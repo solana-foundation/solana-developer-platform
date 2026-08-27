@@ -182,6 +182,8 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
     with:
       release_sha: ${{ needs.publish-release.outputs.release_sha }}
       release_tag: ${{ needs.publish-release.outputs.release_tag }}

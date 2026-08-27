@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveComplianceIntegrations,
   resolveCustodyIntegrations,
+  resolvePrivacyIntegrations,
   resolveRampIntegrations,
   resolveRpcIntegrations,
 } from "./integrations-status";
@@ -129,5 +130,19 @@ describe("integrations status", () => {
         ["active", "available", "enabled", "request_access", "not_configured"].includes(s)
       )
     ).toBe(true);
+  });
+
+  it("maps the feature-gated Private Channels instance onto catalog states", () => {
+    const label = "Private Channels";
+    expect(resolvePrivacyIntegrations({ enabled: false, active: true, label })).toEqual([]);
+    expect(resolvePrivacyIntegrations({ enabled: true, active: true, label })[0]?.status).toBe(
+      "active"
+    );
+    expect(resolvePrivacyIntegrations({ enabled: true, active: false, label })[0]?.status).toBe(
+      "available"
+    );
+    expect(resolvePrivacyIntegrations({ enabled: true, active: null, label })[0]?.status).toBe(
+      "unknown"
+    );
   });
 });

@@ -61,6 +61,12 @@ export {
 } from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
 export type {
+  HeliusRingsAssetAllowlistRow,
+  HeliusRingsAssetRepository,
+  HeliusRingsAssetRepositoryContext,
+} from "./helius-rings-asset.repository";
+export { createPostgresHeliusRingsAssetRepository } from "./helius-rings-asset.repository.postgres";
+export type {
   AppendHeliusRingsEventInput,
   HeliusRingsEventRepository,
   HeliusRingsEventRepositoryContext,
@@ -418,6 +424,7 @@ export {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createEarnRepository,
+  createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
   createHeliusRingsKeyRefRepository,

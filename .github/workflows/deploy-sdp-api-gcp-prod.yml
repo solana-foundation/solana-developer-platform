@@ -11,6 +11,9 @@ on:
         description: "Version tag that must resolve to release_sha"
         type: string
         required: true
+    secrets:
+      DOPPLER_TOKEN_CI:
+        required: true
   workflow_dispatch:
     inputs:
       image_sha:
@@ -27,10 +30,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  smoke:
+    name: Gate on dev smoke
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.event_name != 'workflow_dispatch'
+    uses: ./.github/workflows/sdp-dev-smoke.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
+    permissions:
+      contents: read
+
   deploy:
     name: Deploy production image
+    needs: smoke
     if: >-
       always() &&
+      (needs.smoke.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
@@ -46,7 +63,6 @@ jobs:
       JOB: sdp-prod-api-public-cron
       WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
-      PII_MIGRATE_JOB: sdp-prod-counterparty-pii-migrate
     steps:
       - name: Validate deploy image SHA
         env:
@@ -64,6 +80,24 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.release_sha != '' && inputs.release_sha || github.sha }}
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Notify Slack — deploy started
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: production
+          STATUS: started
+          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: ./scripts/notify-slack.sh
 
       - name: Verify release identity
         if: ${{ inputs.release_sha != '' }}
@@ -149,22 +183,12 @@ jobs:
               --region "${REGION}" --project "${PROJECT_ID}" \
               --format='value(spec.template.spec.template.spec.containers[0].image)'
           )"
-          previous_pii_migrate_image="$(
-            gcloud run jobs describe "${PII_MIGRATE_JOB}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --format='value(spec.template.spec.template.spec.containers[0].image)'
-          )"
           if [[ -z "${previous_cron_image}" ]]; then
             echo "Could not resolve the current cron job image." >&2
             exit 1
           fi
-          if [[ -z "${previous_pii_migrate_image}" ]]; then
-            echo "Could not resolve the current counterparty PII migration job image." >&2
-            exit 1
-          fi
           echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
-          echo "PREVIOUS_PII_MIGRATE_IMAGE=${previous_pii_migrate_image}" >> "${GITHUB_ENV}"
           worker_describe_err="$(mktemp)"
           previous_worker_image="$(
             gcloud run services describe "${WORKER_SERVICE}" \
@@ -271,8 +295,6 @@ jobs:
 
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          gcloud run jobs update "${PII_MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
           describe_err="$(mktemp)"
           if gcloud run services describe "${WORKER_SERVICE}" \
@@ -315,9 +337,6 @@ jobs:
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
-          gcloud run jobs update "${PII_MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" \
-            --image "${PREVIOUS_PII_MIGRATE_IMAGE}" || rollback_failed=1
           if [[ -n "${PREVIOUS_WORKER_IMAGE:-}" ]]; then
             gcloud run services update "${WORKER_SERVICE}" \
               --region "${REGION}" --project "${PROJECT_ID}" \
@@ -339,3 +358,19 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --remove-tags "${CANDIDATE_TAG}"
+
+      - name: Notify Slack — deploy result
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: production
+          STATUS: ${{ job.status }}
+          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: ./scripts/notify-slack.sh

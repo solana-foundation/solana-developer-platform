@@ -2,7 +2,7 @@
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
@@ -24,9 +24,10 @@ import {
   matchesFilters,
   type StatusFilter,
 } from "./integrations-filter";
-import type { IntegrationEntry, IntegrationStatus } from "./integrations-status";
+import type { IntegrationEntry, IntegrationStatus, PrivacyProviderId } from "./integrations-status";
 
 type Translate = ReturnType<typeof useTranslations>;
+const EMPTY_PRIVACY: IntegrationEntry<PrivacyProviderId>[] = [];
 
 const STATUS_FILTERS: StatusFilter[] = [
   "all",
@@ -49,6 +50,8 @@ function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
       return t("Shared.integrations.statusEnabled");
     case "request_access":
       return t("Shared.integrations.statusRequestAccess");
+    case "unknown":
+      return t("Shared.integrations.statusUnknown");
     default:
       return t("Shared.integrations.statusNotConfigured");
   }
@@ -63,7 +66,9 @@ function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate })
           ? "bg-surface-raised text-secondary ring-1 ring-border-subtle"
           : status === "not_configured"
             ? "bg-fill-subtle text-tertiary"
-            : "bg-fill-subtle text-secondary"
+            : status === "unknown"
+              ? "bg-status-warning-bg text-status-warning-text"
+              : "bg-fill-subtle text-secondary"
       )}
     >
       {statusLabel(status, t)}
@@ -136,6 +141,7 @@ function familyLabelKey(family: IntegrationFamily) {
       rpc: "Shared.integrations.rpcTitle",
       ramps: "Shared.integrations.rampsTitle",
       compliance: "Shared.integrations.complianceTitle",
+      privacy: "Shared.integrations.privacyTitle",
     } as const
   )[family];
 }
@@ -147,6 +153,7 @@ function familyDescriptionKey(family: IntegrationFamily) {
       rpc: "Shared.integrations.rpcDescription",
       ramps: "Shared.integrations.rampsDescription",
       compliance: "Shared.integrations.complianceDescription",
+      privacy: "Shared.integrations.privacyDescription",
     } as const
   )[family];
 }
@@ -156,12 +163,14 @@ export function IntegrationsCatalog({
   rpc,
   ramps,
   compliance,
+  privacy = EMPTY_PRIVACY,
 }: {
   /** `null` when the connected-provider lookup failed: state unknown, not empty. */
   custody: CustodyProviderAvailability[] | null;
   rpc: IntegrationEntry<OrganizationRpcProvider>[];
   ramps: IntegrationEntry<RampProviderId>[];
   compliance: IntegrationEntry<ComplianceProviderId>[];
+  privacy?: IntegrationEntry<PrivacyProviderId>[];
 }) {
   const t = useTranslations();
   // The family axis lives in the header tabs (`?tab=`, same contract as
@@ -212,8 +221,17 @@ export function IntegrationsCatalog({
       description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
     }));
 
-    return [...custodyRows, ...rpcRows, ...rampRows, ...complianceRows];
-  }, [custody, rpc, ramps, compliance, t]);
+    const privacyRows: IntegrationRowModel[] = privacy.map((provider) => ({
+      family: "privacy",
+      provider: provider.provider,
+      label: provider.label,
+      status: provider.status,
+      icon: <VenetianMaskIcon aria-hidden className="size-5 text-secondary" strokeWidth={1.8} />,
+      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
+    }));
+
+    return [...custodyRows, ...rpcRows, ...rampRows, ...complianceRows, ...privacyRows];
+  }, [custody, rpc, ramps, compliance, privacy, t]);
 
   const visible = rows.filter((row) => matchesFilters(row, { family, status, query }));
   const clearFilters = () => {

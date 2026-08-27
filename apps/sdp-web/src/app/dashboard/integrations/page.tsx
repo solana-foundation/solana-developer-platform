@@ -1,8 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types";
+import type { CustodyConfigSummary, PrivateChannelInstanceEnvelope } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
+import { privateChannels } from "@/flags";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -11,6 +13,7 @@ import { IntegrationsCatalog } from "./integrations-catalog";
 import {
   resolveComplianceIntegrations,
   resolveCustodyIntegrations,
+  resolvePrivacyIntegrations,
   resolveRampIntegrations,
   resolveRpcIntegrations,
 } from "./integrations-status";
@@ -26,6 +29,17 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
     .filter((config) => config.status === "active")
     .map((config) => config.provider)
     .filter(isKnownCustodyProvider);
+}
+
+async function getPrivateChannelsActive(client: SdpApiClient): Promise<boolean | null> {
+  try {
+    const response = await client.fetch<PrivateChannelInstanceEnvelope>(
+      "/v1/private-channels/instance"
+    );
+    return response.instance?.isActive === true;
+  } catch {
+    return null;
+  }
 }
 
 export default async function IntegrationsPage() {
@@ -54,8 +68,8 @@ export default async function IntegrationsPage() {
     throw new Error("Selected project required");
   }
   const organizationId = onboarding.organization.id;
-
-  const [availability, connectedProviders] = await Promise.all([
+  const [t, privateChannelsEnabled] = await Promise.all([getTranslations(), privateChannels()]);
+  const [availability, connectedProviders, privateChannelsActive] = await Promise.all([
     trace.step("fetch_provider_access", () =>
       fetchProviderAvailability(projectClient.request, organizationId)
     ),
@@ -65,6 +79,9 @@ export default async function IntegrationsPage() {
     trace.step("fetch_custody_configs", () =>
       getConnectedCustodyProviders(projectClient.request).catch(() => null)
     ),
+    privateChannelsEnabled
+      ? trace.step("fetch_private_channels_instance", () => getPrivateChannelsActive(projectClient))
+      : Promise.resolve(false),
   ]);
 
   trace.log({ ok: true });
@@ -87,6 +104,11 @@ export default async function IntegrationsPage() {
       })}
       ramps={resolveRampIntegrations(availability.providers.ramps)}
       compliance={resolveComplianceIntegrations(availability.providers.compliance)}
+      privacy={resolvePrivacyIntegrations({
+        enabled: privateChannelsEnabled,
+        active: privateChannelsActive,
+        label: t("Shared.dashboardShell.privateChannels"),
+      })}
     />
   );
 }
