@@ -110,9 +110,19 @@ export function resolveCustodyIntegrations(input: {
 }
 
 /**
- * The organization runs exactly one RPC provider, chosen in onboarding or on an
- * integration's own page — that one is active. The rest of the enabled set is
- * available to switch to.
+ * Which RPC provider is actually carrying this project's traffic — that one is
+ * active, and the rest of the enabled set is available to switch to.
+ *
+ * A tenant connection outranks the organization's selection, because that is
+ * the order the relay resolves in: it only reaches `organization_provider`
+ * after tenant resolution returns nothing. Reading `active` off the selection
+ * alone marked the provider a project had merely *picked* as Connected while
+ * the provider its requests really went through read "Ready to connect" — the
+ * two answers exactly inverted, on the catalog and on the detail header.
+ *
+ * A serving provider is active even when this deployment holds no URL for it:
+ * BYOK runs on the tenant's own endpoint, so deployment availability decides
+ * nothing about whether their own key is live.
  *
  * `default` is listed like any other provider, including while the organization
  * is on a vendor. Hiding it left an organization that had moved to Helius with
@@ -121,16 +131,36 @@ export function resolveCustodyIntegrations(input: {
  */
 export function resolveRpcIntegrations(input: {
   selectedProvider: OrganizationRpcProvider | null;
+  /**
+   * The provider whose tenant-owned connection serves this project. `null` when
+   * nothing of the tenant's own does — and also when the viewer may not read
+   * connections at all, in which case the organization's selection is the best
+   * answer available and the behaviour is unchanged from before BYOK.
+   */
+  servingProvider?: OrganizationRpcProvider | null;
+  /**
+   * Providers this project holds a live key of its own for. A tenant key runs
+   * on the tenant's endpoint, so it makes a provider usable no matter what this
+   * deployment holds — without this, a provider they had configured themselves
+   * and could switch to read "Not configured" beside its own Use this provider
+   * button.
+   */
+  providersWithOwnKey?: readonly string[];
   entries: Partial<Record<OrganizationRpcProvider, ProviderAvailabilityEntry>>;
 }): IntegrationEntry<OrganizationRpcProvider>[] {
+  const activeProvider = input.servingProvider ?? input.selectedProvider;
+  const ownKeys = new Set(input.providersWithOwnKey ?? []);
+
   return ORGANIZATION_RPC_PROVIDERS.map((provider) => {
     const entry = input.entries[provider];
     // Every RPC provider is generally available; an unconfigured one lacks a
-    // URL in this deployment, which is never organization access.
+    // URL in this deployment *and* a key of the tenant's own, because either
+    // one is enough to route through it. Deployment availability is never
+    // organization access.
     const status: IntegrationStatus =
-      provider === input.selectedProvider
+      provider === activeProvider
         ? "active"
-        : entry?.enabled
+        : entry?.enabled || ownKeys.has(provider)
           ? "available"
           : "not_configured";
     return {

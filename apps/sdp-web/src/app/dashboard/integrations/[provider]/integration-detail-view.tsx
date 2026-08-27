@@ -30,6 +30,28 @@ export interface RpcConnectionContext {
    * `null` when the read failed and we must not claim there are none.
    */
   byokConnections?: SafeRpcConnection[] | null | "restricted";
+  /** `null` when it could not be read, or the viewer may not manage it. */
+  credentialMode?: "managed" | "byok" | null;
+  /** Live connections across the whole organization, for the fail-closed warning. */
+  liveConnectionCount?: number;
+  /**
+   * Live connections this project holds across every provider, not just the one
+   * on this page. A project may hold a proven key per provider, so "is this the
+   * last one" cannot be answered from the narrowed list the section renders.
+   */
+  liveProjectConnections?: number;
+  /**
+   * Providers this project holds its own key for. Read by the header status,
+   * which must not call a provider the tenant configured themselves "Not
+   * configured" just because this deployment carries no URL for it.
+   */
+  providersWithOwnKey?: readonly string[];
+  /**
+   * The provider whose connection the relay would actually route this project
+   * through, whichever provider that is. `null` when nothing of the tenant's
+   * own serves it and the platform selection still decides.
+   */
+  servingProvider?: string | null;
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -186,7 +208,15 @@ export async function IntegrationDetailView({
             canManage={rpc.canManage}
             isEnabledInDeployment={rpc.isEnabledInDeployment}
             organizationId={rpc.organizationId}
+            hasOwnKey={
+              Array.isArray(rpc.byokConnections) &&
+              rpc.byokConnections.some(
+                (connection) =>
+                  connection.scope === "project" && connection.status !== "deactivated"
+              )
+            }
             provider={detail.provider as OrganizationRpcProvider}
+            servingProvider={rpc.servingProvider ?? null}
             status={detail.status}
           />
         </Section>
@@ -197,6 +227,10 @@ export async function IntegrationDetailView({
           <RpcByokSection
             canManage={rpc.canManage}
             connections={rpc.byokConnections}
+            credentialMode={rpc.credentialMode ?? null}
+            liveConnectionCount={rpc.liveConnectionCount ?? 0}
+            liveProjectConnections={rpc.liveProjectConnections ?? 0}
+            servingProvider={rpc.servingProvider ?? null}
             provider={detail.provider}
           />
         </Section>
