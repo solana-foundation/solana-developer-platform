@@ -62,6 +62,9 @@ export interface PaymentTransferRow {
   idempotency_fingerprint: string | null;
   confirmed_at: string | null;
   finalization_last_polled_at: string | null;
+  settlement_signature: string | null;
+  settlement_verified_slot: number | null;
+  settlement_verified_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -217,6 +220,9 @@ export interface PaymentsRepository {
     fiatAmount?: string | null;
     providerData?: Record<string, unknown>;
     error?: string | null;
+    settlementSignature?: string | null;
+    settlementVerifiedSlot?: number | null;
+    settlementVerifiedAt?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**

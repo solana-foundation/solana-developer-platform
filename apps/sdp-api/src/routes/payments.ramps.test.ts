@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { RAMP_PROVIDERS, rampSettlementAssurance } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -1175,6 +1176,43 @@ describe("Payments routes — ramps", () => {
       );
       expect(completed.status).toBe(200);
       expect(await statusOf("xfr_mg_complete_ok")).toBe("completed");
+
+      // The proof must reach the caller, not just the database (#559).
+      const body = (await completed.json()) as {
+        data: { transfer: { settlementVerification: Record<string, unknown> } };
+      };
+      expect(body.data.transfer.settlementVerification).toMatchObject({
+        status: "verified",
+        signature: "sig-xfr_mg_leg_ok",
+      });
+      expect(body.data.transfer.settlementVerification.verifiedAt).toEqual(expect.any(String));
+    });
+
+    it("reports a provider-attested ramp as unsupported rather than implying verification", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_cb_unverified",
+        provider: "coinbase",
+        providerReference: "cb_session_unverified",
+        type: "onramp",
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_cb_unverified",
+        { method: "GET", headers },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transfer: { settlementVerification: Record<string, unknown> } };
+      };
+      // Coinbase on-ramp is not chain-verified today, so claiming anything else would be a lie.
+      expect(body.data.transfer.settlementVerification).toEqual({
+        status: "unsupported",
+        signature: null,
+        slot: null,
+        verifiedAt: null,
+      });
     });
 
     it("refuses to complete when the crypto leg is not confirmed on chain", async () => {
@@ -1259,6 +1297,51 @@ describe("Payments routes — ramps", () => {
 
       expect(res.status).toBe(409);
       expect(await statusOf("xfr_mg_complete_swap")).toBe("settling");
+    });
+  });
+
+  describe("settlement assurance on estimates", () => {
+    it("stamps every provider outcome with what it can prove about settlement", async () => {
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/estimate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            fiatCurrency: "USD",
+            assetRail: "usdc.solana",
+            fiatAmount: "100",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { estimates: { provider: string; status: string; settlementAssurance?: string }[] };
+      };
+      expect(body.data.estimates.length).toBeGreaterThan(0);
+      // Present on failed and unsupported outcomes too: the caller is choosing a provider here,
+      // and a provider that errored on rate still has a knowable settlement guarantee (#559).
+      for (const estimate of body.data.estimates) {
+        expect(["onchain", "provider_attested"]).toContain(estimate.settlementAssurance);
+      }
+    });
+
+    it("advertises onchain only for pairs the code actually verifies", () => {
+      // Guards the table against drifting ahead of the implementation. MoneyGram off-ramp is the
+      // only flow that proves its crypto leg on chain before completing; everything else rests on
+      // the provider's word. Adding a pair here without a verifier would advertise a guarantee
+      // nothing enforces.
+      expect(rampSettlementAssurance("moneygram", "offramp")).toBe("onchain");
+      expect(rampSettlementAssurance("moneygram", "onramp")).toBe("provider_attested");
+      for (const provider of RAMP_PROVIDERS.filter((p) => p !== "moneygram")) {
+        expect(rampSettlementAssurance(provider, "onramp")).toBe("provider_attested");
+        expect(rampSettlementAssurance(provider, "offramp")).toBe("provider_attested");
+      }
     });
   });
 

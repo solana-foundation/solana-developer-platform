@@ -23,6 +23,36 @@ export const RAMP_PROVIDERS = [
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
 /**
+ * Which (provider, direction) pairs the settlement verifier can actually prove on chain (#559).
+ *
+ * This is the source of truth for the `settlementAssurance` reported on estimates and quotes,
+ * and it exists as one table precisely so the advertised guarantee cannot drift from what the
+ * verifier implements. A conformance test asserts the two agree.
+ *
+ * Only add a pair here once verification for it is live. Advertising `onchain` optimistically
+ * is worse than advertising nothing, because a caller comparing providers would choose on a
+ * guarantee that is not being enforced.
+ *
+ * Today only MoneyGram off-ramp qualifies: the customer sends the crypto leg from their own
+ * SDP wallet, so a transfer row exists to verify and link. Hosted deliveries, where the
+ * provider sends straight to the destination wallet, have no such row.
+ */
+export const RAMP_ONCHAIN_VERIFIED_PAIRS = [
+  { provider: "moneygram", direction: "offramp" },
+] as const;
+
+export function rampSettlementAssurance(
+  provider: RampProviderId,
+  direction: "onramp" | "offramp"
+): "onchain" | "provider_attested" {
+  return RAMP_ONCHAIN_VERIFIED_PAIRS.some(
+    (pair) => pair.provider === provider && pair.direction === direction
+  )
+    ? "onchain"
+    : "provider_attested";
+}
+
+/**
  * Vault-infra partners fronting Earn yield strategies.
  *
  * Two shapes live here and the difference is load-bearing:

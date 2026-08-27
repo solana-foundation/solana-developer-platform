@@ -273,6 +273,11 @@ async function completeMoneygramOfframp(
     fromStatuses: ["pending", "settling"],
     toStatus: "completed",
     amount: leg.amount,
+    // The leg was just proven on chain, so record that proof in the provider-neutral
+    // columns rather than leaving it readable only under provider_data.moneygram (#559).
+    settlementSignature: leg.signature,
+    settlementVerifiedSlot: leg.slot,
+    settlementVerifiedAt: new Date().toISOString(),
     providerData: {
       moneygram: {
         ...moneygramData,

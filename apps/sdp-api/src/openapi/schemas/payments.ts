@@ -732,6 +732,28 @@ export const rampTransferSettlementSchema = z
       "Provider-reported settlement economics, captured verbatim from a terminal webhook. Present only for providers that report them (moonpay, lightspark, coinbase).",
   });
 
+export const rampSettlementVerificationSchema = z
+  .object({
+    status: z.enum(["verified", "pending", "unsupported"]).openapi({
+      description:
+        "`verified`: settlement was proven on chain and `signature` is populated. `pending`: this provider and direction can be verified and it has not happened yet, so keep polling. `unsupported`: this provider and direction cannot be chain-verified, so `completed` is the strongest available signal and polling will not change this.",
+      example: "unsupported",
+    }),
+    signature: z.string().nullable().openapi({
+      description:
+        "Solana transaction signature proving settlement. Null unless status is verified.",
+    }),
+    slot: z
+      .number()
+      .nullable()
+      .openapi({ description: "Slot the settlement transaction landed in." }),
+    verifiedAt: z.string().nullable().openapi({ description: "When verification was recorded." }),
+  })
+  .openapi({
+    description:
+      "Whether this ramp transfer's settlement was proven on chain. `completed` on its own only means a provider reported success, and providers differ, so this reports the guarantee uniformly. Only ever `verified` from a real on-chain signature, never from inference.",
+  });
+
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
@@ -825,6 +847,10 @@ export const transferSchema = z
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
+    settlementVerification: rampSettlementVerificationSchema.optional().openapi({
+      description:
+        "Present on every ramp transfer, absent on wallet transfers, which carry `signature` and the confirmed/finalized lifecycle instead.",
+    }),
     settlement: rampTransferSettlementSchema.optional().openapi({
       description:
         "Provider-reported settlement economics for a ramp transfer, recorded at the terminal webhook. Absent for providers that do not report them and for transfers that settled before this was captured.",
@@ -2364,20 +2390,29 @@ const rampEstimateSchema = z
   })
   .openapi({ description: "A single provider's ramp estimate." });
 
+const settlementAssuranceSchema = z.enum(["onchain", "provider_attested"]).openapi({
+  description:
+    "What this provider and direction can prove about settlement. `onchain`: the crypto leg is verified against the chain before the transfer completes. `provider_attested`: completion rests on the provider reporting success, with no independent check. Providers are chosen per transaction here, so this is where that difference is visible.",
+  example: "provider_attested",
+});
+
 const rampProviderEstimateResultSchema = z
   .discriminatedUnion("status", [
     z.object({
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("ok"),
+      settlementAssurance: settlementAssuranceSchema,
       estimate: rampEstimateSchema,
     }),
     z.object({
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("unsupported"),
+      settlementAssurance: settlementAssuranceSchema,
     }),
     z.object({
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("error"),
+      settlementAssurance: settlementAssuranceSchema,
       error: z.string().openapi({ description: "Why this provider could not be estimated." }),
     }),
   ])

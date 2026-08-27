@@ -445,6 +445,9 @@ function buildObservedTransferRows(
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        settlement_signature: null,
+        settlement_verified_slot: null,
+        settlement_verified_at: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -530,6 +533,9 @@ function buildObservedTransferRows(
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        settlement_signature: null,
+        settlement_verified_slot: null,
+        settlement_verified_at: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -624,6 +630,9 @@ function buildObservedTransferRows(
       idempotency_fingerprint: null,
       confirmed_at: null,
       finalization_last_polled_at: null,
+      settlement_signature: null,
+      settlement_verified_slot: null,
+      settlement_verified_at: null,
       created_at: timestamp,
       updated_at: timestamp,
     });

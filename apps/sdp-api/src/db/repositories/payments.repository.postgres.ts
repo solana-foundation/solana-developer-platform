@@ -168,6 +168,9 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     confirmed_at: (row.confirmed_at as string | null | undefined) ?? null,
     finalization_last_polled_at:
       (row.finalization_last_polled_at as string | null | undefined) ?? null,
+    settlement_signature: (row.settlement_signature as string | null | undefined) ?? null,
+    settlement_verified_slot: (row.settlement_verified_slot as number | null | undefined) ?? null,
+    settlement_verified_at: (row.settlement_verified_at as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -483,6 +486,18 @@ export function createPostgresPaymentsRepository(
       if (input.error !== undefined) {
         assignments.push("error = ?");
         assignmentValues.push(input.error);
+      }
+      if (input.settlementSignature !== undefined) {
+        assignments.push("settlement_signature = ?");
+        assignmentValues.push(input.settlementSignature);
+      }
+      if (input.settlementVerifiedSlot !== undefined) {
+        assignments.push("settlement_verified_slot = ?");
+        assignmentValues.push(input.settlementVerifiedSlot);
+      }
+      if (input.settlementVerifiedAt !== undefined) {
+        assignments.push("settlement_verified_at = ?");
+        assignmentValues.push(input.settlementVerifiedAt);
       }
       const row = await db
         .prepare(

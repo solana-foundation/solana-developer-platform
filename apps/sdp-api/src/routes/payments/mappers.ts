@@ -1,4 +1,9 @@
-import type { RampTransferSettlement } from "@sdp/types";
+import {
+  type RampProviderId,
+  type RampSettlementVerification,
+  type RampTransferSettlement,
+  rampSettlementAssurance,
+} from "@sdp/types";
 import {
   isRampTransferType,
   type PaymentTransferRow as TransferRow,
@@ -52,6 +57,26 @@ export function mapTransferRow(row: TransferRow) {
   }
 
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
+  const direction = row.type === "offramp" ? "offramp" : "onramp";
+  // Always present on ramp transfers so callers branch on a value, never on absence (#559).
+  // `verified` is only ever reported from a recorded on-chain signature; a provider simply
+  // saying it settled leaves this `unsupported`, which is the honest report of what we know.
+  const settlementVerification: RampSettlementVerification = row.settlement_signature
+    ? {
+        status: "verified",
+        signature: row.settlement_signature,
+        slot: row.settlement_verified_slot,
+        verifiedAt: row.settlement_verified_at,
+      }
+    : {
+        status:
+          rampSettlementAssurance(row.provider as RampProviderId, direction) === "onchain"
+            ? "pending"
+            : "unsupported",
+        signature: null,
+        slot: null,
+        verifiedAt: null,
+      };
   const moneygram = mapMoneygramTransferDetails(row);
   return {
     ...base,
@@ -61,6 +86,7 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
+    settlementVerification,
     ...(moneygram ? { moneygram } : {}),
   };
 }

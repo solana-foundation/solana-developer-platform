@@ -1660,6 +1660,12 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
+              "settlementVerification": {
+                "status": "unsupported",
+                "signature": "example",
+                "slot": 1,
+                "verifiedAt": "example"
+              },
               "settlement": {
                 "provider": "moonpay",
                 "status": "completed",
@@ -1972,6 +1978,12 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
+              "settlementVerification": {
+                "status": "unsupported",
+                "signature": "example",
+                "slot": 1,
+                "verifiedAt": "example"
+              },
               "settlement": {
                 "provider": "moonpay",
                 "status": "completed",
@@ -2061,6 +2073,12 @@
                 "score": "0.12",
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "settlementVerification": {
+                "status": "unsupported",
+                "signature": "example",
+                "slot": 1,
+                "verifiedAt": "example"
               },
               "settlement": {
                 "provider": "moonpay",
@@ -2229,6 +2247,12 @@
                   "score": "0.12",
                   "level": "low",
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "settlementVerification": {
+                  "status": "unsupported",
+                  "signature": "example",
+                  "slot": 1,
+                  "verifiedAt": "example"
                 },
                 "settlement": {
                   "provider": "moonpay",
@@ -2456,6 +2480,12 @@
                   "score": "0.12",
                   "level": "low",
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "settlementVerification": {
+                  "status": "unsupported",
+                  "signature": "example",
+                  "slot": 1,
+                  "verifiedAt": "example"
                 },
                 "settlement": {
                   "provider": "moonpay",
@@ -2991,6 +3021,12 @@
                 "score": "0.12",
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "settlementVerification": {
+                "status": "unsupported",
+                "signature": "example",
+                "slot": 1,
+                "verifiedAt": "example"
               },
               "settlement": {
                 "provider": "moonpay",
@@ -5380,6 +5416,7 @@
               {
                 "provider": "moonpay",
                 "status": "ok",
+                "settlementAssurance": "provider_attested",
                 "estimate": {
                   "provider": "moonpay",
                   "direction": "onramp",
@@ -5426,6 +5463,7 @@
               {
                 "provider": "moonpay",
                 "status": "ok",
+                "settlementAssurance": "provider_attested",
                 "estimate": {
                   "provider": "moonpay",
                   "direction": "onramp",
@@ -5634,6 +5672,12 @@
                 "score": "0.12",
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "settlementVerification": {
+                "status": "unsupported",
+                "signature": "example",
+                "slot": 1,
+                "verifiedAt": "example"
               },
               "settlement": {
                 "provider": "moonpay",

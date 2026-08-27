@@ -178,6 +178,35 @@ export type RampTransferSettlement =
   | LightsparkRampSettlement
   | CoinbaseRampSettlement;
 
+/**
+ * Whether a ramp transfer's settlement was proven on chain, reported uniformly across
+ * every provider (#559).
+ *
+ * `completed` on a ramp means a provider reported success, which is a different claim
+ * from money having moved. Provider choice is made per transaction at estimate time, so
+ * an integrator cannot hold static knowledge of which providers can be verified; the
+ * guarantee has to travel with the transfer.
+ *
+ * `verified` is only ever set from proof: a signature that was checked on chain. A
+ * settlement inferred by correlation, for example a matching balance change in a time
+ * window, is deliberately NOT verified, because any coincident transfer would satisfy it.
+ */
+export interface RampSettlementVerification {
+  /**
+   * `verified`: proven on chain, `signature` is populated and independently checkable.
+   * `pending`: this provider and direction can be verified and it has not happened yet.
+   * `unsupported`: this provider and direction cannot be chain-verified, so `completed`
+   * is the strongest signal available and polling for more will not help.
+   */
+  status: "verified" | "pending" | "unsupported";
+  signature: string | null;
+  slot: number | null;
+  verifiedAt: string | null;
+}
+
+/** What a provider and direction can prove about settlement, known before you commit. */
+export type RampSettlementAssurance = "onchain" | "provider_attested";
+
 export interface MoneygramTransferDetails {
   transactionId?: string;
   referenceNumber?: string;
@@ -209,6 +238,8 @@ export interface PaymentTransferSummary {
   fiatCurrency?: string;
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
+  /** Present on every ramp transfer; absent on wallet transfers. See RampSettlementVerification. */
+  settlementVerification?: RampSettlementVerification;
   moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
@@ -831,6 +862,8 @@ export interface PaymentRampEstimate {
 export interface RampProviderEstimateSuccess {
   provider: RampProviderId;
   status: "ok";
+  /** What this provider and direction can prove about settlement. See RampSettlementVerification. */
+  settlementAssurance: RampSettlementAssurance;
   estimate: PaymentRampEstimate;
 }
 
@@ -838,11 +871,13 @@ export interface RampProviderEstimateSuccess {
 export interface RampProviderEstimateUnsupported {
   provider: RampProviderId;
   status: "unsupported";
+  settlementAssurance: RampSettlementAssurance;
 }
 
 export interface RampProviderEstimateError {
   provider: RampProviderId;
   status: "error";
+  settlementAssurance: RampSettlementAssurance;
   error: string;
 }
 
