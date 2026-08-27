@@ -5,7 +5,10 @@ import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getInstanceOverview } from "@/services/private-channels";
 import type { AppContext } from "../context";
-import { getPrivateChannelInstanceRepository } from "../context";
+import {
+  getPrivateChannelInstanceRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "../context";
 import { recordInstanceError } from "../helpers";
 
 // GET /instance/overview — active instance snapshot: gateway health + a few
@@ -25,7 +28,8 @@ export async function getPrivateChannelOverview(c: AppContext) {
   }
 
   const instance = mapPrivateChannelInstanceRow(row);
-  const overview = await getInstanceOverview(instance);
+  const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+  const overview = await getInstanceOverview(instance, projectRpc.rpc);
 
   const health = overview.gateway.health;
   if (health.status === "unreachable") {

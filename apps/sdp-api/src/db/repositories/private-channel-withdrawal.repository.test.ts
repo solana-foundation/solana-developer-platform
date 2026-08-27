@@ -24,7 +24,6 @@ function makeInput(overrides: Partial<CreateWithdrawalInput> = {}): CreateWithdr
     amount: "1.5",
     context: {
       gatewayUrl: "https://gw.example",
-      chainRpcUrl: "https://devnet.example",
       escrowProgramId: "EscrowProg1111111111111111111111111111111",
       escrowInstanceAddr: "EscrowInst1111111111111111111111111111111",
       actingUserId: TEST_USER.id,
@@ -90,7 +89,6 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
     expect(row?.settlement_ref).toBeNull();
     expect(row?.context).toMatchObject({
       gatewayUrl: "https://gw.example",
-      chainRpcUrl: "https://devnet.example",
     });
   });
 

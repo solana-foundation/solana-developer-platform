@@ -24,7 +24,6 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   deposit: "/dashboard/payments/deposit",
   requests: "/dashboard/payments/requests",
   recurring: "/dashboard/payments/recurring",
-  privateChannels: "/dashboard/payments/private-channels",
 } as const;
 
 export type DashboardLoadingRoute =
@@ -41,6 +40,7 @@ export type DashboardLoadingRoute =
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
+  | "markets-landing"
   | "treasury-solutions"
   | "earn-program"
   | "payments-transactions"
@@ -91,10 +91,10 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
 }
 
 function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
-  if (
-    pathname === DASHBOARD_SIDE_NAV_HREFS.markets ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions
-  ) {
+  if (pathname === DASHBOARD_SIDE_NAV_HREFS.markets) {
+    return "markets-landing";
+  }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
     return "treasury-solutions";
   }
   if (
@@ -146,6 +146,9 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === "/dashboard/integrations") return "integrations";
+  if (pathname.startsWith("/dashboard/integrations/private-channels")) {
+    return "integration-detail";
+  }
   if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 

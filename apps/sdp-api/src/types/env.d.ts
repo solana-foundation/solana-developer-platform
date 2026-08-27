@@ -4,6 +4,7 @@ import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
+import type { Observability } from "@/runtime/observability";
 import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
@@ -15,6 +16,14 @@ export interface Env {
   // is the sole scheduler. Set to "false" or "0" to opt in explicitly; other
   // Node runtimes remain enabled by default and may opt out with "true"/"1".
   DISABLE_CRON?: string;
+
+  // Deployment-owned Cloud Scheduler cadence for the dedicated managed
+  // reconciliation job. The job requires a five-field crontab and uses the
+  // exact value for its managed Sentry monitor configuration.
+  SDP_MANAGED_RECONCILIATION_CRON?: string;
+  // Cloud Run job timeout, projected from the same infrastructure resource.
+  // Sentry's minute-based maxRuntime is the ceiling of this value.
+  SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS?: string;
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
@@ -59,10 +68,6 @@ export interface Env {
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
   SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
   SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
-  COUNTERPARTY_PII_KMS_KEY_NAME?: string;
-  COUNTERPARTY_PII_KMS_API_BASE_URL?: string;
-  COUNTERPARTY_PII_KMS_METADATA_TOKEN_URL?: string;
-  COUNTERPARTY_PII_ENCRYPTION_KEY?: string;
   SENTRY_DSN?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
 
@@ -225,9 +230,15 @@ export interface Env {
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
 
-  // Rings gateway selector. Only "http" activates the live adapter and the
-  // indexing-poll job; anything else keeps NotImplementedRingsGateway.
-  HELIUS_RINGS_ADAPTER?: string;
+  // Rings upstreams, all required once Rings is enabled. Absence does not
+  // disable the gateway: it reports every component red naming what is missing.
+  HELIUS_RINGS_RPC_URL?: string;
+  HELIUS_RINGS_INDEXER_URL?: string;
+  HELIUS_RINGS_PROVER_URL?: string;
+
+  // Permits plain-http Rings upstreams; opt-in per environment because over
+  // plaintext an indexer response reveals which notes an identity owns.
+  HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -303,6 +314,10 @@ export interface Env {
   // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
+  // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
+  // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
+  // process serves both clusters and withdrawals are not environment-gated.
+  EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
 
   // Earn vault-infra provider configuration
   VEDA_API_KEY?: string;
@@ -318,6 +333,8 @@ export interface Env {
 // Extend Hono's context with our bindings
 declare module "hono" {
   interface ContextVariableMap {
+    // Injected by createApp so handlers use the same implementation as tests
+    observability?: Observability;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;

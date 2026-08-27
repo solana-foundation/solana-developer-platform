@@ -1,111 +1,137 @@
 ---
 name: register-provider
-description: Scaffold and wire a new ramp provider into SDP so the platform knows it exists, dispatches to it, and gates it by availability. Add the id to RAMP_PROVIDERS, register the client, fill the dispatch switches, declare secrets, and stub the provider class. Step 1 — do this before the capability skills. Use when opening a PR against apps/sdp-api to add a ramp provider.
+description: Register a new ramp provider across the SDP payments package, API schemas and dispatch, availability/setup, environment contract, shared quote types, webhooks, and dashboard catalog. Step 1 for a provider-owned ramp integration PR.
 disable-model-invocation: true
 ---
 
 # Register a ramp provider
 
-Step 1. This makes the platform *aware* of your provider and routes to it. The method bodies (estimate, quote, webhook, requirements, rails) are the other skills — here you build the skeleton and wire every dispatch site.
+Build the smallest honest skeleton for the capabilities the provider supports. Registration spans three ownership boundaries:
 
-Canonical example to copy: **`apps/sdp-api/src/lib/ramps/providers/lightspark/client.ts`** (the class) + how it's referenced across the files below.
+- `packages/sdp-payments`: HTTP adapter and normalized ramp contract.
+- `apps/sdp-api`: auth, policy gates, DB orchestration, provider availability, schemas, and webhooks.
+- `packages/sdp-types` / `apps/sdp-web`: shared public shapes and provider presentation.
 
-## The mantra: add the id, follow the compiler
+## 1. Add the closed provider id
 
-Add your id to `RAMP_PROVIDERS` first, then run `tsc --noEmit`. The id is a closed union (`RampProviderId`), so the type checker now points at **every** site that must be wired. Fix each one — never add a fallback or a `default` branch to silence it.
+Add the lowercase id to `RAMP_PROVIDERS` in `packages/sdp-types/src/provider-access.ts`. `GENERAL_PROVIDER_DEFAULTS.ramps` currently enables every registered ramp for every organization; availability still fails closed when deployment credentials are absent. Registration is therefore a launch decision, not a hidden stub. Do not add the id until the implemented capability is safe to surface.
 
-```ts
-// packages/sdp-types/src/provider-access.ts
-export const RAMP_PROVIDERS = ["moonpay", "lightspark", "bvnk", "<id>"] as const;
+Run these immediately and follow every exhaustive error:
+
+```bash
+pnpm --filter @sdp/payments typecheck
+pnpm --filter @sdp/api typecheck
+pnpm --filter sdp-web typecheck
 ```
 
-Five sites break, in roughly this order:
+The compiler is only part of the checklist; Zod unions, translations, and ordered UI lists may not fail automatically.
 
-| File | What's enforced | What you add |
-|---|---|---|
-| `lib/ramps/index.ts` | `RAMP_PROVIDER_CLIENTS` is `as const satisfies Record<RampProviderId, …>` | `<id>: new <Id>RampClient()` |
-| `services/provider-availability.service.ts` | `ramps: Record<RampProviderId, ProviderAvailabilityDefinition>` | `<id>: { label, isConfigured }` |
-| `routes/payments/handlers/ramps.ts` | quote, requirements, and (currently unused) execute switches end in `const _exhaustive: never` | a `case "<id>"` in each |
-| `routes/webhooks/handlers.ts` | `RAMP_PROVIDER_WEBHOOK_PROCESSOR` is `as const satisfies Record<Exclude<RampProviderId, …>, WebhookProcessor<…>>` | `<id>: new <Id>WebhookProcessor()` (or extend the `Exclude` list if you skip webhooks) |
-| `provider-access.ts` tier defaults | `createBooleanRecord(RAMP_PROVIDERS, …)` | (optional) add `<id>` to a tier's enabled list |
+## 2. Add the package adapter
 
-## The wiring
-
-### 1. Provider id + entitlements — `provider-access.ts`
-Add the id (above). Then decide default entitlement per tier — your provider is **disabled by default** unless you add it to the enabled list:
-
-```ts
-const ENTERPRISE_PROVIDER_DEFAULTS = {
-  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "lightspark", "bvnk", "<id>"]),
-  // …
-};
-```
-
-### 2. Client registry — `lib/ramps/index.ts`
-```ts
-export const RAMP_PROVIDER_CLIENTS = {
-  moonpay: new MoonpayRampClient(),
-  lightspark: new LightsparkRampClient(),
-  bvnk: new BvnkRampClient(),
-  <id>: new <Id>RampClient(),
-} as const satisfies Record<RampProviderId, RampProviderClient>;
-```
-`assertRampProviderRegistryComplete` also fails loudly at runtime if you miss this.
-
-### 3. Availability — `services/provider-availability.service.ts`
-Add an entry that reports whether the provider's secrets are present, for both modes. `isConfigured` returning false → the route returns HTTP 503 `PROVIDER_NOT_CONFIGURED`.
-
-```ts
-ramps: {
-  // …
-  <id>: {
-    label: "<Provider>",
-    isConfigured: (env, testMode) => {
-      const prod = hasAllEnv(env, ["<PROVIDER>_KEY", "<PROVIDER>_SECRET"]);
-      const sandbox = hasAllEnv(env, ["<PROVIDER>_SANDBOX_KEY", "<PROVIDER>_SANDBOX_SECRET"]);
-      return testMode ? sandbox : prod;
-    },
-  },
-},
-```
-
-### 4. Secrets — env vars on the `Env` type
-The keys you reference in step 3 (and in your config reader) must exist on the `Env` type (`apps/sdp-api/src/types/env.d.ts`) and be provided as environment variables — both prod and `*_SANDBOX_*` sets. Hosted and self-hosted deployments supply them through their runtime environment or secret manager; local development can use Doppler or `.env.local`. A missing value surfaces as a 503.
-
-### 5. Dispatch — `routes/payments/handlers/ramps.ts`
-Add a `case "<id>"` to each switch the compiler flags — the quote paths and `advanceCounterpartyRequirements`, plus the `executeOnramp`/`executeOfframp` switches. (Execute isn't currently exercised, but those switches still end in a `never` default, so add a case to compile.) The handler resolves DB state (counterparty, wallet, customer) and passes pre-resolved inputs to your client — the client never touches the DB. Provider-specific DB resolution that's too big to inline goes in `routes/payments/handlers/ramps/<id>.ts` (see `ramps/lightspark.ts`).
-
-### 6. Webhook dispatch — `routes/webhooks/handlers.ts`
-Add `<id>: new <Id>WebhookProcessor()` to the `RAMP_PROVIDER_WEBHOOK_PROCESSOR` map (or extend its `Exclude<RampProviderId, …>` if your provider has no webhooks). `parseRampWebhookProvider` accepts the id automatically once it's in that map. (Webhook *implementation*, including the `WebhookProcessor` class itself, is the `integrate-webhook` skill.)
-
-## The provider class + config reader
-
-Create `lib/ramps/providers/<id>/client.ts`:
+Create `packages/sdp-payments/src/ramps/providers/<id>/client.ts` and export/register it in `packages/sdp-payments/src/ramps/index.ts`:
 
 ```ts
 export class <Id>RampClient implements RampProvider {
   readonly id = "<id>";
   readonly declaredRailSupport = <ID>_DECLARED_RAIL_SUPPORT;
-  // estimate*, createOfframpQuote, validateCounterparty, _discoverRails,
-  // distillRailSupport — bodies live in the capability skills.
+  // Implement the methods required by packages/sdp-payments/src/ramps/types.ts.
 }
 ```
 
-Credentials are read from the passed `env`, keyed by `mode` — the provider never imports AppContext. The handler builds the `{ env, mode }` context with `rampRuntime(c)` (`routes/payments/context.ts`). Write one config reader that throws when unconfigured:
+`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` remains optional.
+
+Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`.
+
+If API-side handlers import provider-specific public helpers or types through package subpaths, add explicit exports in `packages/sdp-payments/package.json`.
+
+## 3. Wire API admission and orchestration
+
+Update every applicable site:
+
+| Site | Decision |
+|---|---|
+| `apps/sdp-api/src/services/provider-availability.service.ts` | label plus prod/sandbox credential completeness; `testMode === undefined` means either configured mode |
+| `apps/sdp-api/src/services/provider-setup-registry.ts` | add `rampSetup("<id>")`; ramps are deployment-managed today |
+| `apps/sdp-api/src/routes/payments/schemas.ts` | add the provider-specific submit-requirements schema arm |
+| `apps/sdp-api/src/routes/counterparties/schemas.ts` | add the id only to the directions actually supported |
+| `apps/sdp-api/src/routes/payments/handlers/ramps.ts` | add quote and `advanceCounterpartyRequirements` branches for every provider; unsupported directions reject explicitly; keep DB work here or in `handlers/ramps/<id>.ts` |
+| `apps/sdp-api/src/routes/webhooks/handlers.ts` | register a processor, or explicitly add the id to the excluded no-webhook providers |
+
+Availability is tri-state by environment:
 
 ```ts
-function read<Id>Config(env: Record<string, string | undefined>, mode: SdpEnvironment) {
-  const key = (mode === "sandbox" ? env.<PROVIDER>_SANDBOX_KEY : env.<PROVIDER>_KEY)?.trim();
-  if (!key) throw providerNotConfigured("<Provider> is not configured. Set <PROVIDER>_KEY.");
-  return { key, /* … */ };
-}
+isConfigured: (env, testMode) => {
+  const prod = hasAllEnv(env, ["<PROVIDER>_KEY", "<PROVIDER>_SECRET"]);
+  const sandbox = hasAllEnv(env, ["<PROVIDER>_SANDBOX_KEY", "<PROVIDER>_SANDBOX_SECRET"]);
+  if (testMode === true) return sandbox;
+  if (testMode === false) return prod;
+  return prod || sandbox;
+},
 ```
 
-## Rules + verify
+Do not add obsolete `executeOnramp` / `executeOfframp` branches; those methods are not part of the current provider contract.
 
-Shared rules live in `integrate-ramp-provider`. The ones you'll hit here:
+## 4. Extend shared contracts
 
-- No fallbacks. Missing config throws `providerNotConfigured`; an unknown provider hits the `never` default and throws — don't soften either.
-- HTTP in the provider; DB in the handler.
-- Strong typing: the registry and availability maps are `as const satisfies Record<RampProviderId, …>`; no `any`.
-- Verify with `tsc --noEmit` (the real checklist — it must be clean) + `biome check`. ESLint is broken repo-wide; don't use it.
+Add the provider to a closed `PaymentRampQuote` arm in `packages/sdp-types/src/payments.ts`, even when an existing delivery-mode shape fits; for example, extend the provider literal on the hosted arm. Add a `PaymentRampInstruction` arm for a new manual instruction shape. The supported delivery modes are:
+
+- `manual_instructions`: bank or crypto funding instructions.
+- `hosted`: a provider-hosted URL.
+- `session_widget`: an embedded provider session.
+
+Add provider-specific onboarding states to `packages/sdp-types/src/ramp-requirements.ts` only when the existing generic states cannot represent the upstream lifecycle. Extend `RampTransferSettlement` when signed settlement events carry provider-specific economics worth preserving. Update `apps/sdp-api/src/openapi/**` when the public request or response contract changes, then run the owning generators from `AGENTS.md`.
+
+```bash
+pnpm -C apps/sdp-api openapi:generate
+pnpm generate:api-playground
+pnpm -C apps/sdp-docs generate:api
+pnpm -C apps/sdp-docs generate:ai
+```
+
+## 5. Declare environment keys
+
+Add every runtime key to all environment-contract projections that consume API keys:
+
+1. `apps/sdp-api/src/types/env.d.ts`
+2. `turbo.json` `globalEnv`
+3. `scripts/secret-keys.mjs` `API_LOCAL_ENV_KEYS`
+4. `apps/sdp-api/.env.local.example` with commented placeholders and no real credentials
+
+If the provider has distinct webhook keys, API base URL overrides, account ids, or sandbox-only settings, include those exact keys too. A missing required key must produce `PROVIDER_NOT_CONFIGURED` (503).
+
+## 6. Surface the provider in the dashboard
+
+At minimum update:
+
+- `apps/sdp-web/src/lib/ramps.ts`: logo and ordered label option.
+- `apps/sdp-web/src/app/dashboard/integrations/integrations-status.ts`: label and description key.
+- `apps/sdp-web/messages/*/shared.json`: provider description in every locale.
+- `apps/sdp-web/public/provider-logos/`: provider asset.
+
+If the provider introduces a new onboarding lifecycle, manual instruction shape, or session-widget fields, update the provider helpers and quote renderer under `apps/sdp-web/src/app/dashboard/payments/ramps/`. Reuse an existing delivery-mode renderer only when its contract already fits.
+
+## 7. Document setup and limits
+
+Update `apps/sdp-docs/content/docs/payments/ramps-providers.mdx` with supported directions, rails, entity/country limits, sandbox behavior, required environment keys, webhook setup, and known limitations. Keep public endpoint claims aligned with `apps/sdp-api/src/openapi/**`, then run:
+
+```bash
+pnpm --filter sdp-docs check:links
+pnpm --filter sdp-docs build
+```
+
+## Verify
+
+Add mocked provider-client tests and focused API tests for supported directions, unsupported directions, malformed responses, missing credentials, counterparty gating, and webhook verification when applicable. Then run:
+
+```bash
+pnpm --filter @sdp/payments typecheck
+pnpm --filter @sdp/payments lint
+pnpm --filter @sdp/payments test
+pnpm --filter @sdp/api typecheck
+pnpm --filter @sdp/api test -- <focused-test-files>
+pnpm --filter sdp-web typecheck
+pnpm --filter sdp-web check:i18n
+pnpm check:module-boundaries
+```
+
+Continue with `rail-discovery`, `integrate-estimate`, `counterparty-requirements` for every provider, the needed quote direction skill, and `integrate-webhook` when settlement is server-notified.

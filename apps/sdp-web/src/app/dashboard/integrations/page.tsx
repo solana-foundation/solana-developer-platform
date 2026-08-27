@@ -1,9 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types";
+import type { CustodyConfigSummary, PrivateChannelInstanceEnvelope } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
+import { privateChannels } from "@/flags";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
@@ -11,9 +14,11 @@ import { IntegrationsCatalog } from "./integrations-catalog";
 import {
   resolveComplianceIntegrations,
   resolveCustodyIntegrations,
+  resolvePrivacyIntegrations,
   resolveRampIntegrations,
   resolveRpcIntegrations,
 } from "./integrations-status";
+import { fetchRpcTenantState } from "./rpc-serving-provider.server";
 
 async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
   const res = await request("/v1/wallets/configs");
@@ -28,14 +33,26 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
     .filter(isKnownCustodyProvider);
 }
 
+async function getPrivateChannelsActive(client: SdpApiClient): Promise<boolean | null> {
+  try {
+    const response = await client.fetch<PrivateChannelInstanceEnvelope>(
+      "/v1/private-channels/instance"
+    );
+    return response.instance?.isActive === true;
+  } catch {
+    return null;
+  }
+}
+
 export default async function IntegrationsPage() {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");
   }
+  const dashboardAccess = resolveDashboardAccess(orgRole);
 
   const trace = createTimedTrace("dashboard.integrations.page");
   const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
@@ -54,18 +71,30 @@ export default async function IntegrationsPage() {
     throw new Error("Selected project required");
   }
   const organizationId = onboarding.organization.id;
-
-  const [availability, connectedProviders] = await Promise.all([
-    trace.step("fetch_provider_access", () =>
-      fetchProviderAvailability(projectClient.request, organizationId)
-    ),
-    // null, not [] — an empty list claims nothing is connected and offers
-    // Configure for providers that are already active. Unknown must render as
-    // unknown, never as installable.
-    trace.step("fetch_custody_configs", () =>
-      getConnectedCustodyProviders(projectClient.request).catch(() => null)
-    ),
-  ]);
+  const [t, privateChannelsEnabled] = await Promise.all([getTranslations(), privateChannels()]);
+  const [availability, connectedProviders, privateChannelsActive, rpcTenantState] =
+    await Promise.all([
+      trace.step("fetch_provider_access", () =>
+        fetchProviderAvailability(projectClient.request, organizationId)
+      ),
+      // null, not [] — an empty list claims nothing is connected and offers
+      // Configure for providers that are already active. Unknown must render as
+      // unknown, never as installable.
+      trace.step("fetch_custody_configs", () =>
+        getConnectedCustodyProviders(projectClient.request).catch(() => null)
+      ),
+      privateChannelsEnabled
+        ? trace.step("fetch_private_channels_instance", () =>
+            getPrivateChannelsActive(projectClient)
+          )
+        : Promise.resolve(false),
+      // The catalog and the provider's own page must not answer "which RPC is
+      // connected" differently, so both read the serving connection. `null` here
+      // and on the detail page alike falls back to the organization's selection.
+      trace.step("fetch_rpc_tenant_state", () =>
+        fetchRpcTenantState(dashboardAccess.capabilities.canManageOrgSettings)
+      ),
+    ]);
 
   trace.log({ ok: true });
 
@@ -83,10 +112,17 @@ export default async function IntegrationsPage() {
         // The shell only routes here after onboarding, so a missing setting
         // means the organization runs on SDP's default RPC, not "none".
         selectedProvider: onboarding.setup?.rpcProvider ?? "default",
+        servingProvider: rpcTenantState.servingProvider,
+        providersWithOwnKey: rpcTenantState.providersWithOwnKey,
         entries: availability.providers.rpc,
       })}
       ramps={resolveRampIntegrations(availability.providers.ramps)}
       compliance={resolveComplianceIntegrations(availability.providers.compliance)}
+      privacy={resolvePrivacyIntegrations({
+        enabled: privateChannelsEnabled,
+        active: privateChannelsActive,
+        label: t("Shared.dashboardShell.privateChannels"),
+      })}
     />
   );
 }

@@ -6,6 +6,7 @@ import {
 } from "@kamino-finance/klend-sdk";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction } from "@solana/kit";
+import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import Decimal from "decimal.js";
 import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { vaultAssetIdentityFromState } from "./asset-identity";
@@ -24,6 +25,7 @@ import type {
 } from "./types";
 import {
   buildMaximumWithdrawalBalanceGuard,
+  buildShareAccountCloseInstruction,
   buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
   type RoleTaggedInstruction,
@@ -182,7 +184,7 @@ export async function buildKaminoDepositPlan(
   input: KaminoDepositInput,
   assertActive: AssertActive = alwaysActive
 ): Promise<KaminoInstructionPlan> {
-  const { client, vault, state, config, assetIdentity } = await bindVault(
+  const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
     runtime,
     input.vault,
     assertActive
@@ -200,7 +202,29 @@ export async function buildKaminoDepositPlan(
   const amount = toDecimal(acceptedAmount, "amount");
 
   assertActive();
-  const reserves = await client.loadVaultReserves(state);
+  // Whether this deposit CREATES the share ATA decides who is owed its rent
+  // back, and it cannot be inferred from the instructions: `createAtasIdempotent`
+  // emits the same create either way and charges nothing when the account is
+  // already there. Only a chain read distinguishes them, so it happens here,
+  // concurrently with the reserve load rather than as an extra serial trip.
+  const [reserves, shareAccountsResponse, [shareAta]] = await Promise.all([
+    client.loadVaultReserves(state),
+    rpc
+      .getTokenAccountsByOwner(
+        input.owner.address,
+        { mint: assetIdentity.shareMint },
+        { encoding: "jsonParsed" }
+      )
+      .send(),
+    findAssociatedTokenPda({
+      owner: input.owner.address,
+      mint: assetIdentity.shareMint,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    }),
+  ]);
+  const createsShareAccount = !parseShareTokenAccountBalances(shareAccountsResponse?.value).some(
+    (account) => account.address === shareAta
+  );
   assertActive();
 
   let acceptedMinSharesOut: string | undefined;
@@ -246,6 +270,7 @@ export async function buildKaminoDepositPlan(
       amount: acceptedAmount,
       ...(acceptedMinSharesOut === undefined ? {} : { minSharesOut: acceptedMinSharesOut }),
     },
+    createsShareAccount,
   });
 }
 
@@ -473,12 +498,54 @@ export async function buildKaminoWithdrawPlan(
     );
   }
 
+  // Give the share ATA's rent back, but ONLY when this exit provably empties it.
+  //
+  // SPL `CloseAccount` fails on a non-zero balance, and a failed close fails the
+  // whole withdrawal, so this condition has to be exact rather than optimistic.
+  // It is: the redemptions above are asserted to encode exactly
+  // `requestedBaseUnits`, and consolidation reports what the ATA will hold when
+  // they run, so equality means the account ends at zero. A partial exit
+  // correctly leaves the account open, still holding shares and still holding
+  // its rent.
+  //
+  // Appended AFTER the share-encoding assertion on purpose. A close redeems no
+  // shares, and folding it in earlier would invite a future edit to count it.
+  // It is last in the instruction order because it must follow every redemption.
+  // Did THIS exit create the share account? If so it also paid the rent, and
+  // that beats whatever the caller recorded from an earlier movement: a single
+  // transaction can create the account, consolidate into it, redeem everything
+  // and close it, and in that case the party owed the refund is the one who
+  // funded it moments earlier in the same transaction. Only when the account
+  // pre-dates this exit does the recorded funder describe who paid for it.
+  const createsShareAccount = !shareAccounts.some(
+    (account) => account.address === consolidation.shareAta
+  );
+  const rentRefundTo = createsShareAccount ? input.rentPayer?.address : input.rentRefundTo;
+  const closeShareAccountInstruction = buildShareAccountCloseInstruction({
+    shareAta: consolidation.shareAta,
+    owner: input.owner,
+    ...(rentRefundTo === undefined ? {} : { refundTo: rentRefundTo }),
+    ataBaseUnitsBeforeExit: consolidation.postConsolidationAtaBaseUnits,
+    redeemedBaseUnits: requestedBaseUnits,
+    ownerTotalBaseUnits: consolidation.totalBaseUnits,
+  });
+
   return assertPlanTargetsCluster({
     cluster: config.cluster,
-    instructions: tagged.map((entry) => entry.instruction),
+    instructions: [
+      ...tagged.map((entry) => entry.instruction),
+      ...(closeShareAccountInstruction ? [closeShareAccountInstruction] : []),
+    ],
     lookupTables: Object.keys(lookupTables) as Address[],
     assetIdentity,
     accepted: { shares: acceptedShares },
+    // An EXIT can create the share ATA too, and charge its rent to `rentPayer`:
+    // consolidation emits an idempotent create, and klend interleaves its own
+    // ATA prerequisites into the withdraw bundle. So the same observation the
+    // deposit path makes has to be reported here, or an exit that paid the rent
+    // would leave the position naming whoever funded a PREVIOUS instance of the
+    // account, and the next close would refund the wrong party.
+    createsShareAccount,
   });
 }
 

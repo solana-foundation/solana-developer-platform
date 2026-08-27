@@ -48,10 +48,6 @@ export function writeIssuanceFixtures(fixtures: IssuanceFixtures): void {
   fs.writeFileSync(issuanceFixturesPath, JSON.stringify(fixtures, null, 2));
 }
 
-export function readIssuanceFixtures(): IssuanceFixtures {
-  return JSON.parse(fs.readFileSync(issuanceFixturesPath, "utf8")) as IssuanceFixtures;
-}
-
 export function clearIssuanceFixtures(): void {
   fs.rmSync(issuanceFixturesPath, { force: true });
 }

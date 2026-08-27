@@ -48,11 +48,16 @@ export function isByokRpcProvider(value: string): value is ByokRpcProvider {
 /**
  * Endpoints a tenant does not have to type.
  *
- * Only providers whose host is the same for every account belong here, and
- * only where this repository already carries both network URLs. QuickNode and
- * Triton issue an account-specific subdomain, and Nodit and Validation Cloud
- * are not confirmed for both clusters, so those still require an explicit
- * endpoint rather than a guessed one.
+ * Only providers whose host is the same for every account belong here.
+ * QuickNode and Triton issue an account-specific subdomain -- SDP's own are
+ * `evocative-old-mansion.solana-devnet.quiknode.pro` and
+ * `solanaf-sdp-7436.devnet.rpcpool.com` -- so there is no base to publish and
+ * those two must always be supplied.
+ *
+ * Every URL below was confirmed against the live host rather than guessed:
+ * each answers a JSON-RPC POST with an authentication error rather than a DNS
+ * failure or a 404, and each vendor's documented form agrees with the one SDP
+ * uses for its own account.
  */
 export const DEFAULT_TENANT_ENDPOINTS: Partial<
   Record<ByokRpcProvider, Record<"devnet" | "mainnet-beta", string>>
@@ -65,6 +70,37 @@ export const DEFAULT_TENANT_ENDPOINTS: Partial<
     devnet: "https://solana-devnet.g.alchemy.com/v2",
     "mainnet-beta": "https://solana-mainnet.g.alchemy.com/v2",
   },
+  // Key in the path: `/v1/` alone answers "missing api key" and `/v1/<key>`
+  // answers "invalid api key", so the placeholder has to be templated in.
+  validationcloud: {
+    devnet: "https://devnet.solana.validationcloud.io/v1/{API_KEY}",
+    "mainnet-beta": "https://mainnet.solana.validationcloud.io/v1/{API_KEY}",
+  },
+  // No placeholder: Nodit reads the key from a header, and a key in the path
+  // is not read at all. See `buildTenantRpcTarget`.
+  nodit: {
+    devnet: "https://solana-devnet.nodit.io",
+    "mainnet-beta": "https://solana-mainnet.nodit.io",
+  },
+};
+
+/**
+ * The genesis hash each cluster reports, which is what makes a connection's
+ * network claim checkable.
+ *
+ * The probe used to ask `getVersion`, which every cluster answers alike, so an
+ * endpoint on the wrong cluster passed. A project's network comes from its
+ * environment rather than a field precisely so the two cannot disagree, and
+ * without this the disagreement simply moved into the endpoint: a sandbox
+ * project could be pointed at mainnet and read `devnet` in its own row.
+ *
+ * Read from the public clusters rather than transcribed.
+ */
+export const SOLANA_GENESIS_HASHES: Record<"devnet" | "mainnet-beta", string> = {
+  // biome-ignore lint/security/noSecrets: Public cluster genesis hash, not a credential.
+  devnet: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  // biome-ignore lint/security/noSecrets: Public cluster genesis hash, not a credential.
+  "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
 };
 
 /** Whether the tenant must supply an endpoint because we cannot know theirs. */
@@ -206,8 +242,18 @@ export function buildTenantRpcTarget(
     case "alchemy":
       return { endpoint: withAlchemyApiKey(endpointUrl, apiKey), headers: {} };
     case "quicknode":
-    case "nodit":
       return { endpoint: withOptionalApiKeyTemplate(endpointUrl, apiKey), headers: {} };
+    // Nodit authenticates by header. A key in the path is not read at all:
+    // `POST /<key>` answers NO_AUTHENTICATION_FOUND while the same request
+    // with `X-API-KEY` answers AUTHENTICATION_FAILED, so the header is the
+    // mechanism and sending none is why a Nodit connection could never work.
+    // Templating stays optional so an endpoint that already carries the key
+    // keeps resolving.
+    case "nodit":
+      return {
+        endpoint: withOptionalApiKeyTemplate(endpointUrl, apiKey),
+        headers: { "X-API-KEY": apiKey },
+      };
     // Triton authenticates by header; the key must not also be templated into
     // the URL, where it would end up in logs that only redact query strings.
     case "triton":

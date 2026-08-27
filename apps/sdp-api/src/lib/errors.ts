@@ -308,3 +308,26 @@ export async function nullOnExpected<T>(
     throw err;
   }
 }
+
+export function redactErrorForCapture(err: Error): Error {
+  const sanitized = new Error(redactCredentialString(err.message));
+  sanitized.name = err.name;
+  sanitized.stack = err.stack ? redactCredentialString(err.stack) : undefined;
+
+  const source = err as Error & {
+    context?: unknown;
+    cause?: unknown;
+  };
+  const target = sanitized as Error & {
+    context?: unknown;
+    cause?: unknown;
+  };
+  if (source.context !== undefined) {
+    target.context = redactCredentialSecrets(source.context);
+  }
+  if (source.cause !== undefined) {
+    target.cause = redactCredentialSecrets(source.cause);
+  }
+
+  return sanitized;
+}

@@ -13,6 +13,15 @@ import {
   validateTerminology,
 } from "../.github/scripts/missing-translations.mjs";
 
+// The orchestration script runs a release on import unless told not to, and it
+// reads its GitHub context at import time.
+process.env.TRANSLATION_SCRIPT_IMPORT_ONLY = "1";
+process.env.GITHUB_REPOSITORY = "solana-foundation/solana-developer-platform";
+process.env.GITHUB_SERVER_URL = "https://github.com";
+const { failureMarkdown, failureReport, summaryMarkdown } = await import(
+  "../.github/scripts/translate-missing.mjs"
+);
+
 const guidance = {
   default: {
     context: {
@@ -351,113 +360,116 @@ test("cancels the stream when Eve reports a failure", { timeout: 1_000 }, async 
     },
   });
 
-  await assert.rejects(
-    translateMissingEntries({
-      missing,
-      agentUrl: "https://translation.example.test",
-      agentUsername: "test-user",
-      agentPassword: "test-password",
-      maxRetries: 0,
-      fetchImpl: async (url) =>
-        url.endsWith("/eve/v1/session")
-          ? {
-              ok: true,
-              status: 200,
-              json: async () => ({ sessionId: "session-1" }),
-            }
-          : {
-              ok: true,
-              status: 200,
-              body,
-            },
-    }),
-    /Translation agent failed: model unavailable/
-  );
+  const result = await translateMissingEntries({
+    missing,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    maxRetries: 0,
+    fetchImpl: async (url) =>
+      url.endsWith("/eve/v1/session")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({ sessionId: "session-1" }),
+          }
+        : {
+            ok: true,
+            status: 200,
+            body,
+          },
+  });
+
+  assert.deepEqual(result.translations, []);
+  assert.equal(result.failures.length, 1);
+  assert.equal(result.failures[0].locale, "fr");
+  assert.equal(result.failures[0].keys, 1);
+  assert.match(result.failures[0].reason, /Translation agent failed: model unavailable/);
   assert.equal(streamCancelled, true);
 });
 
-test("rejects an Eve result that changes placeholders", async () => {
-  await assert.rejects(
-    translateMissingEntries({
-      missing: [
-        {
-          locale: "fr",
-          sourceFile: "en.json",
-          targetFile: "fr.json",
-          key: "Home.title",
-          source: "Hello {name}",
-        },
-      ],
-      agentUrl: "https://translation.example.test",
-      agentUsername: "test-user",
-      agentPassword: "test-password",
-      fetchImpl: async (url) =>
-        url.endsWith("/eve/v1/session")
-          ? {
-              ok: true,
-              status: 200,
-              json: async () => ({ sessionId: "session-1" }),
-            }
-          : {
-              ok: true,
-              status: 200,
-              text: async () =>
-                `${JSON.stringify({
-                  type: "result.completed",
-                  data: {
-                    result: {
-                      translations: [
-                        { file: "en.json", key: "Home.title", translation: "Bonjour" },
-                      ],
-                    },
+test("defers a batch whose Eve result changes placeholders", async () => {
+  const result = await translateMissingEntries({
+    missing: [
+      {
+        locale: "fr",
+        sourceFile: "en.json",
+        targetFile: "fr.json",
+        key: "Home.title",
+        source: "Hello {name}",
+      },
+    ],
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    fetchImpl: async (url) =>
+      url.endsWith("/eve/v1/session")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({ sessionId: "session-1" }),
+          }
+        : {
+            ok: true,
+            status: 200,
+            text: async () =>
+              `${JSON.stringify({
+                type: "result.completed",
+                data: {
+                  result: {
+                    translations: [{ file: "en.json", key: "Home.title", translation: "Bonjour" }],
                   },
-                })}\n`,
-            },
-    }),
-    /changed placeholders/
-  );
+                },
+              })}\n`,
+          },
+  });
+
+  assert.deepEqual(result.translations, []);
+  assert.equal(result.failures.length, 1);
+  assert.match(result.failures[0].reason, /changed placeholders/);
 });
 
-test("rejects locale-specific literal terminology from Eve", async () => {
-  await assert.rejects(
-    translateMissingEntries({
-      missing: [
-        {
-          locale: "fr",
-          sourceFile: "en.json",
-          targetFile: "fr.json",
-          key: "Home.token",
-          source: "Token",
-        },
-      ],
-      guidance,
-      agentUrl: "https://translation.example.test",
-      agentUsername: "test-user",
-      agentPassword: "test-password",
-      maxRetries: 0,
-      fetchImpl: async (url) =>
-        url.endsWith("/eve/v1/session")
-          ? {
-              ok: true,
-              status: 200,
-              json: async () => ({ sessionId: "session-1" }),
-            }
-          : {
-              ok: true,
-              status: 200,
-              text: async () =>
-                `${JSON.stringify({
-                  type: "result.completed",
-                  data: {
-                    result: {
-                      translations: [{ file: "en.json", key: "Home.token", translation: "Jeton" }],
-                    },
+test("defers a batch whose Eve result uses forbidden terminology", async () => {
+  const result = await translateMissingEntries({
+    missing: [
+      {
+        locale: "fr",
+        sourceFile: "en.json",
+        targetFile: "fr.json",
+        key: "Home.token",
+        source: "Token",
+      },
+    ],
+    guidance,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    maxRetries: 0,
+    fetchImpl: async (url) =>
+      url.endsWith("/eve/v1/session")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({ sessionId: "session-1" }),
+          }
+        : {
+            ok: true,
+            status: 200,
+            text: async () =>
+              `${JSON.stringify({
+                type: "result.completed",
+                data: {
+                  result: {
+                    translations: [{ file: "en.json", key: "Home.token", translation: "Jeton" }],
                   },
-                })}\n`,
-            },
-    }),
-    /use Token \/ Tokens/
-  );
+                },
+              })}\n`,
+          },
+  });
+
+  assert.deepEqual(result.translations, []);
+  assert.equal(result.failures.length, 1);
+  assert.match(result.failures[0].reason, /use Token \/ Tokens/);
 });
 
 test("feeds validation failures back to Eve before retrying a batch", async () => {
@@ -617,4 +629,217 @@ test("translation workflow does not push a locally created commit", () => {
   );
 
   assert.doesNotMatch(workflow, /git push origin HEAD:codex\/release-main/);
+});
+
+test("queues a committed translation whose source placeholders changed", () => {
+  const messagesDir = createFixture();
+  // Reproduces the 2026-08-04 wedge: en gained a placeholder, fr kept the old
+  // value. The key is present, so the collector used to skip it while the
+  // validator kept rejecting it, and no run could ever produce a clean tree.
+  writeJson(path.join(messagesDir, "en.json"), { Home: { title: "Hello {first} {last}" } });
+
+  const { missing } = collectMissingTranslations({ messagesDir, sourceLocale: "en" });
+  const entry = missing.find((item) => item.locale === "fr" && item.key === "Home.title");
+
+  assert.ok(entry, "stale fr key must be queued for retranslation");
+  assert.equal(entry.stale, true);
+  assert.deepEqual(entry.defects, ["placeholder mismatch"]);
+  assert.equal(entry.source, "Hello {first} {last}");
+});
+
+test("repairs a stale translation instead of refusing to overwrite it", () => {
+  const messagesDir = createFixture();
+  writeJson(path.join(messagesDir, "en.json"), { Home: { title: "Hello {first} {last}" } });
+
+  const { missing } = collectMissingTranslations({ messagesDir, sourceLocale: "en" });
+  applyTranslations({
+    messagesDir,
+    translations: missing.map((entry) => ({ ...entry, value: entry.source })),
+  });
+
+  const fr = JSON.parse(fs.readFileSync(path.join(messagesDir, "fr.json"), "utf8"));
+  assert.equal(fr.Home.title, "Hello {first} {last}");
+  assert.doesNotThrow(() => validateCatalogs({ messagesDir, sourceLocale: "en" }));
+});
+
+test("queues a committed translation that violates locale terminology", () => {
+  const messagesDir = createFixture();
+  writeJson(path.join(messagesDir, "en.json"), { Home: { title: "Hello {name}", token: "Token" } });
+  writeJson(path.join(messagesDir, "fr.json"), {
+    Home: { title: "Bonjour {name}", token: "Jeton" },
+  });
+
+  const { missing } = collectMissingTranslations({ messagesDir, sourceLocale: "en", guidance });
+  const entry = missing.find((item) => item.locale === "fr" && item.key === "Home.token");
+
+  assert.ok(entry, "terminology violation must be queued for retranslation");
+  assert.equal(entry.stale, true);
+  assert.deepEqual(entry.defects, ["terminology"]);
+});
+
+test("still refuses to overwrite a healthy existing translation", () => {
+  const messagesDir = createFixture();
+  assert.throws(
+    () =>
+      applyTranslations({
+        messagesDir,
+        translations: [{ targetFile: "fr.json", key: "Home.title", value: "Salut {name}" }],
+      }),
+    /Refusing to overwrite existing translation Home\.title/
+  );
+});
+
+test("allowMissing reports drift while ignoring untranslated keys", () => {
+  const messagesDir = createFixture();
+  // fr/dashboard.json is missing Dashboard.save, which allowMissing tolerates.
+  assert.doesNotThrow(() =>
+    validateCatalogs({ messagesDir, sourceLocale: "en", allowMissing: true })
+  );
+  assert.throws(
+    () => validateCatalogs({ messagesDir, sourceLocale: "en" }),
+    /missing Dashboard\.save/
+  );
+
+  writeJson(path.join(messagesDir, "en.json"), { Home: { title: "Hello {first} {last}" } });
+  assert.throws(
+    () => validateCatalogs({ messagesDir, sourceLocale: "en", allowMissing: true }),
+    /placeholder mismatch for Home\.title/
+  );
+});
+
+test("the validator rejects nothing the collector fails to queue", () => {
+  const messagesDir = createFixture();
+  // Induce every defect class at once.
+  writeJson(path.join(messagesDir, "en.json"), {
+    Home: { title: "Hello {first} {last}", token: "Token" },
+  });
+  writeJson(path.join(messagesDir, "fr.json"), {
+    Home: { title: "Bonjour {name}", token: "Jeton" },
+  });
+
+  const { missing } = collectMissingTranslations({ messagesDir, sourceLocale: "en", guidance });
+  const queued = new Set(
+    missing.map((entry) => `${entry.locale}/${entry.targetFile}:${entry.key}`)
+  );
+
+  let errors = [];
+  try {
+    validateCatalogs({ messagesDir, sourceLocale: "en", guidance });
+  } catch (error) {
+    errors = error.message.split("\n").slice(1);
+  }
+  assert.ok(errors.length > 0, "fixture must produce validation errors");
+
+  // Every error line ends in the key it concerns; all of them must be queued.
+  for (const error of errors) {
+    const [location, detail] = error.split(": ");
+    const key = detail.split(" ").at(-1);
+    const targetFile = location.split("/").slice(1).join("/");
+    const locale = location.split("/")[0];
+    assert.ok(
+      queued.has(`${locale}/${targetFile}:${key}`),
+      `validator rejected ${locale}/${targetFile}:${key} but the collector never queued it`
+    );
+  }
+
+  // And filling the queue clears the validator completely.
+  applyTranslations({
+    messagesDir,
+    translations: missing.map((entry) => ({ ...entry, value: entry.source })),
+  });
+  assert.doesNotThrow(() => validateCatalogs({ messagesDir, sourceLocale: "en", guidance }));
+});
+
+test("keeps translations from batches that succeeded when another batch fails", async () => {
+  const missing = [
+    { locale: "fr", sourceFile: "en.json", targetFile: "fr.json", key: "Home.a", source: "A" },
+    { locale: "es", sourceFile: "en.json", targetFile: "es.json", key: "Home.a", source: "A" },
+  ];
+
+  const result = await translateMissingEntries({
+    missing,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    maxRetries: 0,
+    fetchImpl: async (url, init) => {
+      if (url.endsWith("/eve/v1/session")) {
+        const locale = JSON.parse(JSON.parse(init.body).message).targetLocale;
+        if (locale === "es") {
+          return { ok: false, status: 503 };
+        }
+        return { ok: true, status: 200, json: async () => ({ sessionId: "session-1" }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          `${JSON.stringify({
+            type: "result.completed",
+            data: {
+              result: { translations: [{ file: "en.json", key: "Home.a", translation: "A" }] },
+            },
+          })}\n`,
+      };
+    },
+  });
+
+  assert.equal(result.batches, 2);
+  assert.equal(result.translations.length, 1, "the fr batch must survive the es failure");
+  assert.equal(result.translations[0].locale, "fr");
+  assert.equal(result.failures.length, 1);
+  assert.equal(result.failures[0].locale, "es");
+  assert.match(result.failures[0].reason, /HTTP 503/);
+});
+
+test("reports a run that threw before it could summarize", () => {
+  process.env.GITHUB_RUN_ID = "424242";
+
+  const markdown = failureMarkdown("Cannot add wallet.balance.label: balance is not an object");
+
+  assert.match(markdown, /<!-- sdp-translation-summary -->/, "must update the summary in place");
+  assert.match(markdown, /Status: \*\*failed\*\*/);
+  assert.match(markdown, /Cannot add wallet\.balance\.label: balance is not an object/);
+  assert.ok(
+    markdown.includes(
+      "- Failing run: https://github.com/solana-foundation/solana-developer-platform/actions/runs/424242"
+    ),
+    "the comment has to link the run that failed, because the run itself is green"
+  );
+  assert.match(markdown, /does not gate the push to `main`/);
+});
+
+test("omits the run link outside a workflow run", () => {
+  delete process.env.GITHUB_RUN_ID;
+
+  const markdown = failureMarkdown("boom");
+
+  assert.doesNotMatch(markdown, /Failing run/);
+  assert.match(markdown, /Status: \*\*failed\*\*/);
+});
+
+test("a summary that already posted is not replaced by a bare failure", () => {
+  process.env.GITHUB_RUN_ID = "424242";
+
+  assert.equal(
+    failureReport("2 batch(es) failed", { summaryReported: true }),
+    null,
+    "the partial summary already says more than a failure comment would"
+  );
+  assert.match(
+    failureReport("2 batch(es) failed", { summaryReported: false }),
+    /Status: \*\*failed\*\*/
+  );
+});
+
+test("summary status names the outcome the runbook documents", () => {
+  assert.match(summaryMarkdown({ missing: [], noOp: true }), /Status: \*\*no-op\*\*/);
+  assert.match(summaryMarkdown({ missing: [{ locale: "fr" }] }), /Status: \*\*generated\*\*/);
+  assert.match(
+    summaryMarkdown({
+      missing: [{ locale: "fr" }],
+      failures: [{ locale: "fr", keys: 3, reason: "HTTP 503" }],
+    }),
+    /Status: \*\*partial\*\*/
+  );
 });

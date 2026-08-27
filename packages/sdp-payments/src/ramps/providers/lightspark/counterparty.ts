@@ -522,11 +522,9 @@ function lightsparkBeneficiary(counterparty: CounterpartyRow): Record<string, un
   if (counterparty.entity_type !== "individual") {
     return { beneficiaryType: "BUSINESS", legalName: counterparty.display_name };
   }
-  const identity = counterparty.identity;
   return {
     beneficiaryType: "INDIVIDUAL",
     fullName: counterparty.display_name,
-    ...(identity.dateOfBirth ? { birthDate: identity.dateOfBirth } : {}),
   };
 }
 

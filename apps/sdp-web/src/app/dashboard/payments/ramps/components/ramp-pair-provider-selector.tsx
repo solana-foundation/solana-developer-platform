@@ -7,10 +7,8 @@ import {
 } from "@sdp/types/generated/ramp-support";
 import {
   type CryptoRailId,
-  countryDisplayName,
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
-  rampProviderServesCountry,
 } from "@sdp/types/payment-rails";
 import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
 import { AnimatePresence, motion } from "motion/react";
@@ -82,13 +80,6 @@ function pairsForDirection(direction: RampDirection): readonly RampPair[] {
       return exhaustive;
     }
   }
-}
-
-function getCounterpartyCountry(counterparty: Counterparty | null): string | null {
-  if (counterparty === null) {
-    return null;
-  }
-  return counterparty.identity.address.countryCode;
 }
 
 function providerAccessReason(access: ProviderAvailabilityEntry): string | null {
@@ -163,7 +154,6 @@ function buildProviderExclusion(args: {
   selectedPairSupport: RampPair | null;
   selectedPair: SelectedRampPair;
   selectedCounterparty: Counterparty | null;
-  selectedCountry: string | null;
   amount: string;
 }): ProviderExclusion | null {
   const {
@@ -173,7 +163,6 @@ function buildProviderExclusion(args: {
     selectedPairSupport,
     selectedPair,
     selectedCounterparty,
-    selectedCountry,
     amount,
   } = args;
   const provider = option.id;
@@ -194,17 +183,6 @@ function buildProviderExclusion(args: {
 
   if (selectedPairSupport === null || !selectedPairSupport.providers.includes(provider)) {
     reasons.push(unsupportedPairReason(direction, selectedPair));
-  }
-
-  if (selectedCountry !== null) {
-    const countryServed = rampProviderServesCountry(
-      support.countrySupport,
-      selectedCountry,
-      selectedPair.fiatCurrency
-    );
-    if (countryServed === false) {
-      reasons.push(`Not available in ${countryDisplayName(selectedCountry)}`);
-    }
   }
 
   if (selectedCounterparty !== null && support.entityTypes.length > 0) {
@@ -246,10 +224,6 @@ export function RampPairProviderSelector({
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]
   );
-  const selectedCountry = useMemo(
-    () => getCounterpartyCountry(selectedCounterparty),
-    [selectedCounterparty]
-  );
   const directionProviderOptions = useMemo(
     () =>
       RAMP_PROVIDER_OPTIONS.filter(
@@ -267,7 +241,6 @@ export function RampPairProviderSelector({
           selectedPairSupport,
           selectedPair,
           selectedCounterparty,
-          selectedCountry,
           amount,
         });
         return exclusion ? [exclusion] : [];
@@ -278,7 +251,6 @@ export function RampPairProviderSelector({
       directionProviderOptions,
       rampProviderAccess,
       selectedCounterparty,
-      selectedCountry,
       selectedPair,
       selectedPairSupport,
     ]

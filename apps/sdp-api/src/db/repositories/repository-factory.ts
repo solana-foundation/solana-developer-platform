@@ -1,7 +1,6 @@
 // biome-ignore-all lint/security/noSecrets: repository and method identifiers are not credentials
 import { getDb } from "@/db";
 import { bindRepositoryToTenant, type TenantScope } from "@/lib/tenant-scope";
-import { createPiiCipher, type PiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
 import { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
@@ -13,6 +12,8 @@ import type { CounterpartyAccountsRepository } from "./counterparty-account.repo
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
+import type { HeliusRingsAssetRepository } from "./helius-rings-asset.repository";
+import { createPostgresHeliusRingsAssetRepository } from "./helius-rings-asset.repository.postgres";
 import type { HeliusRingsEventRepository } from "./helius-rings-event.repository";
 import { createPostgresHeliusRingsEventRepository } from "./helius-rings-event.repository.postgres";
 import type { HeliusRingsHealthRepository } from "./helius-rings-health.repository";
@@ -145,9 +146,8 @@ export function createCounterpartiesRepository(
   env: Env,
   scope: TenantScope
 ): CounterpartiesRepository {
-  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
   return bindRepositoryToTenant(
-    createPostgresCounterpartiesRepository(getDb(env), testCipher ?? createPiiCipher(env)),
+    createPostgresCounterpartiesRepository(getDb(env)),
     scope,
     "CounterpartiesRepository",
     [
@@ -160,17 +160,15 @@ export function createCounterpartiesRepository(
 }
 
 export function createSystemCounterpartiesRepository(env: Env): CounterpartiesRepository {
-  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
-  return createPostgresCounterpartiesRepository(getDb(env), testCipher ?? createPiiCipher(env));
+  return createPostgresCounterpartiesRepository(getDb(env));
 }
 
 export function createCounterpartyAccountsRepository(
   env: Env,
   scope: TenantScope
 ): CounterpartyAccountsRepository {
-  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
   return bindRepositoryToTenant(
-    createPostgresCounterpartyAccountsRepository(getDb(env), testCipher ?? createPiiCipher(env)),
+    createPostgresCounterpartyAccountsRepository(getDb(env)),
     scope,
     "CounterpartyAccountsRepository"
   );
@@ -252,6 +250,10 @@ export function createHeliusRingsEventRepository(env: Env): HeliusRingsEventRepo
 
 export function createHeliusRingsHealthRepository(env: Env): HeliusRingsHealthRepository {
   return createPostgresHeliusRingsHealthRepository(getDb(env));
+}
+
+export function createHeliusRingsAssetRepository(env: Env): HeliusRingsAssetRepository {
+  return createPostgresHeliusRingsAssetRepository(getDb(env));
 }
 
 export function createPrivateChannelInstanceRepository(env: Env): PrivateChannelInstanceRepository {

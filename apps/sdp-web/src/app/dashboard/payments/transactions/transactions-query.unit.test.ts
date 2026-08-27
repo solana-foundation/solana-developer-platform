@@ -73,14 +73,14 @@ describe("transaction filter query", () => {
       {
         from: "2026-07-01",
         to: "2026-07-18",
-        counterparty: "counterparty_1",
+        counterparty: "cpty_1",
       },
       new Date("2026-07-18T12:00:00.000Z")
     );
     const query = toTransactionsApiQuery(filters);
 
     expect(query.get("includeObserved")).toBe("true");
-    expect(query.get("counterpartyId")).toBe("counterparty_1");
+    expect(query.get("counterpartyId")).toBe("cpty_1");
     expect(query.get("from")).toBe("2026-07-01T00:00:00.000Z");
     expect(query.get("to")).toBe("2026-07-18T12:00:00.000Z");
   });

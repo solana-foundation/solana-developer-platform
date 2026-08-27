@@ -27,6 +27,10 @@ const guidanceFile = path.resolve(
 );
 const guidance = loadTranslationGuidance(guidanceFile);
 
+// Set once a summary reaches the release PR. The failure reporter reads it so a
+// late throw cannot replace an accurate summary with a bare error.
+let summaryReported = false;
+
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
@@ -80,13 +84,15 @@ function formatLocales(locales) {
   return locales.length === 0 ? "None" : locales.map((locale) => `\`${locale}\``).join(", ");
 }
 
-function summaryMarkdown({
+export function summaryMarkdown({
   missing,
   translations = [],
   batches = 0,
   noOp = false,
   newLocales = [],
   existingLocales = [],
+  failures = [],
+  residualDrift = [],
 }) {
   const counts = groupedCounts(missing);
   const impacted =
@@ -94,25 +100,84 @@ function summaryMarkdown({
       ? "None"
       : counts.map(([locale, count]) => `\`${locale}\` (${count})`).join(", ");
   const files = [...new Set(translations.map((entry) => entry.targetFile))].sort();
+  const staleCount = missing.filter((entry) => entry.stale).length;
+  const droppedKeys = failures.reduce((total, failure) => total + failure.keys, 0);
+  const status = noOp ? "no-op" : failures.length > 0 ? "partial" : "generated";
   const lines = [
     "<!-- sdp-translation-summary -->",
     "## Eve translation sync",
     "",
-    `- Status: **${noOp ? "no-op" : "generated"}**`,
+    `- Status: **${status}**`,
     `- Impacted locales: ${impacted}`,
     `- Newly discovered locales: ${formatLocales(newLocales)}`,
     `- Existing locales updated: ${formatLocales(existingLocales)}`,
-    `- Missing strings: ${missing.length}`,
+    `- Missing strings: ${missing.length - staleCount}`,
+    `- Stale strings re-translated: ${staleCount}`,
     `- Generated strings: ${translations.length}`,
     `- Eve agent: \`${agentHost(agentUrl)}\``,
     `- Model: \`${agentModel ?? "configured by Eve"}\``,
     "- Context: product and locale background, translation instructions, terminology, key namespace, and up to 6 nearby catalog entries",
     `- Requests: ${batches}`,
+    `- Failed batches: ${
+      failures.length === 0
+        ? "None"
+        : `${failures.length} (${droppedKeys} strings deferred to the next run)`
+    }`,
     `- Generated files: ${files.length === 0 ? "None" : files.map((file) => `\`${file}\``).join(", ")}`,
-    "",
-    "Generated values are LLM-assisted and require normal review.",
   ];
+
+  if (failures.length > 0) {
+    lines.push(
+      "",
+      "### Failed batches",
+      "",
+      ...failures.map(
+        (failure) => `- \`${failure.locale}\` (${failure.keys} strings): ${failure.reason}`
+      )
+    );
+  }
+
+  if (residualDrift.length > 0) {
+    lines.push(
+      "",
+      `> **${residualDrift.length} pre-existing catalog defect(s) still unrepaired.** They are queued for the next run.`,
+      ...residualDrift.slice(0, 20).map((error) => `> - ${error}`)
+    );
+  }
+
+  lines.push("", "Generated values are LLM-assisted and require normal review.");
   return lines.join("\n");
+}
+
+function workflowRunUrl() {
+  const server = process.env.GITHUB_SERVER_URL;
+  const runId = process.env.GITHUB_RUN_ID;
+  return server && repo && runId ? `${server}/${repo}/actions/runs/${runId}` : null;
+}
+
+/**
+ * The translation job is continue-on-error, so a throw leaves the workflow run
+ * green and the failing job buried inside it. Without a comment the release PR
+ * carries no trace at all, which is the same invisibility that let the 2026-08
+ * stall run for sixteen days. Same marker as summaryMarkdown, so the next run
+ * replaces this in place.
+ */
+export function failureMarkdown(message) {
+  const runUrl = workflowRunUrl();
+  return [
+    "<!-- sdp-translation-summary -->",
+    "## Eve translation sync",
+    "",
+    "- Status: **failed**",
+    "- The run stopped before it could report. Whatever it did not commit is queued for the next run.",
+    ...(runUrl ? [`- Failing run: ${runUrl}`] : []),
+    "",
+    "```",
+    message,
+    "```",
+    "",
+    "The workflow run is green by design; this job does not gate the push to `main`. Treat this comment as the release gate.",
+  ].join("\n");
 }
 
 async function githubRequest(method, resourcePath, body) {
@@ -196,8 +261,24 @@ async function createTranslationCommit(files) {
   return commit.oid;
 }
 
+/**
+ * Catalog defects in values that already exist, ignoring keys nobody has
+ * translated yet. Returns the error lines instead of throwing so a run can tell
+ * "drift I inherited" from "drift I just caused".
+ */
+function driftErrors() {
+  try {
+    validateCatalogs({ messagesDir, sourceLocale, guidance, allowMissing: true });
+    return [];
+  } catch (error) {
+    return String(error instanceof Error ? error.message : error)
+      .split("\n")
+      .slice(1);
+  }
+}
+
 async function main() {
-  const inventory = collectMissingTranslations({ messagesDir, sourceLocale });
+  const inventory = collectMissingTranslations({ messagesDir, sourceLocale, guidance });
   const impactedLocales = [...new Set(inventory.missing.map((entry) => entry.locale))].sort();
   const localeClass = classifyLocales(impactedLocales);
   if (inventory.missing.length === 0) {
@@ -206,6 +287,7 @@ async function main() {
     console.log(summary);
     writeStepSummary(summary);
     await updateReleasePrComment(summary);
+    summaryReported = true;
     return;
   }
 
@@ -219,6 +301,8 @@ async function main() {
     return;
   }
 
+  const inheritedDrift = new Set(driftErrors());
+
   const result = await translateMissingEntries({
     missing: inventory.missing,
     guidance,
@@ -230,7 +314,18 @@ async function main() {
   });
 
   applyTranslations({ messagesDir, translations: result.translations });
-  validateCatalogs({ messagesDir, sourceLocale, guidance });
+
+  // Every applied value already passed validateAgentTranslations, so anything
+  // still flagged here belongs to a batch that failed and kept its old value.
+  // Refuse to commit only if this run made things worse; otherwise banking the
+  // batches that did succeed is strictly better than discarding all of them.
+  const residualDrift = driftErrors();
+  const introducedDrift = residualDrift.filter((error) => !inheritedDrift.has(error));
+  if (introducedDrift.length > 0) {
+    throw new Error(
+      `Translation sync introduced new catalog drift:\n${introducedDrift.join("\n")}`
+    );
+  }
 
   const messagesRelativeDir = path.relative(process.cwd(), messagesDir);
   const files = [
@@ -238,20 +333,69 @@ async function main() {
       result.translations.map((entry) => path.join(messagesRelativeDir, entry.targetFile))
     ),
   ].sort();
-  await createTranslationCommit(files);
+  if (files.length > 0) {
+    await createTranslationCommit(files);
+  } else {
+    console.log("No translations were generated; skipping commit");
+  }
 
   const summary = summaryMarkdown({
     missing: inventory.missing,
     translations: result.translations,
     batches: result.batches,
+    failures: result.failures,
+    residualDrift,
     ...localeClass,
   });
   console.log(summary);
   writeStepSummary(summary);
   await updateReleasePrComment(summary);
+  summaryReported = true;
+
+  if (result.failures.length > 0) {
+    const dropped = result.failures.reduce((total, failure) => total + failure.keys, 0);
+    throw new Error(
+      `${result.failures.length} batch(es) failed; ${dropped} string(s) deferred to the next run. Committed translations are unaffected.`
+    );
+  }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+/**
+ * What a failed run should say on the release PR, or null when it should stay
+ * quiet. The deferred-batch throw runs after its own summary is posted and that
+ * summary says more than this would; every other throw happens before any
+ * report exists at all.
+ */
+export function failureReport(message, { summaryReported: reported }) {
+  return reported ? null : failureMarkdown(message);
+}
+
+async function reportFailure(error) {
+  const message = String(error instanceof Error ? error.message : error);
+  console.error(message);
   process.exitCode = 1;
-});
+
+  const failure = failureReport(message, { summaryReported });
+  if (!failure) {
+    return;
+  }
+
+  writeStepSummary(failure);
+  try {
+    await updateReleasePrComment(failure);
+  } catch (reportError) {
+    console.error(
+      `Could not report the failure on the release PR: ${
+        reportError instanceof Error ? reportError.message : reportError
+      }`
+    );
+  }
+}
+
+// Importing this module for tests must not run a release. The opt-out is
+// deliberately inverted: anything short of an explicit "1" still runs, because
+// a translation sync that silently skips itself is the exact failure class this
+// script exists to remove.
+if (process.env.TRANSLATION_SCRIPT_IMPORT_ONLY !== "1") {
+  main().catch(reportFailure);
+}

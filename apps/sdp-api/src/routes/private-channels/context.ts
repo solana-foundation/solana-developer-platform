@@ -11,7 +11,9 @@ import {
   createPrivateChannelWithdrawalRepository,
   createProjectUserRepository,
 } from "@/db/repositories";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { createPrivateChannelEventService } from "@/services/private-channels/event.service";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import type { Env } from "@/types/env";
 
 /** Hono request context bound to the app `Env`. */
@@ -59,4 +61,16 @@ export function getPrivateChannelUserRepository(c: AppContext) {
 
 export function getProjectUserRepository(c: AppContext) {
   return createProjectUserRepository(c.env);
+}
+
+/** Resolve this request's selected project RPC without exposing its endpoint. */
+export function loadPrivateChannelProjectRpcClient(c: AppContext) {
+  const auth = getAuth(c);
+  return loadProjectRpcClient({
+    env: c.env,
+    kv: c.var.kv,
+    organizationId: auth.organizationId,
+    projectId: requireProjectId(c),
+    environment: c.get("projectEnvironment"),
+  });
 }

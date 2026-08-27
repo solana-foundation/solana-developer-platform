@@ -337,6 +337,7 @@ export async function createTransferBatch(c: AppContext) {
         chunk,
         recipientsByIndex,
         feePayment,
+        lastValidBlockHeight: lifetime.lastValidBlockHeight,
         preflight: body.options?.preflight !== false,
       })
     )

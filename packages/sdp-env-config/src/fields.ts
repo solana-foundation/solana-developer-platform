@@ -563,22 +563,6 @@ export const FIELDS: EnvField[] = [
     pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
     help: "Optional Cloud KMS key used for custody envelope encryption. Keep the custody encryption key configured so existing legacy rows remain readable.",
   },
-  {
-    key: "COUNTERPARTY_PII_ENCRYPTION_KEY",
-    section: "secrets",
-    kind: "secret",
-    secretEncoding: "base64",
-    label: "Counterparty PII encryption key",
-    help: "Required for self-hosted deployments. Use a dedicated 32-byte key and never reuse the custody encryption key.",
-  },
-  {
-    key: "COUNTERPARTY_PII_KMS_KEY_NAME",
-    section: "secrets",
-    kind: "text",
-    label: "Counterparty PII Cloud KMS key name",
-    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
-    help: "Required for managed deployments. Dedicated Cloud KMS key used for counterparty PII envelope encryption.",
-  },
 
   // Advanced (defaulted, collapsed)
   {
@@ -734,16 +718,37 @@ export const FIELDS: EnvField[] = [
     help: "Gates the devnet-only Helius Rings shielded wallet API routes.",
   },
   {
-    key: "HELIUS_RINGS_ADAPTER",
+    key: "HELIUS_RINGS_RPC_URL",
+    section: "advanced",
+    kind: "password",
+    label: "Helius Rings Solana RPC URL",
+    help: "Helius devnet RPC the Rings SDK reads and submits through, with the API key already applied. Required once Rings is enabled.",
+  },
+  {
+    key: "HELIUS_RINGS_INDEXER_URL",
+    section: "advanced",
+    kind: "url",
+    label: "Helius Rings Photon indexer URL",
+    help: "Photon indexer the shielded balance reads come from. Required once Rings is enabled.",
+  },
+  {
+    key: "HELIUS_RINGS_PROVER_URL",
+    section: "advanced",
+    kind: "url",
+    label: "Helius Rings prover URL",
+    help: "Proving service the Rings SDK calls. Required once Rings is enabled.",
+  },
+  {
+    key: "HELIUS_RINGS_ALLOW_INSECURE_HTTP",
     section: "advanced",
     kind: "select",
-    label: "Helius Rings gateway adapter",
-    defaultValue: "none",
+    label: "Helius Rings allow plain-http upstreams",
+    defaultValue: "false",
     options: [
-      { value: "none", label: "Not implemented (default)" },
-      { value: "http", label: "Live HTTP gateway" },
+      { value: "false", label: "Require https (default)" },
+      { value: "true", label: "Allow http" },
     ],
-    help: 'Only "http" activates the live Rings gateway and the indexing-poll job.',
+    help: "The public devnet indexer and prover are plain http on a real host, and the SDK refuses to dial them without this. Over plaintext an indexer response reveals which notes an identity owns, so leave it off outside devnet.",
   },
   {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",

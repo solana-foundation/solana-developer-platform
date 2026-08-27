@@ -30,6 +30,38 @@ test("does not retry a persistent error", async () => {
   assert.equal(calls, 1);
 });
 
+test("stops retrying once the elapsed budget is spent", async () => {
+  let calls = 0;
+  await assert.rejects(
+    withTransientRpcRetry(
+      async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        throw new Error("fetch failed");
+      },
+      [0, 0, 0, 0],
+      { maxElapsedMs: 60 }
+    ),
+    /fetch failed/
+  );
+  assert.equal(calls, 2);
+});
+
+test("fast transient failures use the whole schedule within the budget", async () => {
+  let calls = 0;
+  const result = await withTransientRpcRetry(
+    async () => {
+      calls += 1;
+      if (calls < 4) throw new Error("fetch failed");
+      return "ok";
+    },
+    [0, 0, 0],
+    { maxElapsedMs: 60_000 }
+  );
+  assert.equal(result, "ok");
+  assert.equal(calls, 4);
+});
+
 test("retries a long-term-storage server error", async () => {
   let calls = 0;
   const result = await withTransientRpcRetry(async () => {

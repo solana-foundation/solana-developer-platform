@@ -1,8 +1,14 @@
 import type { IntegrationStatus } from "./integrations-status";
 
-export type IntegrationFamily = "custody" | "rpc" | "ramps" | "compliance";
+export type IntegrationFamily = "custody" | "rpc" | "ramps" | "compliance" | "privacy";
 
-export const INTEGRATION_FAMILIES: IntegrationFamily[] = ["custody", "rpc", "ramps", "compliance"];
+export const INTEGRATION_FAMILIES: IntegrationFamily[] = [
+  "custody",
+  "rpc",
+  "ramps",
+  "compliance",
+  "privacy",
+];
 
 export type FamilyFilter = IntegrationFamily | "all";
 export type StatusFilter = IntegrationStatus | "all";

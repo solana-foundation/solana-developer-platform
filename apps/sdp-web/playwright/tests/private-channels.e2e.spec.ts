@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
   ensureLinkedOrg,
+  getBootstrapApiBaseUrl,
+  provisionWithAdminSession,
   resolvePlaywrightProjectId,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
-import { getBootstrapApiBaseUrl } from "../support/local-issuance-bootstrap";
 
 // The dashboard gates on the `private-channels` Vercel flag, whose default falls
 // back to PRIVATE_CHANNELS_ENABLED. Local Playwright runs have no Vercel provider,
@@ -20,13 +20,10 @@ test.describe
     let bootstrapProjectId = "";
 
     test.beforeAll(async ({ browser }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      bootstrapProjectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      await session.page.close();
+      bootstrapProjectId = await provisionWithAdminSession(browser, async (session) => {
+        await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+        return resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), session.getBearerToken);
+      });
     });
 
     test.beforeEach(async ({ page }) => {
@@ -39,17 +36,23 @@ test.describe
       await page.goto("/dashboard/payments");
       await expect(page.getByRole("link", { name: "Private Channels" })).toHaveCount(0);
 
-      await page.goto("/dashboard/payments/private-channels");
+      await page.goto("/dashboard/integrations");
+      await expect(page.getByRole("link", { name: "Private Channels" })).toHaveCount(0);
+
+      await page.goto("/dashboard/integrations/private-channels");
       await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
     });
 
     test("shows private channels when the dashboard feature flag is enabled", async ({ page }) => {
       test.skip(!privateChannelsEnabled, "Requires PRIVATE_CHANNELS_ENABLED=true");
 
-      await page.goto("/dashboard/payments");
+      await page.goto("/dashboard/integrations");
       await expect(page.getByRole("link", { name: "Private Channels" })).toBeVisible();
       await page.getByRole("link", { name: "Private Channels" }).click();
-      await expect(page).toHaveURL(/\/dashboard\/payments\/private-channels\/instance$/);
+      await expect(page).toHaveURL(/\/dashboard\/integrations\/private-channels$/);
+
+      await page.getByRole("link", { name: "Configure" }).click();
+      await expect(page).toHaveURL(/\/dashboard\/integrations\/private-channels\/setup$/);
 
       await expect(
         page.locator("main").getByText("Connect Private Channel", { exact: true })
@@ -90,7 +93,7 @@ test.describe
       // is connected because the /instance endpoints are what the operator needs
       // to bootstrap. Regressing that flag would strand the tab behind the
       // Overview redirect chain and make the sandbox constants unreachable.
-      await page.goto("/dashboard/payments/private-channels/api-playground");
+      await page.goto("/dashboard/integrations/private-channels/api-playground");
 
       await expect(page.getByRole("button", { name: "API Playground" })).toBeVisible();
 

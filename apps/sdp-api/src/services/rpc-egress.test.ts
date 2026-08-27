@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EgressBlockedError } from "@/services/guarded-egress";
 import { checkResolvedRpcTargetConnection } from "@/services/provider-setup-registry";
-import { fetchRpcRelayTarget } from "@/services/rpc-egress";
+import { createRpcTransportForTarget, fetchRpcRelayTarget } from "@/services/rpc-egress";
 
 /**
  * Both directions matter. A guard that refused everything would pass a
@@ -66,6 +66,27 @@ describe("fetchRpcRelayTarget", () => {
         { headers: { "Content-Type": "application/json" }, body: "{}" }
       )
     ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+});
+
+describe("createRpcTransportForTarget", () => {
+  const payload = { jsonrpc: "2.0", id: "probe", method: "getVersion", params: [] };
+
+  it("runs a platform Solana transport through the relay executor", async () => {
+    const transport = createRpcTransportForTarget({ endpoint: origin });
+
+    const response = await transport<{ result: { "solana-core": string } }>({ payload });
+
+    expect(response.result["solana-core"]).toBe("0.0.0");
+  });
+
+  it("guards customer endpoints used by the Solana transport", async () => {
+    const transport = createRpcTransportForTarget({
+      endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
+      connectionId: "rconn_test",
+    });
+
+    await expect(transport({ payload })).rejects.toBeInstanceOf(EgressBlockedError);
   });
 });
 

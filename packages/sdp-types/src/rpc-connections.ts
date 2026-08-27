@@ -24,18 +24,13 @@ export type RpcConnectionScope = (typeof RPC_CONNECTION_SCOPES)[number];
 export const RPC_CONNECTION_NETWORKS = ["devnet", "mainnet-beta"] as const;
 export type RpcConnectionNetwork = (typeof RPC_CONNECTION_NETWORKS)[number];
 
-export const RPC_CONNECTION_CHECK_STATUSES = [
-  "pending",
-  "running",
-  "success",
-  "failed",
-  "retry_unknown",
-] as const;
-export type RpcConnectionCheckStatus = (typeof RPC_CONNECTION_CHECK_STATUSES)[number];
-
-export interface RpcConnectionCheck {
-  status: RpcConnectionCheckStatus;
-  at: string | null;
+/**
+ * The outcome of a connectivity probe, returned to the caller and never
+ * stored (HOO-1228). A connection is checked when it is saved and again on
+ * demand, so a persisted copy could only go stale.
+ */
+export interface RpcConnectionTestResult {
+  ok: boolean;
   /** Redacted code only — never an upstream provider response. */
   failureCode: string | null;
 }
@@ -55,7 +50,6 @@ export interface SafeRpcConnection {
   /** The connection the relay picks for this scope and network. */
   isDefault: boolean;
   displayMetadata: Record<string, unknown>;
-  lastCheck: RpcConnectionCheck | null;
   createdAt: string;
   activatedAt: string | null;
   deactivatedAt: string | null;
@@ -77,12 +71,19 @@ export interface RpcConnectionListResponse {
 
 /**
  * Providers whose RPC host is the same for every account, so a tenant never
- * has to type an endpoint. Everything else issues an account-specific host
- * (QuickNode, Triton) or is not confirmed for both clusters, and must supply
- * one. `@sdp/rpc/byok` holds the actual URLs; the dashboard only needs to know
- * whether to ask.
+ * has to type an endpoint. Only QuickNode and Triton are left out, and not for
+ * want of checking: both issue an account-specific subdomain, so there is no
+ * base host to publish and the endpoint has to come from the tenant.
+ *
+ * `@sdp/rpc/byok` holds the actual URLs and the per-provider rule for where the
+ * key goes; the dashboard only needs to know whether to ask for an endpoint.
  */
-export const RPC_PROVIDERS_WITH_DEFAULT_ENDPOINT = ["helius", "alchemy"] as const;
+export const RPC_PROVIDERS_WITH_DEFAULT_ENDPOINT = [
+  "helius",
+  "alchemy",
+  "validationcloud",
+  "nodit",
+] as const;
 
 export function rpcProviderNeedsEndpoint(provider: string): boolean {
   return !(RPC_PROVIDERS_WITH_DEFAULT_ENDPOINT as readonly string[]).includes(provider);
