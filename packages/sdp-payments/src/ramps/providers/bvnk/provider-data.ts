@@ -10,7 +10,7 @@ import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import type { CounterpartyRow } from "../../../counterparty";
+import { type CounterpartyRow, SDP_COUNTERPARTY_ID_PATTERN } from "../../../counterparty";
 import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
 import { readRecord } from "../../../json";
@@ -245,19 +245,16 @@ export interface BvnkCustomerResolution {
   verificationUrl?: string;
 }
 
-const SDP_COUNTERPARTY_ID_PATTERN =
-  /^counterparty_([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/i;
-
 /**
  * Builds the value stored in BVNK's customer `externalReference` field.
  *
  * BVNK limits `externalReference` to 36 characters, while SDP counterparty ids
- * are `counterparty_<uuid>` and therefore too long. This function creates a
+ * are `cpty_<uuid>` and therefore too long. This function creates a
  * reversible BVNK-facing id in `cp_<uuid_without_hyphens>` format. BVNK returns
  * this caller-provided value in customer/payment webhooks, letting handlers
  * reconstruct the SDP counterparty id and load by primary key.
  *
- * @param counterpartyId SDP counterparty primary key in `counterparty_<uuid>` format.
+ * @param counterpartyId SDP counterparty primary key in `cpty_<uuid>` format.
  * @returns BVNK customer `externalReference` in `cp_<32_hex_uuid>` format.
  * @throws SdpPaymentsError with `INTERNAL_ERROR` when the counterparty id cannot be
  * represented in BVNK's compact externalReference format.

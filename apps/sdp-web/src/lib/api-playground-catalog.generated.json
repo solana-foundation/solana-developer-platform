@@ -1648,7 +1648,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -1778,7 +1778,7 @@
             "key": "counterpartyId",
             "label": "counterpartyId",
             "description": "Filter transfers tied to a specific counterparty.",
-            "defaultValue": "counterparty_example",
+            "defaultValue": "cpty_example",
             "required": false
           },
           {
@@ -1947,7 +1947,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -2024,7 +2024,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -2079,7 +2079,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -2116,7 +2116,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -2143,7 +2143,7 @@
                 "batchId": "batch_example",
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
@@ -2179,7 +2179,7 @@
                 },
                 "amount": "100.00",
                 "provider": "moonpay",
-                "counterpartyId": "counterparty_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
                 "providerReference": "ramp_quote_example",
                 "deliveryMode": "session_widget",
@@ -2357,7 +2357,7 @@
                 "batchId": "batch_example",
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
@@ -2393,7 +2393,7 @@
                 },
                 "amount": "100.00",
                 "provider": "moonpay",
-                "counterpartyId": "counterparty_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
                 "providerReference": "ramp_quote_example",
                 "deliveryMode": "session_widget",
@@ -2439,7 +2439,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -2451,7 +2451,7 @@
               "projectId": "prj_example",
               "sourceWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2492,7 +2492,7 @@
             "key": "counterpartyId",
             "label": "counterpartyId",
             "description": "Filter recurring payments by counterparty.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": false
           },
           {
@@ -2566,7 +2566,7 @@
                 "projectId": "prj_example",
                 "sourceWalletId": "privy_wallet_123",
                 "sourceAddress": "So11111111111111111111111111111111111111112",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destinationAddress": "So11111111111111111111111111111111111111112",
                 "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2622,7 +2622,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -2634,7 +2634,7 @@
               "projectId": "prj_example",
               "sourceWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2688,7 +2688,7 @@
               "projectId": "prj_example",
               "sourceWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2742,7 +2742,7 @@
               "projectId": "prj_example",
               "sourceWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2796,7 +2796,7 @@
               "projectId": "prj_example",
               "sourceWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2850,7 +2850,7 @@
               "projectId": "prj_example",
               "sourceWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2915,7 +2915,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -2970,7 +2970,7 @@
               "projectId": "prj_example",
               "sourceWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -3302,7 +3302,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
+            "defaultValue": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
             "required": true
           }
         ],
@@ -5292,7 +5292,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
             "required": true
           }
         ],
@@ -5453,7 +5453,7 @@
           "data": {
             "counterparties": [
               {
-                "id": "cp_example",
+                "id": "cpty_example",
                 "organizationId": "org_example",
                 "projectId": "prj_example",
                 "externalId": "customer_42",
@@ -5513,7 +5513,7 @@
         "expectedResponse": {
           "data": {
             "counterparty": {
-              "id": "cp_example",
+              "id": "cpty_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "customer_42",
@@ -5559,7 +5559,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -5567,7 +5567,7 @@
         "expectedResponse": {
           "data": {
             "counterparty": {
-              "id": "cp_example",
+              "id": "cpty_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "customer_42",
@@ -5613,7 +5613,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -5631,7 +5631,7 @@
         "expectedResponse": {
           "data": {
             "counterparty": {
-              "id": "cp_example",
+              "id": "cpty_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "customer_42",
@@ -5677,7 +5677,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -5695,7 +5695,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6368,7 +6368,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6433,7 +6433,7 @@
                 "id": "cpa_example",
                 "organizationId": "org_example",
                 "projectId": "prj_example",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "accountKind": "crypto_wallet",
                 "label": "USDC wallet",
                 "details": {
@@ -6467,7 +6467,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -6488,7 +6488,7 @@
               "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "accountKind": "crypto_wallet",
               "label": "USDC wallet",
               "details": {
@@ -6518,7 +6518,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6536,7 +6536,7 @@
               "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "accountKind": "crypto_wallet",
               "label": "USDC wallet",
               "details": {
@@ -6566,7 +6566,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6594,7 +6594,7 @@
               "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "accountKind": "crypto_wallet",
               "label": "USDC wallet",
               "details": {
@@ -6624,7 +6624,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {

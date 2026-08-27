@@ -859,7 +859,7 @@ describe("BVNK ramp webhook", () => {
   const BVNK_WEBHOOK_SECRET = "bvnk_webhook_secret_test";
   const ORG_ID = "org_bvnk_webhook";
   const PROJECT_ID = "prj_bvnk_webhook";
-  const COUNTERPARTY_ID = "counterparty_123e4567-e89b-12d3-a456-426614174000";
+  const COUNTERPARTY_ID = "cpty_123e4567-e89b-12d3-a456-426614174000";
   const CUSTOMER_REFERENCE = "965a5ef5-77f3-482e-917f-194c30143810";
   const USER_ID = "usr_bvnk_webhook";
   const WALLET_ID = "a:1:wallet:1";
@@ -1771,7 +1771,7 @@ describe("Lightspark ramp webhook", () => {
       accountId: "ExternalAccount:019e92fe-cc69-6abf-0000-973b67b36284",
     },
     customerId: "Customer:019e92fe-c8b0-938e-0000-35ae407d1719",
-    platformCustomerId: "counterparty_8eac0e73-775a-419c-a2c0-6310ee4d1a78",
+    platformCustomerId: "cpty_8eac0e73-775a-419c-a2c0-6310ee4d1a78",
     createdAt: "2026-06-05T11:48:26.865811Z",
     description: "SDP onramp",
     source: {

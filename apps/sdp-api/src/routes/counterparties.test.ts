@@ -189,7 +189,7 @@ describe("Counterparties Routes", () => {
       const res = await createCounterparty({ externalId: "ext_001" });
       expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.data.counterparty.id).toMatch(/^counterparty_/);
+      expect(body.data.counterparty.id).toMatch(/^cpty_/);
       expect(body.data.counterparty.organizationId).toBe(TEST_ORG.id);
       expect(body.data.counterparty.entityType).toBe("individual");
       expect(body.data.counterparty.displayName).toBe("Alice");
@@ -301,7 +301,7 @@ describe("Counterparties Routes", () => {
 
     it("returns 404 for unknown id", async () => {
       const res = await app.request(
-        "/v1/counterparties/counterparty_does_not_exist",
+        "/v1/counterparties/cpty_does_not_exist",
         { headers: { Authorization: authHeader } },
         env
       );
@@ -311,7 +311,7 @@ describe("Counterparties Routes", () => {
     it("returns 404 when the counterparty belongs to a different project in the same org", async () => {
       const db = getDb(env);
       const otherProjectId = "prj_counterparties_cross_project";
-      const otherCounterpartyId = "counterparty_cross_project_iso";
+      const otherCounterpartyId = "cpty_cross_project_iso";
 
       await db
         .prepare(
@@ -735,7 +735,7 @@ describe("Counterparties Routes", () => {
 
     it("returns 404 for unknown id", async () => {
       const res = await app.request(
-        "/v1/counterparties/counterparty_does_not_exist",
+        "/v1/counterparties/cpty_does_not_exist",
         { method: "DELETE", headers: { Authorization: authHeader } },
         env
       );

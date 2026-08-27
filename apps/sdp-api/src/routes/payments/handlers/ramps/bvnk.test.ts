@@ -23,7 +23,7 @@ function counterpartyWithBvnkRule(ruleId: string): CounterpartyRow {
   );
 
   return {
-    id: "counterparty_123e4567-e89b-12d3-a456-426614174000",
+    id: "cpty_123e4567-e89b-12d3-a456-426614174000",
     organization_id: "org_test",
     project_id: "prj_test",
     external_id: null,
