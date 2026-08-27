@@ -17,6 +17,7 @@
 - Payments, transfers, and ramps
 - Compliance screening
 - Asset profiles and public token metadata
+- Caller-signed Earn vault deposits and exits
 
 ## Start here
 - [What is SDP?](https://platform.solana.com/docs/introduction): One API for tokenization, custody, payments, and compliance on Solana.
@@ -43,6 +44,7 @@
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
+- [Earn](https://platform.solana.com/docs/reference/api/earn): Caller-signed external-wallet vault deposit and exit transactions.
 
 ## AI guide
 - [Docs for AI](https://platform.solana.com/docs/reference/docs-for-ai): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.

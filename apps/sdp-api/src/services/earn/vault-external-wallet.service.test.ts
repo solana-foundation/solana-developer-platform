@@ -424,6 +424,45 @@ describe("submitExternalWalletDeposit", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("enforces the external position's project claim in the database", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
+        .bind(SIBLING_PROJECT, result.movement.id)
+        .run()
+    ).rejects.toThrow(/earn_movements_external_wallet_claim_fkey/i);
+  });
+
+  it("preserves external position and movement history after project deletion", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    await getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
+
+    const movement = await getDb(env)
+      .prepare("SELECT project_id FROM earn_movements WHERE id = ?")
+      .bind(result.movement.id)
+      .first<{ project_id: string | null }>();
+    const position = await getDb(env)
+      .prepare("SELECT project_id FROM earn_positions WHERE id = ?")
+      .bind(result.position.id)
+      .first<{ project_id: string | null }>();
+
+    expect(movement?.project_id).toBeNull();
+    expect(position?.project_id).toBeNull();
+  });
+
   it("leaves the movement requested and reconcilable when broadcast fails", async () => {
     broadcastVaultTransaction.mockRejectedValue(new Error("rpc unreachable"));
     const built = await buildExternalWalletDepositTransaction(env, depositInput());

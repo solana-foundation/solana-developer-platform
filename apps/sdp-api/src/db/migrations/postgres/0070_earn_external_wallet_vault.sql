@@ -101,7 +101,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_earn_positions_external_wallet_claim
 -- the custody wallet.
 ALTER TABLE earn_positions
     ADD CONSTRAINT earn_positions_external_wallet_movement_identity_key
-        UNIQUE (id, organization_id, environment, provider, vault_address, owner_address);
+        UNIQUE (
+            id,
+            organization_id,
+            project_id,
+            environment,
+            provider,
+            vault_address,
+            owner_address
+        );
 
 -- The per-wallet read path PRO-1724 serves: "what does this external wallet
 -- hold in this project". Partial, so the treasury indexes stay untouched.
@@ -158,17 +166,26 @@ ALTER TABLE earn_movements
         );
 
 -- 0059's exact-claim guarantee for the external-wallet shape: an external-wallet movement is
--- pinned to the position that carries its exact (vault, owner) claim. MATCH
+-- pinned to the position that carries its exact (project, vault, owner) claim. MATCH
 -- SIMPLE skips the constraint while any column is NULL, which is every custody
 -- vault row (owner NULL) and every custodial row (vault NULL), so this binds
 -- exactly the new shape and nothing else, the same trick the custody claim FK
 -- already plays in reverse.
 ALTER TABLE earn_movements
     ADD CONSTRAINT earn_movements_external_wallet_claim_fkey
-        FOREIGN KEY (position_id, organization_id, environment, provider, vault_address, owner_address)
+        FOREIGN KEY (
+            position_id,
+            organization_id,
+            project_id,
+            environment,
+            provider,
+            vault_address,
+            owner_address
+        )
         REFERENCES earn_positions(
             id,
             organization_id,
+            project_id,
             environment,
             provider,
             vault_address,

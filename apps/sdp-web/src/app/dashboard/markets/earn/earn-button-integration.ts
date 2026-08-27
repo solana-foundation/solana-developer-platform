@@ -48,11 +48,14 @@ function sdpHeaders(extra: Record<string, string> = {}) {
 export async function buildEarnDepositTransaction({
   ownerAddress,
   amount,
+  minSharesOut,
 }: {
   /** The customer's Solana wallet address. */
   ownerAddress: string;
   /** Deposit amount in the vault token's units, as a decimal string. */
   amount: string;
+  /** Minimum acceptable shares, derived from your quote and slippage tolerance. */
+  minSharesOut: string;
 }) {
   const response = await fetch(\`\${SDP_API_URL}/v1/earn/external-wallet/deposit-transactions\`, {
     method: "POST",
@@ -61,6 +64,7 @@ export async function buildEarnDepositTransaction({
       strategyId: ${JSON.stringify(strategy.id)},
       ownerAddress,
       amount,
+      minSharesOut,
     }),
   });
   const result = await response.json();

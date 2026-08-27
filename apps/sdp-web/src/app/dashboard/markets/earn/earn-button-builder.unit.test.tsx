@@ -155,6 +155,8 @@ describe("EarnButtonBuilder", () => {
     expect(code).not.toContain("crypto.randomUUID()");
     expect(code).toContain('strategyId: "earn_strategy_live"');
     expect(code).toContain("ownerAddress");
+    expect(code).toContain("minSharesOut: string");
+    expect(code).toContain("minSharesOut,");
     expect(code).toContain("signedTransaction");
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
