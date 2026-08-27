@@ -78,6 +78,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.release_sha != '' && inputs.release_sha || github.sha }}
 
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
       - name: Notify Slack — deploy started
         continue-on-error: true
         env:
