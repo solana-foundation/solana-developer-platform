@@ -98,7 +98,7 @@ export function flattenCatalog(value, prefix = "", result = new Map()) {
   return result;
 }
 
-function setCatalogValue(catalog, key, value) {
+function setCatalogValue(catalog, key, value, { overwrite = false } = {}) {
   const segments = key.split(".");
   let target = catalog;
   for (const segment of segments.slice(0, -1)) {
@@ -112,13 +112,43 @@ function setCatalogValue(catalog, key, value) {
   }
 
   const leaf = segments.at(-1);
-  if (target[leaf] !== undefined) {
+  if (target[leaf] !== undefined && !overwrite) {
     throw new Error(`Refusing to overwrite existing translation ${key}`);
   }
   target[leaf] = value;
 }
 
-export function collectMissingTranslations({ messagesDir, sourceLocale = "en" }) {
+/**
+ * Reasons validateCatalogs would reject an already-committed translation.
+ *
+ * Every defect listed here has to be repairable by collectMissingTranslations,
+ * otherwise the catalog wedges: the validator rejects a key the collector never
+ * queues, and no run can ever produce a clean tree. Keep the two in step.
+ *
+ * @returns {string[]} Empty when the existing translation is acceptable.
+ */
+function translationDefects({ locale, key, source, translation, guidance }) {
+  const defects = [];
+
+  try {
+    const sourceTokens = extractPlaceholderTokens(source);
+    const translationTokens = extractPlaceholderTokens(translation);
+    if (sourceTokens.join("\u0000") !== translationTokens.join("\u0000")) {
+      defects.push("placeholder mismatch");
+    }
+  } catch {
+    // Unparseable ICU in the committed value is itself a defect worth redoing.
+    defects.push("malformed ICU");
+  }
+
+  if (terminologyErrors({ locale, entries: [{ key, value: translation }], guidance }).length > 0) {
+    defects.push("terminology");
+  }
+
+  return defects;
+}
+
+export function collectMissingTranslations({ messagesDir, sourceLocale = "en", guidance = {} }) {
   const sourceFiles = catalogFiles(messagesDir, sourceLocale);
   if (sourceFiles.length === 0) {
     throw new Error(`No ${sourceLocale} catalog found under ${messagesDir}`);
@@ -139,7 +169,17 @@ export function collectMissingTranslations({ messagesDir, sourceLocale = "en" })
       const sourceEntries = [...sourceLeaves.entries()];
 
       for (const [entryIndex, [key, source]] of sourceEntries.entries()) {
-        if (!targetLeaves.has(key)) {
+        // A key needs work when it is absent, or when the value that is already
+        // committed is one validateCatalogs would reject. Without the second
+        // case a source string whose placeholders changed is invisible here and
+        // fatal there, which wedges every future run.
+        const existing = targetLeaves.get(key);
+        const defects =
+          existing === undefined
+            ? []
+            : translationDefects({ locale, key, source, translation: existing, guidance });
+
+        if (existing === undefined || defects.length > 0) {
           const namespace = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "<root>";
           const nearby = sourceEntries
             .map(([nearbyKey, nearbySource], nearbyIndex) => ({
@@ -171,6 +211,10 @@ export function collectMissingTranslations({ messagesDir, sourceLocale = "en" })
             targetFile: targetRelativePath,
             key,
             source,
+            // stale entries already hold a value, so applying them has to
+            // overwrite rather than refuse.
+            stale: existing !== undefined,
+            defects,
             context: {
               namespace,
               nearby,
@@ -232,42 +276,60 @@ export function validateTerminology({ locale, entries, guidance }) {
   }
 }
 
-function validateCatalogFile({ sourceFile, targetFile, locale, targetRelativePath, guidance }) {
+function validateCatalogFile({
+  sourceFile,
+  targetFile,
+  locale,
+  targetRelativePath,
+  guidance,
+  allowMissing = false,
+}) {
   const sourceCatalog = readJson(sourceFile);
   const targetCatalog = fs.existsSync(targetFile) ? readJson(targetFile) : {};
   const sourceLeaves = flattenCatalog(sourceCatalog);
   const targetLeaves = flattenCatalog(targetCatalog);
   const errors = [];
 
-  for (const key of sourceLeaves.keys()) {
-    if (!targetLeaves.has(key)) {
-      errors.push(`${locale}/${targetRelativePath}: missing ${key}`);
-    }
-  }
-
-  for (const [key, source] of sourceLeaves) {
-    const translation = targetLeaves.get(key);
-    if (translation !== undefined) {
-      const sourceTokens = extractPlaceholderTokens(source);
-      const translationTokens = extractPlaceholderTokens(translation);
-      if (sourceTokens.join("\u0000") !== translationTokens.join("\u0000")) {
-        errors.push(`${locale}/${targetRelativePath}: placeholder mismatch for ${key}`);
+  if (!allowMissing) {
+    for (const key of sourceLeaves.keys()) {
+      if (!targetLeaves.has(key)) {
+        errors.push(`${locale}/${targetRelativePath}: missing ${key}`);
       }
     }
   }
 
-  errors.push(
-    ...terminologyErrors({
-      locale,
-      entries: [...targetLeaves].map(([key, value]) => ({ key, value })),
-      guidance,
-    })
-  );
+  // Deliberately the same predicate collectMissingTranslations queues on, and
+  // deliberately keyed off the source catalog. Anything rejected here is
+  // therefore something the collector hands to Eve on the next run, so a
+  // rejection can never become permanent. One consequence worth knowing:
+  // orphaned target keys (no longer present in en) are ignored rather than
+  // failed, because no source string exists to retranslate them from.
+  for (const [key, source] of sourceLeaves) {
+    const translation = targetLeaves.get(key);
+    if (translation === undefined) {
+      continue;
+    }
+    for (const defect of translationDefects({ locale, key, source, translation, guidance })) {
+      errors.push(`${locale}/${targetRelativePath}: ${defect} for ${key}`);
+    }
+  }
 
   return errors;
 }
 
-export function validateCatalogs({ messagesDir, sourceLocale = "en", guidance = {} }) {
+/**
+ * @param {object} options
+ * @param {boolean} [options.allowMissing] Skip "missing key" errors and report
+ *   only drift (placeholder or terminology defects) in values that do exist.
+ *   Use after a partially successful sync, where an untranslated key is a
+ *   backlog measurement rather than a fault.
+ */
+export function validateCatalogs({
+  messagesDir,
+  sourceLocale = "en",
+  guidance = {},
+  allowMissing = false,
+}) {
   const sourceFiles = catalogFiles(messagesDir, sourceLocale);
   const locales = availableLocales(messagesDir, sourceLocale);
   const errors = [];
@@ -283,6 +345,7 @@ export function validateCatalogs({ messagesDir, sourceLocale = "en", guidance = 
           locale,
           targetRelativePath,
           guidance,
+          allowMissing,
         })
       );
     }
@@ -677,6 +740,7 @@ export async function translateMissingEntries({
     throw new Error("Translation retry count must be a non-negative integer");
   }
   const translations = [];
+  const failures = [];
   let batches = 0;
   const byLocale = new Map();
   for (const entry of missing) {
@@ -688,23 +752,34 @@ export async function translateMissingEntries({
   for (const [locale, localeEntries] of byLocale) {
     for (let index = 0; index < localeEntries.length; index += batchSize) {
       const batch = localeEntries.slice(index, index + batchSize);
-      translations.push(
-        ...(await requestTranslations({
-          locale,
-          entries: batch,
-          guidance,
-          agentUrl,
-          agentUsername,
-          agentPassword,
-          fetchImpl,
-          maxRetries,
-        }))
-      );
       batches += 1;
+      try {
+        translations.push(
+          ...(await requestTranslations({
+            locale,
+            entries: batch,
+            guidance,
+            agentUrl,
+            agentUsername,
+            agentPassword,
+            fetchImpl,
+            maxRetries,
+          }))
+        );
+      } catch (error) {
+        // Eve is flaky at this scale and a batch can exhaust its retries. Losing
+        // that batch costs one batch, so record it and keep going; aborting the
+        // run here would throw away every batch already paid for.
+        failures.push({
+          locale,
+          keys: batch.length,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
-  return { translations, batches };
+  return { translations, batches, failures };
 }
 
 export function applyTranslations({ messagesDir, translations }) {
@@ -719,7 +794,7 @@ export function applyTranslations({ messagesDir, translations }) {
     const targetFile = path.join(messagesDir, targetRelativePath);
     const catalog = fs.existsSync(targetFile) ? readJson(targetFile) : {};
     for (const entry of entries) {
-      setCatalogValue(catalog, entry.key, entry.value);
+      setCatalogValue(catalog, entry.key, entry.value, { overwrite: entry.stale === true });
     }
     writeJson(targetFile, catalog);
   }

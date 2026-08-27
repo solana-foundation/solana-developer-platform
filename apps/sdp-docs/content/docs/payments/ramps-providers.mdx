@@ -1,9 +1,9 @@
 ---
 title: Ramp providers
-description: MoonPay, Lightspark, and BVNK — capability matrix, configuration, and per-provider notes.
+description: MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, and Stripe — capability matrix, configuration, and per-provider notes.
 ---
 
-SDP currently integrates three ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/execute` and `POST /v1/payments/ramps/offramp/execute` selects between them.
+SDP currently integrates seven ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
 
 ## Sandbox vs production selection
 
@@ -12,15 +12,19 @@ The sandbox/production mode is chosen **per request**, not at deployment time:
 - Non-production SDP deployments (`ENVIRONMENT !== "production"`) always use sandbox credentials.
 - In production deployments, the calling API key's environment picks the mode — `sk_test_` keys use sandbox, `sk_live_` use production.
 
-Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment.
+Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment — MoonPay, Lightspark, BVNK, and Mural read separate sandbox and production credentials this way. Coinbase and Stripe use a single credential pair regardless of the resolved mode (see their sections below); MoneyGram only has sandbox credentials today.
 
 ## Capability matrix
 
-| Provider | Onramp | Offramp | Sandbox | Compliance attachment | Notes |
+| Provider | Onramp | Offramp | Sandbox | Delivery mode | Notes |
 | --- | --- | --- | --- | --- | --- |
-| MoonPay | ✓ | ✓ | ✓ | — | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
-| Lightspark | ✓ | ✓ | ✓ | — | Grid API. Same per-request sandbox/production selection as MoonPay. |
-| BVNK | ✓ | ✓ | ✓ | ✓ (`bvnkCompliance`) | Hawk auth. |
+| MoonPay | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
+| Lightspark | ✓ | ✓ | ✓ | `manual_instructions` | Grid API. Same per-request sandbox/production selection as MoonPay. |
+| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
+| MoneyGram | ✓ | ✓ | ✓ | `session_widget` | Sandbox-only pilot integration — there is no production credential path yet. |
+| Coinbase | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Rate estimates work in production; order creation is sandbox-only. Onramp only. |
+| Mural | ✓ | ✗ (estimate only) | ✓ | `manual_instructions` | Off-ramp rate estimate works; off-ramp quote creation is not implemented yet. |
+| Stripe | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | No separate sandbox credentials — supply a Stripe test-mode secret key. Onramp only. |
 
 ## MoonPay
 
@@ -44,7 +48,9 @@ MoonPay normalizes token symbols internally — `USDC` is mapped to `usdc_sol`, 
 | `LIGHTSPARK_GRID_SANDBOX_CLIENT_ID` | conditional | Sandbox Grid API client identifier. Required when the request resolves to sandbox. |
 | `LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET` | conditional | Sandbox Grid API client secret. |
 
-Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). Lightspark identifies wallets by its own `ExternalAccount:…` ids — onramp `destinationWallet` accepts that id *or* a Solana wallet address (SDP creates the external account if needed), while offramp `sourceWallet` requires the Lightspark account id.
+Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). `destinationWallet` / `sourceWallet` are your own custody wallet, same as every other provider — Lightspark's customer id and payout account are resolved server-side from the counterparty's Provider Requirements, not passed on the quote request.
+
+Lightspark quotes always return `deliveryMode: "manual_instructions"` — the response carries funding instructions to display to the payer, not a redirect URL.
 
 ## BVNK
 
@@ -60,25 +66,57 @@ Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/
 
 BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
-BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — an object of the form `{ "partyDetails": [...] }` carrying compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
+BVNK is a travel-rule / compliance-sharing provider: it requires party details (name, address, and similar identity fields) to satisfy KYC sharing requirements. SDP builds those party details from the counterparty's own record when creating the quote — there is no compliance object to pass on the ramp request itself. Populate the counterparty's identity fields before quoting BVNK.
 
-```json
-{
-  "provider": "bvnk",
-  "destinationWallet": "wal_...",
-  "cryptoToken": "USDC",
-  "fiatAmount": "100.00",
-  "bvnkCompliance": {
-    "partyDetails": [
-      { "type": "individual", "firstName": "...", "lastName": "...", "...": "..." }
-    ]
-  }
-}
-```
+BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
+
+## MoneyGram
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `MONEYGRAM_SANDBOX_PUBLIC_KEY` | conditional | Sandbox public key, sent as `x-api-key` on the rail-discovery (currency list) call. |
+| `MONEYGRAM_SANDBOX_SECRET_KEY` | conditional | Sandbox secret key, sent as `x-api-key` on estimate, quote, and session calls. |
+
+MoneyGram is a sandbox-only pilot integration today — the client always calls MoneyGram's sandbox host and throws if a request resolves to production; there is no production credential pair to configure yet.
+
+MoneyGram quotes always return `deliveryMode: "session_widget"`: both onramp and offramp create a session against the same endpoint and return a `widgetUrl` (with `mode=on-ramp` or `mode=off-ramp`) plus a short-lived `sessionToken` to mount. It requires no Provider Requirements collection — every counterparty is treated as ready.
+
+## Coinbase
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `COINBASE_CDP_API_KEY_ID` | conditional | CDP Secret API Key id. Same key is used for sandbox and production — sandbox is flagged per-request, not by a separate credential. |
+| `COINBASE_CDP_API_KEY_SECRET` | conditional | CDP Secret API Key secret. Paired with `COINBASE_CDP_API_KEY_ID`; used to sign a per-request JWT. |
+
+Coinbase is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject with "Coinbase Onramp does not support off-ramp." Onramp quotes always return `deliveryMode: "hosted"`: SDP creates a guest-checkout Apple Pay order and returns its payment link as `hostedUrl`.
+
+Order creation (the quote step) is sandbox-only today — it requires buyer agreement and phone-OTP attestation timestamps that SDP's production flow does not yet collect, so a non-sandbox request fails loudly instead of sending a false attestation. Rate estimates have no such restriction and work in both modes. Onramp requires the counterparty to have an email and phone number.
+
+## Mural
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `MURAL_PAY_API_KEY` | conditional | Production API key for organization, account, and payin calls. |
+| `MURAL_PAY_SANDBOX_API_KEY` | conditional | Sandbox equivalent. Required when the request resolves to sandbox. |
+| `MURAL_PAY_TRANSFER_API_KEY` | conditional | Production transfer-scoped key, sent as a separate header on payout-execute calls. |
+| `MURAL_PAY_SANDBOX_TRANSFER_API_KEY` | conditional | Sandbox equivalent of the transfer key. |
+
+Mural onramp is business-counterparty only (no individual entity type). A quote requires the counterparty's Mural organization and payin account already provisioned — through Provider Requirements onboarding (organization creation, terms-of-service acceptance, verification) — and returns `deliveryMode: "manual_instructions"` built from that account's active payin method; the quote step itself makes no live Mural call.
+
+Off-ramp rate estimates work today (a real call to Mural's fees endpoint), but off-ramp quote creation always throws — it is not implemented yet.
+
+## Stripe
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `STRIPE_SECRET_KEY` | conditional | Secret key, sent as the username on HTTP Basic auth. A single key serves both modes — use a `sk_test_…` key to sandbox it, `sk_live_…` for production. |
+| `STRIPE_PUBLISHABLE_KEY` | conditional | Publishable key, echoed back on the quote for the client to mount the onramp session. |
+
+Stripe is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject as unsupported. Onramp is also limited to `usdc.solana` and `sol.solana` as destination assets. Quotes always return `deliveryMode: "session_widget"`: a `clientSecret` and `publishableKey` to mount Stripe's crypto onramp session, plus an optional `redirectUrl`.
 
 ## Provider gating
 
-Even when all three providers' env vars are populated, an org can be restricted to a subset. SDP gates by `assertProviderAvailable` on every ramp call — if the org's entitlement does not include the requested provider, the call returns an error. To activate or change provider entitlements for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
+Even when all seven providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call — if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
 
 ## Choosing a provider
 
@@ -87,7 +125,10 @@ Even when all three providers' env vars are populated, an org can be restricted 
 | Fastest sandbox iteration | MoonPay or BVNK. |
 | Travel-rule / compliance party metadata | BVNK. |
 | Lightning-aware fiat settlement | Lightspark. |
-| Broadest payment-method coverage | MoonPay (region-dependent). |
+| Broadest payment-method coverage | MoonPay (corridor-dependent). |
+| Business-entity onramp counterparties | Mural (its only supported entity type). |
+| Widget/session-embedded onramp UI | MoneyGram or Stripe. |
+| Onramp only, no off-ramp needed | Coinbase or Stripe. |
 
 For self-hosted deployments where only a subset of providers will ever be configured, see [Providers optional for self-hosted SDP](/docs/reference/provider-onboarding) — SDP supports running with any single provider active.
 

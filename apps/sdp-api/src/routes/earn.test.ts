@@ -459,7 +459,12 @@ describe("Earn routes — session-caller environment resolution", () => {
     await seedAuth();
     await seedSessionAuth();
     const sandbox = await seedStrategy();
-    const production = await seedStrategy({ environment: "production" });
+    // On its own cluster, so the production default view (which lists the
+    // environment's own cluster since PRO-1742) includes it.
+    const production = await seedStrategy({
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
 
     // A production-project session sees the production catalogue…
     const productionList = await getEarnAsSession(
@@ -488,6 +493,195 @@ describe("Earn routes — session-caller environment resolution", () => {
   });
 });
 
+describe("Earn routes - button configurations", () => {
+  async function enableKaminoForOrganization() {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { kamino: true } } }), TEST_ORG.id)
+      .run();
+  }
+
+  function putConfiguration(strategyId: string, style = "accent", accentColor = "#9945FF") {
+    return app.request(
+      "/v1/earn/button-configurations/current",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ strategyId, style, accentColor }),
+      },
+      env
+    );
+  }
+
+  it("persists a project-scoped configuration and serves its handoff without auth", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+
+    const missing = await getEarn("/v1/earn/button-configurations/current");
+    expect(missing.status).toBe(404);
+
+    const saved = await putConfiguration(strategy.id);
+    expect(saved.status).toBe(200);
+    const savedBody = (await saved.json()) as {
+      data: {
+        configuration: {
+          publicToken: string;
+          strategyId: string;
+          style: string;
+          accentColor: string;
+        };
+      };
+    };
+    expect(savedBody.data.configuration).toMatchObject({
+      strategyId: strategy.id,
+      style: "accent",
+      accentColor: "#9945FF",
+    });
+    expect(savedBody.data.configuration.publicToken).toMatch(/^[A-Za-z0-9_-]{24}$/);
+
+    const reloaded = await getEarn("/v1/earn/button-configurations/current");
+    expect(reloaded.status).toBe(200);
+    const reloadedBody = (await reloaded.json()) as typeof savedBody;
+    expect(reloadedBody.data.configuration).toEqual(savedBody.data.configuration);
+
+    const handoff = await app.request(
+      `/v1/earn/button-configurations/public/${savedBody.data.configuration.publicToken}`,
+      {},
+      env
+    );
+    expect(handoff.status).toBe(200);
+    const handoffBody = (await handoff.json()) as {
+      data: {
+        configuration: Record<string, unknown> & {
+          strategyId: string;
+          strategyName: string;
+          provider: string;
+          style: string;
+          accentColor: string;
+        };
+      };
+    };
+    expect(handoffBody.data.configuration).toEqual({
+      strategyId: strategy.id,
+      strategyName: strategy.name,
+      provider: strategy.provider,
+      style: "accent",
+      accentColor: "#9945FF",
+      strategyAvailable: true,
+    });
+    expect(handoffBody.data.configuration).not.toHaveProperty("organizationId");
+    expect(handoffBody.data.configuration).not.toHaveProperty("projectId");
+    expect(handoffBody.data.configuration).not.toHaveProperty("apiKey");
+  });
+
+  async function savePublicToken(strategyId: string): Promise<string> {
+    const saved = await putConfiguration(strategyId);
+    expect(saved.status).toBe(200);
+    const savedBody = (await saved.json()) as {
+      data: { configuration: { publicToken: string } };
+    };
+    return savedBody.data.configuration.publicToken;
+  }
+
+  async function readHandoff(publicToken: string) {
+    const handoff = await app.request(
+      `/v1/earn/button-configurations/public/${publicToken}`,
+      {},
+      env
+    );
+    expect(handoff.status).toBe(200);
+    const body = (await handoff.json()) as {
+      data: {
+        configuration: {
+          strategyId: string;
+          strategyName: string | null;
+          provider: string | null;
+          strategyAvailable: boolean;
+        };
+      };
+    };
+    return body.data.configuration;
+  }
+
+  it("withholds display metadata once the configured strategy is hidden from the catalogue", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+    const publicToken = await savePublicToken(strategy.id);
+
+    // A later editorial hide (HIDDEN_STRATEGY_TERMS matches the name) must not
+    // keep leaking the row's name/provider through the unauthenticated route.
+    await getDb(env)
+      .prepare("UPDATE earn_strategies SET name = ? WHERE id = ?")
+      .bind("Aave Reserve Vault", strategy.id)
+      .run();
+
+    expect(await readHandoff(publicToken)).toEqual({
+      strategyId: strategy.id,
+      strategyName: null,
+      provider: null,
+      style: "accent",
+      accentColor: "#9945FF",
+      strategyAvailable: false,
+    });
+  });
+
+  it("reports a paused strategy as unavailable instead of serving a polished dead end", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+    const publicToken = await savePublicToken(strategy.id);
+    expect((await readHandoff(publicToken)).strategyAvailable).toBe(true);
+
+    // The operator stop switch: deposits against the strategy now 400, so the
+    // handoff must stop advertising a snippet that cannot work.
+    await getDb(env)
+      .prepare("UPDATE earn_strategies SET status = 'paused' WHERE id = ?")
+      .bind(strategy.id)
+      .run();
+
+    expect(await readHandoff(publicToken)).toMatchObject({
+      strategyName: null,
+      provider: null,
+      strategyAvailable: false,
+    });
+  });
+
+  it("survives a delisted strategy row without inventing a display name", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+    const publicToken = await savePublicToken(strategy.id);
+
+    // The delist pass deletes catalogue rows; 0068 has no FK by design.
+    await getDb(env).prepare("DELETE FROM earn_strategies WHERE id = ?").bind(strategy.id).run();
+
+    expect(await readHandoff(publicToken)).toMatchObject({
+      strategyId: strategy.id,
+      strategyName: null,
+      provider: null,
+      strategyAvailable: false,
+    });
+  });
+
+  it("refuses to configure a paused strategy and names the reason", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy({ status: "paused" });
+
+    const response = await putConfiguration(strategy.id, "ink");
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("is paused and cannot accept new deposits");
+    expect(await getEarn("/v1/earn/button-configurations/current")).toHaveProperty("status", 404);
+  });
+});
+
 describe("Earn routes — strategy catalogue", () => {
   it("returns the paginated list envelope and omits non-active strategies", async () => {
     await seedAuth();
@@ -513,37 +707,63 @@ describe("Earn routes — strategy catalogue", () => {
 
   /**
    * `fundable` is derived per request, so the SAME row answers differently to a
-   * sandbox and a production caller. This is the wire-level warning a partner
-   * reads before treating a listed strategy as depositable. Kamino used to be
-   * the live example (mainnet vaults listed in sandbox) and no longer is — each
-   * environment catalogues its own cluster, and the sync refuses to store a
-   * mainnet instrument outside production. The derivation still matters for
-   * Ground, for rows written before that guard, and for the next single-cluster
-   * provider, which is why this seeds the cluster directly.
+   * sandbox and a production caller — the wire-level warning a partner reads
+   * before treating a listed strategy as depositable. Since PRO-1742 a sandbox
+   * environment deliberately stores the mirrored mainnet shelf BESIDE its own,
+   * so the list defaults to the environment's own cluster: an integrator's
+   * default view stays a catalogue it can act on, and the mirrored rows are an
+   * explicit `?cluster=` opt-in whose rows arrive `fundable: false`.
    */
-  it("derives fundable from hostCluster against the caller's environment", async () => {
+  it("lists the environment's own cluster by default and the mirrored shelf on explicit opt-in", async () => {
     await seedAuth();
     const local = await seedStrategy({ hostCluster: "devnet" });
-    const elsewhere = await seedStrategy({ hostCluster: "mainnet-beta" });
+    const mirrored = await seedStrategy({ hostCluster: "mainnet-beta" });
 
-    const res = await getEarn("/v1/earn/strategies");
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
+    const defaults = await getEarn("/v1/earn/strategies");
+    expect(defaults.status).toBe(200);
+    const defaultBody = (await defaults.json()) as {
       data: {
         strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
+        total: number;
       };
     };
-    const byId = new Map(body.data.strategies.map((s) => [s.id, s]));
-    expect(byId.get(local.id)).toMatchObject({ hostCluster: "devnet", fundable: true });
+    expect(defaultBody.data.strategies.map((s) => s.id)).toEqual([local.id]);
+    expect(defaultBody.data.strategies[0]).toMatchObject({
+      hostCluster: "devnet",
+      fundable: true,
+    });
+    // The filter runs in SQL: the total describes the default view, not the
+    // store, so pagination never walks a reader into hidden rows.
+    expect(defaultBody.data.total).toBe(1);
+
+    const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(optIn.status).toBe(200);
+    const optInBody = (await optIn.json()) as {
+      data: {
+        strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
+        total: number;
+      };
+    };
+    expect(optInBody.data.strategies.map((s) => s.id)).toEqual([mirrored.id]);
     // Listed, and explicitly not fundable — the row is honest about both.
-    expect(byId.get(elsewhere.id)).toMatchObject({
+    expect(optInBody.data.strategies[0]).toMatchObject({
       hostCluster: "mainnet-beta",
       fundable: false,
     });
+    expect(optInBody.data.total).toBe(1);
+  });
+
+  it("rejects a cluster value outside the Solana cluster vocabulary", async () => {
+    await seedAuth();
+
+    const res = await getEarn("/v1/earn/strategies?cluster=testnet");
+
+    expect(res.status).toBe(400);
   });
 
   it("carries hostCluster and fundable on the single-strategy read too", async () => {
+    // Deliberate asymmetry with the list default above: an explicitly
+    // addressed row is served whatever its cluster — honest, never hidden.
     await seedAuth();
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
 

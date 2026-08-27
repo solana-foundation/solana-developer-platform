@@ -23,22 +23,20 @@ describe("POST /api/dashboard/issuance/tokens/[tokenId]/[action]", () => {
     vi.clearAllMocks();
   });
 
-  it.each([
-    "not-a-real-action",
-    "__proto__",
-    "constructor",
-    "toString",
-  ])("returns 404 for unsupported action %s without proxying", async (action) => {
-    const response = await POST(tokenActionRequest(), {
-      params: Promise.resolve({ tokenId: "tok_1", action }),
-    });
+  it.each(["not-a-real-action", "__proto__", "constructor", "toString"])(
+    "returns 404 for unsupported action %s without proxying",
+    async (action) => {
+      const response = await POST(tokenActionRequest(), {
+        params: Promise.resolve({ tokenId: "tok_1", action }),
+      });
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: { message: "Token action is not supported" },
-    });
-    expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "Token action is not supported" },
+      });
+      expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([
     ["deploy", "deploy"],

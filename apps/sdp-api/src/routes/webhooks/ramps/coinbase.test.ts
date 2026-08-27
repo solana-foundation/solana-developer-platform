@@ -15,7 +15,7 @@ function sandboxOrderEvent(overrides: Record<string, unknown>): Record<string, u
       { feeAmount: "0.05", feeCurrency: "USD", feeType: "FEE_TYPE_EXCHANGE" },
     ],
     orderId: "1f184f09-3d65-690d-b3b1-ba4a77af2429",
-    partnerUserRef: "sandbox-counterparty_c8e2e54c-60b6-4f4b-8d50-1f76cb64b2a8",
+    partnerUserRef: "sandbox-cpty_c8e2e54c-60b6-4f4b-8d50-1f76cb64b2a8",
     paymentCurrency: "USD",
     paymentMethod: "GUEST_CHECKOUT_APPLE_PAY",
     paymentSubtotal: "2",

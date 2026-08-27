@@ -379,6 +379,7 @@ describe("runCronJob", () => {
     for (const [, config] of starts) {
       expect(config).toEqual({
         schedule: { type: "crontab", value: "*/3 * * * *" },
+        checkinMargin: 4,
         maxRuntime: 2,
       });
     }
@@ -559,11 +560,14 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    const startedSlugs = vi
+    const startedCalls = vi
       .mocked(nodeObservability.captureCheckIn)
-      .mock.calls.filter(([checkIn]) => checkIn.status === "in_progress")
-      .map(([checkIn]) => checkIn.monitorSlug);
+      .mock.calls.filter(([checkIn]) => checkIn.status === "in_progress");
+    const startedSlugs = startedCalls.map(([checkIn]) => checkIn.monitorSlug);
     expect(startedSlugs).toContain("sdp-api-managed-refresh-earn-metrics");
+    for (const [, monitorConfig] of startedCalls) {
+      expect(monitorConfig).toMatchObject({ checkinMargin: 4 });
+    }
     expect(runEarnMetricsRefreshTick).toHaveBeenCalledExactlyOnceWith(env, undefined);
 
     const catalogueObservability = vi.mocked(runEarnCatalogueSyncIfDue).mock.calls[0][1];

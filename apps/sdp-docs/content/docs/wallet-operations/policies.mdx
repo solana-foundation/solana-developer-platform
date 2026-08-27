@@ -3,7 +3,7 @@ title: Wallet policies
 description: Wallet controls, operation permissions, and policy audit visibility.
 ---
 
-Wallet policies constrain how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
+A **wallet policy** constrains how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before each wallet operation executes.
 
 Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
@@ -11,13 +11,13 @@ Use policies for treasury wallets, automated payout wallets, or any custody wall
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="get-wallet-policies.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
   { headers: { Authorization: "Bearer sk_test_..." } }
@@ -34,7 +34,7 @@ const { data } = await response.json();
 
 The payload is wrapped in the standard `data` / `meta` envelope, with the policy under a `policy` key:
 
-```json
+```json title="response.json"
 {
   "data": {
     "policy": {
@@ -104,7 +104,7 @@ The `controlProfile` object shows the active immutable revision. Treat `revision
 
 ### Dashboard actions
 
-The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an approval request.
+The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an **Approval Request**.
 
 `review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
 
@@ -115,7 +115,7 @@ Wallet policies can match operations at two levels:
 - **Operation family** rules apply to every evaluated operation in a broad product area.
 - **Operation type** rules match one exact operation identifier and take precedence when you need a narrower decision.
 
-These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. See [Manage API keys](/docs/guides/manage-api-keys) for caller permissions.
+These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. The wallet policy is the baseline: an API key policy can narrow what a key may do, or route an operation into approval, but it can never expand past what the wallet policy allows. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
 
 ### Operation families
 
@@ -151,7 +151,7 @@ Operation-type matching is exact and case-sensitive. The API accepts only the su
 
 ## Policy evaluation and audit records
 
-Each supported wallet operation records a wallet operation row before policy evaluation and a policy evaluation row after SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
+Each supported action against the wallet is recorded as a **Wallet Operation** — the attempt, whatever the outcome — before evaluation runs, and its **Policy Evaluation** — the verdict, plus a point-in-time snapshot of the operation and the policy that decided it — is recorded once SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
 
 - what operation was evaluated (`walletOperationId`, `operationFamily`, `operationType`)
 - what decision SDP made (`decision`, `reasonCode`, `reason`, `requiresApproval`)
@@ -166,7 +166,7 @@ Use these records to explain allow, deny, approval-required, and review outcomes
 
 ## Destination allowlist
 
-The allowlist is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
+This is a wallet-policy control on outbound destinations — distinct from a token's **Token Access Control** allowlist, which gates who may hold the token itself. It is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
 
 - Maximum entries: **500 addresses per wallet**.
 - Each entry is a single on-chain address — no patterns, ranges, or address books.
@@ -176,7 +176,7 @@ The allowlist exists to bound risk on automated wallets (a hot wallet that shoul
 
 ## Transfer limits
 
-Two limits, both optional:
+A **transfer limit** always targets one **Policy Asset** — identified by mint, with native SOL under its well-known mint — never a blanket cap across assets. Two limits, both optional:
 
 - **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
 - **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
@@ -189,7 +189,7 @@ Set both for defense in depth: a per-transaction cap that catches obvious mistak
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -204,7 +204,7 @@ curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="update-wallet-policies.ts"
 await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
   {

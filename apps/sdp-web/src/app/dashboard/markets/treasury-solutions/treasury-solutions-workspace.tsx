@@ -1,13 +1,19 @@
 "use client";
 
 import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
   type EarnVaultPosition,
   earnProgramSolanaPayoutTokens,
   isVaultDirectDepositEnabled,
   type SdpEnvironment,
+  SOLANA_CLUSTER_LABELS,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
 import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
@@ -39,13 +45,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   type EarnFundingWallet,
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
-import { compareUnsignedDecimals } from "../earn/earn-decimal";
+import { formatUsd } from "../earn/earn-format";
 import {
+  EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
   earnMintAsset,
   earnStrategyAsset,
@@ -66,7 +74,11 @@ import {
   useEarnVaultPositions,
   useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
-import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
+import {
+  type EarnProviderAccess,
+  type EarnVaultDepositAvailability,
+  earnVaultDepositAvailability,
+} from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
@@ -76,8 +88,126 @@ import {
   EarnVaultWithdrawModal,
 } from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
+import {
+  formatAllocationShare,
+  isOpenVaultPosition,
+  summarizeTreasuryAllocation,
+  type TreasuryAllocation,
+  type VaultShareMintVocabulary,
+} from "./treasury-allocation";
 
-function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
+function AllocationFigure({
+  caption,
+  label,
+  value,
+}: {
+  caption: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium text-tertiary">{label}</dt>
+      {/* Numbers never truncate; a figure too wide for its column wraps
+       * instead of painting over the neighbour. */}
+      <dd className="mt-1.5 text-2xl leading-8 font-medium text-primary tabular-nums [overflow-wrap:anywhere]">
+        {value}
+      </dd>
+      <dd className="mt-1 text-xs text-tertiary">{caption}</dd>
+    </div>
+  );
+}
+
+function TreasuryAllocationCard({
+  allocation,
+  isLoading,
+}: {
+  allocation: TreasuryAllocation;
+  isLoading: boolean;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="grid gap-6 sm:grid-cols-3">
+          <SkeletonBlock className="h-20 rounded-xl" />
+          <SkeletonBlock className="h-20 rounded-xl" />
+          <SkeletonBlock className="h-20 rounded-xl" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const summary = allocation;
+
+  return (
+    <Card>
+      <CardContent>
+        <dl className="grid gap-x-6 gap-y-5 sm:grid-cols-3">
+          <AllocationFigure
+            caption={t(
+              summary.availableCash === undefined
+                ? "DashboardMarkets.treasury.summaryCashUnavailable"
+                : "DashboardMarkets.treasury.summaryCashCaption"
+            )}
+            label={t("DashboardMarkets.treasury.summaryCash")}
+            value={formatUsd(summary.availableCash, locale, 2)}
+          />
+          <AllocationFigure
+            caption={
+              summary.deployedValue !== undefined
+                ? t("DashboardMarkets.treasury.summaryDeployedCaption", {
+                    value: formatUsd(summary.deployedValue, locale, 2),
+                  })
+                : t(
+                    summary.deployedAbsence === "unreconciled"
+                      ? "DashboardMarkets.treasury.summaryDeployedUnreconciled"
+                      : "DashboardMarkets.treasury.summaryDeployedUnavailable"
+                  )
+            }
+            label={t("DashboardMarkets.treasury.summaryDeployed")}
+            value={formatAllocationShare(summary.deployedShare, locale)}
+          />
+          <AllocationFigure
+            caption={t(
+              summary.remainingShare !== undefined
+                ? "DashboardMarkets.treasury.summaryRemainingCaption"
+                : summary.sharesAbsence === "empty_float"
+                  ? "DashboardMarkets.treasury.summaryEmptyFloat"
+                  : "DashboardMarkets.treasury.summaryShareUnavailable"
+            )}
+            label={t("DashboardMarkets.treasury.summaryRemaining")}
+            value={formatAllocationShare(summary.remainingShare, locale)}
+          />
+        </dl>
+        {summary.deployedShare !== undefined ? (
+          /* The share stays a decimal string end to end; calc() does the
+           * width multiplication so no Number cast touches the amount. */
+          <div
+            aria-hidden="true"
+            className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-fill-strong"
+            data-testid="treasury-allocation-bar"
+          >
+            <div
+              className="h-full rounded-full bg-primary"
+              style={{ width: `calc(${summary.deployedShare} * 100%)` }}
+            />
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WalletBalanceList({
+  vaultShareMints,
+  wallet,
+}: {
+  vaultShareMints: ReadonlySet<string>;
+  wallet: EarnFundingWallet;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   if (wallet.balances === undefined) {
@@ -85,42 +215,51 @@ function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
       <p className="text-sm text-tertiary">{t("DashboardMarkets.treasury.balanceUnavailable")}</p>
     );
   }
-  if (wallet.balances.length === 0) {
+  // Vault share (receipt) tokens are ownership, not cash: they render as the
+  // wallet's "deployed in vaults" line and as position rows below, never as a
+  // token tile with an unreadable mint-derived symbol.
+  const cashBalances = wallet.balances.filter((balance) => !vaultShareMints.has(balance.mint));
+  if (cashBalances.length === 0) {
     return (
       <p className="text-sm text-tertiary">{t("DashboardMarkets.treasury.noTokenBalances")}</p>
     );
   }
 
   return (
-    <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {wallet.balances.map((balance) => (
-        <div
+    <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {cashBalances.map((balance) => (
+        <li
           className="flex min-w-0 items-center gap-3 rounded-xl bg-fill-subtle px-4 py-3"
           key={`${wallet.id}:${balance.mint}`}
         >
           <TokenMark mint={balance.mint} size="sm" symbol={balance.token} />
           <div className="min-w-0">
-            <dt className="truncate text-xs text-tertiary">{balance.token}</dt>
-            <dd className="mt-0.5 truncate text-sm font-medium text-primary tabular-nums">
+            <p className="truncate text-xs text-tertiary">{balance.token}</p>
+            <p className="mt-0.5 truncate text-sm font-medium text-primary tabular-nums">
               {formatProviderAmount(balance.uiAmount, locale)}
-            </dd>
+            </p>
           </div>
-        </div>
+        </li>
       ))}
-    </dl>
+    </ul>
   );
 }
 
 function TreasuryWalletsCard({
+  allocation,
   error,
   isLoading,
+  shareMints,
   wallets,
 }: {
+  allocation: TreasuryAllocation;
   error: unknown;
   isLoading: boolean;
+  shareMints: VaultShareMintVocabulary;
   wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   return (
     <Card>
       <CardHeader>
@@ -149,27 +288,46 @@ function TreasuryWalletsCard({
           />
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
-            {wallets.map((wallet) => (
-              <section
-                className="rounded-xl border border-border-default px-4 py-4"
-                key={wallet.id}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-medium text-primary">
-                      {wallet.label?.trim() || t("DashboardMarkets.treasury.unnamedWallet")}
-                    </h3>
-                    <p className="mt-1 text-xs text-tertiary" title={wallet.publicKey}>
-                      {shortenMarketAddress(wallet.publicKey)}
-                    </p>
+            {wallets.map((wallet) => {
+              // Straight from the same result the summary rendered, so the
+              // two cannot disagree about this wallet.
+              const deployment = allocation.deploymentByWalletId.get(wallet.id) ?? {
+                kind: "none" as const,
+              };
+              return (
+                <section
+                  className="rounded-xl border border-border-default px-4 py-4"
+                  key={wallet.id}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-medium text-primary">
+                        {wallet.label?.trim() || t("DashboardMarkets.treasury.unnamedWallet")}
+                      </h3>
+                      <p className="mt-1 text-xs text-tertiary" title={wallet.publicKey}>
+                        {shortenMarketAddress(wallet.publicKey)}
+                      </p>
+                    </div>
+                    <Badge variant={wallet.isRuntimeExecutionAllowed ? "success" : "outline"}>
+                      {wallet.provider ?? t("DashboardMarkets.treasury.walletProviderUnknown")}
+                    </Badge>
                   </div>
-                  <Badge variant={wallet.isRuntimeExecutionAllowed ? "success" : "outline"}>
-                    {wallet.provider ?? t("DashboardMarkets.treasury.walletProviderUnknown")}
-                  </Badge>
-                </div>
-                <WalletBalanceList wallet={wallet} />
-              </section>
-            ))}
+                  <WalletBalanceList vaultShareMints={shareMints.known} wallet={wallet} />
+                  {deployment.kind !== "none" ? (
+                    <div className="mt-3 flex items-center justify-between gap-4 border-t border-border-subtle pt-3">
+                      <span className="text-xs text-tertiary">
+                        {t("DashboardMarkets.treasury.walletDeployed")}
+                      </span>
+                      <span className="text-sm font-medium text-primary tabular-nums">
+                        {deployment.kind === "value"
+                          ? formatUsd(deployment.value, locale, 2)
+                          : t("DashboardMarkets.treasury.positionValueUnavailable")}
+                      </span>
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
           </div>
         )}
       </CardContent>
@@ -179,26 +337,42 @@ function TreasuryWalletsCard({
 
 function strategyPositionValue(
   strategy: EarnStrategy,
-  positions: readonly EarnVaultPosition[] | undefined
-): { count: number; value?: string } {
+  positions: readonly EarnVaultPosition[] | undefined,
+  /** Undefined when the witness is unavailable, so nothing can be certified. */
+  unrecordedShareMints: ReadonlySet<string> | undefined
+): { count: number; unrecorded?: boolean; value?: string } {
   const active = (positions ?? []).filter(
     (position) =>
       isOpenVaultPosition(position) &&
       earnStrategyReferenceKey(position.provider, position.providerReference) ===
         earnStrategyReferenceKey(strategy.provider, strategy.providerReference)
   );
+  // Applies to a row WITH recorded positions too, not just an empty one: a
+  // second wallet holding this vault's shares with no row behind them makes
+  // the recorded figure a floor, and printing it would contradict the summary
+  // and that wallet's card, which both read unavailable here. Without the
+  // witness at all, "no active position" is equally unsupportable.
+  const unrecorded =
+    unrecordedShareMints === undefined ||
+    (strategy.shareMint !== undefined && unrecordedShareMints.has(strategy.shareMint));
+  if (unrecorded) return { count: active.length, unrecorded };
   if (active.length === 0) return { count: 0 };
   const values = active.map((position) => position.tokenValue);
   if (values.some((value) => value === undefined)) return { count: active.length };
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
 }
 
-function isOpenVaultPosition(position: EarnVaultPosition): boolean {
-  return (
-    position.closedAt === null &&
-    (position.shares === undefined || compareUnsignedDecimals(position.shares, "0") !== 0)
-  );
-}
+// Exhaustive by construction (EarnDepositAvailabilityBadge): a new
+// availability variant fails this map's compile instead of collapsing to a
+// bare "Unavailable".
+const TREASURY_AVAILABILITY_LABELS = {
+  available: "DashboardMarkets.treasury.depositAvailable",
+  cluster_unavailable: "DashboardMarkets.treasury.clusterUnavailable",
+  strategy_unavailable: "DashboardMarkets.treasury.depositUnavailable",
+  environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
+  access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
+  provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
+} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
 
 function StrategyTable({
   environment,
@@ -206,12 +380,14 @@ function StrategyTable({
   positions,
   providerAccess,
   strategies,
+  unrecordedShareMints,
 }: {
   environment: SdpEnvironment;
   onDeposit: (strategy: EarnStrategy) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
   strategies: readonly EarnStrategy[];
+  unrecordedShareMints: ReadonlySet<string> | undefined;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -234,7 +410,9 @@ function StrategyTable({
         <TableBody>
           {strategies.map((strategy) => {
             const asset = earnStrategyAsset(strategy);
-            const position = positions ? strategyPositionValue(strategy, positions) : null;
+            const position = positions
+              ? strategyPositionValue(strategy, positions, unrecordedShareMints)
+              : null;
             const availability = earnVaultDepositAvailability(
               strategy,
               environment,
@@ -252,32 +430,26 @@ function StrategyTable({
                 </TableCell>
                 <TableCell>
                   <p className="text-sm text-primary tabular-nums">
-                    {position === null
+                    {position === null || position.unrecorded
                       ? "—"
                       : position.count === 0
                         ? t("DashboardMarkets.treasury.noBalance")
                         : formatProviderAmount(position.value, locale, asset?.symbol)}
                   </p>
-                  {position === null || (position.count > 0 && position.value === undefined) ? (
+                  {position === null ||
+                  position.unrecorded ||
+                  (position.count > 0 && position.value === undefined) ? (
                     <p className="mt-1 text-xs text-tertiary">
                       {t("DashboardMarkets.treasury.positionValueUnavailable")}
                     </p>
                   ) : null}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={canDeposit ? "default" : "outline"}>
-                    {t(
-                      availability === "available"
-                        ? "DashboardMarkets.treasury.depositAvailable"
-                        : availability === "environment_unavailable"
-                          ? "DashboardMarkets.treasury.productionUnavailable"
-                          : availability === "access_unavailable"
-                            ? "DashboardMarkets.treasury.accessUnavailable"
-                            : availability === "provider_unavailable"
-                              ? "DashboardMarkets.treasury.providerUnavailable"
-                              : "DashboardMarkets.treasury.depositUnavailable"
-                    )}
-                  </Badge>
+                  <EarnDepositAvailabilityBadge
+                    availability={availability}
+                    labels={TREASURY_AVAILABILITY_LABELS}
+                    strategy={strategy}
+                  />
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex justify-end gap-2">
@@ -306,12 +478,14 @@ function ActiveVaultPositionsCard({
   isLoading,
   onWithdraw,
   positions,
+  unrecordedShareMints,
   wallets,
 }: {
   error: unknown;
   isLoading: boolean;
   onWithdraw: (position: EarnVaultPosition) => void;
   positions: readonly EarnVaultPosition[] | undefined;
+  unrecordedShareMints: ReadonlySet<string> | undefined;
   wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
@@ -340,28 +514,39 @@ function ActiveVaultPositionsCard({
             message={t("DashboardMarkets.treasury.vaultPositionsErrorTitle")}
           />
         ) : activePositions.length === 0 ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.vaultPositionsEmptyDescription")}
-            icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.vaultPositionsEmptyTitle")}
-          />
+          // "No positions" is a claim of ABSENCE, so it needs the same witness
+          // every other surface needs. Receipt tokens with no row behind them,
+          // or a witness that could not be built, mean holdings may exist that
+          // this list cannot show.
+          unrecordedShareMints === undefined || unrecordedShareMints.size > 0 ? (
+            <ListEmptyState
+              description={t("DashboardMarkets.treasury.vaultPositionsIncompleteDescription")}
+              icon={<InfoIcon aria-hidden="true" className="size-5" />}
+              message={t("DashboardMarkets.treasury.vaultPositionsIncompleteTitle")}
+            />
+          ) : (
+            <ListEmptyState
+              description={t("DashboardMarkets.treasury.vaultPositionsEmptyDescription")}
+              icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
+              message={t("DashboardMarkets.treasury.vaultPositionsEmptyTitle")}
+            />
+          )
         ) : (
           <div className="overflow-x-auto border-y border-border-subtle">
-            <Table className="table-fixed" style={{ minWidth: "58rem" }}>
+            <Table className="table-fixed" style={{ minWidth: "52rem" }}>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[28%]">
+                  <TableHead className="w-[32%]">
                     {t("DashboardMarkets.treasury.position")}
                   </TableHead>
                   <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
-                  <TableHead className="w-[16%]">
+                  <TableHead className="w-[20%]">
                     {t("DashboardMarkets.treasury.balance")}
                   </TableHead>
-                  <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.shares")}</TableHead>
-                  <TableHead className="w-[18%]">
+                  <TableHead className="w-[22%]">
                     {t("DashboardMarkets.treasury.custodyWallet")}
                   </TableHead>
-                  <TableHead align="right" className="w-[12%]">
+                  <TableHead align="right" className="w-[14%]">
                     {t("DashboardMarkets.treasury.actions")}
                   </TableHead>
                 </TableRow>
@@ -381,9 +566,6 @@ function ActiveVaultPositionsCard({
                       <TableCell className="text-sm text-secondary">{asset.symbol}</TableCell>
                       <TableCell className="text-sm text-primary tabular-nums">
                         {formatProviderAmount(position.tokenValue, locale, asset.symbol)}
-                      </TableCell>
-                      <TableCell className="text-sm text-secondary tabular-nums">
-                        {formatProviderAmount(position.shares, locale)}
                       </TableCell>
                       <TableCell className="text-sm text-secondary">
                         {wallet?.label?.trim() ||
@@ -536,23 +718,30 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
 }
 
 function TreasuryStrategiesCard({
+  cluster,
   environment,
   error,
   isLoading,
+  onClusterChange,
   onDeposit,
   onRefresh,
   positions,
   providerAccess,
   strategies,
+  unrecordedShareMints,
 }: {
+  /** The cluster sub-shelf being browsed — the environment's own by default. */
+  cluster: SolanaCluster;
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
+  onClusterChange: (cluster: SolanaCluster) => void;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
   strategies: readonly EarnStrategy[] | undefined;
+  unrecordedShareMints: ReadonlySet<string> | undefined;
 }) {
   const t = useTranslations();
   const depositsEnabled = isVaultDirectDepositEnabled(environment);
@@ -563,15 +752,33 @@ function TreasuryStrategiesCard({
         <CardTitle>{t("DashboardMarkets.treasury.strategiesTitle")}</CardTitle>
         <CardDescription>{t("DashboardMarkets.treasury.strategiesDescription")}</CardDescription>
         <CardAction>
-          <Button
-            iconLeft={<RefreshCwIcon />}
-            onClick={onRefresh}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {t("DashboardMarkets.treasury.refresh")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {environment === "sandbox" ? (
+              // Sandbox only (PRO-1742): production has no other shelf to
+              // offer, so the control must not render there at all — reviewing
+              // the mainnet catalogue IS what production shows by default.
+              <SegmentedControl
+                aria-label={t("DashboardMarkets.treasury.clusterToggleLabel")}
+                items={SOLANA_CLUSTERS.map((option) => ({
+                  value: option,
+                  label: SOLANA_CLUSTER_LABELS[option],
+                }))}
+                value={cluster}
+                // Re-clicking the active segment can emit an empty value from
+                // the underlying toggle group; a shelf always has a selection.
+                onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
+              />
+            ) : null}
+            <Button
+              iconLeft={<RefreshCwIcon />}
+              onClick={onRefresh}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {t("DashboardMarkets.treasury.refresh")}
+            </Button>
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent className="px-0">
@@ -600,6 +807,7 @@ function TreasuryStrategiesCard({
             positions={positions}
             providerAccess={providerAccess}
             strategies={strategies ?? []}
+            unrecordedShareMints={unrecordedShareMints}
           />
         )}
         <div className="flex items-start gap-2 border-t border-border-subtle px-6 py-4 text-xs leading-5 text-tertiary">
@@ -678,6 +886,25 @@ export function TreasurySolutionsWorkspace({
     isLoading: strategiesLoading,
     refresh: refreshStrategies,
   } = useEarnStrategies();
+  // PRO-1742: the strategies card's cluster opt-in, sandbox-only by
+  // construction — production always reads its default shelf. The card's read
+  // is SEPARATE from `strategies` above on purpose: that read doubles as the
+  // share-mint vocabulary behind the allocation summary, and browsing the
+  // mirrored mainnet shelf must not blank the devnet vocabulary under it. On
+  // the default shelf both hooks share one SWR key, so no second fetch happens
+  // until the toggle leaves it. `undefined` means "the default shelf", and the
+  // toggle handler below normalizes the environment's own cluster back to it,
+  // so toggling away and back re-joins the shared key instead of keeping a
+  // second, permanently distinct cache entry of the identical shelf.
+  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(undefined);
+  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
+  const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
+  const {
+    strategies: catalogueStrategies,
+    error: catalogueError,
+    isLoading: catalogueLoading,
+    refresh: refreshCatalogue,
+  } = useEarnStrategies({ cluster: strategiesCluster });
   const {
     positions,
     error: positionsError,
@@ -759,6 +986,41 @@ export function TreasurySolutionsWorkspace({
   }, []);
 
   const activeWallets = wallets ?? [];
+  // Every share mint the page knows about, from positions AND the catalogue:
+  // a wallet can hold receipt tokens for a strategy it has no recorded
+  // position in (deposited outside SDP), and those tiles are still not cash.
+  // A USD-stable mint can never be a share mint; a corrupt catalogue row
+  // claiming one must not hide real cash tiles the summary still counts.
+  //
+  // The known set stays best-effort in every state, because hiding a receipt
+  // tile only needs the mint to be known. `complete` is the stricter claim,
+  // and it needs three things:
+  //   - the catalogue landed at all (it is the only witness for a holding with
+  //     no position row),
+  //   - the read is not stale behind a failed revalidation, which would be
+  //     missing any strategy added since (the strategy table already renders
+  //     its error state over stale rows, so this matches that posture), and
+  //   - every row actually NAMED its share mint, since a row without one
+  //     contributes nothing and leaves a real vault unnameable.
+  const shareMints = {
+    known: new Set(
+      [
+        ...(positions ?? []).map((position) => position.shareMint),
+        ...(strategies ?? []).flatMap((strategy) => strategy.shareMint ?? []),
+      ].filter((mint) => !WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.isUsdStable)
+    ),
+    complete:
+      strategies !== undefined &&
+      !strategiesError &&
+      strategies.every((strategy) => strategy.shareMint !== undefined),
+  };
+  // Every figure on this page comes from here, so no two surfaces can compute
+  // the same thing differently.
+  const allocation = summarizeTreasuryAllocation({
+    positions: positionsError ? undefined : positions,
+    shareMints,
+    wallets: walletsError ? undefined : wallets,
+  });
   const programs = programsState?.kind === "ready" ? programsState.programs : [];
   // Recovery seeds durable component state. Do not derive tracker mounts
   // directly from the live list: the list can stop returning a movement just
@@ -803,9 +1065,25 @@ export function TreasurySolutionsWorkspace({
           </Badge>
         </div>
 
+        {/* Errors pass undefined so a stale SWR success never renders as a
+         * live figure: unavailable must read as unavailable, not as the last
+         * total that happened to load. */}
+        {/* The strategies read gates the skeleton too: it is the share-mint
+         * vocabulary, it pages sequentially so it usually lands last, and
+         * without it the summary can only report "unavailable". */}
+        <TreasuryAllocationCard
+          allocation={allocation}
+          isLoading={
+            !(walletsError || positionsError || strategiesError) &&
+            (walletsLoading || positionsLoading || strategiesLoading)
+          }
+        />
+
         <TreasuryWalletsCard
+          allocation={allocation}
           error={walletsError}
           isLoading={walletsLoading}
+          shareMints={shareMints}
           wallets={activeWallets}
         />
 
@@ -813,24 +1091,39 @@ export function TreasurySolutionsWorkspace({
           error={positionsError}
           isLoading={positionsLoading}
           onWithdraw={setWithdrawPosition}
-          positions={positions}
+          positions={positionsError ? undefined : positions}
+          unrecordedShareMints={allocation.unrecordedShareMints}
           wallets={activeWallets}
         />
 
         <TreasuryStrategiesCard
+          cluster={strategiesCluster ?? environmentCluster}
           environment={sdpEnvironment}
-          error={strategiesError}
-          isLoading={strategiesLoading}
+          error={catalogueError}
+          // keepPreviousData holds the outgoing shelf's rows through a toggle
+          // flip, so skeletons are for the true first load only.
+          isLoading={catalogueLoading && catalogueStrategies === undefined}
+          onClusterChange={(cluster) =>
+            setCatalogueCluster(cluster === environmentCluster ? undefined : cluster)
+          }
           onDeposit={setDepositStrategy}
           onRefresh={() => {
             refreshWallets();
             refreshStrategies();
+            // On the default shelf both strategy hooks share one SWR key, and
+            // refreshing it twice would run the paged catalogue fetch twice
+            // per click; the mirror shelf only needs its own refresh once the
+            // toggle has left the default.
+            if (strategiesCluster !== undefined) {
+              refreshCatalogue();
+            }
             refreshPositions();
             refreshPrograms();
           }}
-          positions={positions}
+          positions={positionsError ? undefined : positions}
           providerAccess={providerAccess}
-          strategies={strategies}
+          strategies={catalogueStrategies}
+          unrecordedShareMints={allocation.unrecordedShareMints}
         />
 
         {programsLoading ? <SkeletonBlock className="h-48 rounded-xl" /> : null}

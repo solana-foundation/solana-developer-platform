@@ -87,6 +87,7 @@ import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
 import {
   DASHBOARD_SIDE_NAV_HREFS,
@@ -467,22 +468,22 @@ function DashboardSidebarContent({
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
 export function DashboardShell({
-  assetProfilesEnabled,
   children,
-  earnEnabled,
-  heliusRingsEnabled,
-  marketsEnabled,
+  flags,
   onboardingStatus,
-  privateChannelsEnabled,
 }: {
-  assetProfilesEnabled: boolean;
   children: ReactNode;
-  earnEnabled: boolean;
-  heliusRingsEnabled: boolean;
-  marketsEnabled: boolean;
+  flags: DashboardFlags;
   onboardingStatus: OrganizationOnboardingStatus | null;
-  privateChannelsEnabled: boolean;
 }) {
+  const {
+    assetProfiles: assetProfilesEnabled,
+    earn: earnEnabled,
+    heliusRings: heliusRingsEnabled,
+    markets: marketsEnabled,
+    payments: paymentsEnabled,
+    privateChannels: privateChannelsEnabled,
+  } = flags;
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
@@ -518,6 +519,7 @@ export function DashboardShell({
     earnEnabled,
     heliusRingsEnabled,
     marketsEnabled,
+    paymentsEnabled,
     pendingApprovalCount,
     privateChannelsEnabled,
   });
@@ -778,7 +780,11 @@ export function DashboardShell({
         {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
             duplicate of every destination would otherwise sit behind the overlay. */}
         {isMobileSidebarOpen || isMoreSheetOpen ? null : (
-          <DashboardBottomNav pathname={pathname} onOpenMore={() => setMoreSheetOpen(true)} />
+          <DashboardBottomNav
+            pathname={pathname}
+            paymentsEnabled={paymentsEnabled}
+            onOpenMore={() => setMoreSheetOpen(true)}
+          />
         )}
 
         {isMoreSheetOpen ? (
