@@ -305,7 +305,7 @@ function resolveWalletBalancesSnapshot(
 export async function fetchTransfers(
   options: {
     pageSize: number;
-    walletId?: string;
+    custodyWalletId?: string;
     category?: "wallet" | "ramp";
     counterpartyId?: string;
     statuses?: readonly string[];
@@ -316,7 +316,7 @@ export async function fetchTransfers(
   const transfersQuery = new URLSearchParams({
     page: "1",
     pageSize: String(options.pageSize),
-    ...(options.walletId ? { wallet: options.walletId } : {}),
+    ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
     ...(options.category ? { category: options.category } : {}),
     ...(options.counterpartyId ? { counterpartyId: options.counterpartyId } : {}),
     ...(options.statuses ? { status: options.statuses.join(",") } : {}),
@@ -522,7 +522,7 @@ export async function updateWalletPolicy(
 
 export interface CreateTransferInput {
   transferId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   destination: string;
   token: Address;
   amount: string;
@@ -540,7 +540,7 @@ export async function createTransfer(
     },
     body: JSON.stringify({
       ...(input.transferId ? { transferId: input.transferId } : {}),
-      source: input.source,
+      sourceCustodyWalletId: input.sourceCustodyWalletId,
       destination: input.destination,
       token: input.token,
       amount: input.amount,

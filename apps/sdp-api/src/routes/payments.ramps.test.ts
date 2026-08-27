@@ -13,6 +13,7 @@ import {
   seedCounterparty,
   TEST_API_KEY,
   TEST_CONFIG_ID,
+  TEST_CUSTODY_WALLET_ID,
   TEST_MOONPAY_API_KEY,
   TEST_MOONPAY_OFFRAMP_URL,
   TEST_MOONPAY_ONRAMP_URL,
@@ -26,6 +27,7 @@ import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
+const TEST_CONNECTION_CUSTODY_WALLET_ID = "cwlt_payments_connection_balance";
 
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 
@@ -44,10 +46,14 @@ function assertMoonPaySignature(url: URL): void {
   expect(signature).toBe(expectedSignature);
 }
 
-async function seedActiveConnectionWallet(): Promise<void> {
+async function seedActiveConnectionWallet(params?: {
+  walletId?: string;
+  publicKey?: string;
+}): Promise<void> {
   const credentialId = "pcred_payments_connection_balance";
   const connectionId = "cconn_payments_connection_balance";
-  const custodyWalletId = "cwlt_payments_connection_balance";
+  const walletId = params?.walletId ?? TEST_CONNECTION_WALLET_ID;
+  const publicKey = params?.publicKey ?? TEST_SOLANA_ADDRESSES.wallet2;
 
   await getDb(env).batch([
     getDb(env)
@@ -80,12 +86,7 @@ async function seedActiveConnectionWallet(): Promise<void> {
            id, custody_connection_id, wallet_id, public_key, label, purpose, status
          ) VALUES (?, ?, ?, ?, 'Connection balance wallet', 'transfer', 'active')`
       )
-      .bind(
-        custodyWalletId,
-        connectionId,
-        TEST_CONNECTION_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet2
-      ),
+      .bind(TEST_CONNECTION_CUSTODY_WALLET_ID, connectionId, walletId, publicKey),
     getDb(env)
       .prepare(
         `UPDATE custody_connections
@@ -98,7 +99,7 @@ async function seedActiveConnectionWallet(): Promise<void> {
              updated_at = sdp_iso_now()
          WHERE id = ?`
       )
-      .bind(custodyWalletId, connectionId),
+      .bind(TEST_CONNECTION_CUSTODY_WALLET_ID, connectionId),
   ]);
 }
 
@@ -150,6 +151,108 @@ async function seedRampEventTransfer(params: {
 
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
+
+  it("rejects an ambiguous Provider wallet ID before creating a hosted quote", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "ambiguous_ramp_wallet",
+    });
+    await seedActiveConnectionWallet({ walletId: TEST_WALLET_ID });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+  });
+
+  it("rejects cross-owner address ambiguity after resolving a Provider wallet ID", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "ambiguous_ramp_wallet_address",
+    });
+    await seedActiveConnectionWallet({ publicKey: TEST_SOLANA_ADDRESSES.wallet1 });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+  });
+
+  it("creates a hosted quote for an exact Connection wallet row", async () => {
+    await seedActiveConnectionWallet();
+    const counterpartyId = await seedCounterparty({ externalId: "connection_ramp_wallet" });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_CONNECTION_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await getDb(env)
+        .prepare("SELECT custody_wallet_id FROM payment_transfers")
+        .first<{ custody_wallet_id: string | null }>()
+    ).toEqual({ custody_wallet_id: TEST_CONNECTION_CUSTODY_WALLET_ID });
+  });
 
   it("reads an active Connection wallet balance and preserves API-key wallet scope", async () => {
     await seedActiveConnectionWallet();
@@ -481,6 +584,12 @@ describe("Payments routes — ramps", () => {
     expect(transfersBody.data.transfer.id).toBe(body.data.transferId);
     expect(transfersBody.data.transfer.providerReference).toBeUndefined();
     expect(transfersBody.data.transfer.rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
+    expect(
+      await getDb(env)
+        .prepare("SELECT custody_wallet_id FROM payment_transfers WHERE id = ?")
+        .bind(transfersBody.data.transfer.id)
+        .first<{ custody_wallet_id: string | null }>()
+    ).toEqual({ custody_wallet_id: TEST_CUSTODY_WALLET_ID });
   });
 
   it("creates a hosted MoonPay off-ramp quote with the transfer id", async () => {
@@ -532,14 +641,19 @@ describe("Payments routes — ramps", () => {
 
     const transfer = await getDb(env)
       .prepare(
-        `SELECT id, provider_reference
+        `SELECT id, custody_wallet_id, provider_reference
          FROM payment_transfers
          WHERE id = ? AND organization_id = ? AND project_id = ?`
       )
       .bind(body.data.transferId, TEST_ORG.id, TEST_PROJECT.id)
-      .first<{ id: string; provider_reference: string | null }>();
+      .first<{
+        id: string;
+        custody_wallet_id: string | null;
+        provider_reference: string | null;
+      }>();
     expect(transfer).toEqual({
       id: body.data.transferId,
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
       provider_reference: null,
     });
   });

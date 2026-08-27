@@ -62,6 +62,28 @@ export async function resolveIdempotencyReplay<
   throw conflict("Idempotency key already used with different request payload");
 }
 
+export async function resolveIdentityBoundIdempotencyReplay<
+  Row extends { idempotency_fingerprint: string | null },
+>(
+  findExisting: () => Promise<Row | null>,
+  fingerprint: string,
+  legacyFingerprint: string,
+  identityMatches: (row: Row) => boolean
+): Promise<Row | null> {
+  const existing = await findExisting();
+  if (!existing || existing.idempotency_fingerprint === null) {
+    return null;
+  }
+  if (
+    identityMatches(existing) &&
+    (existing.idempotency_fingerprint === fingerprint ||
+      existing.idempotency_fingerprint === legacyFingerprint)
+  ) {
+    return existing;
+  }
+  throw conflict("Idempotency key already used with different request payload");
+}
+
 export const normalizeForFingerprint = (value: unknown): unknown => {
   if (value === null || value === undefined) {
     return value;
@@ -89,6 +111,7 @@ export const normalizeForFingerprint = (value: unknown): unknown => {
 };
 
 export interface PaymentTransferFingerprintInput {
+  custodyWalletId: string;
   sourceAddress: string | null;
   destinationAddress: string | null;
   token: string;
@@ -107,16 +130,21 @@ export interface TransferBatchFingerprintRecipientInput {
 }
 
 export interface TransferBatchFingerprintInput {
+  sourceCustodyWalletId: string;
   sourceAddress: string;
   token: string;
   recipients: TransferBatchFingerprintRecipientInput[];
   options: Record<string, unknown> | undefined;
 }
 
-export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
-  JSON.stringify(
+function paymentTransferFingerprint(
+  input: PaymentTransferFingerprintInput,
+  custodyWalletId?: string
+): string {
+  return JSON.stringify(
     normalizeForFingerprint({
       scope: "payment_transfer",
+      custodyWalletId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
@@ -126,17 +154,36 @@ export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprin
       privateTransfer: input.privateTransfer ?? null,
     })
   );
+}
 
-export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
-  JSON.stringify(
+export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
+  paymentTransferFingerprint(input, input.custodyWalletId);
+
+export const buildLegacyPaymentTransferFingerprint = (
+  input: PaymentTransferFingerprintInput
+): string => paymentTransferFingerprint(input);
+
+function transferBatchFingerprint(
+  input: TransferBatchFingerprintInput,
+  sourceCustodyWalletId?: string
+): string {
+  return JSON.stringify(
     normalizeForFingerprint({
       scope: "payment_transfer_batch",
+      sourceCustodyWalletId,
       sourceAddress: input.sourceAddress,
       token: input.token,
       recipients: input.recipients,
       options: input.options ?? null,
     })
   );
+}
+
+export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
+  transferBatchFingerprint(input, input.sourceCustodyWalletId);
+
+export const buildLegacyTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
+  transferBatchFingerprint(input);
 
 export interface EarnVaultDepositFingerprintInput {
   environment: string;

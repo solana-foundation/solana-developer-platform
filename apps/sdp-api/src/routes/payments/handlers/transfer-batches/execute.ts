@@ -145,6 +145,7 @@ export async function executeChunk(params: {
       id: generatePaymentTransferId(),
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
+      custodyWalletId: resolved.sourceWallet.id,
       walletId: resolved.sourceWallet.walletId,
       counterpartyId: recipientRows.length === 1 ? firstRecipient.counterparty_id : null,
       sourceAddress: resolved.sourceAddress,

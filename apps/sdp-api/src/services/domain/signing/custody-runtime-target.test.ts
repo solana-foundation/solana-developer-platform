@@ -740,6 +740,47 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
   });
 
+  it.each([null, "root", "mint_authority", "freeze_authority", "fee_payer", "transfer"] as const)(
+    "projects the supported wallet purpose %s",
+    async (purpose) => {
+      const config = await seedConfig({ provider: "privy" });
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET purpose = ? WHERE id = ?")
+        .bind(purpose, `cwlt_${config.id}`)
+        .run();
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.findOperationalWalletById({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          custodyWalletId: `cwlt_${config.id}`,
+        })
+      ).resolves.toMatchObject({ purpose });
+    }
+  );
+
+  it.each(["config", "connection"] as const)(
+    "rejects an unknown wallet purpose from the %s projection",
+    async (owner) => {
+      const wallet =
+        owner === "config" ? await seedConfig({ provider: "privy" }) : await seedConnection();
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET purpose = 'unexpected' WHERE id = ?")
+        .bind(`cwlt_${wallet.id}`)
+        .run();
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.findOperationalWalletById({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          custodyWalletId: `cwlt_${wallet.id}`,
+        })
+      ).rejects.toMatchObject({ code: "INTERNAL_ERROR", statusCode: 500 });
+    }
+  );
+
   it("fails closed when the selected Connection is unusable", async () => {
     const config = await seedConfig({ provider: "privy" });
     const connection = await seedConnection({ lastCheckStatus: "retry_unknown" });

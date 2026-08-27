@@ -54,6 +54,11 @@ export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createF
 
 export const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
 
+export const createOrgSignerForCustodyWalletMock = vi.spyOn(
+  solanaServices,
+  "createOrgSignerForCustodyWallet"
+);
+
 const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
 const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
@@ -610,6 +615,9 @@ export function installPaymentsRouteTestHooks(): void {
         ),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     createOrgSignerMock.mockResolvedValue(
+      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
+    );
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
 
