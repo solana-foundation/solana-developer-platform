@@ -2,7 +2,6 @@ import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { BvnkFiatWallet } from "@sdp/payments/ramps/providers/bvnk/client";
 import {
-  buildBvnkIndividualPayload,
   bvnkOfframpAccountType,
   bvnkOfframpFields,
   isBvnkOfframpCurrency,
@@ -14,7 +13,6 @@ import {
   type BvnkOnrampPaymentRuleState,
   type BvnkOnrampRequestSpec,
   type BvnkPaymentRuleResolution,
-  buildBvnkCustomerExternalReference,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampInstruction,
   buildBvnkOnrampPaymentRuleKey,
@@ -50,7 +48,6 @@ import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
-import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
@@ -139,10 +136,6 @@ type BvnkOnrampQuote = PaymentRampQuote & {
   deliveryMode: "manual_instructions";
   paymentInstructions: BvnkPaymentRampInstruction[];
 };
-
-function requesterIpAddress(c: AppContext): string {
-  return getClientIp(c) ?? "0.0.0.0";
-}
 
 async function persistBvnkOnrampState(
   c: AppContext,
@@ -347,25 +340,21 @@ export async function ensureBvnkOfframpBeneficiary(
 }
 
 /**
- * Ensures the counterparty has a BVNK customer (agreement → sign → create) and
- * refreshes verification status when pending. Persists customer state to
- * counterparty.provider_data.bvnk.customer after each completed step.
+ * Returns and refreshes an existing BVNK customer, rejecting first-time
+ * creation until transient identity collection is wired.
+ *
+ * @param c - Request context used for provider and repository access.
+ * @param counterparty - Counterparty whose provider state is resolved.
+ * @param projectId - Project that owns the counterparty.
+ * @returns The persisted or refreshed BVNK customer resolution.
  */
 export async function ensureBvnkCustomer(
   c: AppContext,
   counterparty: CounterpartyRow,
-  projectId: string,
-  params: {
-    fiatCurrency: string;
-    collectedData?: CollectedFieldData;
-  }
+  projectId: string
 ): Promise<BvnkCustomerResolution> {
   if (counterparty.entity_type === "business") {
     throw badRequest("BVNK supports individual counterparties only.");
-  }
-  const countryCode = counterparty.identity.address?.countryCode;
-  if (!countryCode) {
-    throw badRequest("Counterparty address country is required for BVNK.");
   }
 
   const ctx = rampRuntime(c);
@@ -373,44 +362,14 @@ export async function ensureBvnkCustomer(
   const repo = getCounterpartiesRepository(c);
 
   let customer = readBvnkCustomer(counterparty.provider_data);
-  const expectedExternalReference = buildBvnkCustomerExternalReference(counterparty.id);
 
   if (!customer.customerReference) {
-    const individual = buildBvnkIndividualPayload(
-      counterparty,
-      params.collectedData,
-      params.fiatCurrency
+    throw badRequest(
+      "BVNK customer creation requires identity fields that are no longer stored; JIT collection is not wired yet"
     );
-    const session = await client.createAgreementSession(ctx, {
-      customerType: "INDIVIDUAL",
-      countryCode,
-      useCase: "EMBEDDED_FIAT_ACCOUNTS",
-    });
-    await client.signAgreement(ctx, {
-      reference: session.reference,
-      ipAddress: requesterIpAddress(c),
-    });
-    const created = await client.createBvnkCustomer(ctx, {
-      externalReference: expectedExternalReference,
-      signedAgreementSessionReference: session.reference,
-      individual,
-    });
-    customer = {
-      externalReference: expectedExternalReference,
-      customerReference: created.reference,
-      status: created.status,
-      verificationStatus: created.verificationStatus,
-      verificationUrl: created.verificationUrl,
-    };
-    await repo.upsertBvnkCustomerProviderData({
-      counterpartyId: counterparty.id,
-      organizationId: counterparty.organization_id,
-      projectId,
-      customer,
-    });
   }
 
-  if (customer.customerReference && !isBvnkCustomerVerified(customer.status)) {
+  if (!isBvnkCustomerVerified(customer.status)) {
     const latest = await client.getBvnkCustomer(ctx, { reference: customer.customerReference });
     customer = {
       ...customer,

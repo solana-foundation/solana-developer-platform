@@ -319,10 +319,11 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
 export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
-  identity?: Record<string, unknown>;
   providerData?: Record<string, unknown>;
 }): Promise<string> {
   const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
+  const externalId = params?.externalId ?? null;
+  const providerData = params?.providerData ?? {};
   await getDb(env)
     .prepare(
       `INSERT INTO counterparties (
@@ -332,23 +333,19 @@ export async function seedCounterparty(params?: {
          external_id,
          entity_type,
          display_name,
-         email,
-         identity,
          provider_data,
          status,
          created_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
     )
     .bind(
       id,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      params?.externalId ?? null,
+      externalId,
       "individual",
       "MoonPay Test Counterparty",
-      "moonpay-counterparty@example.com",
-      params?.identity ?? {},
-      params?.providerData ?? {},
+      providerData,
       TEST_USER.id
     )
     .run();

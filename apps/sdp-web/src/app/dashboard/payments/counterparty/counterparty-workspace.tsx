@@ -222,7 +222,7 @@ export function CounterpartyWorkspace({
                             onClick={() => router.push(`/dashboard/payments/counterparty/${cp.id}`)}
                             className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
                           >
-                            <span className="min-w-0 flex-1 space-y-1">
+                            <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2">
                                 <span className="truncate text-sm font-medium text-primary">
                                   {cp.displayName}
@@ -233,36 +233,30 @@ export function CounterpartyWorkspace({
                                     : t("DashboardPayments.counterparty.business")}
                                 </span>
                               </span>
-                              <span className="block truncate text-xs text-secondary">
-                                {cp.email}
-                              </span>
                             </span>
                             <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
                           </button>
                         ))}
                       </div>
                       <Table
-                        className="hidden rounded-none border-0 [&_table]:min-w-[880px] [&_table]:table-fixed md:block"
+                        className="hidden rounded-none border-0 [&_table]:min-w-220 [&_table]:table-fixed md:block"
                         data-counterparty-directory-table
                       >
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="w-[30%]">
+                            <TableHead className="w-2/5">
                               {t("DashboardPayments.counterparty.displayName")}
                             </TableHead>
-                            <TableHead className="w-[12%]">
+                            <TableHead className="w-1/6">
                               {t("DashboardPayments.counterparty.type")}
                             </TableHead>
-                            <TableHead className="w-[24%]">
-                              {t("DashboardPayments.counterparty.email")}
-                            </TableHead>
-                            <TableHead className="w-[16%]">
+                            <TableHead className="w-1/5">
                               {t("DashboardPayments.counterparty.externalId")}
                             </TableHead>
-                            <TableHead className="w-[18%]">
+                            <TableHead className="w-1/5">
                               {t("DashboardPayments.recurring.created")}
                             </TableHead>
-                            <TableHead className="w-[56px]" />
+                            <TableHead className="w-14" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -277,9 +271,6 @@ export function CounterpartyWorkspace({
                                     ? t("DashboardPayments.counterparty.individual")
                                     : t("DashboardPayments.counterparty.business")}
                                 </Badge>
-                              </TableCell>
-                              <TableCell className="text-sm text-secondary">
-                                <span className="block truncate">{cp.email}</span>
                               </TableCell>
                               <TableCell className="font-mono text-xs text-secondary">
                                 <span className="block truncate">{cp.externalId ?? "—"}</span>
