@@ -23,19 +23,23 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-/** Routes by URL so one fake serves both the indexer and the prover. */
+/** Routes by host so one fake serves both the indexer and the prover. */
+function hostOf(input: string | URL): string {
+  return new URL(String(input)).host;
+}
+
 function fetchStub(
   handlers: Readonly<{ indexer?: () => Promise<Response>; prover?: () => Promise<Response> }>
 ): typeof globalThis.fetch {
   return ((input: string | URL) => {
-    const url = String(input);
-    if (url.startsWith(INDEXER_URL)) {
+    const host = hostOf(input);
+    if (host === "indexer.test") {
       return (handlers.indexer ?? (() => Promise.resolve(jsonResponse({ result: "ok" }))))();
     }
-    if (url.startsWith(PROVER_URL)) {
+    if (host === "prover.test") {
       return (handlers.prover ?? (() => Promise.resolve(new Response(null, { status: 200 }))))();
     }
-    throw new Error(`unexpected probe target ${url}`);
+    throw new Error(`unexpected probe target ${String(input)}`);
   }) as typeof globalThis.fetch;
 }
 
@@ -61,7 +65,7 @@ describe("probeRingsHealth", () => {
   it("asks Photon for its health over JSON-RPC, since the client has no such method", async () => {
     const requests: Array<{ method: string; body: unknown }> = [];
     const capture = ((url: string | URL, init?: RequestInit) => {
-      if (String(url).startsWith(INDEXER_URL)) {
+      if (hostOf(url) === "indexer.test") {
         requests.push({ method: init?.method ?? "GET", body: JSON.parse(String(init?.body)) });
       }
       return Promise.resolve(jsonResponse({ result: "ok" }));
@@ -83,7 +87,7 @@ describe("probeRingsHealth", () => {
 
     await probeRingsHealth(input({ fetch: capture }));
 
-    const prover = seen.find((request) => request.url.startsWith(PROVER_URL));
+    const prover = seen.find((request) => hostOf(request.url) === "prover.test");
     expect(prover).toEqual({ url: `${PROVER_URL}/health`, method: "GET" });
   });
 

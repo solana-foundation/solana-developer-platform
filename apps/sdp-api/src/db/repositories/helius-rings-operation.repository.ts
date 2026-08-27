@@ -173,7 +173,12 @@ export interface HeliusRingsOperationRepository {
   ): Promise<HeliusRingsOperationRow | null>;
   /** Terminal failure. Writes the full failure triple the DB CHECK requires. */
   failOperation(input: FailHeliusRingsOperationInput): Promise<HeliusRingsOperationRow | null>;
-  /** Resume sweep feed: non-terminal operations, oldest touched first. */
+  /**
+   * Resume sweep feed: rows the indexing poll actually acts on
+   * (`ready_to_sign`, `submitted`, `indexing`), oldest touched first.
+   * Waiting states such as `approval_required` are excluded so they cannot
+   * fill the limit and starve actionable work.
+   */
   listInFlightOperations(
     input: ListHeliusRingsInFlightOperationsInput
   ): Promise<HeliusRingsOperationRow[]>;

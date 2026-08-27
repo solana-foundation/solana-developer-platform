@@ -13,7 +13,6 @@ import {
   type RingsWallet,
   type RingsWalletIdentity,
 } from "./helius-rings.data";
-import { shortenShieldedAddress } from "./helius-rings.utils";
 
 /**
  * What the last check established. `unchecked` is distinct from any outcome:
@@ -187,9 +186,7 @@ function Address({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5">
       <dt className="text-xs text-secondary">{label}</dt>
-      <dd className="font-mono text-xs text-primary" title={value}>
-        {shortenShieldedAddress(value)}
-      </dd>
+      <dd className="break-all font-mono text-xs text-primary">{value}</dd>
     </div>
   );
 }

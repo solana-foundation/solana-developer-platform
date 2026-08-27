@@ -15,11 +15,13 @@ import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
 import { getBase64Codec, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import {
+  createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
   createPolicyRepository,
+  type HeliusRingsAssetRepository,
   type HeliusRingsEventRepository,
   type HeliusRingsHealthRepository,
   type HeliusRingsOperationRepository,
@@ -67,6 +69,7 @@ export interface HeliusRingsServiceDependencies {
   operations?: HeliusRingsOperationRepository;
   events?: HeliusRingsEventRepository;
   health?: HeliusRingsHealthRepository;
+  assets?: HeliusRingsAssetRepository;
   enforcePolicy?: typeof enforceWalletOperationPolicy;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
@@ -141,6 +144,7 @@ export class HeliusRingsService {
   private readonly operations: HeliusRingsOperationRepository;
   private readonly events: HeliusRingsEventRepository;
   private readonly health: HeliusRingsHealthRepository;
+  private readonly assets: HeliusRingsAssetRepository;
   private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
@@ -164,6 +168,7 @@ export class HeliusRingsService {
     this.operations = dependencies.operations ?? createHeliusRingsOperationRepository(env);
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
     this.health = dependencies.health ?? createHeliusRingsHealthRepository(env);
+    this.assets = dependencies.assets ?? createHeliusRingsAssetRepository(env);
     this.enforcePolicy = dependencies.enforcePolicy ?? enforceWalletOperationPolicy;
     this.signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
     this.submitOuterTransaction =
@@ -272,7 +277,7 @@ export class HeliusRingsService {
     });
 
     return {
-      balances: synced.balances,
+      balances: await this.labelBalances(synced.balances),
       degraded: synced.degraded,
       observedAt: synced.cursor,
     };
@@ -316,6 +321,16 @@ export class HeliusRingsService {
     context: PrepareOperationContext,
     retryOfOperationId: string | null = null
   ): Promise<PrivateOperation> {
+    if (input.asset) {
+      const allowed = await this.assets.getActiveByMint(input.asset.mint);
+      if (!allowed) {
+        throw new HeliusRingsError(
+          "invalid_input",
+          "this mint is not on the Rings asset allowlist"
+        );
+      }
+    }
+
     const wallet = await this.requireWallet(input.walletId);
     const intentKey = computeIntentKey(input);
 
@@ -814,6 +829,22 @@ export class HeliusRingsService {
         `retry limit reached (${RINGS_MAX_RETRY_DEPTH}); inspect the failure instead of retrying`
       );
     }
+  }
+
+  /**
+   * Overlay allowlist symbol and decimals onto Photon balances. The SDK only
+   * knows native SOL; every other mint arrives as UNKNOWN with a null scale.
+   */
+  private async labelBalances(balances: AssetBalance[]): Promise<AssetBalance[]> {
+    if (balances.length === 0) return balances;
+    const known = new Map(
+      (await this.assets.listActive()).map((asset) => [asset.mint, asset] as const)
+    );
+    return balances.map((balance) => {
+      const allowed = known.get(balance.mint);
+      if (!allowed) return balance;
+      return { ...balance, symbol: allowed.symbol, decimals: allowed.decimals };
+    });
   }
 
   private async requireWallet(walletId: string) {

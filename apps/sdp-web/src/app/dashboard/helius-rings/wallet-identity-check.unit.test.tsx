@@ -149,12 +149,8 @@ describe("WalletIdentityCheck", () => {
     expect(screen.getByText(/will refuse rather than re-key it/)).toBeTruthy();
     expect(screen.getByText(/different custody wallet/)).toBeTruthy();
     expect(screen.getByText("Differs in: the nullifier key")).toBeTruthy();
-    // Full commitments sit on title so they stay comparable without blowing
-    // the table cell; the scan form is middle-ellipsis.
-    expect(screen.getByTitle(PUBLISHED)).toBeTruthy();
-    expect(screen.getByTitle(DERIVED)).toBeTruthy();
-    expect(screen.queryByText(PUBLISHED)).toBeNull();
-    expect(screen.queryByText(DERIVED)).toBeNull();
+    expect(screen.getByText(PUBLISHED)).toBeTruthy();
+    expect(screen.getByText(DERIVED)).toBeTruthy();
   });
 
   it.each([

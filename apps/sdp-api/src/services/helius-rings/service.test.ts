@@ -10,7 +10,10 @@ import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyDecision } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { createHeliusRingsWalletRepository } from "@/db/repositories";
+import {
+  createHeliusRingsOperationRepository,
+  createHeliusRingsWalletRepository,
+} from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { gatewayStub, pipelineGateway } from "@/test/fixtures/rings-gateway";
@@ -255,6 +258,27 @@ describe("HeliusRingsService", () => {
       // the whole picture.
       expect(synced).toMatchObject({ degraded: true });
       expect(synced.balances).toHaveLength(1);
+    });
+
+    it("labels an allowlisted mint from the platform table, not UNKNOWN", async () => {
+      const id = await provisionedWallet("rings1sync_usdc");
+      const usdc = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+      const synced = await service({
+        gateway: gatewayStub({
+          syncPhoton: async () =>
+            syncResult({
+              balances: [{ mint: usdc, amountRaw: "1000000", decimals: null, symbol: "UNKNOWN" }],
+            }),
+        }),
+      }).syncWallet(id, OWNER);
+
+      expect(synced.balances[0]).toEqual({
+        mint: usdc,
+        amountRaw: "1000000",
+        decimals: 6,
+        symbol: "USDC",
+      });
     });
 
     // A derivation mismatch — a changed seed, a wrong owner, a tenant mix-up —
@@ -509,6 +533,27 @@ describe("HeliusRingsService", () => {
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "invalid_input", retryable: false });
+    });
+
+    it("refuses a mint that is not on the asset allowlist before reserving", async () => {
+      await expect(
+        service().prepareOperation(
+          operationInput({
+            clientNonce: "nonce-allowlist",
+            asset: { mint: "NotOnTheAllowlist111111111111111111111111", amountRaw: "1" },
+          }),
+          actorContext
+        )
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        message: "this mint is not on the Rings asset allowlist",
+      });
+
+      const rows = await createHeliusRingsOperationRepository(env).listOperationsByWallet({
+        ...tenant,
+        walletId,
+      });
+      expect(rows).toEqual([]);
     });
 
     it("stamps the backing owner as from on a shield", async () => {

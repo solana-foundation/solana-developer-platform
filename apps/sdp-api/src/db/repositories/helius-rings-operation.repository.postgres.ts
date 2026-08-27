@@ -16,15 +16,12 @@ import {
 } from "./helius-rings-operation.repository";
 import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 
-/** The states the resume sweep considers live, matching the partial index. */
-const IN_FLIGHT_STATES = [
-  "preparing",
-  "approval_required",
-  "proving",
-  "ready_to_sign",
-  "submitted",
-  "indexing",
-] as const;
+/**
+ * States the resume sweep acts on. The partial index is broader (it still
+ * covers `preparing`, `approval_required`, and `proving`); those waiting
+ * states must not consume the sweep limit.
+ */
+const SWEEP_STATES = ["ready_to_sign", "submitted", "indexing"] as const;
 
 function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
   return {
@@ -304,7 +301,7 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listInFlightOperations(input: ListHeliusRingsInFlightOperationsInput) {
-      const placeholders = IN_FLIGHT_STATES.map(() => "?").join(", ");
+      const placeholders = SWEEP_STATES.map(() => "?").join(", ");
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
@@ -314,7 +311,7 @@ export function createPostgresHeliusRingsOperationRepository(
             LIMIT ?`
         )
         .bind(
-          ...IN_FLIGHT_STATES,
+          ...SWEEP_STATES,
           input.staleBefore,
           input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT
         )

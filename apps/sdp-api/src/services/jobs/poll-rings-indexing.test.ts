@@ -108,7 +108,7 @@ describe("pollRingsIndexing", () => {
     walletId = wallet.id;
   });
 
-  it("stays dormant unless the flag and every upstream are set", async () => {
+  it("does not call Photon when the flag is on but upstreams are unset", async () => {
     const service = serviceWith(indexed);
     const operation = await service.prepareOperation(
       { walletId, opType: "shield", clientNonce: "job-dormant" },
@@ -116,8 +116,8 @@ describe("pollRingsIndexing", () => {
     );
     expect(operation.state).toBe("indexing");
 
-    // The flag alone is not enough: an enabled deployment with no upstreams
-    // would otherwise log a warning per in-flight operation every minute.
+    // Timeouts still run; Photon execute does not, so a half-configured
+    // deployment will not log a warning per in-flight operation every minute.
     await pollRingsIndexing(
       { ...env, HELIUS_RINGS_ENABLED: "true" },
       { createService: () => service }
@@ -128,6 +128,31 @@ describe("pollRingsIndexing", () => {
       id: operation.id,
     });
     expect(row?.state).toBe("indexing");
+  });
+
+  it("ages out indexing even when upstreams are unset", async () => {
+    const service = serviceWith(notIndexed);
+    const operation = await service.prepareOperation(
+      { walletId, opType: "shield", clientNonce: "job-timeout-no-upstreams" },
+      { apiKeyId: null, actor: null, custodyWalletId: null }
+    );
+    expect(operation.state).toBe("indexing");
+
+    await pollRingsIndexing(
+      { ...env, HELIUS_RINGS_ENABLED: "true" },
+      {
+        createService: () => service,
+        now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
+      }
+    );
+
+    const row = await createHeliusRingsOperationRepository(env).getOperationById({
+      ...tenant,
+      id: operation.id,
+    });
+    expect(row?.state).toBe("failed");
+    expect(row?.failure_code).toBe("indexing_timeout");
+    expect(row?.retryable).toBe(true);
   });
 
   it("completes an indexing operation once Photon reports it", async () => {

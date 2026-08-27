@@ -728,7 +728,7 @@ export const FIELDS: EnvField[] = [
   {
     key: "HELIUS_RINGS_RPC_URL",
     section: "advanced",
-    kind: "url",
+    kind: "password",
     label: "Helius Rings Solana RPC URL",
     help: "Helius devnet RPC the Rings SDK reads and submits through, with the API key already applied. Required once Rings is enabled.",
   },

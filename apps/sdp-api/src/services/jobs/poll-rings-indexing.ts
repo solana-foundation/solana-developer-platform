@@ -19,11 +19,10 @@
  *     is what makes failing it outright safe — and retryable honest, since
  *     rebuilding it cannot duplicate anything.
  *
- * Ships dormant: the job early-returns unless the feature flag is on AND every
- * Rings upstream is configured. Without the second check a half-configured
- * deployment would log one warning per in-flight operation every minute, since
- * the unconfigured gateway fails the pipeline at `proving` and the catch below
- * is per-operation.
+ * Ships dormant unless the feature flag is on. Timeout transitions need only
+ * the database; Photon `executeOperation` calls are gated separately so a
+ * half-configured deployment still ages out stranded rows instead of leaving
+ * them in limbo forever.
  */
 
 import {
@@ -33,7 +32,7 @@ import {
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
-import { type RingsUpstreamEnv, ringsUpstreamsConfigured } from "@/services/helius-rings/gateway";
+import { ringsUpstreamsConfigured } from "@/services/helius-rings/gateway";
 import type { Env } from "@/types/env";
 
 /** An operation may sit in `indexing` this long before it times out. */
@@ -57,10 +56,8 @@ export interface PollRingsIndexingDependencies {
   now?: () => Date;
 }
 
-export function isRingsIndexingPollEnabled(
-  env: Pick<Env, "HELIUS_RINGS_ENABLED"> & RingsUpstreamEnv
-): boolean {
-  return isHeliusRingsEnabled(env) && ringsUpstreamsConfigured(env);
+export function isRingsIndexingPollEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): boolean {
+  return isHeliusRingsEnabled(env);
 }
 
 export async function pollRingsIndexing(
@@ -78,7 +75,6 @@ export async function pollRingsIndexing(
       createHeliusRingsService(env, tenant));
 
   const repository = createHeliusRingsOperationRepository(env);
-  // Everything in flight as of this tick; the poll itself decides per state.
   const inFlight = await repository.listInFlightOperations({
     staleBefore: now().toISOString(),
     limit: MAX_PER_RUN,
@@ -87,6 +83,7 @@ export async function pollRingsIndexing(
   const logger = getLogger();
   const timeoutCutoff = now().getTime() - RINGS_INDEXING_TIMEOUT_MS;
   const signingCutoff = now().getTime() - RINGS_SIGNING_TIMEOUT_MS;
+  const canReachPhoton = ringsUpstreamsConfigured(env);
 
   // Deliberately sequential. executeOperation makes one Photon call per
   // operation, so fanning MAX_PER_RUN out would put 100 unthrottled requests at
@@ -100,18 +97,6 @@ export async function pollRingsIndexing(
   // Note this is not about error isolation: the catch below is per-operation and
   // would survive a Promise.all over the same body unchanged.
   for (const operation of inFlight) {
-    // `submitted` rides along with `indexing`: executeOperation advances it and
-    // polls in one call, which is the only thing that rescues a broadcast whose
-    // indexing transition never committed. The timeout is deliberately not
-    // applied to it — the budget measures how long Photon has been asked, and a
-    // resumed operation has not been asked yet.
-    if (
-      operation.state !== "indexing" &&
-      operation.state !== "submitted" &&
-      operation.state !== "ready_to_sign"
-    ) {
-      continue;
-    }
     try {
       // Aged out rather than polled: there is no external condition to ask
       // about, because nothing was ever broadcast for this row.
@@ -123,6 +108,10 @@ export async function pollRingsIndexing(
       }
       if (operation.state === "indexing" && Date.parse(operation.updated_at) < timeoutCutoff) {
         await failIndexingTimeout(repository, operation);
+        continue;
+      }
+      // Timeouts are local. Photon reconciliation needs the upstreams.
+      if (!canReachPhoton) {
         continue;
       }
       const service = createService({

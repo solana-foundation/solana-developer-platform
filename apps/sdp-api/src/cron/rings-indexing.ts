@@ -3,8 +3,9 @@
  *
  * Mirrors `pending-deposits`: wraps `pollRingsIndexing` with a Sentry cron
  * monitor when observability is supplied and hands the promise to the
- * BackgroundRunner. The job itself early-returns unless the rings flag is on
- * and every Rings upstream is configured, so scheduling it everywhere is free.
+ * BackgroundRunner. The job itself early-returns unless the rings flag is on.
+ * Timeout sweeps still run without upstreams; Photon reconciliation is gated
+ * inside the job, so scheduling it everywhere is free when the flag is off.
  */
 
 import type { BackgroundRunner } from "@/runtime/background";
