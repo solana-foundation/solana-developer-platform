@@ -34,11 +34,17 @@ export interface RpcConnectionContext {
   /** Live connections across the whole organization, for the fail-closed warning. */
   liveConnectionCount?: number;
   /**
-   * Set when the project already routes through a different provider. A
-   * project takes one connection whatever the provider, so this page must not
-   * offer to add a second.
+   * Live connections this project holds across every provider, not just the one
+   * on this page. A project may hold a proven key per provider, so "is this the
+   * last one" cannot be answered from the narrowed list the section renders.
    */
-  projectConnectionProvider?: string | null;
+  liveProjectConnections?: number;
+  /**
+   * Providers this project holds its own key for. Read by the header status,
+   * which must not call a provider the tenant configured themselves "Not
+   * configured" just because this deployment carries no URL for it.
+   */
+  providersWithOwnKey?: readonly string[];
   /**
    * The provider whose connection the relay would actually route this project
    * through, whichever provider that is. `null` when nothing of the tenant's
@@ -197,7 +203,13 @@ export async function IntegrationDetailView({
             canManage={rpc.canManage}
             isEnabledInDeployment={rpc.isEnabledInDeployment}
             organizationId={rpc.organizationId}
-            credentialMode={rpc.credentialMode ?? null}
+            hasOwnKey={
+              Array.isArray(rpc.byokConnections) &&
+              rpc.byokConnections.some(
+                (connection) =>
+                  connection.scope === "project" && connection.status !== "deactivated"
+              )
+            }
             provider={detail.provider as OrganizationRpcProvider}
             servingProvider={rpc.servingProvider ?? null}
             status={detail.status}
@@ -212,7 +224,8 @@ export async function IntegrationDetailView({
             connections={rpc.byokConnections}
             credentialMode={rpc.credentialMode ?? null}
             liveConnectionCount={rpc.liveConnectionCount ?? 0}
-            projectConnectionProvider={rpc.projectConnectionProvider ?? null}
+            liveProjectConnections={rpc.liveProjectConnections ?? 0}
+            servingProvider={rpc.servingProvider ?? null}
             provider={detail.provider}
           />
         </Section>

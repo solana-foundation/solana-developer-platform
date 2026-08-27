@@ -7,7 +7,6 @@ import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submitRpcConnectionAction = vi.fn();
-const activateRpcConnectionAction = vi.fn();
 const deactivateRpcConnectionAction = vi.fn();
 const deleteRpcConnectionAction = vi.fn();
 const testRpcConnectionAction = vi.fn();
@@ -16,7 +15,6 @@ const setRpcCredentialModeAction = vi.fn();
 
 vi.mock("./rpc-connection-actions", () => ({
   submitRpcConnectionAction: (fd: FormData) => submitRpcConnectionAction(fd),
-  activateRpcConnectionAction: (fd: FormData) => activateRpcConnectionAction(fd),
   deactivateRpcConnectionAction: (fd: FormData) => deactivateRpcConnectionAction(fd),
   deleteRpcConnectionAction: (fd: FormData) => deleteRpcConnectionAction(fd),
   testRpcConnectionAction: (fd: FormData) => testRpcConnectionAction(fd),
@@ -77,7 +75,6 @@ function renderSection(props: Partial<ComponentProps<typeof RpcByokSection>> = {
 
 beforeEach(() => {
   submitRpcConnectionAction.mockReset();
-  activateRpcConnectionAction.mockReset();
   deactivateRpcConnectionAction.mockReset();
   deleteRpcConnectionAction.mockReset();
   testRpcConnectionAction.mockReset();
@@ -86,7 +83,6 @@ beforeEach(() => {
   setRpcCredentialModeAction.mockResolvedValue({ status: "saved", mode: "byok" });
   rotateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   submitRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
-  activateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   deactivateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   deleteRpcConnectionAction.mockResolvedValue({ status: "deleted" });
   testRpcConnectionAction.mockResolvedValue({ status: "tested", ok: true, failureCode: null });
@@ -198,12 +194,14 @@ describe("RpcByokSection", () => {
     expect(screen.getByText("Serving traffic")).toBeTruthy();
   });
 
-  it("offers activation for a connection that is not yet serving", async () => {
-    const user = userEvent.setup();
+  it("keeps no per-key switch beside the provider's own switch", () => {
+    // "Use this provider" above does the same thing on this page and moves the
+    // organization's selection with it. Two buttons meant a key and the
+    // provider it belongs to could be pointed in two directions.
     renderSection({ connections: [connection({ status: "pending", isDefault: false })] });
 
-    await user.click(screen.getByRole("button", { name: "Use this connection" }));
-    expect(activateRpcConnectionAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Test" })).toBeTruthy();
   });
 
   it("tells the tenant an organization-scoped connection is not routing", () => {
@@ -277,7 +275,7 @@ describe("RpcByokSection", () => {
       credentialMode: "byok",
       liveConnectionCount: 1,
     });
-    expect(screen.getByText(/stops RPC rather than falling back/)).toBeTruthy();
+    expect(screen.getByText(/stops RPC instead of falling back/)).toBeTruthy();
   });
 
   it("drops a check result once the row is acted on", async () => {
@@ -287,8 +285,10 @@ describe("RpcByokSection", () => {
     await user.click(screen.getByRole("button", { name: "Test" }));
     expect(await screen.findByText(/Reached the provider just now/)).toBeTruthy();
 
-    // The check described the connection as it was; activating changes it.
-    await user.click(screen.getByRole("button", { name: "Use this connection" }));
+    // The check described the connection as it was; rotating changes it.
+    await user.click(screen.getByRole("button", { name: "Rotate key" }));
+    await user.type(screen.getByLabelText(/New API key/i), "replacement-key");
+    await user.click(screen.getByRole("button", { name: /^Rotate$/ }));
     expect(screen.queryByText(/Reached the provider just now/)).toBeNull();
   });
 
@@ -299,13 +299,11 @@ describe("RpcByokSection", () => {
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  it("offers the switch on a proven connection that is not the one serving", () => {
-    // An active non-default connection is a key that works and routes
-    // nothing. It is the whole point of holding more than one, and it had no
-    // control at all because activation was gated on status alone.
+  it("marks a proven connection that is not the one serving as Ready", () => {
+    // An active non-default connection is a key that works and routes nothing.
+    // "active" alone read as though it were the one carrying traffic.
     renderSection({ connections: [connection({ status: "active", isDefault: false })] });
 
-    expect(screen.getByRole("button", { name: "Use this connection" })).toBeTruthy();
     expect(screen.getByText("Ready")).toBeTruthy();
     expect(screen.queryByText("Serving traffic")).toBeNull();
   });
@@ -330,7 +328,7 @@ describe("RpcByokSection", () => {
     // The point of the marketplace: keys in several providers, one serving,
     // switching between them without throwing a working key away. Closing the
     // form here was what made BYOK a one-provider decision.
-    renderSection({ connections: [], projectConnectionProvider: "helius" });
+    renderSection({ connections: [], provider: "triton", servingProvider: "helius" });
 
     expect(screen.getByRole("button", { name: "Add connection" })).toBeTruthy();
     // ...and it says adding will not move traffic, so the switch stays explicit.
@@ -340,16 +338,34 @@ describe("RpcByokSection", () => {
   it("does not claim the organization runs on SDP's when the project has its own connection", () => {
     // The empty state is provider-scoped, so "running on SDP's" was false
     // exactly when another provider held this project's connection.
-    renderSection({ connections: [], projectConnectionProvider: "alchemy" });
+    renderSection({ connections: [], provider: "triton", servingProvider: "alchemy" });
 
     expect(screen.queryByText(/running on SDP's/)).toBeNull();
     expect(screen.getByText(/runs on your own Alchemy connection/)).toBeTruthy();
   });
 
+  it("names the provider that is serving, not merely one holding a key", () => {
+    // The page used to hand this the first project connection on any other
+    // provider. With a Ready key on one and the serving key on another, the
+    // panel and this section named two different providers on one page.
+    renderSection({ connections: [], provider: "alchemy", servingProvider: "quicknode" });
+
+    expect(screen.getByText(/runs on your own QuickNode connection/)).toBeTruthy();
+    expect(screen.queryByText(/Triton/)).toBeNull();
+  });
+
+  it("does not claim traffic runs elsewhere when nothing of the tenant's own serves", () => {
+    // A Ready key on another provider routes nothing, so SDP's is what answers
+    // and the empty state must say so.
+    renderSection({ connections: [], provider: "alchemy", servingProvider: null });
+
+    expect(screen.getByText(/running on SDP's/)).toBeTruthy();
+  });
+
   it("does not tell an admin that only admins can add credentials", () => {
     // canManage is true here, so the admin-only note is addressed to the
     // wrong reader; the reason the form is closed is stated above it.
-    renderSection({ connections: [], projectConnectionProvider: "alchemy" });
+    renderSection({ connections: [], provider: "triton", servingProvider: "alchemy" });
 
     expect(screen.queryByText(/Only organization administrators/)).toBeNull();
   });
@@ -366,8 +382,33 @@ describe("RpcByokSection", () => {
   });
 
   it("warns when the connection about to be deactivated is the only one", () => {
-    renderSection({ connections: [connection()] });
-    expect(screen.getByText(/only connection routing this project/)).toBeTruthy();
+    renderSection({ connections: [connection()], liveProjectConnections: 1 });
+    expect(screen.getByText(/puts this project back on SDP's account/)).toBeTruthy();
+  });
+
+  it("does not call a Ready key the only thing routing this project", () => {
+    // The count came from the list, which the page narrows to one provider, so
+    // it was at most 1 on every page: a key that routes nothing warned that
+    // removing it would put traffic back on SDP's.
+    renderSection({
+      connections: [connection({ status: "active", isDefault: false })],
+      liveProjectConnections: 2,
+    });
+
+    expect(screen.queryByText(/back on SDP's account/)).toBeNull();
+    expect(screen.queryByText(/will not hand over to your other keys/)).toBeNull();
+  });
+
+  it("tells the serving connection that its siblings do not take over by themselves", () => {
+    // Deactivating never promotes a sibling, so with a spare in hand the
+    // honest instruction is to switch first rather than "back to SDP's keys".
+    renderSection({
+      connections: [connection({ status: "active", isDefault: true })],
+      liveProjectConnections: 2,
+    });
+
+    expect(screen.getByText(/will not hand over to your other keys/)).toBeTruthy();
+    expect(screen.queryByText(/back on SDP's account/)).toBeNull();
   });
 
   it("gives a non-admin the connections but no controls", () => {

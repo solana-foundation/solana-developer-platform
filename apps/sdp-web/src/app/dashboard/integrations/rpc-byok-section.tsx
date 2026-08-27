@@ -12,7 +12,6 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import { rpcProviderLabel } from "@/lib/rpc-providers";
 import {
-  activateRpcConnectionAction,
   deactivateRpcConnectionAction,
   deleteRpcConnectionAction,
   rotateRpcConnectionAction,
@@ -44,6 +43,7 @@ function ConnectionList({
   canManage,
   connections,
   failsClosed,
+  liveProjectConnections,
   pendingId,
   onAction,
   onTest,
@@ -57,6 +57,8 @@ function ConnectionList({
   connections: SafeRpcConnection[];
   /** The organization runs on its own keys, so losing this one stops RPC. */
   failsClosed: boolean;
+  /** Across every provider — `connections` is narrowed to the one on this page. */
+  liveProjectConnections: number;
   pendingId: string | null;
   onAction: (action: ConnectionAction, connectionId: string) => void;
   onTest: (connectionId: string) => void;
@@ -66,11 +68,13 @@ function ConnectionList({
   testResults: Record<string, TestOutcome>;
   t: ReturnType<typeof useTranslations>;
 }) {
-  // Deactivating the last one puts the project back on SDP's keys, and the
+  // Deactivating what is serving puts the project back on SDP's keys, and the
   // relay says nothing when it happens, so the warning has to be here.
-  const activeCount = connections.filter(
-    (item) => item.status === "active" && item.scope === "project"
-  ).length;
+  //
+  // Counted across providers rather than inside `connections`, which the page
+  // has already narrowed to this one: a per-page count is at most 1, so every
+  // provider's own key claimed to be the only thing routing the project.
+  const hasSpare = liveProjectConnections > 1;
 
   return (
     <ul className="space-y-2">
@@ -79,11 +83,7 @@ function ConnectionList({
           key={connection.id}
           canManage={canManage}
           connection={connection}
-          isLastActive={
-            activeCount === 1 &&
-            connection.status === "active" &&
-            connection.scope !== "organization"
-          }
+          hasSpare={hasSpare}
           isRotating={rotatingId === connection.id}
           failsClosed={failsClosed}
           pendingId={pendingId}
@@ -130,6 +130,71 @@ function ConnectionStatusBadge({
 }
 
 /**
+ * What the row has to say about itself beyond its badge: why it is stranded,
+ * what withdrawing meant, what depends on it, and the answer to a check.
+ *
+ * Its own component for the same reason the badge is — the row's controls and
+ * its explanations are two separate pieces of branching, and counting them
+ * together put `ConnectionRow` over the repository's complexity limit.
+ */
+function ConnectionRowNotes({
+  failsClosed,
+  hasSpare,
+  isDeactivated,
+  isOrganizationScoped,
+  isServing,
+  testResult,
+  t,
+}: {
+  failsClosed: boolean;
+  hasSpare: boolean;
+  isDeactivated: boolean;
+  isOrganizationScoped: boolean;
+  isServing: boolean;
+  testResult: TestOutcome | undefined;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  // Only the fail-closed case is a warning. The rest describes where traffic
+  // goes if this key is withdrawn, which is ordinary context and was being
+  // shouted in amber next to a green "Serving traffic" badge.
+  const servingNoteKey = hasSpare
+    ? "Shared.integrations.rpcByokServingHasSpare"
+    : failsClosed
+      ? "Shared.integrations.rpcByokLastActiveByok"
+      : "Shared.integrations.rpcByokLastActive";
+  const servingNoteTone = failsClosed && !hasSpare ? "text-warning" : "text-tertiary";
+
+  return (
+    <>
+      {isOrganizationScoped ? (
+        <p className="text-xs text-warning">{t("Shared.integrations.rpcByokOrganizationScoped")}</p>
+      ) : null}
+      {/* "What does deactivated mean?" was the question on the mock, so the
+          answer sits on the row rather than in a badge. */}
+      {isDeactivated ? (
+        <p className="text-xs text-tertiary">
+          {t("Shared.integrations.rpcByokDeactivatedMeaning")}
+        </p>
+      ) : null}
+      {/* Only on the row actually carrying traffic. A Ready key routes
+          nothing, so warning that removing it changes where requests go was
+          simply false — and it appeared on every provider's page at once,
+          because the count behind it came from a list narrowed to one. */}
+      {isServing ? <p className={`text-xs ${servingNoteTone}`}>{t(servingNoteKey)}</p> : null}
+      {/* Only ever the answer to the click that asked for it: nothing about a
+          check is stored any more (HOO-1228). */}
+      {testResult ? (
+        <p className={`text-xs ${testResult.ok ? "text-success" : "text-error"}`}>
+          {testResult.ok
+            ? t("Shared.integrations.rpcByokTestPassed")
+            : (testResult.failureCode ?? t("Shared.integrations.rpcByokTestFailed"))}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * One stored credential and the things that can be done to it.
  *
  * Split out from the list so each row's branching is counted on its own: the
@@ -139,7 +204,7 @@ function ConnectionStatusBadge({
 function ConnectionRow({
   canManage,
   connection,
-  isLastActive,
+  hasSpare,
   isRotating,
   failsClosed,
   pendingId,
@@ -152,7 +217,8 @@ function ConnectionRow({
 }: {
   canManage: boolean;
   connection: SafeRpcConnection;
-  isLastActive: boolean;
+  /** Another live connection on some other provider could take this one's place. */
+  hasSpare: boolean;
   isRotating: boolean;
   failsClosed: boolean;
   pendingId: string | null;
@@ -173,9 +239,6 @@ function ConnectionRow({
   // What the relay routes through: one default per project, not merely one
   // that works. A project can hold a proven key per provider.
   const isServing = connection.isDefault && connection.status === "active" && !isOrganizationScoped;
-  // Anything live that is not the one serving can be switched to, including a
-  // healthy connection sitting idle beside the incumbent.
-  const canActivate = !isServing && !isDeactivated && !isOrganizationScoped;
   // A withdrawn or stranded row has nothing worth checking or replacing.
   const isLive = !isDeactivated && !isOrganizationScoped;
 
@@ -203,50 +266,23 @@ function ConnectionRow({
               ? ` · ····${connection.displayMetadata.apiKeySuffix}`
               : ""}
           </p>
-          {isOrganizationScoped ? (
-            <p className="text-xs text-warning">
-              {t("Shared.integrations.rpcByokOrganizationScoped")}
-            </p>
-          ) : null}
-          {/* "What does deactivated mean?" was the question on the mock, so
-                  the answer sits on the row rather than in a badge. */}
-          {isDeactivated ? (
-            <p className="text-xs text-tertiary">
-              {t("Shared.integrations.rpcByokDeactivatedMeaning")}
-            </p>
-          ) : null}
-          {isLastActive ? (
-            <p className="text-xs text-warning">
-              {failsClosed
-                ? t("Shared.integrations.rpcByokLastActiveByok")
-                : t("Shared.integrations.rpcByokLastActive")}
-            </p>
-          ) : null}
-          {/* Only ever the answer to the click that asked for it: nothing
-                  about a check is stored any more (HOO-1228). */}
-          {testResult ? (
-            <p className={`text-xs ${testResult.ok ? "text-success" : "text-error"}`}>
-              {testResult.ok
-                ? t("Shared.integrations.rpcByokTestPassed")
-                : (testResult.failureCode ?? t("Shared.integrations.rpcByokTestFailed"))}
-            </p>
-          ) : null}
+          <ConnectionRowNotes
+            failsClosed={failsClosed}
+            hasSpare={hasSpare}
+            isDeactivated={isDeactivated}
+            isOrganizationScoped={isOrganizationScoped}
+            isServing={isServing}
+            testResult={testResult}
+            t={t}
+          />
         </div>
 
         {canManage ? (
           <div className="flex flex-wrap items-center gap-2">
-            {canActivate ? (
-              <Button
-                type="button"
-                size="sm"
-                disabled={pendingId === connection.id}
-                onClick={() => {
-                  onAction(activateRpcConnectionAction, connection.id);
-                }}
-              >
-                {t("Shared.integrations.rpcByokUse")}
-              </Button>
-            ) : null}
+            {/* No per-key switch here. "Use this provider" above does the same
+                    thing on this page and also moves the organization's
+                    selection with it, so a key and the provider it belongs to
+                    can no longer be pointed in two directions. */}
             {/* Live connections can be re-checked whenever somebody wants
                     to know, rather than reading a stored verdict. */}
             {isLive ? (
@@ -638,7 +674,8 @@ export function RpcByokSection({
   connections,
   credentialMode,
   liveConnectionCount = 0,
-  projectConnectionProvider,
+  liveProjectConnections = 0,
+  servingProvider,
   provider,
 }: {
   canManage: boolean;
@@ -646,8 +683,15 @@ export function RpcByokSection({
   credentialMode?: "managed" | "byok" | null;
   /** Live connections across the whole organization, not just this provider. */
   liveConnectionCount?: number;
-  /** The provider this project already routes through, when it is not this one. */
-  projectConnectionProvider?: string | null;
+  /** Live connections this project holds across every provider. */
+  liveProjectConnections?: number;
+  /**
+   * The provider whose connection actually carries this project's traffic, when
+   * it is not this one. Must be the serving connection and not merely any key
+   * the project holds elsewhere — the copy below says traffic runs there, and
+   * a project can hold a proven key per provider with only one of them serving.
+   */
+  servingProvider?: string | null;
   /**
    * `null` when the read failed and `"restricted"` when the viewer may not make
    * it at all. Three different answers: unknown, not allowed, and none.
@@ -669,9 +713,9 @@ export function RpcByokSection({
   const hasLiveConnection =
     Array.isArray(connections) &&
     connections.some((item) => item.scope === "project" && item.status !== "deactivated");
-  // A project routes through one connection whatever the provider, so another
-  // provider holding it closes this page's form too.
-  const takenByAnotherProvider = Boolean(projectConnectionProvider);
+  // Context, never a blocker: a project holds a key per provider, and adding one
+  // here is exactly how you get a second one to switch to.
+  const servedElsewhere = Boolean(servingProvider) && servingProvider !== provider;
 
   /** A check describes the connection as it was; any change makes it a lie. */
   const forgetTest = (connectionId: string) =>
@@ -793,6 +837,7 @@ export function RpcByokSection({
           canManage={canManage}
           connections={connections}
           failsClosed={mode === "byok"}
+          liveProjectConnections={liveProjectConnections}
           pendingId={pendingId}
           onAction={(action, id) => {
             void runConnectionAction(action, id);
@@ -811,11 +856,11 @@ export function RpcByokSection({
       ) : (
         <p className="text-sm leading-6 text-tertiary">
           {/* "Running on SDP's" is only true when nothing of the tenant's own
-              serves this project. Another provider holding the project
-              connection is exactly the case where it is false. */}
-          {takenByAnotherProvider
+              serves this project. Another provider's connection carrying the
+              traffic is exactly the case where it is false. */}
+          {servedElsewhere
             ? t("Shared.integrations.rpcByokEmptyRoutedElsewhere", {
-                provider: rpcProviderLabel(projectConnectionProvider ?? ""),
+                provider: rpcProviderLabel(servingProvider ?? ""),
               })
             : t("Shared.integrations.rpcByokEmpty")}
         </p>
@@ -842,10 +887,10 @@ export function RpcByokSection({
 
       {canManage && !hasLiveConnection ? (
         <>
-          {takenByAnotherProvider ? (
+          {servedElsewhere ? (
             <p className="text-sm leading-6 text-tertiary">
               {t("Shared.integrations.rpcByokAddAlongside", {
-                provider: rpcProviderLabel(projectConnectionProvider ?? ""),
+                provider: rpcProviderLabel(servingProvider ?? ""),
               })}
             </p>
           ) : null}

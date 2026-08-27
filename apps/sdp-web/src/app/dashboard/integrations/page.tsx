@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
@@ -14,6 +15,7 @@ import {
   resolveRampIntegrations,
   resolveRpcIntegrations,
 } from "./integrations-status";
+import { fetchRpcTenantState } from "./rpc-serving-provider.server";
 
 async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
   const res = await request("/v1/wallets/configs");
@@ -29,13 +31,14 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
 }
 
 export default async function IntegrationsPage() {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");
   }
+  const dashboardAccess = resolveDashboardAccess(orgRole);
 
   const trace = createTimedTrace("dashboard.integrations.page");
   const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
@@ -55,7 +58,7 @@ export default async function IntegrationsPage() {
   }
   const organizationId = onboarding.organization.id;
 
-  const [availability, connectedProviders] = await Promise.all([
+  const [availability, connectedProviders, rpcTenantState] = await Promise.all([
     trace.step("fetch_provider_access", () =>
       fetchProviderAvailability(projectClient.request, organizationId)
     ),
@@ -64,6 +67,12 @@ export default async function IntegrationsPage() {
     // unknown, never as installable.
     trace.step("fetch_custody_configs", () =>
       getConnectedCustodyProviders(projectClient.request).catch(() => null)
+    ),
+    // The catalog and the provider's own page must not answer "which RPC is
+    // connected" differently, so both read the serving connection. `null` here
+    // and on the detail page alike falls back to the organization's selection.
+    trace.step("fetch_rpc_tenant_state", () =>
+      fetchRpcTenantState(dashboardAccess.capabilities.canManageOrgSettings)
     ),
   ]);
 
@@ -83,6 +92,8 @@ export default async function IntegrationsPage() {
         // The shell only routes here after onboarding, so a missing setting
         // means the organization runs on SDP's default RPC, not "none".
         selectedProvider: onboarding.setup?.rpcProvider ?? "default",
+        servingProvider: rpcTenantState.servingProvider,
+        providersWithOwnKey: rpcTenantState.providersWithOwnKey,
         entries: availability.providers.rpc,
       })}
       ramps={resolveRampIntegrations(availability.providers.ramps)}
