@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 19,
-      "payments": 40,
+      "payments": 42,
       "counterparties": 12,
       "issuance": 46
     }
@@ -5370,7 +5370,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"assetRail\": \"sol.solana\",\n  \"fiatCurrency\": \"AED\",\n  \"fiatAmount\": \"example\"\n}",
+            "defaultValue": "{\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"AED\",\n  \"fiatAmount\": \"example\"\n}",
             "required": true
           }
         ],
@@ -5416,7 +5416,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"assetRail\": \"sol.solana\",\n  \"fiatCurrency\": \"AED\",\n  \"cryptoAmount\": \"example\"\n}",
+            "defaultValue": "{\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"AED\",\n  \"cryptoAmount\": \"example\"\n}",
             "required": true
           }
         ],
@@ -5505,6 +5505,170 @@
                 "decimals": 2
               },
               "expiresAt": "2025-01-01T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "create-payment-offramp-quote",
+        "operationId": "createPaymentOfframpQuote",
+        "title": "Create off-ramp quote",
+        "method": "POST",
+        "path": "/v1/payments/ramps/offramp/quote",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"provider\": \"moneygram\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"sourceWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"AED\",\n  \"cryptoAmount\": \"25\",\n  \"rampsMemo\": {}\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "quote": {
+              "id": "ramp_quote_example",
+              "provider": "moonpay",
+              "status": "pending",
+              "deliveryMode": "hosted",
+              "paymentInstructions": [
+                {
+                  "provider": "lightspark",
+                  "kind": "crypto_deposit",
+                  "destinationAddress": "So11111111111111111111111111111111111111112",
+                  "cryptoCurrency": "USDC",
+                  "network": "SOLANA",
+                  "accountOrWalletInfo": {
+                    "accountType": "USD_ACCOUNT",
+                    "accountNumber": "0000000000000000",
+                    "routingNumber": "000000000",
+                    "paymentRails": ["ACH", "WIRE"],
+                    "reference": "quote-reference-example",
+                    "bankName": "Example Bank",
+                    "address": "ExampleSolanaWalletAddress11111111111111111",
+                    "assetType": "USDC"
+                  }
+                }
+              ],
+              "sendingCurrency": {
+                "code": "USDC",
+                "decimals": 2
+              },
+              "receivingCurrency": {
+                "code": "USDC",
+                "decimals": 2
+              },
+              "feeCurrency": {
+                "code": "USDC",
+                "decimals": 2
+              },
+              "expiresAt": "2025-01-01T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "record-payment-moneygram-ramp-event",
+        "operationId": "recordPaymentMoneygramRampEvent",
+        "title": "Record a MoneyGram ramp event",
+        "method": "POST",
+        "path": "/v1/payments/ramps/moneygram/events",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"kind\": \"onramp_completed\",\n  \"sessionId\": \"session_example\",\n  \"transactionId\": \"transaction_example\",\n  \"status\": \"example\",\n  \"amount\": 1\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transfer": {
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "walletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "rampsMemo": {
+                "invoice": "INV-123",
+                "po": "PO-9"
+              },
+              "amount": "100.00",
+              "provider": "moonpay",
+              "counterpartyId": "counterparty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "providerReference": "ramp_quote_example",
+              "deliveryMode": "session_widget",
+              "fiatCurrency": "USD",
+              "fiatAmount": "100.00",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "baseCurrencyCode": "usd",
+                "baseCurrencyAmount": 100,
+                "quoteCurrencyCode": "usdc_sol",
+                "quoteCurrencyAmount": 98.5,
+                "feeAmount": 1.5,
+                "extraFeeAmount": 0,
+                "networkFeeAmount": 0.01,
+                "areFeesIncluded": true,
+                "usdRate": 1
+              },
+              "moneygram": {
+                "transactionId": "mgi_tx_example",
+                "referenceNumber": "12345678",
+                "payoutAmount": 25,
+                "payoutStatus": "completed",
+                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
+                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
+                "lastWidgetError": "Transaction cancelled by user"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "privateTransfer": {
+              "provider": "magicblock",
+              "magicBlock": {
+                "kind": "transfer",
+                "version": "v0",
+                "instructionCount": 4,
+                "requiredSigners": ["So11111111111111111111111111111111111111112"],
+                "validator": "So11111111111111111111111111111111111111112"
+              }
             }
           },
           "meta": {

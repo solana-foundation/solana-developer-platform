@@ -1,6 +1,7 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
+  createOfframpQuoteRequestSchema,
   createOnrampQuoteRequestSchema,
   createRecurringPaymentRequestSchema,
   createSubscriptionPlanRequestSchema,
@@ -11,6 +12,7 @@ import {
   estimateOfframpRequestSchema,
   estimateOnrampRequestSchema,
   estimateTransferBatchRequestSchema,
+  moneygramRampEventRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
@@ -44,6 +46,7 @@ import {
 } from "./helpers";
 import {
   offrampCurrenciesResponse,
+  offrampQuoteResponse,
   onrampCurrenciesResponse,
   onrampQuoteResponse,
   paymentRecurringPaymentCollectionResponse,
@@ -991,6 +994,54 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(onrampQuoteResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/offramp/quote",
+    tags: ["Payments"],
+    summary: "Create off-ramp quote",
+    operationId: "createPaymentOfframpQuote",
+    description:
+      "Creates a provider-specific off-ramp quote and the ramp transfer record that tracks it through settlement. Takes cryptoToken (a symbol such as USDC), which is not the assetRail value the estimate endpoints accept.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(createOfframpQuoteRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Off-ramp quote created",
+        content: jsonContent(offrampQuoteResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/moneygram/events",
+    tags: ["Payments"],
+    summary: "Record a MoneyGram ramp event",
+    operationId: "recordPaymentMoneygramRampEvent",
+    description:
+      "Records a MoneyGram client event against a ramp transfer. MoneyGram has no server-to-server webhook, so this is the only channel that advances a MoneyGram transfer. `signed` links the on-chain crypto leg and moves the transfer to settling; `completed` re-verifies that leg is confirmed on chain and moves the transfer to completed. All other kinds are advisory and never change status. Events on an already-terminal transfer return the transfer unchanged.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(moneygramRampEventRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Event recorded; the resulting transfer is returned",
+        content: jsonContent(transferResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

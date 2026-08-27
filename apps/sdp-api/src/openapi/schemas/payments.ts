@@ -8,6 +8,7 @@ import {
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
 import {
+  createOfframpQuoteSchema as createOfframpQuoteSchemaBase,
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
@@ -25,6 +26,7 @@ import {
   listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
   listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
   listTransfersQuerySchema as listTransfersQuerySchemaBase,
+  moneygramRampEventSchema as moneygramRampEventSchemaBase,
   paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
   paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
   paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
@@ -2264,12 +2266,63 @@ export const transferBatchEstimateResponseSchema = z
   })
   .openapi({ description: "Transfer batch estimate response payload." });
 
-export const estimateOnrampRequestSchema = withOpenApi(estimateOnrampSchemaBase, {
-  description: "On-ramp estimate request. Fans out one live call per provider on the corridor.",
-});
+export const estimateOnrampRequestSchema = estimateOnrampSchemaBase
+  .extend({
+    assetRail: withOpenApi(estimateOnrampSchemaBase.shape.assetRail, {
+      description:
+        "Crypto rail to receive on, for example usdc.solana. This is NOT the cryptoToken value the quote endpoints take: forwarding a rail into a quote is rejected.",
+      example: "usdc.solana",
+    }),
+  })
+  .openapi({
+    description: "On-ramp estimate request. Fans out one live call per provider on the corridor.",
+  });
 
-export const estimateOfframpRequestSchema = withOpenApi(estimateOfframpSchemaBase, {
-  description: "Off-ramp estimate request. Fans out one live call per provider on the corridor.",
+export const estimateOfframpRequestSchema = estimateOfframpSchemaBase
+  .extend({
+    assetRail: withOpenApi(estimateOfframpSchemaBase.shape.assetRail, {
+      description:
+        "Crypto rail to sell from, for example usdc.solana. This is NOT the cryptoToken value the quote endpoints take: forwarding a rail into a quote is rejected.",
+      example: "usdc.solana",
+    }),
+  })
+  .openapi({
+    description: "Off-ramp estimate request. Fans out one live call per provider on the corridor.",
+  });
+
+export const createOfframpQuoteRequestSchema = createOfframpQuoteSchemaBase
+  .extend({
+    provider: withOpenApi(createOfframpQuoteSchemaBase.shape.provider, {
+      description: "Ramp provider to quote with. Providers differ in how settlement is delivered.",
+      example: "moneygram",
+    }),
+    counterpartyId: withOpenApi(createOfframpQuoteSchemaBase.shape.counterpartyId, {
+      description:
+        "SDP counterparty receiving the fiat payout. Provider-native customer records may be resolved or created from it.",
+      example: "counterparty_example",
+    }),
+    sourceWallet: withOpenApi(createOfframpQuoteSchemaBase.shape.sourceWallet, {
+      description: "Wallet the crypto leg is sent from.",
+      example: "privy_wallet_123",
+    }),
+    cryptoToken: withOpenApi(createOfframpQuoteSchemaBase.shape.cryptoToken, {
+      description:
+        "Token symbol, for example USDC. This is NOT the assetRail value the estimate endpoints take: a rail such as usdc.solana is rejected here.",
+      example: "USDC",
+    }),
+    cryptoAmount: withOpenApi(createOfframpQuoteSchemaBase.shape.cryptoAmount, {
+      description: "Amount of crypto to sell, in whole units.",
+      example: "25",
+    }),
+  })
+  .openapi({
+    description:
+      "Create an off-ramp quote. Creates the ramp transfer record that subsequently tracks settlement.",
+  });
+
+export const moneygramRampEventRequestSchema = withOpenApi(moneygramRampEventSchemaBase, {
+  description:
+    "MoneyGram client event. Only `signed` and `completed` advance the transfer: `signed` moves it to settling, and `completed` verifies the crypto leg on chain and moves it to completed. Every other kind is advisory and never derives status.",
 });
 
 const rampEstimateFeesSchema = z
@@ -2346,6 +2399,12 @@ export const onrampQuoteResponseSchema = z
     quote: onrampQuoteSchema.openapi({ description: "On-ramp quote details." }),
   })
   .openapi({ description: "On-ramp quote response payload." });
+
+export const offrampQuoteResponseSchema = z
+  .object({
+    quote: onrampQuoteSchema.openapi({ description: "Off-ramp quote details." }),
+  })
+  .openapi({ description: "Off-ramp quote response payload." });
 
 export const sandboxTransferSimulationResponseSchema = z
   .object({
