@@ -637,12 +637,13 @@ export function DashboardShell({
     }
   };
 
+  // Both handlers compute the next state from the rendered value and write to
+  // storage outside the setter. React may replay a state updater, so a
+  // localStorage write placed inside one runs more than once.
   const toggleSubnav = (key: DashboardSubnavKey) => {
-    setOpenSubnavs((current) => {
-      const next = withSubnavToggled(current, key);
-      persistSubnav(key, next[key]);
-      return next;
-    });
+    const next = withSubnavToggled(openSubnavs, key);
+    setOpenSubnavs(next);
+    persistSubnav(key, next[key]);
   };
 
   /**
@@ -651,13 +652,12 @@ export function DashboardShell({
    * expressed preference and should survive a reload.
    */
   const openSubnav = (key: DashboardSubnavKey) => {
-    setOpenSubnavs((current) => {
-      const next = withSubnavOpen(current, key);
-      if (next !== current) {
-        persistSubnav(key, true);
-      }
-      return next;
-    });
+    const next = withSubnavOpen(openSubnavs, key);
+    if (next === openSubnavs) {
+      return;
+    }
+    setOpenSubnavs(next);
+    persistSubnav(key, true);
   };
 
   useEffect(() => {
