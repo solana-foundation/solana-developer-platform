@@ -167,6 +167,15 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
     transport = createDefaultRpcTransport({ url: rpcUrl });
   }
 
+  return createRpcFromTransport(transport, { requestTimeoutMs: timeoutMs });
+}
+
+/** Build the standard SDP Solana client around a caller-owned egress transport. */
+export function createRpcFromTransport(
+  transport: RpcTransport,
+  options: Pick<RpcClientOptions, "requestTimeoutMs"> = {}
+): SolanaRpc {
+  const timeoutMs = options.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
   return createSolanaRpcFromTransport(withRequestTimeout(transport, timeoutMs));
 }
 
@@ -535,16 +544,20 @@ export interface SignatureStatusInfo {
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
   signatures: Signature[],
-  options: { searchTransactionHistory?: boolean } = {}
+  options: { searchTransactionHistory?: boolean; retryDelaysMs?: readonly number[] } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
   if (signatures.length === 0) {
     return [];
   }
 
-  const response = await (options.searchTransactionHistory
-    ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
-    : rpc.getSignatureStatuses(signatures)
-  ).send();
+  const response = await withTransientRpcRetry(
+    () =>
+      (options.searchTransactionHistory
+        ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
+        : rpc.getSignatureStatuses(signatures)
+      ).send(),
+    options.retryDelaysMs
+  );
 
   return response.value.map((item) =>
     item

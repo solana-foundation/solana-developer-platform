@@ -241,18 +241,18 @@ describe("rpc_connections constraints", () => {
     });
 
     // Re-checking a live connection whose provider has started rejecting the
-    // key is the ordinary case, and it must be recordable. While the lifecycle
-    // check excluded 'failed', this update raised a constraint violation, the
-    // 409 turned into a 500, and the row kept reading active with a stale
-    // success — the relay would go on trusting a connection that was down.
+    // key is the ordinary case, and the lifecycle flip must be recordable.
+    // While the lifecycle check excluded 'failed', this update raised a
+    // constraint violation, the 409 turned into a 500, and the row kept
+    // reading active — the relay would go on trusting a connection that was
+    // down. The check result itself is no longer stored (HOO-1228); only the
+    // status it puts the connection into.
     await expect(
       getDb(env)
         .prepare(
           `UPDATE rpc_connections
               SET status = 'failed',
-                  is_default = FALSE,
-                  last_check_status = 'failed',
-                  last_check_failure_code = 'provider_rejected'
+                  is_default = FALSE
             WHERE id = ?`
         )
         .bind("rconn_failed_after_active")

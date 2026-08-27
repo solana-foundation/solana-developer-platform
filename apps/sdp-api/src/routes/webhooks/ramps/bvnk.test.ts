@@ -14,7 +14,7 @@ describe("BvnkWebhookProcessor.parse", () => {
         data: {
           id: "wallet_1",
           status: "COMPLETED",
-          walletName: buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY),
+          walletName: buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY),
           customerReference: "customer_1",
           ledgers: [{ type: "FIAT", accountNumber: "900368997705", code: "101019644" }],
         },
@@ -23,7 +23,7 @@ describe("BvnkWebhookProcessor.parse", () => {
       kind: "bvnk:ledger:wallet:create",
       customerReference: "customer_1",
       walletId: "wallet_1",
-      walletName: "sdp:onramp:counterparty_123:USD:USDC_SOLANA:dest",
+      walletName: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
       walletStatus: "COMPLETED",
       bankAccount: { accountNumber: "900368997705" },
     });

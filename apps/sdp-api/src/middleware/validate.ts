@@ -27,7 +27,7 @@ export type ValidatedBodyContext<S extends z.ZodType> = ValidatedContext<{ json:
  * on failure, and hand the typed output to `c.req.valid(target)`.
  *
  * On failure the 400's message carries `z.prettifyError`'s rendering — one
- * `✖ <message>` line per issue with its full `→ at identity.address.line1`
+ * `✖ <message>` line per issue with its full `→ at profile.address.line1`
  * path — deliberately the whole contract: one readable string, no parallel
  * machine-readable detail payload.
  *

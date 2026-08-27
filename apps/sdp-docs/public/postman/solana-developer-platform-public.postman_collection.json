@@ -1453,10 +1453,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
-            "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
+            "description": "Updates payment policy rules for a custody wallet, activating a new control-profile revision. Supply expectedRevisionId to reject the update with 409 when another update has activated a revision since the policy was read. Wallet provisioning and default selection remain in /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-vault-deposits\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"earn_vault_deposit\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ]\n}",
+              "raw": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-vault-deposits\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"earn_vault_deposit\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ],\n  \"expectedRevisionId\": \"wcpr_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1513,7 +1513,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers",
-            "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original transfer, while reusing the key for a different request returns 409.",
+            "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"privy_wallet_123\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
@@ -1549,7 +1549,7 @@
             "description": "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1582,7 +1582,7 @@
             "description": "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1624,7 +1624,7 @@
             "description": "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "raw": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1657,7 +1657,7 @@
             "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "raw": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1681,7 +1681,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
-            "description": "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state."
+            "description": "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently."
           }
         },
         {
@@ -1690,7 +1690,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
-            "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time."
+            "description": "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation."
           }
         },
         {
@@ -1816,7 +1816,7 @@
             "description": "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
+              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1972,7 +1972,7 @@
             "description": "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -5,14 +5,13 @@ import {
   type Token,
   type TokenTransaction,
 } from "@sdp/types";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
+  bootstrapProjectForPage,
   ensureLinkedOrg,
   getBootstrapApiBaseUrl,
   resolvePlaywrightProjectId,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 interface TokenResponse {
@@ -145,11 +144,10 @@ function getActivityRow(
 
 async function bootstrapWalletRouteFixture(
   browser: Browser,
+  page: Page,
   input: { labelPrefix: string; withPolicy?: boolean }
 ) {
-  const session = await getPlaywrightAdminSession(browser);
-
-  try {
+  return bootstrapProjectForPage(browser, page, async (session) => {
     const walletLabel = `${input.labelPrefix} ${Date.now().toString(36).toUpperCase()}`;
     const fixtures = await bootstrapLocalWalletFixtures({
       identity: session.identity,
@@ -159,17 +157,17 @@ async function bootstrapWalletRouteFixture(
       walletLabel,
       tier: "enterprise",
     });
-    const projectId = await resolvePlaywrightProjectId(
-      getBootstrapApiBaseUrl(),
-      session.getBearerToken
-    );
     const wallet = fixtures.wallets[0];
     if (!wallet) {
       throw new Error("Failed to bootstrap wallet route fixture");
     }
 
     if (input.withPolicy) {
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
+      const api = createLocalApiClient(
+        getBootstrapApiBaseUrl(),
+        session.getBearerToken,
+        fixtures.projectId
+      );
       await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
         defaultAction: "allow",
         rules: [
@@ -185,47 +183,24 @@ async function bootstrapWalletRouteFixture(
       });
     }
 
-    return { projectId, wallet, walletLabel };
-  } finally {
-    await session.page.close();
-  }
+    return { projectId: fixtures.projectId, wallet, walletLabel };
+  });
 }
 
 test.describe
   .serial("dashboard wallets e2e", () => {
-    let walletsProjectId = "";
-
-    test.beforeAll(async ({ browser }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      await ensureLinkedOrg(session.identity);
-      walletsProjectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      await session.page.close();
-    });
-
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, walletsProjectId);
-    });
-
     test("bootstrapped Privy wallet appears in the wallets overview", async ({ browser, page }) => {
-      const session = await getPlaywrightAdminSession(browser);
       const walletLabel = `Wallet Detail ${Date.now().toString(36).toUpperCase()}`;
-      const fixtures = await bootstrapLocalWalletFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        provider: "privy",
-        walletCount: 1,
-        walletLabel,
-        tier: "enterprise",
-      });
-      const projectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
+      const fixtures = await bootstrapProjectForPage(browser, page, (session) =>
+        bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          provider: "privy",
+          walletCount: 1,
+          walletLabel,
+          tier: "enterprise",
+        })
       );
-      await session.page.close();
-      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {
@@ -244,10 +219,9 @@ test.describe
     });
 
     test("wallet workspace and detail aliases preserve navigation", async ({ browser, page }) => {
-      const { projectId, wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, {
+      const { wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
         labelPrefix: "Wallet Routes",
       });
-      await seedProjectCookie(page, projectId);
 
       const encodedWalletId = encodeURIComponent(wallet.walletId);
       const walletHref = `/dashboard/wallets/${encodedWalletId}`;
@@ -318,10 +292,9 @@ test.describe
     });
 
     test("wallet actions menu preserves page geometry", async ({ browser, page }) => {
-      const { projectId, wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, {
+      const { wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
         labelPrefix: "Wallet Action Geometry",
       });
-      await seedProjectCookie(page, projectId);
       await page.setViewportSize({ width: 1280, height: 500 });
       await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
         waitUntil: "domcontentloaded",
@@ -389,11 +362,10 @@ test.describe
     });
 
     test("wallet policy history opens the revision drawer", async ({ browser, page }) => {
-      const { projectId, wallet } = await bootstrapWalletRouteFixture(browser, {
+      const { wallet } = await bootstrapWalletRouteFixture(browser, page, {
         labelPrefix: "Wallet Policy Routes",
         withPolicy: true,
       });
-      await seedProjectCookie(page, projectId);
 
       const walletHref = `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`;
       const policyHref = `${walletHref}/policy`;
@@ -433,14 +405,14 @@ test.describe
       browser,
       page,
     }, testInfo) => {
-      const session = await getPlaywrightAdminSession(browser);
-      const projectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      await session.page.close();
-      await seedProjectCookie(page, projectId);
+      await bootstrapProjectForPage(browser, page, async (session) => {
+        await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+        const projectId = await resolvePlaywrightProjectId(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken
+        );
+        return { projectId };
+      });
 
       await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
@@ -557,26 +529,26 @@ test.describe
       browser,
       page,
     }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      let projectId = "";
-      try {
-        await bootstrapLocalWalletFixtures({
-          identity: session.identity,
-          bearerToken: session.getBearerToken,
-          provider: "privy",
-          walletCount: 1,
-          walletLabel: `Wallet Enter Prerequisite ${Date.now().toString(36).toUpperCase()}`,
-          tier: "enterprise",
-        });
-        projectId = await resolvePlaywrightProjectId(
-          getBootstrapApiBaseUrl(),
-          session.getBearerToken
-        );
-      } finally {
-        await session.page.close();
-      }
+      const { bearerToken, projectId } = await bootstrapProjectForPage(
+        browser,
+        page,
+        async (session) => {
+          const fixtures = await bootstrapLocalWalletFixtures({
+            identity: session.identity,
+            bearerToken: session.getBearerToken,
+            provider: "privy",
+            walletCount: 1,
+            walletLabel: `Wallet Enter Prerequisite ${Date.now().toString(36).toUpperCase()}`,
+            tier: "enterprise",
+          });
+          return {
+            bearerToken: session.bearerToken,
+            projectId: fixtures.projectId,
+          };
+        }
+      );
 
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
       const walletLabel = `Wallet Enter ${Date.now().toString(36).toUpperCase()}`;
       const countMatchingWallets = async () => {
         // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
@@ -603,7 +575,6 @@ test.describe
       };
 
       await page.setViewportSize({ width: 390, height: 844 });
-      await seedProjectCookie(page, projectId);
       await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
@@ -637,68 +608,75 @@ test.describe
     }) => {
       test.setTimeout(420_000);
 
-      const session = await getPlaywrightAdminSession(browser);
-      const fixtures = await bootstrapLocalWalletFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        provider: "privy",
-        walletCount: 1,
-        tier: "enterprise",
-      });
-      const projectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
-      await seedProjectCookie(page, projectId);
+      const { deployedToken, wallet } = await bootstrapProjectForPage(
+        browser,
+        page,
+        async (session) => {
+          const fixtures = await bootstrapLocalWalletFixtures({
+            identity: session.identity,
+            bearerToken: session.getBearerToken,
+            provider: "privy",
+            walletCount: 1,
+            tier: "enterprise",
+          });
+          const api = createLocalApiClient(
+            getBootstrapApiBaseUrl(),
+            session.getBearerToken,
+            fixtures.projectId
+          );
+          const wallet = fixtures.wallets[0];
+          if (!wallet) {
+            throw new Error("Failed to bootstrap wallet burn activity fixture");
+          }
 
-      const wallet = fixtures.wallets[0];
-      if (!wallet) {
-        throw new Error("Failed to bootstrap wallet burn activity fixture");
-      }
+          const deployedToken = await createAndDeployWalletActivityToken(api, wallet.walletId);
+          const mintAddress = deployedToken.mintAddress;
+          if (!mintAddress) {
+            throw new Error("Failed to deploy wallet activity token with a mint address");
+          }
 
-      const deployedToken = await createAndDeployWalletActivityToken(api, wallet.walletId);
-      const mintAddress = deployedToken.mintAddress;
-      if (!mintAddress) {
-        throw new Error("Failed to deploy wallet activity token with a mint address");
-      }
+          const minted = await postWithSigningProviderRetry<MintResponse>(
+            api,
+            `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/mint`,
+            {
+              signingWalletId: wallet.walletId,
+              mint: {
+                destination: wallet.publicKey,
+                amount: "6",
+              },
+            }
+          );
+          expect(minted.transaction.status).toBe("confirmed");
+          expect(minted.tokenAccount).toBeTruthy();
 
-      const minted = await postWithSigningProviderRetry<MintResponse>(
-        api,
-        `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/mint`,
-        {
-          signingWalletId: wallet.walletId,
-          mint: {
-            destination: wallet.publicKey,
-            amount: "6",
-          },
+          const burned = await postWithSigningProviderRetry<TransactionResponse>(
+            api,
+            `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn`,
+            {
+              signingWalletId: wallet.walletId,
+              burn: {
+                source: minted.tokenAccount,
+                amount: "2",
+              },
+            }
+          );
+          expect(burned.transaction.type).toBe("burn");
+          expect(burned.transaction.status).toBe("confirmed");
+          expect(burned.transaction.signature).toBeTruthy();
+
+          await waitForToken(
+            api,
+            deployedToken.id,
+            (token) => token.totalSupply === "4",
+            "have total supply 4"
+          );
+          return {
+            deployedToken,
+            projectId: fixtures.projectId,
+            wallet,
+          };
         }
       );
-      expect(minted.transaction.status).toBe("confirmed");
-      expect(minted.tokenAccount).toBeTruthy();
-
-      const burned = await postWithSigningProviderRetry<TransactionResponse>(
-        api,
-        `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn`,
-        {
-          signingWalletId: wallet.walletId,
-          burn: {
-            source: minted.tokenAccount,
-            amount: "2",
-          },
-        }
-      );
-      expect(burned.transaction.type).toBe("burn");
-      expect(burned.transaction.status).toBe("confirmed");
-      expect(burned.transaction.signature).toBeTruthy();
-
-      await waitForToken(
-        api,
-        deployedToken.id,
-        (token) => token.totalSupply === "4",
-        "have total supply 4"
-      );
-      await session.page.close();
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
       await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
@@ -724,20 +702,15 @@ test.describe
     }) => {
       test.setTimeout(420_000);
 
-      const session = await getPlaywrightAdminSession(browser);
-      const fixtures = await bootstrapLocalWalletFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        provider: "privy",
-        walletCount: 1,
-        tier: "enterprise",
-      });
-      const projectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
+      const fixtures = await bootstrapProjectForPage(browser, page, (session) =>
+        bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          provider: "privy",
+          walletCount: 1,
+          tier: "enterprise",
+        })
       );
-      await session.page.close();
-      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {

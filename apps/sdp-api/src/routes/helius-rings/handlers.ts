@@ -45,9 +45,9 @@ export async function getRingsHealth(c: AppContext) {
 // --- wallets ----------------------------------------------------------------
 
 /**
- * POST /wallets — bind a rings wallet to an SDP custody wallet and provision
- * its shielded identity. Until the live gateway lands this responds 503 with a
- * seam-marker message and the wallet stays `pending` — the wizard renders that.
+ * POST /wallets — bind a rings wallet to an SDP custody wallet and provision its
+ * shielded identity. A gateway that refuses answers 503 and the wallet stays
+ * `pending`.
  */
 export async function createRingsWallet(c: AppContext) {
   const parsed = createRingsWalletSchema.safeParse(await c.req.json());
@@ -87,9 +87,61 @@ export async function getRingsWallet(c: AppContext) {
   return success(c, { wallet: mapHeliusRingsWalletRow(row) });
 }
 
+/**
+ * POST /wallets/:walletId/sync — read shielded balances from Photon. Amounts stay
+ * decimal strings all the way out: they are uint64 on the wire and a JSON number
+ * would silently round anything past 2^53.
+ */
+export async function syncRingsWallet(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  const walletId = requireParam(c, "walletId");
+  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
+    ...tenant,
+    id: walletId,
+  });
+  if (!ringsWallet) throw notFound("rings wallet");
+
+  const scope = await resolveScope(c);
+  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+
+  const service = getHeliusRingsService(c, tenant);
+  const synced = await withRingsErrors(() =>
+    service.syncWallet(walletId, custodyWallet?.publicKey ?? null)
+  );
+  return success(c, {
+    balances: synced.balances,
+    degraded: synced.degraded,
+    observedAt: synced.observedAt,
+  });
+}
+
+/**
+ * GET /wallets/:walletId/identity — what the registry publishes for this wallet's
+ * owner, and whether it matches the one this tenant derives. Answers even for a
+ * wallet with no shielded address, which is the case it exists for.
+ */
+export async function getRingsWalletIdentity(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  const walletId = requireParam(c, "walletId");
+  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
+    ...tenant,
+    id: walletId,
+  });
+  if (!ringsWallet) throw notFound("rings wallet");
+
+  const scope = await resolveScope(c);
+  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+
+  const service = getHeliusRingsService(c, tenant);
+  const identity = await withRingsErrors(() =>
+    service.readWalletIdentity(walletId, custodyWallet?.publicKey ?? null)
+  );
+  return success(c, { identity });
+}
+
 // --- zones ------------------------------------------------------------------
 
-/** GET /wallets/:walletId/zones — SDP-owned metadata; fully functional today. */
+/** GET /wallets/:walletId/zones — SDP-owned metadata. */
 export async function listRingsZones(c: AppContext) {
   const { tenant } = tenantOf(c);
   const walletId = requireParam(c, "walletId");
@@ -132,8 +184,7 @@ export async function prepareRingsOperation(c: AppContext) {
   });
   if (!ringsWallet) throw notFound("rings wallet");
 
-  // The policy envelope wants the custody wallet backing the rings wallet;
-  // absence is tolerated (the envelope's wallet id still scopes the policy).
+  // Absence is tolerated: the envelope's wallet id still scopes the policy.
   const scope = await resolveScope(c);
   const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
 
@@ -143,6 +194,7 @@ export async function prepareRingsOperation(c: AppContext) {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
       custodyWalletId: custodyWallet?.id ?? null,
+      owner: custodyWallet?.publicKey ?? null,
     })
   );
   return success(c, { operation }, 201);
@@ -169,11 +221,7 @@ export async function getRingsOperation(c: AppContext) {
   return success(c, { operation });
 }
 
-/**
- * POST /operations/:operationId/execute — advance a waiting operation. The
- * approval verdict is read server-side from the approval request; the request
- * carries no body worth trusting.
- */
+/** POST /operations/:operationId/execute — advance a waiting operation. */
 export async function executeRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
   const service = getHeliusRingsService(c, tenant);
@@ -183,11 +231,7 @@ export async function executeRingsOperation(c: AppContext) {
   return success(c, { operation });
 }
 
-/**
- * POST /operations/:operationId/retry — file a linked retry of a failed op.
- * The retry runs the full prepare-through-policy path, so it re-earns its
- * policy verdict under the current caller's context.
- */
+/** POST /operations/:operationId/retry — file a linked retry of a failed op. */
 export async function retryRingsOperation(c: AppContext) {
   const parsed = retryRingsOperationSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
@@ -217,6 +261,7 @@ export async function retryRingsOperation(c: AppContext) {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
       custodyWalletId: custodyWallet?.id ?? null,
+      owner: custodyWallet?.publicKey ?? null,
     })
   );
   return success(c, { operation }, 201);

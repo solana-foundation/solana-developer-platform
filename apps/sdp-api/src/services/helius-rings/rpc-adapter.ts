@@ -5,9 +5,8 @@ import { RingsAdapterError } from "./adapter-error";
 
 /**
  * Broadcasts the signed outer transaction over the existing SDP RPC path.
- * Submission failures are always retryable: the service's intent key makes a
- * resubmission safe, and the RPC cannot tell a dropped transaction from a
- * transient outage.
+ * Failures are raised retryable for provisioning, which re-reads the user record
+ * before rebuilding; the operation pipeline ignores the bit and asks Photon.
  */
 
 export interface SubmitRingsOuterTransactionInput {

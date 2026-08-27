@@ -10,6 +10,7 @@ import {
   confirmTransaction,
   createRpcForSdk,
   type SimulationResult,
+  type SolanaRpcSdkBridge,
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import type { TokenExtensionsConfig } from "@sdp/types";
@@ -240,14 +241,12 @@ export class Token2022Service {
       transferFeeAuthority: transferFee
         ? toAddress(
             transferFee.transferFeeConfigAuthority,
-            // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
             "extensions.transferFee.transferFeeConfigAuthority"
           )
         : undefined,
       withdrawWithheldAuthority: transferFee
         ? toAddress(
             transferFee.withdrawWithheldAuthority,
-            // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
             "extensions.transferFee.withdrawWithheldAuthority"
           )
         : undefined,
@@ -291,9 +290,10 @@ export class Token2022Service {
 
   private async signAndSubmit(
     fullTx: FullTransaction,
-    rpc: Rpc<SolanaRpcApi>,
+    sdkRpc: SolanaRpcSdkBridge<MosaicSdkRpc>,
     failureMessage: string
   ): Promise<{ signature: Signature; slot: bigint }> {
+    const rpc = sdkRpc as unknown as Rpc<SolanaRpcApi>;
     if (this.feePayment) {
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();

@@ -54,7 +54,7 @@
       "verifySuccess": "Wallet {key} verificada.",
       "revokeSuccess": "Verificação de {key} revogada.",
       "channelBalanceTooltip": "Saldo do canal para o mint {mint}",
-      "channelBalanceAmount": "{amount} USDC"
+      "channelBalanceAmount": "{amount} {symbol}"
     },
     "channels": {
       "title": "Canais",

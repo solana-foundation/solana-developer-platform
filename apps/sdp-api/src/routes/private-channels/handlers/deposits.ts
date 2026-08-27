@@ -12,7 +12,10 @@ import {
 } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import type { AppContext } from "../context";
-import { getPrivateChannelInstanceRepository } from "../context";
+import {
+  getPrivateChannelInstanceRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "../context";
 import { type createDepositBodySchema, depositIdParamSchema } from "../schemas";
 
 async function loadActiveInstance(c: AppContext, organizationId: string, projectId: string) {
@@ -50,6 +53,7 @@ export async function createPrivateChannelDeposit(
     }
     const projectId = requireProjectId(c);
     const instance = await loadActiveInstance(c, auth.organizationId, projectId);
+    const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 
     // Source wallet must be a custody wallet we can sign for.
     const depositorPubkey = resolveWalletAddress(wallets, body.walletId, "walletId", auth, [
@@ -83,6 +87,7 @@ export async function createPrivateChannelDeposit(
       mint: body.mint,
       recipient,
       gatewayAuth,
+      projectRpc,
     });
     return success(c, deposit);
   } catch (error) {

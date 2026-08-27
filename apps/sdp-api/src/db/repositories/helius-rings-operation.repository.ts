@@ -61,9 +61,8 @@ export interface HeliusRingsTimelockInput {
 }
 
 /**
- * The intent as the caller described it. `intentKey` is computed upstream — the
- * repository takes it as given rather than deriving it, so the hashing rule
- * lives in one place (the service) instead of being duplicated behind a column.
+ * The intent as the caller described it. `intentKey` is taken as given so the
+ * hashing rule lives only in the service.
  */
 export interface ReserveHeliusRingsIntentInput extends HeliusRingsProjectScope {
   walletId: string;
@@ -84,15 +83,14 @@ export interface ReserveHeliusRingsIntentResult {
   operation: HeliusRingsOperationRow;
   /**
    * False when the intent key was already taken and `operation` is the row that
-   * was there. Callers use this to skip re-doing side effects on a replay — the
-   * whole point of the idempotency contract.
+   * was there, so a replay can skip re-doing side effects.
    */
   reserved: boolean;
 }
 
 /**
- * Optional columns a transition may set on its way through. Each is written only
- * when present, so a transition never blanks a field an earlier step recorded.
+ * Optional columns a transition may set. Each is written only when present, so a
+ * transition never blanks a field an earlier step recorded.
  */
 export interface HeliusRingsOperationTransitionPatch {
   approvalRequestId?: string | null;
@@ -146,9 +144,7 @@ export interface HeliusRingsOperationRepositoryContext {
 export interface HeliusRingsOperationRepository {
   /**
    * The idempotency entry point. Inserts the operation, or returns the one the
-   * intent key already names — a retried request must never open a second
-   * shielded operation, because the caller has no way to tell the duplicate
-   * apart afterwards and both would move funds.
+   * intent key already names: a second shielded operation would move funds twice.
    */
   reserveIntent(input: ReserveHeliusRingsIntentInput): Promise<ReserveHeliusRingsIntentResult>;
   getOperationById(
@@ -164,16 +160,18 @@ export interface HeliusRingsOperationRepository {
     input: ListHeliusRingsOperationsByProjectInput
   ): Promise<HeliusRingsOperationRow[]>;
   /**
-   * Advances one operation under `SELECT ... FOR UPDATE`. Returns null when the
-   * guard loses — either the row moved on already or it is not in this tenant —
-   * leaving the row untouched.
+   * Advances one operation under `SELECT ... FOR UPDATE`. Returns null, leaving
+   * the row untouched, when the compare-and-swap guard loses.
    */
   transitionState(
     input: TransitionHeliusRingsOperationInput
   ): Promise<HeliusRingsOperationRow | null>;
   /** Terminal failure. Writes the full failure triple the DB CHECK requires. */
   failOperation(input: FailHeliusRingsOperationInput): Promise<HeliusRingsOperationRow | null>;
-  /** Resume sweep feed: non-terminal operations, oldest touched first. */
+  /**
+   * Resume sweep feed: only rows the indexing poll acts on, oldest touched first.
+   * Waiting states are excluded so they cannot fill the limit.
+   */
   listInFlightOperations(
     input: ListHeliusRingsInFlightOperationsInput
   ): Promise<HeliusRingsOperationRow[]>;
@@ -191,9 +189,8 @@ export interface HeliusRingsOperationRepository {
 }
 
 /**
- * Row to the list-shaped domain projection. The activity table renders this;
- * the full `PrivateOperation` needs the event feed joined in, which the service
- * assembles.
+ * Row to the list-shaped domain projection. The full `PrivateOperation` needs the
+ * event feed joined in, which the service assembles.
  */
 export function mapHeliusRingsOperationSummaryRow(
   row: HeliusRingsOperationRow

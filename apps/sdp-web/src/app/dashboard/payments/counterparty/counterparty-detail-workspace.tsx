@@ -11,7 +11,6 @@ import {
   ArrowRightIcon,
   BanknoteArrowDownIcon,
   BanknoteArrowUpIcon,
-  CakeIcon,
   CalendarIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -20,9 +19,6 @@ import {
   ExternalLinkIcon,
   HashIcon,
   LoaderCircleIcon,
-  MailIcon,
-  MapPinIcon,
-  PhoneIcon,
   PlusIcon,
   ReceiptTextIcon,
   ShieldCheckIcon,
@@ -846,63 +842,6 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
   );
 }
 
-function buildPersonalInfoRows(
-  counterparty: Counterparty,
-  t: ReturnType<typeof useTranslations>
-): InfoRowData[] {
-  const rows: InfoRowData[] = [];
-
-  if (counterparty.entityType === "individual") {
-    const identity = counterparty.identity;
-    const fullName = [
-      identity.firstName,
-      identity.middleName,
-      identity.lastName,
-      identity.secondLastName,
-    ]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join(" ");
-    if (fullName)
-      rows.push({
-        label: t("DashboardPayments.counterparty.fullName"),
-        value: fullName,
-        icon: <UserIcon />,
-      });
-    rows.push({
-      label: t("DashboardPayments.counterparty.dateOfBirth"),
-      value: identity.dateOfBirth,
-      icon: <CakeIcon />,
-    });
-    rows.push({
-      label: t("DashboardPayments.counterparty.phone"),
-      value: identity.phone,
-      icon: <PhoneIcon />,
-    });
-  }
-
-  const address = counterparty.identity.address;
-  if (address) {
-    const formatted = [
-      address.line1,
-      address.line2,
-      address.city,
-      address.subdivisionCode,
-      address.postalCode,
-      address.countryCode,
-    ]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join(", ");
-    if (formatted)
-      rows.push({
-        label: t("DashboardPayments.counterparty.address"),
-        value: formatted,
-        icon: <MapPinIcon />,
-      });
-  }
-
-  return rows;
-}
-
 export function CounterpartyDetailWorkspace({
   counterparty,
   initialAccounts,
@@ -917,7 +856,6 @@ export function CounterpartyDetailWorkspace({
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"details" | "transactions">("details");
-  const personalInfoRows = buildPersonalInfoRows(counterparty, t);
 
   async function confirmDelete() {
     const result = await dashboardFetch(
@@ -993,10 +931,10 @@ export function CounterpartyDetailWorkspace({
           />
         ) : (
           <>
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-6">
               <section className="space-y-3">
                 <h3 className="text-2xl font-medium text-primary">
-                  {t("DashboardPayments.counterparty.identity")}
+                  {t("DashboardPayments.counterparty.details")}
                 </h3>
                 <div className="rounded-lg border border-border-default bg-surface-raised p-5">
                   <FieldList
@@ -1010,11 +948,6 @@ export function CounterpartyDetailWorkspace({
                         label: t("DashboardPayments.counterparty.transferType"),
                         value: toTitleCase(counterparty.entityType),
                         icon: <UsersIcon />,
-                      },
-                      {
-                        label: t("DashboardPayments.counterparty.email"),
-                        value: counterparty.email,
-                        icon: <MailIcon />,
                       },
                       {
                         label: t("DashboardPayments.counterparty.externalId"),
@@ -1037,21 +970,6 @@ export function CounterpartyDetailWorkspace({
                       },
                     ]}
                   />
-                </div>
-              </section>
-
-              <section className="space-y-3">
-                <h3 className="text-2xl font-medium text-primary">
-                  {t("DashboardPayments.counterparty.personalInformation")}
-                </h3>
-                <div className="rounded-lg border border-border-default bg-surface-raised p-5">
-                  {personalInfoRows.length > 0 ? (
-                    <FieldList rows={personalInfoRows} />
-                  ) : (
-                    <p className="text-sm text-tertiary">
-                      {t("DashboardPayments.counterparty.noPersonalInformation")}
-                    </p>
-                  )}
                 </div>
               </section>
             </div>

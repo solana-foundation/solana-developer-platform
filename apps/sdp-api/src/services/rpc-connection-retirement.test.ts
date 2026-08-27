@@ -11,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { deactivateRpcConnection, submitRpcConnection } from "@/services/rpc-connection.service";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -65,19 +66,44 @@ vi.mock("@/services/credential-secret-store", async (importOriginal) => {
   };
 });
 
+// Saving probes the tenant endpoint before it writes anything (HOO-1228).
+// What is under test here is the fate of the secret version around that save,
+// so the provider answers healthily for the project's cluster; the probe's own
+// behaviour is covered by the `rpc-byok-*` suites.
+vi.mock("@/services/rpc-probe", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/rpc-probe")>();
+  const { SOLANA_GENESIS_HASHES } = await import("@sdp/rpc/byok");
+  return {
+    ...actual,
+    probeRpcEndpoint: async () => ({
+      upstream: { ok: true, status: 200 },
+      upstreamBody: { result: SOLANA_GENESIS_HASHES.devnet },
+    }),
+  };
+});
+
 const ORG_ID = "org_rpc_retirement";
 const USER_ID = "usr_rpc_retirement";
+/**
+ * A project per saving test. A project holds one connection per provider
+ * (HOO-1227) and the check runs before the secret is written, so tests sharing
+ * a project would be refused before reaching the code under test.
+ */
+const PROJECT_COMMITTED = "prj_rpc_retirement_committed";
+const PROJECT_UNRECORDABLE = "prj_rpc_retirement_unrecordable";
+const PROJECT_DOOMED = "prj_rpc_retirement_doomed";
+const PROJECT_DEACTIVATE = "prj_rpc_retirement_deactivate";
 const appEnv = env as unknown as Env;
 
-function serviceContext(organizationId = ORG_ID) {
+function serviceContext(projectId: string = PROJECT_DEACTIVATE) {
   const values: Record<string, unknown> = {
     clerk: {
       userId: USER_ID,
-      organizationId,
+      organizationId: ORG_ID,
       role: "admin",
       permissions: ["org:read", "org:write", "org:admin"],
     },
-    projectId: null,
+    projectId,
   };
   return {
     env: appEnv,
@@ -88,12 +114,21 @@ function serviceContext(organizationId = ORG_ID) {
 function submitInput(label: string) {
   return {
     provider: "helius" as const,
-    network: "devnet" as const,
-    scope: "organization" as const,
+    scope: "project" as const,
     credentialLabel: label,
     endpointUrl: "https://devnet.helius-rpc.com",
     apiKey: "tenant-key-retirement",
   };
+}
+
+async function seedProject(projectId: string, slug: string): Promise<void> {
+  await getDb(appEnv)
+    .prepare(
+      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
+       VALUES (?, ?, 'RPC Retirement', ?, 'sandbox', ?)`
+    )
+    .bind(projectId, ORG_ID, slug, USER_ID)
+    .run();
 }
 
 async function retirementRows(refLike: string): Promise<Array<{ secret_version_ref: string }>> {
@@ -153,6 +188,10 @@ beforeAll(async () => {
     )
     .bind(USER_ID)
     .run();
+  await seedProject(PROJECT_COMMITTED, "rpc-retirement-committed");
+  await seedProject(PROJECT_UNRECORDABLE, "rpc-retirement-unrecordable");
+  await seedProject(PROJECT_DOOMED, "rpc-retirement-doomed");
+  await seedProject(PROJECT_DEACTIVATE, "rpc-retirement-deactivate");
 });
 
 afterAll(async () => {
@@ -171,9 +210,13 @@ beforeEach(async () => {
 
 describe("BYOK RPC secret retirement", () => {
   it("clears the pre-commit obligation when submission commits", async () => {
-    const connection = await submitRpcConnection(serviceContext(), submitInput("Committed"));
+    const connection = await submitRpcConnection(
+      serviceContext(PROJECT_COMMITTED),
+      submitInput("Committed")
+    );
 
-    expect(connection.status).toBe("pending");
+    // Saving proves the key and puts it straight into service (HOO-1228).
+    expect(connection.status).toBe("active");
     // The rows reference the version, so nothing may destroy it — the
     // provisional obligation must have been cancelled by the same commit.
     expect(await retirementRows("projects/sdp-test/secrets/pcred_%")).toEqual([]);
@@ -184,7 +227,7 @@ describe("BYOK RPC secret retirement", () => {
     retirementQueueControl.failRecordRetirement = true;
 
     await expect(
-      submitRpcConnection(serviceContext(), submitInput("Unrecordable"))
+      submitRpcConnection(serviceContext(PROJECT_UNRECORDABLE), submitInput("Unrecordable"))
     ).rejects.toThrow(/durably recorded/i);
 
     // Fail closed: the version this request wrote was destroyed immediately —
@@ -201,11 +244,20 @@ describe("BYOK RPC secret retirement", () => {
   it("keeps a durable obligation when the transaction fails and the destroy also fails", async () => {
     gcpMock.destroyVersion.mockRejectedValue(new Error("secret manager unavailable"));
 
-    // A missing organization fails the credential insert's foreign key — the
-    // shape of any mid-transaction failure after the secret write landed.
-    await expect(
-      submitRpcConnection(serviceContext("org_rpc_retirement_missing"), submitInput("Doomed"))
-    ).rejects.toThrow();
+    // A rejected credential insert stands in for any mid-transaction failure
+    // after the secret write landed — the window the pre-commit obligation
+    // exists to cover.
+    const insertCredential = vi
+      .spyOn(ProviderCredentialStore.prototype, "insertCredential")
+      .mockRejectedValue(new Error("credential insert failed"));
+
+    try {
+      await expect(
+        submitRpcConnection(serviceContext(PROJECT_DOOMED), submitInput("Doomed"))
+      ).rejects.toThrow();
+    } finally {
+      insertCredential.mockRestore();
+    }
 
     const rows = await retirementRows("projects/sdp-test/secrets/pcred_%");
     expect(rows).toHaveLength(1);

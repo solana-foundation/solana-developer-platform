@@ -10,14 +10,14 @@ describe("transaction counterparty presentation", () => {
     expect(
       getTransactionCounterpartyPresentation({
         counterpartyDisplayName: "Acme Studio",
-        counterpartyId: "counterparty_1234567890",
+        counterpartyId: "cpty_1234567890",
         destination: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
       })
     ).toEqual({
       displayName: "Acme Studio",
       primary: "Acme Studio",
-      reference: "counterparty_1234567890",
-      secondary: "counte…7890",
+      reference: "cpty_1234567890",
+      secondary: "cpty_1…7890",
     });
   });
 
@@ -38,11 +38,11 @@ describe("transaction counterparty presentation", () => {
   it("falls back to the shortened reference when the API has no display name", () => {
     expect(
       getTransactionCounterpartyPresentation({
-        counterpartyId: "counterparty_1234567890",
+        counterpartyId: "cpty_1234567890",
       })
     ).toEqual({
-      primary: "counte…7890",
-      reference: "counterparty_1234567890",
+      primary: "cpty_1…7890",
+      reference: "cpty_1234567890",
     });
   });
 
@@ -102,15 +102,15 @@ describe("transaction counterparty presentation", () => {
           status: "confirmed",
           signature: null,
           rampsMemo: {},
-          counterpartyId: "counterparty_1",
+          counterpartyId: "cpty_1",
         },
         {
           counterpartyDisplayName: "Acme Studio",
-          counterpartyId: "counterparty_1",
+          counterpartyId: "cpty_1",
         }
       )
     ).toMatchObject({
-      counterpartyId: "counterparty_1",
+      counterpartyId: "cpty_1",
       counterpartyDisplayName: "Acme Studio",
     });
   });

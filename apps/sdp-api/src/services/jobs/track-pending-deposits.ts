@@ -6,16 +6,16 @@
  * Reconciles non-terminal deposits each cron tick:
  *  1. `pending` with no signature, stuck > 5 min → failed (never broadcast).
  *  2. `submitted` with a signature → getSignatureStatuses on the deposit's
- *     instance chain RPC → `confirmed` / `failed`; signature not found + stale
+ *     project's configured RPC → `confirmed` / `failed`; signature not found + stale
  *     → failed.
  *
  * `confirmed → settled` is not driven: the operator's channel-side credit is
  * off-chain and gateway `getTransaction` is Operator-only, so we can't observe
  * it. The UI surfaces the credit via the channel-balance read.
  *
- * The reconciler always reads the CURRENT instance row (via `instance_id`) for
- * RPC endpoints, so an operator repointing a stale endpoint doesn't strand
- * in-flight intents. The audit context on each deposit is never consulted here.
+ * The reconciler resolves the project's CURRENT RPC connection each tick, so
+ * provider changes and credential rotations apply to in-flight intents. The
+ * audit context on each deposit is never consulted here.
  * All status transitions are compare-and-swap (`expectedStatus`) so a concurrent
  * worker can't regress state.
  */
@@ -31,6 +31,10 @@ import {
 } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 import { emitDepositEvent } from "@/services/private-channels/deposit-events";
+import {
+  loadProjectRpcClient,
+  type PrivateChannelProjectRpcClient,
+} from "@/services/private-channels/project-rpc";
 import type { Env } from "@/types/env";
 
 const STUCK_AFTER_MS = 5 * 60 * 1000;
@@ -47,6 +51,7 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
   // Cache instance rows across the tick — a busy project's deposits share one row
   // and we don't want to hit Postgres once per deposit.
   const instances = new Map<string, PrivateChannelInstanceRow | null>();
+  const projectRpcs = new Map<string, Promise<PrivateChannelProjectRpcClient>>();
   const loadInstance = async (id: string) => {
     if (instances.has(id)) {
       return instances.get(id) ?? null;
@@ -54,6 +59,18 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
     const row = await instanceRepo.getById(id);
     instances.set(id, row);
     return row;
+  };
+  const loadProjectRpc = (instance: PrivateChannelInstanceRow) => {
+    const key = `${instance.organization_id}:${instance.project_id}`;
+    const cached = projectRpcs.get(key);
+    if (cached) return cached;
+    const loaded = loadProjectRpcClient({
+      env,
+      organizationId: instance.organization_id,
+      projectId: instance.project_id,
+    });
+    projectRpcs.set(key, loaded);
+    return loaded;
   };
 
   const now = Date.now();
@@ -73,7 +90,7 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
           await failStale(env, repo, deposit, now, "Deposit instance no longer connected.");
           continue;
         }
-        await reconcileSubmitted(env, repo, deposit, instance, now);
+        await reconcileSubmitted(env, repo, deposit, await loadProjectRpc(instance), now);
       }
       // `confirmed` intentionally has no transition here — see module docstring.
     } catch (err) {
@@ -136,7 +153,7 @@ async function reconcileSubmitted(
   env: Env,
   repo: PrivateChannelDepositRepository,
   deposit: PrivateChannelDepositRow,
-  instance: PrivateChannelInstanceRow,
+  projectRpc: PrivateChannelProjectRpcClient,
   now: number
 ): Promise<void> {
   if (!deposit.signature) {
@@ -144,8 +161,9 @@ async function reconcileSubmitted(
     return;
   }
 
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: instance.chain_rpc_url });
-  const [status] = await solanaRpc.getSignatureStatuses(rpc, [deposit.signature as Signature]);
+  const [status] = await solanaRpc.getSignatureStatuses(projectRpc.rpc, [
+    deposit.signature as Signature,
+  ]);
 
   if (!status) {
     // Not found on chain; if it's been a while, treat the tx as dropped.

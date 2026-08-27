@@ -362,6 +362,208 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     expect(found?.idempotency_fingerprint).toBe("fp-1");
   });
 
+  it("persists a signed transfer before submission starts", async () => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: "signed-outbox" }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+
+    const signed = await repo.persistSignedTransfer({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      signature: "signed-outbox-signature",
+      signedTransaction: "AQID",
+      lastValidBlockHeight: "18446744073709551615",
+      updatedAt: "2026-08-21T10:00:00.000Z",
+    });
+
+    expect(signed).toMatchObject({
+      signature: "signed-outbox-signature",
+      signed_transaction: "AQID",
+      last_valid_block_height: "18446744073709551615",
+      submission_started_at: null,
+    });
+  });
+
+  it.each([
+    ["a scaled integer", "1234.0", "scaled"],
+    ["a fractional value", "1234.5", "fractional"],
+    ["a negative value", "-1", "negative"],
+    ["a value above u64", "18446744073709551616", "above-u64"],
+  ])("rejects %s as a last valid block height", async (_label, height, suffix) => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: `height-${suffix}` }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+
+    await expect(
+      repo.persistSignedTransfer({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        signature: `height-${suffix}-signature`,
+        signedTransaction: "AQID",
+        lastValidBlockHeight: height,
+        updatedAt: "2026-08-21T10:00:00.000Z",
+      })
+    ).rejects.toMatchObject({
+      code: "23514",
+      constraint: "payment_transfers_last_valid_block_height_check",
+    });
+
+    await expect(
+      repo.getTransferById({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      })
+    ).resolves.toMatchObject({
+      signature: null,
+      signed_transaction: null,
+      last_valid_block_height: null,
+      submission_started_at: null,
+    });
+  });
+
+  it("marks submission started only after the signed transfer is persisted", async () => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: "submission-start" }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+
+    await expect(
+      repo.markTransferSubmissionStarted({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        startedAt: "2026-08-21T10:01:00.000Z",
+      })
+    ).resolves.toBeNull();
+
+    await repo.persistSignedTransfer({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      signature: "submission-start-signature",
+      signedTransaction: "BAUG",
+      lastValidBlockHeight: "1000",
+      updatedAt: "2026-08-21T10:00:00.000Z",
+    });
+    const started = await repo.markTransferSubmissionStarted({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      startedAt: "2026-08-21T10:01:00.000Z",
+    });
+
+    expect(started).toMatchObject({
+      signature: "submission-start-signature",
+      signed_transaction: "BAUG",
+      last_valid_block_height: "1000",
+      submission_started_at: "2026-08-21T10:01:00.000Z",
+      updated_at: "2026-08-21T10:01:00.000Z",
+    });
+  });
+
+  it("does not overwrite an already persisted signed transfer", async () => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: "signed-cas" }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+    const scope = {
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+    };
+
+    await repo.persistSignedTransfer({
+      ...scope,
+      signature: "original-signature",
+      signedTransaction: "BwgJ",
+      lastValidBlockHeight: "2000",
+      updatedAt: "2026-08-21T10:02:00.000Z",
+    });
+    const replacement = await repo.persistSignedTransfer({
+      ...scope,
+      signature: "replacement-signature",
+      signedTransaction: "CgsM",
+      lastValidBlockHeight: "3000",
+      updatedAt: "2026-08-21T10:03:00.000Z",
+    });
+    const persisted = await repo.getTransferById(scope);
+
+    expect(replacement).toBeNull();
+    expect(persisted).toMatchObject({
+      signature: "original-signature",
+      signed_transaction: "BwgJ",
+      last_valid_block_height: "2000",
+      updated_at: "2026-08-21T10:02:00.000Z",
+    });
+  });
+
+  it("does not change submission state after the transfer leaves processing", async () => {
+    const unsigned = await repo.createTransfer(transferInput({ suffix: "terminal-unsigned" }));
+    const signed = await repo.createTransfer(transferInput({ suffix: "terminal-signed" }));
+    if (!unsigned || !signed) throw new Error("Expected transfer creation to succeed");
+
+    await repo.updateTransfer({
+      transferId: unsigned.id,
+      status: "failed",
+      updatedAt: "2026-08-21T10:04:00.000Z",
+    });
+    await expect(
+      repo.persistSignedTransfer({
+        transferId: unsigned.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        signature: "too-late-signature",
+        signedTransaction: "DQ4P",
+        lastValidBlockHeight: "4000",
+        updatedAt: "2026-08-21T10:05:00.000Z",
+      })
+    ).resolves.toBeNull();
+
+    await repo.persistSignedTransfer({
+      transferId: signed.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      signature: "signed-before-terminal",
+      signedTransaction: "EBES",
+      lastValidBlockHeight: "5000",
+      updatedAt: "2026-08-21T10:06:00.000Z",
+    });
+    await repo.updateTransfer({
+      transferId: signed.id,
+      status: "failed",
+      updatedAt: "2026-08-21T10:07:00.000Z",
+    });
+    await expect(
+      repo.markTransferSubmissionStarted({
+        transferId: signed.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        startedAt: "2026-08-21T10:08:00.000Z",
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("keeps legacy transfers without signed-outbox fields valid", async () => {
+    const legacy = await repo.createTransfer({
+      ...transferInput({ suffix: "legacy-submission" }),
+      signature: "legacy-signature",
+      serializedTx: "legacy-serialized-transaction",
+    });
+    if (!legacy) throw new Error("Expected transfer creation to succeed");
+
+    const confirmed = await repo.updateTransfer({
+      transferId: legacy.id,
+      status: "confirmed",
+      updatedAt: "2026-08-21T10:09:00.000Z",
+    });
+
+    expect(confirmed).toMatchObject({
+      signature: "legacy-signature",
+      serialized_tx: "legacy-serialized-transaction",
+      signed_transaction: null,
+      last_valid_block_height: null,
+      submission_started_at: null,
+      status: "confirmed",
+    });
+  });
+
   it("scopes idempotency to project — same org+key in different projects do not collide", async () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const base = {
