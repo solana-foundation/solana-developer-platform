@@ -65,11 +65,25 @@ jobs:
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run GCP read-only smoke
+        id: smoke
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           NODE_ENV: production
         run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run test:e2e:gcp-smoke
+
+      - name: Report run to Loki
+        if: always()
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          SMOKE_TARGET: dev
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh
 
       - name: Upload Playwright artifacts
         if: always()
