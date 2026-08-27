@@ -173,6 +173,9 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     settlement_verified_at: (row.settlement_verified_at as string | null | undefined) ?? null,
     settlement_verification_method:
       (row.settlement_verification_method as string | null | undefined) ?? null,
+    verification_claim_token: (row.verification_claim_token as string | null | undefined) ?? null,
+    verification_claimed_until:
+      (row.verification_claimed_until as string | null | undefined) ?? null,
     verification_last_polled_at:
       (row.verification_last_polled_at as string | null | undefined) ?? null,
     verification_attempts: (row.verification_attempts as number | null | undefined) ?? 0,
@@ -738,7 +741,7 @@ export function createPostgresPaymentsRepository(
       return rows.results.map(mapTransferRow);
     },
 
-    async claimRampTransfersToVerify({ maxAttempts, limit, claimedAt }) {
+    async claimRampTransfersToVerify({ maxAttempts, limit, claimedAt, claimToken, claimedUntil }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
           "PaymentsRepository.claimRampTransfersToVerify is system-only"
@@ -754,7 +757,9 @@ export function createPostgresPaymentsRepository(
       const rows = await db
         .prepare(
           `UPDATE payment_transfers
-              SET verification_last_polled_at = ?
+              SET verification_last_polled_at = ?,
+                  verification_claim_token = ?,
+                  verification_claimed_until = ?
             WHERE id IN (
               SELECT id
                 FROM payment_transfers
@@ -762,19 +767,20 @@ export function createPostgresPaymentsRepository(
                  AND settlement_signature IS NOT NULL
                  AND settlement_verified_at IS NULL
                  AND verification_attempts < ?
+                 AND (verification_claimed_until IS NULL OR verification_claimed_until < ?)
                ORDER BY verification_last_polled_at ASC NULLS FIRST, id ASC
                LIMIT ?
                  FOR UPDATE SKIP LOCKED
             )
         RETURNING *`
         )
-        .bind(claimedAt, maxAttempts, limit)
+        .bind(claimedAt, claimToken, claimedUntil, maxAttempts, claimedAt, limit)
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapTransferRow);
     },
 
-    async advanceRampVerification({ transferId, polledAt, verifiedAt, slot, method }) {
+    async advanceRampVerification({ transferId, polledAt, claimToken, verifiedAt, slot, method }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
           "PaymentsRepository.advanceRampVerification is system-only"
@@ -791,10 +797,13 @@ export function createPostgresPaymentsRepository(
                   settlement_verified_at = COALESCE(?, settlement_verified_at),
                   settlement_verified_slot = COALESCE(?, settlement_verified_slot),
                   settlement_verification_method =
-                    COALESCE(?, settlement_verification_method)
-            WHERE id = ?`
+                    COALESCE(?, settlement_verification_method),
+                  verification_claim_token = NULL,
+                  verification_claimed_until = NULL
+            WHERE id = ?
+              AND verification_claim_token = ?`
         )
-        .bind(polledAt, verifiedAt ?? null, slot ?? null, method ?? null, transferId)
+        .bind(polledAt, verifiedAt ?? null, slot ?? null, method ?? null, transferId, claimToken)
         .run();
     },
 

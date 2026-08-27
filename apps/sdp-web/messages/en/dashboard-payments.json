@@ -720,6 +720,7 @@
       "solanaSignature": "Solana signature",
       "settlementStatus": "Settlement",
       "settlementVerified": "Settlement verified on-chain",
+      "settlementChainObserved": "Matching on-chain transaction found",
       "settlementPending": "Awaiting on-chain verification",
       "settlementUnsupported": "Not verified on-chain",
       "settlementUnsupportedHint": "This provider reports completion without an on-chain check.",

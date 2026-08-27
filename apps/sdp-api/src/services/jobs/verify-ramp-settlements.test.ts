@@ -95,6 +95,8 @@ describe("verifyRampSettlements", () => {
       maxAttempts: expect.any(Number),
       limit: expect.any(Number),
       claimedAt: expect.any(String),
+      claimToken: expect.any(String),
+      claimedUntil: expect.any(String),
     });
     const { maxAttempts, limit } = claimRampTransfersToVerify.mock.calls[0][0];
     expect(maxAttempts).toBeGreaterThan(0);

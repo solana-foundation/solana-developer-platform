@@ -66,6 +66,8 @@ export interface PaymentTransferRow {
   settlement_verified_slot: number | null;
   settlement_verified_at: string | null;
   settlement_verification_method: string | null;
+  verification_claim_token: string | null;
+  verification_claimed_until: string | null;
   verification_last_polled_at: string | null;
   verification_attempts: number;
   created_at: string;
@@ -255,6 +257,10 @@ export interface PaymentsRepository {
     maxAttempts: number;
     limit: number;
     claimedAt: string;
+    /** Identifies this worker's claim. Required later to write the outcome. */
+    claimToken: string;
+    /** Lease expiry. Rows stay excluded until it passes, so a worker in RPC is not re-claimed. */
+    claimedUntil: string;
   }): Promise<PaymentTransferRow[]>;
   /**
    * Records the outcome of one verification attempt. `verifiedAt` and `slot` are
@@ -264,6 +270,8 @@ export interface PaymentsRepository {
   advanceRampVerification(params: {
     transferId: string;
     polledAt: string;
+    /** Must match the claim. A worker whose lease expired and was re-claimed writes nothing. */
+    claimToken: string;
     verifiedAt?: string | null;
     slot?: number | null;
     method?: string | null;

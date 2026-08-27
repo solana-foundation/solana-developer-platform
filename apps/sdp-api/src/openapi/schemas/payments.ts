@@ -734,9 +734,9 @@ const rampTransferSettlementSchema = z
 
 const rampSettlementVerificationSchema = z
   .object({
-    status: z.enum(["verified", "pending", "unsupported"]).openapi({
+    status: z.enum(["verified", "chain_observed", "pending", "unsupported"]).openapi({
       description:
-        "`verified`: settlement was proven on chain and `signature` is populated. `pending`: this provider and direction carry an advertised on-chain guarantee that has not been established yet, so keep polling. `unsupported`: this provider and direction carry no advertised guarantee; a settlement may still be proven opportunistically if the provider reports a usable signature, so this describes what is promised rather than what is possible.",
+        "`verified`: proven on chain AND bound to this transfer, so it is safe to act on alone. `chain_observed`: a real transaction was checked and matches this transfer exactly on mint, wallet, direction, amount and timing, but is not bound to this specific order because a hosted delivery carries nothing on chain referencing it; treat it as strong evidence and a real alert when it fails, not as sufficient alone to release value. `pending`: this provider and direction carry an advertised on-chain guarantee that has not been established yet, so keep polling. `unsupported`: this provider and direction carry no advertised guarantee; a settlement may still be proven opportunistically if the provider reports a usable signature, so this describes what is promised rather than what is possible.",
       example: "unsupported",
     }),
     method: z.enum(["linked_crypto_leg", "provider_signature"]).nullable().openapi({

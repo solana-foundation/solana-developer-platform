@@ -193,16 +193,20 @@ export type RampTransferSettlement =
  */
 export interface RampSettlementVerification {
   /**
-   * `verified`: proven on chain, `signature` is populated and independently checkable.
+   * `verified`: proven on chain AND bound to this transfer. Safe to act on alone.
+   * `chain_observed`: a real on-chain transaction was checked and matches this transfer exactly on
+   * mint, wallet, direction, amount and timing, but is not bound to this specific order, because a
+   * hosted delivery carries nothing on chain referencing it. Strong evidence and a real alert when
+   * it fails, but not sufficient on its own to release value: pair it with reconciliation.
    * `pending`: this provider and direction carry an advertised on-chain guarantee and it has not
    * been established yet.
    * `unsupported`: this provider and direction carry no advertised guarantee. A settlement may
    * still be proven opportunistically if the provider reports a usable signature, so this is a
    * statement about what is promised, not a promise that it can never be verified.
    */
-  status: "verified" | "pending" | "unsupported";
+  status: "verified" | "chain_observed" | "pending" | "unsupported";
   /**
-   * How the settlement was established. Null unless `status` is `verified`.
+   * How the settlement was established. Null unless `status` is `verified` or `chain_observed`.
    *
    * `linked_crypto_leg`: a transaction SDP submitted from the customer's own wallet, matched to
    * this transfer by row id and validated field by field. Settlement identity is proven. Safe as

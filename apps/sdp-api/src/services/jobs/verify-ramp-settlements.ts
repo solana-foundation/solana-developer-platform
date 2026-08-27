@@ -18,6 +18,14 @@ const VERIFICATION_PAGE_SIZE = 25;
 const MAX_VERIFICATION_ATTEMPTS = 10;
 
 /**
+ * How long a claimed row stays excluded from the queue. Must comfortably exceed the time a full
+ * page spends in Solana RPC, or a row is re-claimed mid-flight and its attempt allowance is spent
+ * twice for one real polling opportunity. Generous on purpose: the cost of a long lease is that a
+ * crashed worker's row waits, which is harmless, while the cost of a short one is a burnt attempt.
+ */
+const CLAIM_LEASE_MS = 5 * 60 * 1000;
+
+/**
  * Proves, or fails to prove, that provider-reported ramp settlements actually happened on chain (#559).
  *
  * This job only ever moves a transfer from unproven to proven. It never writes a transfer status,
@@ -30,11 +38,15 @@ export async function verifyRampSettlements(env: Env): Promise<void> {
   }
 
   const repo = createSystemPaymentsRepository(env);
-  const claimedAt = new Date().toISOString();
+  const now = Date.now();
+  const claimedAt = new Date(now).toISOString();
+  const claimToken = crypto.randomUUID();
   const pending = await repo.claimRampTransfersToVerify({
     maxAttempts: MAX_VERIFICATION_ATTEMPTS,
     limit: VERIFICATION_PAGE_SIZE,
     claimedAt,
+    claimToken,
+    claimedUntil: new Date(now + CLAIM_LEASE_MS).toISOString(),
   });
 
   for (const transfer of pending) {
@@ -46,6 +58,7 @@ export async function verifyRampSettlements(env: Env): Promise<void> {
         await repo.advanceRampVerification({
           transferId: transfer.id,
           polledAt,
+          claimToken,
           verifiedAt: polledAt,
           slot: outcome.slot,
           method: outcome.method,
@@ -56,7 +69,7 @@ export async function verifyRampSettlements(env: Env): Promise<void> {
       // Not proven. Advance the cursor and the attempt count so the row rotates to the back of
       // the queue, and record why: a reason that repeats across many rows is a signal about the
       // provider, not about one transfer.
-      await repo.advanceRampVerification({ transferId: transfer.id, polledAt });
+      await repo.advanceRampVerification({ transferId: transfer.id, polledAt, claimToken });
       getLogger().info({
         event: "ramp_settlement_unverified",
         transfer_id: transfer.id,
@@ -73,7 +86,7 @@ export async function verifyRampSettlements(env: Env): Promise<void> {
         error: error instanceof Error ? error.message : String(error),
       });
       await repo
-        .advanceRampVerification({ transferId: transfer.id, polledAt })
+        .advanceRampVerification({ transferId: transfer.id, polledAt, claimToken })
         .catch(() => undefined);
     }
   }

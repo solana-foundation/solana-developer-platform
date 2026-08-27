@@ -118,6 +118,22 @@ describe("verification queue claims", () => {
     return createSystemPaymentsRepository(env);
   }
 
+  let tokenSeq = 0;
+  function claim(limit: number, leaseMs = 5 * 60 * 1000) {
+    const now = Date.now();
+    tokenSeq += 1;
+    const claimToken = `tok_${tokenSeq}`;
+    return repo()
+      .claimRampTransfersToVerify({
+        maxAttempts: 10,
+        limit,
+        claimedAt: new Date(now).toISOString(),
+        claimToken,
+        claimedUntil: new Date(now + leaseMs).toISOString(),
+      })
+      .then((rows) => ({ rows, claimToken }));
+  }
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env)
@@ -134,10 +150,9 @@ describe("verification queue claims", () => {
     await seedQueueRow("xfr_q3");
     await seedQueueRow("xfr_q4");
 
-    const claimedAt = new Date().toISOString();
     const [first, second] = await Promise.all([
-      repo().claimRampTransfersToVerify({ maxAttempts: 10, limit: 2, claimedAt }),
-      repo().claimRampTransfersToVerify({ maxAttempts: 10, limit: 2, claimedAt }),
+      claim(2).then((c) => c.rows),
+      claim(2).then((c) => c.rows),
     ]);
 
     const ids = [...first, ...second].map((r) => r.id);
@@ -150,16 +165,8 @@ describe("verification queue claims", () => {
     await seedQueueRow("xfr_q_rotate_a");
     await seedQueueRow("xfr_q_rotate_b");
 
-    const first = await repo().claimRampTransfersToVerify({
-      maxAttempts: 10,
-      limit: 1,
-      claimedAt: new Date(Date.now() - 1000).toISOString(),
-    });
-    const second = await repo().claimRampTransfersToVerify({
-      maxAttempts: 10,
-      limit: 1,
-      claimedAt: new Date().toISOString(),
-    });
+    const first = await claim(1).then((c) => c.rows);
+    const second = await claim(1).then((c) => c.rows);
 
     // The never-polled row sorts ahead of the one just stamped, so the second claim gets the other.
     expect(first[0]?.id).not.toBe(second[0]?.id);
@@ -170,11 +177,7 @@ describe("verification queue claims", () => {
     // attempt having done nothing. Attempts are consumed by work, not by intent.
     await seedQueueRow("xfr_q_attempt");
 
-    await repo().claimRampTransfersToVerify({
-      maxAttempts: 10,
-      limit: 5,
-      claimedAt: new Date().toISOString(),
-    });
+    await claim(5).then((c) => c.rows);
 
     const row = await getDb(env)
       .prepare(
@@ -189,37 +192,33 @@ describe("verification queue claims", () => {
 
   it("does not claim rows at or above the attempt cap", async () => {
     await seedQueueRow("xfr_q_capped", 10);
-    const claimed = await repo().claimRampTransfersToVerify({
-      maxAttempts: 10,
-      limit: 5,
-      claimedAt: new Date().toISOString(),
-    });
+    const claimed = await claim(5).then((c) => c.rows);
     expect(claimed.map((r) => r.id)).not.toContain("xfr_q_capped");
   });
 
   it("does not claim rows that are already verified", async () => {
     await seedQueueRow("xfr_q_done");
+    const { claimToken } = await claim(5);
     await repo().advanceRampVerification({
       transferId: "xfr_q_done",
       polledAt: new Date().toISOString(),
+      claimToken,
       verifiedAt: new Date().toISOString(),
       slot: 1,
       method: "provider_signature",
     });
 
-    const claimed = await repo().claimRampTransfersToVerify({
-      maxAttempts: 10,
-      limit: 5,
-      claimedAt: new Date().toISOString(),
-    });
+    const claimed = await claim(5).then((c) => c.rows);
     expect(claimed.map((r) => r.id)).not.toContain("xfr_q_done");
   });
 
   it("records the verification method alongside the proof", async () => {
     await seedQueueRow("xfr_q_method");
+    const { claimToken } = await claim(5);
     await repo().advanceRampVerification({
       transferId: "xfr_q_method",
       polledAt: new Date().toISOString(),
+      claimToken,
       verifiedAt: new Date().toISOString(),
       slot: 7,
       method: "provider_signature",
@@ -231,5 +230,47 @@ describe("verification queue claims", () => {
       .first<{ settlement_verification_method: string | null }>();
 
     expect(row?.settlement_verification_method).toBe("provider_signature");
+  });
+
+  it("does not re-claim a leased row after the claim statement commits", async () => {
+    // The exact hole in the previous fix: SKIP LOCKED only held for the duration of the statement,
+    // so a second worker could re-claim the row while the first was still in RPC, and both would
+    // consume an attempt for one polling opportunity.
+    await seedQueueRow("xfr_q_leased");
+
+    const first = await claim(5);
+    expect(first.rows.map((r) => r.id)).toContain("xfr_q_leased");
+
+    const second = await claim(5);
+    expect(second.rows.map((r) => r.id)).not.toContain("xfr_q_leased");
+  });
+
+  it("re-claims a row once its lease has expired", async () => {
+    // A crashed worker must not park a row forever.
+    await seedQueueRow("xfr_q_expired");
+    await claim(5, -1000); // lease already in the past
+    const second = await claim(5);
+    expect(second.rows.map((r) => r.id)).toContain("xfr_q_expired");
+  });
+
+  it("ignores a write from a worker whose claim was superseded", async () => {
+    await seedQueueRow("xfr_q_stale");
+    const stale = await claim(5, -1000);
+    await claim(5); // someone else now holds the row
+
+    await repo().advanceRampVerification({
+      transferId: "xfr_q_stale",
+      polledAt: new Date().toISOString(),
+      claimToken: stale.claimToken,
+      verifiedAt: new Date().toISOString(),
+      slot: 5,
+      method: "provider_signature",
+    });
+
+    const row = await getDb(env)
+      .prepare("SELECT settlement_verified_at FROM payment_transfers WHERE id = ?")
+      .bind("xfr_q_stale")
+      .first<{ settlement_verified_at: string | null }>();
+    expect(row?.settlement_verified_at).toBeNull();
   });
 });

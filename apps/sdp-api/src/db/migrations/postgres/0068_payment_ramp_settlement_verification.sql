@@ -27,6 +27,15 @@ ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS settlement_verified_at TE
 -- is proven later by the weaker path, so the provider does not tell you which was used.
 ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS settlement_verification_method TEXT;
 
+-- Verification lease. Stamping a polling cursor is not enough to stop two workers processing the
+-- same row: the row lock releases when the claim statement commits, and the worker then spends
+-- seconds in Solana RPC. A second replica would re-claim it and both would consume an attempt for
+-- one real polling opportunity, exhausting the allowance and reporting a valid settlement as
+-- unverified. The lease excludes a row until it expires; the token ties the eventual write back to
+-- the worker that claimed it, so a stale worker finishing late cannot overwrite a newer claim.
+ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS verification_claim_token TEXT;
+ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS verification_claimed_until TEXT;
+
 -- Backfill the evidence MoneyGram already proved but never surfaced. These rows were
 -- verified with requireConfirmed at completion time, so the signature is trustworthy;
 -- the slot and timestamp were not recorded then and stay NULL rather than being

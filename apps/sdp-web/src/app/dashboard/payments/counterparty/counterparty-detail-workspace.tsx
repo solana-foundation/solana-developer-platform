@@ -600,6 +600,7 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
  */
 const SETTLEMENT_STATUS_MESSAGE_KEYS = {
   verified: "DashboardPayments.transferDetails.settlementVerified",
+  chain_observed: "DashboardPayments.transferDetails.settlementChainObserved",
   pending: "DashboardPayments.transferDetails.settlementPending",
   unsupported: "DashboardPayments.transferDetails.settlementUnsupported",
 } as const;
