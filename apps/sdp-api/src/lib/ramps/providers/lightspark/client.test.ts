@@ -206,7 +206,7 @@ describe("LightsparkRampClient", () => {
 
     const quote = await new LightsparkRampClient().createOnrampQuote(LIGHTSPARK_CONTEXT, {
       customerId: "Customer:cus_123",
-      externalCustomerId: "counterparty_123",
+      externalCustomerId: "cpty_123",
       destinationWalletAddress: "ExternalAccount:acc_destination_123",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
@@ -270,7 +270,7 @@ describe("LightsparkRampClient", () => {
 
     const quote = await new LightsparkRampClient().createOfframpQuote(LIGHTSPARK_CONTEXT, {
       customerId: "Customer:cus_123",
-      externalCustomerId: "counterparty_123",
+      externalCustomerId: "cpty_123",
       payoutAccountId: "ExternalAccount:acc_payout_123",
       sourceWalletAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
       cryptoToken: "USDC",

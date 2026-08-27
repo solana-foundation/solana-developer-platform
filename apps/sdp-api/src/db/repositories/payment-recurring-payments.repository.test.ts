@@ -55,10 +55,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
   async function seedCounterpartyAccount() {
     const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
-    const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(
-      getDb(env),
-      env.counterpartyPiiCipher
-    );
+    const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(getDb(env));
     const counterparty = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,

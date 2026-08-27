@@ -51,6 +51,7 @@
     "@sdp/earn": "workspace:*",
     "@sdp/env-config": "workspace:*",
     "@sdp/helius-rings": "workspace:*",
+    "@sdp/helius-rings-sdk": "workspace:*",
     "@sdp/issuance": "workspace:*",
     "@sdp/kamino": "workspace:*",
     "@sdp/payments": "workspace:*",

@@ -20,14 +20,7 @@ import { useRingsZones } from "./use-rings-zones";
 
 type Translate = ReturnType<typeof useTranslations>;
 
-const OP_TYPES: RingsOpType[] = [
-  "shield",
-  "transfer_registered",
-  "transfer_anonymous",
-  "withdraw",
-  "merge",
-  "timelock_create",
-];
+const OP_TYPES: RingsOpType[] = ["shield"];
 
 const NEEDS_ASSET: ReadonlySet<RingsOpType> = new Set([
   "shield",
@@ -42,16 +35,14 @@ const NEEDS_RECIPIENT: ReadonlySet<RingsOpType> = new Set([
 ]);
 
 /**
- * Where the wizard is, and the only data valid at that point. A union rather
- * than parallel `step`/`result`/`error` values so "showing a result with no
- * operation" is not representable.
+ * A union rather than parallel `step`/`result`/`error` values so "showing a
+ * result with no operation" is not representable.
  */
 type Phase =
   | { name: "compose" }
   | { name: "review"; error: string | null }
   | { name: "result"; operation: RingsOperationDetail };
 
-/** Everything the compose form has collected. */
 interface ComposerDraft {
   walletId: string | null;
   opType: RingsOpType;
@@ -133,9 +124,8 @@ function buildSummaryRows(
 }
 
 /**
- * One composer for every shielded operation kind. A `review` step sits between
- * the form and the POST; anonymous transfers additionally require an explicit
- * acknowledgement on that step before Confirm unlocks.
+ * One composer for every shielded operation kind. Anonymous transfers require
+ * an explicit acknowledgement on the review step before Confirm unlocks.
  */
 export function OperationComposer({
   wallets,
@@ -269,6 +259,9 @@ function ComposeStep({
   const t = useTranslations();
   const needsAsset = NEEDS_ASSET.has(draft.opType);
   const needsRecipient = NEEDS_RECIPIENT.has(draft.opType);
+  // Only a `ready` wallet has a shielded identity to deposit into; the rest are
+  // omitted rather than shown disabled, since nothing here would provision one.
+  const readyWallets = wallets.filter((wallet) => wallet.status === "ready");
 
   return (
     <>
@@ -280,7 +273,7 @@ function ComposeStep({
             onValueChange={(walletId) => onPatch({ walletId })}
             placeholder={t("DashboardHeliusRings.composer.walletPlaceholder")}
           >
-            {wallets.map((wallet) => (
+            {readyWallets.map((wallet) => (
               <SelectItem key={wallet.id} value={wallet.id}>
                 {wallet.name}
               </SelectItem>

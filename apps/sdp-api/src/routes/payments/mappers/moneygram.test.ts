@@ -8,7 +8,7 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     organization_id: "org_test",
     project_id: "prj_test",
     wallet_id: "wal_test",
-    counterparty_id: "counterparty_test",
+    counterparty_id: "cpty_test",
     source_address: "8nb762111111111111111111111111111111hnis",
     destination_address: null,
     token: "USDC",

@@ -34,7 +34,7 @@ export const counterpartyIdParamSchema = withOpenApi(
   counterpartyIdParamsSchemaBase.shape.counterpartyId,
   {
     description: "Counterparty identifier.",
-    example: "cp_example",
+    example: "cpty_example",
   }
 );
 
@@ -310,7 +310,7 @@ export const counterpartyAccountPathParamsSchema = counterpartyAccountParamsSche
   .extend({
     counterpartyId: withOpenApi(counterpartyAccountParamsSchemaBase.shape.counterpartyId, {
       description: "Counterparty identifier.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: withOpenApi(
       counterpartyAccountParamsSchemaBase.shape.counterpartyAccountId,

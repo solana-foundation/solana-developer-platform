@@ -1,5 +1,4 @@
 import { getDb } from "@/db";
-import { LocalPiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 
 const workerId = process.env.VITEST_POOL_ID;
@@ -64,5 +63,4 @@ const providedEnv: Env = {
 export const env = {
   ...providedEnv,
   db: getDb(providedEnv),
-  counterpartyPiiCipher: new LocalPiiCipher("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="),
 };

@@ -3,9 +3,10 @@ import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type {
-  HeliusRingsOperationRepository,
-  ReserveHeliusRingsIntentInput,
+import {
+  DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
+  type HeliusRingsOperationRepository,
+  type ReserveHeliusRingsIntentInput,
 } from "./helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
@@ -423,6 +424,36 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       // `draft` is excluded because nothing is in flight yet, `completed`
       // because it is terminal, and the fresh row because it was just touched.
       expect(swept.map((row) => row.id)).toEqual([inFlight.operation.id]);
+    });
+
+    it("does not let waiting approval rows starve actionable work", async () => {
+      const submitted = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:starved" }));
+      await repo.transitionState({
+        ...scope,
+        id: submitted.operation.id,
+        expectedState: "draft",
+        nextState: "submitted",
+      });
+      await setUpdatedAt(submitted.operation.id, "2026-01-02T00:00:00.000Z");
+
+      const db = getDb(env);
+      for (let i = 0; i < DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT; i += 1) {
+        const waiting = await repo.reserveIntent(
+          shieldIntent({ intentKey: `sha256:approval-${i}` })
+        );
+        await db
+          .prepare("UPDATE helius_rings_operations SET state = 'approval_required' WHERE id = ?")
+          .bind(waiting.operation.id)
+          .run();
+        await setUpdatedAt(waiting.operation.id, "2026-01-01T00:00:00.000Z");
+      }
+
+      const swept = await repo.listInFlightOperations({
+        staleBefore: "2026-06-01T00:00:00.000Z",
+        limit: DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
+      });
+
+      expect(swept.map((row) => row.id)).toEqual([submitted.operation.id]);
     });
   });
 
