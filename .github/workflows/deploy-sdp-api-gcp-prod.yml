@@ -46,7 +46,6 @@ jobs:
       JOB: sdp-prod-api-public-cron
       WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
-      PII_MIGRATE_JOB: sdp-prod-counterparty-pii-migrate
     steps:
       - name: Validate deploy image SHA
         env:
@@ -149,22 +148,12 @@ jobs:
               --region "${REGION}" --project "${PROJECT_ID}" \
               --format='value(spec.template.spec.template.spec.containers[0].image)'
           )"
-          previous_pii_migrate_image="$(
-            gcloud run jobs describe "${PII_MIGRATE_JOB}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --format='value(spec.template.spec.template.spec.containers[0].image)'
-          )"
           if [[ -z "${previous_cron_image}" ]]; then
             echo "Could not resolve the current cron job image." >&2
             exit 1
           fi
-          if [[ -z "${previous_pii_migrate_image}" ]]; then
-            echo "Could not resolve the current counterparty PII migration job image." >&2
-            exit 1
-          fi
           echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
-          echo "PREVIOUS_PII_MIGRATE_IMAGE=${previous_pii_migrate_image}" >> "${GITHUB_ENV}"
           worker_describe_err="$(mktemp)"
           previous_worker_image="$(
             gcloud run services describe "${WORKER_SERVICE}" \
@@ -271,8 +260,6 @@ jobs:
 
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          gcloud run jobs update "${PII_MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
           describe_err="$(mktemp)"
           if gcloud run services describe "${WORKER_SERVICE}" \
@@ -315,9 +302,6 @@ jobs:
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
-          gcloud run jobs update "${PII_MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" \
-            --image "${PREVIOUS_PII_MIGRATE_IMAGE}" || rollback_failed=1
           if [[ -n "${PREVIOUS_WORKER_IMAGE:-}" ]]; then
             gcloud run services update "${WORKER_SERVICE}" \
               --region "${REGION}" --project "${PROJECT_ID}" \

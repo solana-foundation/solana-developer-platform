@@ -15,6 +15,7 @@ const FAMILY_CARD_COUNTS: Record<IntegrationFamily, number> = {
   rpc: ORGANIZATION_RPC_PROVIDERS.length - 1,
   ramps: RAMP_PROVIDERS.length,
   compliance: COMPLIANCE_PROVIDERS.length,
+  privacy: 1,
 };
 
 export function IntegrationsSkeleton() {

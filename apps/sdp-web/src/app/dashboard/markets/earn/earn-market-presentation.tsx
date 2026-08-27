@@ -1,8 +1,12 @@
 "use client";
 
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import { type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { type EarnStrategy, SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { TokenMark } from "@/components/token-mark";
+import { Badge } from "@/components/ui/badge";
+import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
+import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
 export interface EarnStrategyAsset {
   decimals?: number;
@@ -61,6 +65,36 @@ export function formatProviderApy(value: string | undefined, locale: string): st
 
 export function shortenMarketAddress(value: string): string {
   return value.length <= 16 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
+}
+
+/**
+ * One badge for the deposit-availability verdict, shared by the two catalogue
+ * surfaces (the Treasury strategies table and the Earn Program builder) so the
+ * mapping from `earnVaultDepositAvailability` to copy exists exactly once per
+ * namespace. The label map is EXHAUSTIVE over the union: adding an
+ * availability variant breaks both call sites' compiles instead of silently
+ * collapsing to a bare "Unavailable". `cluster_unavailable` is the one reason
+ * with a subject: the badge names the cluster the instrument lives on
+ * (PRO-1742) from the row's own hostCluster, the server's `fundable` verdict,
+ * with no cluster comparison re-derived here.
+ */
+export function EarnDepositAvailabilityBadge({
+  availability,
+  labels,
+  strategy,
+}: {
+  availability: EarnVaultDepositAvailability;
+  labels: Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+  strategy: EarnStrategy;
+}) {
+  const t = useTranslations();
+  return (
+    <Badge variant={availability === "available" ? "default" : "outline"}>
+      {availability === "cluster_unavailable"
+        ? t(labels.cluster_unavailable, { cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster] })
+        : t(labels[availability])}
+    </Badge>
+  );
 }
 
 /** One strategy identity component shared by Treasury and Earn Program. */

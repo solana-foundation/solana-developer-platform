@@ -15,6 +15,7 @@ export type EarnProviderAccess = Readonly<
 
 export type EarnVaultDepositAvailability =
   | "available"
+  | "cluster_unavailable"
   | "strategy_unavailable"
   | "environment_unavailable"
   | "access_unavailable"
@@ -63,9 +64,18 @@ export function earnVaultDepositAvailability(
   environment: SdpEnvironment,
   providerAccess: EarnProviderAccess | null
 ): EarnVaultDepositAvailability {
+  // `fundable` is the server's answer to the cluster question and ONLY that
+  // question (@sdp/types doc): false is definitive — the instrument does not
+  // exist on this environment's cluster. Answered before the generic collapse
+  // below, and deliberately first, so a mirrored mainnet row in sandbox
+  // (PRO-1742) names the one reason that can never change under it instead of
+  // reading as a bare "Unavailable". No cluster comparison happens here — the
+  // consumer renders `strategy.hostCluster`, the server derived the verdict.
+  if (!strategy.fundable) {
+    return "cluster_unavailable";
+  }
   if (
     strategy.status !== "active" ||
-    !strategy.fundable ||
     earnDepositStyle(strategy.provider) !== "vault_direct" ||
     !isEarnProviderSurfaced(strategy.provider)
   ) {

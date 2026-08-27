@@ -32,6 +32,7 @@ import {
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
   SOLANA_CLUSTERS,
+  type SolanaCluster,
 } from "@sdp/types";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { toast } from "sonner";
@@ -440,13 +441,19 @@ const STRATEGY_PAGE_LIMIT = 20;
  * offers no sort control, so callers filter and order client-side — which only
  * works if every page is actually fetched. Requesting one page of 100 silently
  * dropped everything past it once a second provider synced.
+ *
+ * `cluster` is the PRO-1742 opt-in: omitted, the API answers the environment's
+ * own shelf (the one a caller can act on); named, it browses that cluster's
+ * sub-shelf — in practice the sandbox toggle reading the mirrored mainnet
+ * catalogue, whose rows arrive `fundable: false`.
  */
-export async function fetchEarnStrategies(): Promise<EarnStrategy[]> {
+export async function fetchEarnStrategies(cluster?: SolanaCluster): Promise<EarnStrategy[]> {
   const strategies: EarnStrategy[] = [];
 
   for (let page = 1; page <= STRATEGY_PAGE_LIMIT; page += 1) {
+    const clusterParam = cluster ? `&cluster=${cluster}` : "";
     const { status, body } = await requestJson<{ data: ListEarnStrategiesResponse }>(
-      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${STRATEGY_PAGE_SIZE}`
+      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${STRATEGY_PAGE_SIZE}${clusterParam}`
     );
     if (status < 200 || status >= 300 || !body) {
       throw new Error(errorMessage(body, status));
@@ -464,9 +471,19 @@ export async function fetchEarnStrategies(): Promise<EarnStrategy[]> {
   throw new Error("Earn strategies pagination exceeded its safety limit");
 }
 
-export function useEarnStrategies() {
-  const { data, error, isLoading, mutate } = useSWR("dashboard-earn-strategies", () =>
-    fetchEarnStrategies()
+export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
+  const cluster = options?.cluster;
+  // The cluster is part of the key: two views of different shelves must never
+  // serve each other's cache entry, while the default view keeps deduping with
+  // every other default caller.
+  //
+  // keepPreviousData → a cluster-toggle key flip keeps the current rows on
+  // screen while the full paged fetch reruns, instead of tearing the table to
+  // skeletons (same pattern as activity-tab and wallet-card-balance-value).
+  const { data, error, isLoading, mutate } = useSWR(
+    ["dashboard-earn-strategies", cluster ?? "environment-default"],
+    () => fetchEarnStrategies(cluster),
+    { keepPreviousData: true }
   );
   return { strategies: data, error, isLoading, refresh: () => void mutate() };
 }
