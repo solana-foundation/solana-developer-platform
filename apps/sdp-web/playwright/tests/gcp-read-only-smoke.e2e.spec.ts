@@ -145,19 +145,22 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       const transferMarker = firstTransfer.token ?? firstTransfer.amount;
       if (!transferMarker) throw new Error("The known transfer needs a rendered token or amount");
       // Candidates without a resolvable balance are skipped, not fatal — only the
-      // selected fixture wallet must resolve.
+      // selected fixture wallet must resolve. The fixture is the wallet holding a
+      // stable $10.00 (stablecoin-backed): other funded wallets in the project
+      // hold price-volatile tokens, so "first populated wallet" drifts with the
+      // market while this one renders the same label every run.
       const populatedWallet = walletData.wallets.find((wallet) => {
         if (!wallet.balances) return false;
         const totalBalance = resolveTotalBalance(wallet.balances);
-        return totalBalance !== null && totalBalance > 0;
+        if (totalBalance === null || totalBalance <= 0) return false;
+        return formatCurrencyAmount(totalBalance, "en-US") === "$10.00";
       });
-      if (!populatedWallet) throw new Error("The exact test project needs a populated wallet");
+      if (!populatedWallet) {
+        throw new Error("The exact test project needs its stable $10.00 fixture wallet");
+      }
       const populatedWalletBalanceLabel = formatCurrencyAmount(
         resolveRequiredTotalBalance(populatedWallet),
         "en-US"
-      );
-      expect(populatedWalletBalanceLabel, "the known populated wallet fixture changed").toBe(
-        "$10.00"
       );
 
       const resolvedFixture = {
