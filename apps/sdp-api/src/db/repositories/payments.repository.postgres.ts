@@ -171,6 +171,8 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     settlement_signature: (row.settlement_signature as string | null | undefined) ?? null,
     settlement_verified_slot: (row.settlement_verified_slot as number | null | undefined) ?? null,
     settlement_verified_at: (row.settlement_verified_at as string | null | undefined) ?? null,
+    settlement_verification_method:
+      (row.settlement_verification_method as string | null | undefined) ?? null,
     verification_last_polled_at:
       (row.verification_last_polled_at as string | null | undefined) ?? null,
     verification_attempts: (row.verification_attempts as number | null | undefined) ?? 0,
@@ -502,6 +504,10 @@ export function createPostgresPaymentsRepository(
         assignments.push("settlement_verified_at = ?");
         assignmentValues.push(input.settlementVerifiedAt);
       }
+      if (input.settlementVerificationMethod !== undefined) {
+        assignments.push("settlement_verification_method = ?");
+        assignmentValues.push(input.settlementVerificationMethod);
+      }
       const row = await db
         .prepare(
           `UPDATE payment_transfers
@@ -732,30 +738,43 @@ export function createPostgresPaymentsRepository(
       return rows.results.map(mapTransferRow);
     },
 
-    async listRampTransfersToVerify({ maxAttempts, limit }) {
+    async claimRampTransfersToVerify({ maxAttempts, limit, claimedAt }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
-          "PaymentsRepository.listRampTransfersToVerify is system-only"
+          "PaymentsRepository.claimRampTransfersToVerify is system-only"
         );
       }
+      // One statement, so it is its own transaction and no connection is held open across the
+      // Solana RPC calls the caller then makes.
+      //
+      // FOR UPDATE SKIP LOCKED belongs in the inner select: without it a concurrent replica either
+      // blocks on the same rows or, under READ COMMITTED re-evaluation, silently drops them.
+      // Stamping verification_last_polled_at here rotates the claimed rows to the back of the
+      // ordering immediately, so a replica selecting a moment later does not see them at all.
       const rows = await db
         .prepare(
-          `SELECT *
-           FROM payment_transfers
-           WHERE type IN ('onramp', 'offramp')
-             AND settlement_signature IS NOT NULL
-             AND settlement_verified_at IS NULL
-             AND verification_attempts < ?
-           ORDER BY verification_last_polled_at ASC NULLS FIRST, id ASC
-           LIMIT ?`
+          `UPDATE payment_transfers
+              SET verification_last_polled_at = ?
+            WHERE id IN (
+              SELECT id
+                FROM payment_transfers
+               WHERE type IN ('onramp', 'offramp')
+                 AND settlement_signature IS NOT NULL
+                 AND settlement_verified_at IS NULL
+                 AND verification_attempts < ?
+               ORDER BY verification_last_polled_at ASC NULLS FIRST, id ASC
+               LIMIT ?
+                 FOR UPDATE SKIP LOCKED
+            )
+        RETURNING *`
         )
-        .bind(maxAttempts, limit)
+        .bind(claimedAt, maxAttempts, limit)
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapTransferRow);
     },
 
-    async advanceRampVerification({ transferId, polledAt, verifiedAt, slot }) {
+    async advanceRampVerification({ transferId, polledAt, verifiedAt, slot, method }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
           "PaymentsRepository.advanceRampVerification is system-only"
@@ -770,10 +789,12 @@ export function createPostgresPaymentsRepository(
               SET verification_last_polled_at = ?,
                   verification_attempts = verification_attempts + 1,
                   settlement_verified_at = COALESCE(?, settlement_verified_at),
-                  settlement_verified_slot = COALESCE(?, settlement_verified_slot)
+                  settlement_verified_slot = COALESCE(?, settlement_verified_slot),
+                  settlement_verification_method =
+                    COALESCE(?, settlement_verification_method)
             WHERE id = ?`
         )
-        .bind(polledAt, verifiedAt ?? null, slot ?? null, transferId)
+        .bind(polledAt, verifiedAt ?? null, slot ?? null, method ?? null, transferId)
         .run();
     },
 

@@ -69,6 +69,7 @@ export function mapTransferRow(row: TransferRow) {
   const settlementVerification: RampSettlementVerification = row.settlement_verified_at
     ? {
         status: "verified",
+        method: row.settlement_verification_method as RampSettlementVerification["method"],
         signature: row.settlement_signature,
         slot: row.settlement_verified_slot,
         verifiedAt: row.settlement_verified_at,
@@ -78,6 +79,7 @@ export function mapTransferRow(row: TransferRow) {
           rampSettlementAssurance(row.provider as RampProviderId, direction) === "onchain"
             ? "pending"
             : "unsupported",
+        method: null,
         signature: null,
         slot: null,
         verifiedAt: null,

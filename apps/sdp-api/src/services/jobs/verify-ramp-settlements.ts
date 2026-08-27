@@ -30,9 +30,11 @@ export async function verifyRampSettlements(env: Env): Promise<void> {
   }
 
   const repo = createSystemPaymentsRepository(env);
-  const pending = await repo.listRampTransfersToVerify({
+  const claimedAt = new Date().toISOString();
+  const pending = await repo.claimRampTransfersToVerify({
     maxAttempts: MAX_VERIFICATION_ATTEMPTS,
     limit: VERIFICATION_PAGE_SIZE,
+    claimedAt,
   });
 
   for (const transfer of pending) {
@@ -46,6 +48,7 @@ export async function verifyRampSettlements(env: Env): Promise<void> {
           polledAt,
           verifiedAt: polledAt,
           slot: outcome.slot,
+          method: outcome.method,
         });
         continue;
       }

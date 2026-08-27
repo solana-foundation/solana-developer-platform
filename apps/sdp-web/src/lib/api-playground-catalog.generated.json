@@ -1662,6 +1662,7 @@
               },
               "settlementVerification": {
                 "status": "unsupported",
+                "method": null,
                 "signature": "example",
                 "slot": 1,
                 "verifiedAt": "example"
@@ -1980,6 +1981,7 @@
               },
               "settlementVerification": {
                 "status": "unsupported",
+                "method": null,
                 "signature": "example",
                 "slot": 1,
                 "verifiedAt": "example"
@@ -2076,6 +2078,7 @@
               },
               "settlementVerification": {
                 "status": "unsupported",
+                "method": null,
                 "signature": "example",
                 "slot": 1,
                 "verifiedAt": "example"
@@ -2250,6 +2253,7 @@
                 },
                 "settlementVerification": {
                   "status": "unsupported",
+                  "method": null,
                   "signature": "example",
                   "slot": 1,
                   "verifiedAt": "example"
@@ -2483,6 +2487,7 @@
                 },
                 "settlementVerification": {
                   "status": "unsupported",
+                  "method": null,
                   "signature": "example",
                   "slot": 1,
                   "verifiedAt": "example"
@@ -3024,6 +3029,7 @@
               },
               "settlementVerification": {
                 "status": "unsupported",
+                "method": null,
                 "signature": "example",
                 "slot": 1,
                 "verifiedAt": "example"
@@ -5675,6 +5681,7 @@
               },
               "settlementVerification": {
                 "status": "unsupported",
+                "method": null,
                 "signature": "example",
                 "slot": 1,
                 "verifiedAt": "example"

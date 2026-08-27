@@ -1183,6 +1183,8 @@ describe("Payments routes — ramps", () => {
       };
       expect(body.data.transfer.settlementVerification).toMatchObject({
         status: "verified",
+        // The strong path: bound to a specific transfer row, not to a provider's claim.
+        method: "linked_crypto_leg",
         signature: "sig-xfr_mg_leg_ok",
       });
       expect(body.data.transfer.settlementVerification.verifiedAt).toEqual(expect.any(String));
@@ -1238,6 +1240,7 @@ describe("Payments routes — ramps", () => {
       // Coinbase on-ramp is not chain-verified today, so claiming anything else would be a lie.
       expect(body.data.transfer.settlementVerification).toEqual({
         status: "unsupported",
+        method: null,
         signature: null,
         slot: null,
         verifiedAt: null,

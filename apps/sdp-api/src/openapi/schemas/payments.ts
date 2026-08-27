@@ -736,8 +736,13 @@ const rampSettlementVerificationSchema = z
   .object({
     status: z.enum(["verified", "pending", "unsupported"]).openapi({
       description:
-        "`verified`: settlement was proven on chain and `signature` is populated. `pending`: this provider and direction can be verified and it has not happened yet, so keep polling. `unsupported`: this provider and direction cannot be chain-verified, so `completed` is the strongest available signal and polling will not change this.",
+        "`verified`: settlement was proven on chain and `signature` is populated. `pending`: this provider and direction carry an advertised on-chain guarantee that has not been established yet, so keep polling. `unsupported`: this provider and direction carry no advertised guarantee; a settlement may still be proven opportunistically if the provider reports a usable signature, so this describes what is promised rather than what is possible.",
       example: "unsupported",
+    }),
+    method: z.enum(["linked_crypto_leg", "provider_signature"]).nullable().openapi({
+      description:
+        "How the settlement was established, null unless verified. `linked_crypto_leg`: a transaction SDP submitted from the customer's own wallet, matched to this transfer by id and validated field by field, so settlement identity is proven and it is safe to release value on alone. `provider_signature`: a hash the provider reported, checked on chain for success, mint, this transfer's own wallet, direction, exact amount and a block time at or after the transfer was created, but not bound to this specific order because a hosted delivery carries nothing on chain referencing it; pair it with independent reconciliation before releasing value on it alone.",
+      example: null,
     }),
     signature: z.string().nullable().openapi({
       description:

@@ -36,6 +36,7 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     settlement_signature: null,
     settlement_verified_slot: null,
     settlement_verified_at: null,
+    settlement_verification_method: null,
     verification_last_polled_at: null,
     verification_attempts: 0,
     fee: null,

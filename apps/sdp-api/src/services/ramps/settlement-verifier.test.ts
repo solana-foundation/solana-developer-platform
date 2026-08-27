@@ -24,9 +24,16 @@ function transfer(overrides: Partial<PaymentTransferRow> = {}): PaymentTransferR
     destination_address: DESTINATION,
     source_address: null,
     settlement_signature: "sig_under_test",
+    created_at: CREATED_AT,
     ...overrides,
   } as PaymentTransferRow;
 }
+
+/** The transfer is created first; any legitimate settlement lands after it. */
+const CREATED_AT = "2026-01-01T00:00:00.000Z";
+const CREATED_AT_SECONDS = Math.floor(Date.parse(CREATED_AT) / 1000);
+/** Ten minutes after the order, comfortably inside any legitimate window. */
+const AFTER_CREATED = CREATED_AT_SECONDS + 600;
 
 function balance(owner: string, mint: string, amount: string, decimals = 6) {
   return { owner, mint, uiTokenAmount: { amount, decimals } };
@@ -36,6 +43,7 @@ function balance(owner: string, mint: string, amount: string, decimals = 6) {
 function goodTransaction() {
   return {
     slot: 1234,
+    blockTime: AFTER_CREATED,
     meta: {
       err: null,
       preTokenBalances: [balance(DESTINATION, USDC_DEVNET, "0")],
@@ -54,7 +62,7 @@ describe("verifyRampSettlement", () => {
 
     const result = await verifyRampSettlement(env, transfer());
 
-    expect(result).toEqual({ verified: true, slot: 1234 });
+    expect(result).toEqual({ verified: true, slot: 1234, method: "provider_signature" });
   });
 
   // Everything below must refuse to verify. A lenient matcher here would turn this feature into
@@ -76,6 +84,7 @@ describe("verifyRampSettlement", () => {
   it("refuses when the credited mint is not the transfer's token", async () => {
     fetchParsedTransaction.mockResolvedValue({
       slot: 1234,
+      blockTime: AFTER_CREATED,
       meta: {
         err: null,
         preTokenBalances: [balance(DESTINATION, OTHER_MINT, "0")],
@@ -88,6 +97,7 @@ describe("verifyRampSettlement", () => {
   it("refuses when the credit landed in a different wallet", async () => {
     fetchParsedTransaction.mockResolvedValue({
       slot: 1234,
+      blockTime: AFTER_CREATED,
       meta: {
         err: null,
         preTokenBalances: [balance(OTHER_WALLET, USDC_DEVNET, "0")],
@@ -100,6 +110,7 @@ describe("verifyRampSettlement", () => {
   it("refuses when less than the expected amount moved", async () => {
     fetchParsedTransaction.mockResolvedValue({
       slot: 1234,
+      blockTime: AFTER_CREATED,
       meta: {
         err: null,
         preTokenBalances: [balance(DESTINATION, USDC_DEVNET, "0")],
@@ -125,6 +136,7 @@ describe("verifyRampSettlement", () => {
   it("verifies an off-ramp that debits the source wallet", async () => {
     fetchParsedTransaction.mockResolvedValue({
       slot: 99,
+      blockTime: AFTER_CREATED,
       meta: {
         err: null,
         preTokenBalances: [balance(DESTINATION, USDC_DEVNET, "25000000")],
@@ -137,7 +149,7 @@ describe("verifyRampSettlement", () => {
       transfer({ type: "offramp", source_address: DESTINATION, destination_address: null })
     );
 
-    expect(result).toEqual({ verified: true, slot: 99 });
+    expect(result).toEqual({ verified: true, slot: 99, method: "provider_signature" });
   });
 
   it("refuses when the RPC lookup fails, rather than resolving the row either way", async () => {
@@ -157,5 +169,69 @@ describe("verifyRampSettlement", () => {
     expect(await verifyRampSettlement(env, transfer({ token: "NOTATOKEN" }))).toMatchObject({
       verified: false,
     });
+  });
+
+  // Gates added after review found the predicate accepted any qualifying movement through the
+  // wallet rather than this transfer's settlement.
+
+  it("refuses a transaction that predates the transfer", async () => {
+    fetchParsedTransaction.mockResolvedValue({
+      ...goodTransaction(),
+      blockTime: CREATED_AT_SECONDS - 3600,
+    });
+    expect(await verifyRampSettlement(env, transfer())).toMatchObject({ verified: false });
+  });
+
+  it("refuses when the transaction has no block time", async () => {
+    fetchParsedTransaction.mockResolvedValue({ ...goodTransaction(), blockTime: null });
+    expect(await verifyRampSettlement(env, transfer())).toMatchObject({ verified: false });
+  });
+
+  it("allows clock skew between our clock and cluster time", async () => {
+    // Slightly BEFORE created_at, inside the skew window: cluster time and our clock are not synced.
+    fetchParsedTransaction.mockResolvedValue({
+      ...goodTransaction(),
+      blockTime: CREATED_AT_SECONDS - 60,
+    });
+    expect(await verifyRampSettlement(env, transfer())).toMatchObject({ verified: true });
+  });
+
+  it("refuses when created_at cannot be parsed", async () => {
+    fetchParsedTransaction.mockResolvedValue(goodTransaction());
+    expect(await verifyRampSettlement(env, transfer({ created_at: "not a date" }))).toMatchObject({
+      verified: false,
+    });
+  });
+
+  it("refuses when MORE than the expected amount moved", async () => {
+    // The hole this closes: an at-least bound let any larger unrelated transfer satisfy the check.
+    fetchParsedTransaction.mockResolvedValue({
+      slot: 1234,
+      blockTime: AFTER_CREATED,
+      meta: {
+        err: null,
+        preTokenBalances: [balance(DESTINATION, USDC_DEVNET, "0")],
+        postTokenBalances: [balance(DESTINATION, USDC_DEVNET, "26000000")],
+      },
+    });
+    expect(await verifyRampSettlement(env, transfer())).toMatchObject({ verified: false });
+  });
+
+  it("refuses an off-ramp that debits more than the expected amount", async () => {
+    fetchParsedTransaction.mockResolvedValue({
+      slot: 99,
+      blockTime: AFTER_CREATED,
+      meta: {
+        err: null,
+        preTokenBalances: [balance(DESTINATION, USDC_DEVNET, "26000000")],
+        postTokenBalances: [balance(DESTINATION, USDC_DEVNET, "0")],
+      },
+    });
+    expect(
+      await verifyRampSettlement(
+        env,
+        transfer({ type: "offramp", source_address: DESTINATION, destination_address: null })
+      )
+    ).toMatchObject({ verified: false });
   });
 });

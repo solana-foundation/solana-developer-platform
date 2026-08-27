@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const listRampTransfersToVerify = vi.hoisted(() => vi.fn());
+const claimRampTransfersToVerify = vi.hoisted(() => vi.fn());
 const advanceRampVerification = vi.hoisted(() => vi.fn());
 const verifyRampSettlement = vi.hoisted(() => vi.fn());
 
 vi.mock("@/db/repositories", () => ({
-  createSystemPaymentsRepository: () => ({ listRampTransfersToVerify, advanceRampVerification }),
+  createSystemPaymentsRepository: () => ({ claimRampTransfersToVerify, advanceRampVerification }),
 }));
 vi.mock("@/services/ramps/settlement-verifier", () => ({ verifyRampSettlement }));
 
@@ -20,29 +20,38 @@ function row(id: string, attempts = 0) {
 
 describe("verifyRampSettlements", () => {
   beforeEach(() => {
-    listRampTransfersToVerify.mockReset().mockResolvedValue([]);
+    claimRampTransfersToVerify.mockReset().mockResolvedValue([]);
     advanceRampVerification.mockReset().mockResolvedValue(undefined);
     verifyRampSettlement.mockReset();
   });
 
   it("does nothing at all while the flag is off", async () => {
     await verifyRampSettlements({} as Env);
-    expect(listRampTransfersToVerify).not.toHaveBeenCalled();
+    expect(claimRampTransfersToVerify).not.toHaveBeenCalled();
   });
 
   it("records proof when the settlement verifies", async () => {
-    listRampTransfersToVerify.mockResolvedValue([row("xfr_a")]);
-    verifyRampSettlement.mockResolvedValue({ verified: true, slot: 77 });
+    claimRampTransfersToVerify.mockResolvedValue([row("xfr_a")]);
+    verifyRampSettlement.mockResolvedValue({
+      verified: true,
+      slot: 77,
+      method: "provider_signature",
+    });
 
     await verifyRampSettlements(enabled);
 
     expect(advanceRampVerification).toHaveBeenCalledWith(
-      expect.objectContaining({ transferId: "xfr_a", slot: 77, verifiedAt: expect.any(String) })
+      expect.objectContaining({
+        transferId: "xfr_a",
+        slot: 77,
+        verifiedAt: expect.any(String),
+        method: "provider_signature",
+      })
     );
   });
 
   it("never writes a verifiedAt when verification fails", async () => {
-    listRampTransfersToVerify.mockResolvedValue([row("xfr_b")]);
+    claimRampTransfersToVerify.mockResolvedValue([row("xfr_b")]);
     verifyRampSettlement.mockResolvedValue({ verified: false, reason: "transaction not found" });
 
     await verifyRampSettlements(enabled);
@@ -55,7 +64,7 @@ describe("verifyRampSettlements", () => {
   });
 
   it("burns an attempt when the verifier throws, so a broken row cannot spin forever", async () => {
-    listRampTransfersToVerify.mockResolvedValue([row("xfr_c")]);
+    claimRampTransfersToVerify.mockResolvedValue([row("xfr_c")]);
     verifyRampSettlement.mockRejectedValue(new Error("boom"));
 
     await verifyRampSettlements(enabled);
@@ -67,10 +76,10 @@ describe("verifyRampSettlements", () => {
   });
 
   it("keeps processing the page after one row throws", async () => {
-    listRampTransfersToVerify.mockResolvedValue([row("xfr_d"), row("xfr_e")]);
+    claimRampTransfersToVerify.mockResolvedValue([row("xfr_d"), row("xfr_e")]);
     verifyRampSettlement
       .mockRejectedValueOnce(new Error("boom"))
-      .mockResolvedValueOnce({ verified: true, slot: 5 });
+      .mockResolvedValueOnce({ verified: true, slot: 5, method: "provider_signature" });
 
     await verifyRampSettlements(enabled);
 
@@ -82,11 +91,12 @@ describe("verifyRampSettlements", () => {
 
   it("bounds each run by a page size and an attempt cap", async () => {
     await verifyRampSettlements(enabled);
-    expect(listRampTransfersToVerify).toHaveBeenCalledWith({
+    expect(claimRampTransfersToVerify).toHaveBeenCalledWith({
       maxAttempts: expect.any(Number),
       limit: expect.any(Number),
+      claimedAt: expect.any(String),
     });
-    const { maxAttempts, limit } = listRampTransfersToVerify.mock.calls[0][0];
+    const { maxAttempts, limit } = claimRampTransfersToVerify.mock.calls[0][0];
     expect(maxAttempts).toBeGreaterThan(0);
     expect(limit).toBeGreaterThan(0);
   });

@@ -278,6 +278,7 @@ async function completeMoneygramOfframp(
     settlementSignature: leg.signature,
     settlementVerifiedSlot: leg.slot,
     settlementVerifiedAt: new Date().toISOString(),
+    settlementVerificationMethod: "linked_crypto_leg",
     providerData: {
       moneygram: {
         ...moneygramData,

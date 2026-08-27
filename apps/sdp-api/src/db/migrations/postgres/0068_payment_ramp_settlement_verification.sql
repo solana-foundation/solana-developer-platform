@@ -17,6 +17,16 @@ ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS settlement_signature TEXT
 ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS settlement_verified_slot INTEGER;  -- matches payment_transfers.slot; BIGINT would arrive as a string
 ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS settlement_verified_at TEXT;
 
+-- How the settlement was established, recorded by whoever established it. `linked_crypto_leg` is a
+-- transaction SDP submitted from the customer's own wallet, matched to this row by id and validated
+-- field by field: settlement identity is proven. `provider_signature` is a hash the provider reported,
+-- checked on chain for success, mint, wallet, direction, amount and timing, but not bound to this
+-- particular order, because a hosted delivery carries nothing on chain referencing it.
+--
+-- Not derivable after the fact. A MoneyGram row backfilled below carries a signature but no proof, and
+-- is proven later by the weaker path, so the provider does not tell you which was used.
+ALTER TABLE payment_transfers ADD COLUMN IF NOT EXISTS settlement_verification_method TEXT;
+
 -- Backfill the evidence MoneyGram already proved but never surfaced. These rows were
 -- verified with requireConfirmed at completion time, so the signature is trustworthy;
 -- the slot and timestamp were not recorded then and stay NULL rather than being

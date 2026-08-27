@@ -18,8 +18,15 @@ import type { Env } from "@/types/env";
  * `verified` is a silent claim that money moved.
  */
 export type RampVerificationOutcome =
-  | { verified: true; slot: number }
+  | { verified: true; slot: number; method: "provider_signature" }
   | { verified: false; reason: string };
+
+/**
+ * Tolerance between our clock (`created_at`) and validator-reported cluster time (`blockTime`).
+ * One-sided and generous: the set being excluded is the wallet's entire history before the order
+ * existed, so widening it by minutes costs nothing.
+ */
+const CLOCK_SKEW_SECONDS = 300;
 
 function notVerified(reason: string): RampVerificationOutcome {
   return { verified: false, reason };
@@ -127,6 +134,22 @@ export async function verifyRampSettlement(
     return notVerified("transaction failed on chain");
   }
 
+  // A transaction that predates the order cannot be its settlement. Missing block time refuses
+  // rather than passes: absent evidence is not evidence.
+  const blockTime = typeof parsed.blockTime === "number" ? parsed.blockTime : null;
+  if (blockTime === null) {
+    return notVerified("transaction has no block time");
+  }
+  const createdAtMs = Date.parse(transfer.created_at);
+  if (!Number.isFinite(createdAtMs)) {
+    return notVerified(`transfer created_at is not a parseable date: ${transfer.created_at}`);
+  }
+  if (blockTime < Math.floor(createdAtMs / 1000) - CLOCK_SKEW_SECONDS) {
+    return notVerified(
+      `transaction block time ${blockTime} predates the transfer created at ${transfer.created_at}`
+    );
+  }
+
   const pre = parsed.meta?.preTokenBalances ?? [];
   const post = parsed.meta?.postTokenBalances ?? [];
   const decimals =
@@ -149,9 +172,23 @@ export async function verifyRampSettlement(
     return notVerified(`amount ${transfer.amount} is not representable at ${decimals} decimals`);
   }
 
+  // Exact, not "at least". An at-least bound lets any larger unrelated movement through, and a
+  // tolerance band is a free parameter an attacker sizes their transfer to fit inside. If evidence
+  // of a legitimate mismatch ever appears, tolerance may only be added on the LOW side
+  // (expectedRaw - tolerance <= moved <= expectedRaw), never the high: moving MORE than expected is
+  // the case being excluded. Both numbers are printed so the first real mismatch diagnoses itself.
+  //
+  // Two on-ramps batched into one transaction fail this for both rows. That is already unsupported
+  // by the ramp-scoped unique index on settlement_signature; exact matching makes it fail loudly
+  // instead of verifying an arbitrary one of them.
   if (moved < expectedRaw) {
     return notVerified(
-      `moved ${moved.toString()} base units, expected at least ${expectedRaw.toString()}`
+      `moved ${moved.toString()} base units, expected exactly ${expectedRaw.toString()}`
+    );
+  }
+  if (moved > expectedRaw) {
+    return notVerified(
+      `moved ${moved.toString()} base units, more than the expected ${expectedRaw.toString()}`
     );
   }
 
@@ -160,5 +197,5 @@ export async function verifyRampSettlement(
     return notVerified("transaction has no usable slot");
   }
 
-  return { verified: true, slot };
+  return { verified: true, slot, method: "provider_signature" };
 }

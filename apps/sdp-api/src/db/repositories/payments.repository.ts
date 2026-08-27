@@ -65,6 +65,7 @@ export interface PaymentTransferRow {
   settlement_signature: string | null;
   settlement_verified_slot: number | null;
   settlement_verified_at: string | null;
+  settlement_verification_method: string | null;
   verification_last_polled_at: string | null;
   verification_attempts: number;
   created_at: string;
@@ -225,6 +226,7 @@ export interface PaymentsRepository {
     settlementSignature?: string | null;
     settlementVerifiedSlot?: number | null;
     settlementVerifiedAt?: string | null;
+    settlementVerificationMethod?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
@@ -240,9 +242,19 @@ export interface PaymentsRepository {
    * proven on chain yet, least-recently-polled first. Separate from the wallet
    * finalization queue on purpose; see migration 0069. System-only.
    */
-  listRampTransfersToVerify(params: {
+  /**
+   * Atomically CLAIMS the next page of the queue. Stamping the polling cursor inside the same
+   * statement as the select is what stops two replicas verifying the same row and burning its
+   * attempt allowance twice.
+   *
+   * Deliberately does NOT increment `verification_attempts`: a worker that dies between claim and
+   * completion would otherwise burn an attempt having done nothing, and ten of those permanently
+   * report a real settlement as unverified. Attempts are consumed by work, not by intent.
+   */
+  claimRampTransfersToVerify(params: {
     maxAttempts: number;
     limit: number;
+    claimedAt: string;
   }): Promise<PaymentTransferRow[]>;
   /**
    * Records the outcome of one verification attempt. `verifiedAt` and `slot` are
@@ -254,6 +266,7 @@ export interface PaymentsRepository {
     polledAt: string;
     verifiedAt?: string | null;
     slot?: number | null;
+    method?: string | null;
   }): Promise<void>;
   listConfirmedTransfersToPoll(params: {
     confirmedAfter: string;
