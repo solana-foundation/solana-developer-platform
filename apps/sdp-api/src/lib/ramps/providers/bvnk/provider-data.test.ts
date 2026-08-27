@@ -130,38 +130,42 @@ describe("bvnkOnrampStatusFromProviderData", () => {
 
 describe("buildBvnkCustomerExternalReference", () => {
   it("builds a compact cp_ externalReference from an SDP counterparty id", () => {
-    expect(
-      buildBvnkCustomerExternalReference("counterparty_123e4567-e89b-12d3-a456-426614174000")
-    ).toBe("cp_123e4567e89b12d3a456426614174000");
+    expect(buildBvnkCustomerExternalReference("cpty_123e4567-e89b-12d3-a456-426614174000")).toBe(
+      "cp_123e4567e89b12d3a456426614174000"
+    );
   });
 
   it("rejects a malformed counterparty id", () => {
-    expect(() => buildBvnkCustomerExternalReference("counterparty_123")).toThrow(
+    expect(() => buildBvnkCustomerExternalReference("cpty_123")).toThrow(
       "Malformed SDP counterparty id for BVNK externalReference"
     );
+  });
+
+  it("rejects a retired-prefix counterparty id", () => {
+    expect(() =>
+      buildBvnkCustomerExternalReference("counterparty_123e4567-e89b-12d3-a456-426614174000")
+    ).toThrow("Malformed SDP counterparty id for BVNK externalReference");
   });
 });
 
 describe("parseBvnkOfframpWalletName", () => {
   it("round-trips an SDP off-ramp wallet name", () => {
-    expect(
-      parseBvnkOfframpWalletName(buildBvnkOfframpWalletName("USD", "counterparty_123"))
-    ).toEqual({
+    expect(parseBvnkOfframpWalletName(buildBvnkOfframpWalletName("USD", "cpty_123"))).toEqual({
       namespace: "sdp",
       direction: "offramp",
       fiatCurrency: "USD",
-      counterpartyId: "counterparty_123",
+      counterpartyId: "cpty_123",
     });
   });
 
   it("rejects malformed wallet names", () => {
-    expect(() => parseBvnkOfframpWalletName("sdp:onramp:USD:counterparty_123")).toThrow(
+    expect(() => parseBvnkOfframpWalletName("sdp:onramp:USD:cpty_123")).toThrow(
       "Malformed BVNK off-ramp wallet name"
     );
-    expect(() => parseBvnkOfframpWalletName("sdp:offramp:NOTFIAT:counterparty_123")).toThrow(
+    expect(() => parseBvnkOfframpWalletName("sdp:offramp:NOTFIAT:cpty_123")).toThrow(
       "Malformed BVNK off-ramp wallet name"
     );
-    expect(() => parseBvnkOfframpWalletName("sdp:offramp:USD:counterparty_123:extra")).toThrow(
+    expect(() => parseBvnkOfframpWalletName("sdp:offramp:USD:cpty_123:extra")).toThrow(
       "Malformed BVNK off-ramp wallet name"
     );
   });
@@ -169,27 +173,27 @@ describe("parseBvnkOfframpWalletName", () => {
 
 describe("parseBvnkOnrampWalletName", () => {
   it("round-trips an SDP on-ramp wallet name", () => {
-    const walletName = buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY);
+    const walletName = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
 
-    expect(walletName).toBe("sdp:onramp:counterparty_123:USD:USDC_SOLANA:dest");
+    expect(walletName).toBe("sdp:onramp:cpty_123:USD:USDC_SOLANA:dest");
     expect(parseBvnkOnrampWalletName(walletName)).toEqual({
       namespace: "sdp",
       direction: "onramp",
-      counterpartyId: "counterparty_123",
+      counterpartyId: "cpty_123",
       onrampKey: ONRAMP_KEY,
     });
   });
 
   it("rejects wallet names with malformed payment rule keys", () => {
-    expect(() =>
-      parseBvnkOnrampWalletName("sdp:onramp:counterparty_123:USD:USDC_NOPE:dest")
-    ).toThrow("Malformed BVNK on-ramp wallet name");
+    expect(() => parseBvnkOnrampWalletName("sdp:onramp:cpty_123:USD:USDC_NOPE:dest")).toThrow(
+      "Malformed BVNK on-ramp wallet name"
+    );
   });
 });
 
 describe("buildBvnkWalletIdempotencyKey", () => {
   it("hashes the BVNK wallet name to a stable 36-character key", async () => {
-    const walletName = buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY);
+    const walletName = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
 
     const key = await buildBvnkWalletIdempotencyKey(walletName);
 
@@ -232,11 +236,7 @@ describe("BVNK on-ramp payment rule key", () => {
   });
 });
 
-type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
-
-function counterpartyRow(
-  overrides?: Partial<IndividualCounterpartyRow>
-): IndividualCounterpartyRow {
+function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
   return {
     id: "cp_123",
     organization_id: "org_123",
@@ -244,19 +244,6 @@ function counterpartyRow(
     external_id: null,
     entity_type: "individual",
     display_name: "Ada Lovelace",
-    email: "ada@example.com",
-    identity: {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: {
-        line1: "1 Market St",
-        city: "San Francisco",
-        countryCode: "US",
-        subdivisionCode: "US-TX",
-      },
-    },
     provider_data: {},
     status: "active",
     created_by: null,
@@ -267,28 +254,12 @@ function counterpartyRow(
 }
 
 describe("buildBvnkRuleEntity", () => {
-  it("normalizes an ISO-prefixed stored subdivision code to BVNK's bare stateCode", () => {
-    const entity = buildBvnkRuleEntity(counterpartyRow());
+  it("fails loudly at the unwired JIT seam", () => {
+    const run = () => buildBvnkRuleEntity(counterpartyRow());
 
-    expect(entity.address?.stateCode).toBe("TX");
-  });
-
-  it("throws for a non-US subdivision that does not resolve to 2 characters", () => {
-    const row = counterpartyRow({
-      identity: {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: {
-          line1: "1 High St",
-          city: "London",
-          countryCode: "GB",
-          subdivisionCode: "GB-ENG",
-        },
-      },
-    });
-
-    expect(() => buildBvnkRuleEntity(row)).toThrowError(SdpPaymentsError);
+    expect(run).toThrowError(SdpPaymentsError);
+    expect(run).toThrowError(
+      "BVNK onramp requires identity fields for counterparty cp_123 that are no longer stored; JIT collection is not wired yet"
+    );
   });
 });

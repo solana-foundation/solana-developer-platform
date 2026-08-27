@@ -5,6 +5,7 @@ import {
   EgressBlockedError,
   guardedFetch,
   guardedLookup,
+  headersForRedirect,
   isBlockedAddress,
   nextRedirectStep,
 } from "@/services/guarded-egress";
@@ -99,6 +100,36 @@ describe("nextRedirectStep", () => {
 
   it("is not a redirect without a location", () => {
     expect(nextRedirectStep(302, null, "https://rpc.example/", init)).toBeNull();
+  });
+});
+
+describe("headersForRedirect", () => {
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json; charset=utf-8",
+    Authorization: "Bearer secret",
+    "x-api-key": "secret",
+  };
+
+  it("preserves provider headers within the same origin", () => {
+    expect(headersForRedirect("https://rpc.example/v1", "https://rpc.example/v2", headers)).toBe(
+      headers
+    );
+  });
+
+  it("drops tenant credentials when a redirect changes origin", () => {
+    expect(
+      headersForRedirect("https://rpc.example/v1", "https://regional.example/v2", headers)
+    ).toEqual({
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+    });
+  });
+
+  it("treats a port change as a different origin", () => {
+    expect(
+      headersForRedirect("https://rpc.example/v1", "https://rpc.example:8443/v2", headers)
+    ).not.toHaveProperty("Authorization");
   });
 });
 

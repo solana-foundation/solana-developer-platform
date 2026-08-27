@@ -20,6 +20,7 @@ packages/*
 !packages/sdp-env-config
 !packages/sdp-earn
 !packages/sdp-helius-rings
+!packages/sdp-helius-rings-sdk
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-solana

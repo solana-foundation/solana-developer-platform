@@ -1,6 +1,6 @@
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocLink } from "./doc-link";
 
 function render(node: React.ReactElement): string {
@@ -8,18 +8,24 @@ function render(node: React.ReactElement): string {
 }
 
 describe("DocLink", () => {
-  it("resolves its target through the shared docs origin", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("resolves its target through the configured docs origin", () => {
+    vi.stubEnv("NEXT_PUBLIC_SDP_DOCS_URL", "https://docs.example.test/docs/");
     const markup = render(
       <DocLink path="/reference/policies" newTabHint="opens in a new tab">
         Read the policy reference
       </DocLink>
     );
 
-    expect(markup).toContain(`href="${DEFAULT_SDP_DOCS_URL}/reference/policies"`);
+    expect(markup).toContain('href="https://docs.example.test/docs/reference/policies"');
     expect(markup).toContain("Read the policy reference");
   });
 
-  it("links to the docs root when given no path", () => {
+  it("falls back to the shared docs origin when none is configured", () => {
+    vi.stubEnv("NEXT_PUBLIC_SDP_DOCS_URL", "");
     const markup = render(<DocLink newTabHint="opens in a new tab">Docs</DocLink>);
 
     expect(markup).toContain(`href="${DEFAULT_SDP_DOCS_URL}"`);

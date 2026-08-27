@@ -61,15 +61,15 @@ describe("dashboard workspace tab URL state", () => {
     // /api-playground redirect, both arrive here carrying tab=playground.
     expect(
       shouldClearDashboardTabAfterPathnameChange({
-        previousPathname: "/dashboard/payments/private-channels/members",
-        pathname: "/dashboard/payments/private-channels/overview",
+        previousPathname: "/dashboard/integrations/private-channels/members",
+        pathname: "/dashboard/integrations/private-channels/overview",
         tab: "playground",
       })
     ).toBe(false);
     expect(
       shouldClearDashboardTabAfterPathnameChange({
-        previousPathname: "/dashboard/payments/private-channels/api-playground",
-        pathname: "/dashboard/payments/private-channels/overview",
+        previousPathname: "/dashboard/integrations/private-channels/api-playground",
+        pathname: "/dashboard/integrations/private-channels/overview",
         tab: "playground",
       })
     ).toBe(false);

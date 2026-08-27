@@ -23,6 +23,11 @@ A catalogue-only provider is a complete integration, not a partial one: there is
 no wallet to provision, so `supportsPortfolioWallets` returning false is the
 answer, not a TODO. See CLAUDE.md → "Two provider shapes".
 
+The Clusters row above describes each provider's OWN catalogue sources. Since
+PRO-1742 every non-production environment additionally carries a browse-only
+MIRROR of production's accepted mainnet shelf (rows read `fundable: false`,
+served only on an explicit `?cluster=` opt-in); see "The sync cron" below.
+
 Companion docs:
 
 - [ADR 0002 — Earn provider pluggability](../../docs/decisions/0002-earn-provider-pluggability.md)
@@ -397,6 +402,15 @@ refresh is update-only.
   `listStrategies` per environment (sandbox + production), validates each row
   against the provider's declared support, and upserts on
   `(provider, provider_reference, environment)`.
+- **Non-production is TWO lanes since PRO-1742:** the provider's own catalogue
+  for that environment (the fundable shelf), plus a browse-only MIRROR of the
+  production pass's accepted mainnet shelf, written from the same fetch (the
+  mirror never re-reads the provider). Mirrored rows derive `fundable: false`
+  and every provider mutation refuses them; reads default to the environment's
+  own cluster and only serve the mirror on an explicit `?cluster=` opt-in. A
+  reference both sources list stays on the own (fundable) shelf: the mirror
+  under-reports it, warned hourly (ADR 0002, PRO-1742 addendum: this caps a
+  fully-faithful mirror to cluster-distinct, address-keyed references).
 - **When it runs:** hourly (`EARN_CATALOGUE_SYNC_CRON = "0 * * * *"`), on two
   schedulers behind the same flag gate (`isEarnEnabled`): in-process node-cron
   (`cron/runner.ts` — self-hosted and explicitly opted-in services) and the
@@ -415,8 +429,13 @@ refresh is update-only.
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
 - **Delist convergence:** after a successful non-empty provider response, active
-  rows absent from that provider's live catalogue are deleted. Operator-paused
-  or deprecated rows remain so a later sync cannot silently reactivate them.
+  rows absent from that provider's live catalogue are deleted, scoped to the
+  cluster sub-shelf the responding lane is the truth for. Operator-paused or
+  deprecated rows remain so a later sync cannot silently reactivate them. The
+  mirror lane additionally converges to EMPTY on a reliable "nothing is
+  listed" answer (an empty accepted mainnet shelf, or a steady-state
+  production skip), so orphaned mirror rows never outlive their truth source;
+  fundable own shelves keep the absolute empty-keep-set refusal.
 
 ## Invariants (do not break)
 

@@ -42,7 +42,6 @@ test.describe
         recurringAccountLabel = `E2E Subscription ${suffix}`;
         const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
           displayName: `E2E Recurring ${suffix}`,
-          email: `e2e-recurring-${suffix}@example.com`,
           accountLabel: recurringAccountLabel,
           destinationAddress: fixtures.wallets.treasury.publicKey,
         });

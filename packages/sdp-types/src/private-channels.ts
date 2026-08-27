@@ -42,13 +42,10 @@ export interface PrivateChannelToken {
 }
 
 /**
- * Infer the Solana cluster from an instance's chain RPC URL. The persisted
- * instance stores no explicit cluster, and the sandbox is devnet, so an
- * unrecognized URL is treated as devnet.
+ * Legacy cluster inference used by the currently deployed Private Channels UI.
  *
- * Lives here rather than in the API so the web derives the cluster the SAME way
- * the API does. `useSolanaCluster()` resolves from the selected project's
- * environment instead, which can disagree with the instance's own RPC URL.
+ * @deprecated Private Channels now derives the cluster from the SDP project.
+ * Keep this helper until the UI migration no longer imports it.
  */
 export function inferCluster(chainRpcUrl: string): SolanaCluster {
   return /mainnet/i.test(chainRpcUrl) ? "mainnet-beta" : "devnet";
@@ -83,6 +80,13 @@ export function privateChannelTokens(cluster: SolanaCluster): PrivateChannelToke
  */
 export interface PrivateChannelInstanceInput {
   gatewayUrl: string;
+  /**
+   * Legacy compatibility field. The API accepts and returns it while the
+   * existing dashboard is being migrated, but Private Channels operations use
+   * the project's configured RPC instead.
+   *
+   * @deprecated Configure RPC on the SDP project.
+   */
   chainRpcUrl: string;
   escrowProgramId: string;
   withdrawProgramId: string;
@@ -193,6 +197,7 @@ export type PrivateChannelTransferStatus =
  */
 export interface PrivateChannelTransferContext {
   gatewayUrl?: string;
+  /** @deprecated Private Channels uses the project's configured RPC. */
   chainRpcUrl?: string;
   escrowProgramId?: string;
   escrowInstanceAddr?: string;

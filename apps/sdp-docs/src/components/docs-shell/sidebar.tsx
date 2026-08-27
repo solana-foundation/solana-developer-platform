@@ -1,7 +1,8 @@
 "use client";
 
 import type { Root } from "fumadocs-core/page-tree";
-import { ArrowUpRight, Menu, X } from "lucide-react";
+import { useSearchContext } from "fumadocs-ui/contexts/search";
+import { ArrowUpRight, Menu, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
@@ -26,6 +27,7 @@ function getNodeKey(node: Root["children"][number]) {
 
 export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
   const [open, setOpen] = useState(false);
+  const { setOpenSearch } = useSearchContext();
 
   return (
     <>
@@ -81,6 +83,19 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
               </a>
             ) : null}
           </div>
+
+          <button
+            type="button"
+            className="launch-docs-sidebar-search"
+            onClick={() => setOpenSearch(true)}
+          >
+            <Search aria-hidden="true" />
+            Search docs
+            <span className="launch-docs-sidebar-search-keys">
+              <kbd>⌘</kbd>
+              <kbd>K</kbd>
+            </span>
+          </button>
         </div>
 
         <nav className="launch-docs-sidebar-nav" aria-label="Documentation navigation">
@@ -88,6 +103,18 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
             <NavigationNode key={getNodeKey(node)} node={node} />
           ))}
         </nav>
+
+        <div className="launch-docs-sidebar-status">
+          <span className="launch-docs-status-row">
+            <span className="launch-docs-status-dot" aria-hidden="true" />
+            Live on Devnet
+          </span>
+          <span className="launch-docs-status-row">
+            <span className="launch-docs-status-dot is-muted" aria-hidden="true" />
+            Mainnet
+            <span className="launch-badge">Coming soon</span>
+          </span>
+        </div>
       </aside>
     </>
   );

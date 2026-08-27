@@ -1,10 +1,16 @@
 import { isAddress } from "@sdp/solana/address";
 import {
+  DEFAULT_EARN_BUTTON_ACCENT_COLOR,
   EARN_APY_TYPES,
+  EARN_BUTTON_ACCENT_COLOR_PATTERN,
+  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
+  EARN_BUTTON_PUBLIC_TOKEN_PATTERN,
+  EARN_BUTTON_STYLES,
   EARN_LIQUIDITY_TERMS,
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
   EARN_STRATEGY_SOURCE_KINDS,
+  SOLANA_CLUSTERS,
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -25,6 +31,26 @@ export const listEarnStrategiesQuerySchema = z.object({
   sourceKind: z.enum(EARN_STRATEGY_SOURCE_KINDS).optional(),
   apyType: z.enum(EARN_APY_TYPES).optional(),
   liquidityTerm: z.enum(EARN_LIQUIDITY_TERMS).optional(),
+  // Explicit cluster opt-in (PRO-1742). Omitted, the list answers the
+  // environment's own cluster — the shelf the caller can act on. Naming the
+  // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
+  cluster: z.enum(SOLANA_CLUSTERS).optional(),
+});
+
+export const earnButtonConfigurationSchema = z.object({
+  strategyId: z.string().min(1).max(128),
+  style: z.enum(EARN_BUTTON_STYLES),
+  accentColor: z
+    .string()
+    .regex(EARN_BUTTON_ACCENT_COLOR_PATTERN)
+    .default(DEFAULT_EARN_BUTTON_ACCENT_COLOR),
+});
+
+export const earnButtonConfigurationPublicParamsSchema = z.object({
+  publicToken: z
+    .string()
+    .length(EARN_BUTTON_PUBLIC_TOKEN_LENGTH)
+    .regex(EARN_BUTTON_PUBLIC_TOKEN_PATTERN, "Invalid Earn button integration token"),
 });
 
 // ---------------------------------------------------------------------------

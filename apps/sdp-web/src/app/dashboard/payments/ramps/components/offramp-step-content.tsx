@@ -229,7 +229,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         <MoneygramRampWidget
           direction="offramp"
           quote={quote}
-          counterparty={selectedCounterparty}
           sourceWalletId={fields.walletId}
           sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
           sourceWalletAddress={selectedWallet.publicKey}

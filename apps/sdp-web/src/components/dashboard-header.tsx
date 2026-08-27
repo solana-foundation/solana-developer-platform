@@ -264,7 +264,7 @@ function privateChannelsSubPageTitle(
   segment: string
 ): string {
   switch (segment) {
-    case "instance":
+    case "setup":
       return t("DashboardPrivateChannels.tabs.instance");
     case "channels":
       return t("DashboardPrivateChannels.tabs.channels");
@@ -294,12 +294,28 @@ function getPrivateChannelsRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (!pathname.startsWith("/dashboard/payments/private-channels")) {
+  if (!pathname.startsWith("/dashboard/integrations/private-channels")) {
     return null;
   }
-  const isHub =
-    pathname === "/dashboard/payments/private-channels" ||
-    pathname.startsWith("/dashboard/payments/private-channels/overview");
+  if (pathname === "/dashboard/integrations/private-channels") {
+    return {
+      title: t("Shared.dashboardShell.integrations"),
+      contentWidthClass: "max-w-5xl",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/integrations/private-channels/setup") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: "/dashboard/integrations/private-channels",
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-5xl",
+    });
+  }
+  const isHub = pathname.startsWith("/dashboard/integrations/private-channels/overview");
   if (isHub) {
     return {
       title: t("Shared.dashboardShell.privateChannels"),
@@ -315,7 +331,7 @@ function getPrivateChannelsRoutePageConfig(
     contentWidthClass: "max-w-none",
     topBarLeadingContent: (
       <HeaderBackAction
-        href="/dashboard/payments/private-channels/overview"
+        href="/dashboard/integrations/private-channels/overview"
         label={t("Shared.dashboardShell.backToPrivateChannels")}
         compactOnMobile
       />
@@ -545,6 +561,7 @@ function getIntegrationsPageConfig(
           { id: "rpc", label: t("Shared.integrations.rpcTitle") },
           { id: "ramps", label: t("Shared.integrations.rampsTitle") },
           { id: "compliance", label: t("Shared.integrations.complianceTitle") },
+          { id: "privacy", label: t("Shared.integrations.privacyTitle") },
         ],
         hideOnMobile: false,
       },

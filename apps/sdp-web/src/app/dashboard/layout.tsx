@@ -6,14 +6,7 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
-import {
-  assetProfiles,
-  earn,
-  heliusRings,
-  markets,
-  organizationOnboarding,
-  privateChannels,
-} from "@/flags";
+import { getDashboardFlags } from "@/flags/dashboard";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -43,22 +36,9 @@ async function loadOnboardingStatus(): Promise<OrganizationOnboardingStatus | nu
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const [
-    { orgRole, orgId, userId },
-    onboardingEnabled,
-    assetProfilesEnabled,
-    privateChannelsEnabled,
-    marketsEnabled,
-    earnEnabled,
-    heliusRingsEnabled,
-  ] = await Promise.all([
+  const [{ orgRole, orgId, userId }, flags] = await Promise.all([
     getSdpAuth(),
-    organizationOnboarding(),
-    assetProfiles(),
-    privateChannels(),
-    markets(),
-    earn(),
-    heliusRings(),
+    getDashboardFlags(),
   ]);
 
   if (!userId) {
@@ -77,7 +57,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   const [loadedProjects, onboardingStatus, cookieStore] = await Promise.all([
     loadProjects(),
-    onboardingEnabled ? loadOnboardingStatus() : Promise.resolve(null),
+    flags.organizationOnboarding ? loadOnboardingStatus() : Promise.resolve(null),
     cookies(),
   ]);
   const projects = loadedProjects ?? [];
@@ -96,14 +76,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       shouldRepairInitialProjectCookie={projectSelection.shouldRepairCookie}
     >
       <NetworkDebugProvider>
-        <DashboardShell
-          assetProfilesEnabled={assetProfilesEnabled}
-          earnEnabled={earnEnabled}
-          heliusRingsEnabled={heliusRingsEnabled}
-          marketsEnabled={marketsEnabled}
-          onboardingStatus={onboardingStatus}
-          privateChannelsEnabled={privateChannelsEnabled}
-        >
+        <DashboardShell flags={flags} onboardingStatus={onboardingStatus}>
           {children}
         </DashboardShell>
       </NetworkDebugProvider>

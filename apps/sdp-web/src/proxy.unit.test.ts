@@ -24,4 +24,21 @@ describe("public web routes", () => {
       false
     );
   });
+
+  it("keeps the exact Earn engineering handoff route unauthenticated", () => {
+    expect(
+      isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate/public-token"))
+    ).toBe(true);
+    expect(isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate"))).toBe(
+      false
+    );
+    expect(
+      isPublicRoute(
+        new NextRequest("https://dashboard.example.com/earn/integrate/public-token/internal")
+      )
+    ).toBe(false);
+    expect(
+      isPublicRoute(new NextRequest("https://dashboard.example.com/dashboard/markets/earn"))
+    ).toBe(false);
+  });
 });

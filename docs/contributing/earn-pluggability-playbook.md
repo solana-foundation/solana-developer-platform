@@ -104,18 +104,29 @@ wallet. Clear both once, against your local database:
 ```sql
 DELETE FROM earn_strategies WHERE provider_reference LIKE 'seed-demo-%';
 
+DELETE FROM earn_positions position
+ WHERE position.kind = 'custodial'
+   AND position.provider_wallet_id IN (
+     SELECT id FROM earn_provider_wallets
+      WHERE label = 'Seeded sandbox wallet (local dev)'
+   )
+   AND NOT EXISTS (
+     SELECT 1 FROM earn_movements movement
+      WHERE movement.position_id = position.id
+   );
+
 DELETE FROM earn_provider_wallets
  WHERE label = 'Seeded sandbox wallet (local dev)'
    AND NOT EXISTS (
-     SELECT 1 FROM earn_program_withdrawals x
-      WHERE x.wallet_id = earn_provider_wallets.id
+     SELECT 1 FROM earn_positions position
+      WHERE position.provider_wallet_id = earn_provider_wallets.id
    );
 ```
 
-`earn_program_withdrawals` FKs the link row with no cascade — history is
-undeletable by design (migration `0055`) — so a link you have withdrawn against
-stays put, which is where its history belongs anyway. Recreating the local
-database from scratch is the other valid answer.
+`earn_movements` FKs the unified position with no cascade, and `earn_positions`
+FKs the link row with no cascade, so any wallet with movement history survives
+both guarded deletes (migration `0062`). Recreating the local database from
+scratch is the other valid answer.
 
 **Update.** Sync-owned fields (name, APY, mints, risk metadata, ...) converge
 on the next run; manual edits to those columns get overwritten. `status` is the
@@ -230,11 +241,19 @@ API that ignores an `env` parameter is not evidence: Kamino's returns 200 with a
 byte-identical mainnet payload. Check the chain for a per-cluster program before
 you conclude a provider is single-cluster.
 
-**And non-production may never STORE a mainnet instrument.** The catalogue sync
-refuses any snapshot whose `hostCluster` is `mainnet-beta` outside production,
-provider-neutrally, at the single writer. If your provider genuinely is
-mainnet-only, it contributes nothing to a sandbox catalogue — that is the
-intended outcome, not a gap to work around.
+**And non-production's OWN lane never stores a mainnet instrument.** The
+catalogue sync drops any own-fetch snapshot whose `hostCluster` is foreign to
+the environment (provider drift, warned), provider-neutrally, at the single
+writer. Mainnet rows DO reach a non-production catalogue since PRO-1742, but
+only through the sync's MIRROR lane, which carries production's accepted
+mainnet shelf verbatim as a browse-only sub-shelf: rows read
+`fundable: false`, every provider mutation refuses them, and reads only serve
+them on an explicit `?cluster=` opt-in. If your provider genuinely is
+mainnet-only, its sandbox contribution is exactly that mirrored shelf,
+browsable and never fundable. One requirement to inherit the mirror fully:
+references must be cluster-distinct (address-keyed). A slug shared by both of
+your catalogues collides with the environment's own shelf and stays own-lane
+only (ADR 0002, PRO-1742 addendum).
 
 ### A new catalogue column is EXPAND-ONLY in the release that adds it
 

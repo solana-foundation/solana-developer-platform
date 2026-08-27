@@ -4,9 +4,7 @@ import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
   type Counterparty,
-  type CounterpartyEntityType,
   type CounterpartyFieldOptionsResponse,
-  type CounterpartyIdentity,
   type CounterpartyResponse,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
@@ -41,8 +39,6 @@ import {
   getCounterpartyAccountsRepository,
 } from "./context";
 import {
-  counterpartyBusinessIdentitySchema,
-  counterpartyIdentitySchema,
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   type createCounterpartySchema,
@@ -52,21 +48,18 @@ import {
 } from "./schemas";
 
 function mapToCounterparty(row: CounterpartyRow): Counterparty {
-  const base = {
+  return {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
     externalId: row.external_id,
+    entityType: row.entity_type,
     displayName: row.display_name,
-    email: row.email,
     status: row.status,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-  return row.entity_type === "individual"
-    ? { ...base, entityType: "individual", identity: row.identity }
-    : { ...base, entityType: "business", identity: row.identity };
 }
 
 export const getCounterpartyFieldOptions = async (c: AppContext) => {
@@ -343,8 +336,7 @@ export const createCounterparty = async (
     externalId: body.externalId ?? null,
     entityType: body.entityType,
     displayName: body.displayName,
-    email: body.email,
-    identity: body.identity,
+    providerData: {},
     createdBy,
   });
 
@@ -368,54 +360,6 @@ export const createCounterparty = async (
   const response: CounterpartyResponse = { counterparty: mapToCounterparty(counterparty) };
   return created(c, response);
 };
-
-/**
- * Rejects an update whose resulting (entityType, identity) pair would violate the
- * discriminated identity contract, loading the stored row for whichever side the
- * request omitted. Returns the re-parsed identity when the request provided one.
- */
-async function validateUpdatedIdentity(
-  repo: ReturnType<typeof getCounterpartiesRepository>,
-  input: {
-    counterpartyId: string;
-    organizationId: string;
-    projectId: string;
-    entityType: CounterpartyEntityType | undefined;
-    identity: CounterpartyIdentity | undefined;
-  }
-): Promise<CounterpartyIdentity | undefined> {
-  if (input.identity === undefined && input.entityType === undefined) {
-    return undefined;
-  }
-  let entityType = input.entityType;
-  let identity: unknown = input.identity;
-  if (entityType === undefined || identity === undefined) {
-    const current = await repo.getCounterpartyById(input);
-    if (!current) {
-      throw notFound("Counterparty");
-    }
-    if (entityType === undefined) {
-      entityType = current.entity_type;
-    }
-    if (identity === undefined) {
-      identity = current.identity;
-    }
-  }
-  const identitySchemaForEntityType =
-    entityType === "individual" ? counterpartyIdentitySchema : counterpartyBusinessIdentitySchema;
-  const result = identitySchemaForEntityType.safeParse(identity);
-  if (!result.success) {
-    if (input.identity === undefined) {
-      throw badRequest("Changing entityType requires a matching identity in the same request.", {
-        errors: z.treeifyError(result.error),
-      });
-    }
-    throw badRequest("identity does not match the counterparty's entityType.", {
-      errors: z.treeifyError(result.error),
-    });
-  }
-  return input.identity === undefined ? undefined : result.data;
-}
 
 export const updateCounterparty = async (
   c: ValidatedBodyContext<typeof updateCounterpartySchema>
@@ -444,20 +388,11 @@ export const updateCounterparty = async (
     }
   }
 
-  const validatedIdentity = await validateUpdatedIdentity(repo, {
-    counterpartyId,
-    organizationId: auth.organizationId,
-    projectId,
-    entityType: body.entityType,
-    identity: body.identity,
-  });
-  const update = validatedIdentity === undefined ? body : { ...body, identity: validatedIdentity };
-
   const updated = await repo.updateCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
     projectId,
-    ...update,
+    ...body,
   });
 
   if (!updated) {
