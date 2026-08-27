@@ -11,10 +11,10 @@ import { useEffect, useState } from "react";
  * re-highlighting.
  */
 
-export type HighlightLanguage = "javascript" | "json";
+export type HighlightLanguage = "javascript" | "json" | "typescript";
 
 export function isHighlightLanguage(value: string): value is HighlightLanguage {
-  return value === "javascript" || value === "json";
+  return value === "javascript" || value === "json" || value === "typescript";
 }
 
 // @solana/design-system/styles (imported by globals.css) owns the complete

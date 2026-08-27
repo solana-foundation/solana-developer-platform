@@ -144,11 +144,22 @@ describe("EarnButtonBuilder", () => {
       screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
     ).toBeTruthy();
 
-    const code = screen.getByText(/v1\/earn\/vault-deposits/).textContent ?? "";
+    // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
+    // transaction, the customer's wallet signs, submit the signed bytes. The
+    // treasury route (vault-deposits + custodyWalletId) must not reappear
+    // here — a B2B2C partner cannot name a custody wallet.
+    const code =
+      screen.getByText(/v1\/earn\/external-wallet\/deposit-transactions/).textContent ?? "";
+    expect(code).toContain("/v1/earn/external-wallet/deposits");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
     expect(code).toContain('strategyId: "earn_strategy_live"');
-    expect(code).toContain("response.status === 202");
+    expect(code).toContain("ownerAddress");
+    expect(code).toContain("minSharesOut: string");
+    expect(code).toContain("minSharesOut,");
+    expect(code).toContain("signedTransaction");
+    expect(code).not.toContain("custodyWalletId");
+    expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");
     expect(code).not.toContain("developers.solana.com/earn/buttons");
     expect(screen.getByRole("link", { name: "Done" }).getAttribute("href")).toBe(
