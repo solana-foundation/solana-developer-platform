@@ -2264,11 +2264,11 @@ export const transferBatchEstimateResponseSchema = z
   })
   .openapi({ description: "Transfer batch estimate response payload." });
 
-export const estimateOnrampRequestSchema = estimateOnrampSchemaBase.openapi({
+export const estimateOnrampRequestSchema = withOpenApi(estimateOnrampSchemaBase, {
   description: "On-ramp estimate request. Fans out one live call per provider on the corridor.",
 });
 
-export const estimateOfframpRequestSchema = estimateOfframpSchemaBase.openapi({
+export const estimateOfframpRequestSchema = withOpenApi(estimateOfframpSchemaBase, {
   description: "Off-ramp estimate request. Fans out one live call per provider on the corridor.",
 });
 

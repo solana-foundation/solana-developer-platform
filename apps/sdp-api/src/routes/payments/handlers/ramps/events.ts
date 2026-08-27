@@ -189,8 +189,11 @@ export async function recordMoneygramRampEvent(
   }
 
   const moneygramData = readMoneygramData(transfer);
+  if (event.kind === "completed") {
+    return completeMoneygramOfframp(c, transfer, moneygramData, event);
+  }
   if (event.kind !== "signed") {
-    return recordMoneygramAdvisoryEvent(c, transfer, moneygramData, event);
+    return recordMoneygramAdvisoryEvent(c, transfer, event);
   }
   if (transfer.status === "settling") {
     if (moneygramData.cryptoTransferId === event.cryptoTransferId) {
@@ -234,11 +237,76 @@ export async function recordMoneygramRampEvent(
   return transferResponse(c, updated);
 }
 
-async function recordMoneygramAdvisoryEvent(
+/**
+ * MoneyGram's terminal off-ramp event, and the one MoneyGram event that is NOT advisory.
+ *
+ * `requireVerifiedCryptoLeg` with `requireConfirmed` proves the crypto leg landed on chain
+ * and reached confirmed or finalized, so the transfer has genuinely settled. Recording that
+ * proof and then leaving the status at `settling` made a verified settlement indistinguishable
+ * from one still in flight, which is the defect in #559. MoneyGram has no webhook processor
+ * (see RAMP_PROVIDER_WEBHOOK_PROCESSOR), so nothing else would ever move this row.
+ *
+ * The transition is inline rather than in the background verifier because the proof is here.
+ */
+async function completeMoneygramOfframp(
   c: AppContext,
   transfer: PaymentTransferRow,
   moneygramData: Record<string, unknown>,
-  event: Exclude<MoneygramRampEvent, { kind: "signed" }>
+  event: Extract<MoneygramRampEvent, { kind: "completed" }>
+) {
+  if (transfer.status !== "pending" && transfer.status !== "settling") {
+    throw conflict(`Cannot record a completed event while the transfer is ${transfer.status}.`);
+  }
+  if (transfer.status === "settling" && moneygramData.cryptoTransferId !== event.cryptoTransferId) {
+    throw conflict("Off-ramp transfer is already settling a different crypto transfer.");
+  }
+
+  const leg = await requireVerifiedCryptoLeg(c, transfer, event.cryptoTransferId, {
+    requireConfirmed: true,
+  });
+
+  const repo = getPaymentsRepository(c);
+  const updated = await repo.updateTransferStatusGuarded({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    fromStatuses: ["pending", "settling"],
+    toStatus: "completed",
+    amount: leg.amount,
+    providerData: {
+      moneygram: {
+        ...moneygramData,
+        cryptoTransferId: leg.id,
+        solanaTxSignature: leg.signature,
+        transactionId: event.transactionId,
+        payoutAmount: event.payoutAmount,
+        payoutStatus: event.payoutStatus,
+        ...(event.referenceNumber ? { referenceNumber: event.referenceNumber } : {}),
+      },
+    },
+    updatedAt: new Date().toISOString(),
+  });
+
+  if (!updated) {
+    const current = await repo.getTransferById({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+    });
+    // A concurrent delivery of the same event reaches the same outcome, so treat it as success
+    // rather than surfacing a conflict the caller cannot act on.
+    if (current?.status === "completed" && readMoneygramData(current).cryptoTransferId === leg.id) {
+      return transferResponse(c, current);
+    }
+    throw conflict("Off-ramp transfer changed while the completed event was recorded.");
+  }
+  return transferResponse(c, updated);
+}
+
+async function recordMoneygramAdvisoryEvent(
+  c: AppContext,
+  transfer: PaymentTransferRow,
+  event: Exclude<MoneygramRampEvent, { kind: "signed" | "completed" }>
 ) {
   switch (event.kind) {
     case "onramp_completed":
@@ -249,28 +317,6 @@ async function recordMoneygramAdvisoryEvent(
         status: event.status,
         ...(event.referenceNumber ? { referenceNumber: event.referenceNumber } : {}),
       });
-    case "completed": {
-      if (transfer.status !== "pending" && transfer.status !== "settling") {
-        throw conflict(`Cannot record a completed event while the transfer is ${transfer.status}.`);
-      }
-      if (
-        transfer.status === "settling" &&
-        moneygramData.cryptoTransferId !== event.cryptoTransferId
-      ) {
-        throw conflict("Off-ramp transfer is already settling a different crypto transfer.");
-      }
-      const leg = await requireVerifiedCryptoLeg(c, transfer, event.cryptoTransferId, {
-        requireConfirmed: true,
-      });
-      return recordAdvisoryClientEvent(c, transfer, {
-        kind: event.kind,
-        cryptoTransferId: leg.id,
-        transactionId: event.transactionId,
-        payoutAmount: event.payoutAmount,
-        payoutStatus: event.payoutStatus,
-        ...(event.referenceNumber ? { referenceNumber: event.referenceNumber } : {}),
-      });
-    }
     case "errored":
       return recordAdvisoryClientEvent(c, transfer, {
         kind: event.kind,

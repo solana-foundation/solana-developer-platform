@@ -1083,6 +1083,185 @@ describe("Payments routes — ramps", () => {
     expect(transfer?.status).toBe("pending");
   });
 
+  // #559: MoneyGram's completed event verifies the crypto leg on chain and previously left the
+  // transfer at `settling`, making a proven settlement indistinguishable from one in flight.
+  describe("MoneyGram off-ramp completion", () => {
+    async function seedCryptoLeg(params: {
+      id: string;
+      status: string;
+      amount?: string;
+      signature?: string;
+    }): Promise<void> {
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, source_address, destination_address,
+             token, amount, type, direction, status, signature, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          params.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_WALLET_ID,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          TEST_SOLANA_ADDRESSES.wallet2,
+          "USDC",
+          params.amount ?? "25",
+          "transfer",
+          "outbound",
+          params.status,
+          params.signature ?? `sig-${params.id}`,
+          now,
+          now
+        )
+        .run();
+    }
+
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+
+    function completedBody(sessionId: string, cryptoTransferId: string) {
+      return JSON.stringify({
+        kind: "completed",
+        sessionId,
+        cryptoTransferId,
+        transactionId: "mgi_tx_1",
+        payoutAmount: 25,
+        payoutStatus: "completed",
+      });
+    }
+
+    async function statusOf(id: string): Promise<string | undefined> {
+      const row = await getDb(env)
+        .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+        .bind(id)
+        .first<{ status: string }>();
+      return row?.status;
+    }
+
+    it("advances a verified off-ramp from settling to completed", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_ok",
+        provider: "moneygram",
+        providerReference: "mg_session_complete_ok",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_ok", status: "confirmed" });
+
+      const signed = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            kind: "signed",
+            sessionId: "mg_session_complete_ok",
+            cryptoTransferId: "xfr_mg_leg_ok",
+          }),
+        },
+        env
+      );
+      expect(signed.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_ok")).toBe("settling");
+
+      const completed = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_complete_ok", "xfr_mg_leg_ok") },
+        env
+      );
+      expect(completed.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_ok")).toBe("completed");
+    });
+
+    it("refuses to complete when the crypto leg is not confirmed on chain", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_unconfirmed",
+        provider: "moneygram",
+        providerReference: "mg_session_unconfirmed",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_unconfirmed", status: "pending" });
+
+      const res = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers,
+          body: completedBody("mg_session_unconfirmed", "xfr_mg_leg_unconfirmed"),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(await statusOf("xfr_mg_complete_unconfirmed")).toBe("pending");
+    });
+
+    it("treats a redelivered completed event as idempotent", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_replay",
+        provider: "moneygram",
+        providerReference: "mg_session_replay",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_replay", status: "finalized" });
+
+      const first = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_replay", "xfr_mg_leg_replay") },
+        env
+      );
+      expect(first.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_replay")).toBe("completed");
+
+      const second = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_replay", "xfr_mg_leg_replay") },
+        env
+      );
+      expect(second.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_replay")).toBe("completed");
+    });
+
+    it("rejects a completed event naming a different crypto leg than the one settling", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_swap",
+        provider: "moneygram",
+        providerReference: "mg_session_swap",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_a", status: "confirmed" });
+      await seedCryptoLeg({ id: "xfr_mg_leg_b", status: "confirmed" });
+
+      await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            kind: "signed",
+            sessionId: "mg_session_swap",
+            cryptoTransferId: "xfr_mg_leg_a",
+          }),
+        },
+        env
+      );
+      expect(await statusOf("xfr_mg_complete_swap")).toBe("settling");
+
+      const res = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_swap", "xfr_mg_leg_b") },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      expect(await statusOf("xfr_mg_complete_swap")).toBe("settling");
+    });
+  });
+
   describe("metered quotas", () => {
     it("429s an estimate once the actor's metered quota is exhausted", async () => {
       await seedRateLimit(
