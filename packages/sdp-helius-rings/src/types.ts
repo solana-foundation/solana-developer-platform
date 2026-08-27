@@ -63,11 +63,8 @@ export interface AssetBalance {
   amountRaw: string;
   /**
    * The mint's scale, or null when nothing that produced this balance knew it.
-   *
-   * Nullable rather than defaulted, because there is no scale that means
-   * "unknown": zero is a claim that the amount is already whole units, and a
-   * reader cannot tell it apart from a mint that really has none. A null tells
-   * every consumer to show `amountRaw` as the base-unit count it is and say so.
+   * Nullable rather than defaulted: zero is a claim that the amount is already
+   * in whole units, which a reader cannot tell apart from an unknown scale.
    */
   decimals: number | null;
 }
@@ -112,7 +109,7 @@ export interface OperationFailure {
 export interface OperationEvent {
   kind: string;
   createdAt: string;
-  /** Never contains SecretRef material — event payloads are audit-grade and pass through the redaction registry. */
+  /** Never contains SecretRef material; payloads pass through the redaction registry. */
   payload?: unknown;
 }
 

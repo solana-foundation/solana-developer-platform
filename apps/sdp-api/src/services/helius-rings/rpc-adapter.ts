@@ -5,13 +5,8 @@ import { RingsAdapterError } from "./adapter-error";
 
 /**
  * Broadcasts the signed outer transaction over the existing SDP RPC path.
- *
- * Failures are raised retryable, which is the right reading for the one caller
- * that acts on it: provisioning re-reads the user record before building
- * anything, so a registration that did land is recognised rather than sent
- * twice. The operation pipeline does not act on it — a broadcast it cannot
- * confirm is ambiguous rather than failed, so it carries the signature into
- * `indexing` and lets Photon decide. See `runPipeline`.
+ * Failures are raised retryable for provisioning, which re-reads the user record
+ * before rebuilding; the operation pipeline ignores the bit and asks Photon.
  */
 
 export interface SubmitRingsOuterTransactionInput {

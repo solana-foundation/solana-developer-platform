@@ -23,9 +23,8 @@ import {
 const heliusRings = new Hono<{ Bindings: Env }>();
 
 /**
- * Router-wide gate: 403 unless the feature flag is on. The flag stays off in
- * every deployed environment that has not opted in; the devnet-only guard
- * inside HeliusRingsService is the second lock.
+ * Router-wide gate: 403 unless the feature flag is on. The devnet-only guard in
+ * HeliusRingsService is the second lock.
  */
 async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isHeliusRingsEnabled(c.env)) {
@@ -43,11 +42,10 @@ heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
 heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallets);
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);
 heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRingsWallet);
-// A sync is a read of Photon, but it advances the wallet's recorded observation
-// point, so it carries the write permission its side effect deserves.
+// A sync reads Photon but advances the wallet's recorded observation point, so
+// it carries write.
 heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
-// Read-only in both senses: it reads one on-chain account and records nothing,
-// so unlike /sync it advances no stored observation and does not earn write.
+// Records nothing, so unlike /sync it does not earn write.
 heliusRings.get(
   "/wallets/:walletId/identity",
   requirePermissions("payments:read"),

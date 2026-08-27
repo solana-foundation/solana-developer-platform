@@ -19,17 +19,9 @@ import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 
 /**
- * Signs the gateway-built outer transaction with the custody wallet that owns
- * the shielded identity. Base64 bytes in, base64 bytes out — no SecretRef
- * crosses this boundary, and the transaction bytes are never logged here (they
- * can carry routing metadata the redaction registry does not model).
- *
- * The signer is resolved from `owner`, not from the organization's default
- * wallet. A Rings identity is registered *to* an owner, so a default-signer
- * signature is at best rejected for a missing signature, and on any path that
- * moves value it would move the wrong wallet's money. Resolution is by public
- * key rather than by a stored wallet id because the only thing that makes a
- * signature valid is that it came from the key the transaction names.
+ * Signs the gateway-built outer transaction with the custody wallet resolved by
+ * `owner`'s public key: a signature from any other key moves the wrong wallet's
+ * money. The bytes are never logged; they can carry unmodelled routing metadata.
  */
 
 /** Signer errors that a retry cannot fix. */
@@ -65,8 +57,8 @@ export async function signRingsOuterTransaction(
     throw toSignerFailure(error);
   }
 
-  // The decoder returns an unbranded Transaction; the gateway built these
-  // bytes as a complete compiled tx, which is what the signer brands assert.
+  // The decoder returns an unbranded Transaction; the gateway built these bytes
+  // as the complete compiled tx the signer brands assert.
   const transaction = getTransactionDecoder().decode(
     base64.encode(input.unsignedTxBase64)
   ) as Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
@@ -92,13 +84,9 @@ export async function signRingsOuterTransaction(
 }
 
 /**
- * The signer for exactly the owner named, or a non-retryable refusal.
- *
- * Both failures are refusals rather than fallbacks. Custody not controlling the
- * owner means the identity was provisioned against a wallet this deployment
- * cannot sign for, and a resolved address that disagrees with the owner means
- * the custody row and its provider have diverged — signing either way would
- * produce a valid signature from the wrong key.
+ * The signer for exactly the owner named, or a non-retryable refusal. Neither
+ * failure falls back: signing anyway would produce a valid signature from the
+ * wrong key.
  */
 async function resolveOwnerSigner(
   input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">

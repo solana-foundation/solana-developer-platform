@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
 
 /**
- * Unreachable on purpose. These tests assert the gateway's own behaviour — that
- * it fails closed, and that a dead upstream becomes a red status rather than a
- * thrown error — so no probe is expected to succeed and nothing leaves the host.
+ * Unreachable on purpose: these tests assert that the gateway fails closed and
+ * that a dead upstream becomes a red status rather than a thrown error, so
+ * nothing leaves the host.
  */
 const CONFIG: RingsGatewayConfig = {
   solanaRpcUrl: "http://127.0.0.1:1/rpc",
@@ -35,16 +35,14 @@ describe("createRingsGateway", () => {
     const health = await createRingsGateway({
       ...CONFIG,
       // The public devnet endpoints are plain http on a real host, which is the
-      // case the flag exists for. Loopback http is always permitted, so the
-      // other tests here need no flag to build a client.
+      // case the flag exists for. Loopback http is always permitted.
       indexerUrl: "http://indexer.example",
       proverUrl: "http://prover.example",
       allowInsecureHttp: false,
     }).probeHealth();
 
     // The client cannot be built at all, so the gateway itself is the failure,
-    // and the SDK's own code for it is what tells the operator which of the two
-    // URLs it objected to.
+    // and the SDK's own code names which of the two URLs it objected to.
     expect(health.gateway).toBe("red");
     expect(health.detail?.gateway).toContain("CLIENT_INVALID_CONFIG");
   });
@@ -67,8 +65,7 @@ describe("createRingsGateway", () => {
   });
 
   // A seed that is present but unusable is an operator problem, not a transient
-  // one. Reporting it as anything retryable would send them to the retry button
-  // instead of to the environment.
+  // one, so nothing retryable may be reported for it.
   it.each([
     ["not base64 at all", "not-valid-base64!!"],
     ["the right shape but too short", Buffer.alloc(16, 7).toString("base64")],
@@ -101,7 +98,7 @@ describe("createRingsGateway", () => {
 
       expect(error).toBeInstanceOf(HeliusRingsError);
       expect((error as HeliusRingsError).code).toBe("config_error");
-      // The reason travels, so the operator learns which way it is wrong; the
+      // The reason travels so the operator learns which way it is wrong; the
       // seed itself never does.
       if (derivationSeed.length > 0) {
         expect((error as HeliusRingsError).message).not.toContain(derivationSeed);
@@ -143,9 +140,8 @@ describe("createRingsGateway", () => {
     expect((error as HeliusRingsError).message).toContain("money flows are not implemented");
   });
 
-  // `verifyIndexed` returning null is how the port says "Photon has not indexed
-  // it yet", so a build that cannot verify has to throw rather than answer null
-  // and leave an operation waiting on an answer that will never come.
+  // Null is how the port says "Photon has not indexed it yet", so a build that
+  // cannot verify has to throw rather than leave an operation waiting forever.
   it("never answers not-indexed instead of refusing", async () => {
     await expect(createRingsGateway(CONFIG).verifyIndexed("sig")).rejects.toBeInstanceOf(
       HeliusRingsError
@@ -153,8 +149,7 @@ describe("createRingsGateway", () => {
   });
 
   // Loopback rather than the real Helius host: this asserts the gateway's own
-  // redaction, and reaching a third party over the network to do it would make
-  // a unit test depend on someone else's uptime.
+  // redaction, not a third party's uptime.
   const WITH_KEY = "http://127.0.0.1:1/?api-key=super-secret-key";
 
   it("never leaks the RPC URL into a health response", async () => {
@@ -172,8 +167,8 @@ describe("createRingsGateway", () => {
     }).probeHealth();
 
     expect(health.detail?.gateway).toMatch(/^client unavailable: .+/);
-    // "client unavailable" on its own sent operators looking with nothing to
-    // look at, so the cause has to survive the redaction.
+    // "client unavailable" alone left operators with nothing to look at, so the
+    // cause has to survive the redaction.
     expect(health.detail?.gateway).not.toBe("client unavailable: unknown error");
     expect(JSON.stringify(health)).not.toContain("super-secret-key");
   });

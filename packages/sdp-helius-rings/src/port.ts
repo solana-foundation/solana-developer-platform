@@ -9,11 +9,9 @@ import type {
 } from "./types";
 
 /**
- * The only seam between SDP and the Rings upstreams (Solana RPC, Photon,
- * prover, key authority). Behind it sits the adapter that runs the Zolana SDK
- * in process, or — until an operator configures those upstreams — a reporter
- * that names what is unset. Nothing else in the codebase may talk to those
- * upstreams directly.
+ * The only seam between SDP and the Rings upstreams (Solana RPC, Photon, prover,
+ * key authority). Nothing else in the codebase may talk to those upstreams
+ * directly.
  */
 
 export interface ProvisionIdentityInput {
@@ -23,40 +21,26 @@ export interface ProvisionIdentityInput {
 
 export interface ProvisionIdentityResult {
   shieldedAddress: string;
-  /**
-   * Where the identity's keys came from. No key refs: a deterministic key
-   * authority recomputes material on demand and persists none of it, so there
-   * is nothing for the caller to hold on to.
-   */
+  /** No key refs: a deterministic key authority persists none of its material. */
   materialTag: MaterialTag;
 }
 
 export interface ReadIdentityInput {
   walletId: string;
-  /**
-   * Base58 Solana address that owns the shielded identity. The registry keys
-   * its record by owner, so the wallet id alone names no account to read.
-   */
+  /** Base58 owner address; the registry keys its record by owner, not by wallet id. */
   owner: string;
 }
 
 /** Whether the registry publishes this tenant's identity for the owner. */
 export type RingsIdentityStatus = "unregistered" | "ours" | "foreign";
 
-/**
- * Which published half differs from the one this tenant derives. The same
- * values label the conflict that provisioning refuses on, so an operator reads
- * one vocabulary across both.
- */
+/** Which published half differs; the same values label the conflict provisioning refuses on. */
 export type RingsIdentityMismatch = "owner" | "nullifier_key" | "viewing_key";
 
 /**
  * What the registry publishes for an owner, next to what this tenant derives.
- *
- * Only the two compressed commitments cross this seam. A record's individual
- * nullifier and viewing public keys are the published halves of a shielded
- * identity and stay behind the port; the commitment over them is the value
- * already persisted as a wallet's shielded address.
+ * Only the two compressed commitments cross this seam; a record's individual
+ * nullifier and viewing public keys stay behind the port.
  */
 export interface ReadIdentityResult {
   status: RingsIdentityStatus;
@@ -70,11 +54,7 @@ export interface ReadIdentityResult {
 
 export interface SyncPhotonInput {
   walletId: string;
-  /**
-   * Base58 Solana address that owns the shielded identity. A gateway serves
-   * every wallet in a tenant and the identity is bound to its owner, so the
-   * wallet id alone does not name anything readable.
-   */
+  /** Base58 owner address; the identity is bound to its owner, not to the wallet id. */
   owner: string;
   /** Null on the first sync. */
   cursor: string | null;
@@ -88,22 +68,14 @@ export interface SyncPhotonResult {
   balances: AssetBalance[];
   /** Outer tx signatures Photon has indexed since the previous cursor. */
   indexedOperationSignatures: string[];
-  /**
-   * True when the sync could not read everything it found. The balances are
-   * still returned, so this is what stops a partial answer being read as a
-   * complete one.
-   */
+  /** The balances are still returned, so this is what stops a partial answer reading as complete. */
   degraded: boolean;
 }
 
 export interface BuildOperationInput {
   operation: PrivateOperation;
   keyRefs: KeyRef[];
-  /**
-   * The identity provisioning published for this wallet. Required for a shield:
-   * the deposit is addressed to the derived keys, and those must still be the
-   * ones the row recorded.
-   */
+  /** Required for a shield: the deposit is addressed to the derived keys. */
   expectedShieldedAddress?: string;
 }
 
@@ -129,8 +101,7 @@ export interface RingsGatewayPort {
   provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult>;
   /**
    * Reads the published identity and says whether it is this tenant's. A pure
-   * read of the chain — one account read, no transaction, no fee — though it
-   * derives key material in process, because "ours" is undefined without it.
+   * read of the chain, though it derives key material in process.
    */
   readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult>;
   syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult>;

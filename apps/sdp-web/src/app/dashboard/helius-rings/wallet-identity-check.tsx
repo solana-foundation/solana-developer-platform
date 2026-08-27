@@ -16,19 +16,14 @@ import {
 
 /**
  * What the last check established. `unchecked` is distinct from any outcome:
- * nobody having looked is not an answer, and rendering it as one would state a
- * verdict about the chain that nothing observed.
+ * rendering it as one would state a verdict about the chain nothing observed.
  */
 type Check =
   | { name: "unchecked" }
   | { name: "read"; identity: RingsWalletIdentity }
   | { name: "failed"; message: string };
 
-/**
- * The three outcomes carry different instructions, so they are coloured apart
- * rather than sharing a neutral badge: `foreign` is the one an operator has to
- * act on, and it is the one that looks least like the other two.
- */
+/** Coloured apart because `foreign` is the one an operator has to act on. */
 const STATUS_BADGE: Record<RingsIdentityStatus, BadgeVariant> = {
   unregistered: "default",
   ours: "success",
@@ -36,21 +31,9 @@ const STATUS_BADGE: Record<RingsIdentityStatus, BadgeVariant> = {
 };
 
 /**
- * Reads what the Rings registry publishes for one pending wallet's owner.
- *
- * On demand only. It costs an RPC round trip and derives key material
- * server-side, so nothing here fires on mount or on a timer — an operator who
- * hit a provisioning conflict presses it because the alternative is decoding
- * the PDA by hand.
- *
- * The verdict itself lives in a dialog. Putting the explain-copy and the two
- * commitments in the table cell overflowed the card and clipped against its
- * corner; the cell only offers the check and, after a result, a way back into
- * that dialog.
- *
- * Offered only for `pending` wallets. A `ready` wallet has a recorded identity
- * that every read already re-derives and pins, so the question this answers is
- * one it cannot be in doubt about.
+ * Reads the registry record for one pending wallet, on demand only: it costs an
+ * RPC round trip and derives key material server-side. The verdict lives in a
+ * dialog because the copy and two commitments overflowed the table cell.
  */
 export function WalletIdentityCheck({ wallet }: { wallet: RingsWallet }) {
   const t = useTranslations();
@@ -73,9 +56,8 @@ export function WalletIdentityCheck({ wallet }: { wallet: RingsWallet }) {
       );
       setDialogOpen(true);
     } catch {
-      // No reply at all — offline, or the browser aborted the request. The
-      // envelope reader only ever sees responses, so without catching here the
-      // control would sit disabled on "Checking…" with no answer coming.
+      // No reply at all — offline, or aborted. Uncaught, the control would sit
+      // disabled on "Checking…" with no answer coming.
       setCheck({ name: "failed", message: t("DashboardHeliusRings.identity.readFailed") });
       setDialogOpen(true);
     } finally {
@@ -136,9 +118,8 @@ function Outcome({ identity }: { identity: RingsWalletIdentity }) {
         {t(`DashboardHeliusRings.identity.status_${identity.status}`)}
       </Badge>
 
-      {/* What to do about it, which is the part an operator is actually here
-          for. A status word alone leaves "registered with different keys"
-          looking like something a retry could clear. */}
+      {/* The status word alone leaves "registered with different keys" looking
+          like something a retry could clear. */}
       <p className="text-pretty leading-6 text-secondary">
         {t(`DashboardHeliusRings.identity.explain_${identity.status}`)}
       </p>

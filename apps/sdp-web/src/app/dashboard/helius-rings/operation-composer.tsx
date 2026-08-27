@@ -35,16 +35,14 @@ const NEEDS_RECIPIENT: ReadonlySet<RingsOpType> = new Set([
 ]);
 
 /**
- * Where the wizard is, and the only data valid at that point. A union rather
- * than parallel `step`/`result`/`error` values so "showing a result with no
- * operation" is not representable.
+ * A union rather than parallel `step`/`result`/`error` values so "showing a
+ * result with no operation" is not representable.
  */
 type Phase =
   | { name: "compose" }
   | { name: "review"; error: string | null }
   | { name: "result"; operation: RingsOperationDetail };
 
-/** Everything the compose form has collected. */
 interface ComposerDraft {
   walletId: string | null;
   opType: RingsOpType;
@@ -126,9 +124,8 @@ function buildSummaryRows(
 }
 
 /**
- * One composer for every shielded operation kind. A `review` step sits between
- * the form and the POST; anonymous transfers additionally require an explicit
- * acknowledgement on that step before Confirm unlocks.
+ * One composer for every shielded operation kind. Anonymous transfers require
+ * an explicit acknowledgement on the review step before Confirm unlocks.
  */
 export function OperationComposer({
   wallets,

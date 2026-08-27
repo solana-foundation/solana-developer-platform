@@ -26,14 +26,8 @@ const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockha
 
 /**
  * A genuinely compiled transaction carrying one instruction per entry in
- * `discriminators`, built the way Zolana's `buildUnsignedTransaction` builds
- * one: a v0 message over a blockhash lifetime, with no address lookups.
- *
- * Provisioning decodes what it is about to sign, so a marker object cannot
- * stand in for a transaction in its tests. Only the leading byte of each
- * payload is the registry's discriminator; the rest of a real one publishes key
- * material and none of this asserts on it. An `undefined` entry carries no data
- * at all, which is the shape kit gives an empty payload.
+ * `discriminators`. Provisioning decodes what it is about to sign, so a marker
+ * object cannot stand in; an `undefined` entry is kit's shape for no payload.
  */
 export function compiledRegistryTransaction(
   feePayer: string,
@@ -66,13 +60,9 @@ export function unsignedTxBase64(transaction: Transaction): string {
 }
 
 /**
- * The one identity every test in this package derives from.
- *
- * Shared rather than redeclared per file because several suites assert against
- * the *same* derivation from opposite sides — provisioning refuses a record
- * that does not match it, the identity read reports that same verdict — and two
- * copies of "the record this seed honestly derives" could drift into agreeing
- * with their own suite while disagreeing with each other.
+ * The one identity every test in this package derives from. Shared because
+ * several suites assert against the same derivation from opposite sides, and two
+ * copies of it could drift into disagreeing with each other.
  */
 export const TEST_SEED = new Uint8Array(32).fill(7);
 export const TEST_OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";

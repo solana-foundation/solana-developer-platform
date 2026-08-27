@@ -126,19 +126,16 @@ export function HeliusRingsWorkspace({
         setWalletName("");
         setCreateError(null);
       } else {
-        // The server's reason, verbatim. It is the only text that names what
-        // actually went wrong, and most of these are things the operator can
-        // fix in a minute.
+        // The server's reason verbatim: it is the only text naming what went wrong.
         setCreateError(result.error ?? t("DashboardHeliusRings.wallets.createFailed"));
       }
     } catch {
-      // No reply at all — offline, or the request was aborted.
       setCreateError(t("DashboardHeliusRings.wallets.createFailed"));
     } finally {
       setCreating(false);
     }
-    // The row is reserved before provisioning runs, so a failure still leaves
-    // a pending wallet the table should show.
+    // The row is reserved before provisioning, so a failure still leaves a
+    // pending wallet to show.
     await refresh();
   }, [selectedCustodyWallet, walletName, refresh, t]);
 
@@ -177,9 +174,8 @@ export function HeliusRingsWorkspace({
               );
             })}
           </div>
-          {/* A red badge with no reason is a dead end. The probe already
-              classified why — an unreachable upstream, or a list of unset
-              environment variables — so it is rendered rather than dropped. */}
+          {/* A red badge with no reason is a dead end, so the probe's own
+              classification is rendered rather than dropped. */}
           {alerts.map((alert) => (
             <p key={alert.reason} className="text-sm text-secondary">
               {t("DashboardHeliusRings.health.reason", {
@@ -246,9 +242,8 @@ export function HeliusRingsWorkspace({
                           {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
                         </Badge>
                       </TableCell>
-                      {/* Only for a wallet stuck `pending`. A provisioned wallet's
-                          identity is re-derived and pinned on every read, so the
-                          question this answers cannot be open for one. */}
+                      {/* Only for a wallet stuck `pending`: a provisioned wallet's
+                          identity is re-derived and pinned on every read. */}
                       <TableCell className="min-w-0 align-top">
                         {wallet.status === "pending" ? (
                           <WalletIdentityCheck wallet={wallet} />
@@ -374,9 +369,8 @@ export function HeliusRingsWorkspace({
 }
 
 /**
- * The provisioned shielded identity, scan-shortened in the table so an 88-char
- * commitment cannot blow the layout. The copy control still copies the whole
- * string, and the full address sits on `title` for hover-to-compare.
+ * Scan-shortened so an 88-char commitment cannot blow the layout; the copy
+ * control and `title` still carry the whole string.
  */
 function ShieldedAddress({ address }: { address: string }) {
   const t = useTranslations();

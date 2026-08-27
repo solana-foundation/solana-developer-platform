@@ -28,9 +28,9 @@ import { buildShieldTransaction } from "./shield.js";
 import { syncRingsWallet } from "./sync.js";
 
 /**
- * Everything the gateway needs, as plain strings. This is the Kit-neutral
- * boundary in practice: `@sdp/api` is on `@solana/kit` 6 and this package is on
- * 7, so no branded address, signature or SDK `bigint` may cross over.
+ * Everything the gateway needs, as plain strings. `@sdp/api` is on `@solana/kit`
+ * 6 and this package is on 7, so no branded address, signature or SDK `bigint`
+ * may cross this boundary.
  */
 export interface RingsGatewayConfig {
   /** Full Helius RPC URL with the API key already applied. */
@@ -40,17 +40,16 @@ export interface RingsGatewayConfig {
   /** Base64 master seed the deterministic key authority derives from. */
   readonly derivationSeed: string;
   /**
-   * The tenant every wallet this gateway answers for belongs to. Fixed at
-   * construction rather than passed per call, so a wallet id cannot be paired
-   * with the wrong organization and derive material under someone else's path.
+   * Fixed at construction rather than passed per call, so a wallet id cannot be
+   * paired with the wrong organization and derive material under someone else's
+   * path.
    */
   readonly organizationId: string;
   readonly projectId: string;
   /**
-   * Signs an outer transaction with SDP custody. Base64 in, base64 out: the
-   * owner's Ed25519 secret never leaves custody, so the gateway orchestrates
-   * registration but cannot itself sign it. `owner` names the key the
-   * transaction requires, because one gateway serves a whole tenant.
+   * Signs an outer transaction with SDP custody, base64 in and out; the owner's
+   * Ed25519 secret never leaves custody. `owner` names the key the transaction
+   * requires, because one gateway serves a whole tenant.
    */
   readonly signTransaction: (unsignedTxBase64: string, owner: string) => Promise<string>;
   /** Broadcasts a signed outer transaction and returns its signature. */
@@ -69,11 +68,8 @@ const MONEY_FLOWS_UNIMPLEMENTED =
   "money flows are not implemented in this build of the Rings gateway";
 
 /**
- * Why a client could not be built, with the RPC URL and its API key removed.
- *
- * "client unavailable" on its own left an operator with nothing to look at, and
- * it is only the URL inside the message that cannot be published, so the URL and
- * the key are substituted out rather than the whole message discarded.
+ * Why a client could not be built. Only the URL and its API key cannot be
+ * published, so those are substituted out rather than the message discarded.
  */
 function describeClientFailure(error: unknown, config: RingsGatewayConfig): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
@@ -95,14 +91,9 @@ function readApiKey(rpcUrl: string): string | null {
 }
 
 /**
- * The live gateway, running the Rings SDK in this process.
- *
- * Scoped to what this build can do without spending a note: probe the
- * upstreams, register a shielded identity, read its balances, deposit into it,
- * and ask Photon whether a signature has been indexed. Transfer, withdraw and
- * merge are refused rather than stubbed. The client is built on first use
- * because building it loads the Poseidon hasher and callers construct a
- * gateway per request.
+ * The live gateway, running the Rings SDK in this process. Transfer, withdraw
+ * and merge are refused rather than stubbed. The client is built on first use
+ * because building it loads the Poseidon hasher.
  */
 export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort {
   let pending: Promise<ZolanaClient> | undefined;
@@ -110,9 +101,8 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
 
   /**
    * `config_error` rather than `gateway_unavailable`, so a deployment whose seed
-   * is unusable is not offered a retry that cannot succeed. The reason travels
-   * because `decodeSeed` describes the shape of the failure — wrong length, bad
-   * base64, all zeroes — never the value.
+   * is unusable is not offered a retry that cannot succeed. `decodeSeed`
+   * describes the shape of the failure, never the value.
    */
   function requireMaterial(): ShieldedMaterialSource {
     if (!materialSource) {
@@ -134,8 +124,7 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
   function client(): Promise<ZolanaClient> {
     if (pending === undefined) {
       // A rejection is not cached: a failure here is as likely to be a transient
-      // hasher load as a bad URL, and caching it would make one unlucky request
-      // poison every later one.
+      // hasher load as a bad URL, and caching it would poison every later request.
       pending = createRingsClient(config).catch((error: unknown) => {
         pending = undefined;
         throw error;
@@ -151,16 +140,15 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
 
   return {
     /**
-     * Reports red rather than throwing when the client cannot be built. A
-     * health endpoint that 500s on misconfiguration hides the one fact the
-     * operator called it for.
+     * Reports red rather than throwing when the client cannot be built: a health
+     * endpoint that 500s on misconfiguration hides the one fact it was called
+     * for.
      */
     async probeHealth(): Promise<RuntimeHealth> {
       let resolved: ZolanaClient;
       try {
-        // Bounded like the upstream probes are: an unbounded wait on the hasher
-        // load would hang the one endpoint an operator calls to find out whether
-        // things are hanging.
+        // Bounded like the upstream probes: an unbounded wait on the hasher load
+        // would hang the endpoint an operator called to find out what is hanging.
         resolved = await withHealthTimeout(client(), config.healthTimeoutMs);
       } catch (error) {
         return {
@@ -270,8 +258,8 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
     },
 
     async requestProof(input: RequestProofInput): Promise<ProofArtifact> {
-      // A shield is a public deposit; the SDK already built the instruction.
-      // The pipeline still calls this, so the no-op has to look like a proof.
+      // A shield is a public deposit with no proof, but the pipeline still calls
+      // this, so the no-op has to look like one.
       const metadata =
         typeof input.ringsMetadata?.reveal === "function"
           ? input.ringsMetadata.reveal("adapter")

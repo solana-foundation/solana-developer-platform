@@ -2,17 +2,9 @@
 export const SEED_BYTE_LENGTH = 32;
 
 /**
- * Decodes the master seed from the base64 form it is configured in.
- *
- * Every case here refuses to derive rather than warning. A short, malformed or
- * placeholder seed still yields usable-looking identities, and while the
- * registry's `update_keys` would let a wallet already registered under one be
- * re-keyed, SDP refuses to — re-keying orphans every note encrypted to the old
- * keys. So the cost of accepting a bad seed is paid much later and, in
- * practice, cannot be undone.
- *
- * This deliberately does not read `process.env`: the caller names the variable,
- * this function only decides what a valid seed is.
+ * Decodes the master seed from the base64 form it is configured in. Every case
+ * refuses to derive rather than warning: a bad seed still yields usable-looking
+ * identities, and SDP never re-keys, so the cost is paid later and cannot be undone.
  */
 export function decodeSeed(encoded: string | undefined): Uint8Array {
   if (encoded === undefined || encoded.length === 0) {

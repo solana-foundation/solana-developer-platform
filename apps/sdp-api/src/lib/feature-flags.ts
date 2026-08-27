@@ -31,10 +31,8 @@ export function isHeliusRingsEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): bo
 }
 
 /**
- * Permits plain-http Rings upstreams. The public devnet indexer and prover are
- * http on a real host, so without this the adapter cannot reach them — but in
- * plaintext an indexer response reveals which notes an identity owns, which is
- * why it is an explicit choice rather than something read off the URL scheme.
+ * Permits plain-http Rings upstreams. Explicit rather than read off the URL
+ * scheme: in plaintext an indexer response reveals which notes an identity owns.
  */
 export function isRingsInsecureHttpAllowed(
   env: Pick<Env, "HELIUS_RINGS_ALLOW_INSECURE_HTTP">

@@ -18,17 +18,8 @@ import {
 
 /**
  * Reads what the user registry publishes for an owner and says whether it is
- * this tenant's identity.
- *
- * The honest caveat: this is a pure read *with respect to the chain* — one
- * account read, no transaction built, nothing signed, no fee — but it is not a
- * read with respect to the seed. Deciding "ours" versus "foreign" means having
- * the derived keys to compare against, so the material is derived in process
- * exactly as `syncRingsWallet` already derives it. It is precisely as
- * seed-dependent as a sync, and no less.
- *
- * It exists because an operator who hits a provisioning conflict otherwise has
- * no way to see what is actually published short of decoding the PDA by hand.
+ * this tenant's identity. A pure read with respect to the chain, but not to the
+ * seed: deciding "ours" means deriving the keys in process, exactly as a sync does.
  */
 
 export interface ReadIdentityDeps {
@@ -65,10 +56,8 @@ export async function readRingsIdentityStatus(
       }
 
       // Canonicalised through the SDK's own resolver rather than by reading the
-      // record's key fields. Both paths would reach the same commitment, but
-      // only this one keeps the individual published halves out of every frame
-      // between here and the response: what leaves is one compressed address,
-      // the same class of value already stored as a wallet's shielded address.
+      // record's key fields, so what leaves is one compressed address instead of
+      // the individual published halves.
       const publishedShieldedAddress = canonicalShieldedIdentity(
         resolvedAddressFromRecord(owner, record).address
       );
@@ -85,12 +74,9 @@ export async function readRingsIdentityStatus(
 }
 
 /**
- * Which published half, if any, is not the one this material derives.
- *
- * Shared with provisioning rather than reimplemented there: provisioning
- * refuses a conflicting record on this answer and this read reports it, so a
- * second copy would let the two describe the same record differently. The order
- * is part of the answer — the first difference found is the one named.
+ * Which published half, if any, is not the one this material derives. Shared
+ * with provisioning so the two cannot describe the same record differently. The
+ * order is part of the answer: the first difference found is the one named.
  */
 export function firstMismatch(
   record: UserRecord,

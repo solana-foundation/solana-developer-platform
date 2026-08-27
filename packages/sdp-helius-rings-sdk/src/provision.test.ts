@@ -30,10 +30,7 @@ const UPDATE_KEYS = 2;
 
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 
-/**
- * What the builder returns on the register path. A real compiled transaction,
- * not a marker: provisioning decodes the bytes it is about to sign.
- */
+/** A real compiled transaction, not a marker: provisioning decodes what it signs. */
 const REGISTRATION = compiledRegistryTransaction(OWNER, [REGISTER]);
 
 function deps(overrides: Partial<Parameters<typeof provisionRingsIdentity>[0]> = {}) {
@@ -64,8 +61,7 @@ describe("provisionRingsIdentity", () => {
       shieldedAddress: await derivedIdentity(),
       materialTag: "live",
     });
-    // Custody signs only registration; merging is never provisioned, so no
-    // second transaction is built for it.
+    // Custody signs only registration; merging is never provisioned.
     expect(buildRegistrationTransaction).toHaveBeenCalledTimes(1);
     expect(wiring.signTransaction).toHaveBeenCalledTimes(1);
     expect(wiring.submitTransaction).toHaveBeenCalledTimes(1);
@@ -78,9 +74,7 @@ describe("provisionRingsIdentity", () => {
     const wiring = deps();
     await provisionRingsIdentity(wiring, { walletId: "hrw_1", owner: OWNER });
 
-    // The wire bytes of the transaction the builder produced, unaltered. A
-    // gateway serves a whole tenant, so custody has to be told which key the
-    // transaction needs.
+    // The builder's bytes unaltered, plus the key custody has to be told to use.
     const unsigned = unsignedTxBase64(REGISTRATION);
     expect(wiring.signTransaction).toHaveBeenCalledWith(unsigned, OWNER);
     expect(wiring.submitTransaction).toHaveBeenCalledWith(`signed:${unsigned}`);
@@ -115,8 +109,8 @@ describe("provisionRingsIdentity", () => {
     expect(error).toBeInstanceOf(HeliusRingsError);
     expect((error as HeliusRingsError).code).toBe("conflict");
     expect((error as HeliusRingsError).message).toContain(label);
-    // The point of failing closed: nothing was sent, so the existing identity
-    // is left exactly as it was for a human to look at.
+    // The point of failing closed: nothing was sent, so the existing identity is
+    // left exactly as it was for a human to look at.
     expect(buildRegistrationTransaction).not.toHaveBeenCalled();
     expect(wiring.submitTransaction).not.toHaveBeenCalled();
   });
@@ -154,8 +148,8 @@ describe("provisionRingsIdentity", () => {
       owner: OWNER,
     });
 
-    // A verification read issued before the write confirmed could see
-    // pre-registration state and reject a provision that in fact succeeded.
+    // A read issued before the write confirmed could see pre-registration state
+    // and reject a provision that in fact succeeded.
     expect(order.at(-1)).toBe("fetch");
     expect(order.at(-2)).toBe("confirm");
   });
@@ -170,9 +164,8 @@ describe("provisionRingsIdentity", () => {
     ["more than one instruction", compiledRegistryTransaction(OWNER, [REGISTER, REGISTER])],
     ["an instruction with no data", compiledRegistryTransaction(OWNER, [undefined])],
   ])("refuses to sign %s", async (_label, built) => {
-    // No record, so the control-flow guard waves this through and the builder
-    // is reached. That is the point: what refuses these is the decode of the
-    // bytes, which stands on its own.
+    // No record, so the control-flow guard waves this through and the builder is
+    // reached: what refuses these is the decode of the bytes, on its own.
     buildRegistrationTransaction.mockResolvedValue(built);
     fetchUserRecord.mockResolvedValue(undefined);
 

@@ -12,15 +12,9 @@ import {
 } from "@solana/kit";
 
 /**
- * Turns public Zolana errors into domain codes with fixed messages.
- *
- * Deliberately coarse. An exhaustive per-code map belongs with the money flows
- * that generate the interesting distinctions, and shield — the only one built —
- * generates few: it creates a note rather than spending one, so there is no
- * proof, no sync and no note-selection failure to classify. Each error class
- * therefore gets a default, and only the codes that must *not* read as a
- * transient upstream fault are listed. Transfer and withdraw are what will make
- * this map earn its keep.
+ * Turns public Zolana errors into domain codes with fixed messages. Deliberately
+ * coarse: each error class gets a default, and only the codes whose default
+ * would send an operator the wrong way are listed.
  */
 
 type BridgedErrorCode = Extract<
@@ -30,8 +24,7 @@ type BridgedErrorCode = Extract<
 
 /**
  * The whole message a caller ever sees. Upstream text is never forwarded: it
- * routinely quotes the endpoint it failed on, and the RPC URL carries an API
- * key.
+ * routinely quotes the endpoint it failed on, and the RPC URL carries an API key.
  */
 const SAFE_MESSAGES = {
   config_error: "the Rings gateway configuration is invalid",
@@ -61,15 +54,14 @@ const CODE_OVERRIDES: Readonly<Record<string, BridgedErrorCode>> = {
 };
 
 function bridgedCode(error: unknown): BridgedErrorCode | undefined {
-  // Interface and transaction errors are raised while constructing or decoding
-  // what we asked for, so an unlisted one is our input; client and wallet
-  // errors wrap upstream I/O, so an unlisted one is theirs.
+  // Interface and transaction errors are raised constructing or decoding what we
+  // asked for, so an unlisted one is our input; client and wallet errors wrap
+  // upstream I/O, so an unlisted one is theirs.
   if (error instanceof InterfaceError || error instanceof TransactionError) {
     return CODE_OVERRIDES[error.code] ?? "invalid_input";
   }
   if (error instanceof WalletError) {
-    // A wallet wrapper retains the more specific error when there is one, and
-    // its classification is the better answer.
+    // A wallet wrapper retains the more specific error when there is one.
     return bridgedCode(error.cause) ?? CODE_OVERRIDES[error.code] ?? "gateway_unavailable";
   }
   if (error instanceof ClientError) {

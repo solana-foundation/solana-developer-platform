@@ -17,27 +17,21 @@ export const VIEWING_KEY_BYTE_LENGTH = 32;
 /** A nullifier secret is 31 bytes, which is always inside the BN254 field. */
 export const NULLIFIER_KEY_BYTE_LENGTH = 31;
 
-/**
- * Identifies the wallet a {@link ShieldedMaterialSource} should produce material
- * for. The tenant triple is how SDP addresses a wallet; how a source turns that
- * into key material is the source's own business.
- */
+/** The wallet a {@link ShieldedMaterialSource} should produce material for. */
 export interface MaterialRequest {
   readonly organizationId: string;
   readonly projectId: string;
   readonly walletId: string;
   /**
-   * Base58 Solana address that owns the identity on chain and signs its spends.
-   * Kept as a plain string so this surface does not leak a `@solana/kit` major
-   * into callers that are still on the workspace's Kit 6.
+   * Base58 address that owns the identity on chain. A plain string so this
+   * surface does not leak a `@solana/kit` major into callers still on Kit 6.
    */
   readonly owner: string;
 }
 
 /**
- * Rings key material for one identity, plus the public address that publishes
- * it. Both keys hold secrets, so prefer receiving this through
- * {@link ShieldedMaterialSource.withMaterial} over holding one yourself.
+ * Rings key material for one identity. Both keys hold secrets, so prefer
+ * receiving this through {@link ShieldedMaterialSource.withMaterial}.
  */
 export interface ShieldedMaterial {
   readonly viewingKey: ViewingKey;
@@ -47,20 +41,14 @@ export interface ShieldedMaterial {
 }
 
 /**
- * Where shielded key material comes from.
- *
- * Every source has to put both secrets in this process, which is a property of
- * the SDK rather than a shortcut: `WalletAuthority` returns concrete
- * `ViewingKey` and `NullifierKey` instances, and answering viewing-key
- * operations over a wire is documented as unsupported. A different key
- * authority is therefore a different *source* of material, not a remote holder
- * of it, and this interface is the whole seam between the two.
+ * Where shielded key material comes from. Every source has to hold both secrets
+ * in this process, so a different key authority is a different source rather
+ * than a remote holder of one.
  */
 export interface ShieldedMaterialSource {
   /**
-   * Produces material for one wallet, hands it to `use`, and destroys it
-   * however `use` ends. A scope rather than a getter so no implementation can
-   * hand out live secrets with nobody responsible for reclaiming them.
+   * Produces material for one wallet, hands it to `use`, and destroys it however
+   * `use` ends, so no implementation can hand out unreclaimed live secrets.
    */
   withMaterial<T>(
     request: MaterialRequest,
@@ -73,7 +61,7 @@ export interface ShieldedMaterialInput {
   readonly viewingKeyBytes: Uint8Array;
   /** 31 bytes. */
   readonly nullifierKeyBytes: Uint8Array;
-  /** Base58 Solana address that owns the identity and signs its spends. */
+  /** Base58 Solana address that owns the identity. */
   readonly owner: string;
 }
 
@@ -91,11 +79,7 @@ export class RingsIdentityMismatchError extends Error {
   }
 }
 
-/**
- * Whether 32 bytes are in range for a viewing secret. Exposed so a source can
- * choose its next candidate without guessing which SDK error means "out of
- * range"; the key built to answer is destroyed before returning.
- */
+/** Whether 32 bytes are in range for a viewing secret, so a source can pick another candidate. */
 export function isValidViewingKeyBytes(bytes: Uint8Array): boolean {
   if (bytes.length !== VIEWING_KEY_BYTE_LENGTH) {
     return false;
@@ -110,13 +94,9 @@ export function isValidViewingKeyBytes(bytes: Uint8Array): boolean {
 }
 
 /**
- * Builds one identity from raw key bytes and the owner that publishes it.
- *
- * Never involves the owner's Ed25519 secret: ownership enters as a hash of the
- * public key, and authorization is the owner's signature on the outer Solana
- * transaction. The SDK has no constructor for this shape because each of its own
- * expands both role keys from a signing secret, so the three public halves are
- * published together through `ShieldedAddress.fromPublicKeys` instead.
+ * Builds one identity from raw key bytes and the owner that publishes it. The
+ * owner's Ed25519 secret is never involved: ownership enters as a hash of the
+ * public key, and authorization is its signature on the outer transaction.
  */
 export async function createShieldedMaterial(
   input: ShieldedMaterialInput
@@ -128,9 +108,7 @@ export async function createShieldedMaterial(
     throw new Error(`A Rings nullifier key must be ${NULLIFIER_KEY_BYTE_LENGTH} bytes.`);
   }
 
-  // The owner hash and the nullifier public key are Poseidon hashes, so the
-  // hasher has to be resident before an address can be formed. Loading is
-  // cached, so paying for it here saves every caller from remembering.
+  // Poseidon has to be resident before an address can be formed; loading is cached.
   await initializePoseidon();
 
   const viewingKey = ViewingKey.fromBytes(input.viewingKeyBytes as Bytes32);
@@ -164,21 +142,17 @@ export async function createShieldedMaterial(
 }
 
 /**
- * The canonical string form of a shielded identity: base58 of the compressed
- * address. Persist this and re-derive it on every use so a change in the
- * source's inputs fails closed instead of addressing a new identity.
+ * Base58 of the compressed shielded address. Persist this and re-derive it on
+ * every use so a change in the source's inputs fails closed.
  */
 export function canonicalShieldedIdentity(shieldedAddress: ShieldedAddress): string {
   return getBase58Decoder().decode(CompressedShieldedAddress.fromAddress(shieldedAddress).bytes);
 }
 
 /**
- * Refuses to proceed when material does not reproduce the identity that was
- * persisted. The registry's `update_keys` would let the owner re-key a record,
- * so a mismatch is a rotation SDP could take and refuses to: taking it would
- * orphan every note encrypted to the old keys. It is read instead as the
- * source's inputs having moved, and continuing would address a different
- * identity.
+ * Refuses to proceed when material does not reproduce the persisted identity.
+ * The registry's `update_keys` would let the owner re-key its record, but taking
+ * that would orphan every note encrypted to the old keys.
  */
 export function assertShieldedIdentity(material: ShieldedMaterial, expected: string): void {
   const derived = canonicalShieldedIdentity(material.shieldedAddress);
@@ -189,28 +163,16 @@ export function assertShieldedIdentity(material: ShieldedMaterial, expected: str
 }
 
 /**
- * The whole message an operator sees for a mismatch. Fixed, like every other
- * bridged message here: `RingsIdentityMismatchError` carries both shielded
- * addresses, and publishing the pair says which two identities were involved
- * without telling the operator anything they can act on. The seed and the owner
- * are the inputs that moved, so those are what it names.
+ * Fixed message: the raw error's two shielded addresses tell an operator nothing
+ * they can act on, so this names the inputs that moved instead.
  */
 const IDENTITY_MISMATCH_MESSAGE =
   "the Rings identity derived for this wallet is not the one it was provisioned with; check HELIUS_RINGS_DETERMINISTIC_KA_SEED and the wallet's owner";
 
 /**
- * Fails closed on a mismatch, as a domain failure rather than a bare throw.
- *
- * The mirror of `asDomainFailure` in `apps/sdp-api`: `RingsIdentityMismatchError`
- * is this package's, and this package's barrel exports one factory and nothing
- * else precisely so that no SDK type crosses into an app on a different
- * `@solana/kit` major. Untranslated, it is neither a Zolana error the bridge
- * knows nor a `HeliusRingsError` the route maps, so it reaches the operator as
- * an opaque 500.
- *
- * `conflict`, never `gateway_unavailable`: nothing upstream is down, and the
- * next read derives the same identity from the same inputs, so a retry cannot
- * succeed.
+ * Fails closed on a mismatch as a domain failure; untranslated it reaches the
+ * operator as an opaque 500. `conflict`, because the next read derives the same
+ * identity from the same inputs and a retry cannot succeed.
  */
 export function assertProvisionedIdentity(material: ShieldedMaterial, expected: string): void {
   try {

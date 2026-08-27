@@ -9,10 +9,8 @@ import {
 } from "./helius-rings.utils";
 
 /**
- * The reason every one of these cases is written out: a shielded amount is a
- * uint64 count of base units, and the only way to render it wrong is to let it
- * become a JavaScript number somewhere. Each expectation below is a value a
- * float would have changed.
+ * A shielded amount is a uint64 count of base units, so each expectation below
+ * is a value a float would have changed.
  */
 describe("formatBaseUnits", () => {
   it("renders the whole uint64 range exactly", () => {
@@ -23,8 +21,7 @@ describe("formatBaseUnits", () => {
   });
 
   it("keeps digits a float would have dropped just past 2^53", () => {
-    // Number("9007199254740993") is 9007199254740992 — the last digit is the
-    // whole point of the string carriage.
+    // Number("9007199254740993") is 9007199254740992.
     expect(formatBaseUnits("9007199254740993", 0)).toBe("9007199254740993");
     expect(formatBaseUnits("9007199254740993", 6)).toBe("9007199254.740993");
   });
@@ -76,9 +73,8 @@ describe("readShieldedAmount", () => {
   });
 
   it("keeps a real zero scale apart from an unknown one", () => {
-    // Identical digits, different claims: the first says this mint has no
-    // fraction, the second says nobody knows where its point goes. Collapsing
-    // them is how 1.50 USDC came to read as 1500000 whole tokens.
+    // Identical digits, different claims: only the first says this mint has no
+    // fraction. Collapsing them makes 1.50 USDC read as 1500000 whole tokens.
     expect(readShieldedAmount("1500000", 0)).toEqual({ scale: "exact", text: "1500000" });
     expect(readShieldedAmount("1500000", null)).toEqual({ scale: "baseUnits", text: "1500000" });
   });

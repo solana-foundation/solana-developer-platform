@@ -1,10 +1,7 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import type { RuntimeHealth, RuntimeHealthStatus } from "@sdp/helius-rings";
 
-/**
- * Probes are a health endpoint's dependency, not its workload: a slow answer is
- * a red answer, because the caller is a dashboard waiting on it.
- */
+/** A slow answer is a red answer: the caller is a dashboard waiting on it. */
 const DEFAULT_TIMEOUT_MS = 2_000;
 
 /** Photon's liveness method. Not a Zolana client call, so it goes over raw JSON-RPC. */
@@ -13,12 +10,11 @@ const INDEXER_HEALTH_METHOD = "getIndexerHealth";
 export interface RingsHealthInput {
   /**
    * Only `getLatestBlockhash` is used. Passed as a client rather than a URL
-   * because the URL carries the Helius API key and must not be handled here.
+   * because the URL carries the Helius API key.
    */
   readonly client: Pick<ZolanaClient, "getLatestBlockhash">;
   readonly indexerUrl: string;
   readonly proverUrl: string;
-  /** Per-probe budget. Defaults to two seconds. */
   readonly timeoutMs?: number;
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -30,9 +26,8 @@ interface ProbeOutcome {
 }
 
 /**
- * Failures are classified rather than reported verbatim: the RPC URL embeds an
- * API key and upstream messages routinely quote the URL they failed on, so
- * forwarding one would publish the key through the health endpoint.
+ * Failures are classified rather than reported verbatim: upstream messages
+ * routinely quote the URL they failed on, and the RPC URL carries an API key.
  */
 function classify(error: unknown): ProbeOutcome {
   if (error instanceof Error && error.name === "TimeoutError") {
@@ -43,10 +38,8 @@ function classify(error: unknown): ProbeOutcome {
 }
 
 /**
- * Rejects with a `TimeoutError` when `work` outlives the budget.
- *
- * Exported so the gateway can hold client construction to the same budget as
- * the probes it precedes; a health answer is only bounded if every step is.
+ * Rejects with a `TimeoutError` when `work` outlives the budget. Exported so the
+ * gateway can hold client construction to the same budget as the probes.
  */
 export function withHealthTimeout<T>(work: Promise<T>, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -62,9 +55,8 @@ export function withHealthTimeout<T>(work: Promise<T>, timeoutMs = DEFAULT_TIMEO
 
 async function probeRpc(input: RingsHealthInput, timeoutMs: number): Promise<ProbeOutcome> {
   try {
-    // The signal is what actually cancels the request. `withHealthTimeout` wraps
-    // it anyway because the SDK is alpha: a signal that were ever ignored would
-    // hang the endpoint an operator called to find out what is hanging.
+    // The signal is what cancels the request; the wrapper is a backstop, because
+    // the SDK is alpha and an ignored signal would hang the endpoint.
     await withHealthTimeout(
       input.client.getLatestBlockhash({ signal: AbortSignal.timeout(timeoutMs) }),
       timeoutMs
@@ -79,8 +71,7 @@ async function probePhoton(input: RingsHealthInput, timeoutMs: number): Promise<
   const send = input.fetch ?? globalThis.fetch;
 
   try {
-    // Wrapped for the same reason as the RPC probe, and covering the body read
-    // too: the budget has to bound the whole probe, not just the part a
+    // Wrapped so the budget bounds the body read too, not only the part a
     // caller-supplied `fetch` chooses to honour the signal for.
     return await withHealthTimeout(
       (async () => {
@@ -113,8 +104,8 @@ async function probePhoton(input: RingsHealthInput, timeoutMs: number): Promise<
 }
 
 /**
- * Resolved relative to the configured path, not from the host root, so a prover
- * mounted behind a prefix keeps it. `new URL("/health", ...)` would discard it.
+ * Resolved relative to the configured path so a prover mounted behind a prefix
+ * keeps it; `new URL("/health", ...)` would discard it.
  */
 function proverHealthUrl(proverUrl: string): URL {
   return new URL("health", proverUrl.endsWith("/") ? proverUrl : `${proverUrl}/`);
@@ -139,11 +130,9 @@ async function probeProver(input: RingsHealthInput, timeoutMs: number): Promise<
 }
 
 /**
- * Reports one status per upstream the shielded flows depend on.
- *
- * `gateway` is always green here: the adapter runs in this process, so there is
- * no separate service whose liveness could differ from the caller's. It stays
- * on the response because the dashboard is written against four components.
+ * Reports one status per upstream the shielded flows depend on. `gateway` is
+ * always green because the adapter runs in this process; it stays on the
+ * response because the dashboard is written against four components.
  */
 export async function probeRingsHealth(input: RingsHealthInput): Promise<RuntimeHealth> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;

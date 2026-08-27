@@ -2,9 +2,8 @@ import type { RingsGatewayPort } from "@sdp/helius-rings";
 import { SecretRef } from "@sdp/helius-rings";
 
 /**
- * A gateway with only the methods a test needs. Anything else throws, so a
- * service that reached for an unexpected port method fails loudly rather than
- * quietly answering with a default.
+ * A gateway with only the methods a test needs; anything else throws rather than
+ * answering with a default.
  */
 export function gatewayStub(overrides: Partial<RingsGatewayPort>): RingsGatewayPort {
   const unexpected = (method: string) => async () => {
@@ -23,13 +22,9 @@ export function gatewayStub(overrides: Partial<RingsGatewayPort>): RingsGatewayP
 }
 
 /**
- * The two port calls `runPipeline` makes before it reaches custody, which is
- * the whole of what an operation needs to travel from `draft` to `indexing`.
- *
- * The unsigned transaction is a placeholder because the callers' signer stubs
- * return real wire bytes whatever they are handed; `requiredSigners` is not,
- * since the service refuses anything but exactly one named signer. The metadata
- * seed is opaque to everything downstream, so one value serves every caller.
+ * The two port calls `runPipeline` makes before it reaches custody. The unsigned
+ * transaction is a placeholder because the callers' signer stubs return real wire
+ * bytes; `requiredSigners` is not, since the service demands exactly one.
  */
 export function pipelineGateway(overrides: Partial<RingsGatewayPort> = {}): RingsGatewayPort {
   return gatewayStub({

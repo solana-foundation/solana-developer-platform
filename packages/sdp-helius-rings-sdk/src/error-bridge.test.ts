@@ -42,8 +42,8 @@ describe("withZolanaErrorBridge", () => {
     );
   });
 
-  // These are the ones the default would misroute: an operator sent to a retry
-  // button for a misconfiguration, or to the environment for a real conflict.
+  // The ones the default would misroute: an operator sent to a retry button for a
+  // misconfiguration, or to the environment for a real conflict.
   it.each([
     ["CLIENT_INVALID_CONFIG", new ClientError("CLIENT_INVALID_CONFIG"), "config_error"],
     [
@@ -72,8 +72,8 @@ describe("withZolanaErrorBridge", () => {
   });
 
   it("prefers the specific error a wallet wrapper retained over the wrapper's own code", async () => {
-    // WALLET_SYNC alone would be an unavailable upstream; the retained cause
-    // says the tree is wrong, which is a conflict nobody should retry.
+    // WALLET_SYNC alone would be an unavailable upstream; the retained cause says
+    // the tree is wrong, which is a conflict nobody should retry.
     const wrapped = new WalletError("WALLET_SYNC", {
       cause: new ClientError("CLIENT_TREE_MISMATCH", {
         details: { transactionTree: "a", clientTree: "b" },
@@ -97,8 +97,8 @@ describe("withZolanaErrorBridge", () => {
 
     const thrown = (await bridge(upstream)) as HeliusRingsError;
 
-    // A message that quotes the endpoint it failed on would publish the API key
-    // embedded in the RPC URL, and a chained cause carries it just as far.
+    // A message quoting the endpoint would publish the API key in the RPC URL,
+    // and a chained cause carries it just as far.
     expect(thrown.message).toBe("a Rings upstream service is unavailable");
     expect(thrown.cause).toBeUndefined();
     expect(JSON.stringify({ message: thrown.message })).not.toContain("super-secret-key");

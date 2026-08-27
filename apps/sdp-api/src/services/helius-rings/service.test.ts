@@ -106,8 +106,7 @@ async function provisionedWallet(shieldedAddress = "rings1provisioned"): Promise
 
 /**
  * A service whose gateway succeeds and whose sign/submit adapters are stubbed.
- * The signer returns real wire bytes because the service derives the outer
- * signature from them before it broadcasts.
+ * The signer returns real wire bytes; the service derives the signature from them.
  */
 function liveishService(deps: HeliusRingsServiceDependencies = {}) {
   return service({
@@ -180,9 +179,8 @@ describe("HeliusRingsService", () => {
       expect(wallet.shieldedAddress).toMatch(/^rings1/);
     });
 
-    // The gateway is the only party that knows what material backs the
-    // identity it just published. Inferring the tag here instead would let a
-    // simulated wallet pass for one holding real funds.
+    // Inferring the tag instead of taking the gateway's would let a simulated
+    // wallet pass for one holding real funds.
     it.each(["live", "simulated"] as const)(
       "persists the gateway's %s tag",
       async (materialTag) => {
@@ -217,7 +215,6 @@ describe("HeliusRingsService", () => {
           (error: unknown) => error
         );
 
-      // The route maps this to a 503; the wizard renders the pending state.
       expect(result).toMatchObject({ code: "config_error" });
       const rows = await createHeliusRingsWalletRepository(env).getWalletBySdpWalletId({
         ...tenant,
@@ -254,8 +251,6 @@ describe("HeliusRingsService", () => {
         gateway: gatewayStub({ syncPhoton: async () => syncResult({ degraded: true }) }),
       }).syncWallet(id, OWNER);
 
-      // The balances are still returned; this is what stops them being read as
-      // the whole picture.
       expect(synced).toMatchObject({ degraded: true });
       expect(synced.balances).toHaveLength(1);
     });
@@ -281,9 +276,8 @@ describe("HeliusRingsService", () => {
       });
     });
 
-    // A derivation mismatch — a changed seed, a wrong owner, a tenant mix-up —
-    // must fail rather than answer with someone else's balances, so the
-    // identity provisioning published is pinned on every read.
+    // A derivation mismatch must fail rather than answer with someone else's
+    // balances.
     it("pins the stored shielded address and the owner on every read", async () => {
       const id = await provisionedWallet("rings1sync_pinned");
       const seen: SyncPhotonInput[] = [];
@@ -343,8 +337,7 @@ describe("HeliusRingsService", () => {
       expect(row?.sync_cursor).toBeNull();
     });
 
-    // There is no safe default for whose balances to read, so an unresolvable
-    // owner is a refusal rather than a fallback.
+    // There is no safe default for whose balances to read.
     it("refuses when custody controls no wallet for the owner", async () => {
       const id = await provisionedWallet("rings1sync_no_owner");
 
@@ -393,18 +386,13 @@ describe("HeliusRingsService", () => {
         gateway: gatewayStub({ readIdentity: async () => identityResult() }),
       }).readWalletIdentity(id, OWNER);
 
-      // Without the recorded address, "the chain publishes X" and "the chain
-      // publishes X and so do we" are the same sentence — and only the second
-      // means the row is up to date.
       expect(identity).toEqual({
         ...identityResult(),
         recordedShieldedAddress: "rings1identity_ours",
       });
     });
 
-    // The wallet this exists for: provisioning refused, so nothing was ever
-    // recorded. Refusing to read until an address exists would withhold the
-    // answer from exactly the case that needs it.
+    // The wallet this exists for: provisioning refused, so nothing was recorded.
     it("answers for a pending wallet that has no shielded address at all", async () => {
       const identity = await service({
         gateway: gatewayStub({
@@ -440,8 +428,7 @@ describe("HeliusRingsService", () => {
       expect(seen[0]).toEqual({ walletId: id, owner: OWNER });
     });
 
-    // There is no default account whose record to read, so an unresolvable
-    // owner is a refusal rather than a fallback — as it is for a sync.
+    // There is no default account whose record to read.
     it("refuses a null owner", async () => {
       await expect(
         service({ gateway: gatewayStub({}) }).readWalletIdentity(walletId, null)
@@ -463,8 +450,6 @@ describe("HeliusRingsService", () => {
         gateway: gatewayStub({ readIdentity: async () => identityResult() }),
       }).readWalletIdentity(id, OWNER);
 
-      // A read that advanced a cursor or recorded a health row would have
-      // earned the write permission its route deliberately does not carry.
       expect(await wallets.getWalletById({ ...tenant, id })).toEqual(before);
     });
 
@@ -510,8 +495,6 @@ describe("HeliusRingsService", () => {
       expect(operation.policyEvaluationId).toBe("pev_1");
     });
 
-    // The gateway raises `config_error`; `failFromPortError` funnels it into
-    // gateway_unavailable, so the operation row is unchanged by the collapse.
     it("fails honestly at the port when the upstreams are unconfigured", async () => {
       const operation = await service().prepareOperation(
         operationInput({ clientNonce: "nonce-unconfigured" }),
@@ -589,10 +572,8 @@ describe("HeliusRingsService", () => {
       expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
     });
 
-    // The RPC throwing does not mean the transaction never landed — it can time
-    // out after the node accepted it. Failing here would mark the operation
-    // retryable, and a retry files a fresh operation under a new nonce, so it
-    // would broadcast a *second* transaction and shield the amount twice.
+    // The RPC can throw after the node accepted the transaction. Failing here
+    // would make it retryable, and a retry would shield the amount twice.
     it("carries a broadcast it cannot confirm into indexing rather than failing it", async () => {
       const operation = await liveishService({
         submitOuterTransaction: async () => {
@@ -602,8 +583,7 @@ describe("HeliusRingsService", () => {
 
       expect(operation.state).toBe("indexing");
       expect(operation.failure).toBeNull();
-      // The signature was durable before the RPC call, so Photon has something
-      // to be asked about either way.
+      // The signature was durable before the RPC call, so Photon can be asked.
       expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
     });
 
@@ -658,14 +638,9 @@ describe("HeliusRingsService", () => {
     });
 
     /**
-     * The signing-timeout sweep firing while custody is still working.
-     *
-     * Reproduced by failing the row out of `ready_to_sign` from inside the
-     * signer, exactly as `pollRingsIndexing` would, so the pipeline returns to
-     * a state that has moved under it. Both writers compare-and-swap on the
-     * expected state, so the sweep winning must mean the broadcast never runs —
-     * that is what keeps the sweep's "nothing was broadcast" true and its
-     * `retryable` honest.
+     * The signing-timeout sweep firing while custody is still working. Both
+     * writers compare-and-swap on the expected state, so the sweep winning must
+     * mean the broadcast never runs — which keeps its `retryable` honest.
      */
     describe("when the signing sweep wins the race out of ready_to_sign", () => {
       function racedService() {
@@ -721,8 +696,8 @@ describe("HeliusRingsService", () => {
         const detailed = await raced.service.getOperationWithEvents(operation.id);
         const discarded = detailed.events.find((event) => event.kind === "signature.discarded");
 
-        // Without this the timeline claims the operation was abandoned before a
-        // signature existed, while custody had in fact produced a valid one.
+        // Otherwise the timeline claims no signature existed when custody had
+        // produced a valid one.
         expect(discarded?.payload).toMatchObject({ signature: OUTER_TX.signature });
       });
     });
@@ -744,8 +719,7 @@ describe("HeliusRingsService", () => {
       );
       expect(paused.state).toBe("approval_required");
 
-      // The verdict comes from the approval request, never the caller: while
-      // it reads pending, execute is inert no matter how often it is called.
+      // The verdict comes from the approval request, never the caller.
       const stillPaused = await svc.executeOperation(paused.id);
       expect(stillPaused.state).toBe("approval_required");
 
@@ -796,7 +770,6 @@ describe("HeliusRingsService", () => {
       expect(completed.state).toBe("completed");
       expect(completed.photonIndexedAt).toBe(INDEXED_AT);
 
-      // Executing a terminal operation is a no-op.
       expect((await svc.executeOperation(operation.id)).state).toBe("completed");
     });
 
@@ -815,16 +788,13 @@ describe("HeliusRingsService", () => {
       );
       expect(operation.state).toBe("indexing");
 
-      // Exactly the row a process that died between the RPC broadcast and the
-      // submitted → indexing commit leaves behind: the signature is durable,
-      // the state never moved on.
+      // The row a process that died between the RPC broadcast and the
+      // submitted → indexing commit leaves behind.
       await getDb(env)
         .prepare("UPDATE helius_rings_operations SET state = 'submitted' WHERE id = ?")
         .bind(operation.id)
         .run();
 
-      // One execute both advances it out of `submitted` and polls Photon, so a
-      // stranded broadcast lands in reconciliation instead of sitting forever.
       const resumed = await svc.executeOperation(operation.id);
       expect(resumed.state).toBe("completed");
     });
@@ -902,10 +872,8 @@ describe("HeliusRingsService", () => {
 
   describe("probeHealth", () => {
     /**
-     * The default gateway comes from the environment, and the reason has to
-     * survive the round trip through the health rows: the response is rebuilt
-     * from them, so a missing-variable list the gateway named would otherwise
-     * die one layer above the only thing that knew it.
+     * The reason has to survive the round trip through the health rows, because
+     * the response is rebuilt from them.
      */
     it("surfaces the missing variables when the upstreams are unconfigured", async () => {
       const health = await service().probeHealth();

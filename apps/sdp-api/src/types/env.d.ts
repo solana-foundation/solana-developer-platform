@@ -230,21 +230,18 @@ export interface Env {
   HELIUS_RINGS_ENABLED?: string;
 
   // Rings upstreams, all required once Rings is enabled. Absence does not
-  // disable the gateway: it reports every component red naming what is
-  // missing, so a misconfiguration is diagnosable rather than silent.
+  // disable the gateway: it reports every component red naming what is missing.
   HELIUS_RINGS_RPC_URL?: string;
   HELIUS_RINGS_INDEXER_URL?: string;
   HELIUS_RINGS_PROVER_URL?: string;
 
-  // Permits plain-http Rings upstreams. The public devnet indexer and prover
-  // are http on a real host, and over plaintext an indexer response reveals
-  // which notes an identity owns — so this is opt-in per environment rather
-  // than inferred from the URL.
+  // Permits plain-http Rings upstreams; opt-in per environment because over
+  // plaintext an indexer response reveals which notes an identity owns.
   HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
 
   // Base64 32-byte master seed the deterministic key authority derives every
-  // shielded identity from. Permanent once any wallet is provisioned: SDP
-  // refuses to re-key a registered identity, so changing this orphans its notes.
+  // shielded identity from. Permanent once any wallet is provisioned: changing
+  // it orphans that identity's notes.
   HELIUS_RINGS_DETERMINISTIC_KA_SEED?: string;
 
   // Compliance providers

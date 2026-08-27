@@ -2,13 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRingsWallet, fetchRingsWalletIdentity } from "./helius-rings.data";
 
 /**
- * The reason a provisioning failure gives has to reach the operator intact.
- *
- * A 503 was once collapsed into a single "awaiting integration" notice, which
- * held while the only gateway was the unimplemented one. A live gateway answers
- * 503 for conditions the operator can fix — an unfunded owner, an unreachable
- * indexer — and rewriting those as "awaiting integration" points them at a wait
- * that will never end.
+ * A provisioning failure's reason has to reach the operator intact: a 503 names
+ * fixable conditions, so rewriting it as "awaiting integration" points them at
+ * a wait that will never end.
  */
 
 function respondWith(status: number, body: unknown) {
@@ -55,8 +51,7 @@ describe("createRingsWallet", () => {
     });
   });
 
-  // The caller substitutes its own copy for this, so the only requirement is
-  // that a bodyless failure is still reported as a failure.
+  // The caller substitutes its own copy, so this only has to stay a failure.
   it("reports a failure carrying no message as an undefined reason", async () => {
     respondWith(500, {});
 
@@ -82,8 +77,7 @@ describe("fetchRingsWalletIdentity", () => {
     const result = await fetchRingsWalletIdentity("hrw_1/../health");
 
     expect(result.identity).toEqual(IDENTITY);
-    // The wallet id is encoded, so an id carrying path characters cannot
-    // address a different endpoint.
+    // Encoded, so an id carrying path characters cannot reach another endpoint.
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
       "/api/dashboard/helius-rings/wallets/hrw_1%2F..%2Fhealth/identity"
     );

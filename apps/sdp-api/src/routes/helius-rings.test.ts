@@ -16,10 +16,8 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 /**
- * The one seam these tests reach through. Everything else — auth, permissions,
- * scope resolution, the service, the wallet row — runs for real; only the port
- * is doubled, and only when a test sets it. Left unset the environment picks
- * the gateway exactly as it would in production.
+ * The one seam these tests reach through; everything else runs for real. Left
+ * unset, the environment picks the gateway as it would in production.
  */
 const gatewayOverride = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -222,8 +220,8 @@ describe("Helius Rings routes", () => {
       };
     };
 
-    // Default policy is implicit allow, so the operation advances until the
-    // port call — which the unconfigured gateway refuses.
+    // Default policy is implicit allow, so the operation advances to the port
+    // call, which the unconfigured gateway refuses.
     expect(body.data.operation.state).toBe("failed");
     expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
       code: "gateway_unavailable",
@@ -338,8 +336,7 @@ describe("Helius Rings routes", () => {
         balances: [
           {
             mint: "So11111111111111111111111111111111111111112",
-            // Past 2^53. A JSON number would have rounded it, which is why
-            // amounts stay decimal strings the whole way out.
+            // Past 2^53: a JSON number would have rounded it.
             amountRaw: "18446744073709551615",
             decimals: 9,
             symbol: "SOL",
@@ -367,9 +364,8 @@ describe("Helius Rings routes", () => {
 
       expect(body.data).toMatchObject({ degraded: true, observedAt: observed.cursor });
       expect(body.data.balances[0]?.amountRaw).toBe("18446744073709551615");
-      // The owner is the custody wallet's key, resolved from the caller's
-      // scope, and the stored identity is pinned so a derivation mismatch fails
-      // closed rather than answering with someone else's balances.
+      // The stored identity is pinned so a derivation mismatch fails rather
+      // than answering with someone else's balances.
       expect(seen[0]).toMatchObject({
         walletId: ringsWalletId,
         owner: "HrRouteTestPublicKey111111111111111111111111",
@@ -384,8 +380,7 @@ describe("Helius Rings routes", () => {
     });
 
     // The test environment configures no Rings upstreams, so a provisioned
-    // wallet reaches the port and is refused there — the honest answer, not a
-    // fake balance and not an advanced cursor.
+    // wallet reaches the port and is refused there.
     it("503s through the unconfigured gateway and leaves the cursor alone", async () => {
       await markProvisioned();
 
@@ -453,11 +448,8 @@ describe("Helius Rings routes", () => {
         data: { identity: ReadIdentityResult & { recordedShieldedAddress: string | null } };
       };
 
-      // The fixture wallet is `pending` with no address recorded, which is the
-      // state an operator reaches for this in: nothing of ours to compare.
+      // The fixture wallet is `pending`, so there is nothing of ours to compare.
       expect(body.data.identity).toEqual({ ...PUBLISHED, recordedShieldedAddress: null });
-      // The owner is the custody wallet's key, resolved from the caller's scope
-      // exactly as the sync handler resolves it.
       expect(seen[0]).toEqual({
         walletId: ringsWalletId,
         owner: "HrRouteTestPublicKey111111111111111111111111",
@@ -469,15 +461,14 @@ describe("Helius Rings routes", () => {
       expect(res.status).toBe(404);
     });
 
-    // The test environment configures no Rings upstreams, so the request
-    // reaches the port and is refused there — never answered with a guess.
+    // The test environment configures no Rings upstreams, so the request reaches
+    // the port and is refused there.
     it("503s through the unconfigured gateway", async () => {
       const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`);
       expect(res.status).toBe(503);
     });
 
-    // Read permission, unlike /sync's write: this advances no stored
-    // observation, so a read-only key is enough and must be.
+    // Read permission, unlike /sync's write: this advances no stored observation.
     it("answers a key holding only payments:read", async () => {
       const readOnlyKey = { id: "key_hr_identity_ro", raw: "sk_test_helius_rings_id_ro" };
       await seedCachedApiKey(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {

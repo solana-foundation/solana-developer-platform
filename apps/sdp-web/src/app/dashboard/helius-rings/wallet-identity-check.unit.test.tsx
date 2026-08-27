@@ -62,8 +62,7 @@ describe("WalletIdentityCheck", () => {
   it("reads nothing until the operator asks", async () => {
     renderCheck();
 
-    // The read costs an RPC round trip and derives key material server-side,
-    // so mounting must not trigger one.
+    // The read costs an RPC round trip, so mounting must not trigger one.
     expect(mocks.fetchRingsWalletIdentity).not.toHaveBeenCalled();
     expect(checkButton().disabled).toBe(false);
     expect(screen.queryByRole("status")).toBeNull();
@@ -105,8 +104,7 @@ describe("WalletIdentityCheck", () => {
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(await screen.findByText("Not registered")).toBeTruthy();
     expect(screen.getByText(/provisioning will create one/)).toBeTruthy();
-    // Nothing published, so no published address may be shown — an absent
-    // record must not read as a record agreeing with us.
+    // An absent record must not read as a record agreeing with us.
     expect(screen.queryByText(/The chain publishes/)).toBeNull();
     expect(screen.getByText(/This deployment derives/)).toBeTruthy();
     expect(screen.getByText("Nothing recorded yet")).toBeTruthy();
@@ -144,8 +142,8 @@ describe("WalletIdentityCheck", () => {
     await userEvent.setup().click(checkButton());
 
     expect(await screen.findByText("Registered with different keys")).toBeTruthy();
-    // Provisioning refuses, and since SDP does not rotate, the resolution is a
-    // different custody wallet — not a retry, and not a rotation.
+    // SDP does not rotate keys, so the resolution is a different custody
+    // wallet, not a retry.
     expect(screen.getByText(/will refuse rather than re-key it/)).toBeTruthy();
     expect(screen.getByText(/different custody wallet/)).toBeTruthy();
     expect(screen.getByText("Differs in: the nullifier key")).toBeTruthy();
@@ -207,8 +205,7 @@ describe("WalletIdentityCheck", () => {
     expect(await screen.findByText(/could not be read/)).toBeTruthy();
   });
 
-  // A rejection means no reply ever arrived — offline, or an aborted request.
-  // Without catching it the control would sit disabled on "Checking…" forever.
+  // Uncaught, a rejection would leave the control disabled on "Checking…".
   it("answers, and re-enables the check, when the request never returns a reply", async () => {
     mocks.fetchRingsWalletIdentity.mockRejectedValue(new TypeError("Failed to fetch"));
     renderCheck();

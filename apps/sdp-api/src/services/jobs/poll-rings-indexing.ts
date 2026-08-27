@@ -1,28 +1,10 @@
 /**
  * Background job: reconcile rings operations that have already been broadcast.
  *
- * Each tick sweeps in-flight operations:
- *  1. `submitted` → `executeOperation` advances it to `indexing` and polls in
- *     the same call. This is the crash-recovery path: the broadcast happens
- *     inside `submitted`, so a process that dies before the indexing
- *     transition commits leaves a live transaction here, and nothing else
- *     would ever look at it again.
- *  2. `indexing` → `executeOperation` polls `verifyIndexed` through the port;
- *     a hit completes the operation, a miss leaves it untouched (idempotent).
- *  3. `indexing` older than the timeout budget → `failed:indexing_timeout`
- *     (retryable) — the sweep never leaves an operation in limbo forever.
- *  4. `ready_to_sign` older than its budget → `failed:signer_failed`
- *     (retryable). Unlike the three above this one has no transaction to
- *     reconcile: the pipeline broadcasts only after the transition out of
- *     `ready_to_sign` commits, so an operation that died in this window never
- *     reached an RPC. The row is stale state rather than a lost payment, which
- *     is what makes failing it outright safe — and retryable honest, since
- *     rebuilding it cannot duplicate anything.
- *
- * Ships dormant unless the feature flag is on. Timeout transitions need only
- * the database; Photon `executeOperation` calls are gated separately so a
- * half-configured deployment still ages out stranded rows instead of leaving
- * them in limbo forever.
+ * Failing a `ready_to_sign` row is safe because the pipeline broadcasts only
+ * after the transition out of it commits, so nothing there reached an RPC.
+ * Timeouts need only the database, so they are not gated on the upstreams: a
+ * half-configured deployment still ages out stranded rows.
  */
 
 import {
@@ -39,12 +21,9 @@ import type { Env } from "@/types/env";
 export const RINGS_INDEXING_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
- * An operation may sit in `ready_to_sign` this long before it is abandoned.
- *
- * Far shorter than the indexing budget, and for a different reason: indexing
- * waits on Photon, while this window covers one custody signature and a decode.
- * Anything still here after ten minutes is the remains of a process that died,
- * not work in progress.
+ * An operation may sit in `ready_to_sign` this long before it is abandoned. Far
+ * shorter than the indexing budget: this window covers one custody signature
+ * and a decode rather than a wait on Photon.
  */
 export const RINGS_SIGNING_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -85,21 +64,12 @@ export async function pollRingsIndexing(
   const signingCutoff = now().getTime() - RINGS_SIGNING_TIMEOUT_MS;
   const canReachPhoton = ringsUpstreamsConfigured(env);
 
-  // Deliberately sequential. executeOperation makes one Photon call per
-  // operation, so fanning MAX_PER_RUN out would put 100 unthrottled requests at
-  // the indexer every tick. It would not even buy much: the pool caps at 10
-  // connections with a 5s acquire timeout, so the batch serializes there anyway
-  // and any operation that waits longer is logged as a failure that never
-  // happened. Serial also keeps listInFlightOperations' oldest-first ordering
-  // meaningful when there is a backlog. The 60s tick against the 30-minute
-  // indexing budget leaves ample headroom.
-  //
-  // Note this is not about error isolation: the catch below is per-operation and
-  // would survive a Promise.all over the same body unchanged.
+  // Deliberately sequential: one Photon call per operation, so a fan-out would
+  // put MAX_PER_RUN unthrottled requests at the indexer every tick while the
+  // 10-connection pool serialized them anyway.
   for (const operation of inFlight) {
     try {
-      // Aged out rather than polled: there is no external condition to ask
-      // about, because nothing was ever broadcast for this row.
+      // Aged out rather than polled: nothing was ever broadcast for this row.
       if (operation.state === "ready_to_sign") {
         if (Date.parse(operation.updated_at) < signingCutoff) {
           await failSigningTimeout(repository, operation);

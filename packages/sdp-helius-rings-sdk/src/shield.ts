@@ -6,11 +6,9 @@ import { protocolMint } from "./flows/mint.js";
 import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
 
 /**
- * Builds an unsigned public-to-private deposit.
- *
- * A shield creates a note; it does not spend one. There is no prover call and
- * no wallet sync. The owner's Ed25519 signature on the outer transaction is
- * the whole of the authorization, same as registration.
+ * Builds an unsigned public-to-private deposit. A shield creates a note rather
+ * than spending one, so there is no prover call and no wallet sync; the owner's
+ * signature on the outer transaction is the whole of the authorization.
  */
 
 export interface ShieldDeps {

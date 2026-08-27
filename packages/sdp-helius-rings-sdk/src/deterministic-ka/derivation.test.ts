@@ -68,8 +68,8 @@ describe("deriveMaterial", () => {
     }
   );
 
-  // "a/b" + "c" + "d" and "a" + "b" + "c/d" both build the path a/b/c/d, so
-  // without this rejection two tenants would share one shielded identity.
+  // Both spellings build the path a/b/c/d, so without this rejection two tenants
+  // would share one shielded identity.
   it.each([
     { organizationId: "a/b", projectId: "c", walletId: "d" },
     { organizationId: "a", projectId: "b", walletId: "c/d" },
@@ -79,9 +79,8 @@ describe("deriveMaterial", () => {
     );
   });
 
-  // Restates the derivation — salt, info strings and byte lengths — from outside
-  // the module, so the pinned identity below is anchored to a reviewable
-  // specification rather than to whatever the code produced.
+  // Restates the derivation from outside the module, so the pinned identity below
+  // is anchored to a reviewable specification rather than to the code's output.
   it("derives both keys from the specified HKDF inputs", async () => {
     const path = `${REQUEST.organizationId}/${REQUEST.projectId}/${REQUEST.walletId}`;
     const salt = "sdp/helius-rings/deterministic-ka/v1";
@@ -99,8 +98,8 @@ describe("deriveMaterial", () => {
     }
   });
 
-  // SDP never re-keys a registered identity, so a derivation change is an
-  // identity conflict on every existing wallet rather than a new default.
+  // SDP never re-keys a registered identity, so a derivation change is a conflict
+  // on every existing wallet rather than a new default.
   it("pins the canonical identity so a derivation change cannot pass silently", async () => {
     await expect(identityFor(SEED_A, REQUEST)).resolves.toBe(
       "5CHr4u4PYY6jdJuhU72L8rLbiYkDVQiKLyaHQ6bNpRLyaNEFUaPnZRU6Uw7nnNAFEDzkF3kCDwBny6YkwRdpvhCbz"

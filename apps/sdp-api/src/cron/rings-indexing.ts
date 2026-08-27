@@ -1,11 +1,7 @@
 /**
- * Rings indexing-poll entrypoint.
- *
- * Mirrors `pending-deposits`: wraps `pollRingsIndexing` with a Sentry cron
- * monitor when observability is supplied and hands the promise to the
- * BackgroundRunner. The job itself early-returns unless the rings flag is on.
- * Timeout sweeps still run without upstreams; Photon reconciliation is gated
- * inside the job, so scheduling it everywhere is free when the flag is off.
+ * Rings indexing-poll entrypoint. Scheduled unconditionally: the job itself
+ * early-returns unless the rings flag is on, and gates Photon reconciliation on
+ * the upstreams internally.
  */
 
 import type { BackgroundRunner } from "@/runtime/background";

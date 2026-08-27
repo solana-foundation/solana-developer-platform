@@ -14,9 +14,8 @@ const fetchUserRecord = vi.fn();
 
 /**
  * Only the account read is doubled. `resolvedAddressFromRecord` stays real
- * because it is the claim under test: that what leaves is the compressed
- * commitment the SDK itself computes over a record, not the record's fields.
- * Stubbing it would leave the test asserting its own fake.
+ * because it is the claim under test: that what leaves is the commitment the SDK
+ * computes over a record, not the record's fields.
  */
 vi.mock("@heliuslabs/zolana/wallet", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@heliuslabs/zolana/wallet")>()),
@@ -33,12 +32,9 @@ const OTHER_OWNER = "Gw2CGVLvVSFcNQKKYtCk6VqQtNvHiUCBRLPuVQGnkVBk";
 const INPUT = { walletId: TEST_REQUEST.walletId, owner: OWNER };
 
 /**
- * Someone else's identity published under this owner.
- *
- * The foreign halves are real keys from another wallet's derivation rather than
- * filler bytes. A viewing public key is a P-256 point and a nullifier public
- * key a field element, so canonicalising a record built from arbitrary bytes
- * would fail at the decode and never reach the comparison this asserts on.
+ * Someone else's identity published under this owner. Real keys from another
+ * wallet's derivation rather than filler bytes: a record built from arbitrary
+ * bytes would fail at the decode and never reach the comparison under test.
  */
 const FOREIGN = { ...TEST_REQUEST, walletId: "hrw_someone_else" };
 
@@ -85,9 +81,8 @@ describe("readRingsIdentityStatus", () => {
     });
   });
 
-  // The published address is canonicalised from the record rather than copied
-  // from the derivation, so "ours" has to be an agreement of two independently
-  // computed values, not one value reported twice.
+  // Canonicalised from the record rather than copied from the derivation, so
+  // "ours" is an agreement of two independently computed values.
   it("canonicalises the published address from the record it read", async () => {
     const foreign = await publishedKeys(FOREIGN);
     fetchUserRecord.mockResolvedValue({
@@ -110,8 +105,7 @@ describe("readRingsIdentityStatus", () => {
 
     const result = await readRingsIdentityStatus(deps(), INPUT);
 
-    // Foreign, not a rotation to take: SDP does not re-key a published
-    // identity, so the resolution is a different custody wallet.
+    // Foreign, not a rotation to take: SDP does not re-key a published identity.
     expect(result).toMatchObject({ status: "foreign", mismatch: "nullifier_key" });
     expect(result.derivedShieldedAddress).toBe(await derivedIdentity());
   });
@@ -137,8 +131,6 @@ describe("readRingsIdentityStatus", () => {
     });
   });
 
-  // The owner is checked before either key, so a record that is wrong in more
-  // than one way names the outermost difference rather than an inner one.
   it("names the owner ahead of the keys when both differ", async () => {
     const foreign = await publishedKeys(FOREIGN);
     fetchUserRecord.mockResolvedValue({
@@ -165,8 +157,7 @@ describe("readRingsIdentityStatus", () => {
 
   describe("response shape", () => {
     /**
-     * Every byte-array-shaped value reachable in the result, at any depth. A
-     * viewing public key is 33 bytes and a nullifier public key 32, so an
+     * A viewing public key is 33 bytes and a nullifier public key 32, so an
      * array of either length is the signature of a leak whatever it is named.
      */
     function keyLengthArraysIn(value: unknown): unknown[] {
@@ -194,9 +185,8 @@ describe("readRingsIdentityStatus", () => {
     it("carries exactly the four documented fields and nothing else", async () => {
       const result = await readWith(await honestRecord({ mergingEnabled: true }));
 
-      // `bump`, `mergingEnabled`, and the raw account data all live one spread
-      // away, so the field set is asserted whole rather than by naming what
-      // must be absent.
+      // `bump`, `mergingEnabled` and the raw account data all live one spread
+      // away, so the field set is asserted whole.
       expect(Object.keys(result).sort()).toEqual([
         "derivedShieldedAddress",
         "mismatch",
@@ -225,8 +215,8 @@ describe("readRingsIdentityStatus", () => {
 
       expect(keyLengthArraysIn(result)).toEqual([]);
 
-      // Both the keys this tenant derives and the ones a foreign record
-      // publishes: neither may appear, under any encoding, in either direction.
+      // Neither this tenant's keys nor a foreign record's may appear, under any
+      // encoding, in either direction.
       const ours = await publishedKeys();
       const theirs = await publishedKeys(FOREIGN);
       for (const bytes of [

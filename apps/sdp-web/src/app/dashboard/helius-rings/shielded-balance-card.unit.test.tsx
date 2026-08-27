@@ -36,9 +36,7 @@ const OBSERVED: RingsWalletSync = {
     {
       mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
       symbol: "UNKNOWN",
-      // 1.50 USDC. The gateway reports no scale for a mint it cannot label, and
-      // this is the amount that shows why it must not be assumed: rendered as
-      // whole units it reads as one and a half million tokens.
+      // 1.50 USDC: rendered as whole units it reads as 1.5 million tokens.
       amountRaw: "1500000",
       decimals: null,
     },
@@ -70,8 +68,7 @@ describe("ShieldedBalanceCard", () => {
   it("reads nothing until the operator asks", async () => {
     renderCard();
 
-    // The whole point of the card: a sync is a full indexer scan, so mounting
-    // must not trigger one.
+    // A sync is a full indexer scan, so mounting must not trigger one.
     expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
     expect(screen.getByText(/Not read yet/)).toBeTruthy();
     expect(refreshButton().disabled).toBe(false);
@@ -121,8 +118,7 @@ describe("ShieldedBalanceCard", () => {
     await userEvent.setup().click(refreshButton());
 
     expect(await screen.findByText("1500000 base units")).toBeTruthy();
-    // Neither of the two ways to be confidently wrong: not the figure a guessed
-    // six decimals would give, and not a bare count that reads as whole tokens.
+    // Neither a guessed six decimals nor a bare count reading as whole tokens.
     expect(screen.queryByText("1.5")).toBeNull();
     expect(screen.queryByText("1500000")).toBeNull();
   });
@@ -180,9 +176,7 @@ describe("ShieldedBalanceCard", () => {
     expect(await screen.findByText(/could not be read/)).toBeTruthy();
   });
 
-  // A rejection means no reply ever arrived — offline, or an aborted request.
-  // The envelope reader only ever sees responses, so an uncaught rejection here
-  // would leave the button disabled on "Reading…" with no answer coming.
+  // Uncaught, a rejection would leave the button disabled on "Reading…".
   it("answers, and re-enables the read, when the request never returns a reply", async () => {
     mocks.syncRingsWallet.mockRejectedValue(new TypeError("Failed to fetch"));
     renderCard();
@@ -200,7 +194,7 @@ describe("ShieldedBalanceCard", () => {
     await userEvent.setup().click(refreshButton());
 
     expect(await screen.findByText(/Partial read/)).toBeTruthy();
-    // The notes it did read are still shown — they are the only figures there are.
+    // The notes it did read are still the only figures there are.
     expect(screen.getByText("18446744073.709551615")).toBeTruthy();
   });
 
@@ -224,8 +218,8 @@ describe("ShieldedBalanceCard", () => {
     expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
   });
 
-  // A disabled button is not focusable, so a tooltip on it reaches neither the
-  // keyboard nor a screen reader. The reason has to be text.
+  // A disabled button is not focusable, so its tooltip reaches neither the
+  // keyboard nor a screen reader; the reason has to be text.
   it("says why the read is unavailable somewhere reachable, not on the disabled button", () => {
     renderCard({ ...WALLET, shieldedAddress: null, status: "pending" });
 

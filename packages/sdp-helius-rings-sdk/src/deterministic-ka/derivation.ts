@@ -12,19 +12,16 @@ import { SEED_BYTE_LENGTH } from "./seed.js";
 
 /**
  * Domain separator for every key derived here. Changing it re-keys every
- * identity, which on a registered wallet SDP treats as an identity conflict
- * rather than a rotation to publish, so it is versioned instead of edited.
+ * identity, which SDP treats as a conflict, so it is versioned rather than edited.
  */
 const HKDF_SALT = "sdp/helius-rings/deterministic-ka/v1";
 
 /**
- * A viewing candidate is occasionally out of range for a P-256 scalar. Walk a
- * counter rather than mangling the bytes: the accepted counter is part of the
- * derivation and stays reproducible.
+ * A viewing candidate is occasionally out of range for a P-256 scalar. Walking a
+ * counter rather than mangling the bytes keeps the derivation reproducible.
  */
 const MAX_VIEWING_KEY_ATTEMPTS = 8;
 
-/** Separates the components of a derivation path. */
 const PATH_SEPARATOR = "/";
 
 function derivationPath(request: MaterialRequest): string {
@@ -38,8 +35,7 @@ function derivationPath(request: MaterialRequest): string {
     if (value.length === 0) {
       throw new Error(`A Rings material request needs a ${name}.`);
     }
-    // Without this, {organizationId: "a/b", projectId: "c"} and
-    // {organizationId: "a", projectId: "b", walletId: "c/d"} build one path, so
+    // Without this, "a/b" + "c" + "d" and "a" + "b" + "c/d" build one path, so
     // two tenants would derive the same viewing and nullifier key.
     if (value.includes(PATH_SEPARATOR)) {
       throw new Error(`A Rings ${name} must not contain "${PATH_SEPARATOR}".`);
@@ -67,12 +63,9 @@ function selectViewingKeyBytes(seed: Uint8Array, path: string): Uint8Array {
 }
 
 /**
- * Derives one wallet's material from the master seed.
- *
- * Exported for callers that manage the lifetime themselves, which in practice
- * means tests that hold one identity across several steps. Service code should
- * go through {@link createDeterministicMaterialSource} so the keys are
- * destroyed for it.
+ * Derives one wallet's material from the master seed. Service code should go
+ * through {@link createDeterministicMaterialSource}, which destroys the keys for
+ * it; this is exported for callers that manage the lifetime themselves.
  */
 export async function deriveMaterial(
   seed: Uint8Array,
@@ -98,12 +91,8 @@ export interface DeterministicMaterialSourceConfig {
 
 /**
  * A {@link ShieldedMaterialSource} that recomputes material from one master seed
- * on every request, so no shielded secret is ever stored at rest.
- *
- * It is also interim, and what makes it interim is that the platform holds the
- * seed and can therefore derive every tenant's keys — not that the derivation is
- * deterministic. Replacing it means writing another `ShieldedMaterialSource` and
- * deleting this directory; nothing downstream of the interface changes.
+ * on every request, so no shielded secret is stored at rest. Interim because the
+ * platform holds the seed and can therefore derive every tenant's keys.
  */
 export function createDeterministicMaterialSource(
   config: DeterministicMaterialSourceConfig

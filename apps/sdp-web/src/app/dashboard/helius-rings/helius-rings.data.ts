@@ -1,7 +1,7 @@
 /**
- * Client seam for the Helius Rings workspace. Fetches go through the
- * /api/dashboard/helius-rings BFF proxies; view-model types mirror the API
- * DTOs without importing server packages.
+ * Client seam for the Helius Rings workspace: fetches go through the
+ * /api/dashboard/helius-rings BFF proxies, and the types mirror the API DTOs
+ * without importing server packages.
  */
 
 export type RingsHealthStatus = "green" | "amber" | "red";
@@ -12,10 +12,8 @@ export type RingsHealthComponent = (typeof RINGS_HEALTH_COMPONENTS)[number];
 
 export type RingsHealth = Record<RingsHealthComponent, RingsHealthStatus> & {
   /**
-   * Why a component reads the way it does — a probe's own classification, or a
-   * gateway naming the environment variables it is missing. Keyed
-   * `<component>.reason` by the API, and present only for the components that
-   * recorded one, so an absent entry means "no reason given", never "healthy".
+   * Keyed `<component>.reason` by the API. An absent entry means "no reason
+   * given", never "healthy".
    */
   detail?: Record<string, string>;
 };
@@ -42,8 +40,7 @@ export type RingsOperationState =
   | "completed"
   | "failed";
 
-/** Mirrors OP_TYPES in @sdp/helius-rings; a literal union so the typed i18n
- * keys (`activity.opType_*`) resolve. */
+/** Mirrors OP_TYPES in @sdp/helius-rings; literal so `activity.opType_*` resolves. */
 export type RingsOperationOpType =
   | "shield"
   | "transfer_registered"
@@ -81,10 +78,8 @@ interface Envelope<T> {
 type EnvelopeResult<T> = { ok: true; data: T } | { ok: false; status: number; error?: string };
 
 /**
- * Single reader for every `{ data } | { error }` response on this surface. The
- * body is parsed even on failure so the server's own `error.message` reaches
- * the caller rather than a generic string, and `.catch` absorbs a non-JSON
- * error page.
+ * The body is parsed even on failure so the server's own `error.message`
+ * reaches the caller; `.catch` absorbs a non-JSON error page.
  */
 async function readEnvelope<T>(response: Response): Promise<EnvelopeResult<T>> {
   const body = (await response.json().catch(() => ({}))) as Envelope<T>;
@@ -130,13 +125,8 @@ export function fetchRingsOperations(
 export interface CreateRingsWalletResult {
   wallet?: RingsWallet;
   /**
-   * The server's own reason, whatever the status was.
-   *
-   * A 503 used to be collapsed into a single "awaiting integration" notice,
-   * which was accurate while the only gateway was the unimplemented one. A live
-   * gateway returns 503 for real, fixable conditions too — an unfunded owner,
-   * an unreachable indexer — and rewriting those as "awaiting integration" tells
-   * the operator to wait for something that already arrived.
+   * The server's own reason, whatever the status was. A 503 names fixable
+   * conditions too, so it must not be rewritten as "awaiting integration".
    */
   error?: string;
 }
@@ -162,25 +152,19 @@ export interface RingsShieldedBalance {
   mint: string;
   symbol: string;
   /**
-   * uint64 base units as a decimal string. Never parse this into a JavaScript
-   * number — anything past 2^53 rounds silently. `formatBaseUnits` renders it
-   * with string arithmetic instead.
+   * uint64 base units as a decimal string. Never parse into a JavaScript
+   * number: anything past 2^53 rounds silently.
    */
   amountRaw: string;
-  /**
-   * The mint's scale, or null when the API knew of none. Null is not zero: zero
-   * says the amount is already whole units, and rendering an unknown scale that
-   * way states a magnitude the server never reported.
-   */
+  /** The mint's scale, or null when the API knew of none. Null is not zero. */
   decimals: number | null;
 }
 
 export interface RingsWalletSync {
   balances: RingsShieldedBalance[];
   /**
-   * The indexer could not read everything it found. The balances are still the
-   * ones it did read, so this is what stops a partial answer being presented as
-   * a complete one.
+   * The indexer could not read everything it found, so `balances` is partial
+   * and must not be presented as complete.
    */
   degraded: boolean;
   /** When the answer was true — not a position to resume from. */
@@ -188,10 +172,8 @@ export interface RingsWalletSync {
 }
 
 /**
- * Reads the wallet's shielded balances from the indexer. Only ever called from
- * an explicit operator action: a sync is a full indexer scan, and it advances
- * the wallet's recorded observation point, which is why the API puts it behind
- * the write permission.
+ * Reads the wallet's shielded balances. Operator action only: a sync is a full
+ * indexer scan and advances the wallet's recorded observation point.
  */
 export async function syncRingsWallet(
   walletId: string
@@ -210,10 +192,7 @@ export async function syncRingsWallet(
 /** Mirrors RingsIdentityStatus in @sdp/helius-rings. */
 export type RingsIdentityStatus = "unregistered" | "ours" | "foreign";
 
-/**
- * Mirrors RingsIdentityMismatch in @sdp/helius-rings; a literal union so the
- * typed i18n keys (`identity.mismatch_*`) resolve.
- */
+/** Mirrors RingsIdentityMismatch; literal so `identity.mismatch_*` resolves. */
 export type RingsIdentityMismatch = "owner" | "nullifier_key" | "viewing_key";
 
 export interface RingsWalletIdentity {
@@ -224,21 +203,14 @@ export interface RingsWalletIdentity {
   publishedShieldedAddress: string | null;
   /** Which published half differs. Null unless `status` is `foreign`. */
   mismatch: RingsIdentityMismatch | null;
-  /**
-   * The identity our own row records, which the chain cannot tell us. Null on a
-   * wallet whose provisioning never completed — which is the case this read
-   * exists for.
-   */
+  /** What our own row records; null when provisioning never completed. */
   recordedShieldedAddress: string | null;
 }
 
 /**
- * Reads what the Rings registry publishes for a wallet's owner.
- *
- * A GET behind the read permission: it reads one on-chain account and records
- * nothing, unlike a sync, which advances the wallet's stored observation point.
- * Still an explicit operator action rather than something the page does on
- * load — it costs an RPC round trip and derives key material server-side.
+ * Reads what the Rings registry publishes for a wallet's owner. Records
+ * nothing, but still operator action only: it costs an RPC round trip and
+ * derives key material server-side.
  */
 export async function fetchRingsWalletIdentity(
   walletId: string
@@ -288,10 +260,7 @@ export async function prepareRingsOperation(
   return { operation: result.data.operation };
 }
 
-/**
- * Advances an operation the server has already cleared. The verdict is read
- * from the stored approval request server-side, so this carries no body.
- */
+/** The approval verdict is read server-side, so this carries no body. */
 export async function executeRingsOperation(
   operationId: string
 ): Promise<{ operation?: RingsOperationDetail; error?: string }> {

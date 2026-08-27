@@ -23,30 +23,15 @@ import {
 } from "./material.js";
 
 /**
- * Registers a shielded identity on chain.
- *
- * The gateway orchestrates but never signs: the owner's Ed25519 secret lives in
- * SDP custody, so registration goes through the injected sign and submit
- * callbacks. Provisioning is idempotent because re-registering an owner re-keys
- * its published identity — the registry allows that, SDP does not, and taking it
- * would orphan every note encrypted to the old keys. Merging is a separate
- * instruction and is never enabled here.
- *
- * Two guards keep that promise, and both are needed. Reading the record first
- * is the control-flow one: it decides whether to build at all. Asserting on the
- * built bytes in {@link landTransaction} is the backstop, because the builder
- * reads the record again for itself — a record that appears between the two
- * reads turns the same call into `update_keys` and says nothing about it.
+ * Registers a shielded identity, signing only through custody. Reading the
+ * record first keeps the registry's `update_keys` out of reach; the assertion in
+ * {@link landTransaction} is the backstop, because the builder re-reads it.
  */
 
 export interface ProvisionDeps {
   readonly client: ZolanaClient;
   readonly material: ShieldedMaterialSource;
-  /**
-   * `owner` is passed alongside the bytes because custody has to be told which
-   * key to sign with. A gateway serves every wallet in its tenant, so leaving
-   * the choice to custody's default would sign the wrong wallet's transaction.
-   */
+  /** `owner` names the key custody must sign with; a gateway serves a whole tenant. */
   readonly signTransaction: (unsignedTxBase64: string, owner: string) => Promise<string>;
   readonly submitTransaction: (signedTxBase64: string) => Promise<string>;
   readonly organizationId: string;
@@ -72,12 +57,9 @@ export async function provisionRingsIdentity(
       owner: input.owner,
     },
     async (material) => {
-      // Read the record before building anything. `buildRegistrationTransaction`
-      // returns undefined only when a record already publishes these exact
-      // keys; against one publishing different keys it builds `update_keys`
-      // instead, saying nothing. Reading first is what keeps that instruction
-      // out of reach, so a conflicting identity is refused rather than
-      // overwritten.
+      // Read the record before building anything: against one publishing
+      // different keys, `buildRegistrationTransaction` silently builds
+      // `update_keys` instead.
       let confirmed = await fetchUserRecord({ rpc: deps.client, owner });
       if (!confirmed) {
         const registration = await buildRegistrationTransaction({
@@ -89,8 +71,8 @@ export async function provisionRingsIdentity(
           await landTransaction(deps, registration, input.owner);
         }
 
-        // Re-read rather than trust what was just sent. Confirmation says the
-        // transaction landed, not that the account holds what was intended.
+        // Confirmation says the transaction landed, not that the account holds
+        // what was intended.
         confirmed = await fetchUserRecord({ rpc: deps.client, owner });
       }
 
@@ -112,12 +94,8 @@ export async function provisionRingsIdentity(
 
 /**
  * Fails closed when the published record is not the identity this material
- * derives. Repointing an owner is possible — the registry has an `update_keys`
- * instruction, and `buildRegistrationTransaction` switches to it on its own once
- * a record exists — which is why provisioning reads the record first and never
- * reaches that call on a mismatch. Taking it would orphan every note already
- * encrypted to the old keys, so a mismatch has to stop and be looked at by a
- * human.
+ * derives. The registry's `update_keys` path would take it, and that would
+ * orphan every note already encrypted to the old keys.
  */
 function assertRecordMatchesMaterial(
   record: UserRecord,
@@ -128,30 +106,23 @@ function assertRecordMatchesMaterial(
   if (mismatch) {
     throw new HeliusRingsError(
       "conflict",
-      // The identity read reports the same verdict as a machine-readable code;
-      // this is the one place it becomes prose, so the two cannot name
-      // different fields for the same record.
+      // The one place the identity read's machine-readable verdict becomes prose.
       `the Rings user record for ${owner} publishes a different ${mismatch.replaceAll("_", " ")}; refusing to provision over an existing identity`
     );
   }
 }
 
 /**
- * The one user-registry instruction provisioning may sign. The program also
- * exposes `set_merging_enabled` (1) and `update_keys` (2); the last re-keys a
- * published identity, and the only thing authorizing it is the owner's Ed25519
- * signature — the old keys are never checked, so custody signing it is the
- * whole of the damage.
+ * The one user-registry instruction provisioning may sign. Instruction 2,
+ * `update_keys`, re-keys a published identity and is authorized by the owner's
+ * signature alone, so custody signing it is the whole of the damage.
  */
 const REGISTER_DISCRIMINATOR = 0;
 
 /**
- * Signs through custody, broadcasts, and waits for the chain to accept it.
- *
- * The assertion is the first thing here rather than at the call site because
- * this is the single point where bytes reach `deps.signTransaction`. Guarding
- * the caller would leave a second caller free to sign whatever it built without
- * noticing there was a rule.
+ * Signs through custody, broadcasts, and waits for the chain to accept it. The
+ * assertion sits here rather than at the call site because this is the single
+ * point where bytes reach `deps.signTransaction`.
  */
 async function landTransaction(
   deps: ProvisionDeps,
@@ -169,13 +140,8 @@ async function landTransaction(
 
 /**
  * Refuses anything but a registration, judged on the bytes rather than on how
- * the code arrived here.
- *
- * `conflict`, as {@link assertRecordMatchesMaterial} raises for the sibling
- * case: nothing upstream is down, and a retry re-reads the same record and
- * builds the same instruction, so it cannot succeed. The owner is named because
- * that is what an operator has to go and look at; the instruction data is not,
- * because it is the published halves of a shielded identity.
+ * the code arrived here. The owner is named because that is what an operator has
+ * to look at; the instruction data is not, because it publishes identity halves.
  */
 function assertRegistersIdentity(transaction: Transaction, owner: string): void {
   if (registryDiscriminatorOf(transaction) !== REGISTER_DISCRIMINATOR) {
@@ -187,16 +153,9 @@ function assertRegistersIdentity(transaction: Transaction, owner: string): void 
 }
 
 /**
- * Which user-registry instruction a built transaction would execute, or
- * `undefined` when it is not one registry instruction carrying a payload.
- *
- * The byte rather than a verdict, so the day SDP does support a deliberate
- * rotation that path asserts `update_keys` through this same decode instead of
- * writing a second one. Instructions come from
- * `getInstructionsFromCompiledTransactionMessage` rather than being indexed out
- * of the compiled message's static accounts: a v0 message may load a program
- * address from an address lookup table, and although Zolana's builder sets no
- * lookups today, an index-based read would be wrong the day it does.
+ * Which registry instruction a built transaction would execute, or `undefined`
+ * when it is not one registry instruction with a payload. Read via the decoder,
+ * not the static accounts: a v0 message may load a program from a lookup table.
  */
 function registryDiscriminatorOf(transaction: Transaction): number | undefined {
   const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
@@ -210,7 +169,6 @@ function registryDiscriminatorOf(transaction: Transaction): number | undefined {
     return undefined;
   }
 
-  // Kit omits `data` rather than emptying it, so an instruction with no payload
-  // reads as no discriminator here instead of as byte zero.
+  // Kit omits `data` rather than emptying it, so no payload reads as no discriminator.
   return instruction.data?.[0];
 }

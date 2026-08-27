@@ -11,14 +11,9 @@ import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./materi
 import { hasSyncAnomalies, hydrateWallet, readOnlyAuthority, syncAnomalyCounts } from "./wallet.js";
 
 /**
- * Reads a wallet's shielded balances from Photon.
- *
- * Always a full sync, so `input.cursor` is ignored. The SDK keeps three
- * independent read positions and warns that reaching the tip of one says
- * nothing about the others, so there is no single position to resume from and
- * pretending otherwise would silently skip rows. The returned cursor is
- * therefore an observation timestamp — when this answer was true — rather than
- * somewhere to start next time.
+ * Reads a wallet's shielded balances from Photon. Always a full sync, so
+ * `input.cursor` is ignored: the SDK keeps three independent read positions, and
+ * the returned cursor is an observation timestamp rather than a resume point.
  */
 
 export interface SyncDeps {
@@ -56,12 +51,11 @@ export async function syncRingsWallet(
         balances: getPrivateTokenBalances(wallet).map((balance) =>
           toAssetBalance(balance.mint, balance.amount)
         ),
-        // Photon is queried by view tag and nullifier, not by outer signature,
-        // so the signatures a sync observed are the ones its rows were
-        // reconstructed from.
+        // Photon is queried by view tag and nullifier, not by outer signature, so
+        // these are the signatures the returned rows were reconstructed from.
         indexedOperationSignatures: [...new Set(transactions.map((entry) => entry.id.signature))],
-        // A sync that could not read everything still returns balances, so this
-        // is what stops those partial balances being read as a complete picture.
+        // Partial balances are still returned, so this is what stops them being
+        // read as a complete picture.
         degraded: hasSyncAnomalies(syncAnomalyCounts(report)),
       };
     }
@@ -69,16 +63,9 @@ export async function syncRingsWallet(
 }
 
 /**
- * Labels only the one mint whose decimals are a protocol constant.
- *
- * The port hands the SDK no asset registry, so every other mint keeps its raw
- * amount and reports no scale at all. Guessing nine decimals would render a
- * real holding at the wrong magnitude; dropping the row would report an empty
- * wallet, which is worse still. Zero used to stand in for "unknown" and was the
- * quietest wrong answer of the three — it renders the base-unit count with no
- * point and no caveat, so 1.50 USDC reads as 1500000 whole tokens. A null says
- * the scale is unknown, which is the true statement, and leaves the caller to
- * label the figure as base units.
+ * Labels only the one mint whose decimals are a protocol constant, because the
+ * port hands the SDK no asset registry. Null rather than zero for the rest:
+ * zero renders a base-unit count as whole tokens.
  */
 function toAssetBalance(reportedMint: string, amount: bigint): AssetBalance {
   const mint = sdpMint(reportedMint);

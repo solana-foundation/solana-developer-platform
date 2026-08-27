@@ -48,15 +48,9 @@ import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsOuterTransaction } from "./signer-adapter";
 
 /**
- * Orchestrates every Rings action: provisioning, sync, prepare-through-policy,
- * execution, retry lineage. State transitions run through the persisted state
- * machine with compare-and-swap guards, and every hop is recorded on the
+ * Orchestrates every Rings action. State transitions run through the persisted
+ * state machine with compare-and-swap guards, and every hop is recorded on the
  * operation's event feed.
- *
- * The gateway behind the port comes from `resolveRingsGateway`. Until an
- * operator configures the Rings upstreams it refuses every call, so any path
- * that reaches `buildOperation` ends in `failed:gateway_unavailable` — the UI
- * names what is unset instead of simulating a result.
  */
 
 export interface HeliusRingsTenant {
@@ -84,10 +78,7 @@ export interface HeliusRingsServiceDependencies {
   now?: () => string;
 }
 
-/**
- * How deep a retry chain may grow. Retrying the same failure past this depth
- * is churn, not recovery, and the operator should look at the failure code.
- */
+/** How deep a retry chain may grow before the operator must inspect the failure. */
 export const RINGS_MAX_RETRY_DEPTH = 5;
 
 export interface ProvisionPrivateWalletInput {
@@ -101,20 +92,15 @@ export interface PrepareOperationContext extends HeliusRingsActor {
   /** The SDP custody wallet id backing the rings wallet, for the policy envelope. */
   custodyWalletId: string | null;
   /**
-   * Public key of that custody wallet. A shield stamps this as `from` so the
-   * gateway knows who deposits and who must sign. Null when custody no longer
-   * controls the backing wallet.
+   * Public key of that custody wallet; a shield stamps it as `from`. Null when
+   * custody no longer controls the backing wallet.
    */
   owner?: string | null;
 }
 
 export interface SyncWalletResult {
   balances: AssetBalance[];
-  /**
-   * The sync could not read everything it found. The balances below are still
-   * the ones it did read, so this is what stops a partial answer from being
-   * rendered as a complete one.
-   */
+  /** The sync could not read everything it found; the balances below are partial. */
   degraded: boolean;
   /** When the answer was true, not a position to resume from. */
   observedAt: string;
@@ -122,9 +108,8 @@ export interface SyncWalletResult {
 
 export interface WalletIdentityResult extends ReadIdentityResult {
   /**
-   * The identity our own row records, which the gateway cannot know. Without
-   * it "the chain publishes X" and "the chain publishes X and so do we" read
-   * identically, and only the second means the row is up to date.
+   * The identity our own row records, so a caller can tell "the chain publishes
+   * X" from "the chain publishes X and so do we".
    */
   recordedShieldedAddress: string | null;
 }
@@ -137,12 +122,8 @@ const EXECUTABLE_STATES: ReadonlySet<OperationState> = new Set([
 ]);
 
 /**
- * Domain port errors → operation fail-edge. Adapter errors carry their own
- * code and retryable bit and do not go through this table.
- *
- * `config_error` still lands as `gateway_unavailable`: there is no
- * `config_error` failure code, and the unconfigured-gateway path has always
- * offered a retry. `invalid_input` and `conflict` do not.
+ * Domain port errors → operation fail-edge. `config_error` lands on
+ * `gateway_unavailable` because there is no `config_error` failure code.
  */
 const PORT_ERROR_FAILURE = {
   invalid_input: { code: "invalid_input", retryable: false },
@@ -180,8 +161,8 @@ export class HeliusRingsService {
     private readonly tenant: HeliusRingsTenant,
     dependencies: HeliusRingsServiceDependencies = {}
   ) {
-    // The schema's network CHECK is the second half of this guard. Going to
-    // mainnet is a deliberate migration, not a config flip.
+    // The schema's network CHECK is the other half of this guard: mainnet is a
+    // deliberate migration, not a config flip.
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
@@ -214,13 +195,8 @@ export class HeliusRingsService {
 
   /**
    * Creates (or returns) the rings wallet bound to one custody wallet, then
-   * asks the gateway for a shielded identity. On a gateway that refuses, the
-   * port throws and the wallet stays `pending` — the wizard renders that state.
-   *
-   * Key material is deliberately not persisted here. The deterministic key
-   * authority recomputes it on demand and stores none of it, so there is
-   * nothing to seal into `helius_rings_key_refs`; the gateway reports what kind
-   * of material it used and that tag is the whole of what we keep.
+   * asks the gateway for a shielded identity. No key material is persisted: the
+   * deterministic key authority recomputes it on demand and stores none of it.
    */
   async provisionPrivateWallet(input: ProvisionPrivateWalletInput): Promise<PrivateWallet> {
     const wallet = await this.wallets.createWallet({
@@ -241,10 +217,9 @@ export class HeliusRingsService {
       sdpAddress: input.sdpAddress,
     });
 
-    // The gateway is the only party that knows whether the identity it
-    // published holds real material, so its tag is recorded rather than
-    // inferred here. Getting this wrong in the optimistic direction would let a
-    // simulated wallet be mistaken for one holding real funds.
+    // Only the gateway knows whether the identity it published holds real
+    // material; inferring the tag could let a simulated wallet pass for a
+    // funded one.
     const provisioned = await this.wallets.markProvisioned({
       ...this.tenant,
       id: wallet.id,
@@ -257,18 +232,9 @@ export class HeliusRingsService {
   }
 
   /**
-   * Reads the wallet's shielded balances from Photon and records when the
-   * answer was observed.
-   *
-   * `owner` is passed in rather than looked up: the identity is registered to a
-   * specific custody key, and the caller has already resolved which custody
-   * wallet backs this rings wallet. A null owner is a refusal, not a reason to
-   * fall back to anything — there is no safe default for whose balances to read.
-   *
-   * The persisted `shielded_address` travels as `expectedShieldedAddress` so
-   * the gateway re-derives the identity and compares. Without it a seed change,
-   * a tenant mix-up or a wrong owner would answer with someone else's balances
-   * instead of failing.
+   * Reads the wallet's shielded balances from Photon. A null owner is a refusal,
+   * and the persisted `shielded_address` is pinned so a derivation mismatch
+   * fails rather than answering with someone else's balances.
    */
   async syncWallet(walletId: string, owner: string | null): Promise<SyncWalletResult> {
     const wallet = await this.requireWallet(walletId);
@@ -306,18 +272,9 @@ export class HeliusRingsService {
   }
 
   /**
-   * Reads what the registry publishes for this wallet's owner and whether it is
-   * ours, alongside the identity our own row records.
-   *
-   * Deliberately without `syncWallet`'s `shielded_address` precondition. The
-   * wallet this answers for is the one stuck `pending` — provisioning refused,
-   * so no address was ever recorded — and refusing to read until one exists
-   * would withhold the answer from exactly the case that needs it. A null owner
-   * is still a refusal: there is no default account whose record to read.
-   *
-   * Writes nothing. No cursor, no health row, no wallet patch — the read
-   * advances no stored observation, which is also why its route is a GET behind
-   * the read permission rather than a POST behind write.
+   * Reads what the registry publishes for this wallet's owner beside the
+   * identity our own row records. No `shielded_address` precondition: the
+   * wallet this answers for is the one stuck `pending`. Writes nothing.
    */
   async readWalletIdentity(walletId: string, owner: string | null): Promise<WalletIdentityResult> {
     const wallet = await this.requireWallet(walletId);
@@ -335,8 +292,7 @@ export class HeliusRingsService {
 
   /**
    * Reserves the intent, then advances draft → preparing → policy. Idempotent:
-   * a replayed request returns the operation already reserved, at whatever
-   * state it has reached, without re-running policy.
+   * a replayed request returns the reserved operation without re-running policy.
    */
   async prepareOperation(
     input: PrivateOperationInput,
@@ -363,9 +319,8 @@ export class HeliusRingsService {
       intentKey,
       assetMint: input.asset?.mint ?? null,
       amountRaw: input.asset?.amountRaw ?? null,
-      // A shield always deposits from the backing owner. The request body is
-      // not asked: a caller-supplied `from` would let someone name a different
-      // fee payer than the identity they are shielding into.
+      // A shield always deposits from the backing owner; a caller-supplied
+      // `from` could name a different fee payer than the shielded identity.
       fromAddr: input.opType === "shield" ? (context.owner ?? null) : (input.from ?? null),
       toAddr: input.to ?? null,
       zoneId: input.zoneId ?? null,
@@ -432,9 +387,6 @@ export class HeliusRingsService {
       return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
     }
 
-    // The machine has no preparing → proving shortcut: an allowed operation
-    // passes through approval_required with the `approved` guard immediately
-    // satisfied, so the row's history reads the same either way.
     const paused = await this.transition(operation.id, "preparing", "policy_ok", {
       policyEvaluationId: evaluation.id,
       approvalRequestId: evaluation.approvalRequestId,
@@ -456,10 +408,9 @@ export class HeliusRingsService {
   }
 
   /**
-   * Advances an operation that is waiting on an external condition. Idempotent
-   * per state: an approval still pending or a signature not yet indexed leaves
-   * the row untouched. `submitted` is executable too, so a broadcast whose
-   * indexing transition never committed is resumed rather than stranded.
+   * Advances an operation that is waiting on an external condition, idempotently
+   * per state. `submitted` is executable too, so a broadcast whose indexing
+   * transition never committed is resumed rather than stranded.
    */
   async executeOperation(operationId: string): Promise<PrivateOperation> {
     let operation = await this.requireOperation(operationId);
@@ -468,9 +419,8 @@ export class HeliusRingsService {
     }
 
     if (operation.state === "approval_required") {
-      // The approval verdict is read from the approval request itself — never
-      // from the caller. Trusting the request body here would let anyone with
-      // write access skip a reviewer.
+      // The verdict is read from the approval request, never from the caller,
+      // so write access alone cannot skip a reviewer.
       if (!operation.approval_request_id) {
         const failed = await this.fail(operation.id, "approval_required", {
           code: "invalid_input",
@@ -497,15 +447,9 @@ export class HeliusRingsService {
       return this.toPrivateOperation(await this.runPipeline(proving));
     }
 
-    // submitted: the broadcast either landed or never left the process, and
-    // nothing here can tell the two apart — only the signature is persisted, not
-    // the signed bytes, so there is nothing to resubmit. Both readings resolve
-    // the same way: hand the signature to Photon and let the indexing budget
-    // settle it. A hit completes the operation; a miss times out as
-    // `indexing_timeout` (retryable). Without this, a crash between the RPC
-    // call and the submitted → indexing transition left a live transaction
-    // outside reconciliation forever — the poll skips non-`indexing` rows,
-    // execute ignored `submitted`, and retry requires `failed`.
+    // submitted: the broadcast may or may not have landed, and only the
+    // signature was persisted, so there is nothing to resubmit. Hand it to
+    // Photon rather than leaving a live transaction outside reconciliation.
     if (operation.state === "submitted") {
       const resumed = await this.transition(operation.id, "submitted", "submitted");
       if (!resumed) return this.toPrivateOperation(await this.requireOperation(operation.id));
@@ -541,10 +485,9 @@ export class HeliusRingsService {
   }
 
   /**
-   * Files a fresh operation linked to a failed, retryable one and runs it
-   * through the same prepare-through-policy path — a retry re-earns its policy
-   * verdict, never inherits one. The original row stays exactly as it failed;
-   * the lineage is audit evidence, capped at RINGS_MAX_RETRY_DEPTH.
+   * Files a fresh operation linked to a failed, retryable one; a retry re-earns
+   * its policy verdict rather than inheriting one. The original row stays as it
+   * failed, and the lineage is capped at RINGS_MAX_RETRY_DEPTH.
    */
   async retryOperation(
     operationId: string,
@@ -589,14 +532,9 @@ export class HeliusRingsService {
   }
 
   /**
-   * Probes the gateway and records the observation per component. A gateway
-   * that cannot be reached records itself red — never having observed an
-   * upstream is not evidence that it is healthy.
-   *
-   * The per-component reason is stored alongside the status, because the
-   * response is rebuilt from these rows: a probe that classified why it failed,
-   * or a gateway naming the variables it is missing, would otherwise be
-   * discarded one layer above the only place that knew.
+   * Probes the gateway and records the observation per component; an
+   * unreachable gateway records itself red. The reason is stored alongside the
+   * status because the response is rebuilt from these rows.
    */
   async probeHealth(): Promise<RuntimeHealth> {
     try {
@@ -629,8 +567,7 @@ export class HeliusRingsService {
 
   /**
    * Drives an operation from `proving` as far as the port allows:
-   * build → proof → sign → submit → indexing. The first port failure takes the
-   * state's fail edge; adapter failures carry their own codes.
+   * build → proof → sign → submit → indexing.
    */
   private async runPipeline(operation: HeliusRingsOperationRow): Promise<HeliusRingsOperationRow> {
     let current = operation;
@@ -639,9 +576,7 @@ export class HeliusRingsService {
     try {
       const wallet = await this.requireWallet(current.wallet_id);
       const built = await this.gateway.buildOperation({
-        // The port receives the domain view. No key refs: the deterministic
-        // key authority recomputes material on demand and persists none of
-        // it, so there is nothing to hand over.
+        // No key refs: the deterministic key authority persists none.
         operation: this.toPrivateOperation(current),
         keyRefs: [],
         expectedShieldedAddress: wallet.shielded_address ?? undefined,
@@ -663,16 +598,9 @@ export class HeliusRingsService {
         payload: { source: proof.source },
       });
 
-      // ready_to_sign → submitted: sign with custody, then persist the signature
-      // *before* broadcasting. The signature is a property of the signed
-      // transaction, so it is knowable without the network — which is what makes
-      // `submitted` durable ahead of the RPC call. Broadcasting first would leave
-      // a live on-chain transaction whose signature was never recorded if the
-      // process died in between, and nothing sweeps `ready_to_sign` to find it.
-      //
-      // The gateway names who must sign, and nobody else may be asked. Signing
-      // with the organization's default wallet instead would produce a
-      // perfectly valid signature from the wrong key and move the wrong money.
+      // Persist the signature before broadcasting: the other order could leave a live
+      // transaction whose signature was never recorded. Only the signer the gateway
+      // names is asked; a signature from the wrong key moves the wrong money.
       const [owner, ...additionalSigners] = built.requiredSigners;
       if (!owner || additionalSigners.length > 0) {
         throw new RingsAdapterError(
@@ -694,8 +622,7 @@ export class HeliusRingsService {
           getTransactionDecoder().decode(getBase64Codec().encode(signed))
         );
       } catch (cause) {
-        // The signer returned something that is not a transaction. Retrying the
-        // same inputs cannot change that, so this is the signer's failure.
+        // Retrying the same inputs cannot decode differently.
         throw new RingsAdapterError("signer_failed", "signer returned undecodable bytes", {
           retryable: false,
           cause,
@@ -706,18 +633,9 @@ export class HeliusRingsService {
         outerTxSignature: signature,
       });
       if (!submitted) {
-        // Lost the compare-and-swap out of `ready_to_sign`: the signing-timeout
-        // sweep failed this row while custody was still working. Returning here
-        // is the safe half of that race — the broadcast below is the only one,
-        // so nothing was sent and the sweep's "nothing was broadcast" holds.
-        //
-        // The event exists because the *signature* would otherwise vanish
-        // without a trace. The timeline would say the operation was abandoned
-        // before a signature was recorded, while in fact custody produced a
-        // valid one that this discarded, and an operator debugging a slow
-        // signer would have nothing pointing at the real cause. Recording the
-        // signature itself is safe — it is a public value — and it is the only
-        // handle for confirming on chain that this transaction never landed.
+        // The signing-timeout sweep won the compare-and-swap while custody was still
+        // working. Returning before the broadcast keeps its "nothing was broadcast"
+        // true; the event keeps the discarded signature on the timeline.
         await this.events.append({
           operationId: current.id,
           kind: "signature.discarded",
@@ -730,22 +648,9 @@ export class HeliusRingsService {
       }
       current = submitted;
 
-      // Broadcast from inside `submitted`. A throw here is not evidence that
-      // nothing landed: an RPC can time out or 503 after the node already
-      // accepted the transaction, only the signature was persisted rather than
-      // the signed bytes, and nothing available here tells the two readings
-      // apart.
-      //
-      // So the failure is not taken. Failing `submit_failed` would mark the
-      // operation retryable, and a retry files a *fresh* operation under a new
-      // client nonce — a different intent key, a newly built transaction, a
-      // second broadcast. Whenever the first one did land that shields the
-      // amount twice. The identical ambiguity after a crash is already resolved
-      // the other way by `executeOperation`, and this takes the same answer:
-      // carry the signature into `indexing` and let Photon settle what actually
-      // happened. A transaction that truly never left ends at
-      // `indexing_timeout`, retryable only after Photon has had the full budget
-      // to disagree.
+      // A throw is not evidence that nothing landed, and failing here would mark the
+      // operation retryable — a retry would shield the amount twice whenever the first
+      // broadcast did land. The signature goes to `indexing` for Photon to settle.
       let broadcast: "accepted" | "unconfirmed" = "accepted";
       try {
         await this.submitOuterTransaction({ env: this.env, signedTxBase64: signed });
@@ -753,11 +658,9 @@ export class HeliusRingsService {
         broadcast = "unconfirmed";
       }
 
-      // The RPC's own message is not recorded: it routinely quotes the endpoint
-      // it failed on, and this deployment's endpoint carries a Helius API key.
-      // The flag is the part that is actionable anyway — it tells an operator
-      // reading the timeline that the signature below was never acknowledged,
-      // so a `completed` here is Photon's word rather than the RPC's.
+      // The RPC's own message is not recorded: it quotes the endpoint it failed
+      // on, and this deployment's endpoint carries a Helius API key. The flag
+      // says only that the broadcast was never acknowledged.
       await this.events.append({
         operationId: current.id,
         kind: "transaction.submitted",
@@ -844,9 +747,8 @@ export class HeliusRingsService {
   }
 
   /**
-   * Walks the retry lineage toward the original operation and refuses once the
-   * chain reaches RINGS_MAX_RETRY_DEPTH. The DB's retry_not_self CHECK rules
-   * out a self-loop; the walk is still bounded in case of a longer cycle.
+   * Walks the retry lineage and refuses at RINGS_MAX_RETRY_DEPTH. The walk stays
+   * bounded in case of a cycle the DB's retry_not_self CHECK does not rule out.
    */
   private async assertRetryDepth(operation: HeliusRingsOperationRow): Promise<void> {
     let depth = 1;
@@ -869,8 +771,8 @@ export class HeliusRingsService {
   }
 
   /**
-   * Overlay allowlist symbol and decimals onto Photon balances. The SDK only
-   * knows native SOL; every other mint arrives as UNKNOWN with a null scale.
+   * Overlays allowlist symbol and decimals onto Photon balances: the SDK only
+   * knows native SOL and reports every other mint as UNKNOWN.
    */
   private async labelBalances(balances: AssetBalance[]): Promise<AssetBalance[]> {
     if (balances.length === 0) return balances;
@@ -948,9 +850,8 @@ export class HeliusRingsService {
 }
 
 /**
- * The idempotency contract: one deterministic key per (wallet, op, canonical
- * input, client nonce). Field order is pinned here — object spread order is
- * not part of the contract.
+ * One deterministic key per (wallet, op, canonical input, client nonce). Field
+ * order is pinned here; object spread order is not part of the contract.
  */
 export function computeIntentKey(input: PrivateOperationInput): string {
   const canonical = JSON.stringify({

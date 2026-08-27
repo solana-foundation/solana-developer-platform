@@ -1,9 +1,6 @@
 import type { RepositoryDbClient } from "./base";
 
-/**
- * One row of the platform-level Rings mint allowlist. Status is stored, but
- * readers that gate operations only ask for active entries.
- */
+/** One row of the platform-level Rings mint allowlist. */
 export interface HeliusRingsAssetAllowlistRow {
   mint: string;
   symbol: string;

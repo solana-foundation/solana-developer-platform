@@ -28,8 +28,7 @@ const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockha
 const base64 = getBase64Codec();
 const env = {} as Env;
 
-// Only the resolution path uses these; every test that passes `signer`
-// explicitly never reaches them.
+// Only the resolution path uses these; a test that passes `signer` does not.
 const findActiveWalletByPublicKey = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 
@@ -125,8 +124,8 @@ describe("signRingsOuterTransaction", () => {
 
       const signed = await signRingsOuterTransaction(signInput());
 
-      // Scoped to the tenant and looked up by key: what makes a signature
-      // valid is that it came from the key the transaction names.
+      // Looked up by key: a signature is only valid from the key the
+      // transaction names.
       expect(findActiveWalletByPublicKey).toHaveBeenCalledWith("org_1", "prj_1", FEE_PAYER);
       expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
         env,
@@ -139,8 +138,8 @@ describe("signRingsOuterTransaction", () => {
       );
     });
 
-    // Never the organization's default wallet instead. That signature would be
-    // valid and from the wrong key, which on a spend moves the wrong money.
+    // Never the organization's default wallet: a valid signature from the wrong
+    // key moves the wrong money.
     it("refuses an owner custody does not control", async () => {
       findActiveWalletByPublicKey.mockResolvedValue(null);
 
@@ -152,8 +151,7 @@ describe("signRingsOuterTransaction", () => {
       expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
     });
 
-    // The custody row and its provider have diverged. Signing anyway would
-    // produce a valid signature from a key nobody asked for.
+    // The custody row and its provider have diverged.
     it("refuses when the resolved signer holds a different key", async () => {
       findActiveWalletByPublicKey.mockResolvedValue({ id: "cw_stale", publicKey: FEE_PAYER });
       createOrgSignerForCustodyWallet.mockResolvedValue(

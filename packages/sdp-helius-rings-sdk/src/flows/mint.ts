@@ -2,12 +2,8 @@ import { SOL_MINT } from "@heliuslabs/zolana";
 
 /**
  * The two spellings of native SOL, translated at the one boundary that sees
- * both.
- *
- * SDP names native SOL by its wrapped mint, because that is what its token
- * registry and every other integration key on. The protocol names it with the
- * system program. Neither is wrong, so rather than teaching either side the
- * other's spelling, the conversion lives here.
+ * both: SDP names it by the wrapped mint its token registry keys on, the
+ * protocol names it with the system program.
  */
 
 // biome-ignore lint/security/noSecrets: the wrapped SOL mint, a public constant.

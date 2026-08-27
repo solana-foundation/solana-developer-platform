@@ -49,9 +49,7 @@ let walletId: string;
 
 /**
  * The port calls the pipeline makes before custody, plus whatever indexing
- * answer the test is about. `verifyIndexed` is stated per test rather than
- * driven by a double's own clock, so the delay each case depends on is visible
- * in the case itself.
+ * answer the test is about.
  */
 function serviceWith(overrides: Partial<RingsGatewayPort>) {
   return createHeliusRingsService(env, tenant, {
@@ -116,8 +114,7 @@ describe("pollRingsIndexing", () => {
     );
     expect(operation.state).toBe("indexing");
 
-    // Timeouts still run; Photon execute does not, so a half-configured
-    // deployment will not log a warning per in-flight operation every minute.
+    // Timeouts still run; Photon execute does not.
     await pollRingsIndexing(
       { ...env, HELIUS_RINGS_ENABLED: "true" },
       { createService: () => service }
@@ -180,8 +177,7 @@ describe("pollRingsIndexing", () => {
     );
     expect(operation.state).toBe("indexing");
 
-    // Sweep from a clock beyond the budget: the poll fails it rather than
-    // leaving it in limbo.
+    // Sweep from a clock beyond the budget.
     await pollRingsIndexing(CONFIGURED_ENV, {
       createService: () => service,
       now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
@@ -204,9 +200,8 @@ describe("pollRingsIndexing", () => {
     );
     expect(operation.state).toBe("indexing");
 
-    // Exactly the row a process that died between the RPC broadcast and the
-    // submitted → indexing commit leaves behind. Before the sweep covered
-    // `submitted`, nothing in the system would ever look at this row again.
+    // The row a process that died between the RPC broadcast and the
+    // submitted → indexing commit leaves behind.
     await getDb(env)
       .prepare("UPDATE helius_rings_operations SET state = 'submitted' WHERE id = ?")
       .bind(operation.id)
@@ -238,9 +233,8 @@ describe("pollRingsIndexing", () => {
       return operation.id;
     }
 
-    // Safe to fail outright, unlike `submitted`: the pipeline broadcasts only
-    // after the transition out of `ready_to_sign` commits, so nothing here ever
-    // reached an RPC and retrying cannot duplicate a payment.
+    // Safe to fail outright, unlike `submitted`: nothing here reached an RPC, so
+    // retrying cannot duplicate a payment.
     it("ages out a row abandoned before its signature was recorded", async () => {
       const id = await strandAtReadyToSign("job-unsigned");
 

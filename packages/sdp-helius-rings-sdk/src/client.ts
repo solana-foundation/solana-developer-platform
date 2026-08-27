@@ -12,16 +12,14 @@ export interface RingsClientConfig {
   readonly tree?: string;
   /**
    * Required for plain-http indexer and prover endpoints. In plaintext the
-   * indexer response reveals which notes an identity owns, so this is a
-   * deliberate per-environment decision rather than a default.
+   * indexer response reveals which notes an identity owns.
    */
   readonly allowInsecureHttp?: boolean;
 }
 
 /**
- * The only way this package constructs a client. `createZolanaClient` also
- * loads the Poseidon hasher, which `new ZolanaClient` does not, and every
- * balance path needs it.
+ * The only way this package constructs a client: `createZolanaClient` also loads
+ * the Poseidon hasher, which `new ZolanaClient` does not.
  */
 export function createRingsClient(config: RingsClientConfig): Promise<ZolanaClient> {
   const { tree } = config;

@@ -12,9 +12,8 @@ import {
 } from "./gateway";
 
 /**
- * Read off the seam rather than imported from `@sdp/helius-rings-sdk`:
- * `gateway.ts` is the only file in this app allowed to reach that package, and
- * a test is not a good reason to make it two.
+ * Read off the seam rather than imported: `gateway.ts` is the only file in this
+ * app allowed to reach `@sdp/helius-rings-sdk`.
  */
 type CapturedConfig = Parameters<NonNullable<ResolveRingsGatewayDependencies["createGateway"]>>[0];
 
@@ -65,17 +64,15 @@ describe("resolveRingsGateway", () => {
         indexerUrl: CONFIGURED.HELIUS_RINGS_INDEXER_URL,
         proverUrl: CONFIGURED.HELIUS_RINGS_PROVER_URL,
         derivationSeed: CONFIGURED.HELIUS_RINGS_DETERMINISTIC_KA_SEED,
-        // Fixed at construction: a gateway that took the tenant per call could
-        // be handed a wallet id from another one and derive under its path.
+        // Fixed at construction: a per-call tenant could derive key material
+        // under another organization's path.
         organizationId: tenant.organizationId,
         projectId: tenant.projectId,
       });
     });
 
-    // The public devnet indexer and prover are plain http on a real host, so
-    // the flag is the difference between the adapter working and reporting
-    // red. It is read as a flag rather than inferred from the scheme of the
-    // URLs, so a production typo cannot quietly authorise plaintext.
+    // Read as an explicit flag rather than inferred from the URL scheme, so a
+    // production typo cannot quietly authorise plaintext.
     it.each([
       [undefined, false],
       ["false", false],
@@ -91,10 +88,8 @@ describe("resolveRingsGateway", () => {
       expect(captured[0]).toMatchObject({ allowInsecureHttp: expected });
     });
 
-    // An unfunded owner is an ordinary operator mistake, and it surfaces as a
-    // RingsAdapterError from SDP's own RPC adapter. The SDK's error bridge only
-    // recognises Zolana's error classes, so unless it is translated right here
-    // it reaches the route unmapped and the operator gets a 500.
+    // The SDK's error bridge only recognises Zolana's error classes, so an
+    // untranslated adapter failure reaches the route as a 500.
     it.each([
       ["submit_failed", true, "gateway_unavailable"],
       ["signer_failed", false, "invalid_input"],
@@ -127,8 +122,8 @@ describe("resolveRingsGateway", () => {
       }
     );
 
-    // The RPC URL carries a Helius API key and RPC errors quote the endpoint
-    // they failed on, so the upstream text must not reach the response.
+    // RPC errors quote the endpoint they failed on, and it carries a Helius API
+    // key.
     it("does not forward the adapter's own message", async () => {
       const { captured, createGateway } = capturingCreate();
 
@@ -188,8 +183,6 @@ describe("resolveRingsGateway", () => {
       await expect(config.signTransaction("unsigned", "OwnerPublicKey")).resolves.toBe("signed");
       await expect(config.submitTransaction("signed")).resolves.toBe("sig");
 
-      // The owner reaches the signer: the identity is registered to one key and
-      // the org default is not it.
       expect(signCalls[0]).toMatchObject({
         organizationId: tenant.organizationId,
         projectId: tenant.projectId,
@@ -215,14 +208,10 @@ describe("resolveRingsGateway", () => {
       expect(gateway).toBeInstanceOf(UnconfiguredRingsGateway);
       const health = await gateway.probeHealth();
       expect(health.detail?.gateway).toContain(key);
-      // The indexing poll asks the same question, so it cannot wake up next to
-      // a gateway that would refuse every operation it handed over.
       expect(ringsUpstreamsConfigured(env)).toBe(false);
     });
 
-    // A `KEY=` line is an operator who has not filled it in, not one who chose
-    // the empty URL, so it has to read as missing rather than be handed to the
-    // SDK to fail on later.
+    // A `KEY=` line is an unfilled variable, not a chosen empty URL.
     it("treats a blank value as absent", async () => {
       const env = envOf({ HELIUS_RINGS_PROVER_URL: "   " });
       const gateway = resolveRingsGateway(env, tenant);
@@ -280,7 +269,7 @@ describe("UnconfiguredRingsGateway", () => {
 
     expect(error).toBeInstanceOf(HeliusRingsError);
     // Not `gateway_unavailable`: the fix is an environment edit, so a retry
-    // button cannot succeed and must not be offered.
+    // cannot succeed.
     expect(error).toMatchObject({ code: "config_error" });
     expect((error as Error).message).toContain("HELIUS_RINGS_INDEXER_URL");
   });

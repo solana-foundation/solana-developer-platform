@@ -49,9 +49,8 @@ describe("createShieldedMaterial", () => {
     const second = await createShieldedMaterial({ ...INPUT, owner: OTHER_OWNER });
 
     try {
-      // Same bytes, two owners: identical secrets under different addresses.
-      // This is what lets custody hold the Ed25519 secret while these keys are
-      // produced somewhere else.
+      // Identical secrets under different addresses, which is what lets custody
+      // hold the Ed25519 secret while these keys are produced elsewhere.
       expect(second.viewingKey.secretBytes()).toStrictEqual(first.viewingKey.secretBytes());
       expect(second.nullifierKey.secretBytes()).toStrictEqual(first.nullifierKey.secretBytes());
       expect(second.shieldedAddress.ownerHash()).not.toStrictEqual(

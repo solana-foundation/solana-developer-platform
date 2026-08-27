@@ -61,8 +61,7 @@ describe("syncRingsWallet", () => {
 
     const { balances } = await syncRingsWallet(DEPS, INPUT);
 
-    // The protocol spells native SOL as the system program and SDP spells it as
-    // wrapped SOL. Returning the protocol's would miss every allowlist lookup.
+    // Returning the protocol's spelling would miss every allowlist lookup.
     expect(balances).toEqual([
       { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "2500000000" },
     ]);
@@ -75,11 +74,9 @@ describe("syncRingsWallet", () => {
 
     const [balance] = (await syncRingsWallet(DEPS, INPUT)).balances;
 
-    // Dropping it would tell an operator the wallet is empty when it is not,
-    // and guessing decimals would render the amount at the wrong magnitude.
-    // Null is the third answer: the amount is exact and the scale is unknown,
-    // so the renderer shows base units instead of inventing a point. Zero would
-    // have shown these 1.50 USDC as 1500000 whole tokens.
+    // Dropping it would report an empty wallet and guessing decimals would
+    // render the wrong magnitude; null says the scale is unknown, so the
+    // renderer shows base units rather than reading 1.50 USDC as 1500000.
     expect(balance).toEqual({
       mint: USDC,
       symbol: "UNKNOWN",
@@ -126,8 +123,8 @@ describe("syncRingsWallet", () => {
 
     const { cursor } = await syncRingsWallet(DEPS, INPUT);
 
-    // Not a resume position: the SDK keeps three independent read positions, so
-    // every sync is a full read and this only says when the answer was true.
+    // Not a resume position: every sync is a full read, so this only says when
+    // the answer was true.
     expect(Date.parse(cursor)).toBeGreaterThanOrEqual(before);
     expect(cursor).toBe(new Date(cursor).toISOString());
   });
@@ -146,15 +143,13 @@ describe("syncRingsWallet", () => {
     }).catch((thrown: unknown) => thrown);
 
     // Syncing anyway would report a different identity's balances under this
-    // wallet, which is worse than refusing to answer.
+    // wallet.
     expect(syncWallet).not.toHaveBeenCalled();
-    // And it refuses as a domain failure. Untranslated, the mismatch is neither
-    // a Zolana error the bridge converts nor a HeliusRingsError the route maps,
-    // so it reached the operator as an opaque 500.
+    // And it refuses as a domain failure; untranslated the mismatch reaches the
+    // operator as an opaque 500.
     expect(error).toBeInstanceOf(HeliusRingsError);
     expect(error).not.toBeInstanceOf(RingsIdentityMismatchError);
-    // `conflict` is a 409: the derivation inputs moved, so the same read repeated
-    // fails the same way and a retry button could not fix it.
+    // `conflict` is a 409: the same read repeated fails the same way.
     expect(error).toMatchObject({ code: "conflict" });
   });
 
@@ -167,10 +162,9 @@ describe("syncRingsWallet", () => {
       expectedShieldedAddress: persisted,
     }).catch((thrown: unknown) => thrown)) as Error;
 
-    // The raw error carries both shielded addresses. They name the identities
-    // involved, an operator can act on neither, and the seed and owner behind
-    // them are the actual inputs that moved — so the bridged failure names those
-    // instead, and does not keep the raw error reachable as a cause.
+    // An operator can act on neither shielded address the raw error carries, so
+    // the bridged failure names the seed and owner instead and keeps the raw
+    // error unreachable as a cause.
     const reachable = JSON.stringify(error, Object.getOwnPropertyNames(error));
     expect(reachable).not.toContain(derived);
     expect(reachable).not.toContain(persisted);
@@ -191,9 +185,8 @@ describe("syncRingsWallet", () => {
 
     const [{ authority }] = syncWallet.mock.calls[0] as [{ authority: Record<string, unknown> }];
 
-    // Sync has no operation behind it, so there is no approval an authority
-    // could honestly stand for. Anything beyond reading must be absent rather
-    // than stubbed, so a future SDK that tried to spend here would fail loudly.
+    // Sync has no operation behind it, so there is no approval an authority could
+    // stand for; anything beyond reading must be absent rather than stubbed.
     expect(Object.keys(authority)).toEqual(["syncMaterial"]);
   });
 });
