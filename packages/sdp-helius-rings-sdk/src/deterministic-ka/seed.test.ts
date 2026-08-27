@@ -1,27 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { decodeSeed } from "./seed.js";
+import { describe, expect, it, vi } from "vitest";
+import { DETERMINISTIC_KA_SEED, SEED_BYTE_LENGTH, warnDeterministicKeyAuthority } from "./seed.js";
 
-describe("decodeSeed", () => {
-  it("decodes 32 base64-encoded bytes", () => {
-    const seed = new Uint8Array(32).fill(7);
-
-    expect(decodeSeed(Buffer.from(seed).toString("base64"))).toStrictEqual(seed);
+describe("DETERMINISTIC_KA_SEED", () => {
+  it("is the length the derivation requires", () => {
+    expect(DETERMINISTIC_KA_SEED).toHaveLength(SEED_BYTE_LENGTH);
   });
 
-  it("rejects a missing seed", () => {
-    expect(() => decodeSeed(undefined)).toThrow(/required/);
-    expect(() => decodeSeed("")).toThrow(/required/);
+  it("reads as a test value, so it cannot be mistaken for a configured secret", () => {
+    expect(new TextDecoder().decode(DETERMINISTIC_KA_SEED)).toBe(
+      "INSECURE_TEST_SEED_DEVNET_ONLY!!"
+    );
   });
+});
 
-  it("rejects a seed that is not base64", () => {
-    expect(() => decodeSeed("not base64 at all!!")).toThrow(/base64/);
-  });
+describe("warnDeterministicKeyAuthority", () => {
+  it("warns once per process rather than once per wallet", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-  it("rejects a seed of the wrong length", () => {
-    expect(() => decodeSeed(Buffer.alloc(31).fill(1).toString("base64"))).toThrow(/32 bytes/);
-  });
+    warnDeterministicKeyAuthority();
+    warnDeterministicKeyAuthority();
 
-  it("rejects the all-zero placeholder", () => {
-    expect(() => decodeSeed(Buffer.alloc(32).toString("base64"))).toThrow(/placeholder/);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("INSECURE");
+    warn.mockRestore();
   });
 });

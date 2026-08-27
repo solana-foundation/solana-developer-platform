@@ -18,7 +18,6 @@ const RINGS_UPSTREAM_ENV_KEYS = {
   solanaRpcUrl: "HELIUS_RINGS_RPC_URL",
   indexerUrl: "HELIUS_RINGS_INDEXER_URL",
   proverUrl: "HELIUS_RINGS_PROVER_URL",
-  derivationSeed: "HELIUS_RINGS_DETERMINISTIC_KA_SEED",
 } as const satisfies Record<string, keyof Env>;
 
 type RingsUpstreams = Record<keyof typeof RINGS_UPSTREAM_ENV_KEYS, string>;

@@ -24,7 +24,6 @@ const CONFIGURED = {
   HELIUS_RINGS_RPC_URL: "https://rpc.invalid/?api-key=key",
   HELIUS_RINGS_INDEXER_URL: "https://indexer.invalid",
   HELIUS_RINGS_PROVER_URL: "https://prover.invalid",
-  HELIUS_RINGS_DETERMINISTIC_KA_SEED: Buffer.alloc(32, 7).toString("base64"),
 } satisfies Partial<Env>;
 
 function envOf(overrides: Partial<Env> = {}): Env {
@@ -63,7 +62,6 @@ describe("resolveRingsGateway", () => {
         solanaRpcUrl: CONFIGURED.HELIUS_RINGS_RPC_URL,
         indexerUrl: CONFIGURED.HELIUS_RINGS_INDEXER_URL,
         proverUrl: CONFIGURED.HELIUS_RINGS_PROVER_URL,
-        derivationSeed: CONFIGURED.HELIUS_RINGS_DETERMINISTIC_KA_SEED,
         // Fixed at construction: a per-call tenant could derive key material
         // under another organization's path.
         organizationId: tenant.organizationId,
@@ -198,7 +196,6 @@ describe("resolveRingsGateway", () => {
       "HELIUS_RINGS_RPC_URL",
       "HELIUS_RINGS_INDEXER_URL",
       "HELIUS_RINGS_PROVER_URL",
-      "HELIUS_RINGS_DETERMINISTIC_KA_SEED",
     ] as const satisfies ReadonlyArray<keyof Env>;
 
     it.each(requiredKeys)("names %s when it is absent", async (key) => {

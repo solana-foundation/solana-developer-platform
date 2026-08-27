@@ -11,7 +11,6 @@ const CONFIG: RingsGatewayConfig = {
   solanaRpcUrl: "http://127.0.0.1:1/rpc",
   indexerUrl: "http://127.0.0.1:1",
   proverUrl: "http://127.0.0.1:1",
-  derivationSeed: Buffer.alloc(32, 7).toString("base64"),
   organizationId: "org_1",
   projectId: "proj_1",
   signTransaction: async (unsigned) => unsigned,
@@ -62,59 +61,6 @@ describe("createRingsGateway", () => {
       message: "the Rings gateway configuration is invalid",
     });
     expect((error as Error).message).not.toContain(configuredTree);
-  });
-
-  // A seed that is present but unusable is an operator problem, not a transient
-  // one, so nothing retryable may be reported for it.
-  it.each([
-    ["not base64 at all", "not-valid-base64!!"],
-    ["the right shape but too short", Buffer.alloc(16, 7).toString("base64")],
-    ["the all-zero placeholder", Buffer.alloc(32, 0).toString("base64")],
-    ["absent", ""],
-  ])("refuses a derivation seed that is %s", async (_case, derivationSeed) => {
-    const calls: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
-      ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "addr" })],
-      ["syncPhoton", (g) => g.syncPhoton(SYNC_INPUT)],
-      [
-        "buildOperation",
-        (g) =>
-          g.buildOperation({
-            operation: {
-              opType: "shield",
-              walletId: "hrw_1",
-              input: { from: "addr", asset: { mint: "mint", amountRaw: "1" } },
-            } as never,
-            keyRefs: [],
-            expectedShieldedAddress: "rings1",
-          }),
-      ],
-    ];
-
-    for (const [, call] of calls) {
-      const error = await call(createRingsGateway({ ...CONFIG, derivationSeed })).then(
-        () => null,
-        (thrown: unknown) => thrown
-      );
-
-      expect(error).toBeInstanceOf(HeliusRingsError);
-      expect((error as HeliusRingsError).code).toBe("config_error");
-      // The reason travels so the operator learns which way it is wrong; the
-      // seed itself never does.
-      if (derivationSeed.length > 0) {
-        expect((error as HeliusRingsError).message).not.toContain(derivationSeed);
-      }
-    }
-  });
-
-  it("still reports health when the derivation seed is unusable", async () => {
-    // An operator whose seed is wrong needs the health endpoint most, so it must
-    // not depend on key material it never uses.
-    const health = await createRingsGateway({
-      ...CONFIG,
-      derivationSeed: "not-valid-base64!!",
-    }).probeHealth();
-
-    expect(health.gateway).toBe("green");
   });
 
   // Refused rather than stubbed, so a spend cannot be mistaken for a deposit.

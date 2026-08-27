@@ -881,7 +881,7 @@ describe("HeliusRingsService", () => {
       // Unobserved components read red, not green.
       expect(health).toMatchObject({ rpc: "red", photon: "red", prover: "red", gateway: "red" });
       expect(health.detail?.["gateway.reason"]).toContain("HELIUS_RINGS_RPC_URL");
-      expect(health.detail?.["rpc.reason"]).toContain("HELIUS_RINGS_DETERMINISTIC_KA_SEED");
+      expect(health.detail?.["rpc.reason"]).toContain("HELIUS_RINGS_PROVER_URL");
     });
 
     it("records the gateway's component statuses when reachable", async () => {

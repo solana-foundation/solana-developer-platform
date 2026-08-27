@@ -85,14 +85,14 @@ export async function deriveMaterial(
 }
 
 export interface DeterministicMaterialSourceConfig {
-  /** 32 raw bytes, normally from `decodeSeed`. The caller keeps it out of logs. */
+  /** 32 raw bytes; normally {@link DETERMINISTIC_KA_SEED}. */
   readonly seed: Uint8Array;
 }
 
 /**
  * A {@link ShieldedMaterialSource} that recomputes material from one master seed
- * on every request, so no shielded secret is stored at rest. Interim because the
- * platform holds the seed and can therefore derive every tenant's keys.
+ * on every request, so nothing is stored at rest. Interim: the seed is public,
+ * so not storing these keys does not make them secret.
  */
 export function createDeterministicMaterialSource(
   config: DeterministicMaterialSourceConfig

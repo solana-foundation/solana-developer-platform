@@ -167,7 +167,7 @@ export function assertShieldedIdentity(material: ShieldedMaterial, expected: str
  * they can act on, so this names the inputs that moved instead.
  */
 const IDENTITY_MISMATCH_MESSAGE =
-  "the Rings identity derived for this wallet is not the one it was provisioned with; check HELIUS_RINGS_DETERMINISTIC_KA_SEED and the wallet's owner";
+  "the Rings identity derived for this wallet is not the one it was provisioned with; check the wallet's owner and the organization and project it was provisioned under";
 
 /**
  * Fails closed on a mismatch as a domain failure; untranslated it reaches the

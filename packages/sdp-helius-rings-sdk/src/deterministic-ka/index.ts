@@ -3,4 +3,8 @@ export {
   type DeterministicMaterialSourceConfig,
   deriveMaterial,
 } from "./derivation.js";
-export { decodeSeed, SEED_BYTE_LENGTH } from "./seed.js";
+export {
+  DETERMINISTIC_KA_SEED,
+  SEED_BYTE_LENGTH,
+  warnDeterministicKeyAuthority,
+} from "./seed.js";

@@ -175,7 +175,7 @@ describe("syncRingsWallet", () => {
     expect(reachable).not.toContain(persisted);
     expect(error.cause).toBeUndefined();
     expect(error.message).toBe(
-      "the Rings identity derived for this wallet is not the one it was provisioned with; check HELIUS_RINGS_DETERMINISTIC_KA_SEED and the wallet's owner"
+      "the Rings identity derived for this wallet is not the one it was provisioned with; check the wallet's owner and the organization and project it was provisioned under"
     );
   });
 

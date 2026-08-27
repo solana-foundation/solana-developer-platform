@@ -239,11 +239,6 @@ export interface Env {
   // plaintext an indexer response reveals which notes an identity owns.
   HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
 
-  // Base64 32-byte master seed the deterministic key authority derives every
-  // shielded identity from. Permanent once any wallet is provisioned: changing
-  // it orphans that identity's notes.
-  HELIUS_RINGS_DETERMINISTIC_KA_SEED?: string;
-
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;

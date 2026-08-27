@@ -743,14 +743,6 @@ export const FIELDS: EnvField[] = [
     help: "The public devnet indexer and prover are plain http on a real host, and the SDK refuses to dial them without this. Over plaintext an indexer response reveals which notes an identity owns, so leave it off outside devnet.",
   },
   {
-    key: "HELIUS_RINGS_DETERMINISTIC_KA_SEED",
-    section: "secrets",
-    kind: "secret",
-    secretEncoding: "base64",
-    label: "Helius Rings deterministic key authority seed",
-    help: "Base64-encoded 32-byte master seed every Rings shielded identity is derived from. Permanent once any wallet is provisioned: changing it derives different keys for every identity, and while re-keying a registered one is possible on chain, SDP refuses it — the notes encrypted to the old keys become unreadable and unspendable.",
-  },
-  {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",
     section: "secrets",
     kind: "secret",

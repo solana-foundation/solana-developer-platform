@@ -49,10 +49,16 @@ registration. Everything harder is still ahead.
 | `HELIUS_RINGS_INDEXER_URL` | URL | Photon indexer. Required once Rings is enabled. |
 | `HELIUS_RINGS_PROVER_URL` | URL | Proving service. Required once Rings is enabled. |
 | `HELIUS_RINGS_ALLOW_INSECURE_HTTP` | `false` (default) / `true` | Permits plain-http upstreams. The public devnet indexer and prover are http on a real host, and the SDK refuses to dial them without this. In plaintext an indexer response reveals which notes an identity owns, so it is opt-in per environment rather than inferred from the URL. |
-| `HELIUS_RINGS_DETERMINISTIC_KA_SEED` | base64 32 bytes | Master seed the deterministic key authority derives every shielded identity from. Required once Rings is enabled, and **permanent once any wallet is provisioned** — the registry's `update_keys` instruction would let an owner re-key an identity, but SDP refuses to and doing so would orphan every note encrypted to the old keys, so changing this leaves them unreadable. |
 | `SOLANA_NETWORK` | must be `devnet` | `HeliusRingsService` refuses to construct on any other network, and the schema pins `helius_rings_wallets.network` to `'devnet'`. Going to mainnet is a deliberate forward migration, not a config flip. |
 
-Enabling Rings without all four upstream values does not throw at construction.
+> **The seed is public.** Shielded identities are derived from
+> `INSECURE_TEST_SEED_DEVNET_ONLY!!`, hardcoded in
+> `packages/sdp-helius-rings-sdk/src/deterministic-ka/seed.ts`. Anyone with the
+> source derives the same keys, so a shielded balance here is not private. The
+> API logs a warning on first derivation, and this is why `SOLANA_NETWORK` must
+> be `devnet`.
+
+Enabling Rings without all three upstream values does not throw at construction.
 The health board reports every component red naming the missing variables, and
 every other gateway method fails with `config_error`. Throwing would 500 the
 health endpoint an operator reaches for first.
@@ -134,8 +140,9 @@ says which reading applied.
   table cannot accumulate secret material.
 - Key material is not persisted by the service, and there is nothing to seal
   into `helius_rings_key_refs`: the deterministic key authority recomputes
-  every identity from `HELIUS_RINGS_DETERMINISTIC_KA_SEED` on demand and stores
-  none of it. Provisioning reports only which kind of material it used.
+  every identity from the hardcoded seed on demand and stores none of it.
+  Provisioning reports only which kind of material it used. Not storing the
+  keys is not the same as their being secret — see the warning above.
 - Provisioning signs the registry's `register` instruction and nothing else.
   The record is read first to decide whether to build at all, and the built
   transaction is then decoded before custody sees it — one instruction, the
@@ -155,9 +162,9 @@ signature alone, with no proof that the incoming keys can read anything the
 outgoing ones could. What an operator would need before taking it is the safety
 check — *does the old identity still hold notes?* — and that check cannot be
 built. Reading those notes requires the old viewing **secret**. SDP never held
-it for a record registered by someone else, and once
-`HELIUS_RINGS_DETERMINISTIC_KA_SEED` has changed it cannot reconstruct the one
-it did derive. A rotation would therefore always be a blind write, and the
+it for a record registered by someone else, and once the derivation seed or
+path has changed it cannot reconstruct the one it did derive. A rotation would
+therefore always be a blind write, and the
 blindness is the whole risk: whatever the old identity still holds becomes
 unspendable at the moment it succeeds.
 

@@ -17,7 +17,11 @@ import {
   type VerifyIndexedResult,
 } from "@sdp/helius-rings";
 import { createRingsClient } from "./client.js";
-import { createDeterministicMaterialSource, decodeSeed } from "./deterministic-ka/index.js";
+import {
+  createDeterministicMaterialSource,
+  DETERMINISTIC_KA_SEED,
+  warnDeterministicKeyAuthority,
+} from "./deterministic-ka/index.js";
 import { withZolanaErrorBridge } from "./error-bridge.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { readRingsIdentityStatus } from "./identity.js";
@@ -37,8 +41,6 @@ export interface RingsGatewayConfig {
   readonly solanaRpcUrl: string;
   readonly indexerUrl: string;
   readonly proverUrl: string;
-  /** Base64 master seed the deterministic key authority derives from. */
-  readonly derivationSeed: string;
   /**
    * Fixed at construction rather than passed per call, so a wallet id cannot be
    * paired with the wrong organization and derive material under someone else's
@@ -99,23 +101,11 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
   let pending: Promise<ZolanaClient> | undefined;
   let materialSource: ShieldedMaterialSource | undefined;
 
-  /**
-   * `config_error` rather than `gateway_unavailable`, so a deployment whose seed
-   * is unusable is not offered a retry that cannot succeed. `decodeSeed`
-   * describes the shape of the failure, never the value.
-   */
+  /** Warns on first derivation, not at construction, so health probes stay quiet. */
   function requireMaterial(): ShieldedMaterialSource {
     if (!materialSource) {
-      let seed: Uint8Array;
-      try {
-        seed = decodeSeed(config.derivationSeed);
-      } catch (error) {
-        throw new HeliusRingsError(
-          "config_error",
-          `the Rings derivation seed is unusable: ${error instanceof Error ? error.message : "unknown reason"}`
-        );
-      }
-      materialSource = createDeterministicMaterialSource({ seed });
+      warnDeterministicKeyAuthority();
+      materialSource = createDeterministicMaterialSource({ seed: DETERMINISTIC_KA_SEED });
     }
 
     return materialSource;

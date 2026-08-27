@@ -42,7 +42,6 @@ const CONFIGURED_ENV = {
   HELIUS_RINGS_RPC_URL: "https://rpc.invalid/?api-key=key",
   HELIUS_RINGS_INDEXER_URL: "https://indexer.invalid",
   HELIUS_RINGS_PROVER_URL: "https://prover.invalid",
-  HELIUS_RINGS_DETERMINISTIC_KA_SEED: Buffer.alloc(32, 9).toString("base64"),
 };
 
 let walletId: string;
