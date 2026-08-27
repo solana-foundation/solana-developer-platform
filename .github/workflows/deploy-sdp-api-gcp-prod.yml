@@ -11,6 +11,9 @@ on:
         description: "Version tag that must resolve to release_sha"
         type: string
         required: true
+    secrets:
+      DOPPLER_TOKEN_CI:
+        required: true
   workflow_dispatch:
     inputs:
       image_sha:
@@ -31,7 +34,8 @@ jobs:
     name: Gate on dev smoke
     if: github.repository == 'solana-foundation/solana-developer-platform'
     uses: ./.github/workflows/sdp-dev-smoke.yml
-    secrets: inherit
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
     permissions:
       contents: read
 

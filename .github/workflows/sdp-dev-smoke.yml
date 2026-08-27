@@ -5,6 +5,9 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
   workflow_call:
+    secrets:
+      DOPPLER_TOKEN_CI:
+        required: true
 
 permissions:
   contents: read
