@@ -34,15 +34,6 @@ jobs:
       NEXT_PUBLIC_DISABLE_SENTRY: "1"
       NEXT_PUBLIC_SENTRY_DSN: ""
       PLAYWRIGHT_DISABLE_SENTRY: "1"
-      SDP_FLAG_HOMEPAGE_OPEN_SIGNUP: "true"
-      SDP_FLAG_ORGANIZATION_ONBOARDING: "true"
-      SDP_FLAG_PRIVY_BYOK: "false"
-      SDP_FLAG_ASSET_PROFILES: "true"
-      PRIVATE_CHANNELS_ENABLED: "false"
-      HELIUS_RINGS_ENABLED: "false"
-      PAYMENTS_ENABLED: "true"
-      MARKETS_ENABLED: "false"
-      EARN_ENABLED: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +51,9 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Pin the smoke flag posture
+        run: jq -r 'to_entries[] | .value.env + "=" + (.value.value|tostring)' apps/sdp-web/smoke-flags.json >> "$GITHUB_ENV"
 
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
