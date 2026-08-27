@@ -322,7 +322,7 @@ export async function seedCounterparty(params?: {
   identity?: Record<string, unknown>;
   providerData?: Record<string, unknown>;
 }): Promise<string> {
-  const id = params?.id ?? `counterparty_${crypto.randomUUID()}`;
+  const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
   await getDb(env)
     .prepare(
       `INSERT INTO counterparties (

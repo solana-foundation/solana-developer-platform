@@ -828,7 +828,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       example: [
         {
           externalId: "payroll_row_001",
-          counterpartyId: "cp_example",
+          counterpartyId: "cpty_example",
           counterpartyAccountId: "cpa_example",
           amount: "25.00",
         },
@@ -898,7 +898,7 @@ export const transferBatchRecipientSchema = z
     }),
     counterpartyId: z.string().openapi({
       description: "Counterparty identifier for the recipient.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: z.string().openapi({
       description: "Counterparty account identifier for the recipient.",
@@ -1048,7 +1048,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
     }),
     counterpartyId: withOpenApi(createRecurringPaymentSchemaBase.shape.counterpartyId, {
       description: "Counterparty receiving the recurring payment.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: withOpenApi(
       createRecurringPaymentSchemaBase.shape.counterpartyAccountId,
@@ -1093,7 +1093,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
     counterpartyId: withOpenApi(updateRecurringPaymentSchemaBase.shape.counterpartyId, {
       description:
         "Optional replacement counterparty. When provided, counterpartyAccountId is also required.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: withOpenApi(
       updateRecurringPaymentSchemaBase.shape.counterpartyAccountId,
@@ -1142,7 +1142,7 @@ export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuer
   .extend({
     counterpartyId: withOpenApi(listRecurringPaymentsQuerySchemaBase.shape.counterpartyId, {
       description: "Filter recurring payments by counterparty.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     status: paymentRecurringPaymentStatusSchema.optional(),
   })
@@ -1159,7 +1159,9 @@ export const paymentRecurringPaymentSchema = z
     sourceAddress: solanaAddressSchema.openapi({
       description: "Source wallet address.",
     }),
-    counterpartyId: z.string().openapi({ description: "Counterparty ID.", example: "cp_example" }),
+    counterpartyId: z
+      .string()
+      .openapi({ description: "Counterparty ID.", example: "cpty_example" }),
     counterpartyAccountId: z
       .string()
       .openapi({ description: "Counterparty account ID.", example: "cpa_example" }),

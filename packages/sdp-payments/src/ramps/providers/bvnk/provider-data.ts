@@ -249,14 +249,12 @@ export interface BvnkCustomerResolution {
  * Builds the value stored in BVNK's customer `externalReference` field.
  *
  * BVNK limits `externalReference` to 36 characters, while SDP counterparty ids
- * are `<prefix>_<uuid>` and therefore too long. This function creates a
+ * are `cpty_<uuid>` and therefore too long. This function creates a
  * reversible BVNK-facing id in `cp_<uuid_without_hyphens>` format. BVNK returns
  * this caller-provided value in customer/payment webhooks, letting handlers
- * reconstruct the SDP counterparty id and load by primary key. The uuid is
- * extracted prefix-agnostically so ids issued before and after the `cpty_`
- * prefix change both map to the same external reference.
+ * reconstruct the SDP counterparty id and load by primary key.
  *
- * @param counterpartyId SDP counterparty primary key in `<prefix>_<uuid>` format.
+ * @param counterpartyId SDP counterparty primary key in `cpty_<uuid>` format.
  * @returns BVNK customer `externalReference` in `cp_<32_hex_uuid>` format.
  * @throws SdpPaymentsError with `INTERNAL_ERROR` when the counterparty id cannot be
  * represented in BVNK's compact externalReference format.

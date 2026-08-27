@@ -36,8 +36,7 @@ export function generateCounterpartyId(): string {
 }
 
 /**
- * Matches the uuid segments of an SDP counterparty id. Prefix-agnostic so ids
- * issued before and after the `cpty_` prefix change both match.
+ * Matches the uuid segments of an SDP counterparty id in `cpty_<uuid>` format.
  */
 export const SDP_COUNTERPARTY_ID_PATTERN =
-  /_([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/i;
+  /^cpty_([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/i;

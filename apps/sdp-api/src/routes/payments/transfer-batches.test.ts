@@ -262,7 +262,7 @@ async function updateSeededWalletPublicKey(publicKey: string): Promise<void> {
 }
 
 async function seedCounterparty(externalId: string): Promise<string> {
-  const id = `counterparty_${crypto.randomUUID()}`;
+  const id = `cpty_${crypto.randomUUID()}`;
   await getDb(env)
     .prepare(
       `INSERT INTO counterparties (
