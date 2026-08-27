@@ -33,7 +33,6 @@ jobs:
       JOB: sdp-dev-api-public-cron
       WORKER_SERVICE: sdp-dev-worker
       MIGRATE_JOB: sdp-dev-api-public-migrate
-      PII_MIGRATE_JOB: sdp-dev-counterparty-pii-migrate
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -75,8 +74,6 @@ jobs:
           node .github/scripts/verify-managed-reconciliation-cadence.mjs \
             "${JOB}" "${REGION}" "${PROJECT_ID}"
           gcloud run jobs update "${JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          gcloud run jobs update "${PII_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
       - name: Update worker image

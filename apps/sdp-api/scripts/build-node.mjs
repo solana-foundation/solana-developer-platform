@@ -65,8 +65,6 @@ const entryPoints = {
   migrate: "scripts/migrate-postgres.mjs",
   // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
   "custody-backfill": "scripts/migrate-custody-encryption.ts",
-  // counterparty-pii-migrate.js performs the gated PII backfill/cutover lifecycle.
-  "counterparty-pii-migrate": "scripts/counterparty-pii-migrate.ts",
   // configure.js generates a self-hosted .env in the terminal from the prebuilt image.
   configure: "scripts/configure.ts",
 };
