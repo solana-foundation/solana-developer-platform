@@ -58,7 +58,6 @@ test.describe
         accountLabel = `E2E Solana ${suffix}`;
         await seedCounterpartyWithSolanaAccount(api, {
           displayName: counterpartyName,
-          email: `e2e-payee-${suffix}@example.com`,
           accountLabel,
           destinationAddress,
         });
@@ -68,7 +67,6 @@ test.describe
         deniedAccountLabel = `E2E Blocked Solana ${suffix}`;
         await seedCounterpartyWithSolanaAccount(api, {
           displayName: deniedCounterpartyName,
-          email: `e2e-blocked-payee-${suffix}@example.com`,
           accountLabel: deniedAccountLabel,
           destinationAddress: deniedDestinationAddress,
         });

@@ -236,11 +236,7 @@ describe("BVNK on-ramp payment rule key", () => {
   });
 });
 
-type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
-
-function counterpartyRow(
-  overrides?: Partial<IndividualCounterpartyRow>
-): IndividualCounterpartyRow {
+function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
   return {
     id: "cp_123",
     organization_id: "org_123",
@@ -248,19 +244,6 @@ function counterpartyRow(
     external_id: null,
     entity_type: "individual",
     display_name: "Ada Lovelace",
-    email: "ada@example.com",
-    identity: {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: {
-        line1: "1 Market St",
-        city: "San Francisco",
-        countryCode: "US",
-        subdivisionCode: "US-TX",
-      },
-    },
     provider_data: {},
     status: "active",
     created_by: null,
@@ -271,28 +254,12 @@ function counterpartyRow(
 }
 
 describe("buildBvnkRuleEntity", () => {
-  it("normalizes an ISO-prefixed stored subdivision code to BVNK's bare stateCode", () => {
-    const entity = buildBvnkRuleEntity(counterpartyRow());
+  it("fails loudly at the unwired JIT seam", () => {
+    const run = () => buildBvnkRuleEntity(counterpartyRow());
 
-    expect(entity.address?.stateCode).toBe("TX");
-  });
-
-  it("throws for a non-US subdivision that does not resolve to 2 characters", () => {
-    const row = counterpartyRow({
-      identity: {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: {
-          line1: "1 High St",
-          city: "London",
-          countryCode: "GB",
-          subdivisionCode: "GB-ENG",
-        },
-      },
-    });
-
-    expect(() => buildBvnkRuleEntity(row)).toThrowError(SdpPaymentsError);
+    expect(run).toThrowError(SdpPaymentsError);
+    expect(run).toThrowError(
+      "BVNK onramp requires identity fields for counterparty cp_123 that are no longer stored; JIT collection is not wired yet"
+    );
   });
 });

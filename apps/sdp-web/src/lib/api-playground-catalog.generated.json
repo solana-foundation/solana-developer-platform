@@ -5459,23 +5459,6 @@
                 "externalId": "customer_42",
                 "entityType": "individual",
                 "displayName": "Jane Doe",
-                "email": "jane@example.com",
-                "identity": {
-                  "firstName": "Jane",
-                  "middleName": "Q",
-                  "lastName": "Doe",
-                  "secondLastName": "Garcia",
-                  "dateOfBirth": "1990-01-15",
-                  "phone": "+14155551234",
-                  "address": {
-                    "line1": "123 Main St",
-                    "line2": "Apt 4B",
-                    "city": "San Francisco",
-                    "postalCode": "94105",
-                    "countryCode": "US",
-                    "subdivisionCode": "CA"
-                  }
-                },
                 "status": "active",
                 "createdBy": "usr_example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
@@ -5506,7 +5489,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"displayName\": \"Jane Doe\",\n  \"email\": \"jane@example.com\",\n  \"entityType\": \"individual\",\n  \"identity\": {\n    \"firstName\": \"Jane\",\n    \"middleName\": \"Q\",\n    \"lastName\": \"Doe\",\n    \"secondLastName\": \"Garcia\",\n    \"dateOfBirth\": \"1990-01-15\",\n    \"phone\": \"+14155551234\",\n    \"address\": {\n      \"line1\": \"123 Main St\",\n      \"line2\": \"Apt 4B\",\n      \"city\": \"San Francisco\",\n      \"postalCode\": \"94105\",\n      \"countryCode\": \"US\",\n      \"subdivisionCode\": \"CA\"\n    }\n  }\n}",
+            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"individual\",\n  \"displayName\": \"Jane Doe\"\n}",
             "required": true
           }
         ],
@@ -5519,23 +5502,6 @@
               "externalId": "customer_42",
               "entityType": "individual",
               "displayName": "Jane Doe",
-              "email": "jane@example.com",
-              "identity": {
-                "firstName": "Jane",
-                "middleName": "Q",
-                "lastName": "Doe",
-                "secondLastName": "Garcia",
-                "dateOfBirth": "1990-01-15",
-                "phone": "+14155551234",
-                "address": {
-                  "line1": "123 Main St",
-                  "line2": "Apt 4B",
-                  "city": "San Francisco",
-                  "postalCode": "94105",
-                  "countryCode": "US",
-                  "subdivisionCode": "CA"
-                }
-              },
               "status": "active",
               "createdBy": "usr_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -5573,23 +5539,6 @@
               "externalId": "customer_42",
               "entityType": "individual",
               "displayName": "Jane Doe",
-              "email": "jane@example.com",
-              "identity": {
-                "firstName": "Jane",
-                "middleName": "Q",
-                "lastName": "Doe",
-                "secondLastName": "Garcia",
-                "dateOfBirth": "1990-01-15",
-                "phone": "+14155551234",
-                "address": {
-                  "line1": "123 Main St",
-                  "line2": "Apt 4B",
-                  "city": "San Francisco",
-                  "postalCode": "94105",
-                  "countryCode": "US",
-                  "subdivisionCode": "CA"
-                }
-              },
               "status": "active",
               "createdBy": "usr_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -5624,7 +5573,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"business\",\n  \"displayName\": \"Jane Q. Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"identity\": {\n    \"firstName\": \"Jane\",\n    \"middleName\": \"Q\",\n    \"lastName\": \"Doe\",\n    \"secondLastName\": \"Garcia\",\n    \"dateOfBirth\": \"1990-01-15\",\n    \"phone\": \"+14155551234\",\n    \"address\": {\n      \"line1\": \"123 Main St\",\n      \"line2\": \"Apt 4B\",\n      \"city\": \"San Francisco\",\n      \"postalCode\": \"94105\",\n      \"countryCode\": \"US\",\n      \"subdivisionCode\": \"CA\"\n    }\n  }\n}",
+            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"business\",\n  \"displayName\": \"Jane Q. Doe\"\n}",
             "required": true
           }
         ],
@@ -5637,23 +5586,6 @@
               "externalId": "customer_42",
               "entityType": "individual",
               "displayName": "Jane Doe",
-              "email": "jane@example.com",
-              "identity": {
-                "firstName": "Jane",
-                "middleName": "Q",
-                "lastName": "Doe",
-                "secondLastName": "Garcia",
-                "dateOfBirth": "1990-01-15",
-                "phone": "+14155551234",
-                "address": {
-                  "line1": "123 Main St",
-                  "line2": "Apt 4B",
-                  "city": "San Francisco",
-                  "postalCode": "94105",
-                  "countryCode": "US",
-                  "subdivisionCode": "CA"
-                }
-              },
               "status": "active",
               "createdBy": "usr_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -6414,10 +6346,6 @@
             "required": false,
             "kind": "select",
             "options": [
-              {
-                "label": "bank_account",
-                "value": "bank_account"
-              },
               {
                 "label": "crypto_wallet",
                 "value": "crypto_wallet"

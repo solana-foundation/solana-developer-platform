@@ -126,20 +126,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
         entityType: "individual",
         displayName: "Batch Integration Counterparty",
         externalId: `batch-integration-${Date.now()}`,
-        email: "batch-integration@example.com",
-        identity: {
-          firstName: "Batch",
-          lastName: "Integration",
-          dateOfBirth: "1990-01-01",
-          phone: "+14155550100",
-          address: {
-            line1: "1 Integration Way",
-            city: "San Francisco",
-            postalCode: "94105",
-            countryCode: "US",
-            subdivisionCode: "CA",
-          },
-        },
       }),
     });
     expect(counterpartyRes.status).toBe(201);

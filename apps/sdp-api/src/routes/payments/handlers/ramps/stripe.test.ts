@@ -1,98 +1,75 @@
-import type { CounterpartyIndividualIdentity } from "@sdp/types";
-import { describe, expect, it } from "vitest";
+import type { PaymentRampQuote } from "@sdp/types";
+import { Hono } from "hono";
+import { describe, expect, it, vi } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { buildStripeCustomerInfo } from "./stripe";
+import type { Env } from "@/types/env";
+import { stripeOnrampQuote } from "./stripe";
 
-function counterparty(identity: CounterpartyIndividualIdentity, email?: string): CounterpartyRow {
-  return {
-    id: "cpty_1",
-    organization_id: "org_1",
-    project_id: "proj_1",
-    external_id: null,
-    entity_type: "individual",
-    display_name: "Jane Doe",
-    email: email ? email : "jane@doe.com",
-    identity,
-    provider_data: {},
-    status: "active",
-    created_by: null,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  };
-}
+const { createOnrampQuoteMock } = vi.hoisted(() => ({
+  createOnrampQuoteMock: vi.fn(),
+}));
 
-describe("buildStripeCustomerInfo", () => {
-  it("maps identity, parses ISO dob, and strips the ISO-3166-2 subdivision prefix", () => {
-    const info = buildStripeCustomerInfo(
-      counterparty({
-        firstName: "Jane",
-        lastName: "Doe",
-        dateOfBirth: "1990-07-04",
-        phone: "+15555550123",
-        address: {
-          line1: "1 Market St",
-          line2: "Suite 5",
-          city: "SF",
-          postalCode: "94080",
-          countryCode: "US",
-          subdivisionCode: "US-CA",
-        },
-      })
-    );
+vi.mock("@sdp/payments/ramps", () => ({
+  RAMP_PROVIDER_CLIENTS: {
+    stripe: { createOnrampQuote: createOnrampQuoteMock },
+  },
+}));
 
-    expect(info).toEqual({
-      email: "jane@doe.com",
-      firstName: "Jane",
-      lastName: "Doe",
-      dob: { year: 1990, month: 7, day: 4 },
-      address: {
-        line1: "1 Market St",
-        line2: "Suite 5",
-        city: "SF",
-        state: "CA",
-        postalCode: "94080",
-        country: "US",
-      },
+const STRIPE_QUOTE = {
+  id: "stripe_quote_123",
+  provider: "stripe",
+  status: "pending",
+  deliveryMode: "session_widget",
+  clientSecret: "secret_123",
+  sessionId: "session_123",
+  publishableKey: "pk_test_123",
+} as const satisfies PaymentRampQuote;
+
+const COUNTERPARTY = {
+  id: "counterparty_1",
+  organization_id: "org_1",
+  project_id: "proj_1",
+  external_id: null,
+  entity_type: "individual",
+  display_name: "Jane Doe",
+  provider_data: {},
+  status: "active",
+  created_by: null,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+} as const satisfies CounterpartyRow;
+
+const TEST_ENV = {
+  ENVIRONMENT: "development",
+  API_VERSION: "v1",
+} as const satisfies Env;
+
+describe("stripeOnrampQuote", () => {
+  it("creates a quote without stored customer prefill", async () => {
+    createOnrampQuoteMock.mockImplementationOnce(async () => STRIPE_QUOTE);
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", async (c, next) => {
+      c.set("projectEnvironment", "sandbox");
+      await next();
     });
-  });
-
-  it("accepts an already-bare subdivision code", () => {
-    const info = buildStripeCustomerInfo(
-      counterparty({
-        firstName: "Jane",
-        lastName: "Doe",
-        dateOfBirth: "1990-07-04",
-        phone: "+15555550123",
-        address: { line1: "1 A St", city: "SF", countryCode: "US", subdivisionCode: "CA" },
-      })
+    app.get("/", async (c) =>
+      c.json(
+        await stripeOnrampQuote(c, {
+          counterparty: COUNTERPARTY,
+          destinationWalletAddress: "wallet_123",
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "100",
+        })
+      )
     );
 
-    expect(info.address).toMatchObject({ state: "CA" });
-  });
+    const response = await app.request("/", {}, TEST_ENV);
 
-  it("drops a malformed date of birth instead of sending NaN parts to Stripe", () => {
-    expect(
-      buildStripeCustomerInfo(
-        counterparty({
-          firstName: "Jane",
-          lastName: "Doe",
-          dateOfBirth: "not-a-date",
-          phone: "+15555550123",
-          address: { line1: "1 A St", city: "SF", countryCode: "US" },
-        })
-      ).dob
-    ).toBeUndefined();
-
-    expect(
-      buildStripeCustomerInfo(
-        counterparty({
-          firstName: "Jane",
-          lastName: "Doe",
-          dateOfBirth: "1990-07",
-          phone: "+15555550123",
-          address: { line1: "1 A St", city: "SF", countryCode: "US" },
-        })
-      ).dob
-    ).toBeUndefined();
+    expect(response.status).toBe(200);
+    expect(createOnrampQuoteMock).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "sandbox" }),
+      expect.not.objectContaining({ stripeCustomerInfo: expect.anything() })
+    );
   });
 });

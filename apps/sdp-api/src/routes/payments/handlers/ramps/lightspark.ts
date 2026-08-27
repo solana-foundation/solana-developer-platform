@@ -1,8 +1,6 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type { CreateLightsparkCustomerInput } from "@sdp/payments/ramps/providers/lightspark/client";
 import {
   buildLightsparkAccountInfo,
-  buildLightsparkBusinessInfo,
   lightsparkPayoutCollectedData,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
@@ -66,61 +64,23 @@ async function persistLightsparkData(
 }
 
 /**
- * Returns the Grid customer id for a counterparty, lazily creating the native
- * Lightspark customer (via the provider) and persisting it into provider_data
- * on first use. Business counterparties require collected businessInfo fields
- * and KYB approval — the customer id is persisted only once verified, so a
- * pending verification re-runs on the next requirements advance (creation is
- * idempotent by platformCustomerId). Collected values flow to Grid only and
- * are never persisted.
+ * Returns the persisted Grid customer id and rejects first-time creation until
+ * transient identity collection is wired.
+ *
+ * @param counterparty - Counterparty whose Lightspark customer is resolved.
+ * @returns The existing Lightspark customer resolution.
  */
-export async function ensureLightsparkCustomer(
-  c: AppContext,
-  {
-    counterparty,
-    projectId,
-    collectedData,
-  }: { counterparty: CounterpartyRow; projectId: string; collectedData?: CollectedFieldData }
-): Promise<LightsparkCustomerResolution> {
+export function ensureLightsparkCustomer(
+  counterparty: CounterpartyRow
+): LightsparkCustomerResolution {
   const existing = readLightsparkCustomerId(counterparty.provider_data);
   if (existing) {
     return { customerId: existing };
   }
 
-  const input: CreateLightsparkCustomerInput =
-    counterparty.entity_type === "business"
-      ? {
-          platformCustomerId: counterparty.id,
-          customerType: "BUSINESS",
-          businessInfo: buildLightsparkBusinessInfo(collectedData),
-          email: counterparty.email,
-        }
-      : {
-          platformCustomerId: counterparty.id,
-          customerType: "INDIVIDUAL",
-          fullName: counterparty.display_name,
-          email: counterparty.email,
-        };
-  const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(
-    rampRuntime(c),
-    input
+  throw badRequest(
+    "Lightspark customer creation requires identity fields that are no longer stored; JIT collection is not wired yet"
   );
-  if (input.customerType === "BUSINESS") {
-    const verification = await RAMP_PROVIDER_CLIENTS.lightspark.submitVerification(rampRuntime(c), {
-      customerId: customer.id,
-    });
-    if (verification.verificationStatus !== "APPROVED") {
-      const outstanding = verification.errors.map((error) => error.reason).join("; ");
-      throw badRequest(
-        `Lightspark KYB verification is ${verification.verificationStatus}. Outstanding requirements: ${outstanding}`
-      );
-    }
-  }
-
-  const row = await freshCounterpartyRow(c, counterparty, projectId);
-  await persistLightsparkData(c, row, projectId, { customerId: customer.id });
-
-  return { customerId: customer.id };
 }
 
 async function persistLightsparkPayoutAccount(

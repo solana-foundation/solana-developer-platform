@@ -272,12 +272,10 @@ async function seedCounterparty(externalId: string): Promise<string> {
          external_id,
          entity_type,
          display_name,
-         email,
-         identity,
          provider_data,
          status,
          created_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
     )
     .bind(
       id,
@@ -286,8 +284,6 @@ async function seedCounterparty(externalId: string): Promise<string> {
       externalId,
       "individual",
       "Batch Test Counterparty",
-      "batch-counterparty@example.com",
-      {},
       {},
       TEST_USER.id
     )
