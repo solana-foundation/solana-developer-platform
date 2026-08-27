@@ -27,10 +27,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  smoke:
+    name: Gate on dev smoke
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    uses: ./.github/workflows/sdp-dev-smoke.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
   deploy:
     name: Deploy production image
+    needs: smoke
     if: >-
       always() &&
+      needs.smoke.result == 'success' &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||

@@ -89,11 +89,3 @@ jobs:
             cat "${describe_err}" >&2
             exit 1
           fi
-
-  smoke:
-    name: Post-deploy smoke
-    needs: deploy
-    uses: ./.github/workflows/sdp-dev-smoke.yml
-    secrets: inherit
-    permissions:
-      contents: read
