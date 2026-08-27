@@ -32,7 +32,9 @@ concurrency:
 jobs:
   smoke:
     name: Gate on dev smoke
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.event_name != 'workflow_dispatch'
     uses: ./.github/workflows/sdp-dev-smoke.yml
     secrets:
       DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
@@ -44,7 +46,8 @@ jobs:
     needs: smoke
     if: >-
       always() &&
-      needs.smoke.result == 'success' &&
+      (needs.smoke.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||

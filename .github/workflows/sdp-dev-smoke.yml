@@ -2,7 +2,7 @@ name: SDP dev read-only smoke
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
   workflow_call:
     secrets:
