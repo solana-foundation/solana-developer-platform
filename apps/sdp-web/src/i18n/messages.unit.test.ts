@@ -35,6 +35,31 @@ describe("i18n messages", () => {
     expect(translate(getMessages("vi"), "Home.contactUs")).toBe("Liên hệ");
   });
 
+  it("uses Embedded Yield as the product name in every locale", () => {
+    for (const locale of supportedLocales) {
+      expect(translate(getMessages(locale), "Shared.dashboardShell.earnProgram")).toBe(
+        "Embedded Yield"
+      );
+      expect(translate(getMessages(locale), "DashboardEarn.playground.productName")).toBe(
+        "Embedded Yield"
+      );
+    }
+  });
+
+  it("keeps the legacy Earn product name out of the English source catalog", () => {
+    const messages = getMessages("en") as unknown;
+    const offenders = flattenKeys(messages).filter((key) => {
+      const value = key.split(".").reduce<unknown>((carry, segment) => {
+        return carry && typeof carry === "object"
+          ? (carry as Record<string, unknown>)[segment]
+          : undefined;
+      }, messages);
+      return typeof value === "string" && /\bEarn\b/.test(value);
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
   it("keeps non-English catalogs inventory-matched to English", () => {
     const englishKeys = flattenKeys(getMessages("en")).sort();
 

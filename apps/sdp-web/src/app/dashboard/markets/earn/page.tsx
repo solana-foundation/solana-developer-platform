@@ -1,3 +1,4 @@
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { EarnProgramWorkspace } from "./earn-program-workspace";
 import { loadEarnProviderAccess } from "./earn-provider-access.server";
 
@@ -8,7 +9,7 @@ export default async function EarnPage() {
   const providerAccess = await loadEarnProviderAccess();
   return (
     <EarnProgramWorkspace
-      builderHref="/dashboard/markets/earn/button-builder"
+      builderHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`}
       providerAccess={providerAccess}
     />
   );

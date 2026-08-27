@@ -1,3 +1,4 @@
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { getSelectedProjectId } from "@/lib/sdp-api";
 import { EarnButtonBuilder } from "../earn-button-builder";
 import { loadEarnButtonConfiguration } from "../earn-button-configuration.server";
@@ -23,7 +24,7 @@ export default async function EarnButtonBuilderPage({
       : `${projectId ?? "no-project"}:${configuration.kind}`;
   return (
     <EarnButtonBuilder
-      earnHref="/dashboard/markets/earn"
+      earnHref={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
       configurationLoad={configuration}
       key={configurationKey}
       projectId={projectId ?? null}

@@ -1,7 +1,7 @@
 import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
 
 export function earnButtonIntegrationPath(publicToken: string): string {
-  return `/earn/integrate/${encodeURIComponent(publicToken)}`;
+  return `/embedded-yield/integrate/${encodeURIComponent(publicToken)}`;
 }
 
 /**

@@ -11,6 +11,25 @@ const docsProxyOrigin = (
 
 const nextConfig: NextConfig = {
   distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
+  async redirects() {
+    return [
+      {
+        source: "/dashboard/markets/earn",
+        destination: "/dashboard/markets/embedded-yield",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/markets/earn/button-builder",
+        destination: "/dashboard/markets/embedded-yield/button-builder",
+        permanent: true,
+      },
+      {
+        source: "/earn/integrate/:token",
+        destination: "/embedded-yield/integrate/:token",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

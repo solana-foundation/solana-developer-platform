@@ -68,7 +68,7 @@ describe("EarnProgramWorkspace", () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnProgramWorkspace
-        builderHref="/dashboard/markets/earn/button-builder"
+        builderHref="/dashboard/markets/embedded-yield/button-builder"
         providerAccess={providerAccess}
       />
     );
@@ -82,7 +82,7 @@ describe("EarnProgramWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Continue to integration" }));
 
     expect(mocks.push).toHaveBeenCalledWith(
-      "/dashboard/markets/earn/button-builder?strategy=earn_strategy_live"
+      "/dashboard/markets/embedded-yield/button-builder?strategy=earn_strategy_live"
     );
     expect(document.body.textContent).not.toContain("Mock");
   });
@@ -91,7 +91,7 @@ describe("EarnProgramWorkspace", () => {
     mocks.environment = "production";
     renderWithEnglish(
       <EarnProgramWorkspace
-        builderHref="/dashboard/markets/earn/button-builder"
+        builderHref="/dashboard/markets/embedded-yield/button-builder"
         providerAccess={providerAccess}
       />
     );
@@ -106,7 +106,7 @@ describe("EarnProgramWorkspace", () => {
   it("fails closed when the organization provider is not enabled", () => {
     renderWithEnglish(
       <EarnProgramWorkspace
-        builderHref="/dashboard/markets/earn/button-builder"
+        builderHref="/dashboard/markets/embedded-yield/button-builder"
         providerAccess={{
           kamino: { entitled: false, configured: true, enabled: false },
         }}
