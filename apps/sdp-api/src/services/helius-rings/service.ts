@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   AssetBalance,
+  FailureCode,
   OperationEvent,
   OperationState,
   PrivateOperation,
@@ -10,7 +11,12 @@ import type {
   RuntimeHealth,
   TransitionGuard,
 } from "@sdp/helius-rings";
-import { HeliusRingsError, nextState, type RingsGatewayPort } from "@sdp/helius-rings";
+import {
+  HeliusRingsError,
+  type HeliusRingsErrorCode,
+  nextState,
+  type RingsGatewayPort,
+} from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
 import { getBase64Codec, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
@@ -129,6 +135,22 @@ const EXECUTABLE_STATES: ReadonlySet<OperationState> = new Set([
   "submitted",
   "indexing",
 ]);
+
+/**
+ * Domain port errors → operation fail-edge. Adapter errors carry their own
+ * code and retryable bit and do not go through this table.
+ *
+ * `config_error` still lands as `gateway_unavailable`: there is no
+ * `config_error` failure code, and the unconfigured-gateway path has always
+ * offered a retry. `invalid_input` and `conflict` do not.
+ */
+const PORT_ERROR_FAILURE = {
+  invalid_input: { code: "invalid_input", retryable: false },
+  conflict: { code: "invalid_input", retryable: false },
+  gateway_unavailable: { code: "gateway_unavailable", retryable: true },
+  config_error: { code: "gateway_unavailable", retryable: true },
+  not_found: { code: "gateway_unavailable", retryable: true },
+} as const satisfies Record<HeliusRingsErrorCode, { code: FailureCode; retryable: boolean }>;
 
 export function createHeliusRingsService(
   env: Env,
@@ -727,31 +749,24 @@ export class HeliusRingsService {
     }
   }
 
-  /**
-   * Maps a port or adapter failure onto the operation's fail edge.
-   *
-   * `config_error` still lands as `gateway_unavailable`: there is no
-   * `config_error` failure code, and the unconfigured-gateway path has always
-   * offered a retry. `invalid_input` and `conflict` do not.
-   */
+  /** Maps a port or adapter failure onto the operation's fail edge. */
   private async failFromPortError(
     operation: HeliusRingsOperationRow,
     error: unknown
   ): Promise<HeliusRingsOperationRow> {
-    const failure =
-      error instanceof RingsAdapterError
-        ? { code: error.failureCode, message: error.message, retryable: error.retryable }
-        : error instanceof HeliusRingsError && error.code === "invalid_input"
-          ? { code: "invalid_input" as const, message: error.message, retryable: false }
-          : error instanceof HeliusRingsError && error.code === "conflict"
-            ? { code: "invalid_input" as const, message: error.message, retryable: false }
-            : error instanceof HeliusRingsError && error.code === "gateway_unavailable"
-              ? { code: "gateway_unavailable" as const, message: error.message, retryable: true }
-              : {
-                  code: "gateway_unavailable" as const,
-                  message: error instanceof Error ? error.message : "rings gateway failed",
-                  retryable: true,
-                };
+    let failure: { code: FailureCode; message: string; retryable: boolean };
+    if (error instanceof RingsAdapterError) {
+      failure = { code: error.failureCode, message: error.message, retryable: error.retryable };
+    } else {
+      const mapped =
+        error instanceof HeliusRingsError
+          ? PORT_ERROR_FAILURE[error.code]
+          : { code: "gateway_unavailable" as const, retryable: true };
+      failure = {
+        ...mapped,
+        message: error instanceof Error ? error.message : "rings gateway failed",
+      };
+    }
 
     const failed = await this.fail(operation.id, operation.state, failure);
     return failed ?? (await this.requireOperation(operation.id));
