@@ -3,6 +3,7 @@ name: SDP smoke canary
 on:
   schedule:
     - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -13,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sdp-dev-smoke
+  group: sdp-smoke-${{ github.event.schedule || github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +22,9 @@ jobs:
     name: GCP dev dashboard smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.event.schedule != '*/5 * * * *'
     env:
       DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV
       PLAYWRIGHT_API_URL: https://api-dev.solana.com
@@ -101,7 +104,8 @@ jobs:
     timeout-minutes: 10
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
-      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *'))
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
