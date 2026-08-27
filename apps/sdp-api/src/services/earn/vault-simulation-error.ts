@@ -1,29 +1,50 @@
 /**
- * Translate a Solana `TransactionError` from vault simulation into a sentence a
+ * Translate a Solana `TransactionError` from vault execution into a sentence a
  * dashboard user can act on.
  *
- * The chain answers preflight with bare variants (`"AccountNotFound"`,
+ * The chain answers with bare variants (`"AccountNotFound"`,
  * `{ InstructionError: [1, { Custom: 6001 }] }`) that surface verbatim in the
  * deposit/withdraw modal, where "AccountNotFound" reads as a mystery rather
  * than "your wallet has no SOL". The raw variant is kept in parentheses so
- * operators and logs searches still see the real value.
+ * operators and log searches still see the real value, in the same quoted-JSON
+ * form the old messages used.
  *
- * Wording depends on who pays the fee: the fee-payer failures name the
- * customer's wallet under `wallet-pays` and SDP's sponsor under `sponsored`,
- * because telling a customer to fund their wallet when SDP's sponsor is broke
- * sends them fixing the wrong thing.
+ * This is a deliberate divergence from private-channels'
+ * `describeTransactionErr` (services/private-channels/tx-error.ts), which keeps
+ * the variant verbatim because its `failure_reason` audience is operators. The
+ * earn audience is a dashboard customer, so prose wins here; the raw payload is
+ * capped at the same 2000 chars that helper uses.
+ *
+ * Wording depends on who pays the fee when the caller knows: the fee-payer
+ * failures name the customer's wallet under `wallet-pays` and SDP's sponsor
+ * under `sponsored`, because telling a customer to fund their wallet when SDP's
+ * sponsor is broke sends them fixing the wrong thing. Callers that don't know
+ * the fee mode (e.g. the reconciler describing a landed failure) omit it and
+ * get neutral wording.
  */
 
+import { safeStringify } from "@sdp/solana";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
+export interface VaultSimulationVerdict {
+  message: string;
+  /**
+   * "sponsor" when the failing account is SDP's fee sponsor: that is SDP's
+   * operational problem, so callers surface it as a retryable 5xx instead of a
+   * caller-fault 400 a client would treat as permanent.
+   */
+  fault: "caller" | "sponsor";
+}
+
 function stringifyRaw(err: unknown): string {
+  let out: string | undefined;
   try {
-    return JSON.stringify(err, (_key, value) =>
-      typeof value === "bigint" ? value.toString() : value
-    );
+    // JSON.stringify returns undefined for undefined/symbol/function inputs.
+    out = safeStringify(err);
   } catch {
-    return String(err);
+    out = undefined;
   }
+  return (out ?? String(err)).slice(0, 2000);
 }
 
 /** "WouldExceedMaxAccountCostLimit" -> "would exceed max account cost limit" */
@@ -34,21 +55,17 @@ function humanizeVariantName(name: string): string {
     .toLowerCase();
 }
 
-function feePayerNoun(fee: Pick<VaultFeeMode, "kind">): string {
-  return fee.kind === "sponsored" ? "SDP's fee sponsor" : "the wallet";
-}
-
-const INSTRUCTION_ERROR_DETAILS: Record<string, string> = {
-  InsufficientFunds: "an account did not hold enough funds",
-  UninitializedAccount: "an account it needs has not been initialized",
-  AccountNotRentExempt: "an account would be left below the rent-exempt minimum",
-  InvalidAccountData: "an account held data the program did not expect",
-  MissingRequiredSignature: "a required signature was missing",
-};
+const INSTRUCTION_ERROR_DETAILS = new Map<string, string>([
+  ["InsufficientFunds", "an account did not hold enough funds"],
+  ["UninitializedAccount", "an account it needs has not been initialized"],
+  ["AccountNotRentExempt", "an account would be left below the rent-exempt minimum"],
+  ["InvalidAccountData", "an account held data the program did not expect"],
+  ["MissingRequiredSignature", "a required signature was missing"],
+]);
 
 function describeInstructionErrorDetail(detail: unknown): string {
   if (typeof detail === "string") {
-    return INSTRUCTION_ERROR_DETAILS[detail] ?? `it failed with ${humanizeVariantName(detail)}`;
+    return INSTRUCTION_ERROR_DETAILS.get(detail) ?? `it failed with ${humanizeVariantName(detail)}`;
   }
   if (detail !== null && typeof detail === "object") {
     const custom = (detail as Record<string, unknown>).Custom;
@@ -64,33 +81,58 @@ function describeInstructionErrorDetail(detail: unknown): string {
 }
 
 /**
- * One readable line for the simulation verdict, raw variant appended.
- * Unrecognized variants fall back to the raw JSON so nothing is hidden.
+ * One readable line for a `TransactionError` value, raw variant appended in
+ * parentheses. Unrecognized shapes fall back to the raw JSON so nothing is
+ * hidden. `fee` is an attribution hint for the fee-payer failures; omit it when
+ * the fee mode is unknown.
  */
 export function describeVaultSimulationError(
   err: unknown,
-  fee: Pick<VaultFeeMode, "kind">
-): string {
+  fee?: Pick<VaultFeeMode, "kind">
+): VaultSimulationVerdict {
   const raw = stringifyRaw(err);
+  const sponsored = fee?.kind === "sponsored";
+  const feePayerNoun =
+    fee === undefined ? "the fee payer" : sponsored ? "SDP's fee sponsor" : "the wallet";
+  const feeRemedy = sponsored
+    ? "This is a problem on SDP's side, not with the wallet."
+    : fee === undefined
+      ? "It needs SOL before this can be retried."
+      : "Send SOL to the wallet and retry.";
+  const feeFault = sponsored ? "sponsor" : "caller";
 
   if (typeof err === "string") {
     switch (err) {
       case "AccountNotFound":
-        return fee.kind === "sponsored"
-          ? `${feePayerNoun(fee)} account does not exist on this cluster, so it cannot pay the network fee. This is an SDP configuration problem, not a problem with the wallet (${err})`
-          : `${feePayerNoun(fee)} holds no SOL, so it cannot pay the network fee. Send SOL to the wallet and retry (${err})`;
+        return {
+          message: `${feePayerNoun} holds no SOL, so it cannot pay the network fee. ${feeRemedy} (${raw})`,
+          fault: feeFault,
+        };
       case "InsufficientFundsForFee":
-        return fee.kind === "sponsored"
-          ? `${feePayerNoun(fee)} does not hold enough SOL to pay the network fee. This is an SDP configuration problem, not a problem with the wallet (${err})`
-          : `${feePayerNoun(fee)} does not hold enough SOL to pay the network fee. Send SOL to the wallet and retry (${err})`;
+        return {
+          message: `${feePayerNoun} does not hold enough SOL to pay the network fee. ${feeRemedy} (${raw})`,
+          fault: feeFault,
+        };
       case "ProgramAccountNotFound":
-        return `a program this transaction calls does not exist on this cluster (${err})`;
+        return {
+          message: `a program this transaction calls does not exist on this cluster (${raw})`,
+          fault: "caller",
+        };
       case "BlockhashNotFound":
-        return `the network no longer recognizes this transaction's blockhash. Retry the request (${err})`;
+        return {
+          message: `the network no longer recognizes this transaction's blockhash. Retry the request (${raw})`,
+          fault: "caller",
+        };
       case "AlreadyProcessed":
-        return `an identical transaction was already processed. Retry the request to build a fresh one (${err})`;
+        return {
+          message: `an identical transaction was already processed. Retry the request to build a fresh one (${raw})`,
+          fault: "caller",
+        };
       default:
-        return `the transaction ${humanizeVariantName(err)} (${err})`;
+        return {
+          message: `the transaction failed with "${humanizeVariantName(err)}" (${raw})`,
+          fault: "caller",
+        };
     }
   }
 
@@ -100,15 +142,23 @@ export function describeVaultSimulationError(
     const instruction = record.InstructionError;
     if (Array.isArray(instruction) && instruction.length === 2) {
       const [index, detail] = instruction;
-      return `instruction ${String(index)} was rejected: ${describeInstructionErrorDetail(detail)} (${raw})`;
+      return {
+        message: `instruction at index ${String(index)} was rejected: ${describeInstructionErrorDetail(detail)} (${raw})`,
+        fault: "caller",
+      };
     }
 
     const rent = record.InsufficientFundsForRent;
-    if (rent !== null && typeof rent === "object") {
+    if (rent !== null && typeof rent === "object" && !Array.isArray(rent)) {
       const accountIndex = (rent as Record<string, unknown>).account_index;
-      return `account ${String(accountIndex)} would be left below the rent-exempt minimum; the transaction needs more SOL for rent (${raw})`;
+      if (typeof accountIndex === "number" || typeof accountIndex === "bigint") {
+        return {
+          message: `the account at index ${accountIndex} would be left below the rent-exempt minimum; the transaction needs more SOL for rent (${raw})`,
+          fault: "caller",
+        };
+      }
     }
   }
 
-  return raw;
+  return { message: raw, fault: "caller" };
 }

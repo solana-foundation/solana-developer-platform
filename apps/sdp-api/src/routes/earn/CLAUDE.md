@@ -446,9 +446,12 @@ organization's own custody wallets.
     Provider build, simulation, custody lookup, signing, and broadcast share one
     absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
     a later side effect. The verdict surfaces through
-    `describeVaultSimulationError` (vault-simulation-error.ts), which turns bare
-    `TransactionError` variants into fee-mode-aware prose ("the wallet holds no
-    SOL...") with the raw variant kept in parentheses for log searches.
+    `describeVaultSimulationError` (services/earn/vault-simulation-error.ts),
+    which turns recognized `TransactionError` variants into fee-mode-aware prose
+    ("the wallet holds no SOL...") with the raw variant kept in parentheses for
+    log searches; unrecognized shapes fall back to the capped raw JSON. A
+    failure the helper attributes to SDP's fee sponsor surfaces as a retryable
+    5xx (with no sponsor detail in the body), never a caller-fault 400.
   - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
     without sending; one transaction stores the signature, base64 wire bytes,
     last-valid block height, movement and activated claim while still `pending`.

@@ -259,6 +259,26 @@ describe("vault execution validation", () => {
     if (result.ok) throw new Error("expected a failed simulation");
     expect(result.error).toContain("the wallet holds no SOL");
     expect(result.error).toContain("AccountNotFound");
+    expect(result.fault).toBe("caller");
+  });
+
+  it("marks a sponsored fee-payer failure as SDP's fault", async () => {
+    simulateSend.mockResolvedValueOnce({ value: { err: "AccountNotFound", logs: [] } });
+
+    const result = await simulateVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan,
+      owner: ownerAddress,
+      rpcUrl,
+      fee: { kind: "sponsored", feePayment: feePayment(), sponsor: feePayerAddress },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a failed simulation");
+    expect(result.error).toContain("SDP's fee sponsor holds no SOL");
+    expect(result.fault).toBe("sponsor");
   });
 
   it("rejects lookup-table transport failures instead of returning a simulation verdict", async () => {

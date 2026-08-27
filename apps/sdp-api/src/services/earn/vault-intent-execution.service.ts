@@ -74,9 +74,18 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     });
     if (!simulation.ok) {
       getLogger().error(
-        { error: simulation.error, logs: simulation.logs.slice(-5) },
+        { error: simulation.error, fault: simulation.fault, logs: simulation.logs.slice(-5) },
         `vault ${operation}: simulation failed before signing`
       );
+      // A broke sponsor is SDP's operational problem: a 400 would tell client
+      // retry middleware the caller is at fault (permanent), and would leak
+      // SDP's sponsor funding state as a pollable signal. The detail is in the
+      // log line above; the caller gets a retryable 5xx with no internals.
+      if (simulation.fault === "sponsor") {
+        throw internalError(
+          `Vault ${operation} simulation failed: SDP could not sponsor the network fee. Retry shortly`
+        );
+      }
       throw badRequest(`Vault ${operation} simulation failed: ${simulation.error}`);
     }
     prepared = simulation.prepared;
