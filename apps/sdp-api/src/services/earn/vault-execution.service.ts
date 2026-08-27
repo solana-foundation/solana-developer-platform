@@ -31,6 +31,7 @@ import {
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./execution-registry";
 import type { VaultDeadline } from "./vault-deadline";
+import { describeVaultSimulationError } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 /**
@@ -439,9 +440,7 @@ export async function simulateVaultPlan(
   if (result.value.err) {
     return {
       ok: false,
-      error: JSON.stringify(result.value.err, (_key, value) =>
-        typeof value === "bigint" ? value.toString() : value
-      ),
+      error: describeVaultSimulationError(result.value.err, input.fee),
       logs: result.value.logs ?? [],
     };
   }

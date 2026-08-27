@@ -445,7 +445,10 @@ organization's own custody wallets.
     program error instead of a landed, failed transaction the customer paid for.
     Provider build, simulation, custody lookup, signing, and broadcast share one
     absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
-    a later side effect.
+    a later side effect. The verdict surfaces through
+    `describeVaultSimulationError` (vault-simulation-error.ts), which turns bare
+    `TransactionError` variants into fee-mode-aware prose ("the wallet holds no
+    SOL...") with the raw variant kept in parentheses for log searches.
   - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
     without sending; one transaction stores the signature, base64 wire bytes,
     last-valid block height, movement and activated claim while still `pending`.
