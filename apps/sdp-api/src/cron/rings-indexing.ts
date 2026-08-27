@@ -4,8 +4,7 @@
  * Mirrors `pending-deposits`: wraps `pollRingsIndexing` with a Sentry cron
  * monitor when observability is supplied and hands the promise to the
  * BackgroundRunner. The job itself early-returns unless the rings flag is on
- * and HELIUS_RINGS_ADAPTER is "http" (the Track B live-gateway selector), so
- * scheduling it everywhere is free.
+ * and every Rings upstream is configured, so scheduling it everywhere is free.
  */
 
 import type { BackgroundRunner } from "@/runtime/background";

@@ -61,7 +61,15 @@ export interface AssetBalance {
   mint: string;
   symbol: string;
   amountRaw: string;
-  decimals: number;
+  /**
+   * The mint's scale, or null when nothing that produced this balance knew it.
+   *
+   * Nullable rather than defaulted, because there is no scale that means
+   * "unknown": zero is a claim that the amount is already whole units, and a
+   * reader cannot tell it apart from a mint that really has none. A null tells
+   * every consumer to show `amountRaw` as the base-unit count it is and say so.
+   */
+  decimals: number | null;
 }
 
 export interface PrivateOperationSummary {

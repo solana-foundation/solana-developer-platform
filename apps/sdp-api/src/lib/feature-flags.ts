@@ -29,6 +29,18 @@ export function isHeliusRingsEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): bo
   return isTruthyFlag(env.HELIUS_RINGS_ENABLED);
 }
 
+/**
+ * Permits plain-http Rings upstreams. The public devnet indexer and prover are
+ * http on a real host, so without this the adapter cannot reach them — but in
+ * plaintext an indexer response reveals which notes an identity owns, which is
+ * why it is an explicit choice rather than something read off the URL scheme.
+ */
+export function isRingsInsecureHttpAllowed(
+  env: Pick<Env, "HELIUS_RINGS_ALLOW_INSECURE_HTTP">
+): boolean {
+  return isTruthyFlag(env.HELIUS_RINGS_ALLOW_INSECURE_HTTP);
+}
+
 export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {
   return isTruthyFlag(env.PRIVY_BYOK_ENABLED);
 }

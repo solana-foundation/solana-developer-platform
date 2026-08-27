@@ -1,19 +1,16 @@
 import { createHash } from "node:crypto";
 import type {
+  AssetBalance,
   OperationEvent,
   OperationState,
   PrivateOperation,
   PrivateOperationInput,
   PrivateWallet,
+  ReadIdentityResult,
   RuntimeHealth,
   TransitionGuard,
 } from "@sdp/helius-rings";
-import {
-  HeliusRingsError,
-  NotImplementedRingsGateway,
-  nextState,
-  type RingsGatewayPort,
-} from "@sdp/helius-rings";
+import { HeliusRingsError, nextState, type RingsGatewayPort } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
 import { getBase64Codec, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
@@ -37,19 +34,21 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
+import { resolveRingsGateway } from "./gateway";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsOuterTransaction } from "./signer-adapter";
 
 /**
- * Orchestrates every Rings action: provisioning, prepare-through-policy,
+ * Orchestrates every Rings action: provisioning, sync, prepare-through-policy,
  * execution, retry lineage. State transitions run through the persisted state
  * machine with compare-and-swap guards, and every hop is recorded on the
  * operation's event feed.
  *
- * Until Track B lands the live gateway, any path that reaches the port ends in
- * `failed:gateway_unavailable` (retryable) — the UI reports the pending
- * integration honestly instead of simulating it.
+ * The gateway behind the port comes from `resolveRingsGateway`. Until an
+ * operator configures the Rings upstreams it refuses every call, so any path
+ * that reaches `buildOperation` ends in `failed:gateway_unavailable` — the UI
+ * names what is unset instead of simulating a result.
  */
 
 export interface HeliusRingsTenant {
@@ -92,6 +91,33 @@ export interface ProvisionPrivateWalletInput {
 export interface PrepareOperationContext extends HeliusRingsActor {
   /** The SDP custody wallet id backing the rings wallet, for the policy envelope. */
   custodyWalletId: string | null;
+  /**
+   * Public key of that custody wallet. A shield stamps this as `from` so the
+   * gateway knows who deposits and who must sign. Null when custody no longer
+   * controls the backing wallet.
+   */
+  owner?: string | null;
+}
+
+export interface SyncWalletResult {
+  balances: AssetBalance[];
+  /**
+   * The sync could not read everything it found. The balances below are still
+   * the ones it did read, so this is what stops a partial answer from being
+   * rendered as a complete one.
+   */
+  degraded: boolean;
+  /** When the answer was true, not a position to resume from. */
+  observedAt: string;
+}
+
+export interface WalletIdentityResult extends ReadIdentityResult {
+  /**
+   * The identity our own row records, which the gateway cannot know. Without
+   * it "the chain publishes X" and "the chain publishes X and so do we" read
+   * identically, and only the second means the row is up to date.
+   */
+  recordedShieldedAddress: string | null;
 }
 
 /** States `executeOperation` acts on; the rest return unchanged. */
@@ -133,7 +159,7 @@ export class HeliusRingsService {
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
-    this.gateway = dependencies.gateway ?? new NotImplementedRingsGateway();
+    this.gateway = dependencies.gateway ?? resolveRingsGateway(env, tenant);
     this.wallets = dependencies.wallets ?? createHeliusRingsWalletRepository(env);
     this.operations = dependencies.operations ?? createHeliusRingsOperationRepository(env);
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
@@ -161,12 +187,13 @@ export class HeliusRingsService {
 
   /**
    * Creates (or returns) the rings wallet bound to one custody wallet, then
-   * asks the gateway for a shielded identity. Until Track B lands, the port
-   * throws and the wallet stays `pending` — the wizard renders that state.
+   * asks the gateway for a shielded identity. On a gateway that refuses, the
+   * port throws and the wallet stays `pending` — the wizard renders that state.
    *
-   * Key material is deliberately not persisted here: sealing it through
-   * custody-cipher into `helius_rings_key_refs` is the key-authority work
-   * (Track B4), and holding it unsealed anywhere is not an option.
+   * Key material is deliberately not persisted here. The deterministic key
+   * authority recomputes it on demand and stores none of it, so there is
+   * nothing to seal into `helius_rings_key_refs`; the gateway reports what kind
+   * of material it used and that tag is the whole of what we keep.
    */
   async provisionPrivateWallet(input: ProvisionPrivateWalletInput): Promise<PrivateWallet> {
     const wallet = await this.wallets.createWallet({
@@ -187,18 +214,96 @@ export class HeliusRingsService {
       sdpAddress: input.sdpAddress,
     });
 
-    const materialTag = identity.keyRefs.every((keyRef) => keyRef.materialTag === "live")
-      ? "live"
-      : "simulated";
+    // The gateway is the only party that knows whether the identity it
+    // published holds real material, so its tag is recorded rather than
+    // inferred here. Getting this wrong in the optimistic direction would let a
+    // simulated wallet be mistaken for one holding real funds.
     const provisioned = await this.wallets.markProvisioned({
       ...this.tenant,
       id: wallet.id,
       shieldedAddress: identity.shieldedAddress,
-      materialTag,
+      materialTag: identity.materialTag,
       expectedStatus: "pending",
     });
     // A lost CAS means an operator paused the wallet mid-provision; honour it.
     return mapHeliusRingsWalletRow(provisioned ?? (await this.requireWallet(wallet.id)));
+  }
+
+  /**
+   * Reads the wallet's shielded balances from Photon and records when the
+   * answer was observed.
+   *
+   * `owner` is passed in rather than looked up: the identity is registered to a
+   * specific custody key, and the caller has already resolved which custody
+   * wallet backs this rings wallet. A null owner is a refusal, not a reason to
+   * fall back to anything — there is no safe default for whose balances to read.
+   *
+   * The persisted `shielded_address` travels as `expectedShieldedAddress` so
+   * the gateway re-derives the identity and compares. Without it a seed change,
+   * a tenant mix-up or a wrong owner would answer with someone else's balances
+   * instead of failing.
+   */
+  async syncWallet(walletId: string, owner: string | null): Promise<SyncWalletResult> {
+    const wallet = await this.requireWallet(walletId);
+    if (!wallet.shielded_address) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "rings wallet has no shielded identity yet; provision it before syncing"
+      );
+    }
+    if (!owner) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "custody controls no active wallet for this rings wallet's owner"
+      );
+    }
+
+    const synced = await this.gateway.syncPhoton({
+      walletId: wallet.id,
+      owner,
+      cursor: wallet.sync_cursor,
+      expectedShieldedAddress: wallet.shielded_address,
+    });
+
+    await this.wallets.updateSyncCursor({
+      ...this.tenant,
+      id: wallet.id,
+      syncCursor: synced.cursor,
+    });
+
+    return {
+      balances: synced.balances,
+      degraded: synced.degraded,
+      observedAt: synced.cursor,
+    };
+  }
+
+  /**
+   * Reads what the registry publishes for this wallet's owner and whether it is
+   * ours, alongside the identity our own row records.
+   *
+   * Deliberately without `syncWallet`'s `shielded_address` precondition. The
+   * wallet this answers for is the one stuck `pending` — provisioning refused,
+   * so no address was ever recorded — and refusing to read until one exists
+   * would withhold the answer from exactly the case that needs it. A null owner
+   * is still a refusal: there is no default account whose record to read.
+   *
+   * Writes nothing. No cursor, no health row, no wallet patch — the read
+   * advances no stored observation, which is also why its route is a GET behind
+   * the read permission rather than a POST behind write.
+   */
+  async readWalletIdentity(walletId: string, owner: string | null): Promise<WalletIdentityResult> {
+    const wallet = await this.requireWallet(walletId);
+    if (!owner) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "custody controls no active wallet for this rings wallet's owner"
+      );
+    }
+
+    const identity = await this.gateway.readIdentity({ walletId: wallet.id, owner });
+
+    return { ...identity, recordedShieldedAddress: wallet.shielded_address };
   }
 
   /**
@@ -221,7 +326,10 @@ export class HeliusRingsService {
       intentKey,
       assetMint: input.asset?.mint ?? null,
       amountRaw: input.asset?.amountRaw ?? null,
-      fromAddr: input.from ?? null,
+      // A shield always deposits from the backing owner. The request body is
+      // not asked: a caller-supplied `from` would let someone name a different
+      // fee payer than the identity they are shielding into.
+      fromAddr: input.opType === "shield" ? (context.owner ?? null) : (input.from ?? null),
       toAddr: input.to ?? null,
       zoneId: input.zoneId ?? null,
       transferMode: input.transferMode ?? null,
@@ -447,18 +555,25 @@ export class HeliusRingsService {
    * Probes the gateway and records the observation per component. A gateway
    * that cannot be reached records itself red — never having observed an
    * upstream is not evidence that it is healthy.
+   *
+   * The per-component reason is stored alongside the status, because the
+   * response is rebuilt from these rows: a probe that classified why it failed,
+   * or a gateway naming the variables it is missing, would otherwise be
+   * discarded one layer above the only place that knew.
    */
   async probeHealth(): Promise<RuntimeHealth> {
     try {
       const health = await this.gateway.probeHealth();
       await Promise.all(
-        (["rpc", "prover", "photon", "gateway"] as const).map((component) =>
-          this.health.recordHealth({
+        (["rpc", "prover", "photon", "gateway"] as const).map((component) => {
+          const reason = health.detail?.[component];
+          return this.health.recordHealth({
             projectId: this.tenant.projectId,
             component,
             status: health[component],
-          })
-        )
+            detail: reason === undefined ? null : { reason },
+          });
+        })
       );
     } catch (error) {
       await this.health.recordHealth({
@@ -485,10 +600,14 @@ export class HeliusRingsService {
 
     // proving: build the outer tx and request the proof.
     try {
+      const wallet = await this.requireWallet(current.wallet_id);
       const built = await this.gateway.buildOperation({
-        // The port receives the domain view; key refs arrive with Track B4.
+        // The port receives the domain view. No key refs: the deterministic
+        // key authority recomputes material on demand and persists none of
+        // it, so there is nothing to hand over.
         operation: this.toPrivateOperation(current),
         keyRefs: [],
+        expectedShieldedAddress: wallet.shielded_address ?? undefined,
       });
       const proof = await this.gateway.requestProof({
         operationId: current.id,
@@ -513,10 +632,23 @@ export class HeliusRingsService {
       // `submitted` durable ahead of the RPC call. Broadcasting first would leave
       // a live on-chain transaction whose signature was never recorded if the
       // process died in between, and nothing sweeps `ready_to_sign` to find it.
+      //
+      // The gateway names who must sign, and nobody else may be asked. Signing
+      // with the organization's default wallet instead would produce a
+      // perfectly valid signature from the wrong key and move the wrong money.
+      const [owner, ...additionalSigners] = built.requiredSigners;
+      if (!owner || additionalSigners.length > 0) {
+        throw new RingsAdapterError(
+          "signer_failed",
+          "the built outer transaction does not name exactly one required signer",
+          { retryable: false }
+        );
+      }
       const signed = await this.signOuterTransaction({
         env: this.env,
         organizationId: this.tenant.organizationId,
         projectId: this.tenant.projectId,
+        owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
       });
       let signature: string;
@@ -539,15 +671,38 @@ export class HeliusRingsService {
       if (!submitted) return this.requireOperation(current.id);
       current = submitted;
 
-      // Broadcast from inside `submitted`, so an RPC failure records
-      // `submit_failed` against the state the state machine declares it for. The
-      // intent key makes a resubmission safe.
-      await this.submitOuterTransaction({ env: this.env, signedTxBase64: signed });
+      // Broadcast from inside `submitted`. A throw here is not evidence that
+      // nothing landed: an RPC can time out or 503 after the node already
+      // accepted the transaction, only the signature was persisted rather than
+      // the signed bytes, and nothing available here tells the two readings
+      // apart.
+      //
+      // So the failure is not taken. Failing `submit_failed` would mark the
+      // operation retryable, and a retry files a *fresh* operation under a new
+      // client nonce — a different intent key, a newly built transaction, a
+      // second broadcast. Whenever the first one did land that shields the
+      // amount twice. The identical ambiguity after a crash is already resolved
+      // the other way by `executeOperation`, and this takes the same answer:
+      // carry the signature into `indexing` and let Photon settle what actually
+      // happened. A transaction that truly never left ends at
+      // `indexing_timeout`, retryable only after Photon has had the full budget
+      // to disagree.
+      let broadcast: "accepted" | "unconfirmed" = "accepted";
+      try {
+        await this.submitOuterTransaction({ env: this.env, signedTxBase64: signed });
+      } catch {
+        broadcast = "unconfirmed";
+      }
 
+      // The RPC's own message is not recorded: it routinely quotes the endpoint
+      // it failed on, and this deployment's endpoint carries a Helius API key.
+      // The flag is the part that is actionable anyway — it tells an operator
+      // reading the timeline that the signature below was never acknowledged,
+      // so a `completed` here is Photon's word rather than the RPC's.
       await this.events.append({
         operationId: current.id,
         kind: "transaction.submitted",
-        payload: { signature },
+        payload: { signature, broadcast },
       });
 
       const indexing = await this.transition(current.id, "submitted", "submitted");
@@ -557,7 +712,13 @@ export class HeliusRingsService {
     }
   }
 
-  /** Maps a port or adapter failure onto the operation's fail edge. */
+  /**
+   * Maps a port or adapter failure onto the operation's fail edge.
+   *
+   * `config_error` still lands as `gateway_unavailable`: there is no
+   * `config_error` failure code, and the unconfigured-gateway path has always
+   * offered a retry. `invalid_input` and `conflict` do not.
+   */
   private async failFromPortError(
     operation: HeliusRingsOperationRow,
     error: unknown
@@ -565,13 +726,17 @@ export class HeliusRingsService {
     const failure =
       error instanceof RingsAdapterError
         ? { code: error.failureCode, message: error.message, retryable: error.retryable }
-        : error instanceof HeliusRingsError && error.code === "gateway_unavailable"
-          ? { code: "gateway_unavailable" as const, message: error.message, retryable: true }
-          : {
-              code: "gateway_unavailable" as const,
-              message: error instanceof Error ? error.message : "rings gateway failed",
-              retryable: true,
-            };
+        : error instanceof HeliusRingsError && error.code === "invalid_input"
+          ? { code: "invalid_input" as const, message: error.message, retryable: false }
+          : error instanceof HeliusRingsError && error.code === "conflict"
+            ? { code: "invalid_input" as const, message: error.message, retryable: false }
+            : error instanceof HeliusRingsError && error.code === "gateway_unavailable"
+              ? { code: "gateway_unavailable" as const, message: error.message, retryable: true }
+              : {
+                  code: "gateway_unavailable" as const,
+                  message: error instanceof Error ? error.message : "rings gateway failed",
+                  retryable: true,
+                };
 
     const failed = await this.fail(operation.id, operation.state, failure);
     return failed ?? (await this.requireOperation(operation.id));

@@ -20,14 +20,7 @@ import { useRingsZones } from "./use-rings-zones";
 
 type Translate = ReturnType<typeof useTranslations>;
 
-const OP_TYPES: RingsOpType[] = [
-  "shield",
-  "transfer_registered",
-  "transfer_anonymous",
-  "withdraw",
-  "merge",
-  "timelock_create",
-];
+const OP_TYPES: RingsOpType[] = ["shield"];
 
 const NEEDS_ASSET: ReadonlySet<RingsOpType> = new Set([
   "shield",
@@ -280,11 +273,13 @@ function ComposeStep({
             onValueChange={(walletId) => onPatch({ walletId })}
             placeholder={t("DashboardHeliusRings.composer.walletPlaceholder")}
           >
-            {wallets.map((wallet) => (
-              <SelectItem key={wallet.id} value={wallet.id}>
-                {wallet.name}
-              </SelectItem>
-            ))}
+            {wallets
+              .filter((wallet) => wallet.status === "ready")
+              .map((wallet) => (
+                <SelectItem key={wallet.id} value={wallet.id}>
+                  {wallet.name}
+                </SelectItem>
+              ))}
           </Select>
         </Field>
         <Field label={t("DashboardHeliusRings.composer.operation")}>

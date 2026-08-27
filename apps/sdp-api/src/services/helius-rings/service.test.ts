@@ -1,5 +1,11 @@
-import type { PrivateOperationInput } from "@sdp/helius-rings";
-import { InMemoryRingsGateway } from "@sdp/helius-rings/testing";
+import type {
+  PrivateOperationInput,
+  ReadIdentityInput,
+  ReadIdentityResult,
+  SyncPhotonInput,
+  SyncPhotonResult,
+} from "@sdp/helius-rings";
+import { HeliusRingsError, SecretRef } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyDecision } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -7,6 +13,7 @@ import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { gatewayStub, pipelineGateway } from "@/test/fixtures/rings-gateway";
 import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -60,6 +67,40 @@ function service(deps: HeliusRingsServiceDependencies = {}) {
 
 const OUTER_TX = signedRingsTransaction(7);
 
+const OWNER = "HrsOwnerPublicKey1111111111111111111111111111";
+
+function syncResult(overrides: Partial<SyncPhotonResult> = {}): SyncPhotonResult {
+  return {
+    cursor: "2026-08-26T12:00:00.000Z",
+    balances: [
+      {
+        mint: "So11111111111111111111111111111111111111112",
+        // Past 2^53: the whole reason amounts stay decimal strings.
+        amountRaw: "18446744073709551615",
+        decimals: 9,
+        symbol: "SOL",
+      },
+    ],
+    indexedOperationSignatures: [],
+    degraded: false,
+    ...overrides,
+  };
+}
+
+/** A rings wallet with a shielded identity, as provisioning would leave it. */
+async function provisionedWallet(shieldedAddress = "rings1provisioned"): Promise<string> {
+  const wallet = await service({
+    gateway: gatewayStub({
+      provisionIdentity: async () => ({ shieldedAddress, materialTag: "live" }),
+    }),
+  }).provisionPrivateWallet({
+    sdpWalletId: `wal_sync_${shieldedAddress}`,
+    sdpAddress: OWNER,
+    name: "Sync",
+  });
+  return wallet.id;
+}
+
 /**
  * A service whose gateway succeeds and whose sign/submit adapters are stubbed.
  * The signer returns real wire bytes because the service derives the outer
@@ -67,7 +108,7 @@ const OUTER_TX = signedRingsTransaction(7);
  */
 function liveishService(deps: HeliusRingsServiceDependencies = {}) {
   return service({
-    gateway: new InMemoryRingsGateway(),
+    gateway: pipelineGateway(),
     signOuterTransaction: async () => OUTER_TX.signedTxBase64,
     submitOuterTransaction: async () => OUTER_TX.signature,
     ...deps,
@@ -119,7 +160,14 @@ describe("HeliusRingsService", () => {
 
   describe("provisionPrivateWallet", () => {
     it("provisions through the gateway and marks the wallet ready", async () => {
-      const wallet = await service({ gateway: new InMemoryRingsGateway() }).provisionPrivateWallet({
+      const wallet = await service({
+        gateway: gatewayStub({
+          provisionIdentity: async () => ({
+            shieldedAddress: "rings1provisioned",
+            materialTag: "live",
+          }),
+        }),
+      }).provisionPrivateWallet({
         sdpWalletId: "wal_prov_1",
         sdpAddress: "addr1",
         name: "Ops",
@@ -129,7 +177,36 @@ describe("HeliusRingsService", () => {
       expect(wallet.shieldedAddress).toMatch(/^rings1/);
     });
 
-    it("leaves the wallet pending when the gateway is not implemented", async () => {
+    // The gateway is the only party that knows what material backs the
+    // identity it just published. Inferring the tag here instead would let a
+    // simulated wallet pass for one holding real funds.
+    it.each(["live", "simulated"] as const)(
+      "persists the gateway's %s tag",
+      async (materialTag) => {
+        const gateway = gatewayStub({
+          provisionIdentity: async () => ({ shieldedAddress: "rings1abc", materialTag }),
+        });
+
+        const wallet = await service({ gateway }).provisionPrivateWallet({
+          sdpWalletId: `wal_tag_${materialTag}`,
+          sdpAddress: "addr1",
+          name: "Ops",
+        });
+
+        expect(wallet).toMatchObject({
+          status: "ready",
+          shieldedAddress: "rings1abc",
+          materialTag,
+        });
+        const row = await createHeliusRingsWalletRepository(env).getWalletById({
+          ...tenant,
+          id: wallet.id,
+        });
+        expect(row?.material_tag).toBe(materialTag);
+      }
+    );
+
+    it("leaves the wallet pending when the upstreams are unconfigured", async () => {
       const result = await service()
         .provisionPrivateWallet({ sdpWalletId: "wal_prov_2", sdpAddress: "addr2", name: "Ops" })
         .then(
@@ -138,12 +215,241 @@ describe("HeliusRingsService", () => {
         );
 
       // The route maps this to a 503; the wizard renders the pending state.
-      expect(result).toMatchObject({ code: "gateway_unavailable" });
+      expect(result).toMatchObject({ code: "config_error" });
       const rows = await createHeliusRingsWalletRepository(env).getWalletBySdpWalletId({
         ...tenant,
         sdpWalletId: "wal_prov_2",
       });
       expect(rows?.status).toBe("pending");
+    });
+  });
+
+  describe("syncWallet", () => {
+    it("reads balances, records the observation and reports it as clean", async () => {
+      const id = await provisionedWallet("rings1sync_ok");
+      const observed = syncResult();
+
+      const synced = await service({
+        gateway: gatewayStub({ syncPhoton: async () => observed }),
+      }).syncWallet(id, OWNER);
+
+      expect(synced).toEqual({
+        balances: observed.balances,
+        degraded: false,
+        observedAt: observed.cursor,
+      });
+      // uint64 all the way out; a JSON number would have rounded it.
+      expect(synced.balances[0]?.amountRaw).toBe("18446744073709551615");
+      const row = await createHeliusRingsWalletRepository(env).getWalletById({ ...tenant, id });
+      expect(row?.sync_cursor).toBe(observed.cursor);
+    });
+
+    it("carries the degraded flag through rather than dropping it", async () => {
+      const id = await provisionedWallet("rings1sync_degraded");
+
+      const synced = await service({
+        gateway: gatewayStub({ syncPhoton: async () => syncResult({ degraded: true }) }),
+      }).syncWallet(id, OWNER);
+
+      // The balances are still returned; this is what stops them being read as
+      // the whole picture.
+      expect(synced).toMatchObject({ degraded: true });
+      expect(synced.balances).toHaveLength(1);
+    });
+
+    // A derivation mismatch — a changed seed, a wrong owner, a tenant mix-up —
+    // must fail rather than answer with someone else's balances, so the
+    // identity provisioning published is pinned on every read.
+    it("pins the stored shielded address and the owner on every read", async () => {
+      const id = await provisionedWallet("rings1sync_pinned");
+      const seen: SyncPhotonInput[] = [];
+
+      await service({
+        gateway: gatewayStub({
+          syncPhoton: async (input) => {
+            seen.push(input);
+            return syncResult();
+          },
+        }),
+      }).syncWallet(id, OWNER);
+
+      expect(seen[0]).toMatchObject({
+        walletId: id,
+        owner: OWNER,
+        expectedShieldedAddress: "rings1sync_pinned",
+        cursor: null,
+      });
+    });
+
+    it("passes the recorded cursor back on a second sync", async () => {
+      const id = await provisionedWallet("rings1sync_second");
+      const seen: SyncPhotonInput[] = [];
+      const svc = service({
+        gateway: gatewayStub({
+          syncPhoton: async (input) => {
+            seen.push(input);
+            return syncResult({ cursor: `observed:${seen.length}` });
+          },
+        }),
+      });
+
+      await svc.syncWallet(id, OWNER);
+      await svc.syncWallet(id, OWNER);
+
+      expect(seen[0]?.cursor).toBeNull();
+      expect(seen[1]?.cursor).toBe("observed:1");
+    });
+
+    it("refuses a wallet that has no shielded identity yet", async () => {
+      const error = await service({
+        gateway: gatewayStub({ syncPhoton: async () => syncResult() }),
+      })
+        .syncWallet(walletId, OWNER)
+        .then(
+          () => null,
+          (thrown: unknown) => thrown
+        );
+
+      expect(error).toBeInstanceOf(HeliusRingsError);
+      expect(error).toMatchObject({ code: "invalid_input" });
+      const row = await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      });
+      expect(row?.sync_cursor).toBeNull();
+    });
+
+    // There is no safe default for whose balances to read, so an unresolvable
+    // owner is a refusal rather than a fallback.
+    it("refuses when custody controls no wallet for the owner", async () => {
+      const id = await provisionedWallet("rings1sync_no_owner");
+
+      await expect(
+        service({ gateway: gatewayStub({}) }).syncWallet(id, null)
+      ).rejects.toMatchObject({ code: "invalid_input" });
+    });
+
+    it("404s an unknown wallet", async () => {
+      await expect(service().syncWallet("hrw_missing", OWNER)).rejects.toBeInstanceOf(AppError);
+    });
+
+    it("does not advance the cursor when the gateway fails", async () => {
+      const id = await provisionedWallet("rings1sync_failed");
+
+      await expect(
+        service({
+          gateway: gatewayStub({
+            syncPhoton: async () => {
+              throw new HeliusRingsError("config_error", "HELIUS_RINGS_INDEXER_URL is not set");
+            },
+          }),
+        }).syncWallet(id, OWNER)
+      ).rejects.toMatchObject({ code: "config_error" });
+
+      const row = await createHeliusRingsWalletRepository(env).getWalletById({ ...tenant, id });
+      expect(row?.sync_cursor).toBeNull();
+    });
+  });
+
+  describe("readWalletIdentity", () => {
+    function identityResult(overrides: Partial<ReadIdentityResult> = {}): ReadIdentityResult {
+      return {
+        status: "ours",
+        derivedShieldedAddress: "rings1derived",
+        publishedShieldedAddress: "rings1derived",
+        mismatch: null,
+        ...overrides,
+      };
+    }
+
+    it("reports the identity our own row records alongside the chain's", async () => {
+      const id = await provisionedWallet("rings1identity_ours");
+
+      const identity = await service({
+        gateway: gatewayStub({ readIdentity: async () => identityResult() }),
+      }).readWalletIdentity(id, OWNER);
+
+      // Without the recorded address, "the chain publishes X" and "the chain
+      // publishes X and so do we" are the same sentence — and only the second
+      // means the row is up to date.
+      expect(identity).toEqual({
+        ...identityResult(),
+        recordedShieldedAddress: "rings1identity_ours",
+      });
+    });
+
+    // The wallet this exists for: provisioning refused, so nothing was ever
+    // recorded. Refusing to read until an address exists would withhold the
+    // answer from exactly the case that needs it.
+    it("answers for a pending wallet that has no shielded address at all", async () => {
+      const identity = await service({
+        gateway: gatewayStub({
+          readIdentity: async () =>
+            identityResult({
+              status: "foreign",
+              publishedShieldedAddress: "rings1someone_else",
+              mismatch: "nullifier_key",
+            }),
+        }),
+      }).readWalletIdentity(walletId, OWNER);
+
+      expect(identity).toMatchObject({
+        status: "foreign",
+        mismatch: "nullifier_key",
+        recordedShieldedAddress: null,
+      });
+    });
+
+    it("passes the wallet id and the owner to the port", async () => {
+      const seen: ReadIdentityInput[] = [];
+      const id = await provisionedWallet("rings1identity_pinned");
+
+      await service({
+        gateway: gatewayStub({
+          readIdentity: async (input) => {
+            seen.push(input);
+            return identityResult();
+          },
+        }),
+      }).readWalletIdentity(id, OWNER);
+
+      expect(seen[0]).toEqual({ walletId: id, owner: OWNER });
+    });
+
+    // There is no default account whose record to read, so an unresolvable
+    // owner is a refusal rather than a fallback — as it is for a sync.
+    it("refuses a null owner", async () => {
+      await expect(
+        service({ gateway: gatewayStub({}) }).readWalletIdentity(walletId, null)
+      ).rejects.toMatchObject({ code: "invalid_input" });
+    });
+
+    it("404s an unknown wallet", async () => {
+      await expect(service().readWalletIdentity("hrw_missing", OWNER)).rejects.toBeInstanceOf(
+        AppError
+      );
+    });
+
+    it("leaves the wallet row exactly as it found it", async () => {
+      const id = await provisionedWallet("rings1identity_readonly");
+      const wallets = createHeliusRingsWalletRepository(env);
+      const before = await wallets.getWalletById({ ...tenant, id });
+
+      await service({
+        gateway: gatewayStub({ readIdentity: async () => identityResult() }),
+      }).readWalletIdentity(id, OWNER);
+
+      // A read that advanced a cursor or recorded a health row would have
+      // earned the write permission its route deliberately does not carry.
+      expect(await wallets.getWalletById({ ...tenant, id })).toEqual(before);
+    });
+
+    it("surfaces the unconfigured gateway's refusal rather than guessing", async () => {
+      const id = await provisionedWallet("rings1identity_unconfigured");
+
+      await expect(service().readWalletIdentity(id, OWNER)).rejects.toMatchObject({
+        code: "config_error",
+      });
     });
   });
 
@@ -180,14 +486,52 @@ describe("HeliusRingsService", () => {
       expect(operation.policyEvaluationId).toBe("pev_1");
     });
 
-    it("fails honestly at the port when the gateway is not implemented", async () => {
+    // The gateway raises `config_error`; `failFromPortError` funnels it into
+    // gateway_unavailable, so the operation row is unchanged by the collapse.
+    it("fails honestly at the port when the upstreams are unconfigured", async () => {
       const operation = await service().prepareOperation(
-        operationInput({ clientNonce: "nonce-notimpl" }),
+        operationInput({ clientNonce: "nonce-unconfigured" }),
         actorContext
       );
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "gateway_unavailable", retryable: true });
+    });
+
+    it("maps a domain invalid_input onto the operation's fail edge", async () => {
+      const operation = await liveishService({
+        gateway: pipelineGateway({
+          buildOperation: async () => {
+            throw new HeliusRingsError("invalid_input", "a shield needs an asset and an amount");
+          },
+        }),
+      }).prepareOperation(operationInput({ clientNonce: "nonce-invalid" }), actorContext);
+
+      expect(operation.state).toBe("failed");
+      expect(operation.failure).toMatchObject({ code: "invalid_input", retryable: false });
+    });
+
+    it("stamps the backing owner as from on a shield", async () => {
+      const captured: string[] = [];
+      const operation = await liveishService({
+        gateway: pipelineGateway({
+          buildOperation: async ({ operation: built }) => {
+            captured.push(built.input.from ?? "");
+            return {
+              outerUnsignedTxBase64: "dW5zaWduZWQ=",
+              requiredSigners: [OWNER],
+              ringsMetadata: new SecretRef({ seed: "pipeline" }),
+            };
+          },
+        }),
+      }).prepareOperation(operationInput({ clientNonce: "nonce-from" }), {
+        ...actorContext,
+        owner: OWNER,
+      });
+
+      expect(operation.state).toBe("indexing");
+      expect(captured).toEqual([OWNER]);
+      expect(operation.input.from).toBe(OWNER);
     });
 
     it("drives an allowed operation through sign and submit to indexing", async () => {
@@ -200,18 +544,52 @@ describe("HeliusRingsService", () => {
       expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
     });
 
-    it("persists the outer signature before broadcasting", async () => {
+    // The RPC throwing does not mean the transaction never landed — it can time
+    // out after the node accepted it. Failing here would mark the operation
+    // retryable, and a retry files a fresh operation under a new nonce, so it
+    // would broadcast a *second* transaction and shield the amount twice.
+    it("carries a broadcast it cannot confirm into indexing rather than failing it", async () => {
       const operation = await liveishService({
         submitOuterTransaction: async () => {
           throw new RingsAdapterError("submit_failed", "rpc down", { retryable: true });
         },
       }).prepareOperation(operationInput({ clientNonce: "nonce-submit" }), actorContext);
 
-      expect(operation.state).toBe("failed");
-      expect(operation.failure).toMatchObject({ code: "submit_failed", retryable: true });
-      // The signature was durable before the RPC call, so a transaction that
-      // landed anyway is still recoverable from the row.
+      expect(operation.state).toBe("indexing");
+      expect(operation.failure).toBeNull();
+      // The signature was durable before the RPC call, so Photon has something
+      // to be asked about either way.
       expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
+    });
+
+    it("records on the timeline that the broadcast was never acknowledged", async () => {
+      const service = liveishService({
+        submitOuterTransaction: async () => {
+          throw new RingsAdapterError("submit_failed", "rpc down", { retryable: true });
+        },
+      });
+      const operation = await service.prepareOperation(
+        operationInput({ clientNonce: "nonce-submit-event" }),
+        actorContext
+      );
+
+      const detailed = await service.getOperationWithEvents(operation.id);
+      const submitted = detailed.events.find((event) => event.kind === "transaction.submitted");
+
+      expect(submitted?.payload).toMatchObject({ broadcast: "unconfirmed" });
+    });
+
+    it("marks an acknowledged broadcast as accepted", async () => {
+      const service = liveishService();
+      const operation = await service.prepareOperation(
+        operationInput({ clientNonce: "nonce-submit-ok" }),
+        actorContext
+      );
+
+      const detailed = await service.getOperationWithEvents(operation.id);
+      const submitted = detailed.events.find((event) => event.kind === "transaction.submitted");
+
+      expect(submitted?.payload).toMatchObject({ broadcast: "accepted" });
     });
 
     it("fails as signer_failed when the signer returns undecodable bytes", async () => {
@@ -280,32 +658,42 @@ describe("HeliusRingsService", () => {
     });
 
     it("polls indexing idempotently and completes on the Photon hit", async () => {
-      let now = "2026-08-18T00:00:00.000Z";
-      const gateway = new InMemoryRingsGateway({ now: () => now, indexingDelayMs: 1000 });
-      const svc = liveishService({ gateway });
+      const INDEXED_AT = "2026-08-18T00:00:02.000Z";
+      let indexed = false;
+      const svc = liveishService({
+        gateway: pipelineGateway({
+          verifyIndexed: async () =>
+            indexed ? { indexedAt: INDEXED_AT, photonRef: "photon:1" } : null,
+        }),
+      });
       const operation = await svc.prepareOperation(
         operationInput({ clientNonce: "nonce-index" }),
         actorContext
       );
       expect(operation.state).toBe("indexing");
 
-      gateway.recordSubmission(OUTER_TX.signature);
       // Photon has not indexed yet: repeated polls change nothing.
       expect((await svc.executeOperation(operation.id)).state).toBe("indexing");
       expect((await svc.executeOperation(operation.id)).state).toBe("indexing");
 
-      now = "2026-08-18T00:00:02.000Z";
+      indexed = true;
       const completed = await svc.executeOperation(operation.id);
       expect(completed.state).toBe("completed");
-      expect(completed.photonIndexedAt).toBe(now);
+      expect(completed.photonIndexedAt).toBe(INDEXED_AT);
 
       // Executing a terminal operation is a no-op.
       expect((await svc.executeOperation(operation.id)).state).toBe("completed");
     });
 
     it("resumes a broadcast stranded in submitted", async () => {
-      const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
-      const svc = liveishService({ gateway });
+      const svc = liveishService({
+        gateway: pipelineGateway({
+          verifyIndexed: async () => ({
+            indexedAt: "2026-08-18T00:00:00.000Z",
+            photonRef: "photon:1",
+          }),
+        }),
+      });
       const operation = await svc.prepareOperation(
         operationInput({ clientNonce: "nonce-stranded" }),
         actorContext
@@ -319,7 +707,6 @@ describe("HeliusRingsService", () => {
         .prepare("UPDATE helius_rings_operations SET state = 'submitted' WHERE id = ?")
         .bind(operation.id)
         .run();
-      gateway.recordSubmission(OUTER_TX.signature);
 
       // One execute both advances it out of `submitted` and polls Photon, so a
       // stranded broadcast lands in reconciliation instead of sitting forever.
@@ -399,18 +786,30 @@ describe("HeliusRingsService", () => {
   });
 
   describe("probeHealth", () => {
-    it("records gateway red when the port is not implemented", async () => {
+    /**
+     * The default gateway comes from the environment, and the reason has to
+     * survive the round trip through the health rows: the response is rebuilt
+     * from them, so a missing-variable list the gateway named would otherwise
+     * die one layer above the only thing that knew it.
+     */
+    it("surfaces the missing variables when the upstreams are unconfigured", async () => {
       const health = await service().probeHealth();
 
-      expect(health.gateway).toBe("red");
       // Unobserved components read red, not green.
-      expect(health.prover).toBe("red");
+      expect(health).toMatchObject({ rpc: "red", photon: "red", prover: "red", gateway: "red" });
+      expect(health.detail?.["gateway.reason"]).toContain("HELIUS_RINGS_RPC_URL");
+      expect(health.detail?.["rpc.reason"]).toContain("HELIUS_RINGS_DETERMINISTIC_KA_SEED");
     });
 
     it("records the gateway's component statuses when reachable", async () => {
       const health = await service({
-        gateway: new InMemoryRingsGateway({
-          health: { rpc: "green", prover: "amber", photon: "green", gateway: "green" },
+        gateway: gatewayStub({
+          probeHealth: async () => ({
+            rpc: "green",
+            prover: "amber",
+            photon: "green",
+            gateway: "green",
+          }),
         }),
       }).probeHealth();
 

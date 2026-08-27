@@ -11,11 +11,19 @@
  *     a hit completes the operation, a miss leaves it untouched (idempotent).
  *  3. `indexing` older than the timeout budget → `failed:indexing_timeout`
  *     (retryable) — the sweep never leaves an operation in limbo forever.
+ *  4. `ready_to_sign` older than its budget → `failed:signer_failed`
+ *     (retryable). Unlike the three above this one has no transaction to
+ *     reconcile: the pipeline broadcasts only after the transition out of
+ *     `ready_to_sign` commits, so an operation that died in this window never
+ *     reached an RPC. The row is stale state rather than a lost payment, which
+ *     is what makes failing it outright safe — and retryable honest, since
+ *     rebuilding it cannot duplicate anything.
  *
- * Ships dormant: the job early-returns unless the feature flag is on AND
- * HELIUS_RINGS_ADAPTER is "http" — the live gateway selector Track B flips.
- * Until then no operation can reach `indexing` in production anyway (the
- * NotImplemented gateway fails the pipeline at `proving`).
+ * Ships dormant: the job early-returns unless the feature flag is on AND every
+ * Rings upstream is configured. Without the second check a half-configured
+ * deployment would log one warning per in-flight operation every minute, since
+ * the unconfigured gateway fails the pipeline at `proving` and the catch below
+ * is per-operation.
  */
 
 import {
@@ -25,10 +33,21 @@ import {
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
+import { type RingsUpstreamEnv, ringsUpstreamsConfigured } from "@/services/helius-rings/gateway";
 import type { Env } from "@/types/env";
 
 /** An operation may sit in `indexing` this long before it times out. */
 export const RINGS_INDEXING_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * An operation may sit in `ready_to_sign` this long before it is abandoned.
+ *
+ * Far shorter than the indexing budget, and for a different reason: indexing
+ * waits on Photon, while this window covers one custody signature and a decode.
+ * Anything still here after ten minutes is the remains of a process that died,
+ * not work in progress.
+ */
+export const RINGS_SIGNING_TIMEOUT_MS = 10 * 60 * 1000;
 
 const MAX_PER_RUN = 100;
 
@@ -39,9 +58,9 @@ export interface PollRingsIndexingDependencies {
 }
 
 export function isRingsIndexingPollEnabled(
-  env: Pick<Env, "HELIUS_RINGS_ENABLED" | "HELIUS_RINGS_ADAPTER">
+  env: Pick<Env, "HELIUS_RINGS_ENABLED"> & RingsUpstreamEnv
 ): boolean {
-  return isHeliusRingsEnabled(env) && env.HELIUS_RINGS_ADAPTER === "http";
+  return isHeliusRingsEnabled(env) && ringsUpstreamsConfigured(env);
 }
 
 export async function pollRingsIndexing(
@@ -67,6 +86,7 @@ export async function pollRingsIndexing(
 
   const logger = getLogger();
   const timeoutCutoff = now().getTime() - RINGS_INDEXING_TIMEOUT_MS;
+  const signingCutoff = now().getTime() - RINGS_SIGNING_TIMEOUT_MS;
 
   // Deliberately sequential. executeOperation makes one Photon call per
   // operation, so fanning MAX_PER_RUN out would put 100 unthrottled requests at
@@ -85,8 +105,22 @@ export async function pollRingsIndexing(
     // indexing transition never committed. The timeout is deliberately not
     // applied to it — the budget measures how long Photon has been asked, and a
     // resumed operation has not been asked yet.
-    if (operation.state !== "indexing" && operation.state !== "submitted") continue;
+    if (
+      operation.state !== "indexing" &&
+      operation.state !== "submitted" &&
+      operation.state !== "ready_to_sign"
+    ) {
+      continue;
+    }
     try {
+      // Aged out rather than polled: there is no external condition to ask
+      // about, because nothing was ever broadcast for this row.
+      if (operation.state === "ready_to_sign") {
+        if (Date.parse(operation.updated_at) < signingCutoff) {
+          await failSigningTimeout(repository, operation);
+        }
+        continue;
+      }
       if (operation.state === "indexing" && Date.parse(operation.updated_at) < timeoutCutoff) {
         await failIndexingTimeout(repository, operation);
         continue;
@@ -117,6 +151,21 @@ async function failIndexingTimeout(
     expectedState: "indexing",
     code: "indexing_timeout",
     message: "Photon did not index the transaction within the budget",
+    retryable: true,
+  });
+}
+
+async function failSigningTimeout(
+  repository: ReturnType<typeof createHeliusRingsOperationRepository>,
+  operation: HeliusRingsOperationRow
+): Promise<void> {
+  await repository.failOperation({
+    organizationId: operation.organization_id,
+    projectId: operation.project_id,
+    id: operation.id,
+    expectedState: "ready_to_sign",
+    code: "signer_failed",
+    message: "the operation was abandoned before its signature was recorded; nothing was broadcast",
     retryable: true,
   });
 }

@@ -77,8 +77,8 @@ const MANAGED_JOB_CRON = "*/5 * * * *";
  *    five-minute schedule is the effective cadence, the same degradation from
  *    the per-minute crontab that pending-transfers accepts. Fatal.
  * 4. **Rings indexing poll** — behind no gate here, because the job itself
- *    early-returns unless the rings flag is on AND `HELIUS_RINGS_ADAPTER` is
- *    `http`, which is why the in-process runner also schedules it
+ *    early-returns unless the rings flag is on AND every Rings upstream is
+ *    configured, which is why the in-process runner also schedules it
  *    unconditionally. This job is the poll's only tick on managed deployments;
  *    without it an operation that reached `indexing` would neither complete nor
  *    ever time out. The five-minute schedule sits well inside the 30-minute

@@ -46,8 +46,9 @@ export async function getRingsHealth(c: AppContext) {
 
 /**
  * POST /wallets — bind a rings wallet to an SDP custody wallet and provision
- * its shielded identity. Until the live gateway lands this responds 503 with a
- * seam-marker message and the wallet stays `pending` — the wizard renders that.
+ * its shielded identity. A gateway that refuses answers 503 carrying its own
+ * reason and the wallet stays `pending`; the workspace renders that reason
+ * verbatim rather than substituting a notice of its own.
  */
 export async function createRingsWallet(c: AppContext) {
   const parsed = createRingsWalletSchema.safeParse(await c.req.json());
@@ -85,6 +86,74 @@ export async function getRingsWallet(c: AppContext) {
   });
   if (!row) throw notFound("rings wallet");
   return success(c, { wallet: mapHeliusRingsWalletRow(row) });
+}
+
+/**
+ * POST /wallets/:walletId/sync — read shielded balances from Photon.
+ *
+ * The owner is the public key of the custody wallet backing this rings wallet,
+ * resolved from the caller's scope the same way the operation handlers resolve
+ * it. Nothing is persisted about the owner: the identity is re-derived from it
+ * on every call and checked against the stored shielded address, so a wrong
+ * owner fails closed rather than answering with someone else's balances.
+ *
+ * Amounts stay decimal strings all the way out. They are uint64 on the wire
+ * and a JSON number would silently round anything past 2^53.
+ */
+export async function syncRingsWallet(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  const walletId = requireParam(c, "walletId");
+  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
+    ...tenant,
+    id: walletId,
+  });
+  if (!ringsWallet) throw notFound("rings wallet");
+
+  const scope = await resolveScope(c);
+  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+
+  const service = getHeliusRingsService(c, tenant);
+  const synced = await withRingsErrors(() =>
+    service.syncWallet(walletId, custodyWallet?.publicKey ?? null)
+  );
+  return success(c, {
+    balances: synced.balances,
+    degraded: synced.degraded,
+    observedAt: synced.observedAt,
+  });
+}
+
+/**
+ * GET /wallets/:walletId/identity — what the Rings registry publishes for this
+ * wallet's owner, and whether it is the identity this tenant derives.
+ *
+ * A GET behind the read permission, unlike `/sync`. A sync advances the
+ * wallet's recorded observation point and so earns the write permission its
+ * side effect deserves; this advances nothing and writes nothing, so it does
+ * not. The owner is resolved from the caller's scope exactly as the sync
+ * handler resolves it.
+ *
+ * Answers for a wallet with no shielded address at all — that is the case an
+ * operator reaches for it in, having hit a provisioning conflict with nothing
+ * recorded to compare against.
+ */
+export async function getRingsWalletIdentity(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  const walletId = requireParam(c, "walletId");
+  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
+    ...tenant,
+    id: walletId,
+  });
+  if (!ringsWallet) throw notFound("rings wallet");
+
+  const scope = await resolveScope(c);
+  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+
+  const service = getHeliusRingsService(c, tenant);
+  const identity = await withRingsErrors(() =>
+    service.readWalletIdentity(walletId, custodyWallet?.publicKey ?? null)
+  );
+  return success(c, { identity });
 }
 
 // --- zones ------------------------------------------------------------------
@@ -143,6 +212,7 @@ export async function prepareRingsOperation(c: AppContext) {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
       custodyWalletId: custodyWallet?.id ?? null,
+      owner: custodyWallet?.publicKey ?? null,
     })
   );
   return success(c, { operation }, 201);
@@ -217,6 +287,7 @@ export async function retryRingsOperation(c: AppContext) {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
       custodyWalletId: custodyWallet?.id ?? null,
+      owner: custodyWallet?.publicKey ?? null,
     })
   );
   return success(c, { operation }, 201);
