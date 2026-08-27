@@ -20,9 +20,11 @@
 -- it exists so the migration cannot fail on a database where it does. The
 -- survivor is the serving row if there is one, otherwise the newest, which is
 -- the row the dashboard was already showing as this provider's key.
+CREATE TEMP TABLE rpc_duplicate_losers ON COMMIT DROP AS
 WITH ranked AS (
     SELECT
         id,
+        provider_credential_id,
         ROW_NUMBER() OVER (
             PARTITION BY organization_id, scope_key, network, provider
             ORDER BY is_default DESC, created_at DESC, id DESC
@@ -30,14 +32,33 @@ WITH ranked AS (
     FROM rpc_connections
     WHERE status <> 'deactivated'
 )
+SELECT id, provider_credential_id FROM ranked WHERE position > 1;
+
 UPDATE rpc_connections AS c
    SET status = 'deactivated',
        is_default = FALSE,
        deactivated_at = COALESCE(c.deactivated_at, sdp_iso_now()),
        updated_at = sdp_iso_now()
-  FROM ranked
- WHERE ranked.id = c.id
-   AND ranked.position > 1;
+  FROM rpc_duplicate_losers AS loser
+ WHERE loser.id = c.id;
+
+-- The credential goes with the connection, exactly as
+-- `deactivateConnectionCredential` does it. Withdrawing the row and leaving an
+-- active credential behind would strand usable secret material that nothing
+-- can reach or retire.
+--
+-- On `encrypted_db` the ciphertext is the secret, so nulling it destroys it and
+-- the check constraint permits a null payload once the status is `deactivated`.
+-- A `gcp_secret_manager` version cannot be destroyed from SQL; its `secret_ref`
+-- stays for an operator to retire, which is the one residue this cannot clear.
+UPDATE provider_credentials AS pc
+   SET status = 'deactivated',
+       encrypted_secret_payload = NULL,
+       deactivated_at = COALESCE(pc.deactivated_at, sdp_iso_now()),
+       updated_at = sdp_iso_now()
+  FROM rpc_duplicate_losers AS loser
+ WHERE loser.provider_credential_id = pc.id
+   AND pc.status <> 'deactivated';
 
 CREATE UNIQUE INDEX IF NOT EXISTS rpc_connections_one_live_per_provider
     ON rpc_connections (organization_id, scope_key, network, provider)
