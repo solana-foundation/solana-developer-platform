@@ -62,14 +62,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       externalId: null,
       entityType: "individual",
       displayName: "Acme Recipient",
-      email: "acme@example.com",
-      identity: {
-        firstName: "Acme",
-        lastName: "Recipient",
-        dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-      },
+      providerData: {},
       createdBy: TEST_USER.id,
     });
     if (!counterparty) {

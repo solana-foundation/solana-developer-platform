@@ -29,14 +29,6 @@ function counterpartyWithBvnkRule(ruleId: string): CounterpartyRow {
     external_id: null,
     entity_type: "individual",
     display_name: "BVNK Test Counterparty",
-    email: "bvnk@example.com",
-    identity: {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-    },
     provider_data: {
       bvnk: {
         customer: { customerReference: "cust_bvnk_123", status: "VERIFIED" },

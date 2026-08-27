@@ -1,10 +1,6 @@
 import type { CounterpartyRow } from "@sdp/payments";
 import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import type {
-  CounterpartyEntityType,
-  CounterpartyIdentity,
-  CounterpartyProviderData,
-} from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyProviderData } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
 export type { CounterpartyRow } from "@sdp/payments";
@@ -16,9 +12,7 @@ export interface CreateCounterpartyInput {
   externalId: string | null;
   entityType: CounterpartyEntityType;
   displayName: string;
-  email: string;
-  identity: CounterpartyIdentity;
-  providerData?: CounterpartyProviderData;
+  providerData: CounterpartyProviderData;
   createdBy: string | null;
 }
 
@@ -29,8 +23,6 @@ export interface UpdateCounterpartyInput {
   externalId?: string | null;
   entityType?: CounterpartyEntityType;
   displayName?: string;
-  email?: string;
-  identity?: CounterpartyIdentity;
   providerData?: CounterpartyProviderData;
 }
 
@@ -43,7 +35,7 @@ export interface ArchiveCounterpartyInput {
 export interface ListCounterpartiesInput {
   organizationId: string;
   projectId: string;
-  includeArchived?: boolean;
+  includeArchived: boolean;
   limit: number;
   offset: number;
 }

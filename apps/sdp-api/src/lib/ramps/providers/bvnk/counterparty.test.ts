@@ -1,12 +1,11 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import {
-  buildBvnkIndividualPayload,
+  bvnkOnrampFields,
   validateBvnkCounterparty,
 } from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import { normalizeBvnkStateCode } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 
 const ONRAMP_REQUIREMENTS_OPTIONS = {
   cryptoToken: "USDC_SOLANA",
@@ -14,24 +13,7 @@ const ONRAMP_REQUIREMENTS_OPTIONS = {
   destinationWalletAddress: "dest",
 } as const;
 
-const BVNK_CDD_COLLECTED_DATA = {
-  "taxIdentification.number": "123-45-6789",
-  "taxIdentification.taxResidenceCountryCode": "US",
-  nationality: "US",
-  birthCountryCode: "US",
-  "cdd.employmentStatus": "SALARIED",
-  "cdd.sourceOfFunds": "SALARY",
-  "cdd.pepStatus": "NOT_PEP",
-  "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
-  "cdd.expectedMonthlyVolume.amount": "1000",
-  "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
-  "cdd.employmentIndustrySector": "INFORMATION",
-} as const;
-
-type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
-type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
-
-function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCounterparty {
+function counterparty(overrides?: Partial<Counterparty>): Counterparty {
   return {
     id: "cp_123",
     organizationId: "org_123",
@@ -39,19 +21,6 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
     externalId: null,
     entityType: "individual",
     displayName: "Ada Lovelace",
-    email: "ada@example.com",
-    identity: {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: {
-        line1: "1 Market St",
-        city: "San Francisco",
-        countryCode: "US",
-        subdivisionCode: "CA",
-      },
-    },
     status: "active",
     createdBy: null,
     createdAt: "2026-06-11T00:00:00.000Z",
@@ -60,29 +29,8 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
   };
 }
 
-function counterpartyRow(
-  overrides?: Partial<IndividualCounterpartyRow>
-): IndividualCounterpartyRow {
-  return {
-    id: "cp_123",
-    organization_id: "org_123",
-    project_id: "proj_123",
-    external_id: null,
-    entity_type: "individual",
-    display_name: "Ada Lovelace",
-    email: "ada@example.com",
-    identity: counterparty().identity,
-    provider_data: {},
-    status: "active",
-    created_by: null,
-    created_at: "2026-06-11T00:00:00.000Z",
-    updated_at: "2026-06-11T00:00:00.000Z",
-    ...overrides,
-  };
-}
-
 describe("validateBvnkCounterparty", () => {
-  it("does not report ready just because the BVNK customer exists", () => {
+  it("uses provider status after a BVNK customer exists", () => {
     const requirements = validateBvnkCounterparty(counterparty(), {
       direction: "onramp",
       ...ONRAMP_REQUIREMENTS_OPTIONS,
@@ -100,29 +48,29 @@ describe("validateBvnkCounterparty", () => {
     });
   });
 
-  it("collects BVNK CDD fields instead of reading them from stored counterparty identity", () => {
-    const requirements = validateBvnkCounterparty(counterparty(), {
-      direction: "onramp",
-      ...ONRAMP_REQUIREMENTS_OPTIONS,
-      providerData: {},
-    });
+  it("fails loudly at the unwired JIT seam for a new BVNK customer", () => {
+    const run = () =>
+      validateBvnkCounterparty(counterparty(), {
+        direction: "onramp",
+        ...ONRAMP_REQUIREMENTS_OPTIONS,
+        providerData: {},
+      });
 
-    expect(requirements.status).toBe("collect");
-    expect(requirements).toMatchObject({ provider: "bvnk", direction: "onramp" });
-    if (requirements.status !== "collect") throw new Error("Expected collect requirements");
-    expect(requirements.fields.map((field) => field.key)).toEqual([
-      "taxIdentification.number",
-      "taxIdentification.taxResidenceCountryCode",
-      "nationality",
-      "birthCountryCode",
-      "cdd.employmentStatus",
-      "cdd.sourceOfFunds",
-      "cdd.pepStatus",
-      "cdd.intendedUseOfAccount",
-      "cdd.expectedMonthlyVolume.amount",
-      "cdd.estimatedYearlyIncome",
-      "cdd.employmentIndustrySector",
-    ]);
+    expect(run).toThrowError(SdpPaymentsError);
+    expect(run).toThrowError(
+      "BVNK onramp requires identity fields that are no longer stored; JIT collection is not wired yet"
+    );
+  });
+});
+
+describe("bvnkOnrampFields", () => {
+  it("adds the US-only fields for US counterparties", () => {
+    const usKeys = bvnkOnrampFields("US").map((field) => field.key);
+    const baseKeys = bvnkOnrampFields("GB").map((field) => field.key);
+
+    expect(usKeys).toContain("address.stateCode");
+    expect(baseKeys).not.toContain("address.stateCode");
+    expect(usKeys).toEqual(expect.arrayContaining(baseKeys));
   });
 });
 
@@ -149,25 +97,5 @@ describe("normalizeBvnkStateCode", () => {
 
   it("throws for a 1-character code", () => {
     expect(() => normalizeBvnkStateCode("US", "X")).toThrowError(SdpPaymentsError);
-  });
-});
-
-describe("buildBvnkIndividualPayload", () => {
-  it("normalizes an ISO-prefixed stored subdivision code to BVNK's bare stateCode", () => {
-    const row = counterpartyRow({
-      identity: {
-        ...counterparty().identity,
-        address: {
-          line1: "1 Market St",
-          city: "San Francisco",
-          countryCode: "US",
-          subdivisionCode: "US-TX",
-        },
-      },
-    });
-
-    const payload = buildBvnkIndividualPayload(row, BVNK_CDD_COLLECTED_DATA, "USD");
-
-    expect(payload.address).toMatchObject({ countryCode: "US", stateCode: "TX" });
   });
 });

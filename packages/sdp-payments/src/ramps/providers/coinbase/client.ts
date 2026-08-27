@@ -299,14 +299,13 @@ export class CoinbaseRampClient implements RampProvider {
     }
     if (!input.email || !input.phone) {
       throw badRequest(
-        "Coinbase Onramp requires the counterparty to have an email and phone number.",
+        "Coinbase onramp requires identity fields that are no longer stored; JIT collection is not wired yet",
         { provider: this.id }
       );
     }
 
     const now = new Date().toISOString();
     const partnerUserRef = `sandbox-${input.externalCustomerId}`;
-    // Coinbase wants strict E.164; strip any formatting the counterparty phone was stored with.
     const phoneNumber = input.phone.replace(/[\s()-]/g, "");
 
     const { order, paymentLink } = await this.request<CoinbaseCreateOrderResponse>(

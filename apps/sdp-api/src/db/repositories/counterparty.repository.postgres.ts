@@ -1,10 +1,7 @@
-import type {
-  CounterpartyBusinessIdentity,
-  CounterpartyIndividualIdentity,
-  CounterpartyProviderData,
-  CounterpartyStatus,
-} from "@sdp/types";
+import { readRecord } from "@sdp/payments/json";
+import type { CounterpartyProviderData, CounterpartyStatus } from "@sdp/types";
 import type { AppDb, DatabaseExecutor } from "@/db";
+import { internalError } from "@/lib/errors";
 import type {
   ArchiveCounterpartyInput,
   CounterpartiesRepository,
@@ -20,18 +17,44 @@ import { generateCounterpartyId } from "./counterparty.repository";
 
 function assertString(value: unknown, field: string): string {
   if (typeof value !== "string") {
-    throw new Error(`Counterparty ${field} is missing`);
+    throw internalError(`Counterparty ${field} is missing`);
   }
   return value;
+}
+
+function assertNullableString(value: unknown, field: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw internalError(`Counterparty ${field} is invalid`);
+  }
+  return value;
+}
+
+function assertStatus(value: unknown): CounterpartyStatus {
+  if (value !== "active" && value !== "archived") {
+    throw internalError(`Counterparty status is invalid: ${String(value)}`);
+  }
+  return value;
+}
+
+function assertProviderData(value: unknown): CounterpartyProviderData {
+  const providerData = readRecord(value);
+  if (providerData === undefined) {
+    throw internalError("Counterparty provider_data is invalid");
+  }
+  return providerData;
 }
 
 function nestedString(value: unknown, path: readonly string[]): string | null {
   let current = value;
   for (const part of path) {
-    if (!current || typeof current !== "object") {
+    const record = readRecord(current);
+    if (record === undefined) {
       return null;
     }
-    current = (current as Record<string, unknown>)[part];
+    current = record[part];
   }
   return typeof current === "string" && current.length > 0 ? current : null;
 }
@@ -53,30 +76,23 @@ function providerLookupReferences(providerData: CounterpartyProviderData): {
 }
 
 function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
-  const base = {
+  const entityType = assertString(row.entity_type, "entity_type");
+  if (entityType !== "individual" && entityType !== "business") {
+    throw internalError(`Counterparty entity_type is invalid: ${entityType}`);
+  }
+  return {
     id: assertString(row.id, "id"),
     organization_id: assertString(row.organization_id, "organization_id"),
     project_id: assertString(row.project_id, "project_id"),
-    external_id: (row.external_id as string | null) ?? null,
+    external_id: assertNullableString(row.external_id, "external_id"),
+    entity_type: entityType,
     display_name: assertString(row.display_name, "display_name"),
-    email: assertString(row.email, "email"),
-    provider_data: row.provider_data as CounterpartyProviderData,
-    status: row.status as CounterpartyStatus,
-    created_by: (row.created_by as string | null) ?? null,
+    provider_data: assertProviderData(row.provider_data),
+    status: assertStatus(row.status),
+    created_by: assertNullableString(row.created_by, "created_by"),
     created_at: assertString(row.created_at, "created_at"),
     updated_at: assertString(row.updated_at, "updated_at"),
   };
-  return row.entity_type === "individual"
-    ? {
-        ...base,
-        entity_type: "individual",
-        identity: row.identity as CounterpartyIndividualIdentity,
-      }
-    : {
-        ...base,
-        entity_type: "business",
-        identity: row.identity as CounterpartyBusinessIdentity,
-      };
 }
 
 async function updateProviderData(
@@ -128,16 +144,15 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
   return {
     async createCounterparty(input: CreateCounterpartyInput) {
       const id = generateCounterpartyId();
-      const providerData = input.providerData ?? {};
-      const refs = providerLookupReferences(providerData);
+      const refs = providerLookupReferences(input.providerData);
 
       const row = await db
         .prepare(
           `INSERT INTO counterparties (
              id, organization_id, project_id, external_id, entity_type,
-             display_name, email, identity, provider_data,
+             display_name, provider_data,
              bvnk_customer_reference, mural_organization_id, status, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
            RETURNING *`
         )
         .bind(
@@ -147,9 +162,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.externalId,
           input.entityType,
           input.displayName,
-          input.email,
-          input.identity,
-          providerData,
+          input.providerData,
           refs.bvnkCustomerReference,
           refs.muralOrganizationId,
           input.createdBy
@@ -176,8 +189,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           return null;
         }
         const current = mapCounterpartyRow(row);
-        const email = input.email ?? current.email;
-        const identity = input.identity ?? current.identity;
         const providerData = input.providerData ?? current.provider_data;
         const refs = providerLookupReferences(providerData);
 
@@ -187,8 +198,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                 SET external_id = CASE WHEN ?::boolean THEN ? ELSE external_id END,
                     entity_type = ?,
                     display_name = ?,
-                    email = ?,
-                    identity = ?,
                     provider_data = ?,
                     bvnk_customer_reference = ?,
                     mural_organization_id = ?,
@@ -201,8 +210,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
             input.externalId ?? null,
             input.entityType ?? current.entity_type,
             input.displayName ?? current.display_name,
-            email,
-            identity,
             providerData,
             refs.bvnkCustomerReference,
             refs.muralOrganizationId,
@@ -289,9 +296,10 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         )
         .bind(customerReference, customerReference)
         .all<Record<string, unknown>>();
-      return rows.results.length === 1
-        ? mapCounterpartyRow(rows.results[0] as Record<string, unknown>)
-        : null;
+      if (rows.results.length !== 1) {
+        return null;
+      }
+      return mapCounterpartyRow(rows.results[0]);
     },
 
     async findCounterpartyByMuralOrganizationId(organizationId: string) {
@@ -311,9 +319,10 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         )
         .bind(organizationId, organizationId)
         .all<Record<string, unknown>>();
-      return rows.results.length === 1
-        ? mapCounterpartyRow(rows.results[0] as Record<string, unknown>)
-        : null;
+      if (rows.results.length !== 1) {
+        return null;
+      }
+      return mapCounterpartyRow(rows.results[0]);
     },
 
     async mutateProviderData(params) {
@@ -324,14 +333,20 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       await mutateProviderDataLocked(db, {
         ...params,
         mutate(currentProviderData) {
-          const bvnk =
-            currentProviderData.bvnk && typeof currentProviderData.bvnk === "object"
-              ? (currentProviderData.bvnk as Record<string, unknown>)
-              : {};
-          const customer =
-            bvnk.customer && typeof bvnk.customer === "object"
-              ? (bvnk.customer as Record<string, unknown>)
-              : {};
+          const bvnk = readRecord(currentProviderData.bvnk);
+          if (bvnk === undefined) {
+            return {
+              ...currentProviderData,
+              bvnk: { customer: params.customer },
+            };
+          }
+          const customer = readRecord(bvnk.customer);
+          if (customer === undefined) {
+            return {
+              ...currentProviderData,
+              bvnk: { ...bvnk, customer: params.customer },
+            };
+          }
           return {
             ...currentProviderData,
             bvnk: {
@@ -365,14 +380,22 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           return;
         }
         const current = mapCounterpartyRow(row);
-        const mural =
-          current.provider_data.mural && typeof current.provider_data.mural === "object"
-            ? (current.provider_data.mural as Record<string, unknown>)
-            : {};
-        const organization =
-          mural.organization && typeof mural.organization === "object"
-            ? (mural.organization as Record<string, unknown>)
-            : {};
+        const mural = readRecord(current.provider_data.mural);
+        if (mural === undefined) {
+          await updateProviderData(tx, current, {
+            ...current.provider_data,
+            mural: { organization: params.organization },
+          });
+          return;
+        }
+        const organization = readRecord(mural.organization);
+        if (organization === undefined) {
+          await updateProviderData(tx, current, {
+            ...current.provider_data,
+            mural: { ...mural, organization: params.organization },
+          });
+          return;
+        }
         await updateProviderData(tx, current, {
           ...current.provider_data,
           mural: {
@@ -398,7 +421,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           .bind(
             params.organizationId,
             params.projectId,
-            params.includeArchived ?? false,
+            params.includeArchived,
             params.limit,
             params.offset
           )
@@ -411,13 +434,16 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                 AND project_id = ?
                 AND (?::boolean OR status = 'active')`
           )
-          .bind(params.organizationId, params.projectId, params.includeArchived ?? false)
+          .bind(params.organizationId, params.projectId, params.includeArchived)
           .first<{ total: number }>(),
       ]);
 
+      if (countRow === null) {
+        throw internalError("Counterparty count query returned no row");
+      }
       return {
         rows: rowsResult.results.map((row) => mapCounterpartyRow(row)),
-        total: countRow?.total ?? 0,
+        total: countRow.total,
       };
     },
   };
