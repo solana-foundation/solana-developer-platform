@@ -259,6 +259,9 @@ function ComposeStep({
   const t = useTranslations();
   const needsAsset = NEEDS_ASSET.has(draft.opType);
   const needsRecipient = NEEDS_RECIPIENT.has(draft.opType);
+  // Only a `ready` wallet has a shielded identity to deposit into; the rest are
+  // omitted rather than shown disabled, since nothing here would provision one.
+  const readyWallets = wallets.filter((wallet) => wallet.status === "ready");
 
   return (
     <>
@@ -270,13 +273,11 @@ function ComposeStep({
             onValueChange={(walletId) => onPatch({ walletId })}
             placeholder={t("DashboardHeliusRings.composer.walletPlaceholder")}
           >
-            {wallets
-              .filter((wallet) => wallet.status === "ready")
-              .map((wallet) => (
-                <SelectItem key={wallet.id} value={wallet.id}>
-                  {wallet.name}
-                </SelectItem>
-              ))}
+            {readyWallets.map((wallet) => (
+              <SelectItem key={wallet.id} value={wallet.id}>
+                {wallet.name}
+              </SelectItem>
+            ))}
           </Select>
         </Field>
         <Field label={t("DashboardHeliusRings.composer.operation")}>
