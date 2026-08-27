@@ -223,6 +223,74 @@ export const buildEarnVaultWithdrawalFingerprint = (
     })
   );
 
+export interface EarnExternalWalletDepositFingerprintInput {
+  environment: string;
+  provider: string;
+  /** The vault address. */
+  providerReference: string;
+  /** The external wallet that signs and holds the shares. */
+  ownerAddress: string;
+  amount: string;
+  minSharesOut: string | null;
+  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
+  transactionId: string;
+}
+
+/**
+ * Fingerprint for an external-wallet (caller-signed) vault deposit submit.
+ *
+ * Same inclusion test as the custody deposit's: every field changes WHAT MOVES.
+ * `transactionId` earns its place because the submit names one specific built
+ * transaction: two builds are two distinct signable transactions, so a key
+ * retried against a REBUILT transaction is a different request and must 409
+ * rather than silently answer with the first build's movement.
+ */
+export const buildEarnExternalWalletDepositFingerprint = (
+  input: EarnExternalWalletDepositFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_external_wallet_deposit",
+      environment: input.environment,
+      provider: input.provider,
+      providerReference: input.providerReference,
+      ownerAddress: input.ownerAddress,
+      direction: "deposit",
+      amount: normalizeDecimalString(input.amount),
+      minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
+      transactionId: input.transactionId,
+    })
+  );
+
+export interface EarnExternalWalletWithdrawalFingerprintInput {
+  environment: string;
+  provider: string;
+  /** The `earn_positions` row being exited. */
+  positionId: string;
+  /** The external wallet whose shares redeem. */
+  ownerAddress: string;
+  shares: string;
+  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
+  transactionId: string;
+}
+
+/** Fingerprint for an external-wallet withdrawal submit; see the deposit's note. */
+export const buildEarnExternalWalletWithdrawalFingerprint = (
+  input: EarnExternalWalletWithdrawalFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_external_wallet_withdrawal",
+      environment: input.environment,
+      provider: input.provider,
+      positionId: input.positionId,
+      ownerAddress: input.ownerAddress,
+      direction: "withdrawal",
+      shares: normalizeDecimalString(input.shares),
+      transactionId: input.transactionId,
+    })
+  );
+
 export interface EarnWithdrawalFingerprintInput {
   providerWalletRef: string;
   amountUsd: string;

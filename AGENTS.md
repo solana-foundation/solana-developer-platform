@@ -29,7 +29,7 @@ Do not hand-edit generated artifacts. Regenerate them with the owning script.
 
 Public docs and AI artifacts should mirror the supported public surface only.
 
-- Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `policies`, `compliance`
+- Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `policies`, `compliance`, `earn`
 - Hidden/internal families stay out of public AI resources unless product policy changes: `rpc`, `admin`, `onboarding`, `auth`, `organizations`, `members`
 
 ## Preferred checks

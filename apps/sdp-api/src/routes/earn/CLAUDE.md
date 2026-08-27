@@ -445,7 +445,13 @@ organization's own custody wallets.
     program error instead of a landed, failed transaction the customer paid for.
     Provider build, simulation, custody lookup, signing, and broadcast share one
     absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
-    a later side effect.
+    a later side effect. The verdict surfaces through
+    `describeVaultSimulationError` (services/earn/vault-simulation-error.ts),
+    which turns recognized `TransactionError` variants into fee-mode-aware prose
+    ("the wallet holds no SOL...") with the raw variant kept in parentheses for
+    log searches; unrecognized shapes fall back to the capped raw JSON. A
+    failure the helper attributes to SDP's fee sponsor surfaces as a retryable
+    5xx (with no sponsor detail in the body), never a caller-fault 400.
   - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
     without sending; one transaction stores the signature, base64 wire bytes,
     last-valid block height, movement and activated claim while still `pending`.
@@ -629,6 +635,66 @@ movement failed. Never rebuild a transaction during recovery.
   `listReadableEarnVaultWallets`. `?requestId=` serves the one logical
   withdrawal, and `?settled=` uses the ledger terminal set
   (`finalized|failed`), not the deposits' legacy one.
+
+### External-wallet (caller-signed) routes — the B2B2C money path (PRO-1722)
+
+A third signer, not a third model. An *external wallet* is a NON-CUSTODIAL
+wallet the partner's platform connects — SDP holds no key for it and its owner
+is not an SDP tenant. Its movements are `vault_direct` rows in the same ledger:
+one signed transaction, recorded before broadcast, settled by the same
+reconciler. The
+signer distinction is a column pair — exactly one of `custody_wallet_id` and
+`owner_address` per vault row (migration 0070) — and every treasury read
+scopes by custody wallet, so external-wallet rows are structurally invisible
+to those surfaces. Full contract: ADR 0002 addendum 2026-08-26.
+
+Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
+`services/earn/vault-external-wallet.service.ts`):
+
+- `POST /external-wallet/deposit-transactions` — **build + simulate + compile,
+  never sign.** Body `{strategyId, ownerAddress, amount, minSharesOut?}`. Runs
+  the FULL money-in stack in the custody deposit's order (environment
+  capability, production floor, surfacing, entitlement, admission), builds the
+  provider plan for the OWNER, simulates with the owner as fee payer (which is
+  also the funds check), compiles one unsigned transaction and persists it
+  (`earn_external_wallet_transactions`), returning
+  `{transactionId, transaction}` for the external wallet to sign. The memo
+  binds the TRANSACTION id (the submit's key does not exist yet at build time).
+  No idempotency key: a build moves no money and expires with its blockhash.
+- `POST /external-wallet/deposits` — **verify + record + broadcast.** Body
+  `{transactionId, signedTransaction}` plus a REQUIRED `Idempotency-Key`
+  (body `requestId` rejected). The submit proves the bytes are a transaction
+  SDP built — MESSAGE bytes compared against the stored build, owner's ed25519
+  signature verified — and takes nothing but signatures from the wire. The
+  movement is recorded durably, THEN broadcast: record-before-broadcast
+  unchanged, the signature merely became knowable at submit instead of at
+  SDP's signer. Two composed idempotency protections: the key anchors the
+  movement (a partner retry replays the original), and each build is
+  consumable at most once under a row lock (a second key against the same
+  build is a 409, never a second row for one on-chain transaction). The
+  fingerprint includes the build id, so a key reused against a REBUILT
+  transaction conflicts rather than silently replaying.
+- `POST /external-wallet/withdrawal-transactions` — the exit build, ADR 0002
+  exit safety in its strongest form: 404-scoping (org, environment, EXACT
+  project, owner shape — a custody position 404s here) and capability (501)
+  only. Works while the provider is disabled for new deposits; pinned by the
+  exit-safety describe in `../earn.external-wallet.test.ts`.
+- `POST /external-wallet/withdrawals` — the submit, mirrored.
+- **NO policyGate and no `wallets:read`, deliberately** — this is not the
+  vault-deposit cautionary tale repeating. Wallet policy governs the org's own
+  custody and stands between a request and `createOrgSigner`; these routes
+  never resolve a signer and never touch custody. The owner's own signature
+  IS the authorization, and there is no signing sink here for
+  `value-moving-conformance.node.test.ts` to inventory.
+- **Scoping is org AND project**, stricter than custody vault claims: the
+  external wallet belongs to the partner's project
+  (`idx_earn_positions_external_wallet_claim` includes `project_id`), so a
+  sibling project can neither see nor exit its positions. Position reads for
+  partners are PRO-1724, not here.
+- The owner pays fee and rent (Kora sponsorship for this surface is PRO-1744 —
+  see the ADR addendum for why co-signing a stranger's transaction is its own
+  decision, not a default), and the rent funder is recorded NULL so the exit's
+  refund defaults back to the owner.
 
 One gap remains around approvals, and it is narrower than it was. An approved
 deposit or withdrawal is now fully followable — the executor writes the
