@@ -52,7 +52,7 @@ import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
-import { inferCluster, resolveChannelToken } from "./mint";
+import { resolveChannelToken } from "./mint";
 import { describeTxError } from "./tx-error";
 import { confirmAndPersistWithdrawal } from "./withdraw-confirm";
 import { emitWithdrawalEvent } from "./withdraw-events";
@@ -60,7 +60,7 @@ import { emitWithdrawalEvent } from "./withdraw-events";
 /** The instance fields the withdrawal needs. */
 type WithdrawalInstance = Pick<
   PrivateChannelInstance,
-  "id" | "gatewayUrl" | "chainRpcUrl" | "escrowProgramId" | "escrowInstanceAddr"
+  "id" | "gatewayUrl" | "escrowProgramId" | "escrowInstanceAddr"
 >;
 
 export interface CreateChannelWithdrawalInput {
@@ -84,6 +84,7 @@ export interface CreateChannelWithdrawalInput {
    * refreshed.
    */
   gatewayAuth: SpcAuthContext;
+  cluster: import("@sdp/types").SolanaCluster;
 }
 
 /**
@@ -156,8 +157,7 @@ export async function createChannelWithdrawal(
 ): Promise<PrivateChannelWithdrawal> {
   const { instance, organizationId, projectId, wallet } = input;
 
-  const cluster = inferCluster(instance.chainRpcUrl);
-  const { mint, decimals, tokenProgram } = resolveChannelToken(cluster, input.mint);
+  const { mint, decimals, tokenProgram } = resolveChannelToken(input.cluster, input.mint);
   const owner = wallet.publicKey;
   const destination = input.destination ?? owner;
 
@@ -179,7 +179,6 @@ export async function createChannelWithdrawal(
     // Audit-only snapshot; the oracle always reads the current instance row.
     context: {
       gatewayUrl: instance.gatewayUrl,
-      chainRpcUrl: instance.chainRpcUrl,
       escrowProgramId: instance.escrowProgramId,
       escrowInstanceAddr: instance.escrowInstanceAddr,
       actingUserId: input.userId,

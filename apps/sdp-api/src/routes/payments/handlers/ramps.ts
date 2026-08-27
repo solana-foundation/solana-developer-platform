@@ -1,3 +1,4 @@
+import { redactCredentialString } from "@sdp/custody";
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
@@ -53,12 +54,15 @@ import {
   counterpartyNotProvisioned,
   internalError,
   notFound,
+  redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import { describeError, logEvent } from "@/runtime/money-path-events";
+import { isSentryEnabled } from "@/runtime/observability";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -453,11 +457,7 @@ export async function advanceCounterpartyRequirements(
     case "moneygram":
       return readyCounterparty("moneygram", input.direction);
     case "lightspark": {
-      const customer = await ensureLightsparkCustomer(c, {
-        counterparty: input.counterparty,
-        projectId: input.projectId,
-        collectedData: input.collectedData,
-      });
+      const customer = ensureLightsparkCustomer(input.counterparty);
       if (input.direction === "offramp") {
         await ensureLightsparkPayoutAccount(c, {
           counterparty: input.counterparty,
@@ -499,10 +499,7 @@ export async function advanceCounterpartyRequirements(
         }
         return readyCounterparty("bvnk", input.direction);
       }
-      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId, {
-        fiatCurrency: input.fiatCurrency,
-        collectedData: input.collectedData,
-      });
+      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId);
       const scope = await resolveScope(c);
       const destinationWalletAddress = resolveWalletAddress(
         scope.wallets,
@@ -537,7 +534,7 @@ export async function advanceCounterpartyRequirements(
 /** Ceiling on simultaneous live provider estimate calls per request. */
 export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
 
-async function estimateAcrossProviders(
+export async function estimateAcrossProviders(
   c: AppContext,
   providers: readonly RampProviderId[],
   runProvider: (provider: RampProviderId, ctx: RampRuntimeContext) => Promise<PaymentRampEstimate>
@@ -556,6 +553,26 @@ async function estimateAcrossProviders(
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
+        }
+        const cause = error instanceof Error ? error : new Error(String(error));
+        logEvent("error", {
+          event: "sdp_api_ramp_provider_error",
+          provider,
+          organization_id: scope.auth.organizationId,
+          error_message: redactCredentialString(cause.message),
+          ...describeError(error),
+        });
+        const observability = c.get("observability");
+        if (observability && isSentryEnabled(c.env)) {
+          try {
+            observability.withScope((sentryScope) => {
+              sentryScope.setTag("provider", provider);
+              sentryScope.setTag("organization_id", scope.auth.organizationId);
+              observability.captureException(redactErrorForCapture(cause));
+            });
+          } catch {
+            // never let telemetry change the per-provider error contract
+          }
         }
         return {
           provider,
@@ -694,8 +711,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
-        email: counterparty.email,
-        phone: counterparty.entity_type === "individual" ? counterparty.identity.phone : undefined,
         domain: input.domain,
       });
       break;
@@ -825,7 +840,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           sourceWalletAddress,
           paymentTransferId: pendingTransfer.id,
           externalCustomerId: counterparty.external_id ?? counterparty.id,
-          bvnkCompliance: buildBvnkPartyDetails(counterparty, "ORIGINATOR"),
+          bvnkCompliance: buildBvnkPartyDetails(counterparty),
           bvnkOfframpWalletId: wallet.id,
         });
       } catch (error) {

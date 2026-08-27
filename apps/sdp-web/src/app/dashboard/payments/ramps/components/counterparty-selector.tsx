@@ -22,7 +22,7 @@ export function CounterpartySelector({
     () =>
       counterpartiesResult.data
         .filter((cp) => cp.status === "active")
-        .map((cp) => ({ value: cp.id, label: cp.displayName, description: cp.email })),
+        .map((cp) => ({ value: cp.id, label: cp.displayName })),
     [counterpartiesResult.data]
   );
 

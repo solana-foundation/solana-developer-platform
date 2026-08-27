@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
@@ -8,6 +9,10 @@ import type { CounterpartyAccountsRepository } from "./counterparty-account.repo
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_cpta_repo_test";
+const TEST_ACCOUNT_DETAILS = {
+  network: "solana",
+  address: TEST_SOLANA_ADDRESSES.wallet1,
+} as const;
 
 describe("CounterpartyAccountsRepository (postgres)", () => {
   let repo: CounterpartyAccountsRepository;
@@ -25,14 +30,6 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
     await db.prepare("DELETE FROM counterparty_accounts").run();
     await db.prepare("DELETE FROM counterparties").run();
     await db.prepare("DELETE FROM projects").run();
-    await db
-      .prepare(
-        `UPDATE counterparty_pii_migration_state
-            SET phase = 'dual_write',
-                fallback_read_count = 0,
-                last_fallback_read_at = NULL`
-      )
-      .run();
 
     await db
       .prepare(
@@ -56,28 +53,18 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
       .run();
 
-    repo = createPostgresCounterpartyAccountsRepository(db, env.counterpartyPiiCipher);
+    repo = createPostgresCounterpartyAccountsRepository(db);
   });
 
-  async function seedCounterparty(externalId: string | null = null) {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(
-      getDb(env),
-      env.counterpartyPiiCipher
-    );
+  async function seedCounterparty(externalId?: string | null) {
+    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
     const row = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      externalId,
+      externalId: externalId === undefined ? null : externalId,
       entityType: "individual",
       displayName: "Acme Recipient",
-      email: "acme@example.com",
-      identity: {
-        firstName: "Acme",
-        lastName: "Recipient",
-        dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-      },
+      providerData: {},
       createdBy: TEST_USER.id,
     });
     if (!row) {
@@ -96,85 +83,52 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         accountKind: "crypto_wallet",
         label: "Alice's Solana",
-        details: { network: "solana", address: "7xK...Pump" },
+        details: TEST_ACCOUNT_DETAILS,
         providerAccountData: { provider: "grid", gridExternalAccountId: "ext_abc" },
       });
 
-      expect(row).not.toBeNull();
-      expect(row?.id).toMatch(/^counterparty_account_/);
-      expect(row?.counterparty_id).toBe(counterparty.id);
-      expect(row?.account_kind).toBe("crypto_wallet");
-      expect(row?.label).toBe("Alice's Solana");
-      expect(row?.details).toMatchObject({ network: "solana", address: "7xK...Pump" });
-      expect(row?.provider_account_data).toMatchObject({ provider: "grid" });
-      expect(row?.status).toBe("active");
+      assert(row);
+      expect(row.id).toMatch(/^counterparty_account_/);
+      expect(row.counterparty_id).toBe(counterparty.id);
+      expect(row.account_kind).toBe("crypto_wallet");
+      expect(row.label).toBe("Alice's Solana");
+      expect(row.details).toMatchObject(TEST_ACCOUNT_DETAILS);
+      expect(row.provider_account_data).toMatchObject({ provider: "grid" });
+      expect(row.status).toBe("active");
 
       const stored = await getDb(env)
         .prepare(
-          `SELECT sensitive_data_encrypted, label, details, provider_account_data
+          `SELECT label, details, provider_account_data
              FROM counterparty_accounts
             WHERE id = ?`
         )
-        .bind(row?.id)
+        .bind(row.id)
         .first<{
-          sensitive_data_encrypted: string;
           label: string;
           details: Record<string, unknown>;
           provider_account_data: Record<string, unknown>;
         }>();
-      expect(stored?.sensitive_data_encrypted).toMatch(/^pii-local-v1\./);
-      expect(stored?.sensitive_data_encrypted).not.toContain("Alice");
-      expect(stored?.label).toBe("Alice's Solana");
-      expect(stored?.details.address).toBe("7xK...Pump");
+      assert(stored);
+      expect(stored.label).toBe("Alice's Solana");
+      expect(stored.details.address).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+      expect(stored.provider_account_data.provider).toBe("grid");
     });
 
-    it("writes no legacy account PII after encrypted-only cutover", async () => {
-      const counterparty = await seedCounterparty();
-      await getDb(env)
-        .prepare(
-          `UPDATE counterparty_pii_migration_state
-              SET phase = 'encrypted_only'
-            WHERE id = 'counterparty-pii-v1'`
-        )
-        .run();
-
-      const row = await repo.createCounterpartyAccount({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: counterparty.id,
-        accountKind: "bank_account",
-        label: "Sensitive",
-        details: { accountNumber: "00012345" },
-        providerAccountData: { beneficiaryId: "beneficiary_1" },
-      });
-
-      const stored = await getDb(env)
-        .prepare(
-          `SELECT sensitive_data_encrypted, label, details, provider_account_data
-             FROM counterparty_accounts
-            WHERE id = ?`
-        )
-        .bind(row?.id)
-        .first<Record<string, unknown>>();
-      expect(stored?.sensitive_data_encrypted).toMatch(/^pii-local-v1\./);
-      expect(stored?.label).toBeNull();
-      expect(stored?.details).toBeNull();
-      expect(stored?.provider_account_data).toBeNull();
-    });
-
-    it("defaults details and provider_account_data to {} when omitted", async () => {
+    it("defaults provider_account_data to {} when omitted", async () => {
       const counterparty = await seedCounterparty();
 
       const row = await repo.createCounterpartyAccount({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
-      expect(row?.label).toBeNull();
-      expect(row?.details).toEqual({});
-      expect(row?.provider_account_data).toEqual({});
+      assert(row);
+      expect(row.label).toBeNull();
+      expect(row.details).toEqual(TEST_ACCOUNT_DETAILS);
+      expect(row.provider_account_data).toEqual({});
     });
   });
 
@@ -207,6 +161,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: cptyA.id,
         accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
       const result = await repo.getCounterpartyAccountById({
@@ -224,7 +179,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
       await repo.archiveCounterpartyAccount({
@@ -249,7 +205,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
       const wrongProject = await repo.getCounterpartyAccountById({
@@ -270,7 +227,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
         label: "first",
       });
       const second = await repo.createCounterpartyAccount({
@@ -279,6 +237,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         accountKind: "crypto_wallet",
         label: "second",
+        details: TEST_ACCOUNT_DETAILS,
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: first?.id ?? "",
@@ -306,7 +265,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: first?.id ?? "",
@@ -332,13 +292,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
-      });
-      await repo.createCounterpartyAccount({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: counterparty.id,
         accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
       const { rows, total } = await repo.listCounterpartyAccountsByCounterparty({
@@ -361,13 +316,15 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: cptyA.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
       await repo.createCounterpartyAccount({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: cptyB.id,
         accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
       const { rows: rowsA, total: totalA } = await repo.listCounterpartyAccountsByCounterparty({
@@ -391,22 +348,24 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         accountKind: "crypto_wallet",
         label: "old",
-        details: { network: "solana", address: "old" },
+        details: TEST_ACCOUNT_DETAILS,
       });
+      assert(account);
 
       const updated = await repo.updateCounterpartyAccount({
-        counterpartyAccountId: account?.id ?? "",
+        counterpartyAccountId: account.id,
         counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         label: "new",
-        details: { network: "solana", address: "new" },
+        details: { network: "solana", address: TEST_SOLANA_ADDRESSES.wallet2 },
         providerAccountData: { provider: "grid", gridExternalAccountId: "ext_new" },
       });
 
-      expect(updated?.label).toBe("new");
-      expect(updated?.details).toMatchObject({ address: "new" });
-      expect(updated?.provider_account_data).toMatchObject({ gridExternalAccountId: "ext_new" });
+      assert(updated);
+      expect(updated.label).toBe("new");
+      expect(updated.details).toMatchObject({ address: TEST_SOLANA_ADDRESSES.wallet2 });
+      expect(updated.provider_account_data).toMatchObject({ gridExternalAccountId: "ext_new" });
     });
 
     it("nulls label when explicitly set to null (sentinel pattern)", async () => {
@@ -415,7 +374,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
         label: "starts non-null",
       });
 
@@ -435,7 +395,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
         label: "keep me",
       });
 
@@ -444,7 +405,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        details: { currency: "USD" },
+        details: { network: "solana", address: TEST_SOLANA_ADDRESSES.wallet2 },
       });
       expect(updated?.label).toBe("keep me");
     });
@@ -455,7 +416,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
@@ -481,7 +443,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: cptyA.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
         label: "owned by A",
       });
 
@@ -511,7 +474,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
       const archived = await repo.archiveCounterpartyAccount({
@@ -529,7 +493,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
@@ -553,7 +518,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: cptyA.id,
-        accountKind: "bank_account",
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
       });
 
       const spoofed = await repo.archiveCounterpartyAccount({
@@ -576,24 +542,14 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
   describe("listBatchRecipients", () => {
     async function seedNamed(displayName: string, externalId: string) {
-      const counterpartiesRepo = createPostgresCounterpartiesRepository(
-        getDb(env),
-        env.counterpartyPiiCipher
-      );
+      const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
       const row = await counterpartiesRepo.createCounterparty({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         externalId,
         entityType: "individual",
         displayName,
-        email: `${externalId}@example.com`,
-        identity: {
-          firstName: displayName,
-          lastName: "Recipient",
-          dateOfBirth: "1990-01-15",
-          phone: "+14155551234",
-          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-        },
+        providerData: {},
         createdBy: TEST_USER.id,
       });
       if (!row) {
@@ -617,16 +573,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       const acme = await seedNamed("Acme Corp", "ext_acme");
       const beta = await seedNamed("Beta LLC", "ext_beta");
 
-      await seedSolanaAccount(acme.id, "7xKqAcme", "Treasury");
-      await seedSolanaAccount(beta.id, "3mPoBeta", null);
-      // Excluded: bank account.
-      await repo.createCounterpartyAccount({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: acme.id,
-        accountKind: "bank_account",
-        details: { currency: "USD" },
-      });
+      await seedSolanaAccount(acme.id, TEST_SOLANA_ADDRESSES.wallet1, "Treasury");
+      await seedSolanaAccount(beta.id, TEST_SOLANA_ADDRESSES.wallet2, null);
       // Excluded: non-Solana crypto wallet.
       await repo.createCounterpartyAccount({
         organizationId: TEST_ORG.id,
@@ -655,12 +603,12 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       // Ordered by display_name ASC.
       expect(rows[0]).toMatchObject({
         counterparty_display_name: "Acme Corp",
-        address: "7xKqAcme",
+        address: TEST_SOLANA_ADDRESSES.wallet1,
         account_label: "Treasury",
       });
       expect(rows[1]).toMatchObject({
         counterparty_display_name: "Beta LLC",
-        address: "3mPoBeta",
+        address: TEST_SOLANA_ADDRESSES.wallet2,
         account_label: null,
       });
     });
@@ -668,8 +616,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
     it("filters by search on counterparty name (case-insensitive), not address", async () => {
       const acme = await seedNamed("Acme Corp", "ext_acme");
       const beta = await seedNamed("Beta LLC", "ext_beta");
-      await seedSolanaAccount(acme.id, "7xKqAcme", null);
-      await seedSolanaAccount(beta.id, "3mPoBeta", null);
+      await seedSolanaAccount(acme.id, TEST_SOLANA_ADDRESSES.wallet1, null);
+      await seedSolanaAccount(beta.id, TEST_SOLANA_ADDRESSES.wallet2, null);
 
       const byName = await repo.listBatchRecipients({
         organizationId: TEST_ORG.id,
@@ -685,7 +633,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       const byAddress = await repo.listBatchRecipients({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        search: "7xKq",
+        search: TEST_SOLANA_ADDRESSES.wallet1.slice(0, 4),
         limit: 50,
         offset: 0,
       });
@@ -696,9 +644,9 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       const a = await seedNamed("Aaa", "ext_a");
       const b = await seedNamed("Bbb", "ext_b");
       const c = await seedNamed("Ccc", "ext_c");
-      await seedSolanaAccount(a.id, "addrA", null);
-      await seedSolanaAccount(b.id, "addrB", null);
-      await seedSolanaAccount(c.id, "addrC", null);
+      await seedSolanaAccount(a.id, TEST_SOLANA_ADDRESSES.wallet1, null);
+      await seedSolanaAccount(b.id, TEST_SOLANA_ADDRESSES.wallet2, null);
+      await seedSolanaAccount(c.id, TEST_SOLANA_ADDRESSES.wallet3, null);
 
       const page1 = await repo.listBatchRecipients({
         organizationId: TEST_ORG.id,
@@ -724,8 +672,8 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
     it("restricts results to the given accountIds and combines with search", async () => {
       const acme = await seedNamed("Acme Corp", "ext_acme");
       const beta = await seedNamed("Beta LLC", "ext_beta");
-      const acmeAccount = await seedSolanaAccount(acme.id, "7xKqAcme", null);
-      const betaAccount = await seedSolanaAccount(beta.id, "3mPoBeta", null);
+      const acmeAccount = await seedSolanaAccount(acme.id, TEST_SOLANA_ADDRESSES.wallet1, null);
+      const betaAccount = await seedSolanaAccount(beta.id, TEST_SOLANA_ADDRESSES.wallet2, null);
       if (!acmeAccount || !betaAccount) {
         throw new Error("failed to seed accounts");
       }

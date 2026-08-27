@@ -1,0 +1,34 @@
+.launch-external-dialog {
+  margin: auto;
+  max-width: 380px;
+  padding: 22px;
+  border: 1px solid var(--launch-border-strong);
+  border-radius: 12px;
+  background: var(--launch-white);
+  color: var(--launch-text);
+}
+
+.launch-external-dialog::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.launch-external-dialog-text {
+  margin: 0 0 16px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.launch-external-dialog-text strong {
+  color: var(--launch-ink);
+}
+
+.launch-external-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.launch-external-dialog-actions .launch-docs-sidebar-action {
+  padding: 0 14px;
+}

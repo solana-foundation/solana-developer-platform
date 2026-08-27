@@ -117,6 +117,8 @@ export interface GuardedFetchInit {
   method: string;
   headers: Record<string, string>;
   body: string;
+  /** Propagates the caller's transport timeout/cancellation to the socket. */
+  signal?: AbortSignal;
   /**
    * How many redirects to follow. Zero is the probe's existing `redirect:
    * "manual"`. The relay follows a few, because a provider answering on a
@@ -132,6 +134,30 @@ export interface RedirectStep {
   url: string;
   method: string;
   body: string;
+}
+
+const CROSS_ORIGIN_REDIRECT_HEADERS = new Set(["accept", "content-type"]);
+
+/**
+ * Tenant RPC headers may use provider-specific names, so there is no complete
+ * denylist for credentials. Preserve them only within the same origin. A
+ * cross-origin redirect receives the protocol headers SDP owns, never the
+ * tenant-supplied authentication material.
+ */
+export function headersForRedirect(
+  from: string,
+  to: string,
+  headers: Record<string, string>
+): Record<string, string> {
+  if (new URL(from).origin === new URL(to).origin) {
+    return headers;
+  }
+
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) =>
+      CROSS_ORIGIN_REDIRECT_HEADERS.has(name.toLowerCase())
+    )
+  );
 }
 
 /**
@@ -176,6 +202,7 @@ export async function guardedFetch(url: string, init: GuardedFetchInit): Promise
 
   return guardedFetch(step.url, {
     ...init,
+    headers: headersForRedirect(url, step.url, init.headers),
     method: step.method,
     body: step.body,
     maxRedirects: init.maxRedirects - 1,
@@ -186,7 +213,7 @@ async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Resp
   return new Promise<Response>((resolve, reject) => {
     const req = httpsRequest(
       target,
-      { method: init.method, headers: init.headers, lookup: guardedLookup },
+      { method: init.method, headers: init.headers, lookup: guardedLookup, signal: init.signal },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => chunks.push(chunk));

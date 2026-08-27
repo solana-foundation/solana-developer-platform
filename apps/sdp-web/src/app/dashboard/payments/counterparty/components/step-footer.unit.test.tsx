@@ -23,8 +23,8 @@ vi.mock("../counterparty-create-context", () => ({
   CounterpartyCreateProvider: ({ children }: { children: ReactNode }) => children,
   useCounterpartyCreate: () => ({
     step: mocks.step,
-    steps: ["basics", "identity", "address", "review"],
-    currentStepId: mocks.step === 0 ? "basics" : "identity",
+    steps: ["basics", "review"],
+    currentStepId: mocks.step === 0 ? "basics" : "review",
     direction: 1,
     createdCounterparty: mocks.createdCounterparty,
     goNext: mocks.goNext,
@@ -121,8 +121,6 @@ describe("counterparty create cancel behavior", () => {
     expect(phase.props.embedded).toBe(false);
     expect(phase.props.steps.map((step) => step.label)).toEqual([
       "DashboardPayments.counterparty.basics",
-      "DashboardPayments.counterparty.personal",
-      "DashboardPayments.counterparty.address",
       "DashboardPayments.counterparty.review",
     ]);
   });

@@ -12,7 +12,7 @@ Docker daemon is running.
 The install script downloads `compose.yml` and `.env.example` for the latest
 release into `~/sdp` and verifies them against the release checksums.
 
-```bash
+```bash title="Terminal"
 curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
 ```
 
@@ -35,7 +35,7 @@ the app secrets, and validates your answers.
   answer the prompts, and download the `.env` into `~/sdp`.
 - **In your terminal** — run the configurator from the API image:
 
-  ```bash
+  ```bash title="Terminal"
   docker run --rm -it -v "$HOME/sdp:/out" \
     ghcr.io/solana-foundation/sdp/sdp-api:latest \
     node configure.js --out /out/.env
@@ -49,7 +49,7 @@ variable means and which are required.
 
 ## 3. Bring up the stack
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose up -d
 ```
@@ -60,7 +60,7 @@ minutes.
 
 ## 4. Verify
 
-```bash
+```bash title="Terminal"
 docker compose ps
 docker compose logs -f sdp-api
 ```

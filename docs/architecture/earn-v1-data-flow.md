@@ -94,12 +94,23 @@ PRO-1634 owns whatever returns.
 > The catalogue may list instruments that do not exist on every cluster.
 > Kamino was the original example — believed mainnet-only and catalogued into
 > both environments — but it has a devnet deployment, and non-production now
-> catalogues devnet vaults while the sync refuses to STORE a `mainnet-beta`
-> instrument outside production. `host_cluster` states where the instrument
-> lives, and the derived
+> catalogues devnet vaults on its own lane. `host_cluster` states where the
+> instrument lives, and the derived
 > `fundable` answers the caller's actual question. Three gates read the one
 > predicate — `assertKnownYieldSources` before any provider mutation, the wire
 > field, and the dashboard's strategy filter.
+>
+> **Sandbox mirrors the mainnet shelf (2026-08-26, PRO-1742).** The sync's old
+> refusal to STORE a `mainnet-beta` instrument outside production is now
+> scoped to the OWN lanes: every non-production environment additionally
+> carries a browse-only MIRROR of production's accepted mainnet shelf, written
+> by the same single writer, delisted within its own cluster sub-shelf, and
+> served only on an explicit `?cluster=` opt-in (the dashboard's sandbox-only
+> toggle). Mirrored rows derive `fundable: false` and every provider mutation
+> refuses them, so the gates above are unchanged: the curated mainnet
+> catalogue became REVIEWABLE outside production, never fundable there. Full
+> rationale, the collision cap, and the convergence rules: ADR 0002, PRO-1742
+> addendum.
 
 **No new indexer.** V1 needs no event-sourced chain indexer: the catalogue
 comes from provider APIs and position truth is the live provider snapshot.

@@ -16,15 +16,11 @@ import {
 } from "./helius-rings-operation.repository";
 import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 
-/** The states the resume sweep considers live, matching the partial index. */
-const IN_FLIGHT_STATES = [
-  "preparing",
-  "approval_required",
-  "proving",
-  "ready_to_sign",
-  "submitted",
-  "indexing",
-] as const;
+/**
+ * States the resume sweep acts on. The partial index is broader; those waiting
+ * states must not consume the sweep limit.
+ */
+const SWEEP_STATES = ["ready_to_sign", "submitted", "indexing"] as const;
 
 function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
   return {
@@ -93,10 +89,8 @@ export function createPostgresHeliusRingsOperationRepository(
                timelock_unlock_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (intent_key)
-             -- Self-assignment rather than DO NOTHING: DO NOTHING returns zero
-             -- rows on a replay, which is indistinguishable from a failed
-             -- insert. Assigning updated_at to itself makes RETURNING emit the
-             -- row that is already there without altering it.
+             -- Self-assignment rather than DO NOTHING, which returns zero rows
+             -- on a replay and so cannot be told from a failed insert.
              DO UPDATE SET updated_at = helius_rings_operations.updated_at
              RETURNING *`
           )
@@ -119,15 +113,12 @@ export function createPostgresHeliusRingsOperationRepository(
           .first<Record<string, unknown>>();
 
         if (!row) {
-          // The upsert always returns a row; a null here means the statement
-          // matched nothing at all, which is not a state this table can reach.
           throw new Error("helius rings reserveIntent returned no row");
         }
 
         const operation = mapRow(row);
-        // The id we generated only survives if this call is the one that
-        // inserted. On a replay the row carries the original id, which is a
-        // cheaper and clearer signal than inspecting xmax.
+        // The generated id only survives if this call is the one that inserted;
+        // on a replay the row carries the original.
         const reserved = operation.id === id;
 
         if (reserved && input.timelock) {
@@ -204,9 +195,8 @@ export function createPostgresHeliusRingsOperationRepository(
 
     async transitionState(input: TransitionHeliusRingsOperationInput) {
       return db.transaction(async (tx) => {
-        // Lock first. Two workers resuming the same operation would otherwise
-        // both read `submitted`, both write `indexing`, and both go on to do the
-        // follow-up work once each.
+        // Lock first: two workers resuming the same operation would otherwise
+        // both read `submitted` and both do the follow-up work.
         const locked = await tx
           .prepare(
             `SELECT state FROM helius_rings_operations
@@ -223,7 +213,7 @@ export function createPostgresHeliusRingsOperationRepository(
         const values: unknown[] = [input.nextState];
 
         // Only columns the caller named are written, so a later step cannot
-        // blank the approval id an earlier one recorded.
+        // blank what an earlier one recorded.
         if (patch.approvalRequestId !== undefined) {
           assignments.push("approval_request_id = ?");
           values.push(patch.approvalRequestId);
@@ -276,8 +266,7 @@ export function createPostgresHeliusRingsOperationRepository(
 
         if (!locked || locked.state !== input.expectedState) return null;
 
-        // The failure triple moves together because the DB CHECK requires it:
-        // a `failed` row without a code is unactionable in the recovery UI.
+        // The failure triple moves together because the DB CHECK requires it.
         const row = await tx
           .prepare(
             `UPDATE helius_rings_operations
@@ -304,7 +293,7 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listInFlightOperations(input: ListHeliusRingsInFlightOperationsInput) {
-      const placeholders = IN_FLIGHT_STATES.map(() => "?").join(", ");
+      const placeholders = SWEEP_STATES.map(() => "?").join(", ");
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
@@ -314,7 +303,7 @@ export function createPostgresHeliusRingsOperationRepository(
             LIMIT ?`
         )
         .bind(
-          ...IN_FLIGHT_STATES,
+          ...SWEEP_STATES,
           input.staleBefore,
           input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT
         )
@@ -344,8 +333,8 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async releaseTimelock(input: ReleaseHeliusRingsTimelockInput) {
-      // `released_at IS NULL` is the whole guard: it makes the release
-      // single-shot, so two sweeps racing produce one payout and one null.
+      // `released_at IS NULL` makes the release single-shot, so two sweeps
+      // racing produce one payout and one null.
       const row = await db
         .prepare(
           `UPDATE helius_rings_timelocks

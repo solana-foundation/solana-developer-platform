@@ -102,3 +102,7 @@ minimumReleaseAgeExclude:
   - '@solana/transaction-confirmation'
   - '@solana/transaction-messages'
   - '@solana/transactions'
+  # A 2014 release whose registry metadata carries no "time" field, so the age
+  # gate can never clear it. Reached only as a transitive dev dependency of
+  # vitest. Excluded rather than relaxing the gate for the whole workspace.
+  - 'stackback'

@@ -13,7 +13,7 @@
       "status_green": "Operational",
       "status_amber": "Degraded",
       "status_red": "Unavailable",
-      "pendingIntegration": "The Rings gateway is awaiting external integration. Wallet provisioning and shielded operations will fail honestly until it comes online."
+      "reason": "{components}: {reason}"
     },
     "wallets": {
       "title": "Private wallets",
@@ -23,6 +23,7 @@
       "backingWallet": "Custody wallet",
       "shieldedAddress": "Shielded address",
       "shieldedAddressPending": "Not provisioned",
+      "balance": "Balance",
       "status_pending": "Pending",
       "status_ready": "Ready",
       "status_paused": "Paused",
@@ -32,9 +33,50 @@
       "createWalletLabel": "Custody wallet",
       "createWalletPlaceholder": "Select a custody wallet",
       "creating": "Provisioning…",
-      "createPendingNotice": "The wallet was reserved but its shielded identity is awaiting the external gateway integration. It will stay Pending until that lands.",
       "createFailed": "The wallet could not be created. Check the details and try again.",
-      "noCustodyWallets": "No custody wallets available. Create a wallet under Wallets first."
+      "noCustodyWallets": "No custody wallets available. Create a wallet under Wallets first.",
+      "copyShieldedAddress": "Copy shielded address",
+      "shieldedAddressCopied": "Shielded address copied"
+    },
+    "identity": {
+      "column": "On-chain identity",
+      "check": "Check on chain",
+      "checking": "Checking…",
+      "viewDetails": "View details",
+      "dialogTitle": "On-chain identity",
+      "notApplicable": "—",
+      "reading": "Reading the on-chain registry record for this wallet's owner.",
+      "readFailed": "The on-chain record could not be read. Retry shortly.",
+      "status_unregistered": "Not registered",
+      "status_ours": "Registered by this deployment",
+      "status_foreign": "Registered with different keys",
+      "explain_unregistered": "The registry holds no record for this wallet's owner, so provisioning will create one. Nothing on chain is in the way.",
+      "explain_ours": "The published record is the identity this deployment derives, so provisioning already succeeded on chain and only this row is behind. Retry provisioning to record it.",
+      "explain_foreign": "The registry already publishes a different identity for this owner. Provisioning will refuse rather than re-key it, because re-keying would orphan every note encrypted to the published keys. SDP does not rotate an identity, so the fix is to bind this private wallet to a different custody wallet.",
+      "mismatch": "Differs in: {field}",
+      "mismatch_owner": "the record's owner",
+      "mismatch_nullifier_key": "the nullifier key",
+      "mismatch_viewing_key": "the viewing key",
+      "derivedAddress": "This deployment derives",
+      "publishedAddress": "The chain publishes",
+      "recordedAddress": "This row records",
+      "recordedAddressNone": "Nothing recorded yet"
+    },
+    "balances": {
+      "title": "Shielded balance",
+      "description": "Shielded notes held by {name}. Reading them is a full indexer scan, so it happens only when you ask for it — never on a timer.",
+      "refresh": "Refresh",
+      "refreshing": "Reading…",
+      "reading": "Reading this wallet's shielded notes from the indexer.",
+      "unsynced": "Not read yet",
+      "notProvisioned": "This wallet has no shielded identity yet, so there is nothing to read. Provision it first.",
+      "asset": "Asset",
+      "amount": "Amount",
+      "baseUnitsAmount": "{amount} base units",
+      "empty": "No shielded notes in this wallet.",
+      "degraded": "Partial read — the indexer could not return every note, so treat this as incomplete rather than as the wallet's balance.",
+      "observedAt": "Observed {when}",
+      "readFailed": "The shielded balance could not be read. Retry shortly."
     },
     "activity": {
       "title": "Activity",
@@ -68,7 +110,7 @@
     },
     "composer": {
       "title": "New operation",
-      "description": "Compose a shielded operation, review it, then confirm. Until the live gateway lands, operations advance through policy and fail honestly at the integration seam.",
+      "description": "Shield SOL or an allowlisted token into a provisioned private wallet. Confirm signs with the backing custody key and waits for the indexer.",
       "wallet": "Private wallet",
       "walletPlaceholder": "Select a private wallet",
       "operation": "Operation",
