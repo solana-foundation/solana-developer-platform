@@ -15,7 +15,6 @@
       "transferListMissing": "Transfer list response is missing transfer data.",
       "transferLookupFailed": "Transfer lookup failed ({status}).",
       "transferLookupMissing": "Transfer lookup response is missing transfer data.",
-      "transferLookupMultiple": "Transfer lookup returned multiple transfers.",
       "transferCancellationFailed": "Transfer cancellation failed ({status}).",
       "rampEstimateRequestFailed": "Ramp estimate request failed ({status}).",
       "rampEstimateMissing": "Ramp estimate response is missing estimates.",

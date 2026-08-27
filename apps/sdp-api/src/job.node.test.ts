@@ -56,6 +56,10 @@ vi.mock("@/cron/pending-transfers", () => ({
   PENDING_TRANSFERS_MONITOR: "sdp-api-track-pending-transfers",
 }));
 
+vi.mock("@/cron/ramp-transfers", () => ({
+  RAMP_TRANSFERS_MONITOR: "sdp-api-reconcile-ramp-transfers",
+}));
+
 vi.mock("@/cron/pending-deposits", () => ({
   PENDING_DEPOSITS_MONITOR: "sdp-api-track-pending-deposits",
 }));
@@ -134,6 +138,10 @@ vi.mock("@/services/jobs/track-pending-deposits", () => ({
 
 vi.mock("@/services/jobs/track-pending-transfers", () => ({
   trackPendingTransfers: vi.fn(async () => {}),
+}));
+
+vi.mock("@/services/jobs/reconcile-ramp-transfers", () => ({
+  reconcileRampTransfers: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/jobs/track-pending-withdrawals", () => ({
@@ -367,6 +375,7 @@ describe("runCronJob", () => {
       .mock.calls.filter(([checkIn]) => checkIn.status === "in_progress");
     expect(starts.map(([checkIn]) => checkIn.monitorSlug)).toEqual([
       "sdp-api-managed-track-pending-transfers",
+      "sdp-api-managed-reconcile-ramp-transfers",
       "sdp-api-managed-collect-recurring-payments",
       "sdp-api-managed-track-pending-deposits",
       "sdp-api-managed-track-pending-withdrawals",

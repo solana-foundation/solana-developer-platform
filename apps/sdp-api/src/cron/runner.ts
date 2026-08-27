@@ -34,6 +34,7 @@ import {
   PENDING_WITHDRAWALS_CRON,
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
+import { RAMP_TRANSFERS_CRON, runRampTransfersReconciliation } from "./ramp-transfers";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -127,6 +128,19 @@ export function startCron(deps: CronDeps): CronHandle | null {
         return;
       }
       runPendingTransfersReconciliation({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  tasks.push(
+    schedule(RAMP_TRANSFERS_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRampTransfersReconciliation({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,

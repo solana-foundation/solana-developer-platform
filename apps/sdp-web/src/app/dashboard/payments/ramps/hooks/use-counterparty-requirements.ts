@@ -10,6 +10,7 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -231,7 +232,7 @@ export function useCounterpartyRequirements(
 
   useSWR(
     onboarding && lastAdvancePayload && params?.provider && isOnboardingPending(onboarding.status)
-      ? (["counterparty-requirements-status-poll", subjectKey] as const)
+      ? paymentsQueryKeys.requirementsStatusPoll({ subjectKey })
       : null,
     async () => {
       if (!lastAdvancePayload || !params?.provider) {

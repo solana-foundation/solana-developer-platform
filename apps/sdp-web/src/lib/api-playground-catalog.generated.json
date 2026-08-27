@@ -5335,7 +5335,8 @@
                 "decimals": 2
               },
               "expiresAt": "2025-01-01T00:00:00.000Z"
-            }
+            },
+            "transferId": "transfer_example"
           },
           "meta": {
             "requestId": "req_example",

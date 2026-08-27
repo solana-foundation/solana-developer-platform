@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import type { z } from "zod";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   type CounterpartiesResult,
   cancelRampTransfer,
@@ -34,7 +35,6 @@ import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 
-const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export function isTerminalRampTransferStatus(status: string) {
@@ -93,14 +93,14 @@ async function createRampQuote(
   endpoint: string,
   payload: Record<string, unknown>,
   t: Translate
-): Promise<PaymentRampQuote> {
+): Promise<{ quote: PaymentRampQuote; transferId: string }> {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const body = (await response.json().catch(() => ({}))) as {
-    data?: { quote?: PaymentRampQuote };
+    data?: { quote?: PaymentRampQuote; transferId?: string };
     error?: { message?: string };
   };
 
@@ -113,11 +113,11 @@ async function createRampQuote(
     );
   }
 
-  if (!body.data?.quote) {
+  if (!body.data?.quote || !body.data.transferId) {
     throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
   }
 
-  return body.data.quote;
+  return { quote: body.data.quote, transferId: body.data.transferId };
 }
 
 export interface UseRampWizardProps {
@@ -150,7 +150,12 @@ export function useRampWizard<TId extends string>(
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedRampPair, setSelectedRampPair] = useState<SelectedRampPair>(DEFAULT_RAMP_PAIR);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
-  const [quote, setQuote] = useState<PaymentRampQuote | null>(null);
+  const [createdQuote, setCreatedQuote] = useState<{
+    quote: PaymentRampQuote;
+    transferId: string;
+  } | null>(null);
+  const quote = createdQuote === null ? null : createdQuote.quote;
+  const quoteTransferId = createdQuote === null ? null : createdQuote.transferId;
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [memoRows, setMemoRows] = useState<MemoRow[]>([]);
@@ -181,7 +186,7 @@ export function useRampWizard<TId extends string>(
   );
 
   const { mutate: mutateCounterparties } = useSWR(
-    PAYMENTS_ACTION_COUNTERPARTIES_KEY,
+    paymentsQueryKeys.actionCounterparties(),
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
@@ -252,35 +257,23 @@ export function useRampWizard<TId extends string>(
   const isLastStep = stepIndex === steps.length - 1;
 
   const createQuoteAndAdvance = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
-      return;
-    }
-
     setHostedQuoteLoading(true);
     const toastId = toast.loading(t("DashboardPayments.ramps.creatingQuote"), {
       position: "bottom-right",
     });
 
     try {
-      const created = await createRampQuote(
-        config.quoteEndpoint,
-        config.buildQuotePayload({
-          fields,
-          provider: fields.provider,
-          selectedRampPair,
-          cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
-          collectedData: requirements.collectedData,
-          rampsMemo: memoRowsToRecord(memoRows),
-        }),
-        t
-      );
-
-      setQuote(created);
-      config.onQuoteCreated?.(created);
+      const created = await createQuoteForCurrentSelection();
+      if (created === null) {
+        setHostedQuoteLoading(false);
+        toast.dismiss(toastId);
+        return;
+      }
+      config.onQuoteCreated?.(created.quote);
       setStepIndex((current) => current + 1);
       setHostedQuoteLoading(false);
       toast.success(
-        created.deliveryMode === "hosted"
+        created.quote.deliveryMode === "hosted"
           ? t("DashboardPayments.ramps.widgetReady")
           : t("DashboardPayments.ramps.quoteReady"),
         {
@@ -299,38 +292,64 @@ export function useRampWizard<TId extends string>(
     }
   };
 
-  const refreshQuote = async () => {
+  const createQuoteForCurrentSelection = async (): Promise<{
+    quote: PaymentRampQuote;
+    transferId: string;
+  } | null> => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
-      return;
+      return null;
     }
+    const created = await createRampQuote(
+      config.quoteEndpoint,
+      config.buildQuotePayload({
+        fields,
+        provider: fields.provider,
+        selectedRampPair,
+        cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+        collectedData: requirements.collectedData,
+        rampsMemo: memoRowsToRecord(memoRows),
+      }),
+      t
+    );
+    setCreatedQuote(created);
+    return created;
+  };
+
+  const refreshQuote = async () => {
     try {
-      const created = await createRampQuote(
-        config.quoteEndpoint,
-        config.buildQuotePayload({
-          fields,
-          provider: fields.provider,
-          selectedRampPair,
-          cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
-          collectedData: requirements.collectedData,
-          rampsMemo: memoRowsToRecord(memoRows),
-        }),
-        t
-      );
-      setQuote(created);
-    } catch {}
+      await createQuoteForCurrentSelection();
+    } catch (error) {
+      toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
+        description:
+          error instanceof Error ? error.message : t("DashboardPayments.ramps.quoteRequestFailed"),
+        position: "bottom-right",
+      });
+    }
   };
 
   // Only auto-fire the quote while the user sits on the transaction stage —
   // stepping back to edit selections must not create a quote from mid-edit state.
-  useSWR(
+  // One shot, no interval: the quote POST persists the transfer, and the
+  // transfer-status poll owns the flow from there. A failed attempt surfaces
+  // through quoteCreationError with an explicit retry.
+  const {
+    error: quoteCreationError,
+    isValidating: quoteCreationRetrying,
+    mutate: retryQuoteCreation,
+  } = useSWR<{ quote: PaymentRampQuote; transferId: string } | null, Error>(
     config.advanceRequirementsBeforeQuote &&
       isLastStep &&
       requirements.onboarding?.status === "ready" &&
       quote === null
-      ? ([requirementsConfig?.direction ?? "ramp", "ready-quote"] as const)
+      ? paymentsQueryKeys.readyQuote({ direction: requirementsConfig?.direction ?? "ramp" })
       : null,
-    () => refreshQuote(),
-    { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
+    () => createQuoteForCurrentSelection(),
+    {
+      revalidateOnFocus: false,
+      revalidateIfStale: false,
+      revalidateOnReconnect: false,
+      shouldRetryOnError: false,
+    }
   );
 
   const advanceRequirementsAndProceed = async () => {
@@ -483,9 +502,13 @@ export function useRampWizard<TId extends string>(
     fields,
     setField,
     quote,
+    quoteTransferId,
     memoRows,
     setMemoRows,
     refreshQuote,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
     retryOnboarding: requirements.retryOnboarding,

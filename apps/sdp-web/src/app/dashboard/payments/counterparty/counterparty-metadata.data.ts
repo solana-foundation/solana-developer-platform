@@ -4,8 +4,6 @@ import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export const COUNTERPARTY_METADATA_KEY = "counterparty-field-options";
-
 export async function fetchCounterpartyMetadata(t: Translate): Promise<CounterpartyFieldOptions> {
   const result = await dashboardFetch<{ data: { fields: CounterpartyFieldOptions } }>(
     "/api/dashboard/counterparty/metadata"

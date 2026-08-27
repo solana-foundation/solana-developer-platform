@@ -3,16 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { AppContext } from "./processor";
-import { applyRampSettlementEvent } from "./settlements";
+import { applyRampSettlementEvent } from "./ramp-settlements";
 
 const ORG_ID = "org_ramp_settlement_test";
 const PROJECT_ID = "prj_ramp_settlement_test";
 const USER_ID = "usr_ramp_settlement_test";
-
-function context(): AppContext {
-  return { env } as unknown as AppContext;
-}
 
 async function seedTransfer(input: {
   id: string;
@@ -103,7 +98,7 @@ describe("applyRampSettlementEvent", () => {
   it("never reopens a canceled transfer", async () => {
     await seedTransfer({ id: "xfr_canceled", reference: "order_canceled", status: "canceled" });
 
-    await applyRampSettlementEvent(context(), {
+    await applyRampSettlementEvent(env, {
       provider: "coinbase",
       kind: "settled",
       reference: "order_canceled",
@@ -116,10 +111,26 @@ describe("applyRampSettlementEvent", () => {
     });
   });
 
+  it("revives an expired transfer when the provider proves the checkout completed", async () => {
+    await seedTransfer({ id: "xfr_expired", reference: "order_expired", status: "expired" });
+
+    await applyRampSettlementEvent(env, {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_expired",
+      receivedAmount: "42",
+    });
+
+    expect(await readTransfer("xfr_expired")).toMatchObject({
+      status: "completed",
+      amount: "42",
+    });
+  });
+
   it("does not regress a settling transfer on an out-of-order event", async () => {
     await seedTransfer({ id: "xfr_settling", reference: "order_settling", status: "settling" });
 
-    await applyRampSettlementEvent(context(), {
+    await applyRampSettlementEvent(env, {
       provider: "coinbase",
       kind: "awaiting_payment",
       reference: "order_settling",
@@ -135,7 +146,7 @@ describe("applyRampSettlementEvent", () => {
       { provider: "coinbase", kind: "failed", reference: "order_race", error: "declined" },
     ];
 
-    await Promise.all(events.map((event) => applyRampSettlementEvent(context(), event)));
+    await Promise.all(events.map((event) => applyRampSettlementEvent(env, event)));
 
     const transfer = await readTransfer("xfr_race");
     expect(["completed", "failed"]).toContain(transfer?.status);
@@ -157,8 +168,8 @@ describe("applyRampSettlementEvent", () => {
       receivedAmount: "9",
     };
 
-    await applyRampSettlementEvent(context(), event);
-    await applyRampSettlementEvent(context(), { ...event, receivedAmount: "999" });
+    await applyRampSettlementEvent(env, event);
+    await applyRampSettlementEvent(env, { ...event, receivedAmount: "999" });
 
     expect(await readTransfer("xfr_retry")).toMatchObject({
       status: "completed",

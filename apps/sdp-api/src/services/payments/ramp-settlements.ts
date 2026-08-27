@@ -1,11 +1,14 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
-import type { Context } from "hono";
+import { asTransactionalClient, getDb } from "@/db";
 import type { PaymentTransferStatus } from "@/db/repositories";
-import { createSystemPaymentsRepository, isRampTransferType } from "@/db/repositories";
+import {
+  createPostgresCounterpartyProviderAccountsRepository,
+  createSystemPaymentsRepository,
+  createSystemTransactionalPaymentsRepository,
+  isRampTransferType,
+} from "@/db/repositories";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
-
-type AppContext = Context<{ Bindings: Env }>;
 
 const RAMP_SETTLEMENT_STATUS = {
   awaiting_payment: "awaiting_payment",
@@ -15,18 +18,21 @@ const RAMP_SETTLEMENT_STATUS = {
   expired: "expired",
 } as const satisfies Record<Exclude<RampSettlementEvent["kind"], "ignore">, PaymentTransferStatus>;
 
+// `expired` is deliberately absent: it is derived from provider ABSENCE (an
+// abandoned checkout the provider never saw), and a provider event proving
+// activity must be able to revive it — signed widget URLs do not expire, so a
+// customer can complete checkout after the abandonment horizon.
 const TERMINAL_RAMP_TRANSFER_STATUSES = [
   "completed",
   "failed",
-  "expired",
   "canceled",
 ] as const satisfies readonly PaymentTransferStatus[];
 
 const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
-  awaiting_payment: ["pending"],
-  settling: ["pending", "awaiting_payment"],
-  settled: ["pending", "awaiting_payment", "settling"],
-  failed: ["pending", "awaiting_payment", "settling"],
+  awaiting_payment: ["pending", "expired"],
+  settling: ["pending", "awaiting_payment", "expired"],
+  settled: ["pending", "awaiting_payment", "settling", "expired"],
+  failed: ["pending", "awaiting_payment", "settling", "expired"],
   expired: ["pending", "awaiting_payment", "settling"],
 } as const satisfies Record<
   Exclude<RampSettlementEvent["kind"], "ignore">,
@@ -37,12 +43,12 @@ function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
   return (TERMINAL_RAMP_TRANSFER_STATUSES as readonly PaymentTransferStatus[]).includes(status);
 }
 
-export async function applyRampSettlementEvent(c: AppContext, event: RampSettlementEvent) {
+export async function applyRampSettlementEvent(env: Env, event: RampSettlementEvent) {
   if (event.kind === "ignore") {
     return;
   }
 
-  const repo = createSystemPaymentsRepository(c.env);
+  const repo = createSystemPaymentsRepository(env);
   const transfer = await repo.getTransferByProviderReference({
     provider: event.provider,
     providerReference: event.reference,
@@ -88,12 +94,30 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     update.providerData = { settlement: event.settlement };
   }
 
-  await repo.updateTransferStatusGuarded(update);
+  // The status transition and the provider-customer link derive from one
+  // provider event, so they land or roll back together.
+  await getDb(env).transaction(async (tx) => {
+    const client = asTransactionalClient(tx);
+    await createSystemTransactionalPaymentsRepository(client).updateTransferStatusGuarded(update);
+    if (
+      event.providerCustomerId !== undefined &&
+      transfer.counterparty_id !== null &&
+      transfer.project_id !== null
+    ) {
+      await createPostgresCounterpartyProviderAccountsRepository(client).upsertProviderAccount({
+        organizationId: transfer.organization_id,
+        projectId: transfer.project_id,
+        counterpartyId: transfer.counterparty_id,
+        provider: event.provider,
+        providerCustomerReference: event.providerCustomerId,
+      });
+    }
+  });
 
   // Workflow trigger seam: a settled ramp fires onramp_settled / offramp_settled.
   // Rules are project-scoped, so a transfer without a project has nothing to match.
   if (event.kind === "settled" && transfer.project_id) {
-    emitRampSettled(c, {
+    emitRampSettled(env, {
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
       direction: transfer.type === "offramp" ? "offramp" : "onramp",
