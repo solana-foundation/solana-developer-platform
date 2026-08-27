@@ -135,6 +135,7 @@ export function getNavSections(
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
+    paymentsEnabled: boolean;
     pendingApprovalCount: number | null;
     privateChannelsEnabled: boolean;
   }
@@ -165,13 +166,17 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.issuance,
           icon: CoinsIcon,
         },
-        {
-          label: t("Shared.dashboardShell.payments"),
-          href: DASHBOARD_SIDE_NAV_HREFS.payments,
-          icon: ArrowLeftRightIcon,
-          children: getPaymentsActions(t, options.privateChannelsEnabled),
-          subnavKey: "payments",
-        },
+        ...(options.paymentsEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.payments"),
+                href: DASHBOARD_SIDE_NAV_HREFS.payments,
+                icon: ArrowLeftRightIcon,
+                children: getPaymentsActions(t, options.privateChannelsEnabled),
+                subnavKey: "payments" as const,
+              },
+            ]
+          : []),
         ...(options.marketsEnabled && options.earnEnabled && marketsActions.length > 0
           ? [
               {

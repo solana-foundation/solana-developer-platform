@@ -131,6 +131,19 @@ export const heliusRings = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const payments = flag<boolean, DashboardFlagEntities>({
+  key: "payments",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("PAYMENTS_ENABLED", true),
+  description:
+    "Show the Payments module (transactions, counterparties, pay, deposit, requests, recurring). Off hides every Payments surface at once.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
 export const markets = flag<boolean, DashboardFlagEntities>({
   key: "markets",
   adapter: vercelAdapter(),
