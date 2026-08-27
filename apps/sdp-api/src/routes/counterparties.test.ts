@@ -74,15 +74,6 @@ describe("Counterparties Routes", () => {
       .catch(() => {});
     await db
       .prepare(
-        `UPDATE counterparty_pii_migration_state
-            SET phase = 'dual_write',
-                fallback_read_count = 0,
-                last_fallback_read_at = NULL`
-      )
-      .run();
-
-    await db
-      .prepare(
         "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
       )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
@@ -210,15 +201,14 @@ describe("Counterparties Routes", () => {
 
       const stored = await getDb(env)
         .prepare(
-          `SELECT pii_encrypted, provider_data_encrypted
+          `SELECT email, identity
              FROM counterparties
             WHERE id = ?`
         )
         .bind(body.data.counterparty.id)
-        .first<{ pii_encrypted: string; provider_data_encrypted: string }>();
-      expect(stored?.pii_encrypted).toMatch(/^pii-local-v1\./);
-      expect(stored?.pii_encrypted).not.toContain("alice@example.com");
-      expect(stored?.provider_data_encrypted).toMatch(/^pii-local-v1\./);
+        .first<{ email: string; identity: { firstName: string } }>();
+      expect(stored?.email).toBe("alice@example.com");
+      expect(stored?.identity.firstName).toBe(BASE_IDENTITY.firstName);
     });
 
     it("returns 409 on duplicate externalId", async () => {
@@ -227,35 +217,6 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.error.code).toBe("CONFLICT");
-    });
-
-    it("writes no legacy identity or provider PII after encrypted-only cutover", async () => {
-      await getDb(env)
-        .prepare(
-          `UPDATE counterparty_pii_migration_state
-              SET phase = 'encrypted_only'
-            WHERE id = 'counterparty-pii-v1'`
-        )
-        .run();
-
-      const res = await createCounterparty({ externalId: "opaque_001" });
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.data.counterparty.email).toBe("alice@example.com");
-
-      const stored = await getDb(env)
-        .prepare(
-          `SELECT email, identity, provider_data, pii_encrypted, provider_data_encrypted
-             FROM counterparties
-            WHERE id = ?`
-        )
-        .bind(body.data.counterparty.id)
-        .first<Record<string, unknown>>();
-      expect(stored?.email).toBeNull();
-      expect(stored?.identity).toBeNull();
-      expect(stored?.provider_data).toBeNull();
-      expect(stored?.pii_encrypted).toMatch(/^pii-local-v1\./);
-      expect(stored?.provider_data_encrypted).toMatch(/^pii-local-v1\./);
     });
 
     it("returns 400 on invalid body", async () => {
@@ -448,10 +409,7 @@ describe("Counterparties Routes", () => {
         status: "ready",
       });
 
-      const stored = await createPostgresCounterpartiesRepository(
-        getDb(env),
-        env.counterpartyPiiCipher
-      ).getCounterpartyById({
+      const stored = await createPostgresCounterpartiesRepository(getDb(env)).getCounterpartyById({
         counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
@@ -521,10 +479,7 @@ describe("Counterparties Routes", () => {
         status: "customer_verifying",
       });
 
-      const stored = await createPostgresCounterpartiesRepository(
-        getDb(env),
-        env.counterpartyPiiCipher
-      ).getCounterpartyById({
+      const stored = await createPostgresCounterpartiesRepository(getDb(env)).getCounterpartyById({
         counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
