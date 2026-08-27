@@ -32,6 +32,8 @@ type ConnectionAction = (
 /** What a manual check answered, held per row and never persisted. */
 type TestOutcome = { ok: boolean; failureCode: string | null };
 
+type TranslationKey = Parameters<ReturnType<typeof useTranslations>>[0];
+
 /**
  * The stored-credential rows.
  *
@@ -129,58 +131,78 @@ function ConnectionStatusBadge({
   return <Badge variant="outline">{connection.status}</Badge>;
 }
 
+/** A line under the badge: which message, and how loudly to say it. */
+type RowNote = { key: TranslationKey; tone: string };
+
 /**
- * What the row has to say about itself beyond its badge: why it is stranded,
- * what withdrawing meant, what depends on it, and the answer to a check.
+ * Which lines a row shows under its badge, in the order they are read.
  *
- * Its own component for the same reason the badge is — the row's controls and
- * its explanations are two separate pieces of branching, and counting them
- * together put `ConnectionRow` over the repository's complexity limit.
+ * A plain function rather than more props on the component below: deciding
+ * this took five flags, and a component taking five booleans has thirty-two
+ * shapes nobody can hold in their head or test. The component renders what
+ * this returns and branches on nothing.
  */
-function ConnectionRowNotes({
-  failsClosed,
-  hasSpare,
-  isDeactivated,
-  isOrganizationScoped,
-  isServing,
-  testResult,
-  t,
-}: {
+function resolveRowNotes(input: {
   failsClosed: boolean;
   hasSpare: boolean;
   isDeactivated: boolean;
   isOrganizationScoped: boolean;
   isServing: boolean;
+}): RowNote[] {
+  const notes: RowNote[] = [];
+
+  if (input.isOrganizationScoped) {
+    notes.push({ key: "Shared.integrations.rpcByokOrganizationScoped", tone: "text-warning" });
+  }
+  // "What does deactivated mean?" was the question on the mock, so the answer
+  // sits on the row rather than in a badge.
+  if (input.isDeactivated) {
+    notes.push({ key: "Shared.integrations.rpcByokDeactivatedMeaning", tone: "text-tertiary" });
+  }
+  // Only on the row actually carrying traffic. A Ready key routes nothing, so
+  // warning that removing it changes where requests go was simply false, and
+  // it appeared on every provider's page at once because the count behind it
+  // came from a list narrowed to one.
+  //
+  // Only the fail-closed case is a warning. The rest describes where traffic
+  // goes if this key is withdrawn, which is ordinary context and was being
+  // shouted in amber beside a green "Serving traffic" badge.
+  if (input.isServing) {
+    if (input.hasSpare) {
+      notes.push({ key: "Shared.integrations.rpcByokServingHasSpare", tone: "text-tertiary" });
+    } else if (input.failsClosed) {
+      notes.push({ key: "Shared.integrations.rpcByokLastActiveByok", tone: "text-warning" });
+    } else {
+      notes.push({ key: "Shared.integrations.rpcByokLastActive", tone: "text-tertiary" });
+    }
+  }
+
+  return notes;
+}
+
+/**
+ * What the row has to say about itself beyond its badge.
+ *
+ * Its own component for the same reason the badge is: the row's controls and
+ * its explanations are two separate pieces of branching, and counting them
+ * together put `ConnectionRow` over the repository's complexity limit.
+ */
+function ConnectionRowNotes({
+  notes,
+  testResult,
+  t,
+}: {
+  notes: readonly RowNote[];
   testResult: TestOutcome | undefined;
   t: ReturnType<typeof useTranslations>;
 }) {
-  // Only the fail-closed case is a warning. The rest describes where traffic
-  // goes if this key is withdrawn, which is ordinary context and was being
-  // shouted in amber next to a green "Serving traffic" badge.
-  const servingNoteKey = hasSpare
-    ? "Shared.integrations.rpcByokServingHasSpare"
-    : failsClosed
-      ? "Shared.integrations.rpcByokLastActiveByok"
-      : "Shared.integrations.rpcByokLastActive";
-  const servingNoteTone = failsClosed && !hasSpare ? "text-warning" : "text-tertiary";
-
   return (
     <>
-      {isOrganizationScoped ? (
-        <p className="text-xs text-warning">{t("Shared.integrations.rpcByokOrganizationScoped")}</p>
-      ) : null}
-      {/* "What does deactivated mean?" was the question on the mock, so the
-          answer sits on the row rather than in a badge. */}
-      {isDeactivated ? (
-        <p className="text-xs text-tertiary">
-          {t("Shared.integrations.rpcByokDeactivatedMeaning")}
+      {notes.map((note) => (
+        <p key={note.key} className={`text-xs ${note.tone}`}>
+          {t(note.key)}
         </p>
-      ) : null}
-      {/* Only on the row actually carrying traffic. A Ready key routes
-          nothing, so warning that removing it changes where requests go was
-          simply false — and it appeared on every provider's page at once,
-          because the count behind it came from a list narrowed to one. */}
-      {isServing ? <p className={`text-xs ${servingNoteTone}`}>{t(servingNoteKey)}</p> : null}
+      ))}
       {/* Only ever the answer to the click that asked for it: nothing about a
           check is stored any more (HOO-1228). */}
       {testResult ? (
@@ -267,11 +289,13 @@ function ConnectionRow({
               : ""}
           </p>
           <ConnectionRowNotes
-            failsClosed={failsClosed}
-            hasSpare={hasSpare}
-            isDeactivated={isDeactivated}
-            isOrganizationScoped={isOrganizationScoped}
-            isServing={isServing}
+            notes={resolveRowNotes({
+              failsClosed,
+              hasSpare,
+              isDeactivated,
+              isOrganizationScoped,
+              isServing,
+            })}
             testResult={testResult}
             t={t}
           />

@@ -201,7 +201,7 @@ describe("RpcByokSection", () => {
     renderSection({ connections: [connection({ status: "pending", isDefault: false })] });
 
     expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Test" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Test key" })).toBeTruthy();
   });
 
   it("tells the tenant an organization-scoped connection is not routing", () => {
@@ -223,7 +223,7 @@ describe("RpcByokSection", () => {
     });
 
     expect(screen.getByRole("button", { name: /Deactivate/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Test" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Test key" })).toBeNull();
   });
 
   it("offers delete on a deactivated connection and nothing that would error", async () => {
@@ -282,7 +282,7 @@ describe("RpcByokSection", () => {
     const user = userEvent.setup();
     renderSection({ connections: [connection({ status: "pending", isDefault: false })] });
 
-    await user.click(screen.getByRole("button", { name: "Test" }));
+    await user.click(screen.getByRole("button", { name: "Test key" }));
     expect(await screen.findByText(/Reached the provider just now/)).toBeTruthy();
 
     // The check described the connection as it was; rotating changes it.
@@ -426,7 +426,7 @@ describe("RpcByokSection", () => {
     });
     renderSection({ connections: [connection({ status: "failed", isDefault: false })] });
 
-    await user.click(screen.getByRole("button", { name: "Test" }));
+    await user.click(screen.getByRole("button", { name: "Test key" }));
 
     expect(await screen.findByText("provider_rejected_credentials")).toBeTruthy();
   });
@@ -436,7 +436,7 @@ describe("RpcByokSection", () => {
     testRpcConnectionAction.mockResolvedValue({ status: "tested", ok: true, failureCode: null });
     renderSection({ connections: [connection()] });
 
-    await user.click(screen.getByRole("button", { name: "Test" }));
+    await user.click(screen.getByRole("button", { name: "Test key" }));
 
     expect(await screen.findByText(/Reached the provider just now/)).toBeTruthy();
   });

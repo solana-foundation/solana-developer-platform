@@ -437,7 +437,7 @@
     "rpcByokNewApiKey": "New API key",
     "rpcByokRotateSave": "Rotate",
     "rpcByokRotated": "Key rotated.",
-    "rpcByokTest": "Test",
+    "rpcByokTest": "Test key",
     "rpcByokTestPassed": "Reached the provider just now.",
     "rpcByokTestFailed": "Could not reach the provider."
   },

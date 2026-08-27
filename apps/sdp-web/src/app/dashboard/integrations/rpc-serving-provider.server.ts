@@ -65,15 +65,13 @@ export function findServingProvider(
 
 /** Every provider this scope holds a key for that has not been withdrawn. */
 export function findProvidersWithOwnKey(connections: readonly Connection[]): string[] {
-  return [
-    ...new Set(
-      connections
-        .filter(
-          (connection) => connection.scope === "project" && connection.status !== "deactivated"
-        )
-        .map((connection) => connection.provider)
-    ),
-  ];
+  const providers = new Set<string>();
+  for (const connection of connections) {
+    if (connection.scope === "project" && connection.status !== "deactivated") {
+      providers.add(connection.provider);
+    }
+  }
+  return [...providers];
 }
 
 /**
