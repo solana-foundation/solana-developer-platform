@@ -8,7 +8,7 @@ import {
   TEST_OWNER,
   TEST_SEED,
   unsignedTxBase64,
-} from "./test/support.js";
+} from "./test/shielded-identity-fixtures.js";
 
 const buildRegistrationTransaction = vi.fn();
 const fetchUserRecord = vi.fn();

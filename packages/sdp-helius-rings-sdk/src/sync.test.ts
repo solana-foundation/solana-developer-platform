@@ -1,6 +1,11 @@
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { derivedIdentity, TEST_OWNER, TEST_REQUEST, TEST_SEED } from "./test/support.js";
+import {
+  derivedIdentity,
+  TEST_OWNER,
+  TEST_REQUEST,
+  TEST_SEED,
+} from "./test/shielded-identity-fixtures.js";
 
 const syncWallet = vi.fn();
 const getPrivateTokenBalances = vi.fn();

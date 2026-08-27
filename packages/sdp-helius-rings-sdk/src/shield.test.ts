@@ -8,7 +8,7 @@ import {
   TEST_REQUEST,
   TEST_SEED,
   unsignedTxBase64,
-} from "./test/support.js";
+} from "./test/shielded-identity-fixtures.js";
 
 const buildDepositTransaction = vi.fn();
 

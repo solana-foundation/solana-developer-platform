@@ -8,7 +8,7 @@ import {
   TEST_OWNER,
   TEST_REQUEST,
   TEST_SEED,
-} from "./test/support.js";
+} from "./test/shielded-identity-fixtures.js";
 
 const fetchUserRecord = vi.fn();
 

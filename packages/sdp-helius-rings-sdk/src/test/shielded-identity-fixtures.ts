@@ -1,3 +1,8 @@
+/**
+ * Fixtures for one shielded identity: the seed every suite derives from, the
+ * material and address it produces, and the registry transactions that publish it.
+ */
+
 import { USER_REGISTRY_PROGRAM_ID } from "@heliuslabs/zolana";
 import {
   AccountRole,
@@ -60,9 +65,8 @@ export function unsignedTxBase64(transaction: Transaction): string {
 }
 
 /**
- * The one identity every test in this package derives from. Shared because
- * several suites assert against the same derivation from opposite sides, and two
- * copies of it could drift into disagreeing with each other.
+ * Shared rather than copied: several suites assert against this same derivation
+ * from opposite sides, and two copies could drift into disagreeing.
  */
 export const TEST_SEED = new Uint8Array(32).fill(7);
 export const TEST_OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
