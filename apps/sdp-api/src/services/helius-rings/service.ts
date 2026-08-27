@@ -705,7 +705,29 @@ export class HeliusRingsService {
       const submitted = await this.transition(current.id, "ready_to_sign", "signed", {
         outerTxSignature: signature,
       });
-      if (!submitted) return this.requireOperation(current.id);
+      if (!submitted) {
+        // Lost the compare-and-swap out of `ready_to_sign`: the signing-timeout
+        // sweep failed this row while custody was still working. Returning here
+        // is the safe half of that race — the broadcast below is the only one,
+        // so nothing was sent and the sweep's "nothing was broadcast" holds.
+        //
+        // The event exists because the *signature* would otherwise vanish
+        // without a trace. The timeline would say the operation was abandoned
+        // before a signature was recorded, while in fact custody produced a
+        // valid one that this discarded, and an operator debugging a slow
+        // signer would have nothing pointing at the real cause. Recording the
+        // signature itself is safe — it is a public value — and it is the only
+        // handle for confirming on chain that this transaction never landed.
+        await this.events.append({
+          operationId: current.id,
+          kind: "signature.discarded",
+          payload: {
+            signature,
+            reason: "the operation left ready_to_sign before its signature could be recorded",
+          },
+        });
+        return this.requireOperation(current.id);
+      }
       current = submitted;
 
       // Broadcast from inside `submitted`. A throw here is not evidence that

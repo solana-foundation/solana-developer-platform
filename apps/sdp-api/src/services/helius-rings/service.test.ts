@@ -656,6 +656,76 @@ describe("HeliusRingsService", () => {
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "signer_failed", retryable: true });
     });
+
+    /**
+     * The signing-timeout sweep firing while custody is still working.
+     *
+     * Reproduced by failing the row out of `ready_to_sign` from inside the
+     * signer, exactly as `pollRingsIndexing` would, so the pipeline returns to
+     * a state that has moved under it. Both writers compare-and-swap on the
+     * expected state, so the sweep winning must mean the broadcast never runs —
+     * that is what keeps the sweep's "nothing was broadcast" true and its
+     * `retryable` honest.
+     */
+    describe("when the signing sweep wins the race out of ready_to_sign", () => {
+      function racedService() {
+        const repository = createHeliusRingsOperationRepository(env);
+        let submitCalls = 0;
+
+        const service = liveishService({
+          signOuterTransaction: async () => {
+            const [inFlight] = await repository.listInFlightOperations({
+              staleBefore: new Date(Date.now() + 60_000).toISOString(),
+              limit: 10,
+            });
+            if (!inFlight) throw new Error("expected an operation in flight to sweep");
+            await repository.failOperation({
+              ...tenant,
+              id: inFlight.id,
+              expectedState: "ready_to_sign",
+              code: "signer_failed",
+              message: "the operation was abandoned before its signature was recorded",
+              retryable: true,
+            });
+            return OUTER_TX.signedTxBase64;
+          },
+          submitOuterTransaction: async () => {
+            submitCalls += 1;
+            return OUTER_TX.signature;
+          },
+        });
+
+        return { service, submitCalls: () => submitCalls };
+      }
+
+      it("never broadcasts, so the swept row's account of itself stays true", async () => {
+        const raced = racedService();
+
+        const operation = await raced.service.prepareOperation(
+          operationInput({ clientNonce: "nonce-sweep-race" }),
+          actorContext
+        );
+
+        expect(raced.submitCalls()).toBe(0);
+        expect(operation.state).toBe("failed");
+        expect(operation.failure).toMatchObject({ code: "signer_failed", retryable: true });
+      });
+
+      it("records the signature it threw away rather than losing it silently", async () => {
+        const raced = racedService();
+        const operation = await raced.service.prepareOperation(
+          operationInput({ clientNonce: "nonce-sweep-race-event" }),
+          actorContext
+        );
+
+        const detailed = await raced.service.getOperationWithEvents(operation.id);
+        const discarded = detailed.events.find((event) => event.kind === "signature.discarded");
+
+        // Without this the timeline claims the operation was abandoned before a
+        // signature existed, while custody had in fact produced a valid one.
+        expect(discarded?.payload).toMatchObject({ signature: OUTER_TX.signature });
+      });
+    });
   });
 
   describe("executeOperation", () => {
