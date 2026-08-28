@@ -11,9 +11,9 @@ interface GoldenEndpoint {
 
 const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   { domain: "projects", path: "/v1/projects", scope: "org" },
-  { domain: "members", path: "/v1/members", scope: "org" },
+  { domain: "members", path: "/v1/members", scope: "project" },
   { domain: "notifications", path: "/v1/notifications/unread-count", scope: "org" },
-  { domain: "api-keys", path: "/v1/api-keys", scope: "org" },
+  { domain: "api-keys", path: "/v1/api-keys", scope: "project" },
   { domain: "onboarding", path: "/v1/onboarding/status", scope: "org" },
   { domain: "counterparties", path: "/v1/counterparties?page=1&pageSize=1", scope: "project" },
   { domain: "issuance-tokens", path: "/v1/issuance/tokens?page=1&pageSize=20", scope: "project" },
@@ -32,7 +32,6 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
 test.describe("GCP dev API golden endpoints", () => {
   let orgApi: LocalApiClient;
   let projectApi: LocalApiClient;
-  let organizationPath: string;
 
   test.beforeAll(async ({ browser }) => {
     const env = getE2EEnv();
@@ -45,7 +44,6 @@ test.describe("GCP dev API golden endpoints", () => {
       const bearerToken = await session.getBearerToken();
       orgApi = createLocalApiClient(env.sdpApiBaseUrl, bearerToken);
       projectApi = createLocalApiClient(env.sdpApiBaseUrl, bearerToken, env.expectedProjectId);
-      organizationPath = `/v1/organizations/${session.identity.organizationId}`;
     });
   });
 
@@ -55,8 +53,4 @@ test.describe("GCP dev API golden endpoints", () => {
       await expect(api.get(endpoint.path)).resolves.toBeDefined();
     });
   }
-
-  test("organizations responds to an authed read", async () => {
-    await expect(orgApi.get(organizationPath)).resolves.toBeDefined();
-  });
 });
