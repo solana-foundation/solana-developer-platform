@@ -6,7 +6,7 @@ import {
   createPrivateChannelTransfer,
   fetchPrivateChannelTransferRecipients,
 } from "@/lib/private-channels";
-import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage, SdpApiResponseError } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
 
 export interface CreateTransferInput {
@@ -16,16 +16,25 @@ export interface CreateTransferInput {
   amount: string;
   /** Selected token mint; forwarded as-is for the API to validate. */
   mint?: string;
+  /**
+   * Minted in the BROWSER and passed in, never generated here: this action runs
+   * once per invocation, so a key it created would be fresh on every retry —
+   * which is exactly a second spend. See `../value-movement-tracking`.
+   */
+  idempotencyKey: string;
 }
 
 /**
  * Validation failures carry a `messageKey` for the client to translate; server
  * failures carry already-formatted text from the API, which has no key.
+ *
+ * `status` rides along on a server failure so the browser can decide whether to
+ * retire the idempotency key — see the deposit action for the full reasoning.
  */
 export type CreateTransferResult =
   | { ok: true; transfer: PrivateChannelTransfer }
   | { ok: false; kind: "validation"; messageKey: MessageKey }
-  | { ok: false; kind: "server"; message: string };
+  | { ok: false; kind: "server"; message: string; status: number | null };
 
 export type FetchTransferRecipientsResult =
   | { ok: true; recipients: PrivateChannelTransferRecipientDto[] }
@@ -62,15 +71,25 @@ export async function createTransferAction(
   }
   try {
     const client = await createSdpApiClient();
-    const transfer = await createPrivateChannelTransfer(client, input.channelId, {
-      walletId: input.walletId,
-      recipientVerifiedWalletId: input.recipientVerifiedWalletId,
-      amount: input.amount.trim(),
-      ...(input.mint ? { mint: input.mint } : {}),
-    });
+    const transfer = await createPrivateChannelTransfer(
+      client,
+      input.channelId,
+      {
+        walletId: input.walletId,
+        recipientVerifiedWalletId: input.recipientVerifiedWalletId,
+        amount: input.amount.trim(),
+        ...(input.mint ? { mint: input.mint } : {}),
+      },
+      input.idempotencyKey
+    );
     return { ok: true, transfer };
   } catch (error) {
-    return { ok: false, kind: "server", message: extractSdpApiErrorMessage(error) };
+    return {
+      ok: false,
+      kind: "server",
+      message: extractSdpApiErrorMessage(error),
+      status: error instanceof SdpApiResponseError ? error.status : null,
+    };
   }
 }
 

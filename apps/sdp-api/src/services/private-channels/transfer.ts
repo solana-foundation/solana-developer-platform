@@ -22,6 +22,7 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { getTransferCheckedInstruction as getToken2022TransferCheckedInstruction } from "@solana-program/token-2022";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   createPrivateChannelTransferRepository,
   mapPrivateChannelTransferRow,
@@ -29,6 +30,10 @@ import {
   type PrivateChannelTransferRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import {
+  buildPrivateChannelTransferFingerprint,
+  resolveIdempotencyReplay,
+} from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -65,6 +70,11 @@ export interface CreateChannelTransferInput {
   amount: string;
   /** Mint to transfer; must be on the instance's allowlist. Defaults to its first entry. */
   mint?: string;
+  /**
+   * The caller's `Idempotency-Key`. Required: it is the reservation that makes a
+   * retry reuse this transfer instead of spending the balance twice.
+   */
+  idempotencyKey: string;
   gatewayAuth: SpcAuthContext;
   cluster: import("@sdp/types").SolanaCluster;
 }
@@ -235,6 +245,41 @@ async function settleTransfer(
 }
 
 /**
+ * Take the reservation for this transfer, or hand back the transfer that won the
+ * race for the same key. See `reserveWithdrawal` in `./withdraw` — same shape,
+ * same reason the insert is allowed to fail.
+ */
+async function reserveTransfer(
+  repo: PrivateChannelTransferRepository,
+  fingerprint: string,
+  findExisting: () => Promise<PrivateChannelTransferRow | null>,
+  input: Omit<
+    Parameters<PrivateChannelTransferRepository["createTransfer"]>[0],
+    "idempotencyFingerprint"
+  >
+): Promise<{ row: PrivateChannelTransferRow; replayed: boolean }> {
+  try {
+    const created = await repo.createTransfer({
+      ...input,
+      idempotencyFingerprint: fingerprint,
+    });
+    if (!created) {
+      throw new AppError("INTERNAL_ERROR", "Failed to persist the transfer.");
+    }
+    return { row: created, replayed: false };
+  } catch (error) {
+    if (!isPostgresUniqueViolation(error)) {
+      throw error;
+    }
+    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    if (!raced) {
+      throw error;
+    }
+    return { row: raced, replayed: true };
+  }
+}
+
+/**
  * Persist a `pending` row, send once through SPC, then confirm the result:
  * `pending` → `submitted` → `confirmed` | `failed`.
  *
@@ -269,6 +314,31 @@ export async function createChannelTransfer(
 
   const sender = address(input.wallet.publicKey);
   const recipientAddress = address(input.recipient.pubkey);
+
+  const repo = createPrivateChannelTransferRepository(env);
+  const findReplay = () =>
+    repo.findTransferByIdempotency({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+  const fingerprint = buildPrivateChannelTransferFingerprint({
+    instanceId: input.instance.id,
+    channelId: input.channelId,
+    walletId: input.wallet.walletId,
+    recipientVerifiedWalletId: input.recipient.verifiedWalletId,
+    mint,
+    amount: input.amount,
+  });
+
+  // The replay lookup comes FIRST, ahead of the balance read, because a retry of
+  // an already-executed transfer must return that transfer — the balance it spent
+  // is gone, so re-checking would reject the caller's own success.
+  const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
+  if (replay) {
+    return mapPrivateChannelTransferRow(replay);
+  }
+
   const balance = await getChannelBalance(env, {
     instance: input.instance,
     owner: sender,
@@ -281,10 +351,10 @@ export async function createChannelTransfer(
   }
 
   // Persist BEFORE anything is broadcast, so a request that dies mid-flight still
-  // leaves an auditable row. A failure here means nothing was sent, which is a
-  // legitimate 500 — there is no funds movement to report.
-  const repo = createPrivateChannelTransferRepository(env);
-  const pending = await repo.createTransfer({
+  // leaves an auditable row. The insert doubles as the reservation: the unique
+  // index on (organization, project, idempotency_key) means a duplicate racing
+  // this one loses and replays instead of spending the balance a second time.
+  const reserved = await reserveTransfer(repo, fingerprint, findReplay, {
     organizationId: input.organizationId,
     projectId: input.projectId,
     instanceId: input.instance.id,
@@ -297,10 +367,12 @@ export async function createChannelTransfer(
     recipient: recipientAddress,
     mint,
     amount: input.amount,
+    idempotencyKey: input.idempotencyKey,
   });
-  if (!pending) {
-    throw new AppError("INTERNAL_ERROR", "Failed to persist the transfer.");
+  if (reserved.replayed) {
+    return mapPrivateChannelTransferRow(reserved.row);
   }
+  const pending = reserved.row;
 
   const fail = async (failureReason: string) => {
     const failed = await settleTransfer(repo, pending, { status: "failed", failureReason });

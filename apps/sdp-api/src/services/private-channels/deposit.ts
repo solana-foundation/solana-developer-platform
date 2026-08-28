@@ -40,12 +40,15 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   createPrivateChannelDepositRepository,
   mapPrivateChannelDepositRow,
+  type PrivateChannelDepositRepository,
   type PrivateChannelDepositRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { buildPrivateChannelDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -75,8 +78,13 @@ export interface CreateChannelDepositInput {
   amount: string;
   /** Mint to deposit; must be on the instance's allowlist. Defaults to its first entry. */
   mint?: string;
-  /** Address credited in the channel; defaults to the depositor. */
-  recipient?: string;
+  /** Address credited in the channel; already authorized by the route's access seam. */
+  recipient: string;
+  /**
+   * The caller's `Idempotency-Key`. Required: it is the reservation that makes a
+   * retry reuse this deposit instead of broadcasting a second escrow transfer.
+   */
+  idempotencyKey: string;
   /**
    * SPC auth context. Auth-enabled instances gate gateway reads; kept on the
    * signature only so this module stays symmetric with withdraw.ts, and its
@@ -147,7 +155,73 @@ async function broadcastDeposit(
   return solanaRpc.sendTransaction(input.projectRpc.rpc, signedBytes);
 }
 
-/** Create a deposit intent: persist, broadcast to devnet, confirm on-chain. */
+/**
+ * Claim the caller's `Idempotency-Key` for this deposit, or hand back the
+ * deposit that already claimed it.
+ *
+ * The unique index IS the reservation, which is why the insert is allowed to
+ * fail: a concurrent duplicate loses it and reads the winner's row instead of
+ * broadcasting a second escrow transfer. The pre-insert lookup only saves the
+ * common (sequential retry) case a round trip through a failed insert. Both
+ * paths go through `resolveIdempotencyReplay`, so a key reused with a DIFFERENT
+ * request is a 409 rather than a quiet answer about someone else's deposit.
+ */
+async function reserveDeposit(
+  repo: PrivateChannelDepositRepository,
+  input: {
+    organizationId: string;
+    projectId: string;
+    instanceId: string;
+    walletId: string;
+    depositor: string;
+    recipient: string;
+    mint: string;
+    amount: string;
+    context: PrivateChannelDepositRow["context"];
+    idempotencyKey: string;
+  }
+): Promise<{ row: PrivateChannelDepositRow; replayed: boolean }> {
+  const fingerprint = buildPrivateChannelDepositFingerprint({
+    instanceId: input.instanceId,
+    walletId: input.walletId,
+    recipient: input.recipient,
+    mint: input.mint,
+    amount: input.amount,
+  });
+  const findExisting = () =>
+    repo.findDepositByIdempotency({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+
+  const existing = await resolveIdempotencyReplay(findExisting, fingerprint);
+  if (existing) {
+    return { row: existing, replayed: true };
+  }
+
+  try {
+    const created = await repo.createDeposit({
+      ...input,
+      idempotencyFingerprint: fingerprint,
+    });
+    if (!created) {
+      throw new AppError("INTERNAL_ERROR", "Failed to persist the deposit intent.");
+    }
+    return { row: created, replayed: false };
+  } catch (error) {
+    if (!isPostgresUniqueViolation(error)) {
+      throw error;
+    }
+    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    if (!raced) {
+      throw error;
+    }
+    return { row: raced, replayed: true };
+  }
+}
+
+/** Create a deposit intent: reserve, persist, broadcast to devnet, confirm on-chain. */
 export async function createChannelDeposit(
   env: Env,
   input: CreateChannelDepositInput
@@ -168,7 +242,7 @@ export async function createChannelDeposit(
     input.mint
   );
   const depositor = wallet.publicKey;
-  const recipient = input.recipient ?? depositor;
+  const recipient = input.recipient;
 
   const amountBaseUnits = parseDecimalAmount(input.amount, decimals);
   if (amountBaseUnits <= 0n) {
@@ -176,7 +250,10 @@ export async function createChannelDeposit(
   }
 
   const repo = createPrivateChannelDepositRepository(env);
-  const created = await repo.createDeposit({
+  // The reservation is taken BEFORE the signer is derived or anything is
+  // broadcast, so a retry — or a second request racing the first — can only ever
+  // reach the row the winner created.
+  const { row: created, replayed } = await reserveDeposit(repo, {
     organizationId,
     projectId,
     instanceId: instance.id,
@@ -192,9 +269,10 @@ export async function createChannelDeposit(
       escrowInstanceAddr: instance.escrowInstanceAddr,
       actingUserId: input.userId,
     },
+    idempotencyKey: input.idempotencyKey,
   });
-  if (!created) {
-    throw new AppError("INTERNAL_ERROR", "Failed to persist the deposit intent.");
+  if (replayed) {
+    return mapPrivateChannelDepositRow(created);
   }
 
   let latest: PrivateChannelDepositRow = created;

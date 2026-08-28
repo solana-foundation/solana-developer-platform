@@ -34,9 +34,14 @@ const SCOPE = {
   projectId: TEST_PROJECT_ID,
 };
 
+/** Fresh reservation per call; the idempotency test below pins the key. */
+let nextIdempotencyKey = 0;
+
 function makeInput(
   overrides: Partial<CreatePrivateChannelTransferInput> = {}
 ): CreatePrivateChannelTransferInput {
+  nextIdempotencyKey += 1;
+  const key = `idem_pct_${nextIdempotencyKey}`;
   return {
     ...SCOPE,
     instanceId: TEST_INSTANCE_ID,
@@ -49,6 +54,8 @@ function makeInput(
     recipient: RECIPIENT,
     mint: MINT,
     amount: "12.34",
+    idempotencyKey: key,
+    idempotencyFingerprint: `fp_${key}`,
     ...overrides,
   };
 }
@@ -539,5 +546,27 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
         })
       )
     ).rejects.toThrow();
+  });
+
+  it("holds one transfer per idempotency key within a tenant", async () => {
+    const first = await repo.createTransfer(
+      makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+    );
+    expect(first).not.toBeNull();
+
+    // The unique index IS the reservation: a duplicate cannot insert, which is
+    // what stops a retry from spending the sender's balance twice.
+    await expect(
+      repo.createTransfer(
+        makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+      )
+    ).rejects.toThrow();
+
+    const found = await repo.findTransferByIdempotency({
+      ...SCOPE,
+      idempotencyKey: "idem_shared",
+    });
+    expect(found?.id).toBe(first?.id);
+    expect(found?.idempotency_fingerprint).toBe("fp_idem_shared");
   });
 });

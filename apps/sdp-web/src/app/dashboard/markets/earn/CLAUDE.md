@@ -286,7 +286,7 @@ program create still sends the body `requestId` form.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
   (fingerprint: project, position, shares) under its own versioned
   `sessionStorage` key.
-- `earn-idempotency-key-store.ts` — the shared machinery behind BOTH tracking
+- `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking
   modules (storage tiers, quota divergence, approval holds, entry bounds), plus
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
   when the withdrawal flow arrived; two copies of a double-spend guard is how

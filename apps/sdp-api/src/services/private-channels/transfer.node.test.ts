@@ -77,6 +77,8 @@ function makePendingRow(input: CreatePrivateChannelTransferInput): PrivateChanne
     status: "pending",
     signature: null,
     failure_reason: null,
+    idempotency_key: input.idempotencyKey,
+    idempotency_fingerprint: input.idempotencyFingerprint,
     created_at: "2026-07-28T10:00:00.000Z",
     updated_at: "2026-07-28T10:00:00.000Z",
   };
@@ -101,6 +103,7 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
       pubkey: recipient,
     },
     amount: "1.25",
+    idempotencyKey: "idem_transfer_test",
     gatewayAuth: auth,
     cluster: "devnet" as const,
     ...overrides,
@@ -145,6 +148,12 @@ beforeEach(async () => {
       inserted = makePendingRow(input);
       return inserted;
     }),
+    // The reservation lookup the service runs before the balance read. The stub
+    // answers from whatever this test inserted, which is enough to exercise both
+    // the replay and the fingerprint-conflict paths.
+    findTransferByIdempotency: vi.fn(async ({ idempotencyKey }: { idempotencyKey: string }) =>
+      inserted?.idempotency_key === idempotencyKey ? inserted : null
+    ),
     updateTransfer: vi.fn(async (input: UpdatePrivateChannelTransferInput) => {
       if (!inserted || inserted.status !== (input.expectedStatus ?? inserted.status)) {
         return null;
@@ -315,6 +324,10 @@ describe("createChannelTransfer", () => {
       recipient,
       mint: MINT,
       amount: "1.25",
+      idempotencyKey: "idem_transfer_test",
+      // The fingerprint carries every field that changes WHAT MOVES, so reusing
+      // the key for a different transfer is a conflict rather than a replay.
+      idempotencyFingerprint: expect.stringContaining('"scope":"private_channel_transfer"'),
     });
     // The audit row must exist before anything can move funds.
     expect(vi.mocked(repo.createTransfer).mock.invocationCallOrder[0] ?? 0).toBeLessThan(
@@ -437,7 +450,13 @@ describe("createChannelTransfer", () => {
       .mockResolvedValueOnce(SIGNATURE);
 
     const failed = await createChannelTransfer(TEST_ENV, makeInput());
-    const retried = await createChannelTransfer(TEST_ENV, makeInput());
+    // A retry is a NEW intent and carries a NEW key. Reusing the first key would
+    // replay the failure instead — see the replay test below, which is the same
+    // rule seen from the other side.
+    const retried = await createChannelTransfer(
+      TEST_ENV,
+      makeInput({ idempotencyKey: "idem_transfer_retry" })
+    );
 
     expect(failed).toMatchObject({
       status: "failed",
@@ -468,6 +487,52 @@ describe("createChannelTransfer", () => {
       "usr_transfer_test"
     );
     expect(solanaRpc.sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("replays a reserved key without reading the balance or sending again", async () => {
+    const first = await createChannelTransfer(TEST_ENV, makeInput());
+    expect(first).toMatchObject({ status: "confirmed", signature: SIGNATURE });
+
+    vi.mocked(balanceService.getChannelBalance).mockClear();
+    vi.mocked(solanaRpc.sendTransaction).mockClear();
+
+    const replayed = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(replayed).toMatchObject({ status: "confirmed", signature: SIGNATURE });
+    // Neither a second broadcast nor a second insert.
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+    expect(repo.createTransfer).toHaveBeenCalledTimes(1);
+    // The balance read is skipped on purpose: the first transfer already SPENT
+    // that balance, so re-checking would reject the caller's own success.
+    expect(balanceService.getChannelBalance).not.toHaveBeenCalled();
+  });
+
+  it("rejects a key reused for a different transfer instead of replaying it", async () => {
+    await createChannelTransfer(TEST_ENV, makeInput());
+
+    // Same key, different amount — a different movement, so answering with the
+    // first one would report a transfer the caller never asked for.
+    await expect(
+      createChannelTransfer(TEST_ENV, makeInput({ amount: "9.99" }))
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(repo.createTransfer).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays instead of double-spending when a concurrent request wins the insert", async () => {
+    // The pre-insert lookup found nothing (the race is still open), then the
+    // unique index rejects this insert because the other request got there
+    // first. The service must read the winner's row, never broadcast.
+    const winner = await createChannelTransfer(TEST_ENV, makeInput());
+    vi.mocked(solanaRpc.sendTransaction).mockClear();
+    vi.mocked(repo.findTransferByIdempotency).mockResolvedValueOnce(null);
+    vi.mocked(repo.createTransfer).mockRejectedValueOnce(
+      Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" })
+    );
+
+    const loser = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(loser.id).toBe(winner.id);
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 
   it("fails the request without sending when the pending row cannot be stored", async () => {

@@ -29,6 +29,10 @@ export interface PrivateChannelTransferRow {
   status: PrivateChannelMemberTransferStatus;
   signature: string | null;
   failure_reason: string | null;
+  /** The caller's `Idempotency-Key`; the tenant-scoped reservation this row claimed. */
+  idempotency_key: string | null;
+  /** Fingerprint of the request that claimed the key. Null only on pre-header history. */
+  idempotency_fingerprint: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +54,13 @@ export interface CreatePrivateChannelTransferInput extends PrivateChannelTransfe
   recipient: string;
   mint: string;
   amount: string;
+  /**
+   * The reservation. Both fields travel together — the schema rejects one
+   * without the other — because a key with no fingerprint could only ever be
+   * replayed blind.
+   */
+  idempotencyKey: string;
+  idempotencyFingerprint: string;
 }
 
 export interface UpdatePrivateChannelTransferInput {
@@ -90,6 +101,14 @@ export interface PrivateChannelTransferRepository {
   ): Promise<PrivateChannelTransferRow | null>;
   updateTransfer(
     input: UpdatePrivateChannelTransferInput
+  ): Promise<PrivateChannelTransferRow | null>;
+  /**
+   * The row that already claimed `idempotencyKey` in this tenant, or null.
+   * Scoped to (organization, project) to match the unique index, so one
+   * tenant's key can neither collide with nor probe for another's.
+   */
+  findTransferByIdempotency(
+    scope: PrivateChannelTransferProjectScope & { idempotencyKey: string }
   ): Promise<PrivateChannelTransferRow | null>;
   getTransferById(
     scope: PrivateChannelTransferProjectScope & { id: string }

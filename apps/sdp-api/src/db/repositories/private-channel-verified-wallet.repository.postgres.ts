@@ -65,5 +65,23 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapPrivateChannelVerifiedWalletRow);
     },
+
+    async findByInstanceAndPubkey(instanceId: string, pubkey: string) {
+      // Uniqueness is (user_id, instance_id, pubkey), so several members may
+      // have verified the same pubkey. The question here is only "has ANYONE
+      // proved control of this address on this instance", which is what makes a
+      // credited balance spendable — so the newest row is a fine witness.
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_verified_wallets
+             WHERE instance_id = ?
+               AND pubkey = ?
+             ORDER BY verified_at DESC, id DESC
+             LIMIT 1`
+        )
+        .bind(instanceId, pubkey)
+        .first<Record<string, unknown>>();
+      return row ? mapPrivateChannelVerifiedWalletRow(row) : null;
+    },
   };
 }

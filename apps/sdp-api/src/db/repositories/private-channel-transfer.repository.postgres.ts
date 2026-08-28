@@ -30,6 +30,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelTransferRow {
     status: row.status as PrivateChannelTransferRow["status"],
     signature: (row.signature ?? null) as string | null,
     failure_reason: (row.failure_reason ?? null) as string | null,
+    idempotency_key: (row.idempotency_key ?? null) as string | null,
+    idempotency_fingerprint: (row.idempotency_fingerprint ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -54,8 +56,9 @@ export function createPostgresPrivateChannelTransferRepository(
                id, organization_id, project_id, instance_id, channel_id,
                sender_private_channel_user_id, recipient_private_channel_user_id,
                sender_wallet_id, recipient_verified_wallet_id,
-               sender, recipient, mint, amount, status
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+               sender, recipient, mint, amount, status,
+               idempotency_key, idempotency_fingerprint
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
           RETURNING *`
         )
         .bind(
@@ -71,8 +74,23 @@ export function createPostgresPrivateChannelTransferRepository(
           input.sender,
           input.recipient,
           input.mint,
-          input.amount
+          input.amount,
+          input.idempotencyKey,
+          input.idempotencyFingerprint
         )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async findTransferByIdempotency(
+      scope: PrivateChannelTransferProjectScope & { idempotencyKey: string }
+    ) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_transfers
+             WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(scope.organizationId, scope.projectId, scope.idempotencyKey)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },

@@ -1,11 +1,11 @@
 "use client";
 
-import { createIdempotencyKeyStore } from "./earn-idempotency-key-store";
+import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 
 /**
  * The vault WITHDRAWAL idempotency key store — the deposit store's mirror
  * (PRO-1702), sharing every durability rule through
- * `earn-idempotency-key-store.ts`. A retry inside the record-before-broadcast
+ * `@/lib/idempotency-key-store.ts`. A retry inside the record-before-broadcast
  * window must carry the same key or the chain accepts the same exit twice; an
  * approval hold pins the key for as long as a human may take.
  */

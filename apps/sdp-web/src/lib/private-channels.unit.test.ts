@@ -102,16 +102,23 @@ describe("private-channel transfer API helpers", () => {
     const client = createClient(transfer);
 
     await expect(
-      createPrivateChannelTransfer(client, "channel/alpha", {
-        walletId: "wallet_sender",
-        recipientVerifiedWalletId: "pcvw_recipient",
-        amount: "1.25",
-      })
+      createPrivateChannelTransfer(
+        client,
+        "channel/alpha",
+        {
+          walletId: "wallet_sender",
+          recipientVerifiedWalletId: "pcvw_recipient",
+          amount: "1.25",
+        },
+        "idem_transfer_unit"
+      )
     ).resolves.toEqual(transfer);
     expect(client.fetch).toHaveBeenCalledWith(
       "/v1/private-channels/channels/channel%2Falpha/transfers",
       {
         method: "POST",
+        // The reservation rides as a header; the body stays the request itself.
+        headers: { "Idempotency-Key": "idem_transfer_unit" },
         body: JSON.stringify({
           walletId: "wallet_sender",
           recipientVerifiedWalletId: "pcvw_recipient",

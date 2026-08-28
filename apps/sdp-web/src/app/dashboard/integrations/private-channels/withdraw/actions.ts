@@ -7,7 +7,7 @@ import {
   createPrivateChannelWithdrawal,
   fetchPrivateChannelWithdrawal,
 } from "@/lib/private-channels";
-import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage, SdpApiResponseError } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
 
 export interface CreateWithdrawalInput {
@@ -16,16 +16,26 @@ export interface CreateWithdrawalInput {
   /** Selected token mint; forwarded as-is for the API to validate. */
   mint?: string;
   destination?: string;
+  /**
+   * Minted in the BROWSER and passed in, never generated here: this action runs
+   * once per invocation, so a key it created would be fresh on every retry —
+   * which for a withdrawal is a second irreversible burn. See
+   * `../value-movement-tracking`.
+   */
+  idempotencyKey: string;
 }
 
 /**
  * Validation failures carry a `messageKey` for the client to translate; server
  * failures carry already-formatted text from the API, which has no key.
+ *
+ * `status` rides along on a server failure so the browser can decide whether to
+ * retire the idempotency key — see the deposit action for the full reasoning.
  */
 export type CreateWithdrawalResult =
   | { ok: true; withdrawal: PrivateChannelWithdrawal }
   | { ok: false; kind: "validation"; messageKey: MessageKey }
-  | { ok: false; kind: "server"; message: string };
+  | { ok: false; kind: "server"; message: string; status: number | null };
 
 export async function createWithdrawalAction(
   input: CreateWithdrawalInput
@@ -44,16 +54,25 @@ export async function createWithdrawalAction(
 
   try {
     const client = await createSdpApiClient();
-    const withdrawal = await createPrivateChannelWithdrawal(client, {
-      walletId: input.walletId,
-      amount: input.amount,
-      ...(input.mint ? { mint: input.mint } : {}),
-      ...(input.destination ? { destination: input.destination } : {}),
-    });
+    const withdrawal = await createPrivateChannelWithdrawal(
+      client,
+      {
+        walletId: input.walletId,
+        amount: input.amount,
+        ...(input.mint ? { mint: input.mint } : {}),
+        ...(input.destination ? { destination: input.destination } : {}),
+      },
+      input.idempotencyKey
+    );
     revalidatePath("/dashboard/integrations/private-channels/withdraw");
     return { ok: true, withdrawal };
   } catch (error) {
-    return { ok: false, kind: "server", message: extractSdpApiErrorMessage(error) };
+    return {
+      ok: false,
+      kind: "server",
+      message: extractSdpApiErrorMessage(error),
+      status: error instanceof SdpApiResponseError ? error.status : null,
+    };
   }
 }
 

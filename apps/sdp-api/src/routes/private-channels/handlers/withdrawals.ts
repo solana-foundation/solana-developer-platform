@@ -1,9 +1,7 @@
-import { mapPrivateChannelInstanceRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound, unauthorized, walletNotFound } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import {
   createChannelWithdrawal,
   getChannelWithdrawal,
@@ -12,30 +10,27 @@ import {
 } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import type { AppContext } from "../context";
-import {
-  getPrivateChannelInstanceRepository,
-  loadPrivateChannelProjectRpcClient,
-} from "../context";
+import { loadPrivateChannelProjectRpcClient } from "../context";
+import { requireIdempotencyKey } from "../helpers";
 import { type createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
-
-async function loadActiveInstance(c: AppContext, organizationId: string, projectId: string) {
-  const row = await getPrivateChannelInstanceRepository(c).getActiveByProject({
-    organizationId,
-    projectId,
-  });
-  if (!row) {
-    throw notFound("Active private channel instance");
-  }
-  return mapPrivateChannelInstanceRow(row);
-}
+import { resolveWithdrawalCreateContext } from "../value-movement-access";
 
 /**
  * POST /withdrawals — burn the custody wallet's channel-chain balance (via the
  * withdraw program) and broadcast it to the gateway; the operator later releases
- * the matching real USDC on devnet to `destination` (defaults to the owner).
- * Feature-gated + `payments:write`. Returns the withdrawal DTO with its current
- * status (submitted/confirmed, or failed with a reason). `settled` (operator's
- * devnet release observed) is detected asynchronously by the oracle.
+ * the matching real USDC to `destination` (defaults to the owner). Feature-gated
+ * + `payments:write`. Returns the withdrawal DTO with its current status
+ * (submitted/confirmed, or failed with a reason). `settled` (operator's release
+ * observed) is detected asynchronously by the oracle.
+ *
+ * Authorization lives entirely in `resolveWithdrawalCreateContext`: the burn
+ * owner must be a custody wallet the ACTING member verified on this instance.
+ * That check is what stops one project member from burning another's balance and
+ * pointing the release at an address of their own — the two halves of the same
+ * attack, since `destination` is otherwise free.
+ *
+ * `Idempotency-Key` is required. A burn cannot be undone, so the reservation is
+ * the only thing standing between a retry and a second irreversible burn.
  */
 export async function createPrivateChannelWithdrawal(
   c: ValidatedBodyContext<typeof createWithdrawalBodySchema>
@@ -43,46 +38,31 @@ export async function createPrivateChannelWithdrawal(
   const body = c.req.valid("json");
 
   try {
-    const { auth, wallets } = await resolveScope(c);
-    const userId = auth.userId;
-    if (!userId) {
-      throw unauthorized("Private Channel withdrawals require a user session.");
-    }
-    const projectId = requireProjectId(c);
-    const instance = await loadActiveInstance(c, auth.organizationId, projectId);
+    const idempotencyKey = requireIdempotencyKey(c, "Private Channels withdrawals");
+    const context = await resolveWithdrawalCreateContext(c, {
+      walletId: body.walletId,
+      destination: body.destination,
+    });
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
-
-    // Source wallet must be a custody wallet we can sign for (the burn owner).
-    const ownerPubkey = resolveWalletAddress(wallets, body.walletId, "walletId", auth, [
-      "wallets:read",
-    ]);
-    const wallet = wallets.find((w) => w.publicKey === ownerPubkey);
-    if (!wallet) {
-      throw walletNotFound();
-    }
-
-    // Devnet release destination may be another wallet/address; defaults to the owner.
-    const destination = body.destination
-      ? resolveWalletAddress(wallets, body.destination, "destination", auth, ["wallets:read"])
-      : undefined;
 
     // Auth-enabled instances JWT-gate the burn broadcast (write) + confirm (read).
     const gatewayAuth = await resolveGatewayAuth(c.env, {
-      instance,
-      organizationId: auth.organizationId,
-      projectId,
-      userId,
+      instance: context.instance,
+      organizationId: context.auth.organizationId,
+      projectId: context.projectId,
+      userId: context.auth.userId,
     });
 
     const withdrawal = await createChannelWithdrawal(c.env, {
-      instance,
-      organizationId: auth.organizationId,
-      projectId,
-      userId,
-      wallet,
+      instance: context.instance,
+      organizationId: context.auth.organizationId,
+      projectId: context.projectId,
+      userId: context.actor.user_id,
+      wallet: context.wallet,
       amount: body.amount,
       mint: body.mint,
-      destination,
+      destination: context.destination,
+      idempotencyKey,
       gatewayAuth,
       cluster: projectRpc.cluster,
     });

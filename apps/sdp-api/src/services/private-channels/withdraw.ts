@@ -41,17 +41,24 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   createPrivateChannelWithdrawalRepository,
   mapPrivateChannelWithdrawalRow,
+  type PrivateChannelWithdrawalRepository,
   type PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import {
+  buildPrivateChannelWithdrawalFingerprint,
+  resolveIdempotencyReplay,
+} from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
+import { getChannelBalance } from "./balance";
 import { resolveChannelToken } from "./mint";
 import { describeTxError } from "./tx-error";
 import { confirmAndPersistWithdrawal } from "./withdraw-confirm";
@@ -75,8 +82,16 @@ export interface CreateChannelWithdrawalInput {
   amount: string;
   /** Mint to withdraw; must be on the instance's allowlist. Defaults to its first entry. */
   mint?: string;
-  /** Devnet address that receives the operator's release; defaults to the owner. */
-  destination?: string;
+  /**
+   * Devnet address that receives the operator's release; already authorized by
+   * the route's access seam.
+   */
+  destination: string;
+  /**
+   * The caller's `Idempotency-Key`. Required: it is the reservation that makes a
+   * retry reuse this withdrawal instead of broadcasting a second burn.
+   */
+  idempotencyKey: string;
   /**
    * SPC auth context for the gateway. Required — broadcasting the burn is a gateway
    * WRITE and confirming it a gateway READ, both JWT-gated. Resolved by the handler;
@@ -150,7 +165,55 @@ async function broadcastWithdrawal(
   });
 }
 
-/** Create a withdrawal intent: persist, broadcast the burn to the gateway, confirm. */
+/**
+ * Take the reservation for this withdrawal, or hand back the withdrawal that won
+ * the race for the same key.
+ *
+ * The unique index IS the reservation, which is why the insert is allowed to
+ * fail: a concurrent duplicate loses it and reads the winner's row rather than
+ * broadcasting a second burn, which would destroy balance no later step could
+ * give back. The caller has already resolved the sequential-retry case, so this
+ * only handles the concurrent one.
+ */
+async function reserveWithdrawal(
+  repo: PrivateChannelWithdrawalRepository,
+  fingerprint: string,
+  findExisting: () => Promise<PrivateChannelWithdrawalRow | null>,
+  input: {
+    organizationId: string;
+    projectId: string;
+    instanceId: string;
+    walletId: string;
+    owner: string;
+    destination: string;
+    mint: string;
+    amount: string;
+    context: PrivateChannelWithdrawalRow["context"];
+    idempotencyKey: string;
+  }
+): Promise<{ row: PrivateChannelWithdrawalRow; replayed: boolean }> {
+  try {
+    const created = await repo.createWithdrawal({
+      ...input,
+      idempotencyFingerprint: fingerprint,
+    });
+    if (!created) {
+      throw new AppError("INTERNAL_ERROR", "Failed to persist the withdrawal intent.");
+    }
+    return { row: created, replayed: false };
+  } catch (error) {
+    if (!isPostgresUniqueViolation(error)) {
+      throw error;
+    }
+    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    if (!raced) {
+      throw error;
+    }
+    return { row: raced, replayed: true };
+  }
+}
+
+/** Create a withdrawal intent: reserve, check the balance, burn, confirm. */
 export async function createChannelWithdrawal(
   env: Env,
   input: CreateChannelWithdrawalInput
@@ -159,7 +222,7 @@ export async function createChannelWithdrawal(
 
   const { mint, decimals, tokenProgram } = resolveChannelToken(input.cluster, input.mint);
   const owner = wallet.publicKey;
-  const destination = input.destination ?? owner;
+  const destination = input.destination;
 
   const amountBaseUnits = parseDecimalAmount(input.amount, decimals);
   if (amountBaseUnits <= 0n) {
@@ -167,7 +230,47 @@ export async function createChannelWithdrawal(
   }
 
   const repo = createPrivateChannelWithdrawalRepository(env);
-  const created = await repo.createWithdrawal({
+  const findReplay = () =>
+    repo.findWithdrawalByIdempotency({
+      organizationId,
+      projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+  const fingerprint = buildPrivateChannelWithdrawalFingerprint({
+    instanceId: instance.id,
+    walletId: wallet.walletId,
+    destination,
+    mint,
+    amount: input.amount,
+  });
+
+  // The replay lookup comes FIRST, ahead of the balance read, because a retry of
+  // an already-burned withdrawal must return that withdrawal — the balance it
+  // spent is gone, so re-checking would reject the caller's own success.
+  const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
+  if (replay) {
+    return mapPrivateChannelWithdrawalRow(replay);
+  }
+
+  // Reject an over-withdrawal before it reaches the chain. The burn program would
+  // refuse it anyway, but that answer arrives as an opaque channel-chain failure
+  // on a row already marked `submitted`; this one is a clean 400 with nothing
+  // persisted, and it mirrors the member-transfer path.
+  const balance = await getChannelBalance(env, {
+    instance,
+    owner,
+    mint,
+    auth: input.gatewayAuth,
+    cluster: input.cluster,
+  });
+  if (amountBaseUnits > BigInt(balance.amount)) {
+    throw new AppError("INSUFFICIENT_TOKEN_BALANCE");
+  }
+
+  // The reservation is taken BEFORE the signer is derived or the burn is
+  // broadcast, so a retry — or a second request racing the first — can only ever
+  // reach the row the winner created.
+  const { row: created, replayed } = await reserveWithdrawal(repo, fingerprint, findReplay, {
     organizationId,
     projectId,
     instanceId: instance.id,
@@ -183,9 +286,10 @@ export async function createChannelWithdrawal(
       escrowInstanceAddr: instance.escrowInstanceAddr,
       actingUserId: input.userId,
     },
+    idempotencyKey: input.idempotencyKey,
   });
-  if (!created) {
-    throw new AppError("INTERNAL_ERROR", "Failed to persist the withdrawal intent.");
+  if (replayed) {
+    return mapPrivateChannelWithdrawalRow(created);
   }
 
   let latest: PrivateChannelWithdrawalRow = created;

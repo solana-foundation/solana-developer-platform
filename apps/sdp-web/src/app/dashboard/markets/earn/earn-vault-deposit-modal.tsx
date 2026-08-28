@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { cn } from "@/lib/utils";
 import {
@@ -19,10 +20,6 @@ import {
 } from "./deposit/earn-funding-wallets";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { formatTokenQuantity, tokenSymbol } from "./earn-format";
-import {
-  applyIdempotencyKeyOutcome,
-  resolveHeldIdempotencyKey,
-} from "./earn-idempotency-key-store";
 import { shortenMarketAddress } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,

@@ -373,9 +373,13 @@ async function seedTransfer(input: {
     .run();
 }
 
+/**
+ * The route requires `Idempotency-Key`, so the default headers carry one; the
+ * tests that care about the reservation pass their own.
+ */
 async function postTransfer(
   body: Record<string, unknown>,
-  headers: Record<string, string> = sessionHeaders()
+  headers: Record<string, string> = sessionHeaders({ "Idempotency-Key": "idem_route_transfer" })
 ) {
   return app.request(
     `/v1/private-channels/channels/${CHANNEL_ID}/transfers`,
@@ -425,9 +429,25 @@ describe("Private Channels — transfer access and routes", () => {
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
-      apiKeyHeaders()
+      { ...apiKeyHeaders(), "Idempotency-Key": "idem_route_transfer" }
     );
     expect(transfer.status).toBe(403);
+    expect(createChannelTransferMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move funds without an idempotency key", async () => {
+    const response = await postTransfer(
+      {
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      },
+      sessionHeaders()
+    );
+
+    expect(response.status).toBe(400);
+    // Nothing is resolved, signed or broadcast: without a key there is no way to
+    // tell a retry from a second spend, so the request never starts.
     expect(createChannelTransferMock).not.toHaveBeenCalled();
   });
 
@@ -711,6 +731,9 @@ describe("Private Channels — transfer access and routes", () => {
           pubkey: RECIPIENT_ADDRESS,
         },
         amount: "1.5",
+        // The caller's header, forwarded verbatim: the service reserves against
+        // it before anything is signed.
+        idempotencyKey: "idem_route_transfer",
         gatewayAuth: expect.objectContaining({ pcUserId: ACTOR_PC_USER_ID }),
       })
     );

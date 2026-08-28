@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { resetIdempotencyKeyStoresForTests } from "./earn-idempotency-key-store";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
