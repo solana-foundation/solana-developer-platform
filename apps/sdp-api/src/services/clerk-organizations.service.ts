@@ -50,7 +50,10 @@ export class ClerkOrganizationsService {
     });
 
     if (!res.ok) {
-      const body = await res.text();
+      const body = await res.text().catch((error: unknown) => {
+        logVendorCallFailure("clerk", operation, error, startedAt);
+        throw error;
+      });
       logVendorCallFailure(
         "clerk",
         operation,
@@ -67,7 +70,10 @@ export class ClerkOrganizationsService {
       return {} as T;
     }
 
-    return (await res.json()) as T;
+    return (await res.json().catch((error: unknown) => {
+      logVendorCallFailure("clerk", operation, error, startedAt);
+      throw error;
+    })) as T;
   }
 
   async getOrganization(organizationId: string): Promise<ClerkOrganization> {

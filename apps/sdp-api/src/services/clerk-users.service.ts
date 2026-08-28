@@ -68,7 +68,10 @@ export class ClerkUsersService {
     });
 
     if (!res.ok) {
-      const body = await res.text();
+      const body = await res.text().catch((error: unknown) => {
+        logVendorCallFailure("clerk", operation, error, startedAt);
+        throw error;
+      });
       logVendorCallFailure(
         "clerk",
         operation,
@@ -85,7 +88,10 @@ export class ClerkUsersService {
       return {} as T;
     }
 
-    return (await res.json()) as T;
+    return (await res.json().catch((error: unknown) => {
+      logVendorCallFailure("clerk", operation, error, startedAt);
+      throw error;
+    })) as T;
   }
 
   async getUser(userId: string): Promise<ClerkUser> {

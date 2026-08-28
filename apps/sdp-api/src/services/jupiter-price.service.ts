@@ -73,7 +73,10 @@ async function fetchPriceChunk(
 
   // A mint Jupiter cannot price reliably is omitted from the object entirely — no null
   // entry and no error — so absence is the only signal that a price is unavailable.
-  const body = (await response.json()) as Record<string, JupiterPriceEntry | null>;
+  const body = (await response.json().catch((error: unknown) => {
+    logVendorCallFailure("jupiter", "price", error, startedAt);
+    throw error;
+  })) as Record<string, JupiterPriceEntry | null>;
   for (const [mint, entry] of Object.entries(body ?? {})) {
     const usdPrice = entry?.usdPrice;
     if (typeof usdPrice === "number" && Number.isFinite(usdPrice) && usdPrice >= 0) {
