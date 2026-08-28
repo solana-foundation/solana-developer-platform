@@ -8,7 +8,28 @@ import {
   RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsHealthComponent,
+  type RingsOperationState,
 } from "./helius-rings.data";
+
+/**
+ * States something is actively working through, so the row will change on its
+ * own and is worth both a spinner and another poll.
+ *
+ * `approval_required` is deliberately absent: it is waiting on a person, not on
+ * the pipeline, and a spinner there would turn indefinitely. Terminal states
+ * are absent for the obvious reason.
+ */
+const SETTLING: ReadonlySet<RingsOperationState> = new Set<RingsOperationState>([
+  "preparing",
+  "proving",
+  "ready_to_sign",
+  "submitted",
+  "indexing",
+]);
+
+export function isSettling(state: RingsOperationState): boolean {
+  return SETTLING.has(state);
+}
 
 export function formatWhen(iso: string, locale: string): string {
   const d = new Date(iso);
@@ -115,4 +136,12 @@ export function healthAlerts(health: RingsHealth | null): RingsHealthAlert[] {
 export function shortenShieldedAddress(address: string, lead = 6, tail = 4): string {
   if (address.length <= lead + tail + 1) return address;
   return `${address.slice(0, lead)}…${address.slice(-tail)}`;
+}
+
+/**
+ * Enough of an operation id to tell two apart in a lineage label. The prefix is
+ * shared by every row, so only the tail distinguishes them.
+ */
+export function shortenOperationId(operationId: string, tail = 8): string {
+  return operationId.length <= tail ? operationId : `…${operationId.slice(-tail)}`;
 }

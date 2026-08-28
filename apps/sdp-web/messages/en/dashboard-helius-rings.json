@@ -80,12 +80,16 @@
     },
     "activity": {
       "title": "Activity",
-      "description": "Every shielded operation, newest first. Failed operations carry their failure code.",
+      "description": "Every shielded operation, newest first. A spinner marks one still settling; anything resting on a decision offers it on the row. Select a row for its full timeline.",
       "empty": "No operations yet.",
       "operation": "Operation",
       "state": "State",
       "amount": "Amount (base units)",
       "created": "Created",
+      "action": "Action",
+      "working": "Still settling",
+      "retryOf": "Retry of {id}",
+      "retriedAs": "Retried as {id}",
       "opType_shield": "Shield",
       "opType_transfer_registered": "Send (registered)",
       "opType_transfer_anonymous": "Send (anonymous)",
@@ -102,11 +106,12 @@
       "state_submitted": "Submitted",
       "state_indexing": "Indexing",
       "state_completed": "Completed",
-      "state_failed": "Failed"
+      "state_failed": "Failed",
+      "state_voided": "Voided"
     },
     "errors": {
       "loadFailed": "Could not load Helius Rings data. Retry shortly.",
-      "gatewayUnavailable": "External integration pending"
+      "gatewayUnavailable": "A Rings upstream is unavailable. Check the API logs for detail."
     },
     "composer": {
       "title": "New operation",
@@ -118,55 +123,36 @@
       "amount": "Amount (base units)",
       "baseUnits": "base units",
       "recipient": "Recipient address",
-      "recipientAnonymous": "Recipient address (undisclosed on-chain)",
       "recipientPlaceholder": "Solana address",
-      "zone": "Destination zone",
-      "zonePlaceholder": "Optional",
-      "unlockAt": "Unlocks at",
-      "beneficiary": "Beneficiary address",
       "review": "Review",
       "back": "Back",
       "confirm": "Confirm",
       "preparing": "Preparing…",
-      "newOperation": "New operation",
+      "started": "Operation started. Track it in Activity below.",
       "prepareFailed": "The operation could not be prepared. Check the details and try again.",
       "summaryWallet": "Wallet",
       "summaryOperation": "Operation",
       "summaryAmount": "Amount",
       "summaryRecipient": "Recipient",
-      "summaryZone": "Zone",
-      "summaryUnlockAt": "Unlocks at",
-      "summaryBeneficiary": "Beneficiary",
-      "anonymousWarning": "I understand the counterparty is not disclosed on-chain. Anonymous transfers are subject to the same wallet policy and approval rules as any other transfer — they are not lower-risk.",
       "gatewayRedNotice": "The Rings gateway is unavailable. You can still compose and confirm — the operation will run through policy and record an honest gateway failure."
-    },
-    "zones": {
-      "title": "Zones",
-      "description": "Named destinations inside a wallet. Zone metadata is SDP-owned and works today; on-chain effects wait on the gateway.",
-      "empty": "No zones yet.",
-      "nameLabel": "Zone name",
-      "namePlaceholder": "Payroll",
-      "kindLabel": "Kind",
-      "kind_treasury": "Treasury",
-      "kind_public": "Public",
-      "create": "Create zone"
     },
     "detail": {
       "title": "Operation detail",
       "operationId": "Operation",
+      "retryOf": "Retry of",
       "timeline": "Timeline",
       "timelineEmpty": "No events recorded.",
       "retryable": "A retry can succeed.",
       "notRetryable": "Not retryable."
     },
     "recovery": {
-      "title": "Needs attention",
-      "description": "Operations resting on a human decision. Approved operations execute against the verdict already stored server-side; a retry files a fresh operation linked to the original and re-runs policy, and retry chains are capped server-side.",
-      "empty": "Nothing waiting.",
       "retry": "Retry",
       "retrying": "Retrying…",
       "execute": "Execute",
-      "executing": "Executing…"
+      "executing": "Executing…",
+      "void": "Void",
+      "voiding": "Voiding…",
+      "voidConfirm": "Voiding asserts this signed transaction never landed on chain and releases the wallet's spend slot. Continue only if you have reconciled the signature and confirmed absence."
     }
   }
 }

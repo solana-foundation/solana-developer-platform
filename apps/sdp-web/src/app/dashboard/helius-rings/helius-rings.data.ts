@@ -38,7 +38,8 @@ export type RingsOperationState =
   | "submitted"
   | "indexing"
   | "completed"
-  | "failed";
+  | "failed"
+  | "voided";
 
 /** Mirrors OP_TYPES in @sdp/helius-rings; literal so `activity.opType_*` resolves. */
 export type RingsOperationOpType =
@@ -58,6 +59,11 @@ export interface RingsOperationSummary {
   assetMint: string | null;
   amountRaw: string | null;
   createdAt: string;
+  failureCode: string | null;
+  outerTxSignature: string | null;
+  retryable: boolean | null;
+  /** The operation this one was filed to replace, if it is a retry. */
+  retryOfOperationId: string | null;
 }
 
 export interface RingsOperationEvent {
@@ -226,22 +232,20 @@ export async function fetchRingsWalletIdentity(
   return { identity: result.data.identity };
 }
 
-export type RingsOpType =
-  | "shield"
-  | "transfer_registered"
-  | "transfer_anonymous"
-  | "withdraw"
-  | "merge"
-  | "timelock_create";
+/**
+ * What the API accepts today. Narrower than `RingsOperationOpType`, which also
+ * has to name the older kinds already recorded against this project. The API
+ * rejects anything else on a strict schema, so widening this without widening
+ * that one only moves the refusal later.
+ */
+export type RingsOpType = "shield" | "withdraw";
 
 export interface PrepareRingsOperationInput {
   walletId: string;
   opType: RingsOpType;
-  asset?: { mint: string; amountRaw: string };
+  asset: { mint: string; amountRaw: string };
+  /** Withdrawals only: the public address the funds leave the pool for. */
   to?: string;
-  zoneId?: string;
-  transferMode?: "registered" | "anonymous";
-  timelock?: { unlockAt: string; beneficiary: string };
 }
 
 export async function prepareRingsOperation(
@@ -294,41 +298,24 @@ export async function retryRingsOperation(
   return { operation: result.data.operation };
 }
 
-export interface RingsZone {
-  id: string;
-  name: string;
-  kind: "treasury" | "public";
-}
-
-export function fetchRingsZones(
-  walletId: string,
-  fallbackError: string
-): Promise<{ zones: RingsZone[] }> {
-  return getJson(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/zones`,
-    fallbackError
-  );
-}
-
-export async function createRingsZone(input: {
-  walletId: string;
-  name: string;
-  kind: RingsZone["kind"];
-}): Promise<{ zone?: RingsZone; error?: string }> {
+export async function voidRingsOperation(
+  operationId: string,
+  signature: string
+): Promise<{ operation?: RingsOperationDetail; error?: string }> {
   const response = await fetch(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(input.walletId)}/zones`,
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/void`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input.name, kind: input.kind }),
+      body: JSON.stringify({ signature }),
       cache: "no-store",
     }
   );
-  const result = await readEnvelope<{ zone: RingsZone }>(response);
+  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
   if (!result.ok) {
     return { error: result.error };
   }
-  return { zone: result.data.zone };
+  return { operation: result.data.operation };
 }
 
 /** Devnet assets seeded in the rings allowlist. */

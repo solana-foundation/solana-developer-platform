@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -17,27 +17,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
+import { ActivityCard } from "./activity-card";
 import {
   createRingsWallet,
+  executeRingsOperation,
   fetchRingsHealth,
   fetchRingsOperations,
   fetchRingsWallets,
   RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsHealthStatus,
-  type RingsOperationState,
   type RingsOperationSummary,
   type RingsWallet,
 } from "./helius-rings.data";
-import { formatWhen, healthAlerts, shortenShieldedAddress } from "./helius-rings.utils";
+import { healthAlerts, isSettling, shortenShieldedAddress } from "./helius-rings.utils";
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
-import { RecoveryCard } from "./recovery-card";
 import { ShieldedBalanceCard } from "./shielded-balance-card";
 import { WalletIdentityCheck } from "./wallet-identity-check";
-import { ZonesCard } from "./zones-card";
 
 interface CustodyWalletOption {
   walletId: string;
@@ -57,17 +56,8 @@ const WALLET_BADGE: Record<RingsWallet["status"], "warning" | "success" | "defau
   paused: "default",
 };
 
-const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
-  draft: "default",
-  preparing: "default",
-  approval_required: "warning",
-  proving: "default",
-  ready_to_sign: "default",
-  submitted: "default",
-  indexing: "default",
-  completed: "success",
-  failed: "danger",
-};
+/** How often to re-read while an operation is still moving. */
+const OPERATION_POLL_INTERVAL_MS = 4_000;
 
 export function HeliusRingsWorkspace({
   custodyWallets,
@@ -75,7 +65,6 @@ export function HeliusRingsWorkspace({
   custodyWallets: CustodyWalletOption[];
 }) {
   const t = useTranslations();
-  const locale = useLocale();
 
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
@@ -109,6 +98,46 @@ export function HeliusRingsWorkspace({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Signing and submission finish inline, but indexing is settled by a
+  // once-a-minute sweep, so an operation routinely lands here mid-flight and
+  // then changes with nothing on the page having asked. Polling stops as soon
+  // as nothing is moving, so an idle dashboard is not one.
+  const settling = operations.some((operation) => isSettling(operation.state));
+
+  // A tick outlasting the interval would otherwise stack another on top of it.
+  const ticking = useRef(false);
+
+  const tick = useCallback(async () => {
+    if (ticking.current) return;
+    ticking.current = true;
+    try {
+      // Settlement is otherwise driven only by the sweep, so a completed
+      // transaction shows as `indexing` until the next minute boundary. Asking
+      // here makes the row track Photon instead of the cron.
+      //
+      // Only `indexing`: the endpoint reads Photon and completes from what it
+      // finds, whereas for a row still waiting on custody the same call
+      // concludes that signing died and fails it.
+      await Promise.all(
+        operations
+          .filter((operation) => operation.state === "indexing")
+          .map((operation) => executeRingsOperation(operation.id).catch(() => undefined))
+      );
+      await refresh();
+    } finally {
+      ticking.current = false;
+    }
+  }, [operations, refresh]);
+
+  // A successful refresh replaces `tick` and so restarts the interval, spacing
+  // the next one a full period after the last finished. A failed one leaves
+  // both in place, which is what keeps polling alive across a blip.
+  useEffect(() => {
+    if (!settling) return;
+    const timer = setInterval(() => void tick(), OPERATION_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [settling, tick]);
 
   const gatewayPending = health !== null && health.gateway !== "green";
   const alerts = healthAlerts(health);
@@ -313,52 +342,7 @@ export function HeliusRingsWorkspace({
 
       <OperationComposer wallets={wallets} gatewayRed={gatewayPending} onPrepared={refresh} />
 
-      <ZonesCard wallets={wallets} />
-
-      <RecoveryCard operations={operations} onChanged={refresh} />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("DashboardHeliusRings.activity.title")}</CardTitle>
-          <CardDescription>{t("DashboardHeliusRings.activity.description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {operations.length === 0 ? (
-            <p className="text-sm text-secondary">{t("DashboardHeliusRings.activity.empty")}</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("DashboardHeliusRings.activity.operation")}</TableHead>
-                  <TableHead>{t("DashboardHeliusRings.activity.state")}</TableHead>
-                  <TableHead>{t("DashboardHeliusRings.activity.amount")}</TableHead>
-                  <TableHead>{t("DashboardHeliusRings.activity.created")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {operations.map((operation) => (
-                  <TableRow
-                    key={operation.id}
-                    className="cursor-pointer"
-                    onClick={() => setDetailOperationId(operation.id)}
-                  >
-                    <TableCell>
-                      {t(`DashboardHeliusRings.activity.opType_${operation.opType}`)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={STATE_BADGE[operation.state]}>
-                        {t(`DashboardHeliusRings.activity.state_${operation.state}`)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{operation.amountRaw ?? "—"}</TableCell>
-                    <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <ActivityCard operations={operations} onChanged={refresh} onSelect={setDetailOperationId} />
 
       <OperationDetailDrawer
         operationId={detailOperationId}

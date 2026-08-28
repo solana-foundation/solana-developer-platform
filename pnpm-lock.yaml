@@ -635,6 +635,9 @@ importers:
       '@sdp/helius-rings':
         specifier: workspace:*
         version: link:../sdp-helius-rings
+      '@solana-program/compute-budget':
+        specifier: 0.17.0
+        version: 0.17.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana/kit':
         specifier: 7.1.1
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)

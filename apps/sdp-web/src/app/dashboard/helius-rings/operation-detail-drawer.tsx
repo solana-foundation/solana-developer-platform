@@ -84,6 +84,12 @@ export function OperationDetailDrawer({
                 label={t("DashboardHeliusRings.activity.created")}
                 value={formatWhen(detail.createdAt, locale)}
               />
+              {detail.retryOfOperationId ? (
+                <DetailRow
+                  label={t("DashboardHeliusRings.detail.retryOf")}
+                  value={detail.retryOfOperationId}
+                />
+              ) : null}
             </dl>
 
             {detail.failure ? (

@@ -44,9 +44,8 @@ function capturingCreate() {
 const allMethods: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
   ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "owner" })],
   ["readIdentity", (g) => g.readIdentity({ walletId: "hrw_1", owner: "owner" })],
-  ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "owner", cursor: null })],
-  ["buildOperation", (g) => g.buildOperation({ operation: {} as never, keyRefs: [] })],
-  ["requestProof", (g) => g.requestProof({ operationId: "hro_1", ringsMetadata: {} as never })],
+  ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "owner" })],
+  ["buildOperation", (g) => g.buildOperation({ operation: {} as never, owner: "owner" })],
   ["verifyIndexed", (g) => g.verifyIndexed("sig")],
 ];
 
