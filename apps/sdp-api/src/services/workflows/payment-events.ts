@@ -14,6 +14,12 @@ function logDispatchError(label: string, error: unknown): void {
 // rules for these triggers match project-wide. Fire-and-forget off the response path;
 // the event key dedupes redelivery, so the webhook and reconciliation paths can both
 // emit for one transfer without double-firing rules.
+//
+// Delivery is at-most-once BY DECISION (Aug 2026): the dispatch is detached, which is
+// safe on the Node-only deployment (the process outlives the response and finishes the
+// dispatch on the event loop) but would drop triggers on a Workers-style runtime that
+// tears down at response time. A durable outbox written in the settlement transaction
+// is the planned rework; do not add waitUntil plumbing here in the meantime.
 export function emitRampSettled(
   env: Env,
   input: {
