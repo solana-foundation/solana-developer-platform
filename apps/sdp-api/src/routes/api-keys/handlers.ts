@@ -701,20 +701,48 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     );
   }
 
-  // Everything past this point is post-commit: the replacement key exists
-  // and its secret lives only in the response below. A throw here would
-  // send a 500 whose retry mints a second live key, so both remaining steps
-  // are best effort and their failures are logged, never raised.
+  // Post-commit: the replacement exists and its secret lives only in the
+  // response below, so this must not simply throw — a 500 here would lose
+  // that secret. The pre-commit probe rules out a store that is already
+  // down, but it cannot stop one from failing in the window that follows.
   const oldKeyCacheRefreshed = await tryRefreshApiKeyCache(
     getDb(c.env),
     c.var.kv.apiKeys,
     rotation.previousKeyHash
   );
+
   if (!oldKeyCacheRefreshed) {
-    getLogger().error(
-      { keyId },
-      "Rotated key cache entry could not be refreshed or dropped; the reconciliation sweep enforces the rotation deadline"
-    );
+    // The cache kept the pre-rotation entry: active, no deadline. Returning
+    // the secret now would leave the old key usable past the deadline
+    // Postgres carries, with every repair path blocked on the same store.
+    // Undo instead — put Postgres back into the state that stale entry
+    // already describes, so nothing is left inconsistent with it.
+    try {
+      await apiKeyService.undoRotation(keyId, rotation.apiKey.id);
+      getLogger().error(
+        { keyId, newKeyId: rotation.apiKey.id },
+        "Rotated key cache entry could not be refreshed or dropped; rotation rolled back"
+      );
+      throw new AppError(
+        "SERVICE_UNAVAILABLE",
+        "Rotation was rolled back because cached credentials could not be invalidated; nothing was changed, so retry shortly"
+      );
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      // The undo itself failed, so the rotation stands with a stale cached
+      // deadline. The reconciliation sweep repairs it once the store
+      // accepts writes again; surface it rather than report success.
+      getLogger().error(
+        { error, keyId, newKeyId: rotation.apiKey.id },
+        "Rotated key cache entry could not be invalidated and the rollback failed; the reconciliation sweep enforces the rotation deadline"
+      );
+      throw new AppError(
+        "INTERNAL_ERROR",
+        `Rotation committed but cached credentials could not be invalidated and the rollback failed. The replacement key is ${rotation.apiKey.id}; revoke it and retry, as its secret was not delivered.`
+      );
+    }
   }
 
   try {

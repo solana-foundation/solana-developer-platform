@@ -566,6 +566,51 @@ export class ApiKeyService {
     };
   }
 
+  /**
+   * Compensating undo for a rotation whose cache invalidation could not be
+   * applied. The stale cached entry describes the PRE-rotation key — active,
+   * no deadline — so rather than leave the old key authorizing past a
+   * deadline the cache will never carry, put Postgres back into the state
+   * that entry already describes: clear the deadline and retire the
+   * replacement nobody received a secret for.
+   *
+   * The rotation becomes a no-op instead of a half-applied one, and because
+   * the replacement is no longer active the caller's retry is admitted by
+   * the duplicate guard rather than refused.
+   */
+  async undoRotation(keyId: string, replacementKeyId: string): Promise<void> {
+    assertTenantClaim(
+      this.scope,
+      { organizationId: this.scope.organizationId, projectId: this.scope.projectId },
+      "ApiKeyService.undoRotation"
+    );
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .prepare(
+          `UPDATE api_keys
+           SET rotation_deadline = NULL
+           WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(keyId, this.scope.organizationId, this.scope.projectId)
+        .run();
+
+      await tx
+        .prepare(
+          `UPDATE api_keys
+           SET status = 'revoked', revoked_at = ?
+           WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(
+          new Date().toISOString(),
+          replacementKeyId,
+          this.scope.organizationId,
+          this.scope.projectId
+        )
+        .run();
+    });
+  }
+
   async revokeApiKey(
     keyId: string,
     organizationId: string,

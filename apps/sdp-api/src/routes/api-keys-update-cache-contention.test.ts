@@ -12,15 +12,17 @@
  *   reports a retriable failure instead of a success that leaves the old
  *   authorization live for the remaining cache TTL.
  *
- * Rotation inverts the second guarantee on purpose: its response carries the
- * replacement key's one-time secret, so failing the request over the old
- * key's cache refresh would push the caller into rotating again and minting
- * a second live credential. Rotation must deliver, and the reconciliation
- * sweep — not a client retry — repairs the old key's cached entry.
+ * Rotation cannot use either shape: its response carries the replacement
+ * key's one-time secret, so a plain failure loses that secret, while a plain
+ * success can leave the old key authorizing past its new deadline. It is
+ * therefore all-or-nothing — the cache is probed before anything commits,
+ * and an invalidation that fails afterwards rolls the rotation back so
+ * Postgres matches what the cache still says.
  *
  * Contention is simulated by mocking createKVStoreSet so compareAndSet on
- * `key:*` entries reports a lost race while armed — persistently, or for a
- * set number of calls.
+ * `key:*` entries reports a lost race while armed, and writes reject either
+ * immediately or from the Nth call onward — the latter reproducing a store
+ * that fails only after the pre-commit probe has already passed.
  */
 
 import { hashString } from "@sdp/payments/hash";
@@ -31,6 +33,9 @@ const kvContention = vi.hoisted(() => ({
   contendApiKeyCas: false,
   loseCasRemaining: 0,
   failWrites: false,
+  // Lets the pre-commit probe succeed and every write after it fail, which
+  // is the one window the probe cannot cover.
+  failWritesAfter: 0,
 }));
 
 vi.mock("@/runtime/kv-redis", async (importOriginal) => {
@@ -47,6 +52,12 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
             // reads is what leaves stale authorization usable.
             if (kvContention.failWrites) {
               throw new Error("simulated redis write outage");
+            }
+            if (kvContention.failWritesAfter > 0) {
+              kvContention.failWritesAfter -= 1;
+              if (kvContention.failWritesAfter === 0) {
+                kvContention.failWrites = true;
+              }
             }
             if (
               prop === "compareAndSet" &&
@@ -209,7 +220,48 @@ describe("API key update with contended cache refresh", () => {
     kvContention.contendApiKeyCas = false;
     kvContention.loseCasRemaining = 0;
     kvContention.failWrites = false;
+    kvContention.failWritesAfter = 0;
     await clearKVStores(env);
+  });
+
+  it("rolls the rotation back when the store fails after the pre-commit probe", async () => {
+    // The probe passes, then the store stops accepting writes before the
+    // post-commit invalidation. The cached entry therefore still describes
+    // the pre-rotation key — active, no deadline — and every repair path is
+    // blocked on that same store. Returning the secret here would leave the
+    // old key usable past its deadline, so the rotation is undone instead.
+    // The probe's own write is what arms the failure.
+    kvContention.failWritesAfter = 1;
+
+    const res = await rotateTargetKey({ gracePeriodHours: 0 });
+    expect(res.status).toBe(503);
+
+    // Postgres now matches what the cache still says: the old key is active
+    // with no deadline, so the stale entry is no longer stale.
+    const row = await getDb(env)
+      .prepare("SELECT status, rotation_deadline FROM api_keys WHERE id = ?")
+      .bind(TARGET_KEY.id)
+      .first<{ status: string; rotation_deadline: string | null }>();
+    expect(row?.status).toBe("active");
+    expect(row?.rotation_deadline).toBeNull();
+
+    // The replacement nobody received a secret for is retired, so no live
+    // orphan is left behind.
+    const liveReplacements = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*) AS count FROM api_keys WHERE rotated_from = ? AND status = 'active'"
+      )
+      .bind(TARGET_KEY.id)
+      .first<{ count: number }>();
+    expect(Number(liveReplacements?.count)).toBe(0);
+
+    // The old key still works, which is correct: the rotation never applied.
+    kvContention.failWrites = false;
+    expect(await targetKeyListStatus()).toBe(200);
+
+    // And the retry is admitted rather than refused as a duplicate.
+    expect((await rotateTargetKey({ gracePeriodHours: 0 })).status).toBe(201);
+    expect(await targetKeyListStatus()).toBe(401);
   });
 
   it("refuses to rotate at all while the cache cannot accept the invalidation", async () => {
