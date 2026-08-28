@@ -16,8 +16,8 @@
     "test:e2e:dashboard": "playwright test --config=playwright.config.ts --project=public --project=dashboard",
     "test:e2e:dashboard-transactions": "playwright test --config=playwright.config.ts --project=dashboard-transactions",
     "test:e2e:issuance": "playwright test --config=playwright.config.ts --project=issuance",
-    "test:e2e:gcp-smoke": "playwright test --config=playwright.config.ts --project=gcp-read-only",
-    "test": "vitest run"
+    "test:e2e:gcp-smoke": "playwright test --config=playwright.config.ts --project=gcp-read-only --workers=1",
+    "test": "vitest run --coverage"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
@@ -66,6 +66,7 @@
     "@types/qrcode": "1.5.6",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.3",
+    "@vitest/coverage-istanbul": "4.1.10",
     "eslint": "10.4.1",
     "eslint-config-next": "16.2.12",
     "jsdom": "30.0.1",

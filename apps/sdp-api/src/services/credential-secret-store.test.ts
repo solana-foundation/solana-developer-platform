@@ -26,6 +26,15 @@ function testEncryptionKey(): string {
   return btoa(binary);
 }
 
+// Secret Manager canonicalizes resource names to the numeric project id, so
+// every ref it returns -- and therefore every ref we persist -- is spelled with
+// the number even though we address it by project id. Fixtures that answered
+// with the project id instead were what let HOO-1390 ship: they asserted the
+// bug was correct behaviour.
+const PROJECT_ID = "sdp-dev-123";
+const PROJECT_NUMBER = "1049637352508";
+const SECRET_ID = "sdp-dev-provider-credentials-pcred_123";
+
 describe("GcpSecretManagerCredentialSecretStore", () => {
   it("creates, versions, reads, and destroys credential payloads by exact refs", async () => {
     const payload = {
@@ -39,35 +48,26 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
       const body = typeof init?.body === "string" ? init.body : undefined;
       requests.push({ url, method, body });
 
-      if (
-        url.endsWith(
-          "/v1/projects/sdp-dev-123/secrets?secretId=sdp-dev-provider-credentials-pcred_123"
-        )
-      ) {
+      // Addressed by project id, answered with the project number.
+      if (url.endsWith(`/v1/projects/${PROJECT_ID}/secrets?secretId=${SECRET_ID}`)) {
         return new Response(
           JSON.stringify({
-            name: "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123",
+            name: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}`,
           })
         );
       }
 
-      if (
-        url.endsWith(
-          "/v1/projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123:addVersion"
-        )
-      ) {
+      if (url.endsWith(`/v1/projects/${PROJECT_ID}/secrets/${SECRET_ID}:addVersion`)) {
         return new Response(
           JSON.stringify({
-            name: "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123/versions/1",
+            name: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
           })
         );
       }
 
-      if (
-        url.endsWith(
-          "/v1/projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123/versions/1:access"
-        )
-      ) {
+      // The persisted ref is the canonical one, so the reads that follow are
+      // addressed by number.
+      if (url.endsWith(`/v1/projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1:access`)) {
         return new Response(
           JSON.stringify({
             payload: {
@@ -77,14 +77,10 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
         );
       }
 
-      if (
-        url.endsWith(
-          "/v1/projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123/versions/1:destroy"
-        )
-      ) {
+      if (url.endsWith(`/v1/projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1:destroy`)) {
         return new Response(
           JSON.stringify({
-            name: "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123/versions/1",
+            name: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
             state: "DESTROYED",
           })
         );
@@ -94,7 +90,8 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     };
 
     const store = new GcpSecretManagerCredentialSecretStore({
-      projectId: "sdp-dev-123",
+      projectId: PROJECT_ID,
+      projectNumber: PROJECT_NUMBER,
       secretPrefix: "sdp-dev-provider-credentials",
       accessToken: "test-token",
       fetcher,
@@ -109,9 +106,8 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
 
     expect(stored).toEqual({
       storageBackend: "gcp_secret_manager",
-      secretRef: "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123",
-      secretVersionRef:
-        "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123/versions/1",
+      secretRef: `projects/${PROJECT_ID}/secrets/${SECRET_ID}`,
+      secretVersionRef: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
     });
     expect(await store.read({ orgId: "org_123", stored })).toEqual(payload);
     await store.destroyVersion({ secretVersionRef: stored.secretVersionRef as string });
@@ -126,6 +122,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     const store = new GcpSecretManagerCredentialSecretStore({
       projectId: "sdp-dev-123",
       secretPrefix: "sdp-dev-provider-credentials",
+      projectNumber: PROJECT_NUMBER,
       accessToken: "test-token",
       fetcher: async () => new Response("{}"),
     });
@@ -136,6 +133,17 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
         provider: "privy",
         providerCredentialId: "pcred_123",
         existingSecretRef: "projects/other-project/secrets/sdp-dev-provider-credentials-pcred_123",
+        payload: { appSecret: "secret" },
+      })
+    ).rejects.toMatchObject({ code: "INVALID_SECRET_REF" });
+
+    // Accepting the canonical spelling must not become "accept any digits".
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        existingSecretRef: `projects/9999999999/secrets/${SECRET_ID}`,
         payload: { appSecret: "secret" },
       })
     ).rejects.toMatchObject({ code: "INVALID_SECRET_REF" });
@@ -203,6 +211,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
 
     const store = new GcpSecretManagerCredentialSecretStore({
       projectId: "sdp-dev-123",
+      projectNumber: PROJECT_NUMBER,
       secretPrefix: "sdp-dev-provider-credentials",
       metadataTokenUrl: "http://metadata.test/token",
       fetcher,
@@ -222,10 +231,84 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     });
   });
 
+  it("resolves the project number from the metadata server and reuses it", async () => {
+    const metadataUrl = "http://metadata.test/numeric-project-id";
+    const requests: { url: string; headers?: HeadersInit }[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      requests.push({ url, headers: init?.headers });
+
+      if (url === metadataUrl) {
+        return new Response(`${PROJECT_NUMBER}\n`);
+      }
+
+      if (url.endsWith(":addVersion")) {
+        return new Response(
+          JSON.stringify({ name: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1` })
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ name: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}` })
+      );
+    };
+
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: PROJECT_ID,
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      metadataProjectNumberUrl: metadataUrl,
+      fetcher,
+    });
+
+    const write = async () =>
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        payload: { appSecret: "secret" },
+      });
+
+    // The canonical name comes back spelled with the number, which is what the
+    // caller has to persist.
+    expect(await write()).toMatchObject({
+      secretVersionRef: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
+    });
+    await write();
+
+    expect(requests[0]).toMatchObject({
+      url: metadataUrl,
+      headers: { "Metadata-Flavor": "Google" },
+    });
+    // Cached across stores, not just within one, because a store is built per
+    // request.
+    expect(requests.filter((request) => request.url === metadataUrl)).toHaveLength(1);
+  });
+
+  it("rejects a metadata project number that is not numeric", async () => {
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: PROJECT_ID,
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      metadataProjectNumberUrl: "http://metadata.test/bad-project-number",
+      fetcher: async () => new Response("not-a-number"),
+    });
+
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        payload: { appSecret: "secret" },
+      })
+    ).rejects.toMatchObject({ code: "INVALID_CONFIGURATION" });
+  });
+
   it("wraps malformed successful GCP responses in CredentialSecretStoreError", async () => {
     const store = new GcpSecretManagerCredentialSecretStore({
       projectId: "sdp-dev-123",
       secretPrefix: "sdp-dev-provider-credentials",
+      projectNumber: PROJECT_NUMBER,
       accessToken: "test-token",
       fetcher: async () => new Response("not-json"),
     });
@@ -250,6 +333,12 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
       },
     ],
     [
+      "a different project number",
+      {
+        name: `projects/9999999999/secrets/${SECRET_ID}/versions/1`,
+      },
+    ],
+    [
       "a different secret prefix",
       {
         name: "projects/sdp-dev-123/secrets/other-prefix-pcred_123/versions/1",
@@ -271,6 +360,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     const store = new GcpSecretManagerCredentialSecretStore({
       projectId: "sdp-dev-123",
       secretPrefix: "sdp-dev-provider-credentials",
+      projectNumber: PROJECT_NUMBER,
       accessToken: "test-token",
       fetcher: async (input) =>
         String(input).endsWith(":addVersion")
@@ -291,6 +381,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
   it("wraps invalid GCP payload base64 in CredentialSecretStoreError", async () => {
     const store = new GcpSecretManagerCredentialSecretStore({
       projectId: "sdp-dev-123",
+      projectNumber: PROJECT_NUMBER,
       secretPrefix: "sdp-dev-provider-credentials",
       accessToken: "test-token",
       fetcher: async () =>

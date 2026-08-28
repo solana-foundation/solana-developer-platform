@@ -208,4 +208,65 @@ describe("switching which provider serves a project", () => {
     });
     expect(kept?.id).toBe("rconn_serving_incumbent");
   });
+
+  it("refuses a second live connection for the same provider", async () => {
+    // The pre-check in submitRpcConnection is an unlocked read, so two
+    // concurrent saves for one provider both see nothing and both proceed.
+    // The default-slot index only catches that when both try to serve; with
+    // another provider already serving neither claims the slot, and before
+    // this index both rows persisted (HOO-1317).
+    await seedConnection({
+      connectionId: "rconn_dupe_first",
+      credentialId: "pcred_dupe_first",
+      provider: "alchemy",
+      isDefault: true,
+    });
+
+    await expect(
+      seedConnection({
+        connectionId: "rconn_dupe_second",
+        credentialId: "pcred_dupe_second",
+        provider: "alchemy",
+        isDefault: false,
+      })
+    ).rejects.toThrow(/rpc_connections_one_live_per_provider/);
+  });
+
+  it("still allows a withdrawn key and a live one on the same provider", async () => {
+    // Deactivated rows are excluded so history keeps its place, which is what
+    // makes re-adding after a deactivation possible at all.
+    await seedConnection({
+      connectionId: "rconn_dupe_gone",
+      credentialId: "pcred_dupe_gone",
+      provider: "triton",
+      status: "deactivated",
+    });
+
+    await expect(
+      seedConnection({
+        connectionId: "rconn_dupe_new",
+        credentialId: "pcred_dupe_new",
+        provider: "triton",
+        isDefault: true,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("leaves a different provider on the same project alone", async () => {
+    await seedConnection({
+      connectionId: "rconn_dupe_a",
+      credentialId: "pcred_dupe_a",
+      provider: "alchemy",
+      isDefault: true,
+    });
+
+    await expect(
+      seedConnection({
+        connectionId: "rconn_dupe_b",
+        credentialId: "pcred_dupe_b",
+        provider: "quicknode",
+        isDefault: false,
+      })
+    ).resolves.toBeUndefined();
+  });
 });
