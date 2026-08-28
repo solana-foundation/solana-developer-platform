@@ -761,6 +761,117 @@ function decodeMagicBlockPreparedTransaction(serializedTx: string) {
 
 type DecodedMagicBlockPreparedTransaction = ReturnType<typeof decodeMagicBlockPreparedTransaction>;
 
+/** How MagicBlock spells a transaction version on the wire vs. what the bytes say. */
+const MAGICBLOCK_DECLARED_VERSIONS: Readonly<Record<string, 0 | "legacy">> = {
+  legacy: "legacy",
+  v0: 0,
+};
+
+function hostileMagicBlockTransaction(reason: string, details?: Record<string, unknown>): AppError {
+  return new AppError(
+    "PROVIDER_UNAVAILABLE",
+    `MagicBlock returned a transaction that does not match the requested transfer: ${reason}`,
+    { provider: "magicblock", ...details }
+  );
+}
+
+/**
+ * Hold the provider's transaction bytes against the operation SDP is willing to
+ * sign, BEFORE any custody key is resolved.
+ *
+ * Everything SDP decides about a prepared private transfer is decided from the
+ * provider's JSON: `requiredSigners` picks which custody wallets get their keys
+ * loaded and whose wallet policy is enforced, `recentBlockhash` /
+ * `lastValidBlockHeight` set the submission window, and `version` picks the
+ * fee-payer rewrite. None of that was ever checked against the bytes those
+ * signatures would actually authorize, so a compromised or buggy provider could
+ * describe one transfer and hand over another — a set of declared signers that
+ * passes policy, attached to a message that spends something else.
+ *
+ * What is checkable here, and what is not:
+ *
+ *   * The DECLARED metadata is checkable, and this is the whole point — once the
+ *     bytes are proven to require exactly the signers SDP authorized, over the
+ *     blockhash SDP bounded, in the version SDP is about to rewrite, the JSON
+ *     stops being an independent claim and becomes a description of the bytes.
+ *   * The operation's source MUST be one of those signers. A transaction that
+ *     does not need the source wallet's signature cannot be this transfer, and a
+ *     provider naming only OTHER custody wallets would otherwise get SDP to sign
+ *     on behalf of wallets the caller never named.
+ *   * The instruction set is NOT checkable against the operation, and pretending
+ *     otherwise would be worse than not trying. MagicBlock's whole product is
+ *     private routing through its own on-chain programs: the transfer legs go to
+ *     provider PDAs on a schedule, `split` may fan one payment into several, and
+ *     the recipient is deliberately absent from the deposit leg. There is no
+ *     token-program transfer to the destination to match, and no published
+ *     program list to allow-list against. That residual trust is bounded by the
+ *     Kora fee payer, which sponsors only allow-listed programs at submission —
+ *     and by `instructionCount`, which the provider reports as a count of
+ *     logical steps rather than of compiled instructions, so it is metadata for
+ *     operators and NOT an assertable invariant.
+ */
+function assertMagicBlockTransactionMatchesOperation(
+  decoded: DecodedMagicBlockPreparedTransaction,
+  input: {
+    declaredVersion: string;
+    declaredBlockhash: string;
+    declaredRequiredSigners: readonly string[];
+    sourceAddress: string;
+  }
+): void {
+  const { compiledMessage } = decoded;
+
+  const expectedVersion = MAGICBLOCK_DECLARED_VERSIONS[input.declaredVersion];
+  if (expectedVersion === undefined) {
+    throw hostileMagicBlockTransaction(`unsupported version "${input.declaredVersion}"`);
+  }
+  if (compiledMessage.version !== expectedVersion) {
+    throw hostileMagicBlockTransaction("the encoded version differs from the declared one", {
+      declaredVersion: input.declaredVersion,
+      encodedVersion: compiledMessage.version,
+    });
+  }
+
+  // The declared blockhash is what bounds the submission window, so bytes
+  // carrying a different lifetime could outlive the window SDP thinks it set.
+  if (!("lifetimeToken" in compiledMessage)) {
+    throw hostileMagicBlockTransaction("the transaction carries no lifetime constraint");
+  }
+  if (compiledMessage.lifetimeToken !== input.declaredBlockhash) {
+    throw hostileMagicBlockTransaction("the encoded blockhash differs from the declared one");
+  }
+
+  const signerCount = compiledMessage.header.numSignerAccounts;
+  if (signerCount < 1 || signerCount > compiledMessage.staticAccounts.length) {
+    throw hostileMagicBlockTransaction("the account header declares an impossible signer count", {
+      signerCount,
+      staticAccountCount: compiledMessage.staticAccounts.length,
+    });
+  }
+
+  const encodedSigners = new Set<string>(compiledMessage.staticAccounts.slice(0, signerCount));
+  const declaredSigners = new Set(input.declaredRequiredSigners);
+
+  // Set equality in BOTH directions. A signer the bytes need but the JSON hides
+  // would be signed without its wallet policy ever being consulted; a signer the
+  // JSON invents but the bytes do not need drags an unrelated custody wallet
+  // through key resolution and policy enforcement for no reason.
+  const undeclared = [...encodedSigners].filter((signer) => !declaredSigners.has(signer));
+  const unencoded = [...declaredSigners].filter((signer) => !encodedSigners.has(signer));
+  if (undeclared.length > 0 || unencoded.length > 0) {
+    throw hostileMagicBlockTransaction("its signers differ from the declared required signers", {
+      undeclaredSigners: undeclared,
+      unencodedSigners: unencoded,
+    });
+  }
+
+  if (!encodedSigners.has(input.sourceAddress)) {
+    throw hostileMagicBlockTransaction("the requested source wallet is not one of its signers", {
+      sourceAddress: input.sourceAddress,
+    });
+  }
+}
+
 function addSponsoredFeePayerToPreparedTransaction(
   decoded: DecodedMagicBlockPreparedTransaction,
   feePayer: Address,
@@ -887,7 +998,7 @@ async function executePreparedPrivateTransfer(
   c: AppContext,
   scope: ResolvedScope,
   operation: OutboundPaymentOperation,
-  serializedTx: string,
+  prepared: { serializedTx: string; blockhash: string },
   lastValidBlockHeight: bigint,
   metadata: PreparedPrivateTransferMetadata,
   submissionStore: SignedSubmissionStore
@@ -895,7 +1006,19 @@ async function executePreparedPrivateTransfer(
   const walletsByAddress = new Map(scope.wallets.map((wallet) => [wallet.publicKey, wallet]));
   const signerWallets = new Map<string, CustodyWallet>();
   const requiredSigners = [...new Set(metadata.magicBlock.requiredSigners)];
-  const decodedTransaction = decodeMagicBlockPreparedTransaction(serializedTx);
+  const decodedTransaction = decodeMagicBlockPreparedTransaction(prepared.serializedTx);
+
+  // Bind the provider's JSON to the provider's bytes before a single custody key
+  // is resolved. Everything below authorizes against the JSON, so this is the
+  // step that makes those decisions statements about what will actually be
+  // signed. See `assertMagicBlockTransactionMatchesOperation`.
+  assertMagicBlockTransactionMatchesOperation(decodedTransaction, {
+    declaredVersion: metadata.magicBlock.version,
+    declaredBlockhash: prepared.blockhash,
+    declaredRequiredSigners: requiredSigners,
+    sourceAddress: operation.sourceWallet.publicKey,
+  });
+
   const existingFeePayer = decodedTransaction.existingFeePayer;
   const shouldReplaceProviderFeePayer =
     requiredSigners.includes(existingFeePayer) && !walletsByAddress.has(existingFeePayer);
@@ -1183,7 +1306,7 @@ export async function createTransfer(c: AppContext) {
         c,
         scope,
         operation,
-        mapped.prepared.serializedTx,
+        { serializedTx: mapped.prepared.serializedTx, blockhash: mapped.prepared.blockhash },
         BigInt(mapped.prepared.lastValidBlockHeight),
         mapped.metadata,
         submissionStore

@@ -1588,6 +1588,130 @@ describe("Payments routes — transfers", () => {
       }
     });
 
+    /**
+     * A hostile provider is the whole point of decoding the bytes: SDP decides
+     * which custody keys to load, whose wallet policy to enforce and how long the
+     * submission window runs entirely from the provider's JSON. Each case below
+     * makes that JSON disagree with the transaction it describes, and every one
+     * must be refused BEFORE a signature exists.
+     */
+    describe("hostile MagicBlock responses", () => {
+      async function requestWithProviderResponse(
+        buildResponse: (sourceSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>) => object
+      ) {
+        env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
+        const sourceSigner = await generateKeyPairSigner();
+        await updateSeededWalletPublicKey(sourceSigner.address);
+        createRpcMock.mockReturnValue({
+          getTokenSupply: () => ({ send: async () => ({ value: { decimals: 6 } }) }),
+          getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
+        } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+        createOrgSignerMock.mockResolvedValue(sourceSigner);
+        createFeePaymentAdapterMock.mockReturnValue({
+          providerId: "mock",
+          getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+          getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+          signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+          signAndSend: vi.fn(),
+        } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+          new Response(JSON.stringify(buildResponse(sourceSigner)), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+        try {
+          return await requestMagicBlockPrivateTransfer();
+        } finally {
+          fetchSpy.mockRestore();
+        }
+      }
+
+      /** The honest response, which each case below mutates one field of. */
+      function honestResponse(sourceAddress: string) {
+        return {
+          kind: "transfer",
+          version: "v0",
+          transactionBase64: buildMagicBlockTestTransactionBase64({ source: sourceAddress }),
+          sendTo: "base",
+          recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+          lastValidBlockHeight: 123456,
+          instructionCount: 3,
+          requiredSigners: [sourceAddress],
+        };
+      }
+
+      // The attack this closes: name a benign signer set, ship bytes that need a
+      // DIFFERENT wallet's signature. The declared set is what policy runs over,
+      // so a hidden signer would be signed without ever being judged.
+      it("refuses bytes whose signers differ from the declared required signers", async () => {
+        const response = await requestWithProviderResponse((sourceSigner) => ({
+          ...honestResponse(sourceSigner.address),
+          transactionBase64: buildMagicBlockTestTransactionBase64({
+            source: sourceSigner.address,
+            additionalSigner: TEST_SOLANA_ADDRESSES.wallet3,
+          }),
+        }));
+
+        expect(response.status).toBe(503);
+        expect(sendTransactionMock).not.toHaveBeenCalled();
+      });
+
+      // The mirror: declare a signer the bytes never needed, and an unrelated
+      // custody wallet is dragged through key resolution for nothing.
+      it("refuses a declared signer the transaction does not require", async () => {
+        const response = await requestWithProviderResponse((sourceSigner) => ({
+          ...honestResponse(sourceSigner.address),
+          requiredSigners: [sourceSigner.address, TEST_SOLANA_ADDRESSES.wallet3],
+        }));
+
+        expect(response.status).toBe(503);
+        expect(sendTransactionMock).not.toHaveBeenCalled();
+      });
+
+      // SDP bounds the submission window from the DECLARED blockhash, so bytes
+      // carrying another lifetime could outlive the window it thinks it set.
+      it("refuses bytes whose blockhash differs from the declared one", async () => {
+        const response = await requestWithProviderResponse((sourceSigner) => ({
+          ...honestResponse(sourceSigner.address),
+          recentBlockhash: "11111111111111111111111111111111",
+        }));
+
+        expect(response.status).toBe(503);
+        expect(sendTransactionMock).not.toHaveBeenCalled();
+      });
+
+      it("refuses a declared version the bytes do not carry", async () => {
+        const response = await requestWithProviderResponse((sourceSigner) => ({
+          ...honestResponse(sourceSigner.address),
+          version: "legacy",
+        }));
+
+        expect(response.status).toBe(503);
+        expect(sendTransactionMock).not.toHaveBeenCalled();
+      });
+
+      // A transaction that does not need the source wallet's signature is not
+      // the transfer the caller asked for, whatever else it might be.
+      it("refuses a transaction the requested source wallet does not sign", async () => {
+        const response = await requestWithProviderResponse((sourceSigner) => {
+          void sourceSigner;
+          return {
+            ...honestResponse(TEST_SOLANA_ADDRESSES.wallet3),
+            transactionBase64: buildMagicBlockTestTransactionBase64({
+              source: TEST_SOLANA_ADDRESSES.wallet3,
+            }),
+          };
+        });
+
+        // A provider fault, not a caller fault: the request named a wallet SDP
+        // controls, and the provider answered with something else.
+        expect(response.status).toBe(503);
+        expect(sendTransactionMock).not.toHaveBeenCalled();
+      });
+    });
+
     it("does not re-run MagicBlock preparation on an idempotent replay", async () => {
       env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
       const sourceSigner = await generateKeyPairSigner();
