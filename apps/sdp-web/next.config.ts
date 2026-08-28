@@ -14,14 +14,9 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
-        source: "/dashboard/markets/earn",
-        destination: "/dashboard/markets/embedded-yield",
-        permanent: true,
-      },
-      {
-        source: "/dashboard/markets/earn/button-builder",
-        destination: "/dashboard/markets/embedded-yield/button-builder",
-        permanent: true,
+        source: "/dashboard/markets/earn/:path*",
+        destination: "/dashboard/markets/embedded-yield/:path*",
+        permanent: false,
       },
       {
         source: "/earn/integrate/:token",

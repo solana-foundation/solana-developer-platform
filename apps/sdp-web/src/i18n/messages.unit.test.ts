@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { isAppLocale, supportedLocales } from "@/i18n/config";
-import { getMessages, mergeLocalizedMessages, translate } from "@/i18n/messages";
+import {
+  englishSourceMessages,
+  getMessages,
+  mergeLocalizedMessages,
+  mergeLocalizedMessagesWithEmbeddedYieldBrand,
+  translate,
+} from "@/i18n/messages";
 
 function flattenKeys(value: unknown, prefix = ""): string[] {
   if (typeof value === "string") {
@@ -46,20 +52,27 @@ describe("i18n messages", () => {
     }
   });
 
-  it("keeps the legacy Earn product name out of every rendered catalog", () => {
-    for (const locale of supportedLocales) {
-      const messages = getMessages(locale) as unknown;
-      const offenders = flattenKeys(messages).filter((key) => {
-        const value = key.split(".").reduce<unknown>((carry, segment) => {
-          return carry && typeof carry === "object"
-            ? (carry as Record<string, unknown>)[segment]
-            : undefined;
-        }, messages);
-        return typeof value === "string" && /\bEarn\b/.test(value);
-      });
+  it("defines the product name in the raw English source catalog", () => {
+    expect(englishSourceMessages.Shared.dashboardShell.earnProgram).toBe("Embedded Yield");
+    expect(englishSourceMessages.DashboardEarn.playground.productName).toBe("Embedded Yield");
+  });
 
-      expect(offenders, `legacy Earn copy in ${locale}`).toEqual([]);
-    }
+  it("only repairs stale localized branding when the source names Embedded Yield", () => {
+    expect(
+      mergeLocalizedMessagesWithEmbeddedYieldBrand(
+        {
+          product: "Compare Embedded Yield strategies",
+          generic: "Earn yield on idle balances",
+        },
+        {
+          product: "Compare Earn strategies",
+          generic: "Earn yield on idle balances",
+        }
+      )
+    ).toEqual({
+      product: "Compare Embedded Yield strategies",
+      generic: "Earn yield on idle balances",
+    });
   });
 
   it("keeps non-English catalogs inventory-matched to English", () => {
