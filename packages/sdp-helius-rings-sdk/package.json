@@ -16,7 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "0.1.1-alpha",
+    "@heliuslabs/zolana": "0.1.2-alpha",
     "@sdp/helius-rings": "workspace:*",
     "@solana/kit": "7.1.1"
   },
