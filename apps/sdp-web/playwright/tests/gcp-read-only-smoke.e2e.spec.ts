@@ -251,6 +251,32 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     capture.assertClean();
   });
 
+  test("wallet manage drill-down renders the wallet detail", async ({ page }) => {
+    const capture = capturePageFailures(page);
+
+    await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+    const walletCard = page
+      .locator("article")
+      .filter({ hasText: fixture.populatedWallet.publicKey })
+      .first();
+    await walletCard.getByRole("link", { name: "Manage" }).click();
+
+    await expect(page).toHaveURL(/\/dashboard\/wallets\/./, { timeout: 20_000 });
+    const walletIdentity = fixture.populatedWallet.label ?? fixture.populatedWallet.publicKey;
+    await expect(page.getByText(walletIdentity).first()).toBeVisible({ timeout: 20_000 });
+    await assertExactIdentityAndProject(page, fixture);
+    capture.assertClean();
+  });
+
+  test("payments transfers table shows the fixture transfer", async ({ page }) => {
+    const capture = capturePageFailures(page);
+
+    await page.goto("/dashboard/payments", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { level: 1, name: "Payments" })).toBeVisible();
+    await expect(page.getByText(fixture.transferMarker).first()).toBeVisible({ timeout: 20_000 });
+    capture.assertClean();
+  });
+
   test("wallets batches balance hydration into one request", async ({ page }) => {
     const capture = capturePageFailures(page);
     const batchBalanceRequests: string[] = [];
