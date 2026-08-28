@@ -19,6 +19,10 @@ assertExactConsumers("@kamino-finance/klend-sdk", [KAMINO_PACKAGE]);
 assertExactConsumers("@sdp/kamino", [API_PACKAGE]);
 assertExactConsumers("@jup-ag/lend", [JUPITER_LEND_PACKAGE]);
 assertExactConsumers("@sdp/jupiter-lend", [API_PACKAGE]);
+// Same rule for the WisdomTree execution package: only the API composes
+// executing providers. (No third-party SDK to pin — the package builds its
+// transfer legs from @solana/kit and @solana-program/token-2022 directly.)
+assertExactConsumers("@sdp/wisdomtree", [API_PACKAGE]);
 
 const safeBigintManifest = JSON.parse(readFileSync(path.join(ROOT, SAFE_BIGINT_PACKAGE), "utf8"));
 if (
