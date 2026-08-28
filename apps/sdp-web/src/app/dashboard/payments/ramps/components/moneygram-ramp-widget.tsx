@@ -12,6 +12,10 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
+import {
+  isTrustedRampDestination,
+  MONEYGRAM_WIDGET_APPROVED_HOSTS,
+} from "@/lib/trusted-ramp-destinations";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
@@ -187,6 +191,12 @@ export function MoneygramRampWidget({
       return;
     }
     const { sessionId, sessionToken, widgetUrl } = quote;
+    // The widget URL becomes the SDK's API base, so only HTTPS MoneyGram
+    // widget hosts may ever be mounted — anything else fails closed.
+    if (!isTrustedRampDestination(widgetUrl, MONEYGRAM_WIDGET_APPROVED_HOSTS)) {
+      setLoadError(t("DashboardPayments.ramps.untrustedProviderUrl"));
+      return;
+    }
     const mountPoint = document.createElement("div");
     mountPoint.className = "h-full w-full";
     container.appendChild(mountPoint);
