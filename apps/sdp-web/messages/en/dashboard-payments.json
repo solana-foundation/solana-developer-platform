@@ -661,7 +661,9 @@
       "solanaSignature": "Solana signature",
       "moneygramError": "MoneyGram error",
       "lastUpdated": "Last updated",
-      "copy": "Copy {label}"
+      "copy": "Copy {label}",
+      "viewReceipt": "View receipt",
+      "receipt": "Receipt"
     },
     "requestFailed": "Request failed.",
     "submitting": "Submitting...",
