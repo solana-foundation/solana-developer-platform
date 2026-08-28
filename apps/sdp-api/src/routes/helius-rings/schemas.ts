@@ -16,7 +16,7 @@ export const createRingsWalletSchema = z.object({
  * flow nothing can build has already consumed a policy evaluation and possibly
  * a human approval, and it tells the caller far less than a 400 does.
  */
-const ENABLED_OP_TYPES = ["shield", "withdraw"] as const;
+const ENABLED_OP_TYPES = ["shield", "withdraw", "transfer_registered"] as const;
 
 /**
  * Base units, as a string.
@@ -77,6 +77,20 @@ export const prepareRingsOperationSchema = z
           }),
           amountRaw,
         }),
+        to: z.string().min(1),
+      }),
+      z.strictObject({
+        ...operationFields,
+        opType: z.literal("transfer_registered"),
+        // Same SPL-vault caveat as withdraw — SOL is the only asset with a wired
+        // settlement in this build.
+        asset: z.strictObject({
+          mint: z.literal(SDP_NATIVE_MINT, {
+            error: "only SOL private transfers are supported",
+          }),
+          amountRaw,
+        }),
+        /** Recipient's canonical shielded address; the service resolves it to a same-tenant wallet. */
         to: z.string().min(1),
       }),
     ],

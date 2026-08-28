@@ -76,6 +76,16 @@ export interface BuildOperationInput {
   pinnedInputs?: string[];
   knownAssets?: KnownAsset[];
   requireSlot?: string;
+  /**
+   * Present only for private transfers: identifies the recipient wallet so the
+   * SDK can load its material and derive the ShieldedAddress needed to build the
+   * transfer output. Same tenant as the sender is enforced upstream.
+   */
+  recipient?: {
+    walletId: string;
+    owner: string;
+    expectedShieldedAddress: string;
+  };
 }
 
 export interface BuildOperationResult {

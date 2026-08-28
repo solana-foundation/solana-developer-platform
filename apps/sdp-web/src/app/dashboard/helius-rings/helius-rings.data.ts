@@ -247,7 +247,7 @@ export async function fetchRingsWalletIdentity(
  * rejects anything else on a strict schema, so widening this without widening
  * that one only moves the refusal later.
  */
-export type RingsOpType = "shield" | "withdraw";
+export type RingsOpType = "shield" | "withdraw" | "transfer_registered";
 
 export interface PrepareRingsOperationInput {
   walletId: string;

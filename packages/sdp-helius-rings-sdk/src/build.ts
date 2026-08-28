@@ -26,7 +26,7 @@ import {
 import { CustodyWalletAuthority } from "./authority.js";
 import { withZolanaErrorBridgeSync } from "./error-bridge.js";
 import { buildShieldTransaction } from "./flows/shield.js";
-import { buildWithdrawal, type SpendDeps } from "./flows/spend.js";
+import { buildTransfer, buildWithdrawal, type SpendDeps } from "./flows/spend.js";
 import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
 import { hydrateWallet } from "./wallet.js";
 
@@ -90,7 +90,7 @@ export async function buildRingsOperation(
         );
       }
 
-      if (operation.opType !== "withdraw") {
+      if (operation.opType !== "withdraw" && operation.opType !== "transfer_registered") {
         throw new HeliusRingsError(
           "invalid_input",
           `unsupported Rings operation type: ${operation.opType}`
@@ -120,6 +120,47 @@ export async function buildRingsOperation(
       });
 
       const spend: SpendDeps = { client: deps.client, wallet, authority, material, owner };
+
+      if (operation.opType === "transfer_registered") {
+        if (!input.recipient) {
+          throw new HeliusRingsError(
+            "invalid_input",
+            "a private transfer needs a recipient wallet identifier"
+          );
+        }
+        // Load the recipient's material inside its own scope purely to lift out
+        // the ShieldedAddress. That object is public — no secrets outlive the
+        // scope — and Zolana's `.send` needs the full three-key form the
+        // canonical shielded-identity string can't rebuild alone.
+        const recipient = input.recipient;
+        const recipientShieldedAddress = await deps.material.withMaterial(
+          {
+            organizationId: deps.organizationId,
+            projectId: deps.projectId,
+            walletId: recipient.walletId,
+            owner: recipient.owner,
+          },
+          async (recipientMaterial) => {
+            assertProvisionedIdentity(recipientMaterial, recipient.expectedShieldedAddress);
+            return recipientMaterial.shieldedAddress;
+          }
+        );
+
+        const built = await buildTransfer(spend, {
+          recipient: recipientShieldedAddress,
+          mint,
+          amountRaw: requireAmount(input),
+          ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
+        });
+
+        const lifetime = await deps.client.getLatestBlockhash();
+        return finish(
+          assemble(owner, built.instructions ?? [], lifetime),
+          built.inputNotes,
+          lifetime
+        );
+      }
+
       const built = await buildWithdrawal(spend, {
         recipient: requireRecipient(input),
         mint,

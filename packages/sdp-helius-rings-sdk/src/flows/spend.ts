@@ -1,3 +1,4 @@
+import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import { transactInstruction } from "@heliuslabs/zolana/interface";
 import {
@@ -29,6 +30,14 @@ export interface SpendResult {
 
 export interface WithdrawInput {
   readonly recipient: string;
+  readonly mint: string;
+  readonly amountRaw: string;
+  readonly pinnedInputs?: readonly string[];
+}
+
+export interface TransferInput {
+  /** Full recipient shielded address; caller loaded the recipient's material to obtain it. */
+  readonly recipient: ShieldedAddress;
   readonly mint: string;
   readonly amountRaw: string;
   readonly pinnedInputs?: readonly string[];
@@ -69,6 +78,52 @@ export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Pr
           kind: "withdraw",
           owner: deps.owner,
           recipient,
+          amount,
+        }),
+      }),
+    ],
+    inputNotes: selection.ids,
+  };
+}
+
+/**
+ * Shielded → shielded transfer. Same note-selection + proving path as a
+ * withdraw, but the confidential transfer's `.send()` names a shielded recipient
+ * instead of a public settlement target. No interface transfer on the outer tx.
+ */
+export async function buildTransfer(deps: SpendDeps, input: TransferInput): Promise<SpendResult> {
+  const protocolAsset = protocolMint(input.mint);
+  if (protocolAsset !== PROTOCOL_NATIVE_MINT) {
+    throw new HeliusRingsError("invalid_input", "only SOL transfers are supported in this build");
+  }
+
+  const asset = address(protocolAsset);
+  const amount = BigInt(input.amountRaw);
+  const selection = selectNotes({
+    wallet: deps.wallet,
+    asset,
+    amount,
+    ...(input.pinnedInputs ? { pinned: input.pinnedInputs } : {}),
+  });
+
+  const transfer = new ConfidentialTransfer(
+    deps.material.shieldedAddress,
+    proofInputs(deps, selection),
+    deps.owner
+  );
+  transfer.send(input.recipient, asset, amount);
+
+  return {
+    instructions: [
+      transactInstruction({
+        payer: deps.owner,
+        inputTree: deps.client.tree,
+        outputTree: deps.client.tree,
+        data: await prove(deps, transfer, {
+          kind: "transfer_registered",
+          owner: deps.owner,
+          recipient: input.recipient,
+          asset,
           amount,
         }),
       }),

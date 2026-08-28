@@ -15,24 +15,29 @@ import {
 } from "./helius-rings.data";
 import { formatAssetAmount, parseDecimalToBaseUnits } from "./helius-rings.utils";
 
+export interface CustodySummary {
+  readonly name: string;
+  readonly publicKey: string;
+}
+
 type Translate = ReturnType<typeof useTranslations>;
 
-/** Backend accepts shield + withdraw; private_transfer is UI-only until server support lands. */
-type ComposerOpType = RingsOpType | "private_transfer";
-const OP_TABS: readonly ComposerOpType[] = ["shield", "withdraw", "private_transfer"] as const;
+// UI tab labels map 1:1 to server op types; `transfer_registered` is what the
+// API accepts for shielded → shielded transfers within this project.
+const OP_TABS: readonly RingsOpType[] = ["shield", "withdraw", "transfer_registered"] as const;
 
 type Phase = { name: "compose" } | { name: "review"; error: string | null };
 
 interface ComposerDraft {
   walletId: string;
-  opType: ComposerOpType;
+  opType: RingsOpType;
   assetMint: string;
   /** User-typed decimal amount, e.g. "1.01". Converted to base units at submit. */
   amountDecimal: string;
   recipient: string;
 }
 
-function newDraft(walletId: string, opType: ComposerOpType = "shield"): ComposerDraft {
+function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDraft {
   return {
     walletId,
     opType,
@@ -52,25 +57,38 @@ function draftAmountRaw(draft: ComposerDraft): string | null {
 }
 
 function isDraftComplete(draft: ComposerDraft): boolean {
-  if (draft.opType === "private_transfer") return false;
   if (draftAmountRaw(draft) === null) return false;
-  return draft.opType !== "withdraw" || draft.recipient.trim().length > 0;
+  // Withdraw's recipient is derived from the wallet's own custody address; only
+  // private transfers still need an explicit recipient choice.
+  if (draft.opType === "transfer_registered") {
+    return draft.recipient.trim().length > 0;
+  }
+  return true;
 }
 
-function buildSummaryRows(t: Translate, draft: ComposerDraft): Array<[string, string]> {
+function buildSummaryRows(
+  t: Translate,
+  draft: ComposerDraft,
+  custody: CustodySummary | null,
+  recipientOptions: readonly RingsWallet[]
+): Array<[string, string]> {
   const amountRaw = draftAmountRaw(draft);
   const rows: Array<[string, string]> = [
     [
       t("DashboardHeliusRings.composer.summaryOperation"),
-      t(`DashboardHeliusRings.activity.opType_${draft.opType === "private_transfer" ? "transfer_anonymous" : draft.opType}`),
+      t(`DashboardHeliusRings.activity.opType_${draft.opType}`),
     ],
     [
       t("DashboardHeliusRings.composer.summaryAmount"),
       formatAssetAmount(amountRaw, draft.assetMint),
     ],
   ];
-  if (draft.opType === "withdraw") {
-    rows.push([t("DashboardHeliusRings.composer.summaryRecipient"), draft.recipient]);
+  if (draft.opType === "transfer_registered") {
+    const recipientWallet = recipientOptions.find((w) => w.shieldedAddress === draft.recipient);
+    rows.push([
+      t("DashboardHeliusRings.composer.summaryRecipient"),
+      recipientWallet?.name ?? draft.recipient,
+    ]);
   }
   return rows;
 }
@@ -78,10 +96,16 @@ function buildSummaryRows(t: Translate, draft: ComposerDraft): Array<[string, st
 /** Compose then review; confirming hands the operation to Activity. */
 export function OperationComposer({
   wallets,
+  recipientOptions,
+  custody,
   gatewayRed,
   onPrepared,
 }: {
   wallets: RingsWallet[];
+  /** Other private wallets in the same project the sender can transfer to. */
+  recipientOptions: RingsWallet[];
+  /** Custody wallet backing the selected private wallet — name + Solana pubkey. */
+  custody: CustodySummary | null;
   gatewayRed: boolean;
   onPrepared: () => Promise<void>;
 }) {
@@ -89,7 +113,8 @@ export function OperationComposer({
 
   // Workspace selection guarantees exactly one wallet by the time we mount, but
   // guard anyway so a stale prop doesn't submit against a missing id.
-  const walletId = wallets[0]?.id ?? null;
+  const wallet = wallets[0] ?? null;
+  const walletId = wallet?.id ?? null;
 
   const [phase, setPhase] = useState<Phase>({ name: "compose" });
   const [draft, setDraft] = useState<ComposerDraft>(() => newDraft(walletId ?? ""));
@@ -112,18 +137,32 @@ export function OperationComposer({
   }, []);
 
   const handleConfirm = useCallback(async () => {
-    if (draft.opType === "private_transfer") return;
     const amountRaw = draftAmountRaw(draft);
     if (amountRaw === null) return;
     setSubmitting(true);
     setPhase({ name: "review", error: null });
     let prepared: Awaited<ReturnType<typeof prepareRingsOperation>>;
     try {
+      // Withdraw always lands in the wallet's own custody address — no free
+      // input. Transfer uses the recipient private wallet's shielded address.
+      const to =
+        draft.opType === "withdraw"
+          ? (custody?.publicKey ?? undefined)
+          : draft.opType === "transfer_registered"
+            ? draft.recipient.trim()
+            : undefined;
+      if ((draft.opType === "withdraw" || draft.opType === "transfer_registered") && !to) {
+        setPhase({
+          name: "review",
+          error: t("DashboardHeliusRings.composer.prepareFailed"),
+        });
+        return;
+      }
       prepared = await prepareRingsOperation({
         walletId: draft.walletId,
         opType: draft.opType,
         asset: { mint: draft.assetMint, amountRaw },
-        to: draft.opType === "withdraw" ? draft.recipient.trim() : undefined,
+        to,
       });
     } finally {
       setSubmitting(false);
@@ -141,13 +180,18 @@ export function OperationComposer({
     await onPrepared();
   }, [draft, onPrepared, t]);
 
-  const summaryRows = useMemo(() => buildSummaryRows(t, draft), [t, draft]);
+  const summaryRows = useMemo(
+    () => (wallet ? buildSummaryRows(t, draft, custody, recipientOptions) : []),
+    [t, draft, wallet, custody, recipientOptions]
+  );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>{t("DashboardHeliusRings.composer.title")}</CardTitle>
-        <CardDescription>{t("DashboardHeliusRings.composer.description")}</CardDescription>
+        <CardDescription>
+          {t(`DashboardHeliusRings.composer.description_${draft.opType}`)}
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {started && phase.name === "compose" ? (
@@ -167,6 +211,8 @@ export function OperationComposer({
             />
             <ComposeStep
               draft={draft}
+              custody={custody}
+              recipientOptions={recipientOptions}
               onPatch={patchDraft}
               onReview={() => setPhase({ name: "review", error: null })}
             />
@@ -193,8 +239,8 @@ function OpTabs({
   value,
   onSelect,
 }: {
-  value: ComposerOpType;
-  onSelect: (op: ComposerOpType) => void;
+  value: RingsOpType;
+  onSelect: (op: RingsOpType) => void;
 }) {
   const t = useTranslations();
   return (
@@ -237,18 +283,24 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ComposeStep({
   draft,
+  custody,
+  recipientOptions,
   onPatch,
   onReview,
 }: {
   draft: ComposerDraft;
+  custody: CustodySummary | null;
+  recipientOptions: readonly RingsWallet[];
   onPatch: (patch: Partial<ComposerDraft>) => void;
   onReview: () => void;
 }) {
   const t = useTranslations();
 
-  if (draft.opType === "private_transfer") {
+  if (draft.opType === "transfer_registered" && recipientOptions.length === 0) {
     return (
-      <Callout variant="info">{t("DashboardHeliusRings.composer.privateTransferComingSoon")}</Callout>
+      <Callout variant="info">
+        {t("DashboardHeliusRings.composer.privateTransferNoRecipients")}
+      </Callout>
     );
   }
 
@@ -284,13 +336,24 @@ function ComposeStep({
         </Field>
       </div>
 
-      {draft.opType === "withdraw" ? (
-        <Field label={t("DashboardHeliusRings.composer.recipient")}>
-          <Input
-            value={draft.recipient}
-            placeholder={t("DashboardHeliusRings.composer.recipientPlaceholder")}
-            onChange={(event) => onPatch({ recipient: event.target.value })}
-          />
+      {draft.opType === "transfer_registered" ? (
+        <Field label={t("DashboardHeliusRings.composer.recipientPrivateWallet")}>
+          <Select
+            ariaLabel={t("DashboardHeliusRings.composer.recipientPrivateWallet")}
+            value={draft.recipient || null}
+            onValueChange={(value) => {
+              if (value) onPatch({ recipient: value });
+            }}
+            placeholder={t("DashboardHeliusRings.composer.recipientPrivateWalletPlaceholder")}
+          >
+            {recipientOptions.map((option) =>
+              option.shieldedAddress === null ? null : (
+                <SelectItem key={option.id} value={option.shieldedAddress}>
+                  {option.name}
+                </SelectItem>
+              )
+            )}
+          </Select>
         </Field>
       ) : null}
 
@@ -302,6 +365,7 @@ function ComposeStep({
     </>
   );
 }
+
 
 function ReviewStep({
   rows,

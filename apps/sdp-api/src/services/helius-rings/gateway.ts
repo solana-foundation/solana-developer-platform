@@ -49,6 +49,11 @@ export type RingsOuterTransactionPolicyInput = Readonly<{
         mint: string;
         amountRaw: string;
         to: string;
+      }>
+    | Readonly<{
+        opType: "transfer_registered";
+        mint: string;
+        amountRaw: string;
       }>;
   expectedTree?: string;
 }>;

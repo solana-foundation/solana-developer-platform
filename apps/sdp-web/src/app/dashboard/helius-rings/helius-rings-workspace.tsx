@@ -189,13 +189,15 @@ export function HeliusRingsWorkspace({
     await refresh();
   }, [selectedCustodyWallet, walletName, refresh, t]);
 
-  const custodyLabel = useMemo(() => {
-    const byId = new Map(custodyWallets.map((wallet) => [wallet.walletId, wallet]));
-    return (sdpWalletId: string) => {
-      const wallet = byId.get(sdpWalletId);
-      return wallet?.label ?? sdpWalletId;
-    };
-  }, [custodyWallets]);
+  const custodyByWalletId = useMemo(
+    () => new Map(custodyWallets.map((wallet) => [wallet.walletId, wallet])),
+    [custodyWallets]
+  );
+
+  const custodyLabel = useCallback(
+    (sdpWalletId: string) => custodyByWalletId.get(sdpWalletId)?.label ?? sdpWalletId,
+    [custodyByWalletId]
+  );
 
   // One custody wallet = one private wallet. Anything already bound (including a
   // pending row: it holds the slot too) drops out of the create form.
@@ -431,6 +433,17 @@ export function HeliusRingsWorkspace({
             <WalletOverview wallet={selectedWallet} refreshTick={balancesTick} />
             <OperationComposer
               wallets={[selectedWallet]}
+              recipientOptions={wallets.filter(
+                (wallet) => wallet.id !== selectedWallet.id && wallet.shieldedAddress !== null
+              )}
+              custody={(() => {
+                const custody = custodyByWalletId.get(selectedWallet.sdpWalletId);
+                if (!custody) return null;
+                return {
+                  name: custody.label ?? custody.walletId,
+                  publicKey: custody.publicKey,
+                };
+              })()}
               gatewayRed={upstreamsRed}
               onPrepared={refresh}
             />

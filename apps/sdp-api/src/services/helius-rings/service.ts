@@ -123,8 +123,11 @@ function assertOperationEnabled(opType: PrivateOperationInput["opType"]): void {
       "merge is temporarily disabled until fresh wallet sync can replay merged state safely"
     );
   }
-  if (opType === "transfer_registered" || opType === "transfer_anonymous") {
-    throw new HeliusRingsError("invalid_input", "transfer is not enabled in this build");
+  if (opType === "transfer_anonymous") {
+    throw new HeliusRingsError(
+      "invalid_input",
+      "anonymous transfer is not enabled in this build"
+    );
   }
 }
 
@@ -796,6 +799,12 @@ export class HeliusRingsService {
       // the outer transaction is built for, and the key that must sign it.
       const owner = await this.requireOwner(current.wallet_id);
       const wallet = await this.requireWallet(current.wallet_id);
+      // Private transfers require the recipient wallet's ShieldedAddress; the
+      // SDK reloads its material transiently to lift it out.
+      const recipient =
+        current.op_type === "transfer_registered"
+          ? await this.resolveTransferRecipient(current)
+          : undefined;
       const built = await this.gateway.buildOperation({
         operation: this.toPrivateOperation(current),
         owner,
@@ -808,6 +817,7 @@ export class HeliusRingsService {
         // already consumed, and the chain rejects the transaction it goes into.
         ...(wallet.last_indexed_slot ? { requireSlot: wallet.last_indexed_slot } : {}),
         knownAssets: await this.knownAssets(),
+        ...(recipient ? { recipient } : {}),
       });
 
       // Proving and building are one call: the SDK proves inside the builder, so
@@ -1037,6 +1047,42 @@ export class HeliusRingsService {
     const wallet = await this.wallets.getWalletById({ ...this.tenant, id: walletId });
     if (!wallet) throw new AppError("NOT_FOUND", "rings wallet not found");
     return wallet;
+  }
+
+  /**
+   * Recipient of a private transfer, matched by shielded address within this
+   * project. The recipient must be an already-provisioned wallet in the same
+   * tenant — cross-tenant transfers are not supported in this build.
+   */
+  private async resolveTransferRecipient(
+    operation: HeliusRingsOperationRow
+  ): Promise<{ walletId: string; owner: string; expectedShieldedAddress: string }> {
+    const shieldedAddress = operation.to_addr;
+    if (!shieldedAddress) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "a private transfer must name a recipient shielded address"
+      );
+    }
+    if (shieldedAddress === operation.wallet_id) {
+      throw new HeliusRingsError("invalid_input", "cannot transfer to self");
+    }
+    const rows = await this.wallets.listWallets({ ...this.tenant });
+    const recipient = rows.find((row) => row.shielded_address === shieldedAddress);
+    if (!recipient || !recipient.owner_address || !recipient.shielded_address) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "the private transfer recipient must be a provisioned wallet in this project"
+      );
+    }
+    if (recipient.id === operation.wallet_id) {
+      throw new HeliusRingsError("invalid_input", "cannot transfer to self");
+    }
+    return {
+      walletId: recipient.id,
+      owner: recipient.owner_address,
+      expectedShieldedAddress: recipient.shielded_address,
+    };
   }
 
   /**
@@ -1275,6 +1321,15 @@ function outerTransactionPolicyInput(
           opType: "withdraw",
           ...common,
           to: requiredOuterPolicyField(operation.to_addr),
+        },
+      };
+    case "transfer_registered":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: {
+          opType: "transfer_registered",
+          ...common,
         },
       };
     default:
