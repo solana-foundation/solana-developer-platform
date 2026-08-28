@@ -62,10 +62,10 @@ beforeEach(() => resetWisdomTreeTokenCache());
 afterEach(() => vi.restoreAllMocks());
 
 describe("capability shape", () => {
-  it("is vault-direct with eligibility, without withdraw, and never custodial", () => {
+  it("is vault-direct with eligibility AND withdraw, and never custodial", () => {
     const client = offlineClient(fakeReader({}));
     expect(supportsVaultDirect(client)).toBe(true);
-    expect(supportsVaultWithdraw(client)).toBe(false);
+    expect(supportsVaultWithdraw(client)).toBe(true);
     expect(supportsDepositEligibility(client)).toBe(true);
     expect(() => assertWisdomTreeNotPortfolioProvider(client)).not.toThrow();
   });
