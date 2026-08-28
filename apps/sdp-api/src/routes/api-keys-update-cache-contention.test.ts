@@ -93,6 +93,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
+import { ApiKeyService } from "@/services/api-key.service";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -262,6 +263,51 @@ describe("API key update with contended cache refresh", () => {
     // And the retry is admitted rather than refused as a duplicate.
     expect((await rotateTargetKey({ gracePeriodHours: 0 })).status).toBe(201);
     expect(await targetKeyListStatus()).toBe(401);
+  });
+
+  it("retries a rollback that fails transiently instead of leaving the deadline uncached", async () => {
+    // Same window as above, plus a Postgres blip on the first undo. Conceding
+    // after one attempt would commit the one state nothing can repair:
+    // Postgres carrying a rotation deadline the cached entry does not know
+    // about, which lets the old secret authenticate past it for the entry's
+    // full TTL — the sweep cannot help, it writes to the same dead cache.
+    const undoRotation = ApiKeyService.prototype.undoRotation;
+    let undoAttempts = 0;
+    const undoSpy = vi
+      .spyOn(ApiKeyService.prototype, "undoRotation")
+      .mockImplementation(async function (this: ApiKeyService, ...args) {
+        undoAttempts += 1;
+        if (undoAttempts === 1) {
+          throw new Error("simulated transient postgres failure");
+        }
+        return await undoRotation.apply(this, args);
+      });
+
+    try {
+      kvContention.failWritesAfter = 1;
+
+      const res = await rotateTargetKey({ gracePeriodHours: 0 });
+      expect(res.status).toBe(503);
+      expect(undoAttempts).toBeGreaterThan(1);
+
+      // The retry landed the undo, so Postgres again matches the stale entry.
+      const row = await getDb(env)
+        .prepare("SELECT status, rotation_deadline FROM api_keys WHERE id = ?")
+        .bind(TARGET_KEY.id)
+        .first<{ status: string; rotation_deadline: string | null }>();
+      expect(row?.status).toBe("active");
+      expect(row?.rotation_deadline).toBeNull();
+
+      const liveReplacements = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*) AS count FROM api_keys WHERE rotated_from = ? AND status = 'active'"
+        )
+        .bind(TARGET_KEY.id)
+        .first<{ count: number }>();
+      expect(Number(liveReplacements?.count)).toBe(0);
+    } finally {
+      undoSpy.mockRestore();
+    }
   });
 
   it("refuses to rotate at all while the cache cannot accept the invalidation", async () => {

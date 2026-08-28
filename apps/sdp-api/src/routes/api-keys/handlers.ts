@@ -121,6 +121,45 @@ async function tryRefreshApiKeyCache(
   }
 }
 
+/**
+ * Undo a committed rotation whose cache invalidation failed, putting Postgres
+ * back into the state the stale cached entry already describes.
+ *
+ * This is the last repair that does not need the cache, so it retries rather
+ * than settling for the one outcome nothing can fix: Postgres carrying a
+ * rotation deadline the cache does not know about, which lets the old secret
+ * authenticate past it. A single attempt would concede that on a dropped
+ * connection or a lock timeout — far likelier than an outage lasting the whole
+ * window. The undo is idempotent (clear the deadline, revoke the replacement),
+ * so a retry after a partial-looking failure is safe.
+ *
+ * Failing every attempt means neither store accepts writes. Nothing can then
+ * record the deadline anywhere the reader looks — not this handler, and not
+ * the reconciliation sweep, which writes to the same cache — so the caller is
+ * told which key to revoke by hand.
+ */
+async function tryUndoRotation(
+  apiKeyService: ApiKeyService,
+  keyId: string,
+  replacementKeyId: string
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    try {
+      await apiKeyService.undoRotation(keyId, replacementKeyId);
+      return true;
+    } catch (error) {
+      getLogger().error(
+        { error, keyId, replacementKeyId, attempt },
+        "Rotation rollback attempt failed"
+      );
+    }
+  }
+  return false;
+}
+
 function resolveActor(c: AppContext): {
   organizationId: string;
   permissions: Permission[];
@@ -717,8 +756,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     // Postgres carries, with every repair path blocked on the same store.
     // Undo instead — put Postgres back into the state that stale entry
     // already describes, so nothing is left inconsistent with it.
-    try {
-      await apiKeyService.undoRotation(keyId, rotation.apiKey.id);
+    if (await tryUndoRotation(apiKeyService, keyId, rotation.apiKey.id)) {
       getLogger().error(
         { keyId, newKeyId: rotation.apiKey.id },
         "Rotated key cache entry could not be refreshed or dropped; rotation rolled back"
@@ -727,22 +765,20 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
         "SERVICE_UNAVAILABLE",
         "Rotation was rolled back because cached credentials could not be invalidated; nothing was changed, so retry shortly"
       );
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-      // The undo itself failed, so the rotation stands with a stale cached
-      // deadline. The reconciliation sweep repairs it once the store
-      // accepts writes again; surface it rather than report success.
-      getLogger().error(
-        { error, keyId, newKeyId: rotation.apiKey.id },
-        "Rotated key cache entry could not be invalidated and the rollback failed; the reconciliation sweep enforces the rotation deadline"
-      );
-      throw new AppError(
-        "INTERNAL_ERROR",
-        `Rotation committed but cached credentials could not be invalidated and the rollback failed. The replacement key is ${rotation.apiKey.id}; revoke it and retry, as its secret was not delivered.`
-      );
     }
+
+    // Neither store accepted writes, so the rotation stands with a cached
+    // entry that still reports no deadline. Nothing here can repair that —
+    // the sweep writes to the same cache — so name the key an operator has
+    // to revoke by hand rather than imply an automatic recovery.
+    getLogger().error(
+      { keyId, newKeyId: rotation.apiKey.id },
+      "Rotated key cache entry could not be invalidated and every rollback attempt failed; the old secret authenticates until the cache accepts writes or its entry expires"
+    );
+    throw new AppError(
+      "INTERNAL_ERROR",
+      `Rotation committed but cached credentials could not be invalidated and the rollback failed. The replacement key is ${rotation.apiKey.id}; revoke it and retry, as its secret was not delivered.`
+    );
   }
 
   try {
