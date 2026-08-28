@@ -13,7 +13,7 @@ import {
   createPolicyRepository,
   type UpsertApiKeyWalletPolicyBindingInput,
 } from "@/db/repositories";
-import { refreshApiKeyCache } from "@/lib/api-key-cache";
+import { dropApiKeyCacheEntry, refreshApiKeyCache } from "@/lib/api-key-cache";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -80,10 +80,15 @@ async function ensureApiKeyCacheRefreshed(
  * request over this write: the replacement key's one-time secret is already
  * committed and exists only in the pending response, so a 500 here pushes
  * the caller into rotating again — minting a second live credential while
- * the first one's secret is lost. Retries absorb transient failures; a
- * refresh that never lands is reported to the caller-independent
- * reconciliation sweep, which enforces the old key's rotation deadline
- * within its per-minute cadence.
+ * the first one's secret is lost.
+ *
+ * Retries absorb transient failures. When they are exhausted the slot may
+ * still hold the pre-rotation entry, whose `rotationDeadline: null` would let
+ * the old secret reach protected endpoints past the deadline Postgres now
+ * carries — and with `gracePeriodHours: 0` that deadline is immediate. So the
+ * entry is dropped instead of left standing: the next request misses and
+ * re-reads the real deadline, rather than waiting on the reconciliation
+ * sweep. Only when that also fails is the sweep the remaining path.
  */
 async function tryRefreshApiKeyCache(
   db: DatabaseClient,
@@ -99,11 +104,17 @@ async function tryRefreshApiKeyCache(
         return true;
       }
     } catch {
-      // Thrown store errors retry like lost CAS rounds; the sweep is the
-      // durable path if the store stays down.
+      // Thrown store errors retry like lost CAS rounds; the drop below and
+      // then the sweep are the remaining paths if the store stays down.
     }
   }
-  return false;
+
+  try {
+    await dropApiKeyCacheEntry(kv, keyHash);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function resolveActor(c: AppContext): {
@@ -684,7 +695,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
   if (!oldKeyCacheRefreshed) {
     getLogger().error(
       { keyId },
-      "Rotated key cache refresh failed; the reconciliation sweep enforces the rotation deadline"
+      "Rotated key cache entry could not be refreshed or dropped; the reconciliation sweep enforces the rotation deadline"
     );
   }
 

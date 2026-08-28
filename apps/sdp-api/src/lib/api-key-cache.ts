@@ -378,6 +378,24 @@ function tryParseStatus(raw: string): ApiKeyStatus | null {
 }
 
 /**
+ * Last-resort invalidation for a mutation that cannot fail its request but
+ * must not leave pre-mutation authorization cached — today only rotation,
+ * whose response carries the replacement secret. Emptying the slot turns a
+ * stale trusted entry into a miss, and the next request re-reads Postgres
+ * through the verified fill path rather than waiting on the reconciliation
+ * sweep.
+ *
+ * The module's "refresh, never delete" rule does not apply here: it guarded
+ * against an in-flight fill from a pre-mutation read repopulating the emptied
+ * slot, which two-phase installs already prevent — such a fill lands pending,
+ * verifies against Postgres, sees the drift, and repairs to authoritative
+ * state. Deleting is therefore strictly safer than leaving the stale entry.
+ */
+export async function dropApiKeyCacheEntry(kv: KVStore, keyHash: string): Promise<void> {
+  await kv.delete(apiKeyCacheKey(keyHash));
+}
+
+/**
  * Re-read the key from Postgres and overwrite the cache with that state.
  * Every mutation path (revoke, update, rotate, organization delete) must call
  * this before reporting success so the next request observes the change.

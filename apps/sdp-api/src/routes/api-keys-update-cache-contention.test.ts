@@ -231,7 +231,7 @@ describe("API key update with contended cache refresh", () => {
     expect(await targetKeyListStatus()).toBe(403);
   });
 
-  async function rotateTargetKey(): Promise<Response> {
+  async function rotateTargetKey(body: Record<string, unknown> = {}): Promise<Response> {
     return await app.request(
       `/v1/api-keys/${TARGET_KEY.id}/rotate`,
       {
@@ -240,11 +240,33 @@ describe("API key update with contended cache refresh", () => {
           Authorization: `Bearer ${ADMIN_KEY.raw}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       },
       env
     );
   }
+
+  it("stops the old secret at an immediate deadline the refresh could not cache", async () => {
+    // gracePeriodHours: 0 means the old key is done the moment the rotation
+    // commits. Rotation cannot fail its request over a cache write, so a
+    // contended refresh used to leave the pre-rotation entry standing with
+    // rotationDeadline: null — and the middleware reads the deadline solely
+    // from the cache, so the old secret kept working until the sweep ran.
+    kvContention.contendApiKeyCas = true;
+
+    expect((await rotateTargetKey({ gracePeriodHours: 0 })).status).toBe(201);
+
+    const row = await getDb(env)
+      .prepare("SELECT rotation_deadline FROM api_keys WHERE id = ?")
+      .bind(TARGET_KEY.id)
+      .first<{ rotation_deadline: string | null }>();
+    expect(row?.rotation_deadline).toBeTruthy();
+
+    // No sweep, no client retry: the very next request must already be
+    // refused, because the unwritable entry was dropped rather than left to
+    // authorize past the deadline.
+    expect(await targetKeyListStatus()).toBe(401);
+  });
 
   it("refuses to mint a second live key when one replacement already exists", async () => {
     // Rotation is a create: its secret exists only in the response that
@@ -294,11 +316,16 @@ describe("API key update with contended cache refresh", () => {
       .first<{ count: number }>();
     expect(Number(replacements?.count)).toBe(1);
 
-    // The store recovers; no client retry exists for rotation, so the
-    // reconciliation sweep is what lands the old key's deadline in cache.
+    // The unwritable entry was dropped rather than left reporting no
+    // deadline, so nothing stale survives the request that could not write.
+    const targetHash = await hashString(TARGET_KEY.raw, env.API_KEY_PEPPER);
+    const kv = createKVStoreSet(env).apiKeys;
+    expect(await kv.get(apiKeyCacheKey(targetHash))).toBeNull();
+
+    // A miss, so the next request re-reads Postgres and caches the real
+    // deadline — no sweep and no client retry involved.
     kvContention.contendApiKeyCas = false;
-    const outcome = await reconcileRevokedApiKeyCache(env);
-    expect(outcome.repaired).toBe(1);
+    expect(await targetKeyListStatus()).toBe(200);
 
     const row = await getDb(env)
       .prepare("SELECT rotation_deadline FROM api_keys WHERE id = ?")
@@ -306,11 +333,10 @@ describe("API key update with contended cache refresh", () => {
       .first<{ rotation_deadline: string | null }>();
     expect(row?.rotation_deadline).toBeTruthy();
 
-    const targetHash = await hashString(TARGET_KEY.raw, env.API_KEY_PEPPER);
-    const cached = await createKVStoreSet(env).apiKeys.get<CachedApiKey>(
-      apiKeyCacheKey(targetHash),
-      "json"
-    );
+    const cached = await kv.get<CachedApiKey>(apiKeyCacheKey(targetHash), "json");
     expect(cached?.rotationDeadline).toBe(row?.rotation_deadline);
+
+    // And the sweep has nothing left to repair for this key.
+    expect((await reconcileRevokedApiKeyCache(env)).repaired).toBe(0);
   });
 });
