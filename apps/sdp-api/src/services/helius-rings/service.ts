@@ -588,6 +588,46 @@ export class HeliusRingsService {
   }
 
   /**
+   * Escalates a signed failure whose blockhash has expired to
+   * `manual_reconciliation_required`, if Photon still has nothing.
+   *
+   * Never assumes absence on its own: asks Photon first, and only if the
+   * indexer still holds nothing does the row's failure code change. That keeps
+   * the invariant that positive evidence is the only path to `completed`.
+   */
+  async escalateToManualReconciliation(operationId: string): Promise<PrivateOperation> {
+    const operation = await this.requireOperation(operationId);
+    if (operation.state !== "failed" || !operation.signed_transaction) {
+      return this.toPrivateOperation(operation);
+    }
+    if (operation.failure_code === "manual_reconciliation_required") {
+      return this.toPrivateOperation(operation);
+    }
+
+    // A late Photon hit is the same answer as the happy path; take it.
+    const settled = await this.completeIfIndexed(operationId);
+    if (settled.state === "completed") return settled;
+
+    const message = operation.outer_tx_signature
+      ? `signed transaction ${operation.outer_tx_signature} did not land after its blockhash expired; reconcile it on chain before starting another`
+      : "signed bytes did not land after their blockhash expired; reconcile on chain before starting another";
+    const escalated = await this.operations.escalateToManualReconciliation({
+      ...this.tenant,
+      id: operation.id,
+      message,
+    });
+    if (!escalated) return this.toPrivateOperation(await this.requireOperation(operation.id));
+
+    await this.events.append({
+      operationId: escalated.id,
+      kind: "operation.escalated",
+      payload: { fromCode: operation.failure_code },
+    });
+
+    return this.toPrivateOperation(escalated);
+  }
+
+  /**
    * Completes a signed failure if Photon now holds it, and does nothing if not.
    *
    * Never reads the chain or the blockhash, so it can never conclude absence —

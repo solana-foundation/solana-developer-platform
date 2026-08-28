@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
-import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
+import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchRingsOperationDetail, type RingsOperationDetail } from "./helius-rings.data";
 import { formatTimeOfDay, formatWhen } from "./helius-rings.utils";
@@ -49,10 +49,12 @@ export function OperationDetailDrawer({
     });
   }, [detail]);
 
+  const title = t("DashboardHeliusRings.detail.title");
+
   return (
-    <Drawer open={operationId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DrawerContent className="flex w-full max-w-md flex-col gap-4 p-6">
-        <DrawerTitle>{t("DashboardHeliusRings.detail.title")}</DrawerTitle>
+    <Modal isOpen={operationId !== null} ariaLabel={title} onClose={onClose} size="md">
+      <div className="flex flex-col gap-4 p-6 pr-14">
+        <h2 className="text-base font-medium text-primary">{title}</h2>
 
         {error ? <Callout variant="danger">{error}</Callout> : null}
 
@@ -125,8 +127,8 @@ export function OperationDetailDrawer({
             </div>
           </>
         ) : null}
-      </DrawerContent>
-    </Drawer>
+      </div>
+    </Modal>
   );
 }
 

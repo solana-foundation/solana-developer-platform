@@ -102,6 +102,11 @@ const ADAPTER_FAILURE_MESSAGES = {
     "custody could not sign the Rings registration transaction for this wallet's owner",
   submit_failed:
     "the Rings registration transaction could not be broadcast; confirm the wallet owner holds devnet SOL for the fee",
+  // Preflight rejection during provisioning: the SDK's own submit hook. Same
+  // shape reason as submit_failed here — the caller has to fix the tx before
+  // provisioning can proceed.
+  manual_reconciliation_required:
+    "the Rings registration transaction was rejected by simulation and never broadcast; verify the wallet owner's balance and reprovision",
 } as const satisfies Record<RingsAdapterError["failureCode"], string>;
 
 async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {

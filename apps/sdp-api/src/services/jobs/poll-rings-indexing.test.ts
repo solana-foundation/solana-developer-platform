@@ -385,6 +385,64 @@ describe("pollRingsIndexing", () => {
       expect(row?.state).toBe("failed");
     });
 
+    it("escalates a stuck signed failure once its blockhash has expired", async () => {
+      const id = await strand("withdraw", "job-failed-escalate");
+      await createHeliusRingsOperationRepository(env).failOperation({
+        ...tenant,
+        id,
+        expectedState: "indexing",
+        code: "submit_failed",
+        message: "Transaction simulation failed: InsufficientFundsForRent",
+        retryable: false,
+      });
+
+      // Bytes still exist and the failure code is not yet reconcilable, so
+      // the row holds the wallet's slot forever. The reconcile pass upgrades
+      // it to manual_reconciliation_required so an operator can void.
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      expect(row?.state).toBe("failed");
+      expect(row?.failure_code).toBe("manual_reconciliation_required");
+      expect(row?.retryable).toBe(false);
+      expect(row?.signed_transaction).not.toBeNull();
+    });
+
+    it("leaves a signed failure alone until its blockhash has passed", async () => {
+      const id = await strand("withdraw", "job-failed-not-expired");
+      await createHeliusRingsOperationRepository(env).failOperation({
+        ...tenant,
+        id,
+        expectedState: "indexing",
+        code: "submit_failed",
+        message: "Transaction simulation failed",
+        retryable: false,
+      });
+      // Keep the blockhash alive against the sweep's view of the chain.
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET last_valid_block_height = 999999 WHERE id = ?")
+        .bind(id)
+        .run();
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      // Blockhash still alive: the tx might yet land, so escalation is unsafe.
+      expect(row?.failure_code).toBe("submit_failed");
+    });
+
     /**
      * A crash inside the pipeline leaves an operation holding its wallet's
      * slot, in a state retry refuses for not being `failed`. Without the sweep

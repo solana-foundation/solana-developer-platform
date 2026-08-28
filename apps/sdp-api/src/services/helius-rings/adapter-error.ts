@@ -62,12 +62,18 @@ export function redactAdapterMessage(
  * needs to take the state machine's fail edge: the operation-level failure
  * code and whether a retry can succeed.
  */
+/** Codes the signer/RPC adapters can raise; widened for preflight escalation. */
+export type RingsAdapterFailureCode = Extract<
+  FailureCode,
+  "signer_failed" | "submit_failed" | "manual_reconciliation_required"
+>;
+
 export class RingsAdapterError extends Error {
-  readonly failureCode: Extract<FailureCode, "signer_failed" | "submit_failed">;
+  readonly failureCode: RingsAdapterFailureCode;
   readonly retryable: boolean;
 
   constructor(
-    failureCode: Extract<FailureCode, "signer_failed" | "submit_failed">,
+    failureCode: RingsAdapterFailureCode,
     message: string,
     options: {
       retryable: boolean;

@@ -1,13 +1,16 @@
 /**
  * Background job: settle rings operations that have already been broadcast.
  *
- * Each tick runs three passes:
+ * Each tick runs four passes:
  *  1. Signed bytes whose blockhash has expired — they either landed or never
  *     will, so Photon is asked once and anything unconfirmed becomes
  *     `manual_reconciliation_required`.
- *  2. Signed failures Photon has since indexed, completed from that positive
+ *  2. Signed failures (e.g. `submit_failed`) whose blockhash has expired —
+ *     Photon is asked once, then the failure code is upgraded so an operator
+ *     can void the wallet's blocked slot.
+ *  3. Signed failures Photon has since indexed, completed from that positive
  *     evidence. Never the reverse: absence from an indexer is not proof.
- *  3. In-flight rows, advanced by `executeOperation`, with `indexing` past the
+ *  4. In-flight rows, advanced by `executeOperation`, with `indexing` past the
  *     budget failed so nothing sits in limbo.
  *
  * Ships dormant: early-returns unless the feature flag is on.
@@ -92,6 +95,7 @@ export async function pollRingsIndexing(
     logger.warn({}, "rings expiry pass skipped: block height unavailable");
   } else {
     await escalateExpiredSubmissions(repository, serviceFor, logger, blockHeight);
+    await escalateExpiredSignedFailures(repository, serviceFor, logger, blockHeight);
   }
 
   await completeIndexedFailures(repository, serviceFor, logger);
@@ -134,6 +138,33 @@ async function escalateExpiredSubmissions(
       });
     } catch (error) {
       logger.warn({ operationId: operation.id, err: error }, "rings expiry pass failed");
+    }
+  }
+}
+
+/**
+ * Escalates a signed failure whose blockhash has passed.
+ *
+ * A row failed during broadcast (submit_failed, gateway_unavailable) but
+ * with signed bytes on it holds the wallet's spend slot forever: void requires
+ * `manual_reconciliation_required`. This pass upgrades the code once the
+ * blockhash has expired, so the operator can reconcile against the chain.
+ */
+async function escalateExpiredSignedFailures(
+  repository: OperationRepository,
+  serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
+  logger: Logger,
+  blockHeight: string
+): Promise<void> {
+  const expired = await repository.listExpiredSignedFailures({ blockHeight, limit: MAX_PER_RUN });
+  for (const operation of expired) {
+    try {
+      await serviceFor(operation).escalateToManualReconciliation(operation.id);
+    } catch (error) {
+      logger.warn(
+        { operationId: operation.id, err: error },
+        "rings signed-failure escalation failed"
+      );
     }
   }
 }

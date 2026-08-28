@@ -456,6 +456,53 @@ export function createPostgresHeliusRingsOperationRepository(
       return result.results.map(mapRow);
     },
 
+    async listExpiredSignedFailures(input: HeliusRingsExpiredSubmissionsInput) {
+      // Same shape as listExpiredSubmissions, but for rows that already failed
+      // with signed bytes and a resolvable code — the ones the reconcile pass
+      // needs to upgrade so an operator can void the wallet's blocked slot.
+      const result = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE state = 'failed'
+              AND signed_transaction IS NOT NULL
+              AND failure_code IS NOT NULL
+              AND failure_code <> 'manual_reconciliation_required'
+              AND last_valid_block_height IS NOT NULL
+              AND last_valid_block_height < ?
+            ORDER BY last_valid_block_height ASC
+            LIMIT ?`
+        )
+        .bind(input.blockHeight, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
+    },
+
+    async escalateToManualReconciliation(
+      input: HeliusRingsProjectScope & { id: string; message: string }
+    ) {
+      // CAS against the same guard the query uses: only a signed failure whose
+      // code is not already manual_reconciliation_required is escalated.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET failure_code = 'manual_reconciliation_required',
+                  failure_message = ?,
+                  retryable = false,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND state = 'failed'
+              AND signed_transaction IS NOT NULL
+              AND failure_code IS NOT NULL
+              AND failure_code <> 'manual_reconciliation_required'
+          RETURNING *`
+        )
+        .bind(input.message, input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
     async failOperation(input: FailHeliusRingsOperationInput) {
       return db.transaction(async (tx) => {
         const locked = await tx

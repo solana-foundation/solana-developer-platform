@@ -264,6 +264,19 @@ export interface HeliusRingsOperationRepository {
   ): Promise<HeliusRingsOperationRow | null>;
   /** Signed failures, for the pass that completes the ones Photon now holds. */
   listSignedFailures(input: { limit?: number }): Promise<HeliusRingsOperationRow[]>;
+  /** Signed failures whose blockhash has expired and that still name a resolvable code. */
+  listExpiredSignedFailures(
+    input: HeliusRingsExpiredSubmissionsInput
+  ): Promise<HeliusRingsOperationRow[]>;
+  /**
+   * Rewrites a signed failure's code to `manual_reconciliation_required`, in place.
+   *
+   * State stays `failed`; only the failure triple moves. Guarded so it only
+   * fires on a signed failure that has not already been escalated.
+   */
+  escalateToManualReconciliation(
+    input: HeliusRingsProjectScope & { id: string; message: string }
+  ): Promise<HeliusRingsOperationRow | null>;
   /**
    * Terminal failure. Writes the full failure triple the DB CHECK requires.
    * A ready-to-sign failure loses if signed bytes won the row lock first.
