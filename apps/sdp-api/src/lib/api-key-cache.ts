@@ -181,22 +181,25 @@ export async function fillApiKeyCache(
   const cacheKey = apiKeyCacheKey(keyHash);
   // Deploy-compat: readers from the previous deploy interpret an empty
   // binding list as unrestricted, so a selected-scope key without bindings
-  // must never be cached. Fills of that key class authenticate from their
-  // own DB read and leave the slot empty (a miss for every reader) — but
-  // only after the terminal-slot fence every other path gets. This class
-  // never installs, so no lost CAS can signal a raced revocation; the slot
-  // it deliberately leaves empty can only ever hold a revocation's terminal
-  // write or a hard-delete tombstone, and one observed here can only mean a
-  // commit newer than this fill's DB read.
+  // must never be cached. Fills of that key class install nothing and leave
+  // the slot empty (a miss for every reader) — but they still have to decide
+  // what this request authenticates against, and the slot alone cannot tell
+  // them. A terminal entry observed there postdates this fill's DB read and
+  // wins outright; an empty slot proves nothing, because a revocation's
+  // terminal write that Redis evicted leaves the slot looking exactly like
+  // one that was never written, and this class installs nothing, so there is
+  // no CAS result to read the race from either.
   if (entry.walletScope === "selected" && (entry.walletBindings ?? []).length === 0) {
     const fenced = await readTerminalSlotEntry(kv, cacheKey);
     if (fenced) {
       return fenced;
     }
-    // Same deliberate boundary as resolveContendedFill: fenced against a
-    // revocation already in the slot, open to one committing after it. See
-    // the module header.
-    return entry;
+    // `entry` predates the fence, so adopting it here would authorize a
+    // revocation that had already completed and was merely evicted out of
+    // sight — the eviction hole this module exists to close, not the
+    // read-then-act boundary in the header. Resolve against Postgres, which
+    // cannot be evicted, exactly as every other undecidable race does.
+    return await resolveContendedFill(db, kv, cacheKey, keyHash, entry);
   }
   // Installs go in marked pending: readers treat them as misses until the
   // post-install Postgres read clears them. Publishing a trusted entry
@@ -250,9 +253,10 @@ export async function fillApiKeyCache(
 }
 
 /**
- * Authoritative resolution for a fill that lost a race it cannot decode
- * from the cache alone (CAS exhaustion, a lost publish whose competing
- * write may already be evicted): re-read Postgres — which cannot be
+ * Authoritative resolution for a fill that cannot decode the race from the
+ * cache alone — CAS exhaustion, a lost publish whose competing write may
+ * already be evicted, or the deploy-compat class that never writes and so
+ * has no CAS result to read at all: re-read Postgres — which cannot be
  * evicted — so the state this request authenticates against postdates
  * every lost race. No cache write: a plain put could clobber a revocation
  * landing right after this read; the next miss re-fills through the

@@ -8,6 +8,11 @@
  * fill's own pre-race snapshot would let a revocation that landed during
  * those windows be ignored by the very request that raced it.
  *
+ * The deploy-compat class (selected scope, no bindings) is the same problem
+ * without a CAS to lose: it caches nothing, so an empty slot could equally
+ * be a never-written one or a revocation's terminal entry that Redis
+ * evicted, and only Postgres can tell those apart.
+ *
  * Also covers refreshApiKeyCache's convergence contract: an empty slot is
  * never claimed with unverified non-terminal state, and CAS exhaustion that
  * leaves a possibly-stale entry cached is reported to the caller instead of
@@ -114,6 +119,32 @@ function revokedRow(): Record<string, unknown> {
   };
 }
 
+/**
+ * A store for the deploy-compat class: the slot reads back as `slotValue`,
+ * and any write fails the test — this key class must never be cached.
+ */
+function uncacheableStore(slotValue: string | null): KVStore {
+  return {
+    ...contendedStore(null),
+    get: async () => slotValue,
+    compareAndSet: async () => {
+      throw new Error("this key class must never be cached");
+    },
+    put: async () => {
+      throw new Error("this key class must never be cached");
+    },
+  } as KVStore;
+}
+
+/**
+ * A key row that hydrates into the deploy-compat class: its signing wallet
+ * no longer resolves to an active custody wallet, so the binding is dropped
+ * and the key reads back as selected-scope with no bindings.
+ */
+function unresolvedBindingRow(status: string): Record<string, unknown> {
+  return { ...revokedRow(), status, signing_wallet_id: "wal_unresolved" };
+}
+
 describe("fillApiKeyCache deploy-compat class (selected scope, no bindings)", () => {
   it("fences the uncacheable class against a revocation that raced the DB read", async () => {
     // This class never installs, so no lost CAS can ever signal a raced
@@ -122,16 +153,7 @@ describe("fillApiKeyCache deploy-compat class (selected scope, no bindings)", ()
     // after this fill's DB read. Skipping the fence would authorize the
     // pre-revocation snapshot.
     const revoked = entryWithStatus("revoked");
-    const kv = {
-      ...contendedStore(null),
-      get: async () => JSON.stringify(revoked),
-      compareAndSet: async () => {
-        throw new Error("this key class must never be cached");
-      },
-      put: async () => {
-        throw new Error("this key class must never be cached");
-      },
-    } as KVStore;
+    const kv = uncacheableStore(JSON.stringify(revoked));
 
     const adopted = await fillApiKeyCache(dbThatMustNotBeRead(), kv, KEY_HASH, {
       ...entryWithStatus("active"),
@@ -142,26 +164,46 @@ describe("fillApiKeyCache deploy-compat class (selected scope, no bindings)", ()
     expect(adopted.status).toBe("revoked");
   });
 
-  it("still leaves the slot untouched when the fence observes nothing", async () => {
-    const kv = {
-      ...contendedStore(null),
-      get: async () => null,
-      compareAndSet: async () => {
-        throw new Error("this key class must never be cached");
-      },
-      put: async () => {
-        throw new Error("this key class must never be cached");
-      },
-    } as KVStore;
-    const entry: CachedApiKey = {
-      ...entryWithStatus("active"),
-      walletScope: "selected",
-      walletBindings: [],
-    };
+  it("re-reads Postgres when the fence finds the slot empty, so an evicted revocation is not missed", async () => {
+    // The revocation committed and wrote its terminal entry before this
+    // fence ran; Redis then evicted it, leaving the slot indistinguishable
+    // from one that was never written. This class installs nothing, so
+    // there is no CAS result to read the race from either. Adopting the
+    // fill's own pre-revocation snapshot here would authorize a key whose
+    // revocation had already reported success.
+    const kv = uncacheableStore(null);
 
-    const adopted = await fillApiKeyCache(dbThatMustNotBeRead(), kv, KEY_HASH, entry);
+    const adopted = await fillApiKeyCache(
+      dbReturning(unresolvedBindingRow("revoked")),
+      kv,
+      KEY_HASH,
+      {
+        ...entryWithStatus("active"),
+        walletScope: "selected",
+        walletBindings: [],
+      }
+    );
 
-    expect(adopted).toBe(entry);
+    expect(adopted.status).toBe("revoked");
+  });
+
+  it("still caches nothing for this class when Postgres confirms the key is live", async () => {
+    const kv = uncacheableStore(null);
+
+    const adopted = await fillApiKeyCache(
+      dbReturning(unresolvedBindingRow("active")),
+      kv,
+      KEY_HASH,
+      {
+        ...entryWithStatus("active"),
+        walletScope: "selected",
+        walletBindings: [],
+      }
+    );
+
+    expect(adopted.status).toBe("active");
+    expect(adopted.walletScope).toBe("selected");
+    expect(adopted.walletBindings).toEqual([]);
   });
 });
 
