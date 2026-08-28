@@ -10,12 +10,14 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import {
   prepareRingsOperation,
+  type ProjectRing,
   RINGS_ALLOWLISTED_ASSETS,
   type RingsOperationDetail,
   type RingsOpType,
   type RingsWallet,
   type RingsZone,
 } from "./helius-rings.data";
+import { shortenShieldedAddress } from "./helius-rings.utils";
 import { useRingsZones } from "./use-rings-zones";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -50,6 +52,7 @@ interface ComposerDraft {
   amountRaw: string;
   recipient: string;
   zoneId: string | null;
+  ring: "default" | "custom";
   unlockAt: string;
   beneficiary: string;
 }
@@ -61,6 +64,7 @@ const EMPTY_DRAFT: ComposerDraft = {
   amountRaw: "",
   recipient: "",
   zoneId: null,
+  ring: "default",
   unlockAt: "",
   beneficiary: "",
 };
@@ -88,7 +92,8 @@ function buildSummaryRows(
   t: Translate,
   draft: ComposerDraft,
   wallets: RingsWallet[],
-  zones: RingsZone[]
+  zones: RingsZone[],
+  projectRing: ProjectRing | null
 ): Array<[string, string]> {
   const asset = RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === draft.assetMint);
   const rows: Array<[string, string]> = [
@@ -101,6 +106,14 @@ function buildSummaryRows(
       t(`DashboardHeliusRings.activity.opType_${draft.opType}`),
     ],
   ];
+  if (projectRing !== null) {
+    rows.push([
+      t("DashboardHeliusRings.composer.summaryRing"),
+      draft.ring === "custom"
+        ? `${t("DashboardHeliusRings.composer.ringCustom")} (${shortenShieldedAddress(projectRing.ringProgramId)})`
+        : t("DashboardHeliusRings.composer.ringDefault"),
+    ]);
+  }
   if (NEEDS_ASSET.has(draft.opType)) {
     rows.push([
       t("DashboardHeliusRings.composer.summaryAmount"),
@@ -130,10 +143,12 @@ function buildSummaryRows(
 export function OperationComposer({
   wallets,
   gatewayRed,
+  projectRing,
   onPrepared,
 }: {
   wallets: RingsWallet[];
   gatewayRed: boolean;
+  projectRing: ProjectRing | null;
   onPrepared: () => Promise<void>;
 }) {
   const t = useTranslations();
@@ -172,6 +187,8 @@ export function OperationComposer({
         to: NEEDS_RECIPIENT.has(draft.opType) ? draft.recipient.trim() : undefined,
         zoneId: draft.opType === "merge" && draft.zoneId ? draft.zoneId : undefined,
         transferMode: transferModeFor(draft.opType),
+        // Omitted when "default": the field only exists to name the custom ring.
+        ring: draft.ring === "custom" ? "custom" : undefined,
         timelock:
           draft.opType === "timelock_create"
             ? {
@@ -195,8 +212,8 @@ export function OperationComposer({
   }, [draft, onPrepared, t]);
 
   const summaryRows = useMemo(
-    () => buildSummaryRows(t, draft, wallets, zones),
-    [t, draft, wallets, zones]
+    () => buildSummaryRows(t, draft, wallets, zones, projectRing),
+    [t, draft, wallets, zones, projectRing]
   );
 
   return (
@@ -211,6 +228,7 @@ export function OperationComposer({
             draft={draft}
             wallets={wallets}
             zones={zones}
+            projectRing={projectRing}
             onPatch={patchDraft}
             onReview={() => setPhase({ name: "review", error: null })}
           />
@@ -247,12 +265,14 @@ function ComposeStep({
   draft,
   wallets,
   zones,
+  projectRing,
   onPatch,
   onReview,
 }: {
   draft: ComposerDraft;
   wallets: RingsWallet[];
   zones: RingsZone[];
+  projectRing: ProjectRing | null;
   onPatch: (patch: Partial<ComposerDraft>) => void;
   onReview: () => void;
 }) {
@@ -295,7 +315,34 @@ function ComposeStep({
             ))}
           </Select>
         </Field>
+        {/* No selector while no ring is recorded: there is nothing to choose. */}
+        {projectRing !== null ? (
+          <Field label={t("DashboardHeliusRings.composer.ring")}>
+            <Select
+              ariaLabel={t("DashboardHeliusRings.composer.ring")}
+              value={draft.ring}
+              onValueChange={(value) => {
+                if (value) onPatch({ ring: value as "default" | "custom" });
+              }}
+            >
+              <SelectItem value="default">
+                {t("DashboardHeliusRings.composer.ringDefault")}
+              </SelectItem>
+              {/* Disabled, not hidden, while bring-up is unfinished: the option
+                  exists, the server would refuse it, and the hint says why. */}
+              <SelectItem value="custom" disabled={projectRing.status !== "active"}>
+                {t("DashboardHeliusRings.composer.ringCustom")}
+              </SelectItem>
+            </Select>
+          </Field>
+        ) : null}
       </div>
+
+      {projectRing !== null && projectRing.status !== "active" ? (
+        <p className="text-sm text-secondary">
+          {t("DashboardHeliusRings.composer.ringCustomUnavailable")}
+        </p>
+      ) : null}
 
       {needsAsset ? (
         <div className="flex flex-wrap gap-3">

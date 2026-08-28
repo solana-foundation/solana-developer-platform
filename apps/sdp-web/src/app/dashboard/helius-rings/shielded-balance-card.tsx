@@ -10,7 +10,7 @@ import {
   type RingsWalletSync,
   syncRingsWallet,
 } from "./helius-rings.data";
-import { formatWhen, readShieldedAmount } from "./helius-rings.utils";
+import { formatWhen, readShieldedAmount, shortenShieldedAddress } from "./helius-rings.utils";
 
 /**
  * What the last read established. `unsynced` is distinct from an observed
@@ -109,6 +109,18 @@ export function ShieldedBalanceCard({ wallet }: { wallet: RingsWallet }) {
 function ObservedBalances({ locale, sync }: { locale: string; sync: RingsWalletSync }) {
   const t = useTranslations();
 
+  // The server orders rows default-bucket-first; grouping only folds adjacent
+  // rows of one ring under a shared heading.
+  const groups: Array<{ ring: string | null; balances: RingsShieldedBalance[] }> = [];
+  for (const balance of sync.balances) {
+    const last = groups[groups.length - 1];
+    if (last && last.ring === balance.ringProgramId) {
+      last.balances.push(balance);
+    } else {
+      groups.push({ ring: balance.ringProgramId, balances: [balance] });
+    }
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-1">
       {/* The warning stands whether rows came back or not: "nothing in the part
@@ -126,19 +138,34 @@ function ObservedBalances({ locale, sync }: { locale: string; sync: RingsWalletS
           </p>
         )
       ) : (
-        <ul className="flex min-w-0 flex-col gap-0.5">
-          {sync.balances.map((balance) => (
-            <li
-              key={balance.mint}
-              className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-sm"
-            >
-              <span className="tabular-nums">
-                <Amount balance={balance} />
-              </span>
-              <span className="text-secondary">{balance.symbol}</span>
-            </li>
-          ))}
-        </ul>
+        groups.map((group) => (
+          <div key={group.ring ?? "default"} className="flex min-w-0 flex-col gap-0.5">
+            {/* A single all-default read renders exactly as before; headings
+                appear only once a second ring holds value. */}
+            {groups.length > 1 ? (
+              <p className="text-xs text-tertiary">
+                {group.ring === null
+                  ? t("DashboardHeliusRings.balances.defaultRing")
+                  : t("DashboardHeliusRings.balances.customRing", {
+                      id: shortenShieldedAddress(group.ring),
+                    })}
+              </p>
+            ) : null}
+            <ul className="flex min-w-0 flex-col gap-0.5">
+              {group.balances.map((balance) => (
+                <li
+                  key={`${balance.ringProgramId ?? "default"}:${balance.mint}`}
+                  className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-sm"
+                >
+                  <span className="tabular-nums">
+                    <Amount balance={balance} />
+                  </span>
+                  <span className="text-secondary">{balance.symbol}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
       )}
 
       <p className="text-pretty break-words text-xs text-tertiary">

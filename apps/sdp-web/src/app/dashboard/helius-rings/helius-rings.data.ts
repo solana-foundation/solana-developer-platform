@@ -103,6 +103,8 @@ export interface RingsOperationSummary {
   state: RingsOperationState;
   assetMint: string | null;
   amountRaw: string | null;
+  /** Ring the operation was pinned to at prepare; null = the default public ring. */
+  ringProgramId: string | null;
   createdAt: string;
 }
 
@@ -204,6 +206,8 @@ export interface RingsShieldedBalance {
   amountRaw: string;
   /** The mint's scale, or null when the API knew of none. Null is not zero. */
   decimals: number | null;
+  /** Ring the notes are bound to; null = the default public ring. */
+  ringProgramId: string | null;
 }
 
 export interface RingsWalletSync {
@@ -287,6 +291,8 @@ export interface PrepareRingsOperationInput {
   to?: string;
   zoneId?: string;
   transferMode?: "registered" | "anonymous";
+  /** Symbolic on purpose: the server resolves and pins the program id at prepare. */
+  ring?: "default" | "custom";
   timelock?: { unlockAt: string; beneficiary: string };
 }
 

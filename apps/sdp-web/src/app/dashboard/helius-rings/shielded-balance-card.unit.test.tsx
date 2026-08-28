@@ -32,6 +32,7 @@ const OBSERVED: RingsWalletSync = {
       // 2^64 - 1: the value that proves nothing parsed it into a number.
       amountRaw: "18446744073709551615",
       decimals: 9,
+      ringProgramId: null,
     },
     {
       mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
@@ -39,6 +40,7 @@ const OBSERVED: RingsWalletSync = {
       // 1.50 USDC: rendered as whole units it reads as 1.5 million tokens.
       amountRaw: "1500000",
       decimals: null,
+      ringProgramId: null,
     },
   ],
   degraded: false,
@@ -127,7 +129,9 @@ describe("ShieldedBalanceCard", () => {
     mocks.syncRingsWallet.mockResolvedValue({
       sync: {
         ...OBSERVED,
-        balances: [{ mint: "Mint111", symbol: "UNKNOWN", amountRaw: "1.5", decimals: null }],
+        balances: [
+          { mint: "Mint111", symbol: "UNKNOWN", amountRaw: "1.5", decimals: null, ringProgramId: null },
+        ],
       },
     });
     renderCard();
@@ -137,6 +141,46 @@ describe("ShieldedBalanceCard", () => {
     // A fabricated 0 next to a mint name is worse than no figure.
     expect(await screen.findByText("—")).toBeTruthy();
     expect(screen.queryByText(/base units/)).toBeNull();
+  });
+
+  it("groups balances under ring headings once a second ring holds value", async () => {
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+    mocks.syncRingsWallet.mockResolvedValue({
+      sync: {
+        ...OBSERVED,
+        balances: [
+          ...OBSERVED.balances,
+          {
+            // The same mint as the default bucket: spendable only through the
+            // ring's flows, so it must render as its own row, not merge.
+            mint: "So11111111111111111111111111111111111111112",
+            symbol: "SOL",
+            amountRaw: "2000000000",
+            decimals: 9,
+            ringProgramId: RING_PROGRAM,
+          },
+        ],
+      },
+    });
+    renderCard();
+
+    await userEvent.setup().click(refreshButton());
+
+    expect(await screen.findByText("Default ring")).toBeTruthy();
+    expect(screen.getByText("Custom ring RingPr…1111")).toBeTruthy();
+    expect(screen.getByText("18446744073.709551615")).toBeTruthy();
+    expect(screen.getByText("2")).toBeTruthy();
+  });
+
+  it("renders a default-only read with no ring heading, exactly as before", async () => {
+    mocks.syncRingsWallet.mockResolvedValue({ sync: OBSERVED });
+    renderCard();
+
+    await userEvent.setup().click(refreshButton());
+
+    expect(await screen.findByText("SOL")).toBeTruthy();
+    expect(screen.queryByText("Default ring")).toBeNull();
+    expect(screen.queryByText(/Custom ring/)).toBeNull();
   });
 
   it("separates an observed empty wallet from one nobody has read", async () => {

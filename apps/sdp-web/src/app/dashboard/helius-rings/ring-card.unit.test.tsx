@@ -37,10 +37,10 @@ const FAILED: ProjectRing = {
   failure: { code: "gateway_unavailable", message: "a Rings upstream service is unavailable" },
 };
 
-function renderCard() {
+function renderCard(onRingChanged?: () => void) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <RingCard />
+      <RingCard onRingChanged={onRingChanged} />
     </I18nProvider>
   );
 }
@@ -77,6 +77,21 @@ describe("RingCard", () => {
     expect(screen.getByText("04ff00")).toBeTruthy();
     // Once a ring exists, there is nothing to type: one ring per project.
     expect(screen.queryByLabelText("Ring program id")).toBeNull();
+  });
+
+  it("tells its host after a submit, so a stale ring never gates the composer", async () => {
+    mocks.fetchProjectRing.mockResolvedValueOnce(null).mockResolvedValue(ACTIVE);
+    mocks.createProjectRing.mockResolvedValue({ ring: ACTIVE });
+    const onRingChanged = vi.fn();
+    renderCard(onRingChanged);
+
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Ring program id"), RING_PROGRAM);
+    expect(onRingChanged).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Record and bring up" }));
+
+    expect(await screen.findByText("Active")).toBeTruthy();
+    expect(onRingChanged).toHaveBeenCalledTimes(1);
   });
 
   it("shows the recorded failure and retries with the recorded id, not a typed one", async () => {

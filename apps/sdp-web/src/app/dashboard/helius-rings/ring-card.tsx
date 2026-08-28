@@ -32,10 +32,11 @@ type RingState =
 /**
  * The project's one custom ring. Ops pre-deploys the ring program; submitting
  * its id here runs bring-up server-side (auditor key, config, pool
- * registration). Once a ring is recorded, shield and sync fail closed until it
- * is active, so a failed bring-up's retry lives here too.
+ * registration). Once active, shield operations can target the ring per
+ * operation; default-ring operations are never blocked by it. A failed
+ * bring-up's retry lives here too.
  */
-export function RingCard() {
+export function RingCard({ onRingChanged }: { onRingChanged?: () => void } = {}) {
   const t = useTranslations();
 
   const [state, setState] = useState<RingState>({ name: "loading" });
@@ -79,8 +80,9 @@ export function RingCard() {
       // The row is reserved before bring-up, so a failure still leaves a ring
       // (and its recorded failure) to show.
       await refresh();
+      onRingChanged?.();
     },
-    [refresh, t]
+    [onRingChanged, refresh, t]
   );
 
   // A never-active ring binds no notes, so its id is correctable in place;

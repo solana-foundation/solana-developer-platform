@@ -21,9 +21,11 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import {
   createRingsWallet,
+  fetchProjectRing,
   fetchRingsHealth,
   fetchRingsOperations,
   fetchRingsWallets,
+  type ProjectRing,
   RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsHealthStatus,
@@ -81,6 +83,7 @@ export function HeliusRingsWorkspace({
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
   const [operations, setOperations] = useState<RingsOperationSummary[]>([]);
+  const [projectRing, setProjectRing] = useState<ProjectRing | null>(null);
   const [detailOperationId, setDetailOperationId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -93,14 +96,16 @@ export function HeliusRingsWorkspace({
 
   const refresh = useCallback(async () => {
     try {
-      const [healthResult, walletsResult, operationsResult] = await Promise.all([
+      const [healthResult, walletsResult, operationsResult, ringResult] = await Promise.all([
         fetchRingsHealth(loadFailedCopy),
         fetchRingsWallets(loadFailedCopy),
         fetchRingsOperations(loadFailedCopy),
+        fetchProjectRing(loadFailedCopy),
       ]);
       setHealth(healthResult.health);
       setWallets(walletsResult.wallets);
       setOperations(operationsResult.operations);
+      setProjectRing(ringResult);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : loadFailedCopy);
@@ -190,7 +195,7 @@ export function HeliusRingsWorkspace({
         </CardContent>
       </Card>
 
-      <RingCard />
+      <RingCard onRingChanged={refresh} />
 
       <Card className="min-w-0">
         <CardHeader>
@@ -314,7 +319,12 @@ export function HeliusRingsWorkspace({
         </CardContent>
       </Card>
 
-      <OperationComposer wallets={wallets} gatewayRed={gatewayPending} onPrepared={refresh} />
+      <OperationComposer
+        wallets={wallets}
+        gatewayRed={gatewayPending}
+        projectRing={projectRing}
+        onPrepared={refresh}
+      />
 
       <ZonesCard wallets={wallets} />
 
