@@ -5,11 +5,12 @@ import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/con
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
-  EarnVaultDirectProvider,
   EarnVaultInstruction,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
+  EarnVaultWithdrawInput,
+  EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -26,7 +27,7 @@ import { address, createNoopSigner } from "@solana/kit";
 import { createWisdomTreeChainReader, type WisdomTreeChainReader } from "./chain";
 import { SdpWisdomTreeError } from "./errors";
 import { permittedPlanPrograms } from "./guards";
-import { buildWisdomTreeDepositPlan } from "./plan";
+import { buildWisdomTreeDepositPlan, buildWisdomTreeRedemptionPlan } from "./plan";
 import { readWisdomTreePosition } from "./positions";
 import type { WisdomTreeInstructionPlan, WisdomTreeRuntime } from "./types";
 
@@ -66,12 +67,8 @@ export function toEarnVaultTransactionPlan(
 
 /**
  * WisdomTree as an EXECUTING provider: the catalogue + eligibility client plus
- * the vault-direct capability, money-in and position reads.
- *
- * DELIBERATELY NOT `EarnVaultWithdrawProvider` yet — redemptions (the
- * fund-token transfer through the compliance hook) land as their own change,
- * per the playbook's money-out-is-separate rule, and `supportsVaultWithdraw`
- * answering false keeps the exit route honestly 501 until then.
+ * the vault-direct capability, money in, money OUT (`EarnVaultWithdrawProvider`),
+ * and position reads.
  *
  * Lives here rather than in `@sdp/earn` so the hourly catalogue cron never
  * loads `@solana/kit`. The arrow points inward: this package depends on
@@ -79,7 +76,7 @@ export function toEarnVaultTransactionPlan(
  */
 export class WisdomTreeVaultDirectClient
   extends WisdomTreeEarnClient
-  implements EarnVaultDirectProvider
+  implements EarnVaultWithdrawProvider
 {
   constructor(
     private readonly resolveProvenRpcUrl: (
@@ -197,6 +194,63 @@ export class WisdomTreeVaultDirectClient
         } catch (error) {
           // Amount problems are the caller's to fix; everything else is the
           // provider integration's.
+          if (error instanceof SdpWisdomTreeError && error.code === "INVALID_AMOUNT") {
+            throw badRequest(error.message);
+          }
+          throw error;
+        }
+      }
+    );
+    return toEarnVaultTransactionPlan(plan);
+  }
+
+  /**
+   * The money-OUT half: the on-chain leg of a primary-market redemption —
+   * a Token-2022 TransferChecked of fund tokens to WisdomTree's on-receipt
+   * Sale wallet, hook accounts resolved live. Implementing this is what flips
+   * `supportsVaultWithdraw` to true (the same PRO-1702 mechanism Kamino used).
+   *
+   * Per ADR 0002 this path takes NO surfacing/entitlement/eligibility gate —
+   * a wallet holding the tokens proved its standing on-chain, and the hook
+   * re-proves it at execution. `rentRefundTo` is accepted and unused: no
+   * account is closed by a redemption (see the builder).
+   */
+  async buildVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawInput
+  ): Promise<EarnVaultTransactionPlan> {
+    const plan = await this.withRuntime(
+      ctx,
+      "Building the WisdomTree redemption transfer",
+      async (runtime, assertActive) => {
+        const fund = this.fundFor(input.providerReference, runtime.cluster);
+        const depositMint = wellKnownMint("USDC", runtime.cluster);
+        if (!depositMint) {
+          throw new SdpWisdomTreeError(
+            "CLUSTER_UNSUPPORTED",
+            `USDC is not catalogued for ${runtime.cluster}.`
+          );
+        }
+
+        const onReceiptWallet = await getWisdomTreeOnReceiptWallet(ctx, {
+          tradeType: "Sale",
+          fund: fund.exchangeCode,
+          currency: "USDC",
+        });
+        assertActive();
+
+        try {
+          return await buildWisdomTreeRedemptionPlan(this.createReader(runtime.rpcUrl), runtime, {
+            fund,
+            owner: this.participant(input.owner),
+            onReceiptWallet: address(onReceiptWallet),
+            depositMint: address(depositMint),
+            shares: input.shares,
+            ...(input.rentPayer === undefined
+              ? {}
+              : { rentPayer: this.participant(input.rentPayer) }),
+          });
+        } catch (error) {
           if (error instanceof SdpWisdomTreeError && error.code === "INVALID_AMOUNT") {
             throw badRequest(error.message);
           }
