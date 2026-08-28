@@ -2,7 +2,7 @@ import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { WisdomTreeFund } from "@sdp/types/wisdomtree-programs";
 import { WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS } from "@sdp/types/wisdomtree-programs";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
-import { address } from "@solana/kit";
+import { AccountRole, address } from "@solana/kit";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -13,6 +13,8 @@ import type { WisdomTreeChainReader } from "./chain";
 import { SdpWisdomTreeError } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { parseFundMint } from "./mint";
+import { encodeWisdomTreeFundTokenAccount } from "./token-account";
+import { type ResolvedHookAccount, resolveTransferHookAccounts } from "./transfer-hook";
 import type { WisdomTreeInstructionPlan, WisdomTreeRuntime } from "./types";
 
 const SPL_TOKEN_PROGRAM = address(SPL_TOKEN_PROGRAMS["spl-token"]);
@@ -171,4 +173,149 @@ export async function buildWisdomTreeDepositPlan(
     accepted: { amount: accepted.canonical },
     createsShareAccount,
   });
+}
+
+export interface WisdomTreeRedemptionPlanInput {
+  fund: WisdomTreeFund;
+  /** Wallet whose fund tokens leave and whose USDC later settles back. */
+  owner: TransactionSigner;
+  /** WisdomTree's on-receipt Sale wallet, resolved from the Connect API at build time. */
+  onReceiptWallet: Address;
+  /** The stablecoin the redemption settles in, for the plan's asset identity. */
+  depositMint: Address;
+  /** Fund tokens to redeem, in the fund's own units, as a decimal string. */
+  shares: string;
+  /** Rent funder for any ATA this plan must create. NOT the fee payer. Defaults to the owner. */
+  rentPayer?: TransactionSigner;
+}
+
+/**
+ * Build the on-chain leg of a WisdomTree primary-market REDEMPTION: a
+ * Token-2022 TransferChecked of fund tokens from the owner to WisdomTree's
+ * on-receipt Sale wallet, with the compliance hook's account set resolved live
+ * and appended (extras, hook program, validation account — the interface
+ * order). USDC settles back to the owner's registered wallet after NAV
+ * strike, outside this transaction.
+ *
+ * The hook resolution is where an unverified wallet fails: a missing
+ * compliance account surfaces as HOOK_UNRESOLVED at build, and anything the
+ * resolver cannot see fails at simulation when the hook's execute refuses.
+ * Both refusals happen BEFORE money moves, which is the point.
+ *
+ * No account is ever closed here — the owner's fund ATA survives a full
+ * redemption (a later subscription settles into it), so `rentRefundTo` has no
+ * meaning for this provider and the caller's recorded funder is untouched.
+ */
+export async function buildWisdomTreeRedemptionPlan(
+  reader: WisdomTreeChainReader,
+  runtime: WisdomTreeRuntime,
+  input: WisdomTreeRedemptionPlanInput
+): Promise<WisdomTreeInstructionPlan> {
+  await verifyFundMint(reader, runtime, input.fund);
+  const hookProgram = WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS[runtime.cluster];
+  if (hookProgram === undefined) {
+    throw new SdpWisdomTreeError(
+      "CLUSTER_UNSUPPORTED",
+      `WisdomTree deploys no compliance hook on ${runtime.cluster}; nothing can be redeemed there.`
+    );
+  }
+
+  const accepted = acceptAtMintScale(input.shares, input.fund.decimals, "Redemption quantity");
+  const rentPayer = input.rentPayer ?? input.owner;
+  const fundMint = address(input.fund.mint);
+
+  const [ownerFundAta] = await findAssociatedTokenPda({
+    owner: input.owner.address,
+    tokenProgram: TOKEN_2022_PROGRAM,
+    mint: fundMint,
+  });
+  const [onReceiptFundAta] = await findAssociatedTokenPda({
+    owner: input.onReceiptWallet,
+    tokenProgram: TOKEN_2022_PROGRAM,
+    mint: fundMint,
+  });
+
+  const instructions: Instruction[] = [];
+  const onReceiptFundAccount = await reader.getAccount(onReceiptFundAta);
+  if (onReceiptFundAccount === null) {
+    instructions.push(
+      getCreateAssociatedTokenIdempotentInstruction({
+        payer: rentPayer,
+        ata: onReceiptFundAta,
+        owner: input.onReceiptWallet,
+        mint: fundMint,
+        tokenProgram: TOKEN_2022_PROGRAM,
+      })
+    );
+  }
+
+  const transfer = getTransferCheckedInstruction(
+    {
+      source: ownerFundAta,
+      mint: fundMint,
+      destination: onReceiptFundAta,
+      authority: input.owner,
+      amount: accepted.baseUnits,
+      decimals: input.fund.decimals,
+    },
+    { programAddress: TOKEN_2022_PROGRAM }
+  );
+  // A transfer-hook recipe may read the destination token account's data. If
+  // this plan creates that ATA first, resolution still happens before the
+  // transaction is submitted, so project the exact initialized Token-2022
+  // account bytes the preceding idempotent create will produce.
+  const hookReader: WisdomTreeChainReader =
+    onReceiptFundAccount === null
+      ? {
+          getAccount: async (accountAddress) =>
+            String(accountAddress) === String(onReceiptFundAta)
+              ? {
+                  owner: String(TOKEN_2022_PROGRAM),
+                  data: encodeWisdomTreeFundTokenAccount(fundMint, input.onReceiptWallet),
+                }
+              : reader.getAccount(accountAddress),
+        }
+      : reader;
+  const hookAccounts = await resolveTransferHookAccounts(hookReader, {
+    hookProgram: address(hookProgram),
+    mint: fundMint,
+    source: ownerFundAta,
+    destination: onReceiptFundAta,
+    owner: input.owner.address,
+    amount: accepted.baseUnits,
+  });
+  instructions.push({
+    ...transfer,
+    accounts: [
+      ...(transfer.accounts ?? []),
+      ...hookAccounts.map((account) => ({
+        address: account.address,
+        role: hookAccountRole(account),
+      })),
+    ],
+  } as Instruction);
+
+  return assertPlanTargetsCluster({
+    cluster: runtime.cluster,
+    instructions,
+    lookupTables: [],
+    assetIdentity: { depositTokenMint: input.depositMint, shareMint: fundMint },
+    accepted: { shares: accepted.canonical },
+  });
+}
+
+/**
+ * Appended hook accounts never escalate: the resolver's signer/writable flags
+ * map onto kit's numeric AccountRole, and a signer flag on a resolved extra is
+ * refused outright — the only signer this transfer carries is the owner, and a
+ * hook demanding another signature cannot be satisfied by SDP's signing model.
+ */
+function hookAccountRole(account: ResolvedHookAccount): AccountRole {
+  if (account.isSigner) {
+    throw new SdpWisdomTreeError(
+      "HOOK_UNRESOLVED",
+      `The transfer hook demands a signature from ${account.address}, which SDP cannot provide.`
+    );
+  }
+  return account.isWritable ? AccountRole.WRITABLE : AccountRole.READONLY;
 }
