@@ -248,7 +248,7 @@ describe("startCron", () => {
     vi.mocked(observability.withMonitor).mockImplementation((_slug, fn) => fn());
     startCron({ env: {} as Env, bg, observability });
 
-    (scheduleMock.mock.calls[3][1] as () => void)();
+    (scheduleMock.mock.calls[4][1] as () => void)();
     const passed = vi.mocked(runWorkflowExecutions).mock.calls[0][0].observability;
     await passed?.withMonitor("sdp-api-run-workflow-executions", async () => undefined, {
       schedule: { type: "crontab", value: "*/5 * * * *" },
