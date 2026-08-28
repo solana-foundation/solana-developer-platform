@@ -166,10 +166,15 @@ describe("deactivateRpcConnection", () => {
     const connectionId = `${CONNECTION_ID}_orphan`;
     const credentialId = `${CREDENTIAL_ID}_orphan`;
     await seedActiveConnection(connectionId, credentialId);
-    destroyVersion.mockRejectedValueOnce(new Error("gcp unavailable"));
+    // Rejected for every attempt, not just the first: the destroy retries, so
+    // a single blip is absorbed rather than left for the sweeper. What is
+    // pinned here is the outage that outlasts the request.
+    destroyVersion.mockRejectedValue(new Error("gcp unavailable"));
     const logError = vi.spyOn(getLogger(), "error");
 
     const result = await deactivateRpcConnection(serviceContext(), connectionId);
+    destroyVersion.mockReset();
+    destroyVersion.mockResolvedValue(undefined);
 
     expect(result.status).toBe("deactivated");
     const row = await getDb(appEnv)

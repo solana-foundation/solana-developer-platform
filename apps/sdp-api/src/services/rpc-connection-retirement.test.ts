@@ -9,6 +9,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { getLogger } from "@/runtime/logger";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { deactivateRpcConnection, submitRpcConnection } from "@/services/rpc-connection.service";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
@@ -92,6 +93,7 @@ const USER_ID = "usr_rpc_retirement";
 const PROJECT_COMMITTED = "prj_rpc_retirement_committed";
 const PROJECT_UNRECORDABLE = "prj_rpc_retirement_unrecordable";
 const PROJECT_DOOMED = "prj_rpc_retirement_doomed";
+const PROJECT_LEAKED = "prj_rpc_retirement_leaked";
 const PROJECT_DEACTIVATE = "prj_rpc_retirement_deactivate";
 const appEnv = env as unknown as Env;
 
@@ -191,6 +193,7 @@ beforeAll(async () => {
   await seedProject(PROJECT_COMMITTED, "rpc-retirement-committed");
   await seedProject(PROJECT_UNRECORDABLE, "rpc-retirement-unrecordable");
   await seedProject(PROJECT_DOOMED, "rpc-retirement-doomed");
+  await seedProject(PROJECT_LEAKED, "rpc-retirement-leaked");
   await seedProject(PROJECT_DEACTIVATE, "rpc-retirement-deactivate");
 });
 
@@ -239,6 +242,35 @@ describe("BYOK RPC secret retirement", () => {
       [ORG_ID]
     );
     expect(credentials).toEqual([]);
+  });
+
+  it("retries the destroy and admits the leak when neither recording nor destroying works", async () => {
+    // The terminal case: the queue is unwritable AND the backend refuses the
+    // destroy, so the version this request wrote survives with nothing on
+    // record. Nothing may report that as a clean slate.
+    retirementQueueControl.failRecordRetirement = true;
+    gcpMock.destroyVersion.mockRejectedValue(new Error("secret manager unavailable"));
+    const logError = vi.spyOn(getLogger(), "error");
+
+    await expect(
+      submitRpcConnection(serviceContext(PROJECT_LEAKED), submitInput("Leaked"))
+    ).rejects.toThrow(/could not be completed and could not be recorded/i);
+
+    // The destroy is the only thing that can still end the leak once the queue
+    // is unwritable, so a single blip must not be taken for an answer.
+    expect(gcpMock.destroyVersion.mock.calls.length).toBeGreaterThan(1);
+    // Nothing will collect this one — the flag is what summons a human.
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({ queuedForRetry: false, reason: "secret_cleanup_failed" }),
+      "credential_secret_orphan_risk"
+    );
+    // The credential still never became a row.
+    const credentials = await getDb(appEnv).queryMany<{ id: string }>(
+      `SELECT id FROM provider_credentials WHERE organization_id = ? AND label = 'Leaked'`,
+      [ORG_ID]
+    );
+    expect(credentials).toEqual([]);
+    logError.mockRestore();
   });
 
   it("keeps a durable obligation when the transaction fails and the destroy also fails", async () => {

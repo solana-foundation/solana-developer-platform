@@ -60,6 +60,17 @@ function destroyableVersionRef(stored: StoredCredentialSecret | null | undefined
   return stored.secretVersionRef;
 }
 
+/**
+ * What became of a version this process tried to retire.
+ *
+ * - `destroyed` — gone from the backend; nothing is owed.
+ * - `queued` — still in the backend, but a durable row is on record and the
+ *   sweeper will collect it.
+ * - `orphaned` — still in the backend with nothing on record anywhere. The one
+ *   outcome that needs a human, and the one no caller may describe as clean.
+ */
+export type SecretRetirementOutcome = "destroyed" | "queued" | "orphaned";
+
 // This insert is the ONLY durable record that an orphaned credential still
 // needs destroying, so one attempt is not enough to stake it on. Everything
 // that realistically fails it is transient, and the caller's own database
@@ -67,6 +78,14 @@ function destroyableVersionRef(stored: StoredCredentialSecret | null | undefined
 // fraction of a second of quick retries, never a failed request.
 const QUEUE_ATTEMPTS = 3;
 const QUEUE_BACKOFF_MS = 50;
+
+// The destroy gets its own retries for the same reason, and one that matters
+// more: when the queue cannot be written the database is usually the thing
+// that is broken, which leaves the backend the only party still able to end
+// the leak. Conceding after a single blip there is how a version survives with
+// nothing on record.
+const DESTROY_ATTEMPTS = 3;
+const DESTROY_BACKOFF_MS = 50;
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -163,10 +182,21 @@ export async function queuePendingSecretVersion(
   if (queued) {
     return;
   }
-  // Destroy now, while this process still remembers the version. If even that
-  // fails, `destroySecretVersion` re-attempts the queue and, as the last
-  // resort, logs the orphan risk with queuedForRetry:false — loud, not silent.
-  await destroySecretVersion(env, stored, context);
+  // Destroy now, while this process still remembers the version — with the
+  // queue unwritable this is the only thing that can stop the leak, so it
+  // retries, and it re-attempts the queue if it cannot.
+  const outcome = await destroySecretVersion(env, stored, context);
+  if (outcome === "orphaned") {
+    // The version outlived every attempt to destroy it AND every attempt to
+    // record it. No row was created, so nothing references it — but saying
+    // "nothing was created" full stop would describe a clean slate over a
+    // credential still readable in the backend. `destroySecretVersion` has
+    // already logged it with queuedForRetry:false, which is what summons a
+    // human; this wording is the same admission in the response.
+    throw serviceUnavailable(
+      "Credential cleanup could not be completed and could not be recorded; no connection was created — retry the request"
+    );
+  }
   throw serviceUnavailable(
     "Credential cleanup could not be durably recorded; nothing was created — retry the request"
   );
@@ -223,25 +253,45 @@ export async function queueOrphanedSecretVersion(
  * this after its primary write already committed (or failed for its own
  * reasons), and failing the request for cleanup would report an error for
  * work that actually happened.
+ *
+ * Returns what became of the version rather than nothing, so a caller whose
+ * own error message depends on the answer — `queuePendingSecretVersion`, which
+ * tells the tenant the create was abandoned — cannot claim a clean slate over
+ * a version that is still readable with nothing on record.
  */
 export async function destroySecretVersion(
   env: Env,
   stored: StoredCredentialSecret | null | undefined,
   context: SecretRetirementContext
-): Promise<void> {
+): Promise<SecretRetirementOutcome> {
   const secretVersionRef = destroyableVersionRef(stored);
   if (!secretVersionRef) {
-    return;
+    // Nothing outlives the row for this backend, so there is nothing to owe.
+    return "destroyed";
   }
-  // Building the store is inside the try on purpose: a store this process
+
+  // Building the store is inside the loop on purpose: a store this process
   // cannot construct is unreachable, not absent, and the queue is exactly what
   // "could not retire it now" means here.
-  try {
-    await createCredentialSecretStore(env, "gcp_secret_manager").destroyVersion({
-      secretVersionRef,
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+  let failure: unknown;
+  let destroyed = false;
+  for (let attempt = 1; attempt <= DESTROY_ATTEMPTS; attempt++) {
+    try {
+      await createCredentialSecretStore(env, "gcp_secret_manager").destroyVersion({
+        secretVersionRef,
+      });
+      destroyed = true;
+      break;
+    } catch (error) {
+      failure = error;
+      if (attempt < DESTROY_ATTEMPTS) {
+        await pause(DESTROY_BACKOFF_MS * attempt);
+      }
+    }
+  }
+
+  if (!destroyed) {
+    const reason = failure instanceof Error ? failure.message : String(failure);
     const queued = await queueRetirement(env, context, stored as StoredCredentialSecret, reason);
     // A failed refresh may still leave an earlier (pre-commit) record standing,
     // so ask before claiming nothing will collect it. An unreadable answer
@@ -255,7 +305,7 @@ export async function destroySecretVersion(
       reason: "secret_cleanup_failed",
       queuedForRetry: covered,
     });
-    return;
+    return covered ? "queued" : "orphaned";
   }
   // Destroyed. Discharge whatever obligation is on record. Best effort: a row
   // left behind costs one sweep that finds the version already gone.
@@ -266,4 +316,5 @@ export async function destroySecretVersion(
   } catch {
     // The sweeper reconciles it.
   }
+  return "destroyed";
 }
