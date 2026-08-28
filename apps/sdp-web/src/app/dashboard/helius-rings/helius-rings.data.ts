@@ -20,6 +20,52 @@ export type RingsHealth = Record<RingsHealthComponent, RingsHealthStatus> & {
 
 export type RingsWalletStatus = "pending" | "ready" | "paused";
 
+export type ProjectRingStatus = "pending" | "active" | "failed";
+
+export interface ProjectRing {
+  /** Base58 program id of the project's custom ring program. */
+  ringProgramId: string;
+  status: ProjectRingStatus;
+  /** Uncompressed SEC1 P-256 hex, as the chain publishes it; null until active. */
+  auditorPublicKeyHex: string | null;
+  failure: { code: string; message: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Null means the project uses the default public ring; the API answers 404. */
+export async function fetchProjectRing(fallbackError: string): Promise<ProjectRing | null> {
+  const response = await fetch("/api/dashboard/helius-rings/ring", { cache: "no-store" });
+  if (response.status === 404) {
+    return null;
+  }
+  const result = await readEnvelope<{ ring: ProjectRing }>(response);
+  if (!result.ok) {
+    throw new Error(result.error ?? fallbackError);
+  }
+  return result.data.ring;
+}
+
+/**
+ * Records the pre-deployed ring's program id and runs bring-up server-side.
+ * Re-submitting the same id resumes a failed bring-up.
+ */
+export async function createProjectRing(input: {
+  ringProgramId: string;
+}): Promise<{ ring?: ProjectRing; error?: string }> {
+  const response = await fetch("/api/dashboard/helius-rings/ring", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+  const result = await readEnvelope<{ ring: ProjectRing }>(response);
+  if (!result.ok) {
+    return { error: result.error };
+  }
+  return { ring: result.data.ring };
+}
+
 export interface RingsWallet {
   id: string;
   sdpWalletId: string;

@@ -15,6 +15,26 @@
       "status_red": "Unavailable",
       "reason": "{components}: {reason}"
     },
+    "ring": {
+      "title": "Custom ring",
+      "description": "One custom ring per project. Ops deploys the ring program and hands over its id; submitting it here completes bring-up (auditor key, ring config, pool registration) through custody. Once a ring is recorded, deposits and balance reads bind to it, and both refuse to run until it is active.",
+      "none": "No custom ring recorded. This project deposits into the default public ring.",
+      "programIdLabel": "Ring program id",
+      "programIdPlaceholder": "Base58 program id from the ops deployment",
+      "programId": "Ring program",
+      "auditorKey": "Auditor public key",
+      "submit": "Record and bring up",
+      "submitting": "Bringing up…",
+      "retry": "Retry bring-up",
+      "repointHint": "Retry resumes bring-up with the recorded id. Entering a different id replaces it, which is possible only while the ring has never been active.",
+      "submitFailed": "Ring bring-up failed.",
+      "status_pending": "Pending",
+      "status_active": "Active",
+      "status_failed": "Failed",
+      "explain_pending": "Bring-up has not completed. Deposits and balance reads are refused until it does.",
+      "explain_active": "Deposits are bound to this ring and balance reads count only its notes.",
+      "explain_failed": "Bring-up failed; deposits and balance reads stay refused. Retry resumes from what already landed on chain."
+    },
     "wallets": {
       "title": "Private wallets",
       "description": "Each private wallet is bound to one SDP custody wallet and holds its own shielded identity.",

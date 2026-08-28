@@ -35,6 +35,7 @@ import { formatWhen, healthAlerts, shortenShieldedAddress } from "./helius-rings
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { RecoveryCard } from "./recovery-card";
+import { RingCard } from "./ring-card";
 import { ShieldedBalanceCard } from "./shielded-balance-card";
 import { WalletIdentityCheck } from "./wallet-identity-check";
 import { ZonesCard } from "./zones-card";
@@ -188,6 +189,8 @@ export function HeliusRingsWorkspace({
           ))}
         </CardContent>
       </Card>
+
+      <RingCard />
 
       <Card className="min-w-0">
         <CardHeader>
