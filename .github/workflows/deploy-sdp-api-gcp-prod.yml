@@ -30,6 +30,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  notify-start:
+    name: Notify Slack — release started
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Notify Slack — deploy started
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: production
+          STATUS: started
+          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          COMMIT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEPLOY_SHA}" \
+            --jq '(.sha[0:7]) + " — " + (.commit.message | split("\n")[0])' 2>/dev/null || true)"
+          export COMMIT
+          ./scripts/notify-slack.sh
+
   smoke:
     name: Gate on dev smoke
     if: >-
@@ -84,20 +117,8 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
-      - name: Notify Slack — deploy started
-        continue-on-error: true
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_PROJECT: solana-developer-platform
-          DOPPLER_CONFIG: dev_ci
-          SERVICE: sdp-api
-          ENV: production
-          STATUS: started
-          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
-          ACTOR: ${{ github.actor }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_ID: ${{ github.run_id }}
-        run: ./scripts/notify-slack.sh
+      - name: Resolve commit summary
+        run: echo "COMMIT_LINE=$(git log -1 --format='%h — %s' "${DEPLOY_IMAGE_SHA}" 2>/dev/null || true)" >> "${GITHUB_ENV}"
 
       - name: Verify release identity
         if: ${{ inputs.release_sha != '' }}
@@ -366,18 +387,42 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" \
             --remove-tags "${CANDIDATE_TAG}"
 
+
+  notify-result:
+    name: Notify Slack — release result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    needs: [smoke, deploy]
+    if: >-
+      always() &&
+      github.repository == 'solana-foundation/solana-developer-platform'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
       - name: Notify Slack — deploy result
-        if: ${{ always() }}
-        continue-on-error: true
         env:
+          GH_TOKEN: ${{ github.token }}
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
           SERVICE: sdp-api
           ENV: production
-          STATUS: ${{ job.status }}
+          STATUS: >-
+            ${{ needs.deploy.result == 'success' && 'success' ||
+                (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
+                'failure' }}
           VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
-        run: ./scripts/notify-slack.sh
+        run: |
+          COMMIT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEPLOY_SHA}" \
+            --jq '(.sha[0:7]) + " — " + (.commit.message | split("\n")[0])' 2>/dev/null || true)"
+          export COMMIT
+          ./scripts/notify-slack.sh
