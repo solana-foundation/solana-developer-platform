@@ -12,7 +12,7 @@ import {
   formatDisplayAmount,
   formatMinorCurrencyAmount,
   shortenAddress,
-} from "../payments-overview.utils";
+} from "./payments-overview.utils";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 type RampTransferDirection = "onramp" | "offramp";

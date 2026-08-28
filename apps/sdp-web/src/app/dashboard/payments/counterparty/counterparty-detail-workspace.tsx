@@ -57,9 +57,9 @@ import {
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
+import { providerTransferDetailRows } from "../provider-transfer-details";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
-import { providerTransferDetailRows } from "./provider-transfer-details";
 
 interface CounterpartyDetailWorkspaceProps {
   counterparty: Counterparty;
