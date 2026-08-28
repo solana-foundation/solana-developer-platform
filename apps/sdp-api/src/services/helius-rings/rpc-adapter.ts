@@ -1,7 +1,9 @@
+import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk";
 import { createRpc, type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
 import { getBase64Codec } from "@solana/codecs";
 import {
   isSolanaError,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
 } from "@solana/kit";
 import type { Env } from "@/types/env";
@@ -83,8 +85,13 @@ function classifySubmitError(error: unknown): ClassifiedSubmitError {
 
   if (isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)) {
     const causeMessage = error.cause instanceof Error ? error.cause.message : null;
+    const poolErrorName = decodeShieldedPoolCustomError(error);
+    const namedCause =
+      poolErrorName && causeMessage
+        ? `${poolErrorName} (${causeMessage})`
+        : (poolErrorName ?? causeMessage);
     const tail = readDiagnosticLogs(error).slice(-PREFLIGHT_LOG_TAIL).join(" | ");
-    const head = causeMessage ? `${fallback}: ${causeMessage}` : fallback;
+    const head = namedCause ? `${fallback}: ${namedCause}` : fallback;
     return {
       failureCode: "manual_reconciliation_required",
       message: tail ? `${head} — ${tail}` : head,
@@ -93,6 +100,24 @@ function classifySubmitError(error: unknown): ClassifiedSubmitError {
   }
 
   return { failureCode: "submit_failed", message: fallback, retryable: true };
+}
+
+// Walks the cause chain for an InstructionError.Custom SolanaError and, if the
+// numeric code matches a Rings pool error, returns its symbolic name.
+function decodeShieldedPoolCustomError(error: unknown): string | null {
+  let current: unknown = error;
+  while (current !== undefined && current !== null) {
+    if (isSolanaError(current, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) {
+      const code = current.context.code;
+      if (typeof code === "number") {
+        const decoded = decodeShieldedPoolError(code);
+        if (decoded.kind === "known") return decoded.name;
+      }
+      return null;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
 }
 
 function readDiagnosticLogs(error: unknown): readonly string[] {

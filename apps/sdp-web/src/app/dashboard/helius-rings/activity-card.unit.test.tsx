@@ -24,6 +24,7 @@ vi.mock("./helius-rings.data", async (importOriginal) => ({
 function operation(overrides: Partial<RingsOperationSummary> = {}): RingsOperationSummary {
   return {
     id: "hro_1",
+    walletId: "hrw_1",
     opType: "withdraw",
     state: "indexing",
     assetMint: null,

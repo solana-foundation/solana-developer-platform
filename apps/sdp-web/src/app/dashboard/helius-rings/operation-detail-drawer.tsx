@@ -5,8 +5,26 @@ import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { fetchRingsOperationDetail, type RingsOperationDetail } from "./helius-rings.data";
+import {
+  fetchRingsOperationDetail,
+  type RingsOperationDetail,
+  type RingsOperationState,
+} from "./helius-rings.data";
 import { formatAssetAmount, formatTimeOfDay, formatWhen } from "./helius-rings.utils";
+
+// Mirrors activity-card.tsx so completed reads green here too, not default grey.
+const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
+  draft: "default",
+  preparing: "default",
+  approval_required: "warning",
+  proving: "default",
+  ready_to_sign: "default",
+  submitted: "default",
+  indexing: "default",
+  completed: "success",
+  failed: "danger",
+  voided: "default",
+};
 
 /**
  * Operation detail: identity, failure (code + message, verbatim), and the
@@ -71,7 +89,7 @@ export function OperationDetailDrawer({
                   {t("DashboardHeliusRings.activity.state")}
                 </dt>
                 <dd>
-                  <Badge variant={detail.state === "failed" ? "danger" : "default"}>
+                  <Badge variant={STATE_BADGE[detail.state]}>
                     {t(`DashboardHeliusRings.activity.state_${detail.state}`)}
                   </Badge>
                 </dd>

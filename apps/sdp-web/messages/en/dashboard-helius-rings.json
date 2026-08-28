@@ -3,9 +3,19 @@
     "title": "Helius Rings",
     "subtitle": "Shielded wallets and private transfers on Solana devnet.",
     "devnetBanner": "Devnet only — Helius Rings runs exclusively on Solana devnet. Nothing here touches mainnet funds.",
+    "workspace": {
+      "selectPrompt": "Select a private wallet above to see its details, operations, and activity."
+    },
+    "overview": {
+      "loading": "Reading shielded balance…",
+      "failed": "Balance could not be read. Try again from the wallet's row.",
+      "empty": "0",
+      "notProvisioned": "Not provisioned yet.",
+      "unpriced": "—",
+      "privateBalanceLabel": "Private balance"
+    },
     "health": {
-      "title": "Runtime health",
-      "description": "Live status of the Rings upstreams. Actions stay disabled while a component is red.",
+      "title": "Health",
       "component_rpc": "RPC",
       "component_prover": "Prover",
       "component_photon": "Photon indexer",
@@ -16,8 +26,8 @@
     },
     "wallets": {
       "title": "Private wallets",
-      "description": "Each private wallet is bound to one SDP custody wallet and holds its own shielded identity.",
-      "empty": "No private wallets yet. Create one from a custody wallet below.",
+      "description": "One custody wallet backs one shielded identity.",
+      "empty": "No private wallets yet.",
       "name": "Name",
       "backingWallet": "Custody wallet",
       "shieldedAddress": "Shielded address",
@@ -71,14 +81,13 @@
       "asset": "Asset",
       "amount": "Amount",
       "baseUnitsAmount": "{amount} base units",
-      "empty": "No shielded notes in this wallet.",
+      "empty": "0",
       "degraded": "Partial read — the indexer could not return every note, so treat this as incomplete rather than as the wallet's balance.",
-      "observedAt": "Observed {when}",
       "readFailed": "The shielded balance could not be read. Retry shortly."
     },
     "activity": {
       "title": "Activity",
-      "description": "Every shielded operation, newest first. A spinner marks one still settling; anything resting on a decision offers it on the row. Select a row for its full timeline.",
+      "description": "Newest first. Select a row for its timeline.",
       "empty": "No operations yet.",
       "operation": "Operation",
       "state": "State",
@@ -112,11 +121,15 @@
       "gatewayUnavailable": "A Rings upstream is unavailable. Check the API logs for detail."
     },
     "composer": {
-      "title": "New operation",
-      "description": "Shield SOL or an allowlisted token into a provisioned private wallet. Confirm signs with the backing custody key and waits for the indexer.",
+      "title": "Operations",
+      "description": "Shield, withdraw, or transfer.",
       "wallet": "Private wallet",
       "walletPlaceholder": "Select a private wallet",
       "operation": "Operation",
+      "opTab_shield": "Shield",
+      "opTab_withdraw": "Withdraw",
+      "opTab_private_transfer": "Private transfer",
+      "privateTransferComingSoon": "Private transfer is coming soon — the on-chain circuit is enabled but the API surface is not yet wired up.",
       "asset": "Asset",
       "amount": "Amount",
       "recipient": "Recipient address",

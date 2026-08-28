@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,31 +17,30 @@ import { formatAssetAmount, parseDecimalToBaseUnits } from "./helius-rings.utils
 
 type Translate = ReturnType<typeof useTranslations>;
 
-const OP_TYPES: RingsOpType[] = ["shield", "withdraw"];
+/** Backend accepts shield + withdraw; private_transfer is UI-only until server support lands. */
+type ComposerOpType = RingsOpType | "private_transfer";
+const OP_TABS: readonly ComposerOpType[] = ["shield", "withdraw", "private_transfer"] as const;
 
-/**
- * A union rather than parallel `step`/`error` values so an error can only exist
- * on the step that can show one. Progress belongs to Activity, which follows
- * the operation past this card's lifetime.
- */
 type Phase = { name: "compose" } | { name: "review"; error: string | null };
 
 interface ComposerDraft {
-  walletId: string | null;
-  opType: RingsOpType;
+  walletId: string;
+  opType: ComposerOpType;
   assetMint: string;
   /** User-typed decimal amount, e.g. "1.01". Converted to base units at submit. */
   amountDecimal: string;
   recipient: string;
 }
 
-const EMPTY_DRAFT: ComposerDraft = {
-  walletId: null,
-  opType: "shield",
-  assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
-  amountDecimal: "",
-  recipient: "",
-};
+function newDraft(walletId: string, opType: ComposerOpType = "shield"): ComposerDraft {
+  return {
+    walletId,
+    opType,
+    assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
+    amountDecimal: "",
+    recipient: "",
+  };
+}
 
 function assetOf(mint: string) {
   return RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === mint);
@@ -53,25 +52,17 @@ function draftAmountRaw(draft: ComposerDraft): string | null {
 }
 
 function isDraftComplete(draft: ComposerDraft): boolean {
-  if (draft.walletId === null) return false;
+  if (draft.opType === "private_transfer") return false;
   if (draftAmountRaw(draft) === null) return false;
   return draft.opType !== "withdraw" || draft.recipient.trim().length > 0;
 }
 
-function buildSummaryRows(
-  t: Translate,
-  draft: ComposerDraft,
-  wallets: RingsWallet[]
-): Array<[string, string]> {
+function buildSummaryRows(t: Translate, draft: ComposerDraft): Array<[string, string]> {
   const amountRaw = draftAmountRaw(draft);
   const rows: Array<[string, string]> = [
     [
-      t("DashboardHeliusRings.composer.summaryWallet"),
-      wallets.find((wallet) => wallet.id === draft.walletId)?.name ?? "—",
-    ],
-    [
       t("DashboardHeliusRings.composer.summaryOperation"),
-      t(`DashboardHeliusRings.activity.opType_${draft.opType}`),
+      t(`DashboardHeliusRings.activity.opType_${draft.opType === "private_transfer" ? "transfer_anonymous" : draft.opType}`),
     ],
     [
       t("DashboardHeliusRings.composer.summaryAmount"),
@@ -96,10 +87,24 @@ export function OperationComposer({
 }) {
   const t = useTranslations();
 
+  // Workspace selection guarantees exactly one wallet by the time we mount, but
+  // guard anyway so a stale prop doesn't submit against a missing id.
+  const walletId = wallets[0]?.id ?? null;
+
   const [phase, setPhase] = useState<Phase>({ name: "compose" });
-  const [draft, setDraft] = useState<ComposerDraft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<ComposerDraft>(() => newDraft(walletId ?? ""));
   const [submitting, setSubmitting] = useState(false);
   const [started, setStarted] = useState(false);
+
+  // Switching wallet is a fresh session: clear draft (including tab), any
+  // in-flight review, and the leftover started-callout. Otherwise the tab and
+  // form data from wallet A follow the operator into wallet B.
+  useEffect(() => {
+    if (walletId === null) return;
+    setDraft((current) => (current.walletId === walletId ? current : newDraft(walletId)));
+    setPhase({ name: "compose" });
+    setStarted(false);
+  }, [walletId]);
 
   const patchDraft = useCallback((patch: Partial<ComposerDraft>) => {
     setStarted(false);
@@ -107,7 +112,7 @@ export function OperationComposer({
   }, []);
 
   const handleConfirm = useCallback(async () => {
-    if (!draft.walletId) return;
+    if (draft.opType === "private_transfer") return;
     const amountRaw = draftAmountRaw(draft);
     if (amountRaw === null) return;
     setSubmitting(true);
@@ -130,16 +135,13 @@ export function OperationComposer({
       });
       return;
     }
-    // Back to an empty form with the wallet kept, because the operation is no
-    // longer this card's to report on: Activity has it, and follows it past the
-    // point the composer would have been reset anyway.
     setStarted(true);
     setPhase({ name: "compose" });
-    setDraft((current) => ({ ...EMPTY_DRAFT, walletId: current.walletId }));
+    setDraft(newDraft(draft.walletId, draft.opType));
     await onPrepared();
   }, [draft, onPrepared, t]);
 
-  const summaryRows = useMemo(() => buildSummaryRows(t, draft, wallets), [t, draft, wallets]);
+  const summaryRows = useMemo(() => buildSummaryRows(t, draft), [t, draft]);
 
   return (
     <Card>
@@ -148,21 +150,29 @@ export function OperationComposer({
         <CardDescription>{t("DashboardHeliusRings.composer.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {/* The only thing this card says about an operation it started: that it
-            exists and where to watch it. */}
         {started && phase.name === "compose" ? (
           <Callout live variant="success">
             {t("DashboardHeliusRings.composer.started")}
           </Callout>
         ) : null}
+
         {phase.name === "compose" ? (
-          <ComposeStep
-            draft={draft}
-            wallets={wallets}
-            onPatch={patchDraft}
-            onReview={() => setPhase({ name: "review", error: null })}
-          />
+          <>
+            <OpTabs
+              value={draft.opType}
+              onSelect={(opType) => {
+                setPhase({ name: "compose" });
+                patchDraft({ opType });
+              }}
+            />
+            <ComposeStep
+              draft={draft}
+              onPatch={patchDraft}
+              onReview={() => setPhase({ name: "review", error: null })}
+            />
+          </>
         ) : null}
+
         {phase.name === "review" ? (
           <ReviewStep
             rows={summaryRows}
@@ -178,6 +188,44 @@ export function OperationComposer({
   );
 }
 
+// Segmented control: three buttons that read as one connected group.
+function OpTabs({
+  value,
+  onSelect,
+}: {
+  value: ComposerOpType;
+  onSelect: (op: ComposerOpType) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div
+      role="tablist"
+      aria-label={t("DashboardHeliusRings.composer.operation")}
+      className="inline-flex w-fit rounded-md border border-border-default bg-surface p-0.5"
+    >
+      {OP_TABS.map((op) => {
+        const active = op === value;
+        return (
+          <button
+            key={op}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onSelect(op)}
+            className={
+              active
+                ? "rounded-sm bg-primary px-3 py-1.5 text-sm font-medium text-on-primary"
+                : "rounded-sm px-3 py-1.5 text-sm font-medium text-secondary hover:text-primary"
+            }
+          >
+            {t(`DashboardHeliusRings.composer.opTab_${op}`)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex min-w-48 flex-col gap-1.5">
@@ -189,54 +237,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ComposeStep({
   draft,
-  wallets,
   onPatch,
   onReview,
 }: {
   draft: ComposerDraft;
-  wallets: RingsWallet[];
   onPatch: (patch: Partial<ComposerDraft>) => void;
   onReview: () => void;
 }) {
   const t = useTranslations();
-  // Only a `ready` wallet has a shielded identity to deposit into; the rest are
-  // omitted rather than shown disabled, since nothing here would provision one.
-  const readyWallets = wallets.filter((wallet) => wallet.status === "ready");
+
+  if (draft.opType === "private_transfer") {
+    return (
+      <Callout variant="info">{t("DashboardHeliusRings.composer.privateTransferComingSoon")}</Callout>
+    );
+  }
 
   return (
     <>
-      <div className="flex flex-wrap gap-3">
-        <Field label={t("DashboardHeliusRings.composer.wallet")}>
-          <Select
-            ariaLabel={t("DashboardHeliusRings.composer.wallet")}
-            value={draft.walletId}
-            onValueChange={(walletId) => onPatch({ walletId })}
-            placeholder={t("DashboardHeliusRings.composer.walletPlaceholder")}
-          >
-            {readyWallets.map((wallet) => (
-              <SelectItem key={wallet.id} value={wallet.id}>
-                {wallet.name}
-              </SelectItem>
-            ))}
-          </Select>
-        </Field>
-        <Field label={t("DashboardHeliusRings.composer.operation")}>
-          <Select
-            ariaLabel={t("DashboardHeliusRings.composer.operation")}
-            value={draft.opType}
-            onValueChange={(value) => {
-              if (value) onPatch({ opType: value as RingsOpType });
-            }}
-          >
-            {OP_TYPES.map((type) => (
-              <SelectItem key={type} value={type}>
-                {t(`DashboardHeliusRings.activity.opType_${type}`)}
-              </SelectItem>
-            ))}
-          </Select>
-        </Field>
-      </div>
-
       <div className="flex flex-wrap gap-3">
         <Field label={t("DashboardHeliusRings.composer.asset")}>
           <Select
@@ -258,10 +275,10 @@ function ComposeStep({
             inputMode="decimal"
             value={draft.amountDecimal}
             placeholder="1.01"
-            // Digits + at most one dot. Rejects letters and stray punctuation
-            // client-side; parseDecimalToBaseUnits enforces per-mint precision.
             onChange={(event) =>
-              onPatch({ amountDecimal: event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1") })
+              onPatch({
+                amountDecimal: event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"),
+              })
             }
           />
         </Field>

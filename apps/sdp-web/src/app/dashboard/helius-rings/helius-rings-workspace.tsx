@@ -37,6 +37,7 @@ import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { ShieldedBalanceCard } from "./shielded-balance-card";
 import { WalletIdentityCheck } from "./wallet-identity-check";
+import { WalletOverview } from "./wallet-overview";
 
 interface CustodyWalletOption {
   walletId: string;
@@ -76,6 +77,7 @@ export function HeliusRingsWorkspace({
   const [selectedCustodyWallet, setSelectedCustodyWallet] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
 
   const loadFailedCopy = t("DashboardHeliusRings.errors.loadFailed");
 
@@ -98,6 +100,22 @@ export function HeliusRingsWorkspace({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Bumped whenever a new operation transitions to completed on our watch, so
+  // the balance surfaces re-sync and the just-landed value is on screen without
+  // an explicit refresh.
+  const [balancesTick, setBalancesTick] = useState(0);
+  const completedIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let discoveredCompletion = false;
+    for (const operation of operations) {
+      if (operation.state !== "completed") continue;
+      if (completedIds.current.has(operation.id)) continue;
+      completedIds.current.add(operation.id);
+      discoveredCompletion = true;
+    }
+    if (discoveredCompletion) setBalancesTick((current) => current + 1);
+  }, [operations]);
 
   // Signing and submission finish inline, but indexing is settled by a
   // once-a-minute sweep, so an operation routinely lands here mid-flight and
@@ -186,47 +204,80 @@ export function HeliusRingsWorkspace({
     return custodyWallets.filter((wallet) => !boundIds.has(wallet.walletId));
   }, [custodyWallets, wallets]);
 
+  // Keep the selection valid: auto-select the sole wallet, clear if it vanishes.
+  useEffect(() => {
+    if (wallets.length === 0) {
+      if (selectedWalletId !== null) setSelectedWalletId(null);
+      return;
+    }
+    const stillPresent = wallets.some((wallet) => wallet.id === selectedWalletId);
+    if (!stillPresent) setSelectedWalletId(wallets.length === 1 ? wallets[0].id : null);
+  }, [wallets, selectedWalletId]);
+
+  const selectedWallet = useMemo(
+    () => wallets.find((wallet) => wallet.id === selectedWalletId) ?? null,
+    [wallets, selectedWalletId]
+  );
+
+  const filteredOperations = useMemo(
+    () =>
+      selectedWalletId === null
+        ? []
+        : operations.filter((operation) => operation.walletId === selectedWalletId),
+    [operations, selectedWalletId]
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <Callout variant="warning">{t("DashboardHeliusRings.devnetBanner")}</Callout>
 
       {loadError ? <Callout variant="danger">{loadError}</Callout> : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("DashboardHeliusRings.health.title")}</CardTitle>
-          <CardDescription>{t("DashboardHeliusRings.health.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-4">
-            {RINGS_HEALTH_COMPONENTS.map((component) => {
-              const status = health?.[component] ?? "red";
-              return (
-                <div key={component} className="flex items-center gap-2">
-                  <span className="text-sm text-secondary">
-                    {t(`DashboardHeliusRings.health.component_${component}`)}
-                  </span>
-                  <Badge variant={HEALTH_BADGE[status]}>
-                    {t(`DashboardHeliusRings.health.status_${status}`)}
-                  </Badge>
-                </div>
-              );
-            })}
+      {/* Compact strip, not a full Card: one line of dot + label per component. */}
+      <div className="rounded-[var(--sdp-surface-radius)] bg-surface-raised px-4 py-2.5 shadow-sm ring-1 ring-border-default">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+          <span className="font-medium text-primary">
+            {t("DashboardHeliusRings.health.title")}
+          </span>
+          {RINGS_HEALTH_COMPONENTS.map((component) => {
+            const status = health?.[component] ?? "red";
+            const label = t(`DashboardHeliusRings.health.component_${component}`);
+            return (
+              <div key={component} className="flex items-center gap-2">
+                {/* Green reads as "fine, nothing to say"; anything else needs
+                    the status word to name the failure. */}
+                {status === "green" ? (
+                  <>
+                    <span aria-hidden="true" className="size-2 rounded-full bg-success" />
+                    <span className="text-secondary">{label}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-secondary">{label}</span>
+                    <Badge variant={HEALTH_BADGE[status]}>
+                      {t(`DashboardHeliusRings.health.status_${status}`)}
+                    </Badge>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {alerts.length > 0 ? (
+          <div className="mt-2 flex flex-col gap-1">
+            {alerts.map((alert) => (
+              <p key={alert.reason} className="text-xs text-secondary">
+                {t("DashboardHeliusRings.health.reason", {
+                  components: alert.components
+                    .map((component) => t(`DashboardHeliusRings.health.component_${component}`))
+                    .join(", "),
+                  reason: alert.reason,
+                })}
+              </p>
+            ))}
           </div>
-          {/* A red badge with no reason is a dead end, so the probe's own
-              classification is rendered rather than dropped. */}
-          {alerts.map((alert) => (
-            <p key={alert.reason} className="text-sm text-secondary">
-              {t("DashboardHeliusRings.health.reason", {
-                components: alert.components
-                  .map((component) => t(`DashboardHeliusRings.health.component_${component}`))
-                  .join(", "),
-                reason: alert.reason,
-              })}
-            </p>
-          ))}
-        </CardContent>
-      </Card>
+        ) : null}
+      </div>
 
       <Card className="min-w-0">
         <CardHeader>
@@ -316,37 +367,51 @@ export function HeliusRingsWorkspace({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {wallets.map((wallet) => (
-                    <TableRow key={wallet.id}>
-                      <TableCell className="min-w-0">{wallet.name}</TableCell>
-                      <TableCell className="min-w-0">{custodyLabel(wallet.sdpWalletId)}</TableCell>
-                      <TableCell className="min-w-0 align-top">
-                        {wallet.shieldedAddress === null ? (
-                          // A stuck-pending row is the one case the identity
-                          // check helps with: the button sits under the empty
-                          // address so the diagnosis is where the problem is.
-                          <div className="flex flex-col gap-1.5">
-                            <span className="text-sm text-secondary">
-                              {t("DashboardHeliusRings.wallets.shieldedAddressPending")}
-                            </span>
-                            {wallet.status === "pending" ? (
-                              <WalletIdentityCheck wallet={wallet} />
-                            ) : null}
-                          </div>
-                        ) : (
-                          <ShieldedAddress address={wallet.shieldedAddress} />
-                        )}
-                      </TableCell>
-                      <TableCell className="min-w-0 align-top">
-                        <ShieldedBalanceCard wallet={wallet} />
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={WALLET_BADGE[wallet.status]}>
-                          {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {wallets.map((wallet) => {
+                    const selected = wallet.id === selectedWalletId;
+                    return (
+                      <TableRow
+                        key={wallet.id}
+                        aria-selected={selected}
+                        onClick={() => setSelectedWalletId(wallet.id)}
+                        className={
+                          selected
+                            ? "cursor-pointer border-l-2 border-info bg-info-bg"
+                            : "cursor-pointer border-l-2 border-transparent hover:bg-fill-subtle"
+                        }
+                      >
+                        <TableCell className="min-w-0">{wallet.name}</TableCell>
+                        <TableCell className="min-w-0">
+                          {custodyLabel(wallet.sdpWalletId)}
+                        </TableCell>
+                        <TableCell className="min-w-0 align-top">
+                          {wallet.shieldedAddress === null ? (
+                            // A stuck-pending row is the one case the identity
+                            // check helps with: the button sits under the empty
+                            // address so the diagnosis is where the problem is.
+                            <div className="flex flex-col gap-1.5">
+                              <span className="text-sm text-secondary">
+                                {t("DashboardHeliusRings.wallets.shieldedAddressPending")}
+                              </span>
+                              {wallet.status === "pending" ? (
+                                <WalletIdentityCheck wallet={wallet} />
+                              ) : null}
+                            </div>
+                          ) : (
+                            <ShieldedAddress address={wallet.shieldedAddress} />
+                          )}
+                        </TableCell>
+                        <TableCell className="min-w-0 align-top">
+                          <ShieldedBalanceCard wallet={wallet} refreshTick={balancesTick} />
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={WALLET_BADGE[wallet.status]}>
+                            {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -354,9 +419,30 @@ export function HeliusRingsWorkspace({
         </CardContent>
       </Card>
 
-      <OperationComposer wallets={wallets} gatewayRed={upstreamsRed} onPrepared={refresh} />
+      {selectedWallet === null ? (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-secondary">
+            {t("DashboardHeliusRings.workspace.selectPrompt")}
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <WalletOverview wallet={selectedWallet} refreshTick={balancesTick} />
+            <OperationComposer
+              wallets={[selectedWallet]}
+              gatewayRed={upstreamsRed}
+              onPrepared={refresh}
+            />
+          </div>
 
-      <ActivityCard operations={operations} onChanged={refresh} onSelect={setDetailOperationId} />
+          <ActivityCard
+            operations={filteredOperations}
+            onChanged={refresh}
+            onSelect={setDetailOperationId}
+          />
+        </>
+      )}
 
       <OperationDetailDrawer
         operationId={detailOperationId}

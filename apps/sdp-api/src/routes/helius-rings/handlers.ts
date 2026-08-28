@@ -1,3 +1,5 @@
+import type { AssetBalance } from "@sdp/helius-rings";
+import type { CustodyWalletTokenBalance } from "@sdp/types";
 import {
   type HeliusRingsWalletRow,
   mapHeliusRingsOperationSummaryRow,
@@ -9,7 +11,9 @@ import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
+import type { Env } from "@/types/env";
 import {
   type AppContext,
   allowedRingsWalletIds,
@@ -122,11 +126,76 @@ export async function syncRingsWallet(c: AppContext) {
   await requireRingsWallet(c, tenant, requireParam(c, "walletId"), ["payments:write"]);
   const service = getHeliusRingsService(c, tenant);
   const result = await withRingsErrors(() => service.syncWallet(requireParam(c, "walletId")));
+  const priced = await priceRingsBalances(c.env, result.balances);
   return success(c, {
-    balances: result.balances,
+    balances: priced.balances,
+    totalUsd: priced.totalUsd,
     degraded: result.report.degraded,
     observedAt: result.observedAt,
   });
+}
+
+// Enrich Rings balances with USD via the shared pricing path used by custody.
+// Fails soft: a pricing outage returns unpriced balances (totalUsd = null), so
+// the shielded balance itself is still visible.
+async function priceRingsBalances(
+  env: Env,
+  balances: readonly AssetBalance[]
+): Promise<{
+  balances: (AssetBalance & { usdPrice?: number; usdValue?: number })[];
+  totalUsd: number | null;
+}> {
+  if (balances.length === 0) return { balances: [], totalUsd: 0 };
+
+  const asCustody: CustodyWalletTokenBalance[] = balances.map((balance) => {
+    const decimals = balance.decimals ?? 0;
+    return {
+      token: balance.symbol,
+      mint: balance.mint,
+      amount: balance.amountRaw,
+      uiAmount: decimalFromBaseUnits(balance.amountRaw, decimals),
+      decimals,
+    };
+  });
+
+  let priced: CustodyWalletTokenBalance[];
+  try {
+    priced = await attachUsdValuesToBalances(env, asCustody);
+  } catch {
+    return { balances: balances.map((balance) => ({ ...balance })), totalUsd: null };
+  }
+
+  const enriched = balances.map((balance, index) => {
+    const row = priced[index];
+    return {
+      ...balance,
+      ...(typeof row?.usdPrice === "number" ? { usdPrice: row.usdPrice } : {}),
+      ...(typeof row?.usdValue === "number" ? { usdValue: row.usdValue } : {}),
+    };
+  });
+
+  const anyPriced = enriched.some((balance) => typeof balance.usdValue === "number");
+  const totalUsd = anyPriced
+    ? Number(
+        enriched.reduce((sum, balance) => sum + (balance.usdValue ?? 0), 0).toFixed(2)
+      )
+    : null;
+  return { balances: enriched, totalUsd };
+}
+
+/**
+ * BigInt-safe base10 conversion — bare Number(amountRaw) rounds past 2^53. Mirrors
+ * the client's readShieldedAmount so the string produced here parses the same on
+ * the receiving side.
+ */
+function decimalFromBaseUnits(amountRaw: string, decimals: number): string {
+  if (!/^\d+$/.test(amountRaw)) return "0";
+  if (decimals === 0) return amountRaw;
+  const padded = amountRaw.padStart(decimals + 1, "0");
+  const whole = padded.slice(0, padded.length - decimals);
+  const fraction = padded.slice(padded.length - decimals);
+  const trimmed = fraction.replace(/0+$/, "");
+  return trimmed === "" ? whole : `${whole}.${trimmed}`;
 }
 
 /** GET /wallets/:walletId/identity */

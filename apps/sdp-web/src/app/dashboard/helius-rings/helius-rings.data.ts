@@ -54,6 +54,7 @@ export type RingsOperationOpType =
 
 export interface RingsOperationSummary {
   id: string;
+  walletId: string;
   opType: RingsOperationOpType;
   state: RingsOperationState;
   assetMint: string | null;
@@ -166,6 +167,10 @@ export interface RingsShieldedBalance {
   amountRaw: string;
   /** The mint's scale, or null when the API knew of none. Null is not zero. */
   decimals: number | null;
+  /** USD per whole unit, when pricing was reachable. */
+  usdPrice?: number;
+  /** amountRaw × usdPrice, rounded to 2dp; absent when the mint went unpriced. */
+  usdValue?: number;
 }
 
 export interface RingsWalletSync {
@@ -177,6 +182,8 @@ export interface RingsWalletSync {
   degraded: boolean;
   /** When the answer was true — not a position to resume from. */
   observedAt: string;
+  /** Sum of priced balances, or null if pricing failed for every mint. */
+  totalUsd?: number | null;
 }
 
 /**

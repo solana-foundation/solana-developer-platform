@@ -89,6 +89,7 @@ export interface SyncReport {
 
 export interface PrivateOperationSummary {
   id: string;
+  walletId: string;
   opType: OpType;
   state: OperationState;
   assetMint: string | null;

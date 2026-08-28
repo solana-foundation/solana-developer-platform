@@ -309,6 +309,7 @@ export function mapHeliusRingsOperationSummaryRow(
 ): PrivateOperationSummary {
   return {
     id: row.id,
+    walletId: row.wallet_id,
     opType: row.op_type,
     state: row.state,
     assetMint: row.asset_mint ?? null,
