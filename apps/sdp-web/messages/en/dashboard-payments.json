@@ -203,7 +203,6 @@
       "selectCounterparty": "Select a counterparty",
       "searchCounterparties": "Search counterparties",
       "counterpartiesLoadFailed": "Failed to load counterparties.",
-      "openFullScreen": "Open full screen",
       "selectField": "Select {field}",
       "search": "Search…",
       "stripeLoadError": "Couldn't load Stripe checkout",

@@ -2,7 +2,8 @@
 
 import type { PaymentTransferSummary } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
-import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
+import { CheckCircle2Icon, InfoIcon, Loader2Icon, XCircleIcon } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -132,9 +133,19 @@ export function RampStatusInline({
         state: "loading",
       };
   return (
-    <span className="flex items-center gap-2 text-sm font-medium text-secondary">
+    <span className="inline-flex items-center gap-2 rounded-full bg-fill-subtle px-3 py-1.5 text-sm font-medium text-secondary">
       {statusIcon(copy.state, "size-4")}
       {copy.title}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" aria-label={copy.description} className="flex items-center">
+              <InfoIcon className="size-3.5 text-muted" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-72">{copy.description}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </span>
   );
 }
