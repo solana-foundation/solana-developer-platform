@@ -125,13 +125,14 @@ export interface EarnStrategy {
    *
    * A provider may front instruments that do not exist on every cluster, so a
    * row can name a live mainnet vault while sitting in a sandbox catalogue:
-   * everything about it true, none of it fundable from devnet. Kamino was the
-   * original example and no longer is — it has a devnet deployment, so each
-   * environment now catalogues its own cluster, and the sync refuses to store a
-   * mainnet instrument outside production. The column stays because the
-   * mismatch is structural, not Kamino-shaped: rows written before that guard
-   * survive until a delist pass, and the next single-cluster provider brings it
-   * straight back.
+   * everything about it true, none of it fundable from devnet. Since PRO-1742
+   * that is a designed steady state rather than drift — a non-production
+   * environment stores a browse-only MIRROR of the production mainnet shelf
+   * beside its own cluster's rows, so the curated catalogue can be reviewed
+   * outside production. List reads default to the environment's own cluster
+   * and serve the mirrored shelf only on an explicit `?cluster=` opt-in;
+   * either way, this field plus `fundable` below are what keep a mirrored row
+   * honest.
    *
    * `status: "active"` cannot express that — it is the operator's stop switch,
    * and reusing it here would both lie about why and collide with the
@@ -160,6 +161,61 @@ export interface EarnStrategy {
   fundable: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Persisted customer-facing treatments supported by the Earn button builder. */
+export const EARN_BUTTON_STYLES = ["ink", "light", "accent"] as const;
+export type EarnButtonStyle = (typeof EARN_BUTTON_STYLES)[number];
+export const DEFAULT_EARN_BUTTON_ACCENT_COLOR = "#14F195";
+export const EARN_BUTTON_ACCENT_COLOR_PATTERN = /^#[0-9A-F]{6}$/i;
+
+/**
+ * Shape of the public engineering-handoff token. The generator lives in the
+ * API repository (`customAlphabet(..., EARN_BUTTON_PUBLIC_TOKEN_LENGTH)`);
+ * every validator (API route params, OpenAPI, web client) must consume these
+ * rather than restating the shape.
+ */
+export const EARN_BUTTON_PUBLIC_TOKEN_LENGTH = 24;
+export const EARN_BUTTON_PUBLIC_TOKEN_PATTERN = /^[A-Za-z0-9_-]{24}$/;
+
+/**
+ * One project's saved Earn integration handoff. The public token is safe to
+ * share with an engineer: it resolves configuration only and never carries an
+ * SDP API key.
+ */
+export interface EarnButtonConfiguration {
+  id: string;
+  strategyId: string;
+  style: EarnButtonStyle;
+  accentColor: string;
+  publicToken: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EarnButtonConfigurationResponse {
+  configuration: EarnButtonConfiguration;
+}
+
+/** Public, unauthenticated subset served to an integration handoff page. */
+export interface PublicEarnButtonConfiguration {
+  strategyId: string;
+  strategyName: string | null;
+  provider: string | null;
+  style: EarnButtonStyle;
+  accentColor: string;
+  /**
+   * False when the configured strategy is no longer served by the catalogue
+   * read path (hidden, delisted, or not active). The handoff page must render
+   * a stale state instead of the integration snippet, and the display
+   * metadata above is withheld (`strategyName`/`provider` are null) so the
+   * unauthenticated route never names a strategy the catalogue hides.
+   */
+  strategyAvailable: boolean;
+}
+
+export interface PublicEarnButtonConfigurationResponse {
+  configuration: PublicEarnButtonConfiguration;
 }
 
 /**
@@ -330,6 +386,97 @@ export interface EarnVaultWithdrawalsPage {
   withdrawals: EarnVaultWithdrawal[];
   hasMore: boolean;
   nextCursor: string | null;
+}
+
+/**
+ * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
+ *
+ * An external wallet is a NON-CUSTODIAL wallet the partner's platform
+ * connects; SDP holds no key for it and never signs. Each direction is two
+ * calls: a BUILD returns an unsigned transaction to sign, and a SUBMIT
+ * takes the signed bytes back, records the movement, then broadcasts. These
+ * surfaces postdate the unified ledger, so statuses are the ledger's own
+ * vault vocabulary (`requested … finalized`), never the legacy deposit one.
+ */
+
+/** One unsigned transaction SDP built for an external wallet to sign. */
+export interface EarnExternalWalletTransaction {
+  /** Names the built transaction on the submit call. Single-use. */
+  transactionId: string;
+  /**
+   * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
+   * exactly these bytes (fee payer is the owner) and the partner returns the
+   * signed encoding on the submit call; any other change is refused there.
+   */
+  transaction: string;
+  /** Block height after which these exact bytes can no longer land. */
+  lastValidBlockHeight: string;
+  ownerAddress: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument. */
+  providerReference: string;
+  tokenMint: string;
+  shareMint: string;
+}
+
+/** Response body of POST /v1/earn/external-wallet/deposit-transactions. */
+export interface EarnExternalWalletDepositTransactionResponse {
+  transaction: EarnExternalWalletTransaction & {
+    /** Deposit amount encoded in the transaction, vault-token units. */
+    amount: string;
+    /** Slippage floor encoded in the transaction, share units, or null. */
+    minSharesOut: string | null;
+    strategy: {
+      id: string;
+      name: string;
+      provider: string;
+      providerReference: string;
+      hostCluster: SolanaCluster;
+    };
+  };
+}
+
+/** Response body of POST /v1/earn/external-wallet/withdrawal-transactions. */
+export interface EarnExternalWalletWithdrawalTransactionResponse {
+  transaction: EarnExternalWalletTransaction & {
+    /** The external-wallet position being exited. */
+    positionId: string;
+    /** Shares encoded in the transaction, share units. */
+    shares: string;
+  };
+}
+
+/** One recorded external-wallet vault movement, either direction. */
+export interface EarnExternalWalletMovement {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument. */
+  providerReference: string;
+  direction: EarnMovementDirection;
+  status: EarnVaultDirectMovementStatus;
+  signature: string;
+  ownerAddress: string;
+  /** Requested quantity, denominated in `denomination`. */
+  amount: string;
+  /** Token mint for a deposit; share mint for a withdrawal. */
+  denomination: string;
+  failureReason: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+  settledAt: string | null;
+  /** Present on POST responses; true when the idempotency anchor was replayed. */
+  replayed?: boolean;
+}
+
+/** Response body of POST /v1/earn/external-wallet/deposits. */
+export interface EarnExternalWalletDepositResponse {
+  deposit: EarnExternalWalletMovement;
+}
+
+/** Response body of POST /v1/earn/external-wallet/withdrawals. */
+export interface EarnExternalWalletWithdrawalResponse {
+  withdrawal: EarnExternalWalletMovement;
 }
 
 /**

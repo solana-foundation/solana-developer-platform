@@ -2,20 +2,64 @@
 
 import type { PaymentRampQuote, PaymentTransferSummary } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
-import { CheckCircle2Icon } from "lucide-react";
+import { CheckCircle2Icon, CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import {
   formatMinorCurrencyAmount,
   formatTimestamp,
   resolveTransferTokenLabel,
+  shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { providerTransferDetailRows } from "@/app/dashboard/payments/provider-transfer-details";
+import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
+import { useCopy } from "@/lib/use-copy";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
-function TransferDetailRow({ label, value }: { label: string; value: string }) {
+function TransferDetailRow({
+  label,
+  value,
+  href,
+  copyValue,
+}: {
+  label: string;
+  value: string;
+  href?: string;
+  copyValue?: string;
+}) {
+  const t = useTranslations();
+  const { copy, copied } = useCopy(1200);
   return (
     <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
       <span className="shrink-0 text-sm text-tertiary">{label}</span>
-      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">{value}</span>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex min-w-0 items-center gap-1 text-right text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {value}
+          <ExternalLinkIcon className="size-3.5 shrink-0" />
+        </a>
+      ) : (
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
+            {value}
+          </span>
+          {copyValue ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("DashboardPayments.transferDetails.copy", { label })}
+              onClick={() => void copy(copyValue)}
+            >
+              {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
+            </Button>
+          ) : null}
+        </span>
+      )}
     </div>
   );
 }
@@ -30,6 +74,7 @@ export function RampCompleteScreen({
   transfer: PaymentTransferSummary;
 }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   const onramp = direction === "onramp";
   const tokenLabel = resolveTransferTokenLabel(transfer.token);
   const cryptoAmount = transfer.amount && tokenLabel ? `${transfer.amount} ${tokenLabel}` : null;
@@ -42,7 +87,7 @@ export function RampCompleteScreen({
   const primaryAmount = onramp ? cryptoAmount : fiatAmount;
   const secondaryAmount = onramp ? fiatAmount : cryptoAmount;
 
-  const detailRows: { label: string; value: string }[] = [];
+  const detailRows: { label: string; value: string; href?: string; copyValue?: string }[] = [];
   if (!primaryAmount && secondaryAmount) {
     detailRows.push({
       label: onramp ? t("DashboardPayments.ramps.funded") : t("DashboardPayments.ramps.sent"),
@@ -53,6 +98,7 @@ export function RampCompleteScreen({
     label: t("DashboardPayments.ramps.provider"),
     value: getRampProviderLabel(quote.provider),
   });
+  detailRows.push(...providerTransferDetailRows(transfer, { cluster }, t));
 
   if (quote.provider === "lightspark") {
     const sendingAmount = formatMinorCurrencyAmount(
@@ -89,8 +135,11 @@ export function RampCompleteScreen({
       value: formatTimestamp(transfer.updatedAt, t),
     });
   }
-  detailRows.push({ label: t("DashboardPayments.ramps.transferId"), value: transfer.id });
-  detailRows.push({ label: t("DashboardPayments.ramps.quoteId"), value: quote.id });
+  detailRows.push({
+    label: t("DashboardPayments.ramps.transferId"),
+    value: shortenAddress(transfer.id),
+    copyValue: transfer.id,
+  });
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -125,7 +174,13 @@ export function RampCompleteScreen({
         ) : null}
         <div>
           {detailRows.map((detail) => (
-            <TransferDetailRow key={detail.label} label={detail.label} value={detail.value} />
+            <TransferDetailRow
+              key={detail.label}
+              label={detail.label}
+              value={detail.value}
+              href={detail.href}
+              copyValue={detail.copyValue}
+            />
           ))}
         </div>
       </section>

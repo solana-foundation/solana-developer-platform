@@ -798,7 +798,7 @@ describe("Payments routes — list transfers", () => {
     });
 
     it("composes exact provider-reference lookups with every ledger filter and pagination", async () => {
-      const counterpartyId = await seedCounterparty({ id: "counterparty_exact_reference" });
+      const counterpartyId = await seedCounterparty({ id: "cpty_exact_reference" });
       await seedTransfer({
         id: "xfr_exact_reference_match",
         status: "completed",
@@ -989,7 +989,7 @@ describe("Payments routes — list transfers", () => {
     });
 
     it("composes search, type, provider, and stable database pagination", async () => {
-      const counterpartyId = await seedCounterparty({ id: "counterparty_searchable" });
+      const counterpartyId = await seedCounterparty({ id: "cpty_searchable" });
       await seedTransfer({
         id: "xfr_search_old",
         status: "completed",
@@ -1051,7 +1051,7 @@ describe("Payments routes — list transfers", () => {
     });
 
     it("applies search, date filters, and amount sorting to observed wallet history", async () => {
-      const counterpartyId = await seedCounterparty({ id: "counterparty_observed_search" });
+      const counterpartyId = await seedCounterparty({ id: "cpty_observed_search" });
       const matchingLowSignature = "observed-filter-match-low-signature";
       const matchingHighSignature = "observed-filter-match-high-signature";
       const outsideDateSignature = "observed-filter-outside-date-signature";

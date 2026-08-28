@@ -8,9 +8,7 @@ import type { Counterparty, CounterpartyProviderData } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { describe, expect, it } from "vitest";
 
-type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
-
-function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCounterparty {
+function counterparty(overrides?: Partial<Counterparty>): Counterparty {
   return {
     id: "cp_123",
     organizationId: "org_123",
@@ -18,19 +16,6 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
     externalId: null,
     entityType: "individual",
     displayName: "Ada Lovelace",
-    email: "ada@example.com",
-    identity: {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: {
-        line1: "1 Market St",
-        city: "San Francisco",
-        countryCode: "US",
-        subdivisionCode: "CA",
-      },
-    },
     status: "active",
     createdBy: null,
     createdAt: "2026-06-26T00:00:00.000Z",

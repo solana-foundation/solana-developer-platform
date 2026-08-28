@@ -177,7 +177,24 @@ export function HoldToConfirmButton({
             />
           </svg>
         </span>
-        {holding ? holdingLabel : label}
+        {/*
+          Both labels occupy one grid cell so the button is always as wide as
+          the longer of them, and pressing it cannot resize anything. Swapping
+          the text outright made the button grow mid-hold, which tipped the
+          surrounding flex-wrap and threw the whole row onto a second line
+          under the reader's finger. Reserving the space also holds for
+          translations, where the holding label is usually the longer one.
+
+          `invisible` rather than a conditional render: visibility:hidden keeps
+          the box, and takes the hidden copy out of the accessibility tree, so
+          the button's `aria-label` stays its only name.
+        */}
+        <span aria-hidden className="grid place-items-center">
+          <span className={cn("col-start-1 row-start-1", holding && "invisible")}>{label}</span>
+          <span className={cn("col-start-1 row-start-1", !holding && "invisible")}>
+            {holdingLabel}
+          </span>
+        </span>
         <span aria-live="polite" className="sr-only">
           {holding ? holdingLabel : ""}
         </span>

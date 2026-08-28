@@ -1,16 +1,7 @@
-import type { Country, CountryCode } from "./countries";
+import type { Country } from "./countries";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
-
-export interface CounterpartyAddress {
-  line1: string;
-  line2?: string;
-  city: string;
-  postalCode?: string;
-  countryCode: CountryCode;
-  subdivisionCode?: string;
-}
 
 export const COUNTERPARTY_EMPLOYMENT_STATUSES = [
   "SELF_EMPLOYED",
@@ -104,56 +95,33 @@ export const COUNTERPARTY_INDUSTRY_SECTORS = [
   "WEAPONS",
 ] as const;
 
-export interface CounterpartyBusinessIdentity {
-  address: CounterpartyAddress;
-}
-
-export interface CounterpartyIndividualIdentity {
-  firstName: string;
-  middleName?: string;
-  lastName: string;
-  secondLastName?: string;
-  dateOfBirth: string;
-  phone: string;
-  address: CounterpartyAddress;
-}
-
-export type CounterpartyIdentity = CounterpartyIndividualIdentity | CounterpartyBusinessIdentity;
-
 export type CounterpartyStatus = "active" | "archived";
 
 export type CounterpartyProviderData = Record<string, unknown>;
-
-/** entityType discriminates the identity shape: checking it narrows `identity`. */
-export type CounterpartyEntityIdentity =
-  | { entityType: "individual"; identity: CounterpartyIndividualIdentity }
-  | { entityType: "business"; identity: CounterpartyBusinessIdentity };
 
 export type Counterparty = {
   id: string;
   organizationId: string;
   projectId: string | null;
   externalId: string | null;
+  entityType: CounterpartyEntityType;
   displayName: string;
-  email: string;
   status: CounterpartyStatus;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
-} & CounterpartyEntityIdentity;
+};
 
 export type CreateCounterpartyRequest = {
   externalId?: string;
+  entityType: CounterpartyEntityType;
   displayName: string;
-  email: string;
-} & CounterpartyEntityIdentity;
+};
 
 export interface UpdateCounterpartyRequest {
   externalId?: string | null;
   entityType?: CounterpartyEntityType;
   displayName?: string;
-  email?: string;
-  identity?: CounterpartyIdentity;
 }
 
 export interface CounterpartyResponse {
@@ -177,7 +145,7 @@ export interface ListCounterpartiesResponse {
   pageSize: number;
 }
 
-export const COUNTERPARTY_ACCOUNT_KINDS = ["bank_account", "crypto_wallet"] as const;
+export const COUNTERPARTY_ACCOUNT_KINDS = ["crypto_wallet"] as const;
 export type CounterpartyAccountKind = (typeof COUNTERPARTY_ACCOUNT_KINDS)[number];
 
 export type CounterpartyAccountStatus = "active" | "archived";

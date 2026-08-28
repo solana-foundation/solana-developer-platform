@@ -48,6 +48,76 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
+  it("keeps Earn button configuration internal while publishing caller-signed money routes", () => {
+    const internal = createOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument();
+
+    const current = internal.paths?.["/v1/earn/button-configurations/current"];
+    expect(current?.get?.operationId).toBe("getEarnButtonConfiguration");
+    expect(current?.get?.security).toEqual([
+      { apiKeyAuth: [] },
+      { clerkBearerAuth: [] },
+      { sessionCookie: [] },
+    ]);
+    expect(current?.get?.responses?.["400"]).toBeDefined();
+    expect(current?.get?.responses?.["429"]).toBeDefined();
+    expect(current?.put?.operationId).toBe("upsertEarnButtonConfiguration");
+    expect(current?.put?.security).toEqual([
+      { apiKeyAuth: [] },
+      { clerkBearerAuth: [] },
+      { sessionCookie: [] },
+    ]);
+    expect(current?.put?.requestBody).toBeDefined();
+    expect(current?.put?.responses?.["429"]).toBeDefined();
+
+    expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "JWT",
+    });
+
+    const handoff = internal.paths?.["/v1/earn/button-configurations/public/{publicToken}"]?.get;
+    expect(handoff?.operationId).toBe("getPublicEarnButtonConfiguration");
+    expect(handoff?.security).toBeUndefined();
+    expect(handoff?.responses?.["404"]).toBeDefined();
+    expect(handoff?.responses?.["429"]).toBeDefined();
+    expect(handoff?.responses?.["503"]).toBeDefined();
+
+    expect(publicDocument.paths?.["/v1/earn/button-configurations/current"]).toBeUndefined();
+    expect(
+      publicDocument.paths?.["/v1/earn/button-configurations/public/{publicToken}"]
+    ).toBeUndefined();
+    expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
+
+    for (const path of [
+      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/external-wallet/deposits",
+      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/external-wallet/withdrawals",
+    ]) {
+      const publicOperation = publicDocument.paths?.[path]?.post;
+      expect(publicOperation?.operationId).toBeDefined();
+      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }]);
+
+      const internalOperation = internal.paths?.[path]?.post;
+      expect(internalOperation?.security).toEqual([
+        { apiKeyAuth: [] },
+        { clerkBearerAuth: [] },
+        { sessionCookie: [] },
+      ]);
+    }
+
+    const submitRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
+    );
+    const signedTransactionExample = submitRequest.properties?.signedTransaction?.example;
+    expect(signedTransactionExample).toEqual(expect.any(String));
+    expect(signedTransactionExample).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+    expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
+      signedTransactionExample
+    );
+  });
+
   it("documents allowlist search/label filters and the labels endpoint", () => {
     const doc = createOpenApiDocument();
 
@@ -269,6 +339,7 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
+      "Earn",
     ]);
 
     expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();

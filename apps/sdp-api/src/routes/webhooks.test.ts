@@ -859,7 +859,7 @@ describe("BVNK ramp webhook", () => {
   const BVNK_WEBHOOK_SECRET = "bvnk_webhook_secret_test";
   const ORG_ID = "org_bvnk_webhook";
   const PROJECT_ID = "prj_bvnk_webhook";
-  const COUNTERPARTY_ID = "counterparty_123e4567-e89b-12d3-a456-426614174000";
+  const COUNTERPARTY_ID = "cpty_123e4567-e89b-12d3-a456-426614174000";
   const CUSTOMER_REFERENCE = "965a5ef5-77f3-482e-917f-194c30143810";
   const USER_ID = "usr_bvnk_webhook";
   const WALLET_ID = "a:1:wallet:1";
@@ -886,9 +886,9 @@ describe("BVNK ramp webhook", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties (
-           id, organization_id, project_id, external_id, entity_type, display_name, email,
-           identity, provider_data, status, created_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+           id, organization_id, project_id, external_id, entity_type, display_name,
+           provider_data, status, created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
       )
       .bind(
         COUNTERPARTY_ID,
@@ -897,14 +897,6 @@ describe("BVNK ramp webhook", () => {
         null,
         "individual",
         "Webhook Buyer",
-        "buyer@example.com",
-        {
-          firstName: "Webhook",
-          lastName: "Buyer",
-          dateOfBirth: "1990-01-15",
-          phone: "+14155551234",
-          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-        },
         {
           bvnk: {
             customer: {
@@ -972,6 +964,7 @@ describe("BVNK ramp webhook", () => {
               {
                 walletId?: string;
                 ruleId?: string;
+                provisioningError?: string;
                 bankAccount?: { accountNumber?: string; bankName?: string };
               }
             >;
@@ -995,7 +988,7 @@ describe("BVNK ramp webhook", () => {
     expect((await readBvnk())?.customer?.status).toBe("VERIFIED");
   });
 
-  it("provisions the funding wallet and payment rule after customer verification succeeds", async () => {
+  it("provisions the funding wallet and records the pending-JIT rule error after customer verification succeeds", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1052,11 +1045,14 @@ describe("BVNK ramp webhook", () => {
     expect(res.status).toBe(200);
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(createWallet).toHaveBeenCalledTimes(1);
-    expect(createRule).toHaveBeenCalledTimes(1);
+    expect(createRule).not.toHaveBeenCalled();
 
     const entry = (await readBvnk())?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
     expect(entry?.walletId).toBe(WALLET_ID);
-    expect(entry?.ruleId).toBe("rule_webhook_verified_1");
+    expect(entry?.ruleId).toBeUndefined();
+    expect(entry?.provisioningError).toBe(
+      `BVNK onramp requires identity fields for counterparty ${COUNTERPARTY_ID} that are no longer stored; JIT collection is not wired yet`
+    );
 
     getProfile.mockRestore();
     createWallet.mockRestore();
@@ -1114,7 +1110,7 @@ describe("BVNK ramp webhook", () => {
     expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
   });
 
-  it("creates the payment rule when a wallet activates for a verified customer", async () => {
+  it("records the pending-JIT provisioning error when a wallet activates for a verified customer", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1165,7 +1161,7 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(createRule).toHaveBeenCalledTimes(1);
+    expect(createRule).not.toHaveBeenCalled();
 
     const row = await getDb(env)
       .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
@@ -1173,12 +1169,22 @@ describe("BVNK ramp webhook", () => {
       .first<{
         provider_data: {
           bvnk?: {
-            wallets?: Record<string, { ruleId?: string; bankAccount?: { accountNumber?: string } }>;
+            wallets?: Record<
+              string,
+              {
+                ruleId?: string;
+                provisioningError?: string;
+                bankAccount?: { accountNumber?: string };
+              }
+            >;
           };
         };
       }>();
     const entry = row?.provider_data.bvnk?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
-    expect(entry?.ruleId).toBe("rule_webhook_1");
+    expect(entry?.ruleId).toBeUndefined();
+    expect(entry?.provisioningError).toBe(
+      `BVNK onramp requires identity fields for counterparty ${COUNTERPARTY_ID} that are no longer stored; JIT collection is not wired yet`
+    );
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
 
     createRule.mockRestore();
@@ -1771,7 +1777,7 @@ describe("Lightspark ramp webhook", () => {
       accountId: "ExternalAccount:019e92fe-cc69-6abf-0000-973b67b36284",
     },
     customerId: "Customer:019e92fe-c8b0-938e-0000-35ae407d1719",
-    platformCustomerId: "counterparty_8eac0e73-775a-419c-a2c0-6310ee4d1a78",
+    platformCustomerId: "cpty_8eac0e73-775a-419c-a2c0-6310ee4d1a78",
     createdAt: "2026-06-05T11:48:26.865811Z",
     description: "SDP onramp",
     source: {
@@ -2130,6 +2136,8 @@ describe("MoonPay ramp webhook", () => {
   const TRANSFER_ID = "pt_moonpay_webhook";
   const EXTERNAL_TX_ID = "ramp_quote_moonpay_webhook";
   const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
+  const COUNTERPARTY_ID = "cpty_moonpay_webhook";
+  const MOONPAY_CUSTOMER_ID = "6e9fd8db-98e4-46f4-bd6e-6a3c30fdda19";
 
   function moonpaySignatureHeader(
     body: string,
@@ -2183,18 +2191,27 @@ describe("MoonPay ramp webhook", () => {
       .run();
     await getDb(env)
       .prepare(
+        `INSERT INTO counterparties (
+           id, organization_id, project_id, entity_type, display_name, status, created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(COUNTERPARTY_ID, ORG_ID, PROJECT_ID, "individual", "MoonPay Buyer", "active", USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
         `INSERT INTO payment_transfers (
-           id, organization_id, project_id, wallet_id, source_address, destination_address,
-           token, amount, memo, type, direction, status, provider, provider_reference,
-           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
-           initiated_by_key_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           id, organization_id, project_id, wallet_id, counterparty_id, source_address,
+           destination_address, token, amount, memo, type, direction, status, provider,
+           provider_reference, delivery_mode, fiat_currency, fiat_amount, provider_data,
+           signature, serialized_tx, initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TRANSFER_ID,
         ORG_ID,
         PROJECT_ID,
         "wallet_moonpay_webhook",
+        COUNTERPARTY_ID,
         null,
         "DestinationSolanaWallet111111111111111111111111",
         "SOL",
@@ -2234,6 +2251,7 @@ describe("MoonPay ramp webhook", () => {
     data: {
       id: "0a5bb889-9afb-4b8d-835b-9b9855d67509",
       status: "completed",
+      customerId: MOONPAY_CUSTOMER_ID,
       externalTransactionId: EXTERNAL_TX_ID,
       failureReason: null,
       baseCurrencyAmount: 47.73,
@@ -2273,6 +2291,45 @@ describe("MoonPay ramp webhook", () => {
       feeAmount: 2,
       networkFeeAmount: 0.27,
     });
+  });
+
+  it("links the MoonPay customer to the counterparty and keeps the link stable on redelivery", async () => {
+    const first = await sendMoonpayWebhook(completedPayload);
+    expect(first.status).toBe(200);
+
+    const link = await getDb(env)
+      .prepare(
+        `SELECT id, counterparty_id, provider, provider_customer_reference, status
+         FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'moonpay'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        id: string;
+        counterparty_id: string;
+        provider: string;
+        provider_customer_reference: string;
+        status: string;
+      }>();
+    expect(link).toMatchObject({
+      counterparty_id: COUNTERPARTY_ID,
+      provider: "moonpay",
+      provider_customer_reference: MOONPAY_CUSTOMER_ID,
+      status: "active",
+    });
+
+    const second = await sendMoonpayWebhook(completedPayload);
+    expect(second.status).toBe(200);
+
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT id FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'moonpay'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .all<{ id: string }>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0].id).toBe(link?.id);
   });
 
   it("still marks a transfer failed when an early-stage failure omits economics", async () => {

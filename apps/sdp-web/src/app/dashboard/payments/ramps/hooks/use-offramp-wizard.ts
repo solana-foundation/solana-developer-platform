@@ -9,9 +9,10 @@ import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   createTransfer,
-  fetchTransferByProviderReference,
+  fetchTransferById,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -93,7 +94,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       insertAfter: "MEMO",
       direction: "offramp",
     },
-    advanceRequirementsBeforeQuote: true,
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
     buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
@@ -230,13 +230,12 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     }
   };
 
-  const transferStatusKey = wizard.quote
-    ? (["offramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
+  const transferStatusKey = wizard.quoteTransferId
+    ? paymentsQueryKeys.offrampTransferStatus({ transferId: wizard.quoteTransferId })
     : null;
   const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
     transferStatusKey,
-    ([, provider, providerReference]): Promise<PaymentTransferSummary | null> =>
-      fetchTransferByProviderReference({ provider, providerReference }, t),
+    ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
       refreshInterval: (transfer) =>
         transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,

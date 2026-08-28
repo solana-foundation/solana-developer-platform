@@ -13,14 +13,6 @@ export interface CounterpartyPlaygroundView {
 
 const exampleCounterpartyId = "cpty_abc123";
 const exampleDisplayName = "Acme Corp";
-const exampleEmail = "contact@acme.com";
-const exampleAddress = {
-  line1: "123 Main St",
-  city: "San Francisco",
-  postalCode: "94105",
-  countryCode: "US",
-  subdivisionCode: "CA",
-};
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 const counterpartyIdPathLabel = ["{", "counterpartyId", "}"].join("");
@@ -49,21 +41,19 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     value: cp.id,
     label: cp.displayName,
   }));
-  const individualOnlyDescription = t("DashboardPayments.counterparty.playgroundIndividualOnly");
-  const addressRequiredDescription = t("DashboardPayments.counterparty.playgroundAddressRequired");
-
+  const firstCounterpartyOption = counterpartyOptions[0];
   const counterpartyIdField: ApiPlaygroundFieldConfig =
-    counterpartyOptions.length > 0
-      ? {
+    firstCounterpartyOption === undefined
+      ? buildCounterpartyIdField(t)
+      : {
           key: "counterpartyId",
           label: counterpartyIdPathLabel,
           placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
           kind: "select",
           options: counterpartyOptions,
-          defaultValue: counterpartyOptions[0]?.value ?? "",
+          defaultValue: firstCounterpartyOption.value,
           required: true,
-        }
-      : buildCounterpartyIdField(t);
+        };
 
   const firstId = counterparties[0]?.id ?? exampleCounterpartyId;
   const firstName = counterparties[0]?.displayName ?? exampleDisplayName;
@@ -80,7 +70,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         counterparties:
           counterparties.length > 0
             ? counterparties.map((cp) => ({ id: cp.id, displayName: cp.displayName }))
-            : [{ id: exampleCounterpartyId, displayName: exampleDisplayName, email: exampleEmail }],
+            : [{ id: exampleCounterpartyId, displayName: exampleDisplayName }],
         total: counterparties.length || 1,
         page: 1,
         pageSize: 100,
@@ -97,7 +87,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         counterparty: {
           id: firstId,
           displayName: firstName,
-          email: exampleEmail,
           entityType: "business",
           status: "active",
         },
@@ -118,13 +107,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           required: true,
         },
         {
-          key: "email",
-          label: "email",
-          placeholder: t("DashboardPayments.counterparty.playgroundEmailPlaceholder"),
-          defaultValue: exampleEmail,
-          required: true,
-        },
-        {
           key: "entityType",
           label: "entityType",
           placeholder: t("DashboardPayments.counterparty.selectEntityType"),
@@ -132,65 +114,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           options: entityTypeOptions,
           defaultValue: "business",
           required: true,
-        },
-        {
-          key: "identity.firstName",
-          label: "identity.firstName",
-          placeholder: t("DashboardPayments.counterparty.firstNamePlaceholder"),
-          description: individualOnlyDescription,
-        },
-        {
-          key: "identity.lastName",
-          label: "identity.lastName",
-          placeholder: t("DashboardPayments.counterparty.lastNamePlaceholder"),
-          description: individualOnlyDescription,
-        },
-        {
-          key: "identity.dateOfBirth",
-          label: "identity.dateOfBirth",
-          placeholder: t("DashboardPayments.counterparty.playgroundDateOfBirthPlaceholder"),
-          description: individualOnlyDescription,
-        },
-        {
-          key: "identity.phone",
-          label: "identity.phone",
-          placeholder: t("DashboardPayments.counterparty.playgroundPhonePlaceholder"),
-          description: individualOnlyDescription,
-        },
-        {
-          key: "identity.address.line1",
-          label: "identity.address.line1",
-          defaultValue: exampleAddress.line1,
-          description: addressRequiredDescription,
-          required: true,
-        },
-        {
-          key: "identity.address.line2",
-          label: "identity.address.line2",
-        },
-        {
-          key: "identity.address.city",
-          label: "identity.address.city",
-          defaultValue: exampleAddress.city,
-          description: addressRequiredDescription,
-          required: true,
-        },
-        {
-          key: "identity.address.postalCode",
-          label: "identity.address.postalCode",
-          defaultValue: exampleAddress.postalCode,
-        },
-        {
-          key: "identity.address.countryCode",
-          label: "identity.address.countryCode",
-          defaultValue: exampleAddress.countryCode,
-          description: addressRequiredDescription,
-          required: true,
-        },
-        {
-          key: "identity.address.subdivisionCode",
-          label: "identity.address.subdivisionCode",
-          defaultValue: exampleAddress.subdivisionCode,
         },
         {
           key: "externalId",
@@ -202,9 +125,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         counterparty: {
           id: exampleCounterpartyId,
           displayName: exampleDisplayName,
-          email: exampleEmail,
           entityType: "business",
-          identity: { address: exampleAddress },
           status: "active",
           createdAt: new Date().toISOString(),
         },
@@ -223,11 +144,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           placeholder: t("DashboardPayments.counterparty.updatedDisplayNamePlaceholder"),
         },
         {
-          key: "email",
-          label: "email",
-          placeholder: t("DashboardPayments.counterparty.updatedEmailPlaceholder"),
-        },
-        {
           key: "entityType",
           label: "entityType",
           placeholder: t("DashboardPayments.counterparty.selectEntityType"),
@@ -244,7 +160,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         counterparty: {
           id: firstId,
           displayName: firstName,
-          email: exampleEmail,
           entityType: "business",
           status: "active",
         },

@@ -1,14 +1,19 @@
 "use client";
 
 import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
   type EarnVaultPosition,
   earnProgramSolanaPayoutTokens,
   isVaultDirectDepositEnabled,
   type SdpEnvironment,
+  SOLANA_CLUSTER_LABELS,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
 import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
@@ -40,6 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   type EarnFundingWallet,
@@ -47,6 +53,7 @@ import {
 } from "../earn/deposit/earn-funding-wallets";
 import { formatUsd } from "../earn/earn-format";
 import {
+  EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
   earnMintAsset,
   earnStrategyAsset,
@@ -67,7 +74,11 @@ import {
   useEarnVaultPositions,
   useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
-import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
+import {
+  type EarnProviderAccess,
+  type EarnVaultDepositAvailability,
+  earnVaultDepositAvailability,
+} from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
@@ -351,6 +362,18 @@ function strategyPositionValue(
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
 }
 
+// Exhaustive by construction (EarnDepositAvailabilityBadge): a new
+// availability variant fails this map's compile instead of collapsing to a
+// bare "Unavailable".
+const TREASURY_AVAILABILITY_LABELS = {
+  available: "DashboardMarkets.treasury.depositAvailable",
+  cluster_unavailable: "DashboardMarkets.treasury.clusterUnavailable",
+  strategy_unavailable: "DashboardMarkets.treasury.depositUnavailable",
+  environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
+  access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
+  provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
+} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+
 function StrategyTable({
   environment,
   onDeposit,
@@ -422,19 +445,11 @@ function StrategyTable({
                   ) : null}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={canDeposit ? "default" : "outline"}>
-                    {t(
-                      availability === "available"
-                        ? "DashboardMarkets.treasury.depositAvailable"
-                        : availability === "environment_unavailable"
-                          ? "DashboardMarkets.treasury.productionUnavailable"
-                          : availability === "access_unavailable"
-                            ? "DashboardMarkets.treasury.accessUnavailable"
-                            : availability === "provider_unavailable"
-                              ? "DashboardMarkets.treasury.providerUnavailable"
-                              : "DashboardMarkets.treasury.depositUnavailable"
-                    )}
-                  </Badge>
+                  <EarnDepositAvailabilityBadge
+                    availability={availability}
+                    labels={TREASURY_AVAILABILITY_LABELS}
+                    strategy={strategy}
+                  />
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex justify-end gap-2">
@@ -703,9 +718,11 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
 }
 
 function TreasuryStrategiesCard({
+  cluster,
   environment,
   error,
   isLoading,
+  onClusterChange,
   onDeposit,
   onRefresh,
   positions,
@@ -713,9 +730,12 @@ function TreasuryStrategiesCard({
   strategies,
   unrecordedShareMints,
 }: {
+  /** The cluster sub-shelf being browsed — the environment's own by default. */
+  cluster: SolanaCluster;
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
+  onClusterChange: (cluster: SolanaCluster) => void;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
@@ -732,15 +752,33 @@ function TreasuryStrategiesCard({
         <CardTitle>{t("DashboardMarkets.treasury.strategiesTitle")}</CardTitle>
         <CardDescription>{t("DashboardMarkets.treasury.strategiesDescription")}</CardDescription>
         <CardAction>
-          <Button
-            iconLeft={<RefreshCwIcon />}
-            onClick={onRefresh}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {t("DashboardMarkets.treasury.refresh")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {environment === "sandbox" ? (
+              // Sandbox only (PRO-1742): production has no other shelf to
+              // offer, so the control must not render there at all — reviewing
+              // the mainnet catalogue IS what production shows by default.
+              <SegmentedControl
+                aria-label={t("DashboardMarkets.treasury.clusterToggleLabel")}
+                items={SOLANA_CLUSTERS.map((option) => ({
+                  value: option,
+                  label: SOLANA_CLUSTER_LABELS[option],
+                }))}
+                value={cluster}
+                // Re-clicking the active segment can emit an empty value from
+                // the underlying toggle group; a shelf always has a selection.
+                onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
+              />
+            ) : null}
+            <Button
+              iconLeft={<RefreshCwIcon />}
+              onClick={onRefresh}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {t("DashboardMarkets.treasury.refresh")}
+            </Button>
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent className="px-0">
@@ -848,6 +886,25 @@ export function TreasurySolutionsWorkspace({
     isLoading: strategiesLoading,
     refresh: refreshStrategies,
   } = useEarnStrategies();
+  // PRO-1742: the strategies card's cluster opt-in, sandbox-only by
+  // construction — production always reads its default shelf. The card's read
+  // is SEPARATE from `strategies` above on purpose: that read doubles as the
+  // share-mint vocabulary behind the allocation summary, and browsing the
+  // mirrored mainnet shelf must not blank the devnet vocabulary under it. On
+  // the default shelf both hooks share one SWR key, so no second fetch happens
+  // until the toggle leaves it. `undefined` means "the default shelf", and the
+  // toggle handler below normalizes the environment's own cluster back to it,
+  // so toggling away and back re-joins the shared key instead of keeping a
+  // second, permanently distinct cache entry of the identical shelf.
+  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(undefined);
+  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
+  const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
+  const {
+    strategies: catalogueStrategies,
+    error: catalogueError,
+    isLoading: catalogueLoading,
+    refresh: refreshCatalogue,
+  } = useEarnStrategies({ cluster: strategiesCluster });
   const {
     positions,
     error: positionsError,
@@ -1040,19 +1097,32 @@ export function TreasurySolutionsWorkspace({
         />
 
         <TreasuryStrategiesCard
+          cluster={strategiesCluster ?? environmentCluster}
           environment={sdpEnvironment}
-          error={strategiesError}
-          isLoading={strategiesLoading}
+          error={catalogueError}
+          // keepPreviousData holds the outgoing shelf's rows through a toggle
+          // flip, so skeletons are for the true first load only.
+          isLoading={catalogueLoading && catalogueStrategies === undefined}
+          onClusterChange={(cluster) =>
+            setCatalogueCluster(cluster === environmentCluster ? undefined : cluster)
+          }
           onDeposit={setDepositStrategy}
           onRefresh={() => {
             refreshWallets();
             refreshStrategies();
+            // On the default shelf both strategy hooks share one SWR key, and
+            // refreshing it twice would run the paged catalogue fetch twice
+            // per click; the mirror shelf only needs its own refresh once the
+            // toggle has left the default.
+            if (strategiesCluster !== undefined) {
+              refreshCatalogue();
+            }
             refreshPositions();
             refreshPrograms();
           }}
           positions={positionsError ? undefined : positions}
           providerAccess={providerAccess}
-          strategies={strategies}
+          strategies={catalogueStrategies}
           unrecordedShareMints={allocation.unrecordedShareMints}
         />
 
