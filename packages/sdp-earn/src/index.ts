@@ -10,6 +10,7 @@ import { WisdomTreeEarnClient } from "./providers/wisdomtree/client";
 import type { EarnVaultProvider } from "./types";
 
 export {
+  supportsDepositEligibility,
   supportsLiveMetrics,
   supportsPortfolioWallets,
   supportsVaultQueuedWithdraw,
@@ -35,6 +36,9 @@ export { WisdomTreeEarnClient } from "./providers/wisdomtree/client";
 export { isClusterFundableInEnvironment, isStrategyWithinDeclaredSupport } from "./support";
 export type {
   EarnDeclaredStrategySupport,
+  EarnDepositEligibility,
+  EarnDepositEligibilityInput,
+  EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
   EarnPendingWithdrawalApproval,
   EarnPortfolioAddressBookEntryInput,
