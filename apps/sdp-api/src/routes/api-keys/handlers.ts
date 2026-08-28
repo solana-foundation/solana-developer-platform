@@ -13,7 +13,11 @@ import {
   createPolicyRepository,
   type UpsertApiKeyWalletPolicyBindingInput,
 } from "@/db/repositories";
-import { dropApiKeyCacheEntry, refreshApiKeyCache } from "@/lib/api-key-cache";
+import {
+  dropApiKeyCacheEntry,
+  isApiKeyCacheWritable,
+  refreshApiKeyCache,
+} from "@/lib/api-key-cache";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -658,6 +662,20 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
 
   const body = c.req.valid("json");
   const gracePeriodHours = body.gracePeriodHours ?? 24;
+
+  // Checked BEFORE anything commits. Once the rotation lands, the old key's
+  // cached entry must be invalidated or it keeps authorizing past its new
+  // deadline — and every recovery path (the refresh, the fallback drop, the
+  // reconciliation sweep) writes to this same store, so none of them can
+  // help if it is refusing writes. Rotation cannot be rolled back, cannot
+  // fail its response, and cannot be retried, so the only safe answer to an
+  // unwritable cache is to not start.
+  if (!(await isApiKeyCacheWritable(c.var.kv.apiKeys))) {
+    throw new AppError(
+      "SERVICE_UNAVAILABLE",
+      "Rotation is unavailable right now because cached credentials cannot be invalidated; nothing was changed, so retry shortly"
+    );
+  }
 
   const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const rotation = await apiKeyService.rotateApiKey(

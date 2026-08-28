@@ -27,7 +27,11 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const kvContention = vi.hoisted(() => ({ contendApiKeyCas: false, loseCasRemaining: 0 }));
+const kvContention = vi.hoisted(() => ({
+  contendApiKeyCas: false,
+  loseCasRemaining: 0,
+  failWrites: false,
+}));
 
 vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
@@ -37,9 +41,18 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   const wrapStore = (store: KVStore): KVStore =>
     new Proxy(store, {
       get(target, prop, receiver) {
-        if (prop === "compareAndSet") {
+        if (prop === "put" || prop === "delete" || prop === "compareAndSet") {
           return async (...args: unknown[]) => {
-            if (typeof args[0] === "string" && args[0].startsWith("key:")) {
+            // Reads keep working: a store refusing writes while serving
+            // reads is what leaves stale authorization usable.
+            if (kvContention.failWrites) {
+              throw new Error("simulated redis write outage");
+            }
+            if (
+              prop === "compareAndSet" &&
+              typeof args[0] === "string" &&
+              args[0].startsWith("key:")
+            ) {
               if (kvContention.contendApiKeyCas) {
                 return false;
               }
@@ -195,7 +208,38 @@ describe("API key update with contended cache refresh", () => {
   afterEach(async () => {
     kvContention.contendApiKeyCas = false;
     kvContention.loseCasRemaining = 0;
+    kvContention.failWrites = false;
     await clearKVStores(env);
+  });
+
+  it("refuses to rotate at all while the cache cannot accept the invalidation", async () => {
+    // Writes are refused but reads still work, so a committed rotation would
+    // leave the old key's entry authorizing past its deadline with no
+    // recovery: the refresh, the fallback drop and the reconciliation sweep
+    // all write to this same store. Rotation cannot be rolled back, cannot
+    // fail its response, and cannot be retried, so it must not start.
+    kvContention.failWrites = true;
+
+    const res = await rotateTargetKey({ gracePeriodHours: 0 });
+    expect(res.status).toBe(503);
+
+    // Nothing was committed: no replacement key, no deadline on the old one.
+    const row = await getDb(env)
+      .prepare("SELECT rotation_deadline FROM api_keys WHERE id = ?")
+      .bind(TARGET_KEY.id)
+      .first<{ rotation_deadline: string | null }>();
+    expect(row?.rotation_deadline).toBeNull();
+
+    const replacements = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM api_keys WHERE rotated_from = ?")
+      .bind(TARGET_KEY.id)
+      .first<{ count: number }>();
+    expect(Number(replacements?.count)).toBe(0);
+
+    // The store recovers and the same request succeeds, with nothing to undo.
+    kvContention.failWrites = false;
+    expect((await rotateTargetKey({ gracePeriodHours: 0 })).status).toBe(201);
+    expect(await targetKeyListStatus()).toBe(401);
   });
 
   it("absorbs transient contention and serves the reduced authorization before success", async () => {

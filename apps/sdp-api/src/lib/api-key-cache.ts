@@ -377,6 +377,39 @@ function tryParseStatus(raw: string): ApiKeyStatus | null {
   }
 }
 
+const API_KEY_CACHE_PROBE_PREFIX = "probe:api-key-cache:";
+
+/**
+ * Prove the cache accepts writes before committing state whose safety
+ * depends on invalidating it.
+ *
+ * Rotation is the one mutation with no recovery from a failed invalidation:
+ * it cannot be rolled back (the replacement is already live), cannot fail
+ * its response (the secret exists only there), and cannot be retried (the
+ * retry is refused as a duplicate). Committing into a store that is already
+ * refusing writes strands the old key's entry reporting no rotation
+ * deadline — and the reconciliation sweep writes to that same store, so it
+ * cannot repair it either; only the TTL ends it. Refusing before the commit
+ * leaves nothing half-applied and the caller can simply try again.
+ *
+ * A pass does not promise the later write succeeds. It rules out the store
+ * being down at decision time, which is exactly the case the post-commit
+ * refresh, the drop, and the sweep all share a dependency on and therefore
+ * cannot cover.
+ */
+export async function isApiKeyCacheWritable(kv: KVStore): Promise<boolean> {
+  const probeKey = `${API_KEY_CACHE_PROBE_PREFIX}${crypto.randomUUID()}`;
+  try {
+    await kv.put(probeKey, "1", { expirationTtl: 60 });
+  } catch {
+    return false;
+  }
+  // Best effort: a probe left behind expires on its own and is namespaced
+  // away from every `key:<hash>` entry readers and the sweep look at.
+  await kv.delete(probeKey).catch(() => {});
+  return true;
+}
+
 /**
  * Last-resort invalidation for a mutation that cannot fail its request but
  * must not leave pre-mutation authorization cached — today only rotation,
