@@ -13,6 +13,12 @@ export type SdpWisdomTreeErrorCode =
   /** A chain read failed or returned an account this package refuses to trust. */
   | "CHAIN_UNREADABLE"
   /**
+   * The transfer hook's required accounts could not be resolved. For
+   * WisdomTree's compliance hook, the usual cause is a wallet the issuer has
+   * not verified — resolution failing IS the KYC gate answering no.
+   */
+  | "HOOK_UNRESOLVED"
+  /**
    * The live mint does not match the measured registry (wrong owner program,
    * decimals, or transfer-hook program). Refusing is the point: building
    * against a drifted instrument moves money under stale assumptions.
