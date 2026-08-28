@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -116,20 +116,13 @@ export function OperationComposer({
   const wallet = wallets[0] ?? null;
   const walletId = wallet?.id ?? null;
 
+  // Switching wallet is a fresh session — the workspace passes `key={walletId}`
+  // so React remounts this whole subtree, resetting draft/phase/started/started
+  // without an effect that would let old state paint for a frame.
   const [phase, setPhase] = useState<Phase>({ name: "compose" });
   const [draft, setDraft] = useState<ComposerDraft>(() => newDraft(walletId ?? ""));
   const [submitting, setSubmitting] = useState(false);
   const [started, setStarted] = useState(false);
-
-  // Switching wallet is a fresh session: clear draft (including tab), any
-  // in-flight review, and the leftover started-callout. Otherwise the tab and
-  // form data from wallet A follow the operator into wallet B.
-  useEffect(() => {
-    if (walletId === null) return;
-    setDraft((current) => (current.walletId === walletId ? current : newDraft(walletId)));
-    setPhase({ name: "compose" });
-    setStarted(false);
-  }, [walletId]);
 
   const patchDraft = useCallback((patch: Partial<ComposerDraft>) => {
     setStarted(false);
@@ -178,7 +171,7 @@ export function OperationComposer({
     setPhase({ name: "compose" });
     setDraft(newDraft(draft.walletId, draft.opType));
     await onPrepared();
-  }, [draft, onPrepared, t]);
+  }, [draft, custody, onPrepared, t]);
 
   const summaryRows = useMemo(
     () => (wallet ? buildSummaryRows(t, draft, custody, recipientOptions) : []),
