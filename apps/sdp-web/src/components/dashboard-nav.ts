@@ -69,6 +69,34 @@ export function dashboardSubnavStorageKey(key: DashboardSubnavKey): string {
   return `sdp.dashboard.${key}-subnav-open`;
 }
 
+export type DashboardSubnavState = Record<DashboardSubnavKey, boolean>;
+
+/**
+ * Reveal a section's pages.
+ *
+ * Deliberately not a toggle. Following a top-level item is a request to go
+ * there, so a second click on the section you are already in must not hide the
+ * pages you are looking at (HOO-1218). The chevron remains the control that can
+ * close one.
+ *
+ * Returns the same object when nothing changes, so a caller holding this in
+ * React state does not re-render for a click that decided nothing.
+ */
+export function withSubnavOpen(
+  current: DashboardSubnavState,
+  key: DashboardSubnavKey
+): DashboardSubnavState {
+  return current[key] ? current : { ...current, [key]: true };
+}
+
+/** Flip one section, which is what the chevron does. */
+export function withSubnavToggled(
+  current: DashboardSubnavState,
+  key: DashboardSubnavKey
+): DashboardSubnavState {
+  return { ...current, [key]: !current[key] };
+}
+
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
   _privateChannelsEnabled: boolean

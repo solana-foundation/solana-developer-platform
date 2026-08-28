@@ -8,7 +8,8 @@
       "withdraw": "Retirer",
       "members": "Membres",
       "events": "Événements",
-      "instance": "Instance"
+      "instance": "Instance",
+      "apiPlayground": "API Playground"
     },
     "common": {
       "loadError": "Une erreur est survenue lors du chargement de cette section.",
@@ -19,7 +20,10 @@
       "channelBalance": "Solde du canal :",
       "amountRequired": "Saisissez un montant en USDC.",
       "amountInvalid": "Saisissez un montant en USDC supérieur à zéro, avec jusqu'à 6 décimales.",
-      "amountWithUnit": "{amount} USDC"
+      "amountWithUnit": "{amount} USDC",
+      "tokenLabel": "Token",
+      "amountForToken": "Montant ({symbol})",
+      "amount": "Montant"
     },
     "overview": {
       "title": "Aperçu",
@@ -38,7 +42,29 @@
       "notExecutable": "Non exécutable",
       "reachable": "Accessible",
       "notReachable": "Inaccessible",
-      "ownerMismatch": "propriétaire non concordant"
+      "ownerMismatch": "propriétaire non concordant",
+      "connectedInstanceTitle": "Instance connectée",
+      "statusConnected": "Connecté",
+      "statusDegraded": "Dégradé",
+      "statusUnreachable": "Inaccessible",
+      "instanceAddressLabel": "Adresse de l'instance",
+      "privateBalanceTitle": "Solde privé",
+      "privateBalanceEmpty": "Aucun solde de canal pour l'instant.",
+      "allowedTokensTitle": "Tokens autorisés",
+      "allowedTag": "Autorisé",
+      "activityTitle": "Activité privée récente",
+      "activityNewTransfer": "Nouveau transfert privé",
+      "activityRefresh": "Actualiser",
+      "activityViewAll": "Voir toute l'activité",
+      "activityEmpty": "Aucune activité privée pour l'instant.",
+      "activityLoadError": "Impossible de charger l'activité.",
+      "colStatus": "Statut",
+      "colType": "Type",
+      "colToken": "Token",
+      "colChannel": "Canal",
+      "colCreated": "Créé",
+      "valueNone": "—",
+      "statusNotConnected": "Non connecté"
     },
     "verifiedWallets": {
       "title": "Wallets vérifiés",
@@ -253,7 +279,18 @@
       "typeDepositAwaitingSpcCredit": "En attente de crédit du canal",
       "typeWithdrawalReleaseAttemptFailed": "Échec de la tentative de libération",
       "typeStuckWarning": "Transfert bloqué",
-      "typeNeedsManualReview": "Nécessite une revue manuelle"
+      "typeNeedsManualReview": "Nécessite une revue manuelle",
+      "fieldWalletId": "ID du Wallet",
+      "fieldMemberName": "Nom du membre",
+      "fieldMemberId": "ID du membre",
+      "fieldUserName": "Utilisateur",
+      "fieldUserId": "ID utilisateur",
+      "fieldActor": "Acteur",
+      "fieldActorId": "ID de l'acteur",
+      "fieldMembershipId": "ID d'adhésion",
+      "fieldEventId": "ID de l'événement",
+      "viewTransaction": "Voir la transaction sur Solana Explorer",
+      "rawPayload": "Payload brut"
     },
     "instance": {
       "title": "Connecter un canal privé",
@@ -292,7 +329,25 @@
       "reactivating": "Réactivation…",
       "deleteAria": "Supprimer l'instance de canal privé",
       "deleteTitle": "Supprimer l'instance de canal privé",
-      "deleteDescription": "Cette action supprimera définitivement l'enregistrement d'instance et toutes les données en aval qui lui sont liées (canaux, dépôts, transferts). Cette action est irréversible."
+      "deleteDescription": "Cette action supprimera définitivement l'enregistrement d'instance et toutes les données en aval qui lui sont liées (canaux, dépôts, transferts). Cette action est irréversible.",
+      "setupEyebrow": "Intégration de confidentialité",
+      "setupDetailsTitle": "Détails de connexion",
+      "setupDetailsDescription": "Saisissez les endpoints Private Channels et les adresses des programmes déployés pour ce projet. SDP utilise automatiquement le RPC configuré du projet.",
+      "gatewayNotReady": "La passerelle a répondu mais n'est pas prête",
+      "connectionTestFailed": "Certains endpoints n'ont pas pu être atteints. Vérifiez les détails de connexion en surbrillance et réessayez.",
+      "connectionRequestFailed": "Nous n'avons pas pu tester la connexion. Vérifiez les détails de connexion et réessayez."
+    },
+    "playground": {
+      "productName": "Private Channels",
+      "getInstance": "Obtenir l'instance",
+      "connectInstance": "Connecter l'instance",
+      "probeConnection": "Tester la connexion",
+      "probeHealth": "Tester la santé de la passerelle",
+      "createChannel": "Créer un canal",
+      "getDeposit": "Obtenir le dépôt",
+      "getWithdrawal": "Obtenir le retrait",
+      "getChannel": "Obtenir le canal",
+      "channelDescriptionPlaceholder": "Paiements Ops"
     }
   }
 }

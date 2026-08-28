@@ -4,6 +4,7 @@ import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
@@ -23,7 +24,6 @@ import {
 } from "./components/payment-method-step";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
-import { PAYMENTS_ACTION_WALLETS_KEY } from "./hooks/use-payments-action-wallets";
 import { OfframpRail } from "./offramp-rail";
 import { OnchainReceiveRail } from "./onchain-receive-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
@@ -41,8 +41,6 @@ interface PaymentsActionPageProps {
 }
 
 type WizardStep = { label: string; title: string };
-
-const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
 export interface RailProps {
   wallets: PaymentsDashboardWallet[];
@@ -72,7 +70,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
 
   const { data: counterpartiesResult, mutate: mutateCounterparties } = useSWR(
-    PAYMENTS_ACTION_COUNTERPARTIES_KEY,
+    paymentsQueryKeys.actionCounterparties(),
     fetchAllCounterparties,
     {
       fallbackData: props.counterpartiesResult,
@@ -85,8 +83,12 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     if (!id) {
       return;
     }
-    void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }, t));
-    void preload(["counterparty-accounts", id], () => fetchCounterpartyAccounts(id, t));
+    void preload(paymentsQueryKeys.actionWallets(), () =>
+      fetchWallets({ includeBalances: true }, t)
+    );
+    void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId: id }), () =>
+      fetchCounterpartyAccounts(id, t)
+    );
   };
 
   const fiatEnabled = hasEnabledRampProvider(rampProviderAccess);

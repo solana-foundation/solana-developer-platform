@@ -37,6 +37,8 @@ function git(args) {
 
 function writeStepSummary(markdown) {
   if (process.env.GITHUB_STEP_SUMMARY) {
+    // The runner owns this fixed diagnostic path; remote text cannot select a file or execute.
+    // codeql[js/http-to-file-access]
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
   }
 }
@@ -185,6 +187,8 @@ async function githubRequest(method, resourcePath, body) {
     return null;
   }
 
+  // Catalog diagnostics are posted back to the same repository through this fixed API host.
+  // codeql[js/file-access-to-http]
   const response = await fetch(`https://api.github.com${resourcePath}`, {
     method,
     headers: {
