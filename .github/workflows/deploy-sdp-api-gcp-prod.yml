@@ -396,8 +396,7 @@ jobs:
     needs: [smoke, deploy]
     if: >-
       always() &&
-      github.repository == 'solana-foundation/solana-developer-platform' &&
-      needs.deploy.result != 'cancelled'
+      github.repository == 'solana-foundation/solana-developer-platform'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -413,7 +412,10 @@ jobs:
           DOPPLER_CONFIG: dev_ci
           SERVICE: sdp-api
           ENV: production
-          STATUS: ${{ needs.deploy.result == 'success' && 'success' || 'failure' }}
+          STATUS: >-
+            ${{ needs.deploy.result == 'success' && 'success' ||
+                (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
+                'failure' }}
           VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
           DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
           ACTOR: ${{ github.actor }}

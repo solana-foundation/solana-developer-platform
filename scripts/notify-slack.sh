@@ -17,9 +17,10 @@ echo "::add-mask::$SLACK"
 
 LABEL="$SERVICE"; [ -n "$ENV" ] && LABEL="$SERVICE ($ENV)"
 case "$STATUS" in
-  started) MARKER="[STARTED] Deploy $LABEL"; COLOR="#dbab09" ;;
-  success) MARKER="[SUCCESS] Deploy $LABEL"; COLOR="#36a64f" ;;
-  *)       MARKER="[FAILED] Deploy $LABEL";  COLOR="#cc0000" ;;
+  started)   MARKER="[STARTED] Deploy $LABEL";   COLOR="#dbab09" ;;
+  success)   MARKER="[SUCCESS] Deploy $LABEL";   COLOR="#36a64f" ;;
+  cancelled) MARKER="[CANCELLED] Deploy $LABEL"; COLOR="#808080" ;;
+  *)         MARKER="[FAILED] Deploy $LABEL";    COLOR="#cc0000" ;;
 esac
 
 FIELDS=$(jq -n --arg label "$LABEL" --arg ver "$VERSION" --arg commit "$COMMIT" --arg actor "$ACTOR" --arg run "$RUN_URL" --arg rid "$RUN_ID" \
