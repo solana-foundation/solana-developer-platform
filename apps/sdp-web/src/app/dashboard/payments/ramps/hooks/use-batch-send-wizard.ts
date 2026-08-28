@@ -18,6 +18,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   type CreateTransferBatchResult,
   createTransferBatch,
@@ -118,7 +119,7 @@ export function useBatchSendWizard({
 
   const trimmedSearch = search.trim();
   const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
-    ["batch-recipients", page, trimmedSearch],
+    paymentsQueryKeys.batchRecipients({ page, search: trimmedSearch }),
     () =>
       fetchBatchRecipients(
         {
@@ -302,7 +303,7 @@ export function useBatchSendWizard({
 
   const { data: estimate, error: estimateError } = useSWR(
     currentStepId === "REVIEW" && canProceed && !batchResult
-      ? ["batch-estimate", JSON.stringify(request)]
+      ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
       : null,
     () => estimateTransferBatch(request, t),
     { revalidateOnFocus: false }

@@ -1,9 +1,6 @@
 name: SDP smoke canary
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
-    - cron: "*/5 * * * *"
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -14,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sdp-smoke-${{ github.event.schedule || github.event_name }}-${{ github.ref }}
+  group: sdp-smoke-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -22,9 +19,7 @@ jobs:
     name: GCP dev dashboard smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: >-
-      github.repository == 'solana-foundation/solana-developer-platform' &&
-      github.event.schedule != '*/5 * * * *'
+    if: github.repository == 'solana-foundation/solana-developer-platform'
     env:
       DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,SDP_FLAG_ORGANIZATION_ONBOARDING,SDP_FLAG_PRIVY_BYOK,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,PAYMENTS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
       PLAYWRIGHT_API_URL: https://api-dev.solana.com
@@ -103,54 +98,3 @@ jobs:
             apps/sdp-web/test-results
           if-no-files-found: ignore
 
-  prod-canary:
-    name: Prod public canary
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: >-
-      github.repository == 'solana-foundation/solana-developer-platform' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *'))
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Probe prod dashboard and API
-        id: probe
-        run: |
-          set -euo pipefail
-          fail=""
-          if body=$(curl -fsSL --max-time 30 --retry 2 https://platform.solana.com); then
-            grep -q "<title>Solana Developer Platform</title>" <<< "$body" || fail="dashboard title marker missing"
-          else
-            fail="dashboard unreachable"
-          fi
-          if [ -z "$fail" ]; then
-            if health=$(curl -fsS --max-time 30 --retry 2 https://api.solana.com/health); then
-              jq -e '.status == "ok" and .environment == "production"' >/dev/null <<< "$health" || fail="api health degraded: $health"
-            else
-              fail="api health unreachable"
-            fi
-          fi
-          if [ -n "$fail" ]; then
-            echo "$fail" | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "prod dashboard and API healthy" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Install Doppler CLI
-        if: always()
-        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
-
-      - name: Report run to Loki
-        if: always()
-        continue-on-error: true
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_PROJECT: solana-developer-platform
-          DOPPLER_CONFIG: dev_ci
-          SMOKE_OUTCOME: ${{ steps.probe.outcome }}
-          SMOKE_TARGET: prod
-          RUN_ID: ${{ github.run_id }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh

@@ -16,7 +16,7 @@ vi.mock("@/components/workspace-switcher", () => ({
 
 import { DashboardBottomNav } from "./dashboard-bottom-nav";
 import { DashboardMoreSheet } from "./dashboard-more-sheet";
-import { getNavSections } from "./dashboard-nav";
+import { getNavSections, withSubnavOpen, withSubnavToggled } from "./dashboard-nav";
 
 type Translate = Parameters<typeof getNavSections>[0];
 const t = ((key: string) => key) as Translate;
@@ -181,5 +181,41 @@ describe("Payments dashboard navigation", () => {
     );
 
     expect(markup).not.toContain("/dashboard/payments");
+  });
+});
+
+describe("subnav open state", () => {
+  const closed = { payments: false, markets: false } as const;
+
+  it("opens a section when its top-level item is followed", () => {
+    // Gui's ask: clicking Payments in the side nav expands the Payments
+    // submenu rather than only navigating to it (HOO-1218).
+    expect(withSubnavOpen(closed, "payments")).toEqual({ payments: true, markets: false });
+  });
+
+  it("never closes the section being navigated into", () => {
+    // The whole reason this is not a toggle. A second click on the section you
+    // are already inside would otherwise hide the pages you are looking at.
+    const open = { payments: true, markets: false };
+    expect(withSubnavOpen(open, "payments").payments).toBe(true);
+  });
+
+  it("returns the same object when the section is already open", () => {
+    // Held in React state, so a click that decides nothing must not re-render
+    // the whole shell.
+    const open = { payments: true, markets: false };
+    expect(withSubnavOpen(open, "payments")).toBe(open);
+  });
+
+  it("leaves other sections alone", () => {
+    expect(withSubnavOpen({ payments: false, markets: true }, "payments")).toEqual({
+      payments: true,
+      markets: true,
+    });
+  });
+
+  it("still flips both ways for the chevron", () => {
+    expect(withSubnavToggled(closed, "markets").markets).toBe(true);
+    expect(withSubnavToggled({ payments: false, markets: true }, "markets").markets).toBe(false);
   });
 });
