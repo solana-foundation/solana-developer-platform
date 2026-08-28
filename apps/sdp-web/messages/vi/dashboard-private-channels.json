@@ -390,7 +390,13 @@
       "reactivating": "Đang kích hoạt lại…",
       "deleteAria": "Xóa instance private channel",
       "deleteTitle": "Xóa instance Private Channel",
-      "deleteDescription": "Thao tác này sẽ xóa vĩnh viễn bản ghi instance và mọi dữ liệu downstream gắn với nó (kênh, khoản nạp, lệnh chuyển). Không thể hoàn tác."
+      "deleteDescription": "Thao tác này sẽ xóa vĩnh viễn bản ghi instance và mọi dữ liệu downstream gắn với nó (kênh, khoản nạp, lệnh chuyển). Không thể hoàn tác.",
+      "setupEyebrow": "Tích hợp Privacy",
+      "setupDetailsTitle": "Chi tiết kết nối",
+      "setupDetailsDescription": "Nhập endpoint Private Channels và địa chỉ program đã deploy cho project này. SDP tự động dùng RPC đã cấu hình của project.",
+      "gatewayNotReady": "Gateway đã phản hồi nhưng chưa sẵn sàng",
+      "connectionTestFailed": "Một số endpoint không kết nối được. Kiểm tra chi tiết kết nối được tô sáng và thử lại.",
+      "connectionRequestFailed": "Không thể kiểm tra kết nối. Kiểm tra chi tiết kết nối và thử lại."
     }
   }
 }
