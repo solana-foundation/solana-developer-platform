@@ -53,10 +53,8 @@ export interface ProviderTransferDetailRow {
   mono?: boolean;
 }
 
-function moonpayTrackerUrl(transactionId: string, cluster: SolanaCluster): string {
-  const host =
-    cluster === "mainnet-beta" ? "https://buy.moonpay.com" : "https://buy-sandbox.moonpay.com";
-  return `${host}/v2/transaction-tracker?transactionId=${encodeURIComponent(transactionId)}`;
+function moonpayTrackerUrl(transactionId: string): string {
+  return `https://buy.moonpay.com/v2/transaction-tracker?transactionId=${encodeURIComponent(transactionId)}`;
 }
 
 const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] = [
@@ -64,7 +62,7 @@ const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] 
     kind: "link",
     labelKey: "DashboardPayments.transferDetails.receipt",
     textKey: "DashboardPayments.transferDetails.viewReceipt",
-    href: (settlement, { cluster }) => moonpayTrackerUrl(settlement.transactionId, cluster),
+    href: (settlement) => moonpayTrackerUrl(settlement.transactionId),
   },
   {
     kind: "text",
