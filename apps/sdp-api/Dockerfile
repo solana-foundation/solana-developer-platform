@@ -32,6 +32,7 @@ COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
 COPY packages/sdp-spc-withdraw/package.json ./packages/sdp-spc-withdraw/
 COPY packages/sdp-kamino/package.json ./packages/sdp-kamino/
+COPY packages/sdp-wisdomtree/package.json ./packages/sdp-wisdomtree/
 COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/
 COPY packages/sdp-veda/package.json ./packages/sdp-veda/
 COPY patches ./patches
@@ -59,6 +60,7 @@ COPY packages/sdp-private-channels ./packages/sdp-private-channels
 COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
 COPY packages/sdp-spc-withdraw ./packages/sdp-spc-withdraw
 COPY packages/sdp-kamino ./packages/sdp-kamino
+COPY packages/sdp-wisdomtree ./packages/sdp-wisdomtree
 COPY packages/bigint-buffer ./packages/bigint-buffer
 COPY packages/sdp-veda ./packages/sdp-veda
 

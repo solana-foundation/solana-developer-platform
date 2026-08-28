@@ -19,6 +19,7 @@ import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
+import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
@@ -194,6 +195,11 @@ export function resolveEarnExecutionClient(
     const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);
     assertVedaNotPortfolioProvider(client);
     return instrumentVendorPort("veda", client);
+  }
+  if (provider === "wisdomtree") {
+    const client = new WisdomTreeVaultDirectClient(provenRpcUrl, runOperation);
+    assertWisdomTreeNotPortfolioProvider(client);
+    return instrumentVendorPort("wisdomtree", client);
   }
   return null;
 }

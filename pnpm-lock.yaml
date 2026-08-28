@@ -144,6 +144,9 @@ importers:
       '@sdp/veda':
         specifier: workspace:*
         version: link:../../packages/sdp-veda
+      '@sdp/wisdomtree':
+        specifier: workspace:*
+        version: link:../../packages/sdp-wisdomtree
       '@solana-program/system':
         specifier: 'catalog:'
         version: 0.13.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))

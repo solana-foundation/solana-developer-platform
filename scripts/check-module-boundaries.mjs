@@ -36,6 +36,7 @@ const MODULE_METADATA = [
       "@sdp/spc-withdraw",
       "@sdp/types",
       "@sdp/veda",
+      "@sdp/wisdomtree",
     ],
   },
   {

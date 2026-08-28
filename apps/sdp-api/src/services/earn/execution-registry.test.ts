@@ -225,6 +225,23 @@ describe("resolveVaultDirectClient", () => {
     ).rejects.toThrow(/reports genesis/);
   });
 
+  it("resolves WisdomTree as vault-direct with eligibility, without withdraw, I/O-free", async () => {
+    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const { supportsDepositEligibility, supportsVaultDirect, supportsVaultWithdraw } = await import(
+      "@sdp/earn/capabilities"
+    );
+
+    const client = resolveVaultDirectClient(executionEnv, "wisdomtree", createVaultDeadline());
+
+    expect(client).not.toBeNull();
+    if (!client) throw new Error("expected WisdomTree vault-direct client");
+    expect(supportsVaultDirect(client)).toBe(true);
+    // Money-out stays honestly 501 until the redemption change lands.
+    expect(supportsVaultWithdraw(client)).toBe(false);
+    expect(supportsDepositEligibility(client)).toBe(true);
+    expect(createRpc).not.toHaveBeenCalled();
+  });
+
   it("does not start provider work after endpoint proof exhausts the shared deadline", async () => {
     vi.useFakeTimers();
     mockGenesisSend().mockReturnValue(new Promise<never>(() => undefined));

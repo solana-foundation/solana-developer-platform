@@ -10,6 +10,7 @@ import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
+import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
 import { createVaultDeadline } from "./earn/vault-deadline";
@@ -45,6 +46,8 @@ assertNotPortfolioProvider(kamino);
 
 const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertVedaNotPortfolioProvider(veda);
+const wisdomtree = new WisdomTreeVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+assertWisdomTreeNotPortfolioProvider(wisdomtree);
 
 /**
  * API composition root for Earn providers.
@@ -59,6 +62,7 @@ export const EARN_PROVIDER_CLIENTS = {
   ...CATALOGUE_PROVIDER_CLIENTS,
   kamino,
   veda,
+  wisdomtree,
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function resolveEarnProviderClient(provider: string): EarnVaultProvider {
