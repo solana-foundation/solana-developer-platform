@@ -5,6 +5,14 @@
 -- UNIQUE is (counterparty_id, provider) only: a provider-side customer (e.g. a
 -- MoonPay account deduped by email) may legitimately back multiple
 -- counterparties, so (provider, provider_customer_reference) is a plain lookup index.
+--
+-- Known limitation: the widget flow cannot pin which provider account a
+-- customer pays from — a second checkout under a different email creates a
+-- different provider customer. The link is therefore FIRST-WRITE-WINS: the
+-- first reference seen stays canonical, later mismatches are appended to
+-- metadata.mismatchedReferences and logged, never adopted. Structural
+-- enforcement (one counterparty = one provider account) arrives with headless
+-- sessions, which bind the provider connection to our externalCustomerId.
 
 CREATE TABLE IF NOT EXISTS counterparty_provider_accounts (
     id TEXT PRIMARY KEY,

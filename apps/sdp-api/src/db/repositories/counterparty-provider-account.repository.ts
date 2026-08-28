@@ -1,21 +1,23 @@
-import type { RampProviderId } from "@sdp/types/provider-access";
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
+import { z } from "zod";
 
 export function generateCounterpartyProviderAccountId(): string {
   return `counterparty_provider_account_${crypto.randomUUID()}`;
 }
 
-export interface CounterpartyProviderAccountRow {
-  id: string;
-  organization_id: string;
-  project_id: string;
-  counterparty_id: string;
-  provider: RampProviderId;
-  provider_customer_reference: string;
-  status: string;
-  metadata: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
+export const counterpartyProviderAccountRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  counterparty_id: z.string(),
+  provider: z.enum(RAMP_PROVIDERS),
+  provider_customer_reference: z.string(),
+  status: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type CounterpartyProviderAccountRow = z.infer<typeof counterpartyProviderAccountRowSchema>;
 
 export interface UpsertCounterpartyProviderAccountInput {
   organizationId: string;
