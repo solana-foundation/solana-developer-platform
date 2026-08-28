@@ -261,75 +261,93 @@ export const deleteOrganization = async (c: AppContext) => {
       .bind(orgId),
   ]);
 
-  // Query the hashes AFTER the revocation batch commits: a key created
-  // concurrently with this request still gets revoked by the batch, and a
-  // pre-batch snapshot would miss it — leaving its cached credentials
-  // active for the full TTL.
-  const orgKeyHashes = await db
-    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
-    .bind(orgId)
-    .all<{ key_hash: string }>();
+  // Everything below is post-commit: the organization is deleted, its
+  // memberships are removed and its keys are revoked in Postgres. Each
+  // remaining effect is therefore isolated — one of them throwing must never
+  // skip the others, because every one of them is what actually stops a live
+  // credential. Failures are collected and reported once at the end.
+  const failures: unknown[] = [];
 
-  // Push the revoked state into the auth cache for every one of the org's
-  // keys before reporting success — otherwise cached entries keep
-  // authenticating for the remainder of the cache TTL. The batch above is
-  // already committed and memberships removed, so a transient cache error
-  // must not abort the request into a state the caller cannot retry: failed
-  // hashes are retried with backoff before this handler answers, and only
-  // keys that never succeed become the 500 below (which the per-minute
-  // reconciliation sweep then repairs from the revoked rows).
-  let pendingHashes = (orgKeyHashes.results ?? []).map((row) => row.key_hash);
-  let refreshFailures: unknown[] = [];
-  for (let attempt = 0; attempt < 3 && pendingHashes.length > 0; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+  // Cached entries keep authenticating for the remainder of the cache TTL
+  // until the revoked state is pushed into them. The hashes are queried
+  // AFTER the batch commits: a key created concurrently with this request
+  // still gets revoked by it, and a pre-batch snapshot would miss that key.
+  // Transient cache errors are retried with backoff here rather than
+  // aborting, so the caller is not left with a committed deletion it cannot
+  // retry; keys that never succeed become the 500 below, which the
+  // per-minute reconciliation sweep then repairs from the revoked rows.
+  try {
+    const orgKeyHashes = await db
+      .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
+      .bind(orgId)
+      .all<{ key_hash: string }>();
+
+    let pendingHashes = (orgKeyHashes.results ?? []).map((row) => row.key_hash);
+    let refreshFailures: unknown[] = [];
+    for (let attempt = 0; attempt < 3 && pendingHashes.length > 0; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      }
+      const results = await Promise.allSettled(
+        pendingHashes.map((hash) => refreshApiKeyCache(db, c.var.kv.apiKeys, hash))
+      );
+      const stillPending: string[] = [];
+      refreshFailures = [];
+      results.forEach((result, index) => {
+        const hash = pendingHashes[index];
+        if (hash === undefined) {
+          return;
+        }
+        if (result.status === "rejected") {
+          stillPending.push(hash);
+          refreshFailures.push(result.reason);
+        } else if (!result.value) {
+          // A false return means CAS contention left a possibly-stale entry
+          // cached — as unresolved as a thrown write error.
+          stillPending.push(hash);
+          refreshFailures.push(new Error("api key cache refresh remained contended"));
+        }
+      });
+      pendingHashes = stillPending;
     }
-    const results = await Promise.allSettled(
-      pendingHashes.map((hash) => refreshApiKeyCache(db, c.var.kv.apiKeys, hash))
-    );
-    const stillPending: string[] = [];
-    refreshFailures = [];
-    results.forEach((result, index) => {
-      const hash = pendingHashes[index];
-      if (hash === undefined) {
-        return;
-      }
-      if (result.status === "rejected") {
-        stillPending.push(hash);
-        refreshFailures.push(result.reason);
-      } else if (!result.value) {
-        // A false return means CAS contention left a possibly-stale entry
-        // cached — as unresolved as a thrown write error.
-        stillPending.push(hash);
-        refreshFailures.push(new Error("api key cache refresh remained contended"));
-      }
-    });
-    pendingHashes = stillPending;
+
+    if (pendingHashes.length > 0) {
+      getLogger().error(
+        { errors: refreshFailures },
+        "Failed to invalidate cached API keys after organization deletion"
+      );
+      failures.push(...refreshFailures);
+    }
+  } catch (error) {
+    // Enumerating the keys is itself post-commit work: losing it must not
+    // cost the session revocation below.
+    getLogger().error({ error }, "Failed to enumerate API keys after organization deletion");
+    failures.push(error);
   }
 
-  const sessionService = new SessionService(db);
-  await sessionService
-    .revokeOrganizationSessions(orgId)
-    .catch((error) =>
-      getLogger().error({ error }, "Failed to revoke sessions after organization deletion")
-    );
+  try {
+    await new SessionService(db).revokeOrganizationSessions(orgId);
+  } catch (error) {
+    getLogger().error({ error }, "Failed to revoke sessions after organization deletion");
+    failures.push(error);
+  }
 
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "delete",
-    resourceType: "organization",
-    resourceId: orgId,
-  });
+  try {
+    await new AuditService(getDb(c.env)).log(c, {
+      action: "delete",
+      resourceType: "organization",
+      resourceId: orgId,
+    });
+  } catch (error) {
+    // A missing audit record does not leave a credential live, so it is
+    // logged rather than retried by the caller.
+    getLogger().error({ error }, "Failed to audit an organization deletion that already committed");
+  }
 
-  if (pendingHashes.length > 0) {
-    getLogger().error(
-      { errors: refreshFailures },
-      "Failed to invalidate cached API keys after organization deletion"
-    );
+  if (failures.length > 0) {
     throw new AppError(
       "INTERNAL_ERROR",
-      "Organization was deleted but some cached API keys could not be invalidated yet; the reconciliation job repairs them automatically"
+      "Organization was deleted but some credentials could not be invalidated yet; the reconciliation job repairs cached API keys automatically"
     );
   }
 

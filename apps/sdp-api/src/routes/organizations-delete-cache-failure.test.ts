@@ -23,6 +23,22 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const kvFailure = vi.hoisted(() => ({ failApiKeyWrites: false, failWritesRemaining: 0 }));
+const sessionFailure = vi.hoisted(() => ({ failRevoke: false }));
+
+vi.mock("@/services/session.service", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/services/session.service")>();
+
+  class IsolationTestSessionService extends original.SessionService {
+    override async revokeOrganizationSessions(organizationId: string): Promise<void> {
+      if (sessionFailure.failRevoke) {
+        throw new Error("simulated session revocation failure");
+      }
+      return await super.revokeOrganizationSessions(organizationId);
+    }
+  }
+
+  return { ...original, SessionService: IsolationTestSessionService };
+});
 
 vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
@@ -139,7 +155,34 @@ describe("organization deletion with failing cache invalidation", () => {
   afterEach(async () => {
     kvFailure.failApiKeyWrites = false;
     kvFailure.failWritesRemaining = 0;
+    sessionFailure.failRevoke = false;
     await clearKVStores(env);
+  });
+
+  it("still invalidates cached keys when session revocation fails, and reports it", async () => {
+    // Post-commit effects are isolated: the deletion is already committed,
+    // so a failure in one must neither skip the others nor pass unreported.
+    // A silently swallowed session revocation leaves dashboard sessions live
+    // with nothing to retry it.
+    sessionFailure.failRevoke = true;
+
+    const res = await app.request(
+      `/v1/organizations/${TEST_ORG.id}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` },
+      },
+      env
+    );
+    expect(res.status).toBe(500);
+
+    // The cache invalidation still ran to completion despite that failure.
+    const afterDeletion = await app.request(
+      "/v1/api-keys",
+      { headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` } },
+      env
+    );
+    expect(afterDeletion.status).toBe(401);
   });
 
   it("absorbs a transient cache failure and still invalidates before returning", async () => {
