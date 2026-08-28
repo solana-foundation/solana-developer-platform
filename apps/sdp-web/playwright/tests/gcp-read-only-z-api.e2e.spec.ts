@@ -51,6 +51,10 @@ test.describe("GCP dev API golden endpoints", () => {
     });
   });
 
+  test.afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  });
+
   for (const endpoint of GOLDEN_ENDPOINTS) {
     test(`${endpoint.domain} responds to an authed read`, async () => {
       const api = endpoint.scope === "project" ? projectApi : orgApi;

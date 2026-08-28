@@ -43,7 +43,7 @@ test.describe("GCP dev dashboard read-only page sweep", () => {
       await expect(page.getByRole("heading").first(), `${path} rendered a heading`).toBeVisible({
         timeout: 20_000,
       });
-      await page.waitForTimeout(1_000);
+      await page.waitForTimeout(4_000);
     }
 
     expect(failures, "page sweep server failures").toEqual([]);
