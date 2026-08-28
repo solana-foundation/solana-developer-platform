@@ -43,6 +43,7 @@ import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 
 export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
@@ -164,6 +165,7 @@ async function refreshProviderMetrics(
     // Degrades per provider, exactly like the catalogue sync: one provider's
     // outage must not cost every other provider its refresh. The rows keep
     // their last-known figures until the next frequent tick, not for an hour.
+    logVendorCallFailure(client.provider, "listStrategyMetrics", err);
     getLogger().error(
       { ...logContext, error: err instanceof Error ? err.message : String(err) },
       "refreshEarnStrategyMetrics: failed to list provider metrics"

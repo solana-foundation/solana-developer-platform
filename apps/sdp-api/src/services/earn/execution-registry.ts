@@ -14,6 +14,7 @@ import {
   type SdpEnvironment,
   type SolanaCluster,
 } from "@sdp/types";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 
@@ -181,7 +182,7 @@ export function resolveEarnExecutionClient(
       (label, operation) => deadline.run(label, () => operation(() => deadline.assertActive(label)))
     );
     assertNotPortfolioProvider(client);
-    return client;
+    return instrumentVendorPort("kamino", client);
   }
   return null;
 }

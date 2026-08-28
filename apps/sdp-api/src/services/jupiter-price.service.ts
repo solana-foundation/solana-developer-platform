@@ -1,3 +1,4 @@
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 
 /**
@@ -55,8 +56,16 @@ async function fetchPriceChunk(
   const response = await fetch(requestUrl, {
     headers: apiKey ? { "x-api-key": apiKey } : undefined,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }).catch((error: unknown) => {
+    logVendorCallFailure("jupiter", "price", error);
+    throw error;
   });
   if (!response.ok) {
+    logVendorCallFailure(
+      "jupiter",
+      "price",
+      new Error(`price request returned ${response.status}`)
+    );
     return prices;
   }
 

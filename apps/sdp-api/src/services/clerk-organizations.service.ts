@@ -1,4 +1,5 @@
 import { AppError } from "@/lib/errors";
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { describeClerkFailure } from "./clerk-error";
 
@@ -34,6 +35,7 @@ export class ClerkOrganizationsService {
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const operation = `${options.method ?? "GET"} ${path.split("?")[0]}`;
     const res = await fetch(`${this.apiBase}${path}`, {
       ...options,
       headers: {
@@ -41,10 +43,14 @@ export class ClerkOrganizationsService {
         "Content-Type": "application/json",
         ...(options.headers || {}),
       },
+    }).catch((error: unknown) => {
+      logVendorCallFailure("clerk", operation, error);
+      throw error;
     });
 
     if (!res.ok) {
       const body = await res.text();
+      logVendorCallFailure("clerk", operation, new Error(describeClerkFailure(res.status, body)));
       throw new AppError("INTERNAL_ERROR", describeClerkFailure(res.status, body), {
         status: res.status,
         body,

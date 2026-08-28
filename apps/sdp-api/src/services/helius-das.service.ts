@@ -6,6 +6,7 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { getDb } from "@/db";
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
 import type { Env } from "@/types/env";
 
@@ -247,12 +248,19 @@ function toTrackedTokenBalance(
   };
 }
 
+function dasFetch(url: string, init: RequestInit): Promise<Response> {
+  return fetch(url, init).catch((error: unknown) => {
+    logVendorCallFailure("helius-das", "rpc", error);
+    throw error;
+  });
+}
+
 async function fetchTrackedBalancesForOwner(
   heliusDasUrl: string,
   ownerAddress: string,
   trackedAssets: Map<string, TrackedAssetDefinition>
 ): Promise<CustodyWalletTokenBalance[]> {
-  const response = await fetch(heliusDasUrl, {
+  const response = await dasFetch(heliusDasUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -296,7 +304,7 @@ async function fetchFungibleAssetsByMint(
     return [];
   }
 
-  const response = await fetch(heliusDasUrl, {
+  const response = await dasFetch(heliusDasUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
