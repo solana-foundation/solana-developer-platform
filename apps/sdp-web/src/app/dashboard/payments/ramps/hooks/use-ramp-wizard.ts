@@ -8,7 +8,7 @@ import type {
 } from "@sdp/types";
 import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import type { z } from "zod";
@@ -281,25 +281,36 @@ export function useRampWizard<TId extends string>(
 
   // Only auto-fire the quote while the user sits on the transaction stage —
   // stepping back to edit selections must not create a quote from mid-edit state.
-  // One shot, no interval: the quote POST persists the transfer, and the
-  // transfer-status poll owns the flow from there. A failed attempt surfaces
-  // through quoteCreationError with an explicit retry.
-  const {
-    error: quoteCreationError,
-    isValidating: quoteCreationRetrying,
-    mutate: retryQuoteCreation,
-  } = useSWR<{ quote: PaymentRampQuote; transferId: string } | null, Error>(
-    isLastStep && requirements.onboarding?.status === "ready" && quote === null
-      ? paymentsQueryKeys.readyQuote({ direction: requirementsConfig.direction })
-      : null,
-    () => createQuoteForCurrentSelection(),
-    {
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
-      revalidateOnReconnect: false,
-      shouldRetryOnError: false,
+  // Once per wizard instance, held in local state (never a shared cache: a
+  // remounted wizard — cancel and come back — must fire its own quote); the
+  // quote POST persists the transfer and the transfer-status poll owns the
+  // flow from there. A failed attempt surfaces through quoteCreationError
+  // with an explicit retry.
+  const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
+  const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
+  const quoteCreationAttempted = useRef(false);
+  const runQuoteCreation = async () => {
+    setQuoteCreationRetrying(true);
+    try {
+      await createQuoteForCurrentSelection();
+      setQuoteCreationError(null);
+    } catch (error) {
+      setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      setQuoteCreationRetrying(false);
     }
-  );
+  };
+  const retryQuoteCreation = () => void runQuoteCreation();
+  const readyForQuote = isLastStep && requirements.onboarding?.status === "ready" && quote === null;
+  const runQuoteCreationRef = useRef(runQuoteCreation);
+  runQuoteCreationRef.current = runQuoteCreation;
+  useEffect(() => {
+    if (!readyForQuote || quoteCreationAttempted.current) {
+      return;
+    }
+    quoteCreationAttempted.current = true;
+    void runQuoteCreationRef.current();
+  }, [readyForQuote]);
 
   const advanceRequirementsAndProceed = async () => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {

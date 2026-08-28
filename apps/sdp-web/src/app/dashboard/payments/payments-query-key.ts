@@ -8,7 +8,6 @@ export const paymentsQueryKeys = {
     ["onramp-transfer-status", transferId] as const,
   offrampTransferStatus: ({ transferId }: { transferId: string }) =>
     ["offramp-transfer-status", transferId] as const,
-  readyQuote: ({ direction }: { direction: RampDirection }) => ["ready-quote", direction] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
   rampEstimate: ({
