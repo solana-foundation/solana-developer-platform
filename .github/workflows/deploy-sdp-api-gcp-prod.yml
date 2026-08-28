@@ -98,15 +98,41 @@ jobs:
       # so prod runs the artifact that was scanned and signed — never a rebuild.
       - name: Verify and promote release image
         if: ${{ inputs.release_sha != '' }}
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
-          SRC_DIGEST="$(crane digest "${SRC_BASE}:${{ inputs.release_tag }}")"
-          cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/tags/${{ inputs.release_tag }}" \
-            --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"
+          # release-images.yml is triggered by the tag push and runs in
+          # parallel with this deploy: wait out the build-and-sign window
+          # before treating a missing tag or signature as a failure.
+          SRC_DIGEST=""
+          for attempt in $(seq 1 40); do
+            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${{ inputs.release_tag }}" 2>/dev/null)"; then
+              break
+            fi
+            echo "release image tag not in GHCR yet (attempt ${attempt}/40); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${SRC_DIGEST}" ]]; then
+            echo "release image ${SRC_BASE}:${{ inputs.release_tag }} never appeared in GHCR." >&2
+            exit 1
+          fi
+          verified=""
+          for attempt in $(seq 1 10); do
+            if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/tags/${{ inputs.release_tag }}" \
+              --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
+              verified=true
+              break
+            fi
+            echo "signature not verifiable yet (attempt ${attempt}/10); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${verified}" ]]; then
+            echo "cosign verification failed for ${SRC_BASE}@${SRC_DIGEST}." >&2
+            exit 1
+          fi
           VERSION="$(node -p "require('./package.json').version")"
           DEST_BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
           cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
@@ -150,7 +176,8 @@ jobs:
           set -euo pipefail
           cosign verify "${IMAGE}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@refs/tags/v.+$"
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@refs/tags/v.+$" \
+            --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"
 
       - name: Run database migrations
         if: ${{ inputs.release_sha != '' }}
