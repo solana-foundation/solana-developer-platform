@@ -234,19 +234,6 @@ export interface RampProvider {
     ctx: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote>;
-  /**
-   * Looks up the provider's current view of one transfer by the reference its
-   * quote was created with, for reconciliation when a webhook was missed.
-   * Providers without a transaction-lookup API omit this.
-   *
-   * @param ctx - Runtime env and mode for provider credentials.
-   * @param reference - The provider reference stored on the transfer.
-   * @returns The settlement event for the newest matching provider transaction, or null when the provider has no record of the reference.
-   */
-  findSettlementEventByReference?(
-    ctx: RampRuntimeContext,
-    reference: string
-  ): Promise<RampSettlementEvent | null>;
   createOfframpQuote(
     ctx: RampRuntimeContext,
     input: RampOfframpQuoteInput

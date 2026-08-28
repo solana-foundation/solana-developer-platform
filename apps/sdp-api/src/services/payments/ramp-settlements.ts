@@ -96,9 +96,10 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
 
   // The status transition and the provider-customer link derive from one
   // provider event, so they land or roll back together.
-  await getDb(env).transaction(async (tx) => {
+  const applied = await getDb(env).transaction(async (tx) => {
     const client = asTransactionalClient(tx);
-    await createSystemTransactionalPaymentsRepository(client).updateTransferStatusGuarded(update);
+    const updated =
+      await createSystemTransactionalPaymentsRepository(client).updateTransferStatusGuarded(update);
     if (
       event.providerCustomerId !== undefined &&
       transfer.counterparty_id !== null &&
@@ -112,11 +113,14 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
         providerCustomerReference: event.providerCustomerId,
       });
     }
+    return updated !== null;
   });
 
-  // Workflow trigger seam: a settled ramp fires onramp_settled / offramp_settled.
-  // Rules are project-scoped, so a transfer without a project has nothing to match.
-  if (event.kind === "settled" && transfer.project_id) {
+  // Workflow trigger seam: a settled ramp fires onramp_settled / offramp_settled —
+  // only when the settled transition actually landed. A settled event that lost a
+  // race to another terminal event must not fire settlement workflows for a
+  // transfer whose persisted state is not settled.
+  if (applied && event.kind === "settled" && transfer.project_id) {
     emitRampSettled(env, {
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,

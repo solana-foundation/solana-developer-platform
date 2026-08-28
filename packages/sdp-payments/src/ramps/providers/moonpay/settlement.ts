@@ -36,6 +36,21 @@ export const moonpayBuyTransactionSchema = z.object({
 });
 export type MoonpayBuyTransactionData = z.infer<typeof moonpayBuyTransactionSchema>;
 
+/** The economics fields a terminal MoonPay transaction must carry to record a settlement. */
+const moonpaySettlementEconomicsSchema = z.object({
+  baseCurrency: z.object({ code: z.string() }),
+  currency: z.object({ code: z.string() }),
+  baseCurrencyAmount: z.number(),
+  quoteCurrencyAmount: z.number(),
+  feeAmount: z.number(),
+  extraFeeAmount: z.number(),
+  networkFeeAmount: z.number(),
+  areFeesIncluded: z.boolean(),
+  usdRate: z.number(),
+  cryptoTransactionId: z.string().nullish(),
+  failureReason: z.string().nullish(),
+});
+
 /**
  * Captures the provider-reported economics from a terminal MoonPay
  * transaction, verbatim.
@@ -48,44 +63,23 @@ function buildMoonpaySettlement(
   data: MoonpayBuyTransactionData,
   status: MoonpayRampSettlement["status"]
 ): MoonpayRampSettlement | undefined {
-  const {
-    baseCurrency,
-    currency,
-    baseCurrencyAmount,
-    quoteCurrencyAmount,
-    feeAmount,
-    extraFeeAmount,
-    networkFeeAmount,
-    areFeesIncluded,
-    usdRate,
-    cryptoTransactionId,
-    failureReason,
-  } = data;
-  if (
-    !baseCurrency ||
-    !currency ||
-    baseCurrencyAmount === undefined ||
-    quoteCurrencyAmount === undefined ||
-    feeAmount === undefined ||
-    extraFeeAmount === undefined ||
-    networkFeeAmount === undefined ||
-    areFeesIncluded === undefined ||
-    usdRate === undefined
-  ) {
+  const economics = moonpaySettlementEconomicsSchema.safeParse(data);
+  if (!economics.success) {
     return undefined;
   }
+  const { cryptoTransactionId, failureReason, ...amounts } = economics.data;
   return {
     provider: "moonpay",
     status,
-    baseCurrencyCode: baseCurrency.code.toUpperCase(),
-    baseCurrencyAmount,
-    quoteCurrencyCode: currency.code.toUpperCase(),
-    quoteCurrencyAmount,
-    feeAmount,
-    extraFeeAmount,
-    networkFeeAmount,
-    areFeesIncluded,
-    usdRate,
+    baseCurrencyCode: amounts.baseCurrency.code.toUpperCase(),
+    baseCurrencyAmount: amounts.baseCurrencyAmount,
+    quoteCurrencyCode: amounts.currency.code.toUpperCase(),
+    quoteCurrencyAmount: amounts.quoteCurrencyAmount,
+    feeAmount: amounts.feeAmount,
+    extraFeeAmount: amounts.extraFeeAmount,
+    networkFeeAmount: amounts.networkFeeAmount,
+    areFeesIncluded: amounts.areFeesIncluded,
+    usdRate: amounts.usdRate,
     ...(cryptoTransactionId ? { cryptoTransactionId } : {}),
     ...(failureReason ? { failureReason } : {}),
   };

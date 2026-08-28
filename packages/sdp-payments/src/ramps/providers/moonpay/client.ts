@@ -33,14 +33,8 @@ import type {
   RampProvider,
   RampRawDumpReader,
   RampRuntimeContext,
-  RampSettlementEvent,
   ValidateCounterpartyOptions,
 } from "../../types";
-import {
-  type MoonpayBuyTransactionData,
-  moonpayBuyTransactionSchema,
-  moonpayTransactionSettlementEvent,
-} from "./settlement";
 
 const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
 const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
@@ -322,16 +316,6 @@ export function distillMoonpayRailSupport(
   };
 }
 
-function requireCreatedAt(transaction: MoonpayBuyTransactionData): string {
-  if (transaction.createdAt === undefined) {
-    throw new SdpPaymentsError(
-      "PROVIDER_UNAVAILABLE",
-      `MoonPay transaction ${transaction.id} is missing createdAt`
-    );
-  }
-  return transaction.createdAt;
-}
-
 export class MoonpayRampClient implements RampProvider {
   readonly id = "moonpay";
   readonly declaredRailSupport = MOONPAY_DECLARED_RAIL_SUPPORT;
@@ -468,27 +452,6 @@ export class MoonpayRampClient implements RampProvider {
       deliveryMode: "hosted",
       hostedUrl,
     };
-  }
-
-  async findSettlementEventByReference(
-    { env, mode }: RampRuntimeContext,
-    reference: string
-  ): Promise<RampSettlementEvent | null> {
-    const config = readMoonpayConfig(env, mode);
-    const url = new URL(`${MOONPAY_API_BASE_URL}/v1/transactions`);
-    url.searchParams.set("externalTransactionId", reference);
-    const raw = await providerFetchJson<unknown>(this.id, url.toString(), {
-      method: "GET",
-      headers: { Authorization: `Api-Key ${config.secretKey}` },
-    });
-    const transactions = z.array(moonpayBuyTransactionSchema).parse(raw);
-    if (transactions.length === 0) {
-      return null;
-    }
-    const newest = [...transactions].sort((left, right) =>
-      requireCreatedAt(right).localeCompare(requireCreatedAt(left))
-    )[0];
-    return moonpayTransactionSettlementEvent(newest);
   }
 
   async createOfframpQuote(

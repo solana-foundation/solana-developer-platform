@@ -12,7 +12,6 @@ import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
-import { RAMP_TRANSFERS_MONITOR } from "@/cron/ramp-transfers";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
@@ -39,7 +38,6 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
-import { reconcileRampTransfers } from "@/services/jobs/reconcile-ramp-transfers";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
@@ -161,7 +159,6 @@ export async function runCronJob(): Promise<void> {
   const earnEnabled = isEarnEnabled(env);
   const managedMonitors = [
     PENDING_TRANSFERS_MONITOR,
-    RAMP_TRANSFERS_MONITOR,
     RECURRING_PAYMENTS_COLLECTION_MONITOR,
     PENDING_DEPOSITS_MONITOR,
     PENDING_WITHDRAWALS_MONITOR,
@@ -188,24 +185,18 @@ export async function runCronJob(): Promise<void> {
       }
     };
 
-    {
-      // On-chain transfer tracking and provider-API ramp reconciliation touch
-      // disjoint rows — siblings, not stages.
-      const outcomes = await Promise.allSettled([
-        monitored(PENDING_TRANSFERS_MONITOR, async () => {
-          const inner = await Promise.allSettled([
-            (async () => {
-              await trackPendingTransfers(env);
-              await recoverApprovedWalletOperations(env);
-            })(),
-            reconcileSponsorshipBudgets(env),
-          ]);
-          throwCollected(rejectionReasons(inner), "pending-transfers tick had multiple failures");
-        }),
-        monitored(RAMP_TRANSFERS_MONITOR, () => reconcileRampTransfers(env)),
-      ]);
-      failures.push(...rejectionReasons(outcomes));
-    }
+    await collect(
+      monitored(PENDING_TRANSFERS_MONITOR, async () => {
+        const outcomes = await Promise.allSettled([
+          (async () => {
+            await trackPendingTransfers(env);
+            await recoverApprovedWalletOperations(env);
+          })(),
+          reconcileSponsorshipBudgets(env),
+        ]);
+        throwCollected(rejectionReasons(outcomes), "pending-transfers tick had multiple failures");
+      })
+    );
     await collect(
       monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () => collectDueRecurringPayments(env))
     );
