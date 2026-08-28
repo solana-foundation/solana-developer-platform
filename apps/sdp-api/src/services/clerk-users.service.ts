@@ -54,6 +54,7 @@ export class ClerkUsersService {
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const operation = `${options.method ?? "GET"} ${path.split("?")[0]}`;
+    const startedAt = Date.now();
     const res = await fetch(`${this.apiBase}${path}`, {
       ...options,
       headers: {
@@ -62,13 +63,18 @@ export class ClerkUsersService {
         ...(options.headers || {}),
       },
     }).catch((error: unknown) => {
-      logVendorCallFailure("clerk", operation, error);
+      logVendorCallFailure("clerk", operation, error, startedAt);
       throw error;
     });
 
     if (!res.ok) {
       const body = await res.text();
-      logVendorCallFailure("clerk", operation, new Error(describeClerkFailure(res.status, body)));
+      logVendorCallFailure(
+        "clerk",
+        operation,
+        new Error(describeClerkFailure(res.status, body)),
+        startedAt
+      );
       throw new AppError("INTERNAL_ERROR", describeClerkFailure(res.status, body), {
         status: res.status,
         body,

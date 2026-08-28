@@ -53,11 +53,12 @@ async function fetchPriceChunk(
   const prices = new Map<string, number>();
   const requestUrl = `${url}?${new URLSearchParams({ ids: mints.join(",") }).toString()}`;
 
+  const startedAt = Date.now();
   const response = await fetch(requestUrl, {
     headers: apiKey ? { "x-api-key": apiKey } : undefined,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   }).catch((error: unknown) => {
-    logVendorCallFailure("jupiter", "price", error);
+    logVendorCallFailure("jupiter", "price", error, startedAt);
     throw error;
   });
   if (!response.ok) {

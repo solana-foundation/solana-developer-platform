@@ -149,6 +149,7 @@ async function refreshProviderMetrics(
   const logContext = { provider: client.provider, environment: ctx.environment };
 
   let metrics: ProviderStrategyMetrics[] | undefined;
+  const startedAt = Date.now();
   try {
     metrics = await withDeadline(
       client.listStrategyMetrics(ctx),
@@ -165,7 +166,7 @@ async function refreshProviderMetrics(
     // Degrades per provider, exactly like the catalogue sync: one provider's
     // outage must not cost every other provider its refresh. The rows keep
     // their last-known figures until the next frequent tick, not for an hour.
-    logVendorCallFailure(client.provider, "listStrategyMetrics", err);
+    logVendorCallFailure(client.provider, "listStrategyMetrics", err, startedAt);
     getLogger().error(
       { ...logContext, error: err instanceof Error ? err.message : String(err) },
       "refreshEarnStrategyMetrics: failed to list provider metrics"

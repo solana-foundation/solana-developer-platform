@@ -157,17 +157,18 @@ export async function withGatewayRpc<T>(
 ): Promise<T> {
   const attempt = (token: string) =>
     run(createChannelGatewayRpc(env, gatewayUrl, gatewayAuthOptions(token)));
+  const startedAt = Date.now();
   try {
     return await attempt(context.current);
   } catch (error) {
     if (!isUnauthorizedRpcError(error)) {
-      logVendorCallFailure("spc-gateway", "gateway-rpc", error);
+      logVendorCallFailure("spc-gateway", "gateway-rpc", error, startedAt);
       throw error;
     }
     try {
       return await attempt(await context.refresh());
     } catch (retryError) {
-      logVendorCallFailure("spc-gateway", "gateway-rpc", retryError);
+      logVendorCallFailure("spc-gateway", "gateway-rpc", retryError, startedAt);
       throw retryError;
     }
   }
@@ -186,17 +187,18 @@ export async function withSpcAuth<T>(
   context: SpcAuthContext,
   run: (token: string) => Promise<T>
 ): Promise<T> {
+  const startedAt = Date.now();
   try {
     return await run(context.current);
   } catch (error) {
     if (!isUnauthorizedAuthError(error)) {
-      logVendorCallFailure("spc-gateway", "auth-rest", error);
+      logVendorCallFailure("spc-gateway", "auth-rest", error, startedAt);
       throw error;
     }
     try {
       return await run(await context.refresh());
     } catch (retryError) {
-      logVendorCallFailure("spc-gateway", "auth-rest", retryError);
+      logVendorCallFailure("spc-gateway", "auth-rest", retryError, startedAt);
       throw retryError;
     }
   }

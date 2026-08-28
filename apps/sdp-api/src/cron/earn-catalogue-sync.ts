@@ -326,6 +326,7 @@ async function fetchAcceptedSnapshots(
   const logContext = { provider: client.provider, environment: ctx.environment };
 
   let snapshots: ProviderStrategySnapshot[];
+  const startedAt = Date.now();
   try {
     snapshots = await client.listStrategies(ctx);
   } catch (err) {
@@ -336,7 +337,7 @@ async function fetchAcceptedSnapshots(
       );
       return { ok: false, steadyState: true };
     }
-    logVendorCallFailure(client.provider, "listStrategies", err);
+    logVendorCallFailure(client.provider, "listStrategies", err, startedAt);
     getLogger().error(
       { ...logContext, error: err instanceof Error ? err.message : String(err) },
       "syncEarnCatalogue: failed to list provider strategies"

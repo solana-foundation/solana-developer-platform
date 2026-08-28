@@ -249,8 +249,9 @@ function toTrackedTokenBalance(
 }
 
 function dasFetch(url: string, init: RequestInit): Promise<Response> {
+  const startedAt = Date.now();
   return fetch(url, init).catch((error: unknown) => {
-    logVendorCallFailure("helius-das", "rpc", error);
+    logVendorCallFailure("helius-das", "rpc", error, startedAt);
     throw error;
   });
 }
