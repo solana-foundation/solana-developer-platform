@@ -8,6 +8,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository } from "../../context";
 import { mapTransferRow } from "../../mappers";
 import type { coinbaseRampEventSchema, moneygramRampEventSchema } from "../../schemas";
+import { isRampQuoteBindingExpired } from "./quote-binding";
 
 const TERMINAL_RAMP_STATUSES = [
   "completed",
@@ -200,6 +201,11 @@ export async function recordMoneygramRampEvent(
   }
   if (transfer.status !== "pending") {
     throw conflict(`Cannot record a signed event while the transfer is ${transfer.status}.`);
+  }
+  // A signed event starts settlement under the widget session; once the bound
+  // session has expired the transfer cannot accept a new crypto leg.
+  if (isRampQuoteBindingExpired(transfer)) {
+    throw conflict("MoneyGram session has expired; create a new quote before signing.");
   }
   const leg = await requireVerifiedCryptoLeg(c, transfer, event.cryptoTransferId, {
     requireConfirmed: false,
