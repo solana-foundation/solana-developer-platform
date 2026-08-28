@@ -93,7 +93,7 @@ const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] 
   },
   {
     kind: "explorerTx",
-    labelKey: "DashboardPayments.transferDetails.cryptoTransferId",
+    labelKey: "DashboardPayments.transferDetails.solanaSignature",
     signature: (settlement) =>
       settlement.cryptoTransactionId === undefined ? null : settlement.cryptoTransactionId,
   },
