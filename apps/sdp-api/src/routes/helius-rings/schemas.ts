@@ -7,6 +7,13 @@ export const createRingsWalletSchema = z.object({
   name: z.string().min(1).max(120),
 });
 
+export const createProjectRingSchema = z.object({
+  /** Base58 program id of the pre-deployed custom ring program. */
+  ringProgramId: z
+    .string()
+    .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, "ringProgramId must be a base58 Solana address"),
+});
+
 export const prepareRingsOperationSchema = z.object({
   walletId: z.string().min(1),
   opType: z.enum(OP_TYPES),

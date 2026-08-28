@@ -5,11 +5,13 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  createRingsProjectRing,
   createRingsWallet,
   createRingsZone,
   executeRingsOperation,
   getRingsHealth,
   getRingsOperation,
+  getRingsProjectRing,
   getRingsWallet,
   getRingsWalletIdentity,
   listRingsOperations,
@@ -38,6 +40,11 @@ heliusRings.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: tru
 heliusRings.use("*", projectContextMiddleware());
 
 heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
+
+heliusRings.get("/ring", requirePermissions("payments:read"), getRingsProjectRing);
+// Recording the ring runs bring-up (signed transactions through custody), so it
+// carries write.
+heliusRings.post("/ring", requirePermissions("payments:write"), createRingsProjectRing);
 
 heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallets);
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);

@@ -8,6 +8,8 @@ import {
   type TransactionWithLifetime,
 } from "@solana/kit";
 import {
+  createSignableMessage,
+  isMessagePartialSigner,
   isTransactionModifyingSigner,
   isTransactionPartialSigner,
   type TransactionSigner,
@@ -81,6 +83,55 @@ export async function signRingsOuterTransaction(
   }
 
   return base64.decode(getTransactionEncoder().encode(signed));
+}
+
+export interface SignRingsMessageInput {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  /** Base58 address of the key the message requires a signature from. */
+  owner: string;
+  messageBase64: string;
+  /** Test seam; production resolves the owner's custody signer. */
+  signer?: TransactionSigner;
+}
+
+/**
+ * Ed25519 over raw message bytes with the same custody signer resolution as the
+ * transaction path. Ring bring-up needs it for the auditor-key attestation,
+ * which is a signed message rather than a transaction.
+ */
+export async function signRingsMessage(input: SignRingsMessageInput): Promise<string> {
+  const base64 = getBase64Codec();
+
+  let signer: TransactionSigner;
+  try {
+    signer = input.signer ?? (await resolveOwnerSigner(input));
+  } catch (error) {
+    throw toSignerFailure(error);
+  }
+  if (!isMessagePartialSigner(signer)) {
+    throw new RingsAdapterError("signer_failed", "custody signer cannot sign raw messages", {
+      retryable: false,
+    });
+  }
+
+  try {
+    const [signatures] = await signer.signMessages([
+      createSignableMessage(new Uint8Array(base64.encode(input.messageBase64))),
+    ]);
+    const signature = signatures?.[signer.address];
+    if (!signature) {
+      throw new RingsAdapterError(
+        "signer_failed",
+        "custody signing produced no signature for the named owner",
+        { retryable: false }
+      );
+    }
+    return base64.decode(signature);
+  } catch (error) {
+    throw toSignerFailure(error);
+  }
 }
 
 /**

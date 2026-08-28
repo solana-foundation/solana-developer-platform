@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
   createHeliusRingsOperationRepository,
+  createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
@@ -914,6 +915,178 @@ describe("HeliusRingsService", () => {
       expect(kinds).toContain("policy.evaluated");
       expect(kinds).toContain("proof.received");
       expect(kinds).toContain("transaction.submitted");
+    });
+  });
+
+  describe("project ring", () => {
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+    const OTHER_RING = "RingProgram2111111111111111111111111111111";
+
+    it("records the ring and activates it with the published auditor key", async () => {
+      const svc = service({
+        gateway: gatewayStub({ provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }) }),
+      });
+
+      const ring = await svc.createProjectRing({ ringProgramId: RING_PROGRAM });
+
+      expect(ring).toMatchObject({
+        ringProgramId: RING_PROGRAM,
+        status: "active",
+        auditorPublicKeyHex: "04ff",
+        failure: null,
+      });
+      expect(await svc.getProjectRing()).toMatchObject({ status: "active" });
+    });
+
+    it("records a domain failure on the row and resumes on re-submission", async () => {
+      const failing = service({
+        gateway: gatewayStub({
+          provisionRing: async () => {
+            throw new HeliusRingsError("gateway_unavailable", "a Rings upstream is unavailable");
+          },
+        }),
+      });
+      await expect(
+        failing.createProjectRing({ ringProgramId: RING_PROGRAM })
+      ).rejects.toMatchObject({ code: "gateway_unavailable" });
+      expect(await failing.getProjectRing()).toMatchObject({
+        status: "failed",
+        failure: { code: "gateway_unavailable", message: "a Rings upstream is unavailable" },
+      });
+
+      // Same id, healthy gateway: the failed row is the resume point.
+      const resumed = await service({
+        gateway: gatewayStub({ provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }) }),
+      }).createProjectRing({ ringProgramId: RING_PROGRAM });
+      expect(resumed).toMatchObject({ status: "active", failure: null });
+    });
+
+    it("records only a fixed message for a non-domain failure", async () => {
+      const svc = service({
+        gateway: gatewayStub({
+          provisionRing: async () => {
+            // e.g. a transport error quoting the endpoint, which carries an API key.
+            throw new Error("fetch failed: https://rpc.example/?api-key=super-secret");
+          },
+        }),
+      });
+
+      await expect(svc.createProjectRing({ ringProgramId: RING_PROGRAM })).rejects.toThrow();
+
+      const ring = await svc.getProjectRing();
+      expect(ring?.failure).toEqual({
+        code: "gateway_unavailable",
+        message: "ring bring-up failed",
+      });
+    });
+
+    it("refuses to re-point the project away from an active ring", async () => {
+      await service({
+        gateway: gatewayStub({ provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }) }),
+      }).createProjectRing({ ringProgramId: RING_PROGRAM });
+
+      // The stub's provisionRing default throws, so reaching the gateway at all
+      // would fail this test with a different error than the conflict expected.
+      await expect(
+        service({ gateway: gatewayStub({}) }).createProjectRing({ ringProgramId: OTHER_RING })
+      ).rejects.toMatchObject({ code: "conflict" });
+      expect(await service({ gateway: gatewayStub({}) }).getProjectRing()).toMatchObject({
+        ringProgramId: RING_PROGRAM,
+        status: "active",
+      });
+    });
+
+    it("re-points a never-active ring at a corrected program id", async () => {
+      // A mistyped id records a failure and can never activate...
+      const failing = service({
+        gateway: gatewayStub({
+          provisionRing: async () => {
+            throw new HeliusRingsError("invalid_input", "not a deployed program");
+          },
+        }),
+      });
+      await expect(
+        failing.createProjectRing({ ringProgramId: RING_PROGRAM })
+      ).rejects.toMatchObject({ code: "invalid_input" });
+
+      // ...so submitting the corrected id replaces it and runs bring-up.
+      const provisioned: string[] = [];
+      const ring = await service({
+        gateway: gatewayStub({
+          provisionRing: async ({ ringProgramId }) => {
+            provisioned.push(ringProgramId);
+            return { auditorPublicKeyHex: "04ff" };
+          },
+        }),
+      }).createProjectRing({ ringProgramId: OTHER_RING });
+
+      expect(provisioned).toEqual([OTHER_RING]);
+      expect(ring).toMatchObject({
+        ringProgramId: OTHER_RING,
+        status: "active",
+        auditorPublicKeyHex: "04ff",
+        failure: null,
+      });
+    });
+
+    it("returns an active ring as it stands without re-running bring-up", async () => {
+      await service({
+        gateway: gatewayStub({ provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }) }),
+      }).createProjectRing({ ringProgramId: RING_PROGRAM });
+
+      const replay = await service({ gateway: gatewayStub({}) }).createProjectRing({
+        ringProgramId: RING_PROGRAM,
+      });
+      expect(replay).toMatchObject({ status: "active", auditorPublicKeyHex: "04ff" });
+    });
+
+    it("fails sync closed while the project's ring is not active", async () => {
+      const syncWalletId = await provisionedWallet("rings1ringgate");
+      await createHeliusRingsProjectRingRepository(env).reserveRing({
+        ...tenant,
+        ringProgramId: RING_PROGRAM,
+      });
+
+      // The stub would throw "not expected" if the gateway were reached, so the
+      // config_error proves the guard fired before any Photon read.
+      await expect(
+        service({ gateway: gatewayStub({}) }).syncWallet(syncWalletId, OWNER)
+      ).rejects.toMatchObject({ code: "config_error" });
+    });
+
+    it("fails a shield with a recorded, retryable failure while the ring is not active", async () => {
+      await createHeliusRingsProjectRingRepository(env).reserveRing({
+        ...tenant,
+        ringProgramId: RING_PROGRAM,
+      });
+
+      const operation = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-ring-gate" }),
+        actorContext
+      );
+
+      // A project that declared a ring never silently deposits into the
+      // default ring; the operation records why instead of 500ing.
+      expect(operation.state).toBe("failed");
+      expect(operation.failure).toMatchObject({ code: "gateway_unavailable", retryable: true });
+      expect(operation.failure?.message).toContain("custom ring is pending");
+    });
+
+    it("serves money flows once the ring is active", async () => {
+      const syncWalletId = await provisionedWallet("rings1ringlive");
+      const rings = createHeliusRingsProjectRingRepository(env);
+      await rings.reserveRing({ ...tenant, ringProgramId: RING_PROGRAM });
+      await rings.markActive({
+        ...tenant,
+        ringProgramId: RING_PROGRAM,
+        auditorPublicKey: "04ff",
+      });
+
+      const synced = await service({
+        gateway: gatewayStub({ syncPhoton: async () => syncResult() }),
+      }).syncWallet(syncWalletId, OWNER);
+
+      expect(synced.degraded).toBe(false);
     });
   });
 });

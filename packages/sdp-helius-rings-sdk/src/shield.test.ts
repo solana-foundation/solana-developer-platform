@@ -11,9 +11,15 @@ import {
 } from "./test/shielded-identity-fixtures.js";
 
 const buildDepositTransaction = vi.fn();
+const buildRingDepositTransaction = vi.fn();
 
 vi.mock("@heliuslabs/zolana/wallet", () => ({
   buildDepositTransaction: (...args: unknown[]) => buildDepositTransaction(...args),
+}));
+
+vi.mock("@heliuslabs/zolana/ring", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@heliuslabs/zolana/ring")>()),
+  buildRingDepositTransaction: (...args: unknown[]) => buildRingDepositTransaction(...args),
 }));
 
 const { createDeterministicMaterialSource } = await import("./deterministic-ka/index.js");
@@ -22,15 +28,18 @@ const { buildShieldTransaction } = await import("./shield.js");
 const OWNER = TEST_OWNER;
 const REQUEST = TEST_REQUEST;
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+// Distinct from TEST_OWNER so a swapped parameter cannot pass.
+const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
 
 const BUILT = compiledRegistryTransaction(OWNER, [0]);
 
-function deps() {
+function deps(overrides?: { ringProgramId?: string }) {
   return {
     client: {} as never,
     material: createDeterministicMaterialSource({ seed: TEST_SEED }),
     organizationId: REQUEST.organizationId,
     projectId: REQUEST.projectId,
+    ...overrides,
   };
 }
 
@@ -38,6 +47,52 @@ describe("buildShieldTransaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     buildDepositTransaction.mockResolvedValue(BUILT);
+    buildRingDepositTransaction.mockResolvedValue(BUILT);
+  });
+
+  it("binds the deposit to the configured ring instead of the default pool", async () => {
+    const expected = await derivedIdentity();
+    const encoded = await buildShieldTransaction(deps({ ringProgramId: RING_PROGRAM }), {
+      walletId: REQUEST.walletId,
+      owner: OWNER,
+      mint: SDP_NATIVE_MINT,
+      amountRaw: "1000000000",
+      expectedShieldedAddress: expected,
+    });
+
+    // The default builder would create a note the ring's transact cannot spend.
+    expect(buildDepositTransaction).not.toHaveBeenCalled();
+    expect(encoded).toBe(unsignedTxBase64(BUILT));
+    const params = buildRingDepositTransaction.mock.calls[0]?.[0] as {
+      ringProgramId: string;
+      feePayer: string;
+      depositor: string;
+      amount: bigint;
+    };
+    expect(params.ringProgramId).toBe(RING_PROGRAM);
+    expect(params.feePayer).toBe(OWNER);
+    expect(params.depositor).toBe(OWNER);
+    expect(params.amount).toBe(1_000_000_000n);
+  });
+
+  it("classifies an invalid configured ring without exposing its value", async () => {
+    const configuredRing = "not-a-solana-address";
+    const error = await buildShieldTransaction(deps({ ringProgramId: configuredRing }), {
+      walletId: REQUEST.walletId,
+      owner: OWNER,
+      mint: SDP_NATIVE_MINT,
+      amountRaw: "1",
+      expectedShieldedAddress: await derivedIdentity(),
+    }).then(
+      () => null,
+      (thrown: unknown) => thrown
+    );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({ code: "config_error" });
+    expect((error as Error).message).not.toContain(configuredRing);
+    expect(buildDepositTransaction).not.toHaveBeenCalled();
+    expect(buildRingDepositTransaction).not.toHaveBeenCalled();
   });
 
   it("deposits to the derived identity, converting SDP's native mint", async () => {

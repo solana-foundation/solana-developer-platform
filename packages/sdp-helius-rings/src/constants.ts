@@ -49,6 +49,9 @@ export const RUNTIME_HEALTH_COMPONENTS = ["rpc", "prover", "photon", "gateway"] 
 
 export const WALLET_STATUSES = ["pending", "ready", "paused"] as const;
 
+/** Bring-up is resumable: `failed` is retryable by re-submitting the same ring program id. */
+export const RING_STATUSES = ["pending", "active", "failed"] as const;
+
 export const ZONE_KINDS = ["treasury", "public"] as const;
 
 export const TRANSFER_MODES = ["registered", "anonymous"] as const;

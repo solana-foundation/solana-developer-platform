@@ -1,7 +1,9 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import { buildRingDepositTransaction } from "@heliuslabs/zolana/ring";
 import { buildDepositTransaction } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { address, getBase64Codec, getTransactionEncoder } from "@solana/kit";
+import { withConfiguredAddressErrorBridge } from "./error-bridge.js";
 import { protocolMint } from "./flows/mint.js";
 import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
 
@@ -16,6 +18,12 @@ export interface ShieldDeps {
   readonly material: ShieldedMaterialSource;
   readonly organizationId: string;
   readonly projectId: string;
+  /**
+   * The project's active custom ring. Set, the deposit is ring-bound, so only
+   * that ring's transact can ever spend the note; unset, it lands in the
+   * default ring exactly as before.
+   */
+  readonly ringProgramId?: string;
 }
 
 export interface ShieldInput {
@@ -36,6 +44,13 @@ export async function buildShieldTransaction(
   const owner = parseAddress(input.owner, "owner");
   const asset = parseAddress(protocolMint(input.mint), "mint");
   const amount = parsePositiveAmount(input.amountRaw);
+  // Persisted configuration rather than caller input, so a bad value is a
+  // config_error and its text never echoes back.
+  const configuredRing = deps.ringProgramId;
+  const ringProgramId =
+    configuredRing === undefined
+      ? undefined
+      : withConfiguredAddressErrorBridge(() => address(configuredRing));
 
   return deps.material.withMaterial(
     {
@@ -47,14 +62,18 @@ export async function buildShieldTransaction(
     async (material) => {
       assertProvisionedIdentity(material, input.expectedShieldedAddress);
 
-      const transaction = await buildDepositTransaction({
+      const deposit = {
         client: deps.client,
         feePayer: owner,
         depositor: owner,
         recipient: material.shieldedAddress,
         asset,
         amount,
-      });
+      };
+      const transaction =
+        ringProgramId === undefined
+          ? await buildDepositTransaction(deposit)
+          : await buildRingDepositTransaction({ ...deposit, ringProgramId });
 
       return getBase64Codec().decode(getTransactionEncoder().encode(transaction));
     }

@@ -1,5 +1,6 @@
 import { ClientError } from "@heliuslabs/zolana/client";
 import { InterfaceError } from "@heliuslabs/zolana/interface";
+import { RingError } from "@heliuslabs/zolana/ring";
 import { TransactionError } from "@heliuslabs/zolana/transaction";
 import { WalletError } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings";
@@ -51,6 +52,10 @@ const CODE_OVERRIDES: Readonly<Record<string, BridgedErrorCode>> = {
   INTERFACE_INVALID_ACCOUNT_DATA: "gateway_unavailable",
   INTERFACE_CODEC: "gateway_unavailable",
   INTERFACE_HASH: "gateway_unavailable",
+  // A ring config that decodes but fails its invariants is chain state this
+  // tenant cannot fix by retrying, like the user-record mismatches above.
+  RING_CONFIG_INVALID: "conflict",
+  RING_INVALID_LENGTH: "invalid_input",
 };
 
 function bridgedCode(error: unknown): BridgedErrorCode | undefined {
@@ -60,8 +65,8 @@ function bridgedCode(error: unknown): BridgedErrorCode | undefined {
   if (error instanceof InterfaceError || error instanceof TransactionError) {
     return CODE_OVERRIDES[error.code] ?? "invalid_input";
   }
-  if (error instanceof WalletError) {
-    // A wallet wrapper retains the more specific error when there is one.
+  if (error instanceof WalletError || error instanceof RingError) {
+    // A wallet or ring wrapper retains the more specific error when there is one.
     return bridgedCode(error.cause) ?? CODE_OVERRIDES[error.code] ?? "gateway_unavailable";
   }
   if (error instanceof ClientError) {
@@ -90,7 +95,7 @@ export async function withZolanaErrorBridge<T>(work: () => Promise<T>): Promise<
   }
 }
 
-function isConfiguredTreeAddressError(error: unknown): boolean {
+function isConfiguredAddressError(error: unknown): boolean {
   return (
     isSolanaError(error, SOLANA_ERROR__ADDRESSES__STRING_LENGTH_OUT_OF_RANGE) ||
     isSolanaError(error, SOLANA_ERROR__ADDRESSES__INVALID_BYTE_LENGTH) ||
@@ -100,14 +105,15 @@ function isConfiguredTreeAddressError(error: unknown): boolean {
 }
 
 /**
- * Narrows Kit address failures to the configured-tree parsing site, so a bad
- * tree reads as misconfiguration without echoing the value back.
+ * Narrows Kit address failures to a configured-address parsing site (the tree,
+ * the ring program id), so a bad value reads as misconfiguration without being
+ * echoed back.
  */
-export function withConfiguredTreeErrorBridge<T>(work: () => T): T {
+export function withConfiguredAddressErrorBridge<T>(work: () => T): T {
   try {
     return work();
   } catch (error) {
-    if (!isConfiguredTreeAddressError(error)) throw error;
+    if (!isConfiguredAddressError(error)) throw error;
     throw bridgedError("config_error");
   }
 }

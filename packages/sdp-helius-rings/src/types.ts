@@ -4,12 +4,14 @@ import type {
   MATERIAL_TAGS,
   OP_TYPES,
   OPERATION_STATES,
+  RING_STATUSES,
   RUNTIME_HEALTH_COMPONENTS,
   RUNTIME_HEALTH_STATUSES,
   TRANSFER_MODES,
   WALLET_STATUSES,
   ZONE_KINDS,
 } from "./constants";
+import type { HeliusRingsErrorCode } from "./errors";
 import type { SecretRef } from "./secrets";
 
 export type OperationState = (typeof OPERATION_STATES)[number];
@@ -22,6 +24,7 @@ export type RuntimeHealthComponent = (typeof RUNTIME_HEALTH_COMPONENTS)[number];
 export type WalletStatus = (typeof WALLET_STATUSES)[number];
 export type ZoneKind = (typeof ZONE_KINDS)[number];
 export type TransferMode = (typeof TRANSFER_MODES)[number];
+export type RingStatus = (typeof RING_STATUSES)[number];
 
 export interface ProofArtifact {
   source: MaterialTag;
@@ -55,6 +58,22 @@ export interface Zone {
   id: string;
   name: string;
   kind: ZoneKind;
+}
+
+/**
+ * The one custom ring a project deposits into. The program is deployed by ops;
+ * this record exists from the moment the id is submitted, so a project that
+ * declared a ring can never silently fall back to the default ring.
+ */
+export interface ProjectRing {
+  ringProgramId: string;
+  status: RingStatus;
+  /** Uncompressed SEC1 P-256 point as hex, as the ring's on-chain config publishes it. */
+  auditorPublicKeyHex: string | null;
+  /** Why the last bring-up attempt failed; null unless `status` is `failed`. */
+  failure: { code: HeliusRingsErrorCode; message: string } | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AssetBalance {

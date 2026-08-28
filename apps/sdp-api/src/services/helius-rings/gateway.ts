@@ -5,7 +5,7 @@ import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
-import { signRingsOuterTransaction } from "./signer-adapter";
+import { signRingsMessage, signRingsOuterTransaction } from "./signer-adapter";
 
 /**
  * The only file in `apps/` allowed to import `@sdp/helius-rings-sdk`: the SDK is
@@ -38,6 +38,15 @@ export interface ResolveRingsGatewayDependencies {
   createGateway?: typeof createRingsGateway;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
+  signMessage?: typeof signRingsMessage;
+}
+
+export interface RingsGatewayOptions {
+  /**
+   * The project's active custom ring. Set, shield deposits become ring-bound
+   * and balance reads count only that ring's notes.
+   */
+  ringProgramId?: string;
 }
 
 /**
@@ -56,7 +65,8 @@ export function ringsUpstreamsConfigured(env: RingsUpstreamEnv): boolean {
 export function resolveRingsGateway(
   env: Env,
   tenant: RingsGatewayTenant,
-  dependencies: ResolveRingsGatewayDependencies = {}
+  dependencies: ResolveRingsGatewayDependencies = {},
+  options: RingsGatewayOptions = {}
 ): RingsGatewayPort {
   const configured = readUpstreams(env);
   if ("missing" in configured) {
@@ -65,12 +75,18 @@ export function resolveRingsGateway(
 
   const signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
   const submitOuterTransaction = dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
+  const signMessage = dependencies.signMessage ?? signRingsMessage;
   const create = dependencies.createGateway ?? createRingsGateway;
+  const ringRpcUrl = (env.HELIUS_RINGS_RING_RPC_URL ?? "").trim();
 
   return create({
     ...configured.upstreams,
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
+    // Optional, unlike the three upstreams: only ring bring-up needs it, and
+    // the SDK refuses bring-up with config_error when it is absent.
+    ...(ringRpcUrl === "" ? {} : { ringRpcUrl }),
+    ...(options.ringProgramId === undefined ? {} : { ringProgramId: options.ringProgramId }),
     // Off unless an operator says otherwise, so a production typo cannot
     // quietly authorise plaintext.
     allowInsecureHttp: isRingsInsecureHttpAllowed(env),
@@ -88,6 +104,16 @@ export function resolveRingsGateway(
       ),
     submitTransaction: (signedTxBase64) =>
       asDomainFailure(() => submitOuterTransaction({ env, signedTxBase64 })),
+    signMessage: (messageBase64, owner) =>
+      asDomainFailure(() =>
+        signMessage({
+          env,
+          organizationId: tenant.organizationId,
+          projectId: tenant.projectId,
+          owner,
+          messageBase64,
+        })
+      ),
   });
 }
 
@@ -97,10 +123,9 @@ export function resolveRingsGateway(
  * on, and this deployment's endpoint carries a Helius API key.
  */
 const ADAPTER_FAILURE_MESSAGES = {
-  signer_failed:
-    "custody could not sign the Rings registration transaction for this wallet's owner",
+  signer_failed: "custody could not sign the Rings transaction or attestation for this owner",
   submit_failed:
-    "the Rings registration transaction could not be broadcast; confirm the wallet owner holds devnet SOL for the fee",
+    "the Rings transaction could not be broadcast; confirm the fee payer holds devnet SOL",
 } as const satisfies Record<RingsAdapterError["failureCode"], string>;
 
 /**
@@ -178,6 +203,10 @@ export class UnconfiguredRingsGateway implements RingsGatewayPort {
   }
 
   async provisionIdentity(): Promise<never> {
+    return this.fail();
+  }
+
+  async provisionRing(): Promise<never> {
     return this.fail();
   }
 

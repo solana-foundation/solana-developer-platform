@@ -18,6 +18,7 @@ import {
   withRingsErrors,
 } from "./context";
 import {
+  createProjectRingSchema,
   createRingsWalletSchema,
   createRingsZoneSchema,
   listLimitSchema,
@@ -40,6 +41,33 @@ export async function getRingsHealth(c: AppContext) {
   const { tenant } = tenantOf(c);
   const service = getHeliusRingsService(c, tenant);
   return success(c, { health: await service.probeHealth() });
+}
+
+// --- project ring -----------------------------------------------------------
+
+/** GET /ring — the project's one custom ring, or 404 while it uses the default ring. */
+export async function getRingsProjectRing(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  const service = getHeliusRingsService(c, tenant);
+  const ring = await withRingsErrors(() => service.getProjectRing());
+  if (!ring) throw notFound("project ring");
+  return success(c, { ring });
+}
+
+/**
+ * POST /ring — record the pre-deployed custom ring's program id and complete
+ * bring-up through the gateway. Re-submitting the same id resumes a failed
+ * bring-up; once any ring row exists, shield and sync fail closed until it is
+ * active, so this call is what re-opens them.
+ */
+export async function createRingsProjectRing(c: AppContext) {
+  const parsed = createProjectRingSchema.safeParse(await c.req.json());
+  if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
+
+  const { tenant } = tenantOf(c);
+  const service = getHeliusRingsService(c, tenant);
+  const ring = await withRingsErrors(() => service.createProjectRing(parsed.data));
+  return success(c, { ring }, 201);
 }
 
 // --- wallets ----------------------------------------------------------------

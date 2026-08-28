@@ -126,6 +126,19 @@ export {
 } from "./helius-rings-operation.repository";
 export { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 export type {
+  HeliusRingsProjectRingRepository,
+  HeliusRingsProjectRingRow,
+  HeliusRingsRingScope,
+  MarkHeliusRingsProjectRingActiveInput,
+  MarkHeliusRingsProjectRingFailedInput,
+  ReserveHeliusRingsProjectRingInput,
+} from "./helius-rings-project-ring.repository";
+export {
+  generateHeliusRingsProjectRingId,
+  mapHeliusRingsProjectRingRow,
+} from "./helius-rings-project-ring.repository";
+export { createPostgresHeliusRingsProjectRingRepository } from "./helius-rings-project-ring.repository.postgres";
+export type {
   CreateHeliusRingsWalletInput,
   HeliusRingsProjectScope,
   HeliusRingsWalletRepository,
@@ -435,6 +448,7 @@ export {
   createHeliusRingsHealthRepository,
   createHeliusRingsKeyRefRepository,
   createHeliusRingsOperationRepository,
+  createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createHeliusRingsZoneRepository,
   createKycWalletsRepository,

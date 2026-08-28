@@ -6,6 +6,8 @@ import {
   type ProofArtifact,
   type ProvisionIdentityInput,
   type ProvisionIdentityResult,
+  type ProvisionRingInput,
+  type ProvisionRingResult,
   type ReadIdentityInput,
   type ReadIdentityResult,
   type RequestProofInput,
@@ -28,6 +30,7 @@ import { readRingsIdentityStatus } from "./identity.js";
 import { verifyRingsIndexed } from "./indexed.js";
 import type { ShieldedMaterialSource } from "./material.js";
 import { provisionRingsIdentity } from "./provision.js";
+import { provisionCustomRing } from "./provision-ring.js";
 import { buildShieldTransaction } from "./shield.js";
 import { syncRingsWallet } from "./sync.js";
 
@@ -56,8 +59,20 @@ export interface RingsGatewayConfig {
   readonly signTransaction: (unsignedTxBase64: string, owner: string) => Promise<string>;
   /** Broadcasts a signed outer transaction and returns its signature. */
   readonly submitTransaction: (signedTxBase64: string) => Promise<string>;
+  /**
+   * Signs an arbitrary message with SDP custody, base64 in and out; only ring
+   * bring-up needs it, for the auditor-key attestation.
+   */
+  readonly signMessage?: (messageBase64: string, owner: string) => Promise<string>;
   /** Shielded pool tree; the SDK's default devnet tree when omitted. */
   readonly tree?: string;
+  /**
+   * The project's active custom ring. Set, shield deposits become ring-bound
+   * and balance reads count only that ring's notes.
+   */
+  readonly ringProgramId?: string;
+  /** The Helius ring RPC, which mints auditor keys; only ring bring-up needs it. */
+  readonly ringRpcUrl?: string;
   /** Required for the plain-http public devnet indexer and prover. */
   readonly allowInsecureHttp?: boolean;
   readonly healthTimeoutMs?: number;
@@ -90,6 +105,39 @@ function readApiKey(rpcUrl: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * What bring-up needs beyond the base config, checked as configuration rather
+ * than left to fail inside the flow. Fixed messages: a URL echo could carry an
+ * API key, and the insecure-http rule matches the indexer and prover.
+ */
+function requireRingBringUpConfig(config: RingsGatewayConfig): {
+  ringRpcUrl: string;
+  signMessage: NonNullable<RingsGatewayConfig["signMessage"]>;
+} {
+  const { ringRpcUrl, signMessage } = config;
+  if (!ringRpcUrl || !signMessage) {
+    throw new HeliusRingsError(
+      "config_error",
+      "ring bring-up needs a ring RPC URL and a custody message signer"
+    );
+  }
+
+  let protocol: string;
+  try {
+    protocol = new URL(ringRpcUrl).protocol;
+  } catch {
+    throw new HeliusRingsError("config_error", "the configured ring RPC URL is not a valid URL");
+  }
+  if (!config.allowInsecureHttp && protocol !== "https:") {
+    throw new HeliusRingsError(
+      "config_error",
+      "the configured ring RPC URL is not https and insecure http is not allowed"
+    );
+  }
+
+  return { ringRpcUrl, signMessage };
 }
 
 /**
@@ -193,6 +241,23 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             material: requireMaterial(),
             organizationId: config.organizationId,
             projectId: config.projectId,
+            ...(config.ringProgramId === undefined ? {} : { ringProgramId: config.ringProgramId }),
+          },
+          input
+        )
+      );
+    },
+
+    async provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult> {
+      const bringUp = requireRingBringUpConfig(config);
+      return withZolanaErrorBridge(async () =>
+        provisionCustomRing(
+          {
+            client: await client(),
+            ringRpcUrl: bringUp.ringRpcUrl,
+            signTransaction: config.signTransaction,
+            signMessage: bringUp.signMessage,
+            submitTransaction: config.submitTransaction,
           },
           input
         )
@@ -229,6 +294,7 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             material: requireMaterial(),
             organizationId: config.organizationId,
             projectId: config.projectId,
+            ...(config.ringProgramId === undefined ? {} : { ringProgramId: config.ringProgramId }),
           },
           {
             walletId: input.operation.walletId,

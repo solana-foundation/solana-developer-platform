@@ -63,6 +63,37 @@ describe("createRingsGateway", () => {
     expect((error as Error).message).not.toContain(configuredTree);
   });
 
+  it("refuses ring bring-up when the ring RPC and message signer are not configured", async () => {
+    const error = await createRingsGateway(CONFIG)
+      .provisionRing({ ringProgramId: "Stake11111111111111111111111111111111111111" })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({ code: "config_error" });
+  });
+
+  it("refuses a plain-http ring RPC unless insecure http is explicitly allowed", async () => {
+    const error = await createRingsGateway({
+      ...CONFIG,
+      ringRpcUrl: "http://ring-rpc.example",
+      signMessage: async () => "sig",
+      allowInsecureHttp: false,
+    })
+      .provisionRing({ ringProgramId: "Stake11111111111111111111111111111111111111" })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    // In plaintext the auditor-key response could be swapped in transit.
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({ code: "config_error" });
+    expect((error as Error).message).toContain("https");
+  });
+
   // Refused rather than stubbed, so a spend cannot be mistaken for a deposit.
   const unimplementedFlows: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
     [

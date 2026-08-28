@@ -7,6 +7,7 @@ import type {
   PrivateOperation,
   PrivateOperationInput,
   PrivateWallet,
+  ProjectRing,
   ReadIdentityResult,
   RuntimeHealth,
   TransitionGuard,
@@ -25,6 +26,7 @@ import {
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
   createHeliusRingsOperationRepository,
+  createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createPolicyRepository,
   type HeliusRingsAssetRepository,
@@ -32,9 +34,11 @@ import {
   type HeliusRingsHealthRepository,
   type HeliusRingsOperationRepository,
   type HeliusRingsOperationRow,
+  type HeliusRingsProjectRingRepository,
   type HeliusRingsWalletRepository,
   mapHeliusRingsEventRow,
   mapHeliusRingsHealthRows,
+  mapHeliusRingsProjectRingRow,
   mapHeliusRingsWalletRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
@@ -70,6 +74,7 @@ export interface HeliusRingsServiceDependencies {
   events?: HeliusRingsEventRepository;
   health?: HeliusRingsHealthRepository;
   assets?: HeliusRingsAssetRepository;
+  projectRings?: HeliusRingsProjectRingRepository;
   enforcePolicy?: typeof enforceWalletOperationPolicy;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
@@ -143,11 +148,16 @@ export function createHeliusRingsService(
 
 export class HeliusRingsService {
   private readonly gateway: RingsGatewayPort;
+  /** Test seam: an injected gateway serves ring-bound flows too. */
+  private readonly injectedGateway: RingsGatewayPort | undefined;
+  /** Built on first money flow of an active-ring project; one per service instance. */
+  private ringBoundGateway: RingsGatewayPort | undefined;
   private readonly wallets: HeliusRingsWalletRepository;
   private readonly operations: HeliusRingsOperationRepository;
   private readonly events: HeliusRingsEventRepository;
   private readonly health: HeliusRingsHealthRepository;
   private readonly assets: HeliusRingsAssetRepository;
+  private readonly projectRings: HeliusRingsProjectRingRepository;
   private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
@@ -166,12 +176,14 @@ export class HeliusRingsService {
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
+    this.injectedGateway = dependencies.gateway;
     this.gateway = dependencies.gateway ?? resolveRingsGateway(env, tenant);
     this.wallets = dependencies.wallets ?? createHeliusRingsWalletRepository(env);
     this.operations = dependencies.operations ?? createHeliusRingsOperationRepository(env);
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
     this.health = dependencies.health ?? createHeliusRingsHealthRepository(env);
     this.assets = dependencies.assets ?? createHeliusRingsAssetRepository(env);
+    this.projectRings = dependencies.projectRings ?? createHeliusRingsProjectRingRepository(env);
     this.enforcePolicy = dependencies.enforcePolicy ?? enforceWalletOperationPolicy;
     this.signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
     this.submitOuterTransaction =
@@ -231,6 +243,104 @@ export class HeliusRingsService {
     return mapHeliusRingsWalletRow(provisioned ?? (await this.requireWallet(wallet.id)));
   }
 
+  /** The project's one custom ring, or null while it deposits into the default ring. */
+  async getProjectRing(): Promise<ProjectRing | null> {
+    const ring = await this.projectRings.getByProject({ ...this.tenant });
+    return ring ? mapHeliusRingsProjectRingRow(ring) : null;
+  }
+
+  /**
+   * Records the project's one custom ring and completes bring-up through the
+   * gateway. Idempotent: re-submitting the same id resumes a pending or failed
+   * bring-up, and an already-active ring returns as it stands. A different id
+   * replaces a ring that never went active (a mistyped id binds no notes) and
+   * is refused once active — re-pointing would strand every ring-bound note.
+   */
+  async createProjectRing(input: { ringProgramId: string }): Promise<ProjectRing> {
+    let reserved = await this.projectRings.reserveRing({
+      ...this.tenant,
+      ringProgramId: input.ringProgramId,
+    });
+    if (!reserved) {
+      throw new AppError("INTERNAL_ERROR", "ring reservation returned no row");
+    }
+    if (reserved.ring_program_id !== input.ringProgramId) {
+      // A ring that never went active has no ring-bound notes, so a mistyped
+      // id is correctable; the repository refuses once the ring is active.
+      const repointed = await this.projectRings.repointRing({
+        ...this.tenant,
+        ringProgramId: input.ringProgramId,
+      });
+      if (!repointed) {
+        throw new HeliusRingsError(
+          "conflict",
+          "this project's custom ring is active; re-pointing it would strand its ring-bound notes"
+        );
+      }
+      reserved = repointed;
+    }
+    if (reserved.status === "active") {
+      return mapHeliusRingsProjectRingRow(reserved);
+    }
+
+    try {
+      const provisioned = await this.gateway.provisionRing({
+        ringProgramId: reserved.ring_program_id,
+      });
+      const active = await this.projectRings.markActive({
+        ...this.tenant,
+        ringProgramId: reserved.ring_program_id,
+        auditorPublicKey: provisioned.auditorPublicKeyHex,
+      });
+      if (!active) {
+        throw new AppError("INTERNAL_ERROR", "ring activation matched no row");
+      }
+      return mapHeliusRingsProjectRingRow(active);
+    } catch (error) {
+      // Only a domain failure's fixed message is persisted; anything else could
+      // quote an endpoint, and this deployment's endpoints carry API keys.
+      const failure =
+        error instanceof HeliusRingsError
+          ? { code: error.code, message: error.message }
+          : { code: "gateway_unavailable", message: "ring bring-up failed" };
+      await this.projectRings.markFailed({
+        ...this.tenant,
+        ringProgramId: reserved.ring_program_id,
+        failureCode: failure.code,
+        failureMessage: failure.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * The gateway money flows must use. A project that declared a ring never
+   * silently touches the default ring: until its ring is active, shield and
+   * sync fail closed as configuration, and once active they run ring-bound.
+   */
+  private async moneyGateway(): Promise<RingsGatewayPort> {
+    const ring = await this.projectRings.getByProject({ ...this.tenant });
+    if (!ring) {
+      return this.gateway;
+    }
+    if (ring.status !== "active") {
+      throw new HeliusRingsError(
+        "config_error",
+        `the project's custom ring is ${ring.status}; complete ring bring-up before shielding or syncing`
+      );
+    }
+    if (this.injectedGateway) {
+      return this.injectedGateway;
+    }
+    this.ringBoundGateway ??= resolveRingsGateway(
+      this.env,
+      this.tenant,
+      {},
+      { ringProgramId: ring.ring_program_id }
+    );
+    return this.ringBoundGateway;
+  }
+
   /**
    * Reads the wallet's shielded balances from Photon. A null owner is a refusal,
    * and the persisted `shielded_address` is pinned so a derivation mismatch
@@ -251,7 +361,7 @@ export class HeliusRingsService {
       );
     }
 
-    const synced = await this.gateway.syncPhoton({
+    const synced = await (await this.moneyGateway()).syncPhoton({
       walletId: wallet.id,
       owner,
       cursor: wallet.sync_cursor,
@@ -575,13 +685,16 @@ export class HeliusRingsService {
     // proving: build the outer tx and request the proof.
     try {
       const wallet = await this.requireWallet(current.wallet_id);
-      const built = await this.gateway.buildOperation({
+      // Resolved here rather than at construction: a declared-but-inactive ring
+      // fails the operation with a recorded, retryable failure instead of a 500.
+      const gateway = await this.moneyGateway();
+      const built = await gateway.buildOperation({
         // No key refs: the deterministic key authority persists none.
         operation: this.toPrivateOperation(current),
         keyRefs: [],
         expectedShieldedAddress: wallet.shielded_address ?? undefined,
       });
-      const proof = await this.gateway.requestProof({
+      const proof = await gateway.requestProof({
         operationId: current.id,
         ringsMetadata: built.ringsMetadata,
       });

@@ -10,6 +10,7 @@ import {
 const syncWallet = vi.fn();
 const getPrivateTokenBalances = vi.fn();
 const getPrivateTransactions = vi.fn();
+const walletUtxos = vi.fn();
 
 vi.mock("@heliuslabs/zolana/wallet", () => ({
   syncWallet: (...args: unknown[]) => syncWallet(...args),
@@ -19,7 +20,11 @@ vi.mock("@heliuslabs/zolana/wallet", () => ({
 
 vi.mock("@heliuslabs/zolana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@heliuslabs/zolana")>()),
-  Wallet: class {},
+  Wallet: class {
+    utxos(): unknown[] {
+      return walletUtxos();
+    }
+  },
 }));
 
 const { createDeterministicMaterialSource } = await import("./deterministic-ka/index.js");
@@ -30,6 +35,9 @@ const OWNER = TEST_OWNER;
 const PROTOCOL_SOL = "11111111111111111111111111111111";
 const SDP_SOL = "So11111111111111111111111111111111111111112";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+// Distinct from TEST_OWNER so a swapped parameter cannot pass.
+const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
+const OTHER_RING = "SysvarRent111111111111111111111111111111111";
 
 const DEPS = {
   client: {} as never,
@@ -57,6 +65,42 @@ describe("syncRingsWallet", () => {
     syncWallet.mockResolvedValue(CLEAN);
     getPrivateTokenBalances.mockReturnValue([]);
     getPrivateTransactions.mockReturnValue([]);
+    walletUtxos.mockReturnValue([]);
+  });
+
+  it("counts only the configured ring's unspent notes when a ring is set", async () => {
+    walletUtxos.mockReturnValue([
+      { spent: false, utxo: { ringProgramId: RING_PROGRAM, asset: PROTOCOL_SOL, amount: 2n } },
+      { spent: false, utxo: { ringProgramId: RING_PROGRAM, asset: PROTOCOL_SOL, amount: 3n } },
+      // Unbound: cannot move through the ring's flows, so not this wallet's balance here.
+      { spent: false, utxo: { asset: PROTOCOL_SOL, amount: 100n } },
+      // A foreign ring's note is just as unspendable through this deployment.
+      { spent: false, utxo: { ringProgramId: OTHER_RING, asset: PROTOCOL_SOL, amount: 200n } },
+      { spent: true, utxo: { ringProgramId: RING_PROGRAM, asset: PROTOCOL_SOL, amount: 400n } },
+      { spent: false, utxo: { ringProgramId: RING_PROGRAM, asset: USDC, amount: 7n } },
+    ]);
+
+    const { balances } = await syncRingsWallet({ ...DEPS, ringProgramId: RING_PROGRAM }, INPUT);
+
+    // The SDK's own balance read merges all of the above into one number.
+    expect(getPrivateTokenBalances).not.toHaveBeenCalled();
+    expect(balances).toEqual([
+      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "5" },
+      { mint: USDC, symbol: "UNKNOWN", decimals: null, amountRaw: "7" },
+    ]);
+  });
+
+  it("classifies an invalid configured ring without deriving any material", async () => {
+    const configuredRing = "not-a-solana-address";
+    const error = await syncRingsWallet({ ...DEPS, ringProgramId: configuredRing }, INPUT).then(
+      () => null,
+      (thrown: unknown) => thrown
+    );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({ code: "config_error" });
+    expect((error as Error).message).not.toContain(configuredRing);
+    expect(syncWallet).not.toHaveBeenCalled();
   });
 
   it("reports SOL under the mint SDP uses, not the protocol's", async () => {

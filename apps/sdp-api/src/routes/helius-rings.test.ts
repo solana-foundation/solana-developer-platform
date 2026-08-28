@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
+import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -165,6 +166,81 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { health: Record<string, string> } };
     expect(body.data.health.gateway).toBe("red");
+  });
+
+  describe("project ring", () => {
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+
+    it("404s before a ring is recorded", async () => {
+      const res = await app.request("/v1/helius-rings/ring", { headers: authHeaders() }, env);
+      expect(res.status).toBe(404);
+    });
+
+    it("records the ring, activates it, and serves it back", async () => {
+      gatewayOverride.current = gatewayStub({
+        provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }),
+      });
+
+      const created = await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
+      expect(created.status).toBe(201);
+      const createdBody = (await created.json()) as { data: { ring: Record<string, unknown> } };
+      expect(createdBody.data.ring).toMatchObject({
+        ringProgramId: RING_PROGRAM,
+        status: "active",
+        auditorPublicKeyHex: "04ff",
+      });
+
+      const read = await app.request("/v1/helius-rings/ring", { headers: authHeaders() }, env);
+      expect(read.status).toBe(200);
+      const readBody = (await read.json()) as { data: { ring: Record<string, unknown> } };
+      expect(readBody.data.ring).toMatchObject({ status: "active" });
+    });
+
+    it("409s an attempt to re-point the project away from an active ring", async () => {
+      gatewayOverride.current = gatewayStub({
+        provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }),
+      });
+      await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
+
+      const res = await post("/v1/helius-rings/ring", {
+        ringProgramId: "RingProgram2111111111111111111111111111111",
+      });
+      expect(res.status).toBe(409);
+    });
+
+    it("re-points a never-active ring and completes bring-up with the new id", async () => {
+      // The unconfigured default gateway records a failure the first id can
+      // never recover from.
+      await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
+
+      gatewayOverride.current = gatewayStub({
+        provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }),
+      });
+      const res = await post("/v1/helius-rings/ring", {
+        ringProgramId: "RingProgram2111111111111111111111111111111",
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { data: { ring: Record<string, unknown> } };
+      expect(body.data.ring).toMatchObject({
+        ringProgramId: "RingProgram2111111111111111111111111111111",
+        status: "active",
+      });
+    });
+
+    it("400s a ring program id that is not base58", async () => {
+      const res = await post("/v1/helius-rings/ring", { ringProgramId: "not base58 0OIl" });
+      expect(res.status).toBe(400);
+    });
+
+    it("503s through the unconfigured gateway and records the failure", async () => {
+      const res = await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
+      expect(res.status).toBe(503);
+
+      const read = await app.request("/v1/helius-rings/ring", { headers: authHeaders() }, env);
+      const body = (await read.json()) as { data: { ring: Record<string, unknown> } };
+      expect(body.data.ring).toMatchObject({ status: "failed" });
+    });
   });
 
   it("GET /wallets lists the project's rings wallets", async () => {

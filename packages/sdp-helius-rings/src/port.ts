@@ -96,9 +96,29 @@ export interface VerifyIndexedResult {
   photonRef: string;
 }
 
+export interface ProvisionRingInput {
+  /** Base58 program id of the pre-deployed ring program. */
+  ringProgramId: string;
+}
+
+export interface ProvisionRingResult {
+  /**
+   * Uncompressed SEC1 P-256 auditor public key as hex, as the ring's on-chain
+   * config publishes it. The caller persists it; SDP never holds the secret half.
+   */
+  auditorPublicKeyHex: string;
+}
+
 export interface RingsGatewayPort {
   probeHealth(): Promise<RuntimeHealth>;
   provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult>;
+  /**
+   * Completes bring-up of a pre-deployed ring program: auditor key, ring
+   * config, shielded-pool registration, and the config authority as its own
+   * initial reader. Idempotent against on-chain state, so a run that died
+   * mid-way resumes by calling it again with the same id.
+   */
+  provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult>;
   /**
    * Reads the published identity and says whether it is this tenant's. A pure
    * read of the chain, though it derives key material in process.
