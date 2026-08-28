@@ -7,7 +7,10 @@ interface GoldenEndpoint {
   domain: string;
   path: string;
   scope: "org" | "project";
+  query?: Record<string, string>;
 }
+
+const FIRST_PAGE = { page: "1", pageSize: "20" };
 
 const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   { domain: "projects", path: "/v1/projects", scope: "org" },
@@ -15,14 +18,15 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   { domain: "notifications", path: "/v1/notifications/unread-count", scope: "org" },
   { domain: "api-keys", path: "/v1/api-keys", scope: "project" },
   { domain: "onboarding", path: "/v1/onboarding/status", scope: "org" },
-  { domain: "counterparties", path: "/v1/counterparties?page=1&pageSize=1", scope: "project" },
-  { domain: "issuance-tokens", path: "/v1/issuance/tokens?page=1&pageSize=20", scope: "project" },
+  { domain: "counterparties", path: "/v1/counterparties", scope: "project", query: FIRST_PAGE },
+  { domain: "issuance-tokens", path: "/v1/issuance/tokens", scope: "project", query: FIRST_PAGE },
   { domain: "issuance-templates", path: "/v1/issuance/templates", scope: "project" },
-  { domain: "wallets", path: "/v1/wallets?view=summary", scope: "project" },
+  { domain: "wallets", path: "/v1/wallets", scope: "project", query: { view: "summary" } },
   {
     domain: "payments-transfers",
-    path: "/v1/payments/transfers?page=1&pageSize=1",
+    path: "/v1/payments/transfers",
     scope: "project",
+    query: FIRST_PAGE,
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
   { domain: "policies", path: "/v1/policies", scope: "project" },
@@ -50,7 +54,10 @@ test.describe("GCP dev API golden endpoints", () => {
   for (const endpoint of GOLDEN_ENDPOINTS) {
     test(`${endpoint.domain} responds to an authed read`, async () => {
       const api = endpoint.scope === "project" ? projectApi : orgApi;
-      await expect(api.get(endpoint.path)).resolves.toBeDefined();
+      const path = endpoint.query
+        ? `${endpoint.path}?${new URLSearchParams(endpoint.query)}`
+        : endpoint.path;
+      await expect(api.get(path)).resolves.toBeDefined();
     });
   }
 });

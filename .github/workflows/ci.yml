@@ -178,7 +178,8 @@ jobs:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL
+      TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,TEST_CHANGED_SINCE
     services:
       postgres:
         image: postgres:16-alpine
