@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { OfframpStepContent } from "./components/offramp-step-content";
+import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
@@ -48,6 +49,7 @@ export function OfframpRail({
   const transferTerminal = wizard.transferStatus
     ? isTerminalRampTransferStatus(wizard.transferStatus.status)
     : false;
+  const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
@@ -71,6 +73,11 @@ export function OfframpRail({
             ...wizard.summaryDetails,
           ]}
         />
+      }
+      header={
+        hostedStage && wizard.transferStatus?.status !== "completed" ? (
+          <RampStatusInline direction="offramp" hosted transfer={wizard.transferStatus} />
+        ) : undefined
       }
       secondaryLabel={
         wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined

@@ -440,7 +440,7 @@ export class MoonpayRampClient implements RampProvider {
       baseCurrencyAmount: input.fiatAmount,
       currencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       walletAddress: input.destinationWalletAddress,
-      redirectURL: input.redirectUrl,
+      lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });
@@ -466,7 +466,7 @@ export class MoonpayRampClient implements RampProvider {
       baseCurrencyAmount: input.cryptoAmount,
       quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       refundWalletAddress: input.sourceWalletAddress,
-      redirectURL: input.redirectUrl,
+      lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });

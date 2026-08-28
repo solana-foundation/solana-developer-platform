@@ -222,15 +222,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
 
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
     return (
-      <div className="space-y-6">
-        <MoonpayRampFrame
-          title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
-          src={quote.hostedUrl}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="offramp" transfer={transferStatus} />
-        </div>
-      </div>
+      <MoonpayRampFrame
+        title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
+        src={quote.hostedUrl}
+      />
     );
   }
 
