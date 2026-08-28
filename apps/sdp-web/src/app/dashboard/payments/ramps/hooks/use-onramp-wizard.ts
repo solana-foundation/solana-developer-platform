@@ -9,8 +9,9 @@ import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
-  fetchTransferByProviderReference,
+  fetchTransferById,
   simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -79,7 +80,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       insertAfter: "MEMO",
       direction: "onramp",
     },
-    advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
     buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
@@ -122,13 +122,12 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     ...memoSummaryDetails(t, wizard.memoRows),
   ];
 
-  const transferStatusKey = wizard.quote
-    ? (["onramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
+  const transferStatusKey = wizard.quoteTransferId
+    ? paymentsQueryKeys.onrampTransferStatus({ transferId: wizard.quoteTransferId })
     : null;
   const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
     transferStatusKey,
-    ([, provider, providerReference]): Promise<PaymentTransferSummary | null> =>
-      fetchTransferByProviderReference({ provider, providerReference }, t),
+    ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
       refreshInterval: (transfer) =>
         transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,

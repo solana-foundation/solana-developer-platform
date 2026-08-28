@@ -22,7 +22,7 @@ export async function stripeOnrampQuote(
     fiatCurrency: args.fiatCurrency,
     fiatAmount: args.fiatAmount,
     destinationWalletAddress: args.destinationWalletAddress,
-    externalCustomerId: args.counterparty.external_id ?? args.counterparty.id,
+    externalCustomerId: args.counterparty.id,
     customerIpAddress: args.customerIpAddress,
   });
 }
