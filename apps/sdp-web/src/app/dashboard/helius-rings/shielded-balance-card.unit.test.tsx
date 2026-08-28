@@ -130,7 +130,13 @@ describe("ShieldedBalanceCard", () => {
       sync: {
         ...OBSERVED,
         balances: [
-          { mint: "Mint111", symbol: "UNKNOWN", amountRaw: "1.5", decimals: null, ringProgramId: null },
+          {
+            mint: "Mint111",
+            symbol: "UNKNOWN",
+            amountRaw: "1.5",
+            decimals: null,
+            ringProgramId: null,
+          },
         ],
       },
     });

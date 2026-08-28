@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import {
-  prepareRingsOperation,
   type ProjectRing,
+  prepareRingsOperation,
   RINGS_ALLOWLISTED_ASSETS,
   type RingsOperationDetail,
   type RingsOpType,
