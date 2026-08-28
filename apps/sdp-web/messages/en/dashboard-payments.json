@@ -658,7 +658,7 @@
       "payoutStatus": "Payout status",
       "payoutAmount": "Payout amount",
       "cryptoTransferId": "Crypto transfer ID",
-      "solanaSignature": "Solana signature",
+      "solanaSignature": "Onchain signature",
       "moneygramError": "MoneyGram error",
       "lastUpdated": "Last updated",
       "copy": "Copy {label}",
