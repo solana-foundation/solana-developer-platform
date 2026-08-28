@@ -2147,6 +2147,107 @@
           }
         }
       ]
+    },
+    {
+      "name": "Earn",
+      "item": [
+        {
+          "name": "Build an unsigned external-wallet deposit transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/deposit-transactions",
+            "description": "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The owner is the fee payer and only required signer; the transaction expires with its blockhash, and nothing moves until the signed bytes are submitted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Submit a signed external-wallet deposit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/deposits",
+            "description": "Verifies the signed bytes are exactly the built transaction with the owner's genuine signature, records the movement, then broadcasts. Requires the Idempotency-Key header: a retry with the same key resolves the original movement (`replayed: true`), and each built transaction is consumable exactly once.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_example\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA=\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Build an unsigned external-wallet exit transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-transactions",
+            "description": "Builds one unsigned exit transaction for an external-wallet position. Takes no surfacing, entitlement, availability, or catalogue gate (ADR 0002 exit safety), so the exit works while the provider is disabled for new deposits.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Submit a signed external-wallet withdrawal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawals",
+            "description": "The exit mirror of the deposit submit: signature verified over the exact built message, movement recorded before broadcast, Idempotency-Key required, one submission per built transaction.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_example\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA=\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   ]
 }

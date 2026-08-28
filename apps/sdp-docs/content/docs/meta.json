@@ -19,6 +19,7 @@
     "reference/api/payments",
     "reference/api/policies",
     "reference/api/compliance",
-    "reference/api/asset-profiles"
+    "reference/api/asset-profiles",
+    "reference/api/earn"
   ]
 }

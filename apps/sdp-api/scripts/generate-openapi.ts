@@ -1,9 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { createOpenApiDocument } from "../src/openapi/spec";
+import { createPublicOpenApiDocument } from "../src/openapi/spec";
 
-const document = createOpenApiDocument();
+const document = createPublicOpenApiDocument();
 
 const outputDir = path.resolve(process.cwd(), "generated");
 const outputPath = path.join(outputDir, "openapi.json");

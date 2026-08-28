@@ -183,6 +183,7 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     shares_out: null,
     payout_token: null,
     custody_wallet_id: CUSTODY_WALLET_ID,
+    owner_address: null,
     vault_address: VAULT,
     source_address: VAULT,
     destination_address: WALLET_ADDRESS,

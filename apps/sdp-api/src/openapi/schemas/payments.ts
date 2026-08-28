@@ -2190,6 +2190,10 @@ export const transferBatchEstimateResponseSchema = z
 export const onrampQuoteResponseSchema = z
   .object({
     quote: onrampQuoteSchema.openapi({ description: "On-ramp quote details." }),
+    transferId: z.string().openapi({
+      description:
+        "Identifier of the transfer record created for this quote. Poll GET /v1/payments/transfers/{transferId} for settlement status.",
+    }),
   })
   .openapi({ description: "On-ramp quote response payload." });
 

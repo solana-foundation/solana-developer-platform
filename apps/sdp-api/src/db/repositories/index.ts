@@ -42,6 +42,12 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
+  CounterpartyProviderAccountRow,
+  CounterpartyProviderAccountsRepository,
+  UpsertCounterpartyProviderAccountInput,
+} from "./counterparty-provider-account.repository";
+export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
+export type {
   DeleteUnlistedEarnStrategiesInput,
   EarnButtonConfigurationRow,
   EarnProviderWalletRow,
@@ -454,6 +460,7 @@ export {
   createSystemPaymentRequestsRepository,
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
+  createSystemTransactionalPaymentsRepository,
   createTokenRepository,
   createWalletAssetEnrollmentsRepository,
   createWorkflowExecutionsRepository,

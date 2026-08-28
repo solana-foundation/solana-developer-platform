@@ -416,7 +416,8 @@
       "importFailed": "Falha na importação.",
       "cancel": "Cancelar",
       "importing": "Importando…",
-      "import": "Importar"
+      "import": "Importar",
+      "unknownToken": "Token desconhecido"
     },
     "manualInstructions": {
       "copied": "Copiado: {label}.",
@@ -644,7 +645,8 @@
       "selectFiatCurrency": "Selecionar moeda fiat",
       "onrampRedirectUrlPlaceholder": "https://app.example.com/payments/onramp/complete",
       "createOfframpQuote": "Criar cotação de offramp",
-      "offrampRedirectUrlPlaceholder": "https://app.example.com/payments/offramp/complete"
+      "offrampRedirectUrlPlaceholder": "https://app.example.com/payments/offramp/complete",
+      "policyRulesPlaceholder": "Array JSON de regras de política"
     },
     "commandCenter": {
       "moveMoney": "Movimentar dinheiro",
@@ -912,7 +914,24 @@
       "cancelPaymentDescription": "Isso interrompe os pagamentos futuros para {counterparty}. Você pode retomar o pagamento mais tarde no menu Ações.",
       "keepPayment": "Manter pagamento",
       "cancelPayment": "Cancelar pagamento",
-      "save": "Salvar"
+      "save": "Salvar",
+      "invalidAmountDecimals": "Este ativo suporta no máximo {decimals} casas decimais.",
+      "invalidAmountFormat": "Informe um valor válido.",
+      "searchPayments": "Buscar pagamentos recorrentes",
+      "clearSearch": "Limpar busca",
+      "allStatuses": "Todos os status",
+      "clearFilters": "Limpar filtros",
+      "noMatches": "Nenhum pagamento recorrente corresponde aos seus filtros.",
+      "range": "{from}-{to} de {total} pagamentos",
+      "detailPaymentSection": "Pagamento",
+      "detailWalletsSection": "Wallets e metadados",
+      "detailTo": "Para",
+      "frequency": "Frequência",
+      "subscriptionAccount": "Conta de assinatura",
+      "openAccount": "Abrir conta no explorer",
+      "editPaymentDescription": "Atualize as Wallets, o valor e a programação do pagamento.",
+      "paymentUpdated": "Pagamento recorrente atualizado.",
+      "noChangesToSave": "Nenhuma alteração para salvar."
     },
     "transactions": {
       "searchPlaceholder": "Buscar ID, assinatura, endereço, referência ou contraparte (3+ caracteres)",
@@ -987,7 +1006,12 @@
       "filterWallet": "Wallet",
       "filterCounterparty": "Contraparte",
       "filterProvider": "Provedor",
-      "filterAsset": "Ativo"
+      "filterAsset": "Ativo",
+      "downloadCsv": "Baixar CSV",
+      "downloadingCsv": "Baixando…",
+      "downloadCsvFailed": "Não foi possível baixar o CSV de transações.",
+      "noAssetMatchesDescription": "Os saldos são lidos da chain, enquanto esta tabela lista as transferências registradas pela SDP. Um Token com fundos fora da SDP mostra um saldo sem transferências aqui.",
+      "allAssets": "Todos os ativos"
     },
     "requests": {
       "loadFailed": "Não foi possível carregar as solicitações de pagamento",

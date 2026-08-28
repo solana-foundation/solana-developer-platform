@@ -1,7 +1,6 @@
 "use client";
 
 import { type ReactNode, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
@@ -58,10 +57,17 @@ export function WizardFrame({
         {header || showSummaryButton ? (
           <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
             {header}
+            {header && showSummaryButton ? (
+              <span aria-hidden className="h-4 w-px bg-border-default" />
+            ) : null}
             {showSummaryButton ? (
-              <Button type="button" variant="ghost" onClick={() => setSummaryOpen(true)}>
+              <button
+                type="button"
+                onClick={() => setSummaryOpen(true)}
+                className="text-sm font-medium text-secondary underline-offset-4 hover:text-primary hover:underline"
+              >
                 {t("DashboardPayments.viewSummary")}
-              </Button>
+              </button>
             ) : null}
           </div>
         ) : null}
