@@ -17,6 +17,7 @@ import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
+import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
@@ -54,6 +55,9 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     setCollectedField,
     requirementsBlocker,
     refreshQuote,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
     memoRows,
     setMemoRows,
   } = wizard;
@@ -105,6 +109,16 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}
+      />
+    );
+  }
+
+  if (currentStepId === "PROVIDER" && !quote && quoteCreationError) {
+    return (
+      <RampQuoteError
+        error={quoteCreationError}
+        retrying={quoteCreationRetrying}
+        onRetry={() => void retryQuoteCreation()}
       />
     );
   }
@@ -177,9 +191,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
             src={quote.hostedUrl}
           />
         )}
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
       </div>
     );
   }
