@@ -7,7 +7,8 @@ import type {
 } from "@heliuslabs/zolana/transaction";
 import { syncWallet } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
-import type { ShieldedMaterial } from "./material.js";
+import { canonicalShieldedIdentity, type ShieldedMaterial } from "./material.js";
+import { getCachedWallet, setCachedWallet } from "./wallet-cache.js";
 
 /**
  * An authority that can do nothing but hand over reading material.
@@ -30,6 +31,8 @@ export function readOnlyAuthority(material: ShieldedMaterial): WalletAuthority {
 }
 
 export interface HydrateWalletInput {
+  /** Cache key: same across sync and spend paths for one Rings identity. */
+  readonly walletId: string;
   readonly client: ZolanaClient;
   readonly material: ShieldedMaterial;
   /** `readOnlyAuthority` for a read; a `CustodyWalletAuthority` for a spend. */
@@ -72,7 +75,13 @@ export function hasSyncAnomalies(anomalies: SyncAnomalyCounts): boolean {
 }
 
 export async function hydrateWallet(input: HydrateWalletInput): Promise<HydratedWallet> {
-  const wallet = new Wallet({ identity: input.material.shieldedAddress });
+  // Cache is the single point of entry: read and spend paths share one Wallet
+  // per identity so cursors, decrypted state, and freshly-observed nullifiers
+  // advance in place across every call, not just within one flow.
+  const fingerprint = canonicalShieldedIdentity(input.material.shieldedAddress);
+  const cached = getCachedWallet(input.walletId, fingerprint);
+  const wallet = cached ?? new Wallet({ identity: input.material.shieldedAddress });
+
   const report = await syncWallet({
     wallet,
     authority: input.authority,
@@ -87,6 +96,8 @@ export async function hydrateWallet(input: HydrateWalletInput): Promise<Hydrated
       `the wallet could not be read completely (${anomalies.unparsedTransactions} unparsed, ${anomalies.undecryptableCandidates} undecryptable, ${anomalies.unknownAssetIds} unknown asset ids, ${anomalies.unknownAssetFields} unknown asset fields); refusing to select notes`
     );
   }
+
+  if (cached === undefined) setCachedWallet(input.walletId, wallet, fingerprint);
 
   return { wallet, report };
 }

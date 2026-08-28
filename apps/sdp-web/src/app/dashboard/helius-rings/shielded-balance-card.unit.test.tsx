@@ -65,21 +65,26 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ShieldedBalanceCard", () => {
-  it("reads nothing until the operator asks", async () => {
+  it("reads on mount so the balance is visible without a click", async () => {
+    mocks.syncRingsWallet.mockResolvedValue({ sync: OBSERVED });
     renderCard();
 
-    // A sync is a full indexer scan, so mounting must not trigger one.
-    expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
-    expect(screen.getByText(/Not read yet/)).toBeTruthy();
-    expect(refreshButton().disabled).toBe(false);
-
-    mocks.syncRingsWallet.mockResolvedValue({ sync: OBSERVED });
-    await userEvent.setup().click(refreshButton());
-
-    expect(mocks.syncRingsWallet).toHaveBeenCalledExactlyOnceWith(WALLET.id);
+    expect(await screen.findByText("SOL")).toBeTruthy();
+    expect(mocks.syncRingsWallet).toHaveBeenCalledWith(WALLET.id);
   });
 
-  it("announces the read in flight and blocks a second one", async () => {
+  it("still offers a manual refresh after the auto-read settles", async () => {
+    mocks.syncRingsWallet.mockResolvedValue({ sync: OBSERVED });
+    renderCard();
+    await screen.findByText("SOL");
+
+    await userEvent.setup().click(refreshButton());
+
+    // Mount + click.
+    expect(mocks.syncRingsWallet).toHaveBeenCalledTimes(2);
+  });
+
+  it("announces the read in flight while the auto-sync is pending", async () => {
     let settle: ((result: { sync: RingsWalletSync }) => void) | undefined;
     mocks.syncRingsWallet.mockReturnValue(
       new Promise<{ sync: RingsWalletSync }>((resolve) => {
@@ -88,11 +93,8 @@ describe("ShieldedBalanceCard", () => {
     );
     renderCard();
 
-    await userEvent.setup().click(refreshButton());
-
     expect(refreshButton().getAttribute("aria-label")).toBe("Reading…");
     expect(refreshButton().disabled).toBe(true);
-    expect(screen.queryByText(/Not read yet/)).toBeNull();
 
     settle?.({ sync: OBSERVED });
     expect(await screen.findByText("SOL")).toBeTruthy();

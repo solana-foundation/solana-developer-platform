@@ -109,6 +109,7 @@ export async function buildRingsOperation(
         },
       });
       const { wallet } = await hydrateWallet({
+        walletId: operation.walletId,
         client: deps.client,
         material,
         authority,

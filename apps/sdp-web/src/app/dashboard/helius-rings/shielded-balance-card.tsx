@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, RefreshCw } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
@@ -23,8 +23,10 @@ type Observation =
   | { name: "failed"; message: string };
 
 /**
- * One wallet's shielded balance. The read is a full indexer scan, so it never
- * polls and never fires on mount — only the refresh press triggers it.
+ * One wallet's shielded balance. Fires once on mount for provisioned wallets so
+ * the operator sees a value on load; refresh press repeats the sync. Subsequent
+ * syncs reuse the in-process wallet cache, so only the first read of a wallet
+ * per process pays a full scan.
  */
 export function ShieldedBalanceCard({ wallet }: { wallet: RingsWallet }) {
   const t = useTranslations();
@@ -61,6 +63,13 @@ export function ShieldedBalanceCard({ wallet }: { wallet: RingsWallet }) {
       setReading(false);
     }
   }, [wallet.id, t]);
+
+  // Auto-sync on mount for provisioned wallets. Server-side cache means a second
+  // caller on the same wallet only pays incremental cost.
+  useEffect(() => {
+    if (!provisioned) return;
+    void handleRefresh();
+  }, [provisioned, handleRefresh]);
 
   return (
     <div className="flex min-w-0 items-start gap-1">

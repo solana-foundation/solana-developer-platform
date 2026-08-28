@@ -74,6 +74,7 @@ export async function syncRingsWallet(
       // Tolerant of an incomplete read, unlike the spend path: partial balances
       // are still worth reporting as long as `degraded` says so.
       const { wallet, report } = await hydrateWallet({
+        walletId: input.walletId,
         client: deps.client,
         material,
         authority: readOnlyAuthority(material),
