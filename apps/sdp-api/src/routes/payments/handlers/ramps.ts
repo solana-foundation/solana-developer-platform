@@ -411,7 +411,7 @@ function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus
 async function persistRampQuoteTransfer(
   c: AppContext,
   input: PersistRampQuoteTransferInput
-): Promise<void> {
+): Promise<string> {
   const repository = getPaymentsRepository(c);
   const isOnramp = input.direction === "onramp";
   const binding: RampQuoteBinding = {
@@ -441,7 +441,7 @@ async function persistRampQuoteTransfer(
     if (isRampQuoteBindingExpired(existing)) {
       throw conflict("Provider quote/session reference has expired; create a new quote.");
     }
-    return;
+    return existing.id;
   }
 
   const apiKey = c.get("apiKey");
@@ -489,6 +489,7 @@ async function persistRampQuoteTransfer(
   if (!created) {
     throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
   }
+  return created.id;
 }
 
 export async function advanceCounterpartyRequirements(
@@ -690,7 +691,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         redirectUrl: input.redirectUrl,
       });
       break;
@@ -705,7 +706,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         customerId,
         redirectUrl: input.redirectUrl,
       });
@@ -744,7 +745,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
       });
       break;
     }
@@ -779,7 +780,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
   }
 
-  await persistRampQuoteTransfer(c, {
+  const transferId = await persistRampQuoteTransfer(c, {
     scope,
     projectId,
     counterparty,
@@ -795,7 +796,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     providerData: transferProviderData,
   });
 
-  return success(c, { quote });
+  return success(c, { quote, transferId });
 }
 
 export async function createOfframpQuote(c: AppContext): Promise<Response> {
@@ -821,7 +822,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         redirectUrl: input.redirectUrl,
       });
       break;
@@ -847,7 +848,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         customerId,
         payoutAccountId: payoutAccount.accountId,
       });
@@ -883,7 +884,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           cryptoAmount: input.cryptoAmount,
           sourceWalletAddress,
           paymentTransferId: pendingTransfer.id,
-          externalCustomerId: counterparty.external_id ?? counterparty.id,
+          externalCustomerId: counterparty.id,
           bvnkCompliance: buildBvnkPartyDetails(counterparty),
           bvnkOfframpWalletId: wallet.id,
         });
@@ -906,7 +907,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
       });
       break;
     }
@@ -925,6 +926,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
     }
   }
 
+  let transferId: string;
   if (pendingTransfer) {
     await completePendingBvnkOfframpTransfer(c, {
       organizationId: scope.auth.organizationId,
@@ -933,8 +935,9 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       quote,
       status: rampQuoteTransferStatus(quote),
     });
+    transferId = pendingTransfer.id;
   } else {
-    await persistRampQuoteTransfer(c, {
+    transferId = await persistRampQuoteTransfer(c, {
       scope,
       projectId,
       counterparty,
@@ -950,7 +953,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
     });
   }
 
-  return success(c, { quote });
+  return success(c, { quote, transferId });
 }
 
 export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRampTransferSchema>) {

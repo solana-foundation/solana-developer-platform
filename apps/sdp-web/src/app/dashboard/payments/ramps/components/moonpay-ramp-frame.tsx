@@ -1,9 +1,5 @@
 "use client";
 
-import { Maximize2Icon } from "lucide-react";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import {
   isTrustedRampDestination,
@@ -15,12 +11,10 @@ const FRAME_ALLOW =
 
 /**
  * Embeds the MoonPay widget for on-ramp deposits and off-ramp payouts. The
- * widget renders its whole KYC + payment flow inline, so it keeps a fullscreen
- * escape hatch for the cramped steps.
+ * widget renders its whole KYC + payment flow inline.
  */
 export function MoonpayRampFrame({ title, src }: { title: string; src: string }) {
   const t = useTranslations();
-  const [expanded, setExpanded] = useState(false);
 
   // The frame gets camera/payment permissions, so only HTTPS MoonPay checkout
   // hosts may ever be embedded — anything else fails closed.
@@ -33,38 +27,8 @@ export function MoonpayRampFrame({ title, src }: { title: string; src: string })
   }
 
   return (
-    <div>
-      <div className="relative overflow-hidden rounded-2xl">
-        <iframe title={title} src={src} className="h-[480px] w-full border-0" allow={FRAME_ALLOW} />
-        <div className="absolute top-3 right-3 z-10">
-          <Button
-            type="button"
-            variant="secondary"
-            size="xs"
-            iconLeft={<Maximize2Icon />}
-            onClick={() => setExpanded(true)}
-            className="shadow-sm"
-          >
-            {t("DashboardPayments.ramps.openFullScreen")}
-          </Button>
-        </div>
-      </div>
-      <Modal
-        isOpen={expanded}
-        ariaLabel={title}
-        onClose={() => setExpanded(false)}
-        size="xl"
-        contentClassName="max-w-5xl"
-      >
-        <div className="overflow-hidden rounded-2xl px-1 pt-12 pb-1">
-          <iframe
-            title={title}
-            src={src}
-            className="h-[80vh] w-full border-0"
-            allow={FRAME_ALLOW}
-          />
-        </div>
-      </Modal>
+    <div className="overflow-hidden rounded-2xl">
+      <iframe title={title} src={src} className="h-[640px] w-full border-0" allow={FRAME_ALLOW} />
     </div>
   );
 }

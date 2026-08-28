@@ -1,0 +1,548 @@
+import type { Blockhash } from "@solana/kit";
+import {
+  generateKeyPair,
+  getAddressFromPublicKey,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  partiallySignTransaction,
+} from "@solana/kit";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
+import type { EarnExternalWalletTransactionRow } from "@/db/repositories/earn-external-wallet-transactions.repository";
+import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
+import { env } from "@/test/helpers/env";
+import { seedTestDatabase } from "@/test/mocks/db";
+import type {
+  ExternalWalletDepositBuildInput,
+  ExternalWalletWithdrawalBuildInput,
+} from "./vault-external-wallet.service";
+
+const buildVaultDeposit = vi.hoisted(() => vi.fn());
+const buildVaultWithdrawal = vi.hoisted(() => vi.fn());
+const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
+const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
+const simulateVaultPlan = vi.hoisted(() => vi.fn());
+const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
+
+vi.mock("./execution-registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./execution-registry")>()),
+  resolveVaultDirectClient,
+  resolveVaultWithdrawClient,
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
+
+// `appendVaultRequestMemo` and `compileUnsignedVaultTransaction` stay REAL:
+// the whole point of these tests is that the service hands out genuinely
+// signable bytes and verifies genuine ed25519 signatures over them. Only the
+// RPC-touching stages are stubbed.
+vi.mock("./vault-execution.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./vault-execution.service")>()),
+  simulateVaultPlan,
+  broadcastVaultTransaction,
+}));
+
+const {
+  buildExternalWalletDepositTransaction,
+  buildExternalWalletWithdrawalTransaction,
+  submitExternalWalletDeposit,
+  submitExternalWalletWithdrawal,
+} = await import("./vault-external-wallet.service");
+
+/**
+ * The external-wallet (caller-signed) flows, end to end minus the chain
+ * (PRO-1722): build persists an unsigned transaction, submit verifies a real
+ * signature over exactly those bytes, records the movement before broadcast,
+ * and answers retries from the ledger.
+ *
+ * The owner is a REAL keypair generated per run: the signature-verification
+ * cases (missing, forged, wrong message) are only proof if the happy path's
+ * signature is genuine.
+ */
+
+const ORG = "org_ext_wallet";
+const PROJECT = "prj_ext_wallet";
+const SIBLING_PROJECT = "prj_ext_wallet_sibling";
+const USER = "usr_ext_wallet";
+const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SHARE_MINT = "So11111111111111111111111111111111111111112";
+const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+// 32 base58 ones decode to 32 zero bytes — a structurally valid blockhash.
+const BLOCKHASH = "11111111111111111111111111111111" as Blockhash;
+
+const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+
+let ownerKeyPair: CryptoKeyPair;
+let ownerAddress: string;
+
+function providerInstruction() {
+  return {
+    programAddress: MEMO_PROGRAM_ADDRESS,
+    accounts: [],
+    data: Buffer.from("provider-instruction", "utf8").toString("base64"),
+  };
+}
+
+function depositPlan(overrides: Record<string, unknown> = {}) {
+  return {
+    cluster: "devnet",
+    instructions: [providerInstruction()],
+    lookupTables: [],
+    assetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
+    accepted: { amount: "25" },
+    createsShareAccount: true,
+    ...overrides,
+  };
+}
+
+function withdrawalPlan(overrides: Record<string, unknown> = {}) {
+  return {
+    cluster: "devnet",
+    instructions: [providerInstruction()],
+    lookupTables: [],
+    assetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
+    accepted: { shares: "10" },
+    ...overrides,
+  };
+}
+
+function depositInput(
+  overrides: Partial<ExternalWalletDepositBuildInput> = {}
+): ExternalWalletDepositBuildInput {
+  return {
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    providerReference: VAULT,
+    ownerAddress,
+    tokenMint: TOKEN_MINT,
+    shareMint: SHARE_MINT,
+    label: "Test USDC Vault",
+    amount: "25",
+    userId: USER,
+    ...overrides,
+  };
+}
+
+async function seedTenancy(): Promise<void> {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(ORG, "External Wallet Org", "ext-wallet", "enterprise", "active"),
+    db
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind(USER, "ext-wallet@example.com"),
+    db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', 'ext-wallet-project', 'sandbox', 'active', ?)`
+      )
+      .bind(PROJECT, ORG, USER),
+    db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Sibling Project', 'ext-wallet-sibling', 'sandbox', 'active', ?)`
+      )
+      .bind(SIBLING_PROJECT, ORG, USER),
+  ]);
+}
+
+async function seedExternalWalletPosition(
+  overrides: Partial<{ projectId: string; ownerAddress: string }> = {}
+): Promise<string> {
+  const id = generateEarnPositionId();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO earn_positions (
+         id, organization_id, project_id, environment, provider, kind,
+         owner_address, vault_address, share_mint, token_mint, label, activated_at
+       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Exit Vault', sdp_iso_now())`
+    )
+    .bind(
+      id,
+      ORG,
+      overrides.projectId ?? PROJECT,
+      overrides.ownerAddress ?? ownerAddress,
+      VAULT,
+      SHARE_MINT,
+      TOKEN_MINT
+    )
+    .run();
+  return id;
+}
+
+function withdrawalInput(
+  positionId: string,
+  overrides: Partial<ExternalWalletWithdrawalBuildInput> = {}
+): ExternalWalletWithdrawalBuildInput {
+  return {
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    positionId,
+    vaultAddress: VAULT,
+    tokenMint: TOKEN_MINT,
+    shareMint: SHARE_MINT,
+    ownerAddress,
+    label: "Exit Vault",
+    shareAtaRentFunder: null,
+    shares: "10",
+    userId: USER,
+    ...overrides,
+  };
+}
+
+async function signBuiltTransaction(
+  built: EarnExternalWalletTransactionRow,
+  keyPair: CryptoKeyPair = ownerKeyPair
+): Promise<string> {
+  const transaction = getTransactionDecoder().decode(
+    Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+  );
+  const signed = await partiallySignTransaction([keyPair], transaction);
+  return Buffer.from(getTransactionEncoder().encode(signed)).toString("base64");
+}
+
+function submitDeposit(
+  built: EarnExternalWalletTransactionRow,
+  signedTransaction: string,
+  requestId: string,
+  overrides: Partial<Parameters<typeof submitExternalWalletDeposit>[1]> = {}
+) {
+  return submitExternalWalletDeposit(env, {
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    transactionId: built.id,
+    signedTransaction,
+    requestId,
+    userId: USER,
+    ...overrides,
+  });
+}
+
+beforeEach(async () => {
+  await seedTestDatabase(env);
+  await seedTenancy();
+  vi.clearAllMocks();
+
+  ownerKeyPair = await generateKeyPair();
+  ownerAddress = await getAddressFromPublicKey(ownerKeyPair.publicKey);
+
+  resolveVaultDirectClient.mockReturnValue({ buildVaultDeposit });
+  resolveVaultWithdrawClient.mockReturnValue({ buildVaultWithdrawal });
+  buildVaultDeposit.mockResolvedValue(depositPlan());
+  buildVaultWithdrawal.mockResolvedValue(withdrawalPlan());
+  simulateVaultPlan.mockImplementation(async (_env, input) => ({
+    ok: true,
+    prepared: {
+      plan: input.plan,
+      lookupTables: {},
+      blockhash: BLOCKHASH,
+      lastValidBlockHeight: 361n,
+    },
+  }));
+  broadcastVaultTransaction.mockResolvedValue(undefined);
+});
+
+describe("buildExternalWalletDepositTransaction", () => {
+  it("persists and returns a decodable unsigned transaction for the owner", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+
+    expect(built.direction).toBe("deposit");
+    expect(built.owner_address).toBe(ownerAddress);
+    expect(built.vault_address).toBe(VAULT);
+    expect(built.denomination).toBe(TOKEN_MINT);
+    expect(built.amount_requested).toBe("25");
+    expect(built.creates_share_account).toBe(true);
+    expect(built.last_valid_block_height).toBe("361");
+    expect(built.movement_id).toBeNull();
+
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    // The owner is the fee payer and the only required signer, still unsigned.
+    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+    expect(decoded.signatures[ownerAddress as keyof typeof decoded.signatures]).toBeNull();
+
+    // Simulated with the owner paying its own fee — the shape it will sign.
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
+    );
+    // The provider build was NOT asked to name a separate rent payer.
+    expect(buildVaultDeposit.mock.calls[0][1]).not.toHaveProperty("rentPayer");
+  });
+
+  it("answers 501 when the provider has no vault-direct capability", async () => {
+    resolveVaultDirectClient.mockReturnValue(null);
+    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toThrowError(
+      /direct vault deposits/
+    );
+  });
+
+  it("refuses a failed simulation before persisting anything", async () => {
+    simulateVaultPlan.mockResolvedValue({ ok: false, error: "InstructionError", logs: [] });
+    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS builds FROM earn_external_wallet_transactions")
+      .first<{ builds: number }>();
+    expect(row?.builds).toBe(0);
+  });
+});
+
+describe("submitExternalWalletDeposit", () => {
+  it("verifies the owner signature, records before broadcast, and claims the position", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const signed = await signBuiltTransaction(built);
+    const requestId = crypto.randomUUID();
+
+    const result = await submitDeposit(built, signed, requestId);
+
+    expect(result.replayed).toBe(false);
+    expect(result.movement.status).toBe("submitted");
+    expect(result.movement.direction).toBe("deposit");
+    expect(result.movement.owner_address).toBe(ownerAddress);
+    expect(result.movement.custody_wallet_id).toBeNull();
+    expect(result.movement.source_address).toBe(ownerAddress);
+    expect(result.movement.destination_address).toBe(VAULT);
+    expect(result.movement.denomination).toBe(TOKEN_MINT);
+    expect(result.movement.request_id).toBe(requestId);
+    // The owner funded its own share-account rent: recorded as the NULL funder
+    // so the exit's refund defaults back to the owner.
+    expect(result.movement.creates_share_account).toBe(true);
+    expect(result.movement.share_ata_rent_funder).toBeNull();
+
+    expect(result.position.owner_address).toBe(ownerAddress);
+    expect(result.position.custody_wallet_id).toBeNull();
+    expect(result.position.project_id).toBe(PROJECT);
+    expect(result.position.activated_at).not.toBeNull();
+
+    // The signed bytes that were broadcast are the recorded outbox bytes.
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+    expect(Buffer.from(broadcastVaultTransaction.mock.calls[0][1].bytes).toString("base64")).toBe(
+      result.movement.signed_transaction
+    );
+
+    // The build is consumed by exactly this movement.
+    const consumed = await getDb(env)
+      .prepare("SELECT movement_id FROM earn_external_wallet_transactions WHERE id = ?")
+      .bind(built.id)
+      .first<{ movement_id: string | null }>();
+    expect(consumed?.movement_id).toBe(result.movement.id);
+  });
+
+  it("replays the original movement for the same key without re-broadcasting", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const signed = await signBuiltTransaction(built);
+    const requestId = crypto.randomUUID();
+
+    const first = await submitDeposit(built, signed, requestId);
+    const replay = await submitDeposit(built, signed, requestId);
+
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects the same key used for a different build", async () => {
+    const first = await buildExternalWalletDepositTransaction(env, depositInput());
+    const second = await buildExternalWalletDepositTransaction(env, depositInput());
+    const requestId = crypto.randomUUID();
+
+    await submitDeposit(first, await signBuiltTransaction(first), requestId);
+    await expect(
+      submitDeposit(second, await signBuiltTransaction(second), requestId)
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("rejects a second key against an already-submitted build", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const signed = await signBuiltTransaction(built);
+
+    await submitDeposit(built, signed, crypto.randomUUID());
+    await expect(submitDeposit(built, signed, crypto.randomUUID())).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    // One built transaction, one movement — the ledger holds no duplicate.
+    const rows = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS movements FROM earn_movements")
+      .first<{ movements: number }>();
+    expect(rows?.movements).toBe(1);
+  });
+
+  it("prevents one movement from consuming more than one built transaction", async () => {
+    const first = await buildExternalWalletDepositTransaction(env, depositInput());
+    const second = await buildExternalWalletDepositTransaction(env, depositInput());
+    const result = await submitDeposit(
+      first,
+      await signBuiltTransaction(first),
+      crypto.randomUUID()
+    );
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE earn_external_wallet_transactions
+           SET movement_id = ?, consumed_at = sdp_iso_now()
+           WHERE id = ?`
+        )
+        .bind(result.movement.id, second.id)
+        .run()
+    ).rejects.toThrow(/earn_external_wallet_transactions_movement_id_key/i);
+  });
+
+  it("rejects signed bytes whose message is not the built transaction", async () => {
+    // Two builds of the SAME intent still differ by message: each carries its
+    // own transaction id in the memo. Signing build B and submitting it as
+    // build A is exactly the substitution the message comparison exists for.
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const other = await buildExternalWalletDepositTransaction(env, depositInput());
+
+    await expect(
+      submitDeposit(built, await signBuiltTransaction(other), crypto.randomUUID())
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a submit with no owner signature", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    await expect(
+      submitDeposit(built, built.unsigned_transaction, crypto.randomUUID())
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects a forged owner signature", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const forged = {
+      ...transaction,
+      signatures: {
+        ...transaction.signatures,
+        [ownerAddress]: new Uint8Array(64).fill(7),
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately corrupting the branded signature map to prove verification rejects it.
+    } as any;
+    const bytes = Buffer.from(getTransactionEncoder().encode(forged)).toString("base64");
+
+    await expect(submitDeposit(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("scopes the build to its exact project", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const signed = await signBuiltTransaction(built);
+    await expect(
+      submitDeposit(built, signed, crypto.randomUUID(), { projectId: SIBLING_PROJECT })
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("enforces the external position's project claim in the database", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
+        .bind(SIBLING_PROJECT, result.movement.id)
+        .run()
+    ).rejects.toThrow(/earn_movements_external_wallet_claim_fkey/i);
+  });
+
+  it("preserves external position and movement history after project deletion", async () => {
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    await getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
+
+    const movement = await getDb(env)
+      .prepare("SELECT project_id FROM earn_movements WHERE id = ?")
+      .bind(result.movement.id)
+      .first<{ project_id: string | null }>();
+    const position = await getDb(env)
+      .prepare("SELECT project_id FROM earn_positions WHERE id = ?")
+      .bind(result.position.id)
+      .first<{ project_id: string | null }>();
+
+    expect(movement?.project_id).toBeNull();
+    expect(position?.project_id).toBeNull();
+  });
+
+  it("leaves the movement requested and reconcilable when broadcast fails", async () => {
+    broadcastVaultTransaction.mockRejectedValue(new Error("rpc unreachable"));
+    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.signature).not.toBeNull();
+    expect(result.movement.signed_transaction).not.toBeNull();
+  });
+});
+
+describe("external-wallet withdrawals", () => {
+  it("builds and submits the exit against the recorded position", async () => {
+    const positionId = await seedExternalWalletPosition();
+    const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    expect(built.direction).toBe("withdrawal");
+    expect(built.position_id).toBe(positionId);
+    expect(built.denomination).toBe(SHARE_MINT);
+    expect(built.amount_requested).toBe("10");
+
+    const result = await submitExternalWalletWithdrawal(env, {
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      transactionId: built.id,
+      signedTransaction: await signBuiltTransaction(built),
+      requestId: crypto.randomUUID(),
+      userId: USER,
+    });
+
+    expect(result.replayed).toBe(false);
+    expect(result.movement.direction).toBe("withdrawal");
+    expect(result.movement.status).toBe("submitted");
+    expect(result.movement.position_id).toBe(positionId);
+    expect(result.movement.denomination).toBe(SHARE_MINT);
+    // The mirror image of the deposit: out of the instrument, back to the owner.
+    expect(result.movement.source_address).toBe(VAULT);
+    expect(result.movement.destination_address).toBe(ownerAddress);
+    expect(result.movement.owner_address).toBe(ownerAddress);
+    expect(result.movement.custody_wallet_id).toBeNull();
+  });
+
+  it("answers 501 when the provider cannot build an exit", async () => {
+    resolveVaultWithdrawClient.mockReturnValue(null);
+    const positionId = await seedExternalWalletPosition();
+    await expect(
+      buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId))
+    ).rejects.toThrowError(/vault withdrawals/);
+  });
+
+  it("refuses a deposit submit against a withdrawal build", async () => {
+    const positionId = await seedExternalWalletPosition();
+    const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    await expect(
+      submitDeposit(built, await signBuiltTransaction(built), crypto.randomUUID())
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});

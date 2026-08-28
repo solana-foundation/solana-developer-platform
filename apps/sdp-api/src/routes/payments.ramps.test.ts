@@ -436,6 +436,7 @@ describe("Payments routes — ramps", () => {
           deliveryMode: string;
           hostedUrl: string;
         };
+        transferId: string;
       };
     };
 
@@ -452,7 +453,7 @@ describe("Payments routes — ramps", () => {
     expect(hostedUrl.searchParams.get("currencyCode")).toBe("sol");
     expect(hostedUrl.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(hostedUrl.searchParams.get("redirectURL")).toBe("https://example.com/onramp-done");
-    expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("moonpay_user_123");
+    expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.quote.id);
     assertMoonPaySignature(hostedUrl);
 
@@ -470,6 +471,7 @@ describe("Payments routes — ramps", () => {
       data: [{ id: string; rampsMemo: Record<string, string> }];
     };
     expect(transfersBody.data).toHaveLength(1);
+    expect(transfersBody.data[0].id).toBe(body.data.transferId);
     expect(transfersBody.data[0].rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
 
     const transferRes = await app.request(

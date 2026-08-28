@@ -128,6 +128,8 @@ export interface LightsparkGridAmount {
 export interface MoonpayRampSettlement {
   provider: "moonpay";
   status: "completed" | "failed";
+  /** MoonPay's own transaction id — the key for their transaction receipt page. */
+  transactionId: string;
   baseCurrencyCode: string;
   baseCurrencyAmount: number;
   quoteCurrencyCode: string;

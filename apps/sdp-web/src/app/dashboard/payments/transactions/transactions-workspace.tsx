@@ -13,6 +13,7 @@ import {
   useTransition,
 } from "react";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -384,7 +385,7 @@ export function TransactionsWorkspace({
   const debouncedAsset = useDebounce(assetValue.trim(), 300);
   const { data: filterOptions, isLoading: optionsLoading } = useSWR<TransactionFilterOptions>(
     filtersOpen && selectedProjectId
-      ? ["payments-transaction-filter-options-v2", selectedProjectId]
+      ? paymentsQueryKeys.transactionFilterOptions({ projectId: selectedProjectId })
       : null,
     () => fetchTransactionFilterOptions(),
     { dedupingInterval: 60_000, revalidateOnFocus: false }

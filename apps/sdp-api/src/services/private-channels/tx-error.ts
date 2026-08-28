@@ -6,6 +6,8 @@
  * only get one line to store in `failure_reason`, so we compose it here.
  */
 
+import { safeStringify } from "@sdp/solana";
+
 interface SolanaErrorLike {
   message?: unknown;
   cause?: unknown;
@@ -19,7 +21,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function stringify(value: unknown): string {
   if (typeof value === "string") return value;
   try {
-    return JSON.stringify(value);
+    return safeStringify(value) ?? String(value);
   } catch {
     return String(value);
   }
@@ -78,6 +80,9 @@ export function describeTxError(error: unknown, fallback: string): string {
  * bare value (`"AccountNotFound"`, `{ InstructionError: [1, { Custom: 1 }] }`) and
  * not an Error, so `describeTxError` does not apply. Kept verbatim rather than
  * mapped to prose: the operator reading `failure_reason` needs the real variant.
+ * Earn deliberately takes the opposite policy for its customer-facing surface
+ * (services/earn/vault-simulation-error.ts), keeping the raw variant only in
+ * parentheses.
  */
 export function describeTransactionErr(err: unknown, fallback: string): string {
   if (err === undefined || err === null) {

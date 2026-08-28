@@ -207,7 +207,11 @@ address.
 
 Money moves for Kamino by SDP BUILDING an instruction, signing it with one of
 the organization's own custody wallets and submitting it — `@sdp/kamino` builds
-the plan, the API signs and submits (`POST /v1/earn/vault-deposits`). That
+the plan, the API signs and submits (`POST /v1/earn/vault-deposits`). Since
+PRO-1722 the same builders also serve the EXTERNAL-WALLET flow
+(`/v1/earn/external-wallet/*`), where the plan's `owner` is a wallet SDP does
+not custody and the OWNER signs instead of SDP — nothing changes on this
+package's side, because the builders always took the owner as a parameter. That
 package depends on this one, never the reverse: the hourly catalogue cron must
 not load a 13MB chain SDK it never calls.
 

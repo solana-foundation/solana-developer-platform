@@ -49,6 +49,7 @@ import {
   loadProjectRpcClient,
   type PrivateChannelProjectRpcClient,
 } from "@/services/private-channels/project-rpc";
+import { describeTransactionErr } from "@/services/private-channels/tx-error";
 import { emitWithdrawalEvent } from "@/services/private-channels/withdraw-events";
 import type { Env } from "@/types/env";
 
@@ -271,7 +272,9 @@ async function reconcileSubmitted(
   }
 
   if (status.err) {
-    const reason = JSON.stringify(status.err);
+    // Verbatim by policy (tx-error.ts: operators need the real variant), but a
+    // bare JSON.stringify throws on bigint-carrying errors.
+    const reason = describeTransactionErr(status.err, "transaction failed");
     const failed = await repo.updateWithdrawal({
       id: withdrawal.id,
       status: "failed",

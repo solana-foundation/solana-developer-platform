@@ -257,6 +257,55 @@ custodian. Future work (documented in ADR 0002) is initiating the funding
 transfer in-flow via the customer's connected Fireblocks workspace; Anchorage is
 lifecycle-only in SDP's signing registry today and would need adapter work.
 
+## Vault-direct money paths: who signs decides the surface
+
+A `vault_direct` provider (Kamino) custodies nothing: the vault is a program
+account, and money moves only when a signed transaction lands on chain. SDP
+ships TWO signers over one runtime, and the signer decides which routes serve
+the flow:
+
+| | Treasury (SDP signs) | B2B2C external wallet (the customer signs) |
+| -- | -- | -- |
+| Who holds the funds | an org custody wallet | the end user's own wallet; SDP holds no key |
+| Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (build), then `/external-wallet/deposits` (submit) |
+| Exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-transactions`, then `/external-wallet/withdrawals` |
+| Authorization | wallet policy, then `createOrgSigner` | the owner's own ed25519 signature |
+| Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
+
+Both are the SAME execution model (`vault_direct`): one signed transaction,
+recorded durably with its signature, wire bytes and blockhash window BEFORE
+broadcast, then driven terminal by the same reconciliation sweep. Exactly one
+of the two identity columns is set per row (migration 0070), and every
+treasury read scopes by custody wallet, so external-wallet rows are
+structurally invisible to those surfaces.
+
+The external-wallet flow in one pass (PRO-1722):
+
+1. **Build.** The partner's backend calls the build route with its API key.
+   SDP runs the full money-in gates, asks the provider for the plan, simulates
+   with the owner as fee payer (which is also the funds check), compiles ONE
+   unsigned transaction, persists it (`earn_external_wallet_transactions`),
+   and returns `{transactionId, transaction}`. Nothing has moved; an unsigned
+   build expires with its blockhash (about a minute).
+2. **Sign.** The customer's wallet signs those exact bytes in the partner's
+   UI. The owner is the fee payer and the only required signer; it also pays
+   any share-account rent (Kora sponsorship for this surface is PRO-1744).
+3. **Submit.** The backend returns `{transactionId, signedTransaction}` with a
+   required `Idempotency-Key`. SDP proves the message is byte-for-byte the one
+   it built, verifies the owner's signature, records the movement, THEN
+   broadcasts. A retry with the same key replays the original movement
+   (`replayed: true`); each built transaction is consumable exactly once.
+4. **Settle.** The shared reconciler drives the movement to `finalized` or
+   `failed`; the exit mirrors the deposit and takes only 404-scoping plus
+   capability (ADR 0002 exit safety), so it works while deposits are closed.
+
+The button builder's engineering handoff (`/earn/integrate/:token`) emits this
+exact contract as its server snippet; the treasury dashboard flows use the
+SDP-signed routes. Deeper docs: gates and scoping in
+`apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
+`packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002
+(2026-08-26 addendum, "External wallets: caller-signed vault movements").
+
 ## Rollout gating (pre-release)
 
 Earn is the child in a two-level module flag hierarchy: `MARKETS_ENABLED`
@@ -322,7 +371,12 @@ apps/sdp-api/src/
                                    earn_movements + earn_positions (0062-0065,
                                    PRO-1705 — the ONE provider-neutral movement
                                    ledger and ONE holdings table that supersede
-                                   the two mechanism-split tables above).
+                                   the two mechanism-split tables above);
+                                   0070 adds owner_address (the external-wallet
+                                   signer shape, PRO-1722) and
+                                   earn_external_wallet_transactions (the
+                                   built-unsigned-transaction store its submit
+                                   step verifies against).
                                    The mechanism-split tables above take no
                                    reads and no writes any more; a later
                                    migration drops them.
