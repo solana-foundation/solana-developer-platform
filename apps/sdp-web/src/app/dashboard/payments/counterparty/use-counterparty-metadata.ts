@@ -2,13 +2,14 @@
 
 import type { CounterpartyFieldOptions } from "@sdp/types";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { useTranslations } from "@/i18n/provider";
-import { COUNTERPARTY_METADATA_KEY, fetchCounterpartyMetadata } from "./counterparty-metadata.data";
+import { fetchCounterpartyMetadata } from "./counterparty-metadata.data";
 
 export function useCounterpartyMetadata() {
   const t = useTranslations();
   const { data, error } = useSWR<CounterpartyFieldOptions>(
-    COUNTERPARTY_METADATA_KEY,
+    paymentsQueryKeys.counterpartyFieldOptions(),
     () => fetchCounterpartyMetadata(t),
     { revalidateOnFocus: false, revalidateIfStale: false }
   );

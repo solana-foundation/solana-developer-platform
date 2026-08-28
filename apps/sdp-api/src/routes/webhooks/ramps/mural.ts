@@ -16,13 +16,13 @@ import type { CounterpartyRow } from "@/db/repositories/counterparty.repository"
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import {
   emitKycApprovedForClearedEnrollments,
   emitKycRejectedForEnrollments,
 } from "@/services/workflows/clearance";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { AppContext, WebhookProcessor } from "./processor";
-import { applyRampSettlementEvent } from "./settlements";
 
 const MURAL_DELIVERY_ID_FIELD = "__sdpDeliveryId";
 
@@ -198,7 +198,7 @@ async function handleAccountCredited(
   // Workflow trigger seam: this on-ramp settled (Mural credit path bypasses
   // applyRampSettlementEvent, so it emits here directly).
   if (transfer.project_id) {
-    emitRampSettled(c, {
+    emitRampSettled(c.env, {
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
       direction: "onramp",
@@ -344,13 +344,13 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralPro
       case "account_credited":
         return handleAccountCredited(c, event);
       case "payout_settled":
-        return applyRampSettlementEvent(c, {
+        return applyRampSettlementEvent(c.env, {
           provider: "mural",
           kind: "settled",
           reference: event.payoutRequestId,
         });
       case "payout_failed":
-        return applyRampSettlementEvent(c, {
+        return applyRampSettlementEvent(c.env, {
           provider: "mural",
           kind: "failed",
           reference: event.payoutRequestId,
