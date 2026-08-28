@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { EarnStrategy } from "@sdp/types";
+import type { EarnStrategy, SolanaCluster } from "@sdp/types";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -12,6 +12,7 @@ import { EarnProgramWorkspace } from "./earn-program-workspace";
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as "sandbox" | "production",
   push: vi.fn(),
+  strategyClusters: [] as Array<SolanaCluster | undefined>,
 }));
 
 const liveStrategy: EarnStrategy = {
@@ -32,6 +33,16 @@ const liveStrategy: EarnStrategy = {
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
 
+const mainnetStrategy: EarnStrategy = {
+  ...liveStrategy,
+  id: "earn_strategy_mainnet",
+  providerReference: "KvaultMainnet111111111111111111111111111111",
+  name: "Kamino JLP Vault",
+  shareMint: "ShareMainnet111111111111111111111111111111",
+  hostCluster: "mainnet-beta",
+  fundable: false,
+};
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push }),
 }));
@@ -41,7 +52,14 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 }));
 
 vi.mock("./earn-program-data", () => ({
-  useEarnStrategies: () => ({ strategies: [liveStrategy], error: undefined, isLoading: false }),
+  useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
+    mocks.strategyClusters.push(options?.cluster);
+    return {
+      strategies: options?.cluster === "mainnet-beta" ? [mainnetStrategy] : [liveStrategy],
+      error: undefined,
+      isLoading: false,
+    };
+  },
 }));
 
 function renderWithEnglish(children: ReactNode) {
@@ -52,9 +70,19 @@ function renderWithEnglish(children: ReactNode) {
   );
 }
 
+function getDesktopStrategyRow(name: string) {
+  const row = screen
+    .getAllByText(name)
+    .map((element) => element.closest("tr"))
+    .find((element) => element !== null);
+  if (!row) throw new Error(`Expected the desktop strategy row for ${name}`);
+  return row;
+}
+
 beforeEach(() => {
   mocks.environment = "sandbox";
   mocks.push.mockClear();
+  mocks.strategyClusters.length = 0;
 });
 
 afterEach(cleanup);
@@ -73,8 +101,7 @@ describe("EarnProgramWorkspace", () => {
       />
     );
 
-    const row = screen.getByText("Kamino USDC Vault").closest("tr");
-    if (!row) throw new Error("Expected the live strategy row");
+    const row = getDesktopStrategyRow("Kamino USDC Vault");
     expect(row.textContent).toContain("6.2%");
     expect(row.textContent).toContain("Sandbox ready");
 
@@ -85,6 +112,35 @@ describe("EarnProgramWorkspace", () => {
       "/dashboard/markets/embedded-yield/button-builder?strategy=earn_strategy_live"
     );
     expect(document.body.textContent).not.toContain("Mock");
+    const desktopTable = screen.getByRole("region");
+    expect(desktopTable.className).toContain("[&_table]:min-w-[52rem]");
+    expect(desktopTable.className).toContain("[&_table]:table-fixed");
+    expect(desktopTable.getAttribute("style")).toBeNull();
+  });
+
+  it("previews a mainnet strategy from sandbox with explicit warnings", async () => {
+    const user = userEvent.setup();
+    renderWithEnglish(
+      <EarnProgramWorkspace
+        builderHref="/dashboard/markets/embedded-yield/button-builder"
+        providerAccess={providerAccess}
+      />
+    );
+
+    const toggle = screen.getByLabelText("Strategy network");
+    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
+
+    expect(mocks.strategyClusters).toContain("mainnet-beta");
+    const row = getDesktopStrategyRow("Kamino JLP Vault");
+    expect(row.textContent).toContain("Mainnet only");
+
+    await user.click(within(row).getByRole("button", { name: "Select" }));
+    expect(screen.getByRole("alert").textContent).toContain("Mainnet vault preview");
+    await user.click(screen.getByRole("button", { name: "Continue to integration" }));
+
+    expect(mocks.push).toHaveBeenCalledWith(
+      "/dashboard/markets/embedded-yield/button-builder?strategy=earn_strategy_mainnet&cluster=mainnet-beta"
+    );
   });
 
   it("does not offer a production deposit flow before vault withdrawals exist", () => {
@@ -96,10 +152,13 @@ describe("EarnProgramWorkspace", () => {
       />
     );
 
-    expect(screen.getByText("Sandbox only")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Select" }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expect(screen.getAllByText("Sandbox only")).toHaveLength(2);
+    expect(screen.queryByLabelText("Strategy network")).toBeNull();
+    expect(
+      screen
+        .getAllByRole("button", { name: "Select" })
+        .every((button) => (button as HTMLButtonElement).disabled)
+    ).toBe(true);
     expect(document.body.textContent).toContain("intentionally closed in production");
   });
 
@@ -113,9 +172,11 @@ describe("EarnProgramWorkspace", () => {
       />
     );
 
-    expect(screen.getByText("Setup required")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Select" }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expect(screen.getAllByText("Setup required")).toHaveLength(2);
+    expect(
+      screen
+        .getAllByRole("button", { name: "Select" })
+        .every((button) => (button as HTMLButtonElement).disabled)
+    ).toBe(true);
   });
 });

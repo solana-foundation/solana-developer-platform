@@ -53,4 +53,19 @@ describe("Markets dashboard headers", () => {
     });
     expect(config.headerTabs).toBeUndefined();
   });
+
+  it("uses the integration title for Embedded Yield configuration", () => {
+    const config = getDashboardPageConfig(
+      "/dashboard/markets/embedded-yield/configure",
+      t,
+      false,
+      false
+    );
+
+    expect(config).toMatchObject({
+      title: "Shared.dashboardShell.configureEarnButton",
+      titlePosition: "center",
+      contentWidthClass: "max-w-none",
+    });
+  });
 });
