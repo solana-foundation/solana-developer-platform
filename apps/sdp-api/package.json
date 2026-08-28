@@ -35,7 +35,7 @@
     "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/discover-ramp-rails.ts discover",
     "rails:generate": "tsx scripts/discover-ramp-rails.ts generate",
     "rails:drift": "tsx scripts/discover-ramp-rails.ts drift",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

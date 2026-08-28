@@ -5,6 +5,7 @@ import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
 import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
+import { logEvent } from "@/runtime/money-path-events";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
@@ -93,6 +94,11 @@ vi.mock("@/lib/runtime-env", async (importOriginal) => ({
 
 vi.mock("@/runtime/kv-redis", () => ({
   closeAllRedisClients: vi.fn(async () => {}),
+}));
+
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent: vi.fn(),
 }));
 
 vi.mock("@/runtime/observability", () => ({
@@ -201,6 +207,7 @@ describe("runCronJob", () => {
     vi.mocked(closeDatabasePools).mockClear();
     vi.mocked(closeAllRedisClients).mockClear();
     vi.mocked(Sentry.close).mockClear();
+    vi.mocked(logEvent).mockClear();
   });
 
   it("refuses to run when a managed deployment has no custody KMS key", async () => {
@@ -446,6 +453,48 @@ describe("runCronJob", () => {
       checkInId: "check-in:sdp-api-managed-poll-rings-indexing",
     });
     expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits one sdp_cron_run event per managed tick", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
+
+    await runCronJob();
+
+    const runs = vi
+      .mocked(logEvent)
+      .mock.calls.filter(([, payload]) => payload.event === "sdp_cron_run");
+    expect(runs.map(([, payload]) => payload.monitor).sort()).toEqual([
+      "sdp-api-managed-collect-recurring-payments",
+      "sdp-api-managed-poll-rings-indexing",
+      "sdp-api-managed-reconcile-earn-vault-movements",
+      "sdp-api-managed-refresh-earn-metrics",
+      "sdp-api-managed-retire-workflow-secrets",
+      "sdp-api-managed-run-workflow-executions",
+      "sdp-api-managed-track-pending-deposits",
+      "sdp-api-managed-track-pending-transfers",
+      "sdp-api-managed-track-pending-withdrawals",
+    ]);
+    for (const [level, payload] of runs) {
+      expect(level).toBe("info");
+      expect(payload.status).toBe("ok");
+      expect(payload.duration_ms).toBeTypeOf("number");
+    }
+  });
+
+  it("emits an error-status sdp_cron_run event when a tick fails", async () => {
+    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+
+    await expect(runCronJob()).rejects.toThrow("collection down");
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_cron_run",
+        monitor: "sdp-api-managed-collect-recurring-payments",
+        status: "error",
+        error_name: "Error",
+      })
+    );
   });
 
   it("skips the workflow tick on a self-hosted deployment without the asset-profiles flag", async () => {
