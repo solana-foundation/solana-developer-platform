@@ -18,12 +18,6 @@ export interface ShieldDeps {
   readonly material: ShieldedMaterialSource;
   readonly organizationId: string;
   readonly projectId: string;
-  /**
-   * The project's active custom ring. Set, the deposit is ring-bound, so only
-   * that ring's transact can ever spend the note; unset, it lands in the
-   * default ring exactly as before.
-   */
-  readonly ringProgramId?: string;
 }
 
 export interface ShieldInput {
@@ -33,6 +27,13 @@ export interface ShieldInput {
   readonly amountRaw: string;
   /** The identity provisioning published. A mismatch fails closed. */
   readonly expectedShieldedAddress: string;
+  /**
+   * Ring the operation was pinned to at prepare time. Set, the deposit is
+   * ring-bound, so only that ring's transact can ever spend the note; unset,
+   * it lands in the default ring. Persisted state rather than caller-echoable
+   * input, so a bad value is a config_error and its text never echoes back.
+   */
+  readonly ringProgramId?: string;
 }
 
 const UINT64_MAX = 0xffff_ffff_ffff_ffffn;
@@ -44,13 +45,11 @@ export async function buildShieldTransaction(
   const owner = parseAddress(input.owner, "owner");
   const asset = parseAddress(protocolMint(input.mint), "mint");
   const amount = parsePositiveAmount(input.amountRaw);
-  // Persisted configuration rather than caller input, so a bad value is a
-  // config_error and its text never echoes back.
-  const configuredRing = deps.ringProgramId;
+  const pinnedRing = input.ringProgramId;
   const ringProgramId =
-    configuredRing === undefined
+    pinnedRing === undefined
       ? undefined
-      : withConfiguredAddressErrorBridge(() => address(configuredRing));
+      : withConfiguredAddressErrorBridge(() => address(pinnedRing));
 
   return deps.material.withMaterial(
     {

@@ -33,13 +33,12 @@ const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
 
 const BUILT = compiledRegistryTransaction(OWNER, [0]);
 
-function deps(overrides?: { ringProgramId?: string }) {
+function deps() {
   return {
     client: {} as never,
     material: createDeterministicMaterialSource({ seed: TEST_SEED }),
     organizationId: REQUEST.organizationId,
     projectId: REQUEST.projectId,
-    ...overrides,
   };
 }
 
@@ -50,14 +49,15 @@ describe("buildShieldTransaction", () => {
     buildRingDepositTransaction.mockResolvedValue(BUILT);
   });
 
-  it("binds the deposit to the configured ring instead of the default pool", async () => {
+  it("binds the deposit to the operation's pinned ring instead of the default pool", async () => {
     const expected = await derivedIdentity();
-    const encoded = await buildShieldTransaction(deps({ ringProgramId: RING_PROGRAM }), {
+    const encoded = await buildShieldTransaction(deps(), {
       walletId: REQUEST.walletId,
       owner: OWNER,
       mint: SDP_NATIVE_MINT,
       amountRaw: "1000000000",
       expectedShieldedAddress: expected,
+      ringProgramId: RING_PROGRAM,
     });
 
     // The default builder would create a note the ring's transact cannot spend.
@@ -75,14 +75,15 @@ describe("buildShieldTransaction", () => {
     expect(params.amount).toBe(1_000_000_000n);
   });
 
-  it("classifies an invalid configured ring without exposing its value", async () => {
-    const configuredRing = "not-a-solana-address";
-    const error = await buildShieldTransaction(deps({ ringProgramId: configuredRing }), {
+  it("classifies an invalid pinned ring without exposing its value", async () => {
+    const pinnedRing = "not-a-solana-address";
+    const error = await buildShieldTransaction(deps(), {
       walletId: REQUEST.walletId,
       owner: OWNER,
       mint: SDP_NATIVE_MINT,
       amountRaw: "1",
       expectedShieldedAddress: await derivedIdentity(),
+      ringProgramId: pinnedRing,
     }).then(
       () => null,
       (thrown: unknown) => thrown
@@ -90,7 +91,7 @@ describe("buildShieldTransaction", () => {
 
     expect(error).toBeInstanceOf(HeliusRingsError);
     expect(error).toMatchObject({ code: "config_error" });
-    expect((error as Error).message).not.toContain(configuredRing);
+    expect((error as Error).message).not.toContain(pinnedRing);
     expect(buildDepositTransaction).not.toHaveBeenCalled();
     expect(buildRingDepositTransaction).not.toHaveBeenCalled();
   });

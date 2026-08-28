@@ -57,8 +57,8 @@ export async function getRingsProjectRing(c: AppContext) {
 /**
  * POST /ring — record the pre-deployed custom ring's program id and complete
  * bring-up through the gateway. Re-submitting the same id resumes a failed
- * bring-up; once any ring row exists, shield and sync fail closed until it is
- * active, so this call is what re-opens them.
+ * bring-up. Once the ring is active, operations can target it (`ring:
+ * "custom"`); default-ring operations and sync are never blocked by it.
  */
 export async function createRingsProjectRing(c: AppContext) {
   const parsed = createProjectRingSchema.safeParse(await c.req.json());

@@ -9,7 +9,10 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createHeliusRingsWalletRepository } from "@/db/repositories";
+import {
+  createHeliusRingsProjectRingRepository,
+  createHeliusRingsWalletRepository,
+} from "@/db/repositories";
 import app from "@/index";
 import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import { env } from "@/test/helpers/env";
@@ -380,6 +383,75 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(400);
   });
 
+  describe("operation ring selection", () => {
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+
+    function shieldBody(overrides: Record<string, unknown> = {}) {
+      return {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-ring",
+        ...overrides,
+      };
+    }
+
+    it("400s ring:custom while the project has no ring recorded", async () => {
+      const res = await post("/v1/helius-rings/operations", shieldBody({ ring: "custom" }));
+      expect(res.status).toBe(400);
+    });
+
+    it("503s ring:custom while bring-up is unfinished", async () => {
+      await createHeliusRingsProjectRingRepository(env).reserveRing({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        ringProgramId: RING_PROGRAM,
+      });
+
+      const res = await post("/v1/helius-rings/operations", shieldBody({ ring: "custom" }));
+      expect(res.status).toBe(503);
+    });
+
+    it("pins and echoes the active ring; default stays null", async () => {
+      const rings = createHeliusRingsProjectRingRepository(env);
+      await rings.reserveRing({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        ringProgramId: RING_PROGRAM,
+      });
+      await rings.markActive({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        ringProgramId: RING_PROGRAM,
+        auditorPublicKey: "04ff",
+      });
+
+      // The unconfigured gateway fails the pipeline afterwards; the ring is
+      // resolved and pinned at prepare, which is what this asserts.
+      const custom = await post("/v1/helius-rings/operations", shieldBody({ ring: "custom" }));
+      expect(custom.status).toBe(201);
+      const customBody = (await custom.json()) as {
+        data: { operation: { ringProgramId: string | null } };
+      };
+      expect(customBody.data.operation.ringProgramId).toBe(RING_PROGRAM);
+
+      const byDefault = await post(
+        "/v1/helius-rings/operations",
+        shieldBody({ clientNonce: "route-nonce-ring-default" })
+      );
+      expect(byDefault.status).toBe(201);
+      const defaultBody = (await byDefault.json()) as {
+        data: { operation: { ringProgramId: string | null } };
+      };
+      expect(defaultBody.data.operation.ringProgramId).toBeNull();
+    });
+
+    it("400s a ring value outside the selector set", async () => {
+      const res = await post("/v1/helius-rings/operations", shieldBody({ ring: RING_PROGRAM }));
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe("POST /wallets/:walletId/sync", () => {
     const SHIELDED_ADDRESS = "rings1route_sync";
 
@@ -416,6 +488,7 @@ describe("Helius Rings routes", () => {
             amountRaw: "18446744073709551615",
             decimals: 9,
             symbol: "SOL",
+            ringProgramId: null,
           },
         ],
         indexedOperationSignatures: [],

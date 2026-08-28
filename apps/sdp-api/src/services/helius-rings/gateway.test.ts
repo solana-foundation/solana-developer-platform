@@ -176,23 +176,6 @@ describe("resolveRingsGateway", () => {
       expect(without.captured[0]).not.toHaveProperty("ringRpcUrl");
     });
 
-    it("binds the gateway to the project's ring only when one is passed", () => {
-      const withRing = capturingCreate();
-      resolveRingsGateway(
-        envOf(),
-        tenant,
-        { createGateway: withRing.createGateway },
-        { ringProgramId: "RingProgram1111111111111111111111111111111" }
-      );
-      expect(withRing.captured[0]).toMatchObject({
-        ringProgramId: "RingProgram1111111111111111111111111111111",
-      });
-
-      const without = capturingCreate();
-      resolveRingsGateway(envOf(), tenant, { createGateway: without.createGateway });
-      expect(without.captured[0]).not.toHaveProperty("ringProgramId");
-    });
-
     it("binds the message-signing callback to the tenant and the named owner", async () => {
       const { captured, createGateway } = capturingCreate();
       const calls: unknown[] = [];

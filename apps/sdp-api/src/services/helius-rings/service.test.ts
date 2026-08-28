@@ -83,6 +83,7 @@ function syncResult(overrides: Partial<SyncPhotonResult> = {}): SyncPhotonResult
         amountRaw: "18446744073709551615",
         decimals: 9,
         symbol: "SOL",
+        ringProgramId: null,
       },
     ],
     indexedOperationSignatures: [],
@@ -264,7 +265,15 @@ describe("HeliusRingsService", () => {
         gateway: gatewayStub({
           syncPhoton: async () =>
             syncResult({
-              balances: [{ mint: usdc, amountRaw: "1000000", decimals: null, symbol: "UNKNOWN" }],
+              balances: [
+                {
+                  mint: usdc,
+                  amountRaw: "1000000",
+                  decimals: null,
+                  symbol: "UNKNOWN",
+                  ringProgramId: null,
+                },
+              ],
             }),
         }),
       }).syncWallet(id, OWNER);
@@ -274,6 +283,7 @@ describe("HeliusRingsService", () => {
         amountRaw: "1000000",
         decimals: 6,
         symbol: "USDC",
+        ringProgramId: null,
       });
     });
 
@@ -470,7 +480,7 @@ describe("HeliusRingsService", () => {
       const replay = await svc.prepareOperation(operationInput(), actorContext);
 
       expect(replay.id).toBe(first.id);
-      expect(replay.intentKey).toBe(computeIntentKey(operationInput()));
+      expect(replay.intentKey).toBe(computeIntentKey(operationInput(), null));
     });
 
     it("ends in failed:policy_denied when the policy denies", async () => {
@@ -1040,40 +1050,67 @@ describe("HeliusRingsService", () => {
       expect(replay).toMatchObject({ status: "active", auditorPublicKeyHex: "04ff" });
     });
 
-    it("fails sync closed while the project's ring is not active", async () => {
-      const syncWalletId = await provisionedWallet("rings1ringgate");
+    it("refuses ring:custom before reserving when no ring was ever recorded", async () => {
+      const svc = liveishService();
+
+      // The request names a ring the project does not have: the caller's to fix.
+      await expect(
+        svc.prepareOperation(
+          operationInput({ ring: "custom", clientNonce: "nonce-ring-none" }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(
+        await createHeliusRingsOperationRepository(env).listOperationsByWallet({
+          ...tenant,
+          walletId,
+        })
+      ).toHaveLength(0);
+    });
+
+    it("refuses ring:custom before reserving while bring-up is unfinished", async () => {
       await createHeliusRingsProjectRingRepository(env).reserveRing({
         ...tenant,
         ringProgramId: RING_PROGRAM,
       });
+      const svc = liveishService();
 
-      // The stub would throw "not expected" if the gateway were reached, so the
-      // config_error proves the guard fired before any Photon read.
+      // An operator action (completing bring-up) makes the same request succeed.
       await expect(
-        service({ gateway: gatewayStub({}) }).syncWallet(syncWalletId, OWNER)
+        svc.prepareOperation(
+          operationInput({ ring: "custom", clientNonce: "nonce-ring-pending" }),
+          actorContext
+        )
       ).rejects.toMatchObject({ code: "config_error" });
+      expect(
+        await createHeliusRingsOperationRepository(env).listOperationsByWallet({
+          ...tenant,
+          walletId,
+        })
+      ).toHaveLength(0);
     });
 
-    it("fails a shield with a recorded, retryable failure while the ring is not active", async () => {
+    it("default shields and sync run untouched while a ring row sits pending", async () => {
+      const syncWalletId = await provisionedWallet("rings1ringnogate");
       await createHeliusRingsProjectRingRepository(env).reserveRing({
         ...tenant,
         ringProgramId: RING_PROGRAM,
       });
 
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-ring-gate" }),
+        operationInput({ clientNonce: "nonce-ring-default" }),
         actorContext
       );
+      expect(operation.state).toBe("indexing");
+      expect(operation.ringProgramId).toBeNull();
 
-      // A project that declared a ring never silently deposits into the
-      // default ring; the operation records why instead of 500ing.
-      expect(operation.state).toBe("failed");
-      expect(operation.failure).toMatchObject({ code: "gateway_unavailable", retryable: true });
-      expect(operation.failure?.message).toContain("custom ring is pending");
+      const synced = await service({
+        gateway: gatewayStub({ syncPhoton: async () => syncResult() }),
+      }).syncWallet(syncWalletId, OWNER);
+      expect(synced.degraded).toBe(false);
     });
 
-    it("serves money flows once the ring is active", async () => {
-      const syncWalletId = await provisionedWallet("rings1ringlive");
+    it("pins the active ring on a ring:custom shield and builds against it", async () => {
       const rings = createHeliusRingsProjectRingRepository(env);
       await rings.reserveRing({ ...tenant, ringProgramId: RING_PROGRAM });
       await rings.markActive({
@@ -1082,25 +1119,106 @@ describe("HeliusRingsService", () => {
         auditorPublicKey: "04ff",
       });
 
-      const synced = await service({
-        gateway: gatewayStub({ syncPhoton: async () => syncResult() }),
-      }).syncWallet(syncWalletId, OWNER);
+      const captured: Array<string | null> = [];
+      const operation = await liveishService({
+        gateway: pipelineGateway({
+          buildOperation: async ({ operation: built }) => {
+            captured.push(built.ringProgramId);
+            return {
+              outerUnsignedTxBase64: "dW5zaWduZWQ=",
+              requiredSigners: [OWNER],
+              ringsMetadata: new SecretRef({ seed: "pipeline" }),
+            };
+          },
+        }),
+      }).prepareOperation(operationInput({ ring: "custom", clientNonce: "nonce-ring-live" }), {
+        ...actorContext,
+        owner: OWNER,
+      });
 
-      expect(synced.degraded).toBe(false);
+      expect(operation.state).toBe("indexing");
+      expect(operation.ringProgramId).toBe(RING_PROGRAM);
+      expect(captured).toEqual([RING_PROGRAM]);
+    });
+
+    it("reserves default and custom versions of the same input as distinct operations", async () => {
+      const rings = createHeliusRingsProjectRingRepository(env);
+      await rings.reserveRing({ ...tenant, ringProgramId: RING_PROGRAM });
+      await rings.markActive({
+        ...tenant,
+        ringProgramId: RING_PROGRAM,
+        auditorPublicKey: "04ff",
+      });
+      const svc = liveishService();
+
+      const input = operationInput({ clientNonce: "nonce-ring-split" });
+      const byDefault = await svc.prepareOperation(input, actorContext);
+      const byRing = await svc.prepareOperation({ ...input, ring: "custom" }, actorContext);
+
+      // Same wallet, asset, amount and nonce; only the ring differs. A replay
+      // here would shield into the wrong pool.
+      expect(byRing.id).not.toBe(byDefault.id);
+      expect(byDefault.ringProgramId).toBeNull();
+      expect(byRing.ringProgramId).toBe(RING_PROGRAM);
+    });
+
+    it("retries with the pinned ring rather than re-resolving the selector", async () => {
+      const rings = createHeliusRingsProjectRingRepository(env);
+      await rings.reserveRing({ ...tenant, ringProgramId: RING_PROGRAM });
+      await rings.markActive({
+        ...tenant,
+        ringProgramId: RING_PROGRAM,
+        auditorPublicKey: "04ff",
+      });
+
+      const failed = await service({
+        gateway: gatewayStub({
+          buildOperation: async () => {
+            throw new HeliusRingsError("gateway_unavailable", "prover down");
+          },
+        }),
+      }).prepareOperation(
+        operationInput({ ring: "custom", clientNonce: "nonce-ring-retry" }),
+        actorContext
+      );
+      expect(failed.state).toBe("failed");
+      expect(failed.ringProgramId).toBe(RING_PROGRAM);
+
+      // A projectRings repository that throws proves the retry never re-resolves:
+      // the failed row's pinned ring is the only ring source it has.
+      const retried = await liveishService({
+        projectRings: {
+          getByProject: async () => {
+            throw new Error("a retry must not re-resolve the ring selector");
+          },
+          reserveRing: async () => null,
+          repointRing: async () => null,
+          markActive: async () => null,
+          markFailed: async () => null,
+        },
+      }).retryOperation(failed.id, "nonce-ring-retry-2", { ...actorContext, owner: OWNER });
+
+      expect(retried.state).toBe("indexing");
+      expect(retried.ringProgramId).toBe(RING_PROGRAM);
     });
   });
 });
 
 describe("computeIntentKey", () => {
-  it("is deterministic and nonce-sensitive", () => {
+  it("is deterministic, nonce-sensitive and ring-sensitive", () => {
     const base: PrivateOperationInput = {
       walletId: "hrw_1",
       opType: "shield",
       clientNonce: "n1",
     };
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
 
-    expect(computeIntentKey(base)).toBe(computeIntentKey({ ...base }));
-    expect(computeIntentKey(base)).not.toBe(computeIntentKey({ ...base, clientNonce: "n2" }));
-    expect(computeIntentKey(base)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(computeIntentKey(base, null)).toBe(computeIntentKey({ ...base }, null));
+    expect(computeIntentKey(base, null)).not.toBe(
+      computeIntentKey({ ...base, clientNonce: "n2" }, null)
+    );
+    // Same input, different ring: a second operation, never a replay.
+    expect(computeIntentKey(base, null)).not.toBe(computeIntentKey(base, RING_PROGRAM));
+    expect(computeIntentKey(base, null)).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });

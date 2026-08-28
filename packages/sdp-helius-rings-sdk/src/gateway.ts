@@ -66,11 +66,6 @@ export interface RingsGatewayConfig {
   readonly signMessage?: (messageBase64: string, owner: string) => Promise<string>;
   /** Shielded pool tree; the SDK's default devnet tree when omitted. */
   readonly tree?: string;
-  /**
-   * The project's active custom ring. Set, shield deposits become ring-bound
-   * and balance reads count only that ring's notes.
-   */
-  readonly ringProgramId?: string;
   /** The Helius ring RPC, which mints auditor keys; only ring bring-up needs it. */
   readonly ringRpcUrl?: string;
   /** Required for the plain-http public devnet indexer and prover. */
@@ -241,7 +236,6 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             material: requireMaterial(),
             organizationId: config.organizationId,
             projectId: config.projectId,
-            ...(config.ringProgramId === undefined ? {} : { ringProgramId: config.ringProgramId }),
           },
           input
         )
@@ -294,7 +288,6 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             material: requireMaterial(),
             organizationId: config.organizationId,
             projectId: config.projectId,
-            ...(config.ringProgramId === undefined ? {} : { ringProgramId: config.ringProgramId }),
           },
           {
             walletId: input.operation.walletId,
@@ -302,6 +295,12 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             mint: asset.mint,
             amountRaw: asset.amountRaw,
             expectedShieldedAddress: input.expectedShieldedAddress,
+            // Tolerate both: API rows always carry the field, but the port type
+            // admits operations that never had one.
+            ...(input.operation.ringProgramId === null ||
+            input.operation.ringProgramId === undefined
+              ? {}
+              : { ringProgramId: input.operation.ringProgramId }),
           }
         );
 

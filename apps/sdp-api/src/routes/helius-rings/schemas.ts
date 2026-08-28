@@ -1,4 +1,4 @@
-import { OP_TYPES, TRANSFER_MODES, ZONE_KINDS } from "@sdp/helius-rings";
+import { OP_TYPES, RING_SELECTORS, TRANSFER_MODES, ZONE_KINDS } from "@sdp/helius-rings";
 import { z } from "zod";
 
 export const createRingsWalletSchema = z.object({
@@ -27,6 +27,8 @@ export const prepareRingsOperationSchema = z.object({
   to: z.string().min(1).optional(),
   zoneId: z.string().min(1).optional(),
   transferMode: z.enum(TRANSFER_MODES).optional(),
+  /** Symbolic on purpose: the server resolves and pins the program id at prepare time. */
+  ring: z.enum(RING_SELECTORS).optional(),
   timelock: z
     .object({
       unlockAt: z.iso.datetime(),

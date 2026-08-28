@@ -4,6 +4,7 @@ import type {
   MATERIAL_TAGS,
   OP_TYPES,
   OPERATION_STATES,
+  RING_SELECTORS,
   RING_STATUSES,
   RUNTIME_HEALTH_COMPONENTS,
   RUNTIME_HEALTH_STATUSES,
@@ -25,6 +26,7 @@ export type WalletStatus = (typeof WALLET_STATUSES)[number];
 export type ZoneKind = (typeof ZONE_KINDS)[number];
 export type TransferMode = (typeof TRANSFER_MODES)[number];
 export type RingStatus = (typeof RING_STATUSES)[number];
+export type RingSelector = (typeof RING_SELECTORS)[number];
 
 export interface ProofArtifact {
   source: MaterialTag;
@@ -61,9 +63,10 @@ export interface Zone {
 }
 
 /**
- * The one custom ring a project deposits into. The program is deployed by ops;
- * this record exists from the moment the id is submitted, so a project that
- * declared a ring can never silently fall back to the default ring.
+ * The one custom ring a project's operations may target. The program is
+ * deployed by ops; operations name it per call (`ring: "custom"`) and are
+ * refused until this record is `active`. Default-ring operations never
+ * consult it.
  */
 export interface ProjectRing {
   ringProgramId: string;
@@ -86,6 +89,12 @@ export interface AssetBalance {
    * in whole units, which a reader cannot tell apart from an unknown scale.
    */
   decimals: number | null;
+  /**
+   * Ring the notes are bound to; null means unbound notes in the default
+   * public pool. Balances never merge across rings: value cannot cross a ring
+   * boundary inside a spend, so a merged number would overstate every position.
+   */
+  ringProgramId: string | null;
 }
 
 export interface PrivateOperationSummary {
@@ -94,6 +103,7 @@ export interface PrivateOperationSummary {
   state: OperationState;
   assetMint: string | null;
   amountRaw: string | null;
+  ringProgramId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -115,6 +125,8 @@ export interface PrivateOperationInput {
   zoneId?: string;
   transferMode?: TransferMode;
   timelock?: { unlockAt: string; beneficiary: string };
+  /** Which ring the operation targets; resolved server-side at prepare. Defaults to "default". */
+  ring?: RingSelector;
   /** Caller-supplied; contributes to `intent_key` so retries produce a new operation. */
   clientNonce: string;
 }
@@ -143,6 +155,8 @@ export interface PrivateOperation {
   outerTxSignature: string | null;
   photonIndexedAt: string | null;
   failure: OperationFailure | null;
+  /** Resolved at prepare time and pinned for the operation's whole life; null = default ring. */
+  ringProgramId: string | null;
   input: PrivateOperationInput;
   intentKey: string;
   events: OperationEvent[];

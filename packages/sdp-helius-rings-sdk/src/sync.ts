@@ -1,9 +1,7 @@
 import type { Wallet } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
-import { getPrivateTokenBalances, getPrivateTransactions } from "@heliuslabs/zolana/wallet";
+import { getPrivateTransactions } from "@heliuslabs/zolana/wallet";
 import type { AssetBalance, SyncPhotonInput, SyncPhotonResult } from "@sdp/helius-rings";
-import { address } from "@solana/kit";
-import { withConfiguredAddressErrorBridge } from "./error-bridge.js";
 import {
   NATIVE_MINT_DECIMALS,
   NATIVE_MINT_SYMBOL,
@@ -24,26 +22,12 @@ export interface SyncDeps {
   readonly material: ShieldedMaterialSource;
   readonly organizationId: string;
   readonly projectId: string;
-  /**
-   * The project's active custom ring. Set, balances count only notes bound to
-   * this ring: an unbound note cannot move through the ring's flows, so adding
-   * it in would overstate what this deployment can actually spend.
-   */
-  readonly ringProgramId?: string;
 }
 
 export async function syncRingsWallet(
   deps: SyncDeps,
   input: SyncPhotonInput
 ): Promise<SyncPhotonResult> {
-  // Parsed before any material is derived: a bad configured ring is a
-  // config_error whether or not the wallet exists.
-  const configuredRing = deps.ringProgramId;
-  const ringProgramId =
-    configuredRing === undefined
-      ? undefined
-      : withConfiguredAddressErrorBridge(() => address(configuredRing));
-
   return deps.material.withMaterial(
     {
       organizationId: deps.organizationId,
@@ -62,16 +46,10 @@ export async function syncRingsWallet(
         authority: readOnlyAuthority(material),
       });
       const transactions = getPrivateTransactions(wallet);
-      const balances =
-        ringProgramId === undefined
-          ? getPrivateTokenBalances(wallet).map((balance) =>
-              toAssetBalance(balance.mint, balance.amount)
-            )
-          : ringBoundBalances(wallet, ringProgramId);
 
       return {
         cursor: new Date().toISOString(),
-        balances,
+        balances: perRingBalances(wallet),
         // Photon is queried by view tag and nullifier, not by outer signature, so
         // these are the signatures the returned rows were reconstructed from.
         indexedOperationSignatures: [...new Set(transactions.map((entry) => entry.id.signature))],
@@ -84,23 +62,33 @@ export async function syncRingsWallet(
 }
 
 /**
- * One balance per mint over unspent notes bound to the configured ring. The
- * SDK's own balance read merges ring-bound and unbound notes, so the partition
- * has to happen here, on the reconstructed notes themselves.
+ * One balance per (ring, mint) over unspent notes. One wallet's notes mix
+ * unbound and ring-bound entries; default spend paths reach only unbound notes
+ * and a ring's flows only its own, so merging them (as the SDK's own balance
+ * read does) would overstate every spendable position. Default bucket first,
+ * then rings by id, mints ascending — a deterministic order for the wire.
  */
-function ringBoundBalances(wallet: Wallet, ringProgramId: string): AssetBalance[] {
-  const perMint = new Map<string, bigint>();
+function perRingBalances(wallet: Wallet): AssetBalance[] {
+  const perRing = new Map<string | null, Map<string, bigint>>();
   for (const entry of wallet.utxos()) {
-    if (entry.spent || entry.utxo.ringProgramId !== ringProgramId) {
+    if (entry.spent) {
       continue;
     }
-    const mint = entry.utxo.asset;
-    perMint.set(mint, (perMint.get(mint) ?? 0n) + entry.utxo.amount);
+    const ring = entry.utxo.ringProgramId ?? null;
+    const perMint = perRing.get(ring) ?? new Map<string, bigint>();
+    perMint.set(entry.utxo.asset, (perMint.get(entry.utxo.asset) ?? 0n) + entry.utxo.amount);
+    perRing.set(ring, perMint);
   }
 
-  return [...perMint.entries()]
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-    .map(([mint, amount]) => toAssetBalance(mint, amount));
+  return [...perRing.entries()]
+    .sort(([left], [right]) =>
+      left === null ? -1 : right === null ? 1 : left < right ? -1 : left > right ? 1 : 0
+    )
+    .flatMap(([ring, perMint]) =>
+      [...perMint.entries()]
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([mint, amount]) => toAssetBalance(mint, amount, ring))
+    );
 }
 
 /**
@@ -108,7 +96,11 @@ function ringBoundBalances(wallet: Wallet, ringProgramId: string): AssetBalance[
  * port hands the SDK no asset registry. Null rather than zero for the rest:
  * zero renders a base-unit count as whole tokens.
  */
-function toAssetBalance(reportedMint: string, amount: bigint): AssetBalance {
+function toAssetBalance(
+  reportedMint: string,
+  amount: bigint,
+  ringProgramId: string | null
+): AssetBalance {
   const mint = sdpMint(reportedMint);
   const isNative = mint === SDP_NATIVE_MINT;
 
@@ -117,5 +109,6 @@ function toAssetBalance(reportedMint: string, amount: bigint): AssetBalance {
     symbol: isNative ? NATIVE_MINT_SYMBOL : "UNKNOWN",
     decimals: isNative ? NATIVE_MINT_DECIMALS : null,
     amountRaw: amount.toString(),
+    ringProgramId,
   };
 }

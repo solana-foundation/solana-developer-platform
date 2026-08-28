@@ -3,9 +3,9 @@
 -- A custom ring is a pre-deployed on-chain program (ops deploys it; upgrade
 -- authority is a project custody key). A project admin submits its program id,
 -- SDP completes bring-up through the SDK (auditor key, ring config, shielded
--- pool registration) and records the outcome here. Once a row exists, shield
--- and sync for the project fail closed until it is 'active' — a project that
--- declared a ring must never silently deposit into the default ring.
+-- pool registration) and records the outcome here. Operations name the ring
+-- per call (ring: "custom") and are refused until this row is 'active';
+-- default-ring operations never consult it.
 --
 --   status: 'pending' from submission, 'active' once bring-up confirmed on
 --   chain, 'failed' with the failure recorded on the row. Bring-up is resumed

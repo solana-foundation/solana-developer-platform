@@ -41,14 +41,6 @@ export interface ResolveRingsGatewayDependencies {
   signMessage?: typeof signRingsMessage;
 }
 
-export interface RingsGatewayOptions {
-  /**
-   * The project's active custom ring. Set, shield deposits become ring-bound
-   * and balance reads count only that ring's notes.
-   */
-  ringProgramId?: string;
-}
-
 /**
  * True when every upstream the SDK needs is set. The indexing poll asks the same
  * question so a half-configured deployment does not warn once per operation.
@@ -65,8 +57,7 @@ export function ringsUpstreamsConfigured(env: RingsUpstreamEnv): boolean {
 export function resolveRingsGateway(
   env: Env,
   tenant: RingsGatewayTenant,
-  dependencies: ResolveRingsGatewayDependencies = {},
-  options: RingsGatewayOptions = {}
+  dependencies: ResolveRingsGatewayDependencies = {}
 ): RingsGatewayPort {
   const configured = readUpstreams(env);
   if ("missing" in configured) {
@@ -86,7 +77,6 @@ export function resolveRingsGateway(
     // Optional, unlike the three upstreams: only ring bring-up needs it, and
     // the SDK refuses bring-up with config_error when it is absent.
     ...(ringRpcUrl === "" ? {} : { ringRpcUrl }),
-    ...(options.ringProgramId === undefined ? {} : { ringProgramId: options.ringProgramId }),
     // Off unless an operator says otherwise, so a production typo cannot
     // quietly authorise plaintext.
     allowInsecureHttp: isRingsInsecureHttpAllowed(env),
