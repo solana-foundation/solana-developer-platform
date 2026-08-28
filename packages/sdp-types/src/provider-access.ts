@@ -39,7 +39,14 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
  * which is why `keyPairCredentialDefinition` in the API's availability service
  * excludes it rather than demanding a `KAMINO_API_KEY` that nothing reads.
  */
-export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground", "kamino"] as const;
+export const EARN_PROVIDERS = [
+  "veda",
+  "upshift",
+  "perena",
+  "ground",
+  "kamino",
+  "wisdomtree",
+] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
 /**
@@ -56,6 +63,9 @@ export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
   perena: [],
   ground: ["usdc"],
   kamino: [],
+  // Redemptions pay USDC back, but through the vault-direct model (the org's
+  // own wallet sends fund tokens), never through a program-style payout rail.
+  wisdomtree: [],
 } as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
 
 /** Fail closed for provider ids from open database read models. */
@@ -120,6 +130,12 @@ export const EARN_PROVIDER_SURFACING = {
   // read, re-target, withdrawal and ledger access untouched.
   ground: false,
   kamino: true,
+  // Registered ahead of launch: catalogue, execution client and eligibility
+  // checks are integrated, but the go-live gate (playbook §4: flip LAST, in its
+  // own PR, after an end-to-end deposit works) has not been passed — WisdomTree
+  // is Solana-mainnet-only, so that E2E is blocked on production vault deposits
+  // opening (PRO-1703) and on real WisdomTree Connect credentials.
+  wisdomtree: false,
 } as const satisfies Record<EarnProviderId, boolean>;
 
 /**
@@ -178,6 +194,12 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
   perena: "vault_direct",
   ground: "custodial",
   kamino: "vault_direct",
+  // WisdomTree's on-receipt deposit wallet LOOKS like a fundable address, but
+  // presenting it as one would strand money: attribution runs through the
+  // SENDING wallet's KYC registration, so USDC from an unregistered wallet is
+  // not a subscription. Money moves only when SDP builds the transfer for an
+  // eligibility-checked owner and that owner signs — the vault_direct shape.
+  wisdomtree: "vault_direct",
 } as const satisfies Record<EarnProviderId, EarnDepositStyle>;
 
 /**
@@ -217,6 +239,7 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
+  wisdomtree: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -242,6 +265,7 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
+  wisdomtree: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */
