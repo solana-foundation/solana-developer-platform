@@ -11,6 +11,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { Badge } from "@/components/ui/badge";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -382,14 +383,14 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname === "/dashboard/markets/earn") {
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) {
     return {
       title: t("Shared.dashboardShell.earnProgram"),
       titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname === "/dashboard/markets/earn/button-builder") {
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`) {
     return {
       title: t("Shared.dashboardShell.configureEarnButton"),
       titlePosition: "center",

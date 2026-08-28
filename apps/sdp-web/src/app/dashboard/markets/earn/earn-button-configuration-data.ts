@@ -46,7 +46,7 @@ export async function saveEarnButtonConfiguration(input: {
   if (!parsed.success) {
     return {
       ok: false,
-      error: "Invalid Earn button configuration response",
+      error: "Invalid Embedded Yield button configuration response",
       status: result.status,
       body: result.data,
     };
