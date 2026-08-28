@@ -211,6 +211,7 @@
       "eventRequestFailed": "Event request failed.",
       "moneygramCompletionBeforeTransfer": "MoneyGram reported completion before the crypto transfer was recorded.",
       "moneygramWidgetLoadFailed": "Failed to load the MoneyGram widget.",
+      "untrustedProviderUrl": "The provider returned an untrusted URL, so it was not loaded. Create a new quote or contact support.",
       "unsupportedMoneygramTransaction": "Unsupported transaction: {asset} on {chain}.",
       "sourceWalletNoUsdc": "Source wallet has no USDC balance to send.",
       "coinbaseEventFailed": "Failed to record Coinbase event.",
