@@ -31,6 +31,10 @@ describe("tenant data-access boundary", () => {
       "routes/issuance/handlers/metadata.ts",
       "routes/webhooks/",
       "services/jobs/",
+      // The provider-settlement path shared by webhooks and the ramp
+      // reconciliation job: transfers are looked up by provider reference,
+      // so no tenant scope exists yet.
+      "services/payments/ramp-settlements.ts",
       "db/repositories/index.ts",
       "db/repositories/repository-factory.ts",
     ];
