@@ -73,6 +73,26 @@ export function mergeLocalizedMessages<TValue>(
   return mergeLocalizedValue(fallback, localized) as TValue;
 }
 
+const legacyEarnProductNamePattern = /\bEarn\b/g;
+
+function normalizeEmbeddedYieldBrand<TValue>(value: TValue): TValue {
+  // Localized catalogs land independently and can retain the previous product
+  // name. Keep the rendered brand canonical while their copy catches up.
+  if (typeof value === "string") {
+    return value.replace(legacyEarnProductNamePattern, "Embedded Yield") as TValue;
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeEmbeddedYieldBrand) as TValue;
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nested]) => [key, normalizeEmbeddedYieldBrand(nested)])
+  ) as TValue;
+}
+
 function mergeLocalizedValue(fallback: unknown, localized: unknown): unknown {
   if (typeof fallback === "string") {
     return typeof localized === "string" ? localized : fallback;
@@ -157,11 +177,11 @@ export type MessageKey = MessageKeyFor<Messages>;
 export type TranslationValues = Record<string, string | number>;
 
 const messagesByLocale: Record<AppLocale, Messages> = {
-  en: enMessages,
-  es: esMessages,
-  fr: frMessages,
-  pt: ptMessages,
-  vi: viMessages,
+  en: normalizeEmbeddedYieldBrand(enMessages),
+  es: normalizeEmbeddedYieldBrand(esMessages),
+  fr: normalizeEmbeddedYieldBrand(frMessages),
+  pt: normalizeEmbeddedYieldBrand(ptMessages),
+  vi: normalizeEmbeddedYieldBrand(viMessages),
 };
 
 export function getMessages(locale: AppLocale): Messages {

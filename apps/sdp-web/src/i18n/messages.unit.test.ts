@@ -46,18 +46,20 @@ describe("i18n messages", () => {
     }
   });
 
-  it("keeps the legacy Earn product name out of the English source catalog", () => {
-    const messages = getMessages("en") as unknown;
-    const offenders = flattenKeys(messages).filter((key) => {
-      const value = key.split(".").reduce<unknown>((carry, segment) => {
-        return carry && typeof carry === "object"
-          ? (carry as Record<string, unknown>)[segment]
-          : undefined;
-      }, messages);
-      return typeof value === "string" && /\bEarn\b/.test(value);
-    });
+  it("keeps the legacy Earn product name out of every rendered catalog", () => {
+    for (const locale of supportedLocales) {
+      const messages = getMessages(locale) as unknown;
+      const offenders = flattenKeys(messages).filter((key) => {
+        const value = key.split(".").reduce<unknown>((carry, segment) => {
+          return carry && typeof carry === "object"
+            ? (carry as Record<string, unknown>)[segment]
+            : undefined;
+        }, messages);
+        return typeof value === "string" && /\bEarn\b/.test(value);
+      });
 
-    expect(offenders).toEqual([]);
+      expect(offenders, `legacy Earn copy in ${locale}`).toEqual([]);
+    }
   });
 
   it("keeps non-English catalogs inventory-matched to English", () => {
