@@ -416,7 +416,8 @@
       "importing": "Importation…",
       "import": "Importer",
       "reference": "Référence",
-      "referenceOptional": "Facultatif"
+      "referenceOptional": "Facultatif",
+      "unknownToken": "Token inconnu"
     },
     "manualInstructions": {
       "copied": "{label} copié.",
@@ -644,7 +645,8 @@
       "selectFiatCurrency": "Sélectionnez la monnaie fiduciaire",
       "onrampRedirectUrlPlaceholder": "https://app.example.com/payments/Zonramp/complete",
       "createOfframpQuote": "Créer Offramp devis",
-      "offrampRedirectUrlPlaceholder": "https://app.example.com/payments/Zofframp/complete"
+      "offrampRedirectUrlPlaceholder": "https://app.example.com/payments/Zofframp/complete",
+      "policyRulesPlaceholder": "Tableau JSON de règles de politique"
     },
     "totalSdpBalance": "Solde total du SDP",
     "aggregatedAcrossWallets": "Agrégé sur {count} {walletLabel}.",
@@ -877,7 +879,24 @@
       "cancelPaymentDescription": "Cela arrête les futures collectes pour {counterparty}. Vous pourrez reprendre le paiement ultérieurement depuis le menu Actions.",
       "keepPayment": "Conserver le paiement",
       "cancelPayment": "Annuler le paiement",
-      "save": "Enregistrer"
+      "save": "Enregistrer",
+      "invalidAmountDecimals": "Cet actif prend en charge au plus {decimals} décimales.",
+      "invalidAmountFormat": "Entrez un montant valide.",
+      "searchPayments": "Rechercher des paiements récurrents",
+      "clearSearch": "Effacer la recherche",
+      "allStatuses": "Tous les statuts",
+      "clearFilters": "Effacer les filtres",
+      "noMatches": "Aucun paiement récurrent ne correspond à vos filtres.",
+      "range": "{from}-{to} sur {total} paiements",
+      "detailPaymentSection": "Paiement",
+      "detailWalletsSection": "Wallets et métadonnées",
+      "detailTo": "Vers",
+      "frequency": "Fréquence",
+      "subscriptionAccount": "Compte d'abonnement",
+      "openAccount": "Ouvrir le compte dans l'explorateur",
+      "editPaymentDescription": "Mettez à jour les wallets, le montant et la planification du paiement.",
+      "paymentUpdated": "Paiement Recurring mis à jour.",
+      "noChangesToSave": "Aucune modification à enregistrer."
     },
     "requests": {
       "loadFailed": "Impossible de charger les demandes de paiement",
@@ -1037,7 +1056,12 @@
       "filterWallet": "Wallet",
       "filterCounterparty": "Contrepartie",
       "filterProvider": "Fournisseur",
-      "filterAsset": "Actif"
+      "filterAsset": "Actif",
+      "downloadCsv": "Télécharger le CSV",
+      "downloadingCsv": "Téléchargement…",
+      "downloadCsvFailed": "Le CSV des transactions n'a pas pu être téléchargé.",
+      "noAssetMatchesDescription": "Les soldes sont lus depuis la chaîne, tandis que ce tableau répertorie les transferts enregistrés par SDP. Un Token financé en dehors de SDP affiche un solde sans transfert ici.",
+      "allAssets": "Tous les actifs"
     }
   }
 }
