@@ -64,11 +64,19 @@ export function createLocalApiClient(
       headers["x-project-id"] = projectId;
     }
 
-    const response = await fetch(`${normalizedBaseUrl}${path}`, {
+    let response = await fetch(`${normalizedBaseUrl}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+    for (let attempt = 0; response.status === 429 && attempt < 3; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+      response = await fetch(`${normalizedBaseUrl}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    }
 
     return parseResponse<T>(response);
   };
