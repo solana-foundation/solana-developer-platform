@@ -178,7 +178,8 @@ jobs:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL
+      TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,TEST_CHANGED_SINCE
     services:
       postgres:
         image: postgres:16-alpine
@@ -470,7 +471,7 @@ jobs:
         include:
           - name: Kora / Live Smoke
             provider: kora
-            test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts src/tests/kora-earn-sponsorship.test.ts
+            test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts src/tests/kora-earn-sponsorship.test.ts src/tests/private-channels.test.ts src/tests/private-channels-deposit.test.ts
             rpc_provider: alchemy
             custody_provider: privy
           - name: Surfpool / Issuance Core
@@ -500,7 +501,7 @@ jobs:
             custody_provider: local
           - name: Surfpool / Access
             provider: surfpool
-            test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
+            test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts src/tests/kora-surfpool-shim.test.ts
             rpc_provider: alchemy
             custody_provider: local
           - name: Surfpool / Token and Payment Flows (Kora)

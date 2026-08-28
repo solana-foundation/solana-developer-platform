@@ -3,6 +3,7 @@
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { onboardingCopy, provisioningDetail } from "./providers";
 
 export function RampOnboardingPanel({
@@ -39,7 +40,7 @@ export function RampOnboardingPanel({
         <Button
           type="button"
           variant="secondary"
-          onClick={() => window.open(hostedAction.url, "_blank", "noopener")}
+          onClick={() => openExternalRampUrl(hostedAction.url)}
         >
           {hostedAction.label}
         </Button>
