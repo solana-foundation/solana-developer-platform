@@ -77,21 +77,25 @@ async function seedPendingConnection(
     connectionStatus?: string;
     isDefault?: boolean;
     projectId?: string;
+    /** One live connection per provider per scope, so a case seeding two needs two. */
+    provider?: string;
   } = {}
 ): Promise<void> {
   const db = getDb(env);
   const connectionStatus = options.connectionStatus ?? "pending";
+  const provider = options.provider ?? "helius";
   await db
     .prepare(
       `INSERT INTO provider_credentials (
          id, organization_id, project_id, provider, label, scope, source,
          storage_backend, encrypted_secret_payload, status, deactivated_at, created_by
-       ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
+       ) VALUES (?, ?, NULL, ?, 'Tenant credential', 'organization', 'stored',
                  'encrypted_db', 'secret', ?, ?, ?)`
     )
     .bind(
       credentialId,
       ORGANIZATION_ID,
+      provider,
       options.credentialStatus ?? "pending",
       options.credentialStatus === "deactivated" ? "2026-08-16T12:00:00.000Z" : null,
       USER_ID
@@ -106,13 +110,14 @@ async function seedPendingConnection(
          id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
          network, status, is_default, activated_at, deactivated_at, created_by
-       ) VALUES (?, ?, ?, 'helius', ?, ?, '__organization__',
+       ) VALUES (?, ?, ?, ?, ?, ?, '__organization__',
                  'devnet', ?, ?, ?, ?, ?)`
     )
     .bind(
       connectionId,
       ORGANIZATION_ID,
       options.projectId ?? null,
+      provider,
       options.projectId ? "project" : "organization",
       credentialId,
       connectionStatus,
@@ -357,9 +362,13 @@ describe("RpcConnectionStore.findScopeConnectionState", () => {
       credentialStatus: "active",
       isDefault: false,
     });
+    // A different provider: one live connection per provider now, and the app
+    // itself already refuses a second key while a failed one is still there.
+    // The scope-wide lookup under test does not care which provider it is.
     await seedPendingConnection("rconn_state_idle_bad", "pcred_state_idle_bad", {
       connectionStatus: "failed",
       credentialStatus: "active",
+      provider: "triton",
     });
 
     const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);

@@ -448,6 +448,67 @@ describe("LightsparkRampClient", () => {
     expect(verification).toEqual({ verificationStatus: "APPROVED", errors: [] });
   });
 
+  it("rejects an on-ramp quote whose locked amount does not match the request", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "Quote:ls_onramp_mutated",
+          quoteStatus: "PENDING",
+          exchangeRate: 1,
+          totalSendingAmount: 9900,
+          sendingCurrency: { code: "USD", decimals: 2 },
+          totalReceivingAmount: 9900,
+          receivingCurrency: { code: "USDC", decimals: 6 },
+          feesIncluded: 25,
+          expiresAt: "2026-06-05T09:45:00.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    await expect(
+      new LightsparkRampClient().createOnrampQuote(LIGHTSPARK_CONTEXT, {
+        customerId: "Customer:cus_123",
+        externalCustomerId: "counterparty_123",
+        destinationWalletAddress: "ExternalAccount:acc_destination_123",
+        cryptoToken: "USDC",
+        fiatCurrency: "USD",
+        fiatAmount: "25",
+      })
+    ).rejects.toThrow(/does not match the requested/);
+  });
+
+  it("rejects an off-ramp quote whose currencies do not match the request", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "Quote:ls_offramp_mutated",
+          quoteStatus: "PENDING",
+          exchangeRate: 1,
+          totalSendingAmount: 25000000,
+          sendingCurrency: { code: "USDC", decimals: 6 },
+          totalReceivingAmount: 2490,
+          receivingCurrency: { code: "MXN", decimals: 2 },
+          feesIncluded: 10,
+          expiresAt: "2026-06-11T09:45:00.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    await expect(
+      new LightsparkRampClient().createOfframpQuote(LIGHTSPARK_CONTEXT, {
+        customerId: "Customer:cus_123",
+        externalCustomerId: "counterparty_123",
+        payoutAccountId: "ExternalAccount:acc_payout_123",
+        sourceWalletAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+        cryptoToken: "USDC",
+        fiatCurrency: "USD",
+        cryptoAmount: "25",
+      })
+    ).rejects.toThrow(/does not match the requested/);
+  });
+
   it("derives content-addressed payout account keys", async () => {
     const key = await lightsparkPayoutAccountKey("USD", {
       paymentRails: "ACH",
