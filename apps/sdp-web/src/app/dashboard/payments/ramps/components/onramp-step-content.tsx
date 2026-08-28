@@ -191,9 +191,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
             src={quote.hostedUrl}
           />
         )}
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
       </div>
     );
   }

@@ -21,7 +21,7 @@ export function MoonpayRampFrame({ title, src }: { title: string; src: string })
   return (
     <div>
       <div className="relative overflow-hidden rounded-2xl">
-        <iframe title={title} src={src} className="h-[480px] w-full border-0" allow={FRAME_ALLOW} />
+        <iframe title={title} src={src} className="h-[640px] w-full border-0" allow={FRAME_ALLOW} />
         <div className="absolute top-3 right-3 z-10">
           <Button
             type="button"
