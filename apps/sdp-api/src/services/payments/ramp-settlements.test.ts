@@ -14,27 +14,42 @@ const ORG_ID = "org_ramp_settlement_test";
 const PROJECT_ID = "prj_ramp_settlement_test";
 const USER_ID = "usr_ramp_settlement_test";
 
+const COUNTERPARTY_ID = "cpty_ramp_settlement_test";
+
+async function seedCounterparty() {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO counterparties (
+         id, organization_id, project_id, entity_type, display_name, status, created_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(COUNTERPARTY_ID, ORG_ID, PROJECT_ID, "individual", "Settlement Buyer", "active", USER_ID)
+    .run();
+}
+
 async function seedTransfer(input: {
   id: string;
   reference: string;
   status: string;
   type?: "onramp" | "offramp" | "transfer";
+  counterpartyId?: string;
 }) {
   const type = input.type ?? "onramp";
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers (
-         id, organization_id, project_id, wallet_id, source_address, destination_address,
-         token, amount, memo, type, direction, status, provider, provider_reference,
-         delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
-         initiated_by_key_id, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+         id, organization_id, project_id, wallet_id, counterparty_id, source_address,
+         destination_address, token, amount, memo, type, direction, status, provider,
+         provider_reference, delivery_mode, fiat_currency, fiat_amount, provider_data,
+         signature, serialized_tx, initiated_by_key_id, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
     )
     .bind(
       input.id,
       ORG_ID,
       PROJECT_ID,
       "wallet_ramp_settlement_test",
+      input.counterpartyId === undefined ? null : input.counterpartyId,
       type === "offramp" ? "source" : null,
       type === "onramp" ? "destination" : "destination",
       "USDC",
@@ -190,17 +205,20 @@ describe("applyRampSettlementEvent", () => {
     expect(dispatchWorkflowEvent).not.toHaveBeenCalled();
   });
 
-  it("does not write a provider-customer link from a refused event", async () => {
+  it("links the customer from the winning event and never from a refused one", async () => {
+    await seedCounterparty();
     await seedTransfer({
       id: "xfr_refused_link",
       reference: "order_refused_link",
       status: "settling",
+      counterpartyId: COUNTERPARTY_ID,
     });
     await applyRampSettlementEvent(env, {
       provider: "coinbase",
       kind: "failed",
       reference: "order_refused_link",
       error: "declined",
+      providerCustomerId: "cust_winner",
     });
 
     await applyRampSettlementEvent(env, {
@@ -212,9 +230,14 @@ describe("applyRampSettlementEvent", () => {
     });
 
     const links = await getDb(env)
-      .prepare("SELECT id FROM counterparty_provider_accounts")
-      .all<{ id: string }>();
-    expect(links.results).toHaveLength(0);
+      .prepare(
+        `SELECT provider_customer_reference FROM counterparty_provider_accounts
+         WHERE counterparty_id = ?`
+      )
+      .bind(COUNTERPARTY_ID)
+      .all<{ provider_customer_reference: string }>();
+    expect(links.results).toHaveLength(1);
+    expect(links.results[0].provider_customer_reference).toBe("cust_winner");
   });
 
   it("makes exact retries idempotent", async () => {
