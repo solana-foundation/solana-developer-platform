@@ -14,6 +14,7 @@ import {
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
+import { describeVaultSimulationError } from "@/services/earn/vault-simulation-error";
 import type { Env } from "@/types/env";
 
 const OUTBOX_BATCH_SIZE = 256;
@@ -129,7 +130,11 @@ async function reconcileMovement(
   chain: { cluster: SolanaCluster; rpcUrl: string; currentBlockHeight: bigint | null }
 ): Promise<void> {
   if (status?.err) {
-    await failMovement(ledger, movement, JSON.stringify(status.err));
+    // `failure_reason` renders verbatim in the dashboard, and a bare
+    // JSON.stringify throws on bigint-carrying errors, which would leave the
+    // movement stuck instead of failed. Fee mode is unknown here, so the
+    // fee-payer wording stays neutral.
+    await failMovement(ledger, movement, describeVaultSimulationError(status.err).message);
     return;
   }
   if (status?.confirmationStatus === "finalized") {

@@ -33,6 +33,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | `@sdp/kit-augment` |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | `@sdp/kit-augment` |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
+| `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
 | `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types` |
 
@@ -57,5 +58,6 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/spc-escrow` -> `@sdp/kit-augment`
 - `@sdp/spc-withdraw` -> `@sdp/kit-augment`
 - `@sdp/types` -> None
+- `bigint-buffer` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
 - `sdp-web` -> `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types`
