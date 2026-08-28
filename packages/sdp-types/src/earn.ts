@@ -158,6 +158,10 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   superstate: "Superstate",
   maple: "Maple",
   centrifuge: "Centrifuge",
+  // Issuer-curated tokenized funds (WTGXX et al.) — the id the WisdomTree
+  // catalogue client writes, establishable from the mint's issuer-controlled
+  // on-chain metadata.
+  wisdomtree: "WisdomTree",
   // Ids Ground reports when a protocol or fund curates its own vaults;
   // `g<ticker>` is Ground's own wrapper of a Superstate fund. Some stored rows
   // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
