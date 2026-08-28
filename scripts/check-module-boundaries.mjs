@@ -181,6 +181,18 @@ const MODULE_METADATA = [
     allowedDependencies: [],
   },
   {
+    name: "@sdp/wisdomtree",
+    directory: "packages/sdp-wisdomtree",
+    purpose:
+      "Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads.",
+    // Same inward-pointing arrow as @sdp/kamino: this package depends on
+    // @sdp/earn (provider contract + the Connect REST client it extends), and
+    // @sdp/earn must never depend back — the hourly catalogue cron would then
+    // load @solana/kit. The fund registry lives in @sdp/types for the same
+    // no-cycle reason as the Kamino program tables.
+    allowedDependencies: ["@sdp/earn", "@sdp/types"],
+  },
+  {
     name: "@sdp/types",
     directory: "packages/sdp-types",
     purpose: "Shared runtime types, constants, and product contracts.",
