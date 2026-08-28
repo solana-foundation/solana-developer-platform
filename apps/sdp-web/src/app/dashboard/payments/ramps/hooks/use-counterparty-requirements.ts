@@ -109,6 +109,8 @@ export interface CounterpartyRequirementsParams extends AdvanceRequirementsPaylo
   counterpartyId: string;
   provider: RampProviderId | null;
   direction: RampDirection;
+  /** Fires when onboarding reaches `ready` — on submit or when the status poll observes it. */
+  onReady?: () => void;
 }
 
 export interface CounterpartyRequirementsState {
@@ -218,6 +220,9 @@ export function useCounterpartyRequirements(
       );
       setOnboarding(result);
       setLastAdvancePayload(payload);
+      if (result.status === "ready") {
+        params.onReady?.();
+      }
       return result;
     } finally {
       setIsAdvancing(false);
@@ -246,6 +251,9 @@ export function useCounterpartyRequirements(
         t
       );
       setOnboarding(result);
+      if (result.status === "ready") {
+        params.onReady?.();
+      }
     },
     { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
   );

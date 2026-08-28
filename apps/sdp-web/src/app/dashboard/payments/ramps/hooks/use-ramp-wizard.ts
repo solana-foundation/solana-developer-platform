@@ -8,7 +8,7 @@ import type {
 } from "@sdp/types";
 import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import type { z } from "zod";
@@ -168,6 +168,17 @@ export function useRampWizard<TId extends string>(
     cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
     fiatCurrency: selectedRampPair.fiatCurrency,
     destinationWallet: fields.walletId,
+    // Quote creation is event-driven: it fires the first time onboarding
+    // reaches ready (submit response or status poll), never from an effect.
+    // `runQuoteCreation` is declared below; the callback only runs after
+    // render, when every binding is initialized.
+    onReady: () => {
+      if (quoteCreationAttempted.current) {
+        return;
+      }
+      quoteCreationAttempted.current = true;
+      void runQuoteCreation();
+    },
   });
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
@@ -301,17 +312,6 @@ export function useRampWizard<TId extends string>(
     }
   };
   const retryQuoteCreation = () => void runQuoteCreation();
-  const readyForQuote = isLastStep && requirements.onboarding?.status === "ready" && quote === null;
-  // Deliberately no dependency array: the attempted-guard makes the body a
-  // once-per-instance no-op, and running on every commit means the latest
-  // closure fires without a render-time ref write.
-  useEffect(() => {
-    if (!readyForQuote || quoteCreationAttempted.current) {
-      return;
-    }
-    quoteCreationAttempted.current = true;
-    void runQuoteCreation();
-  });
 
   const advanceRequirementsAndProceed = async () => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
