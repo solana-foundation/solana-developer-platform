@@ -9,6 +9,7 @@ import { registerAuthPaths } from "./paths/auth";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyPaths } from "./paths/custody";
+import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
@@ -58,6 +59,14 @@ const OPENAPI_TAG = {
     name: "Asset Profiles",
     description: "Issued-asset identity and metadata profiles, plus the public token metadata URI.",
   },
+  PUBLIC_EARN: {
+    name: "Earn",
+    description: "Caller-signed external-wallet vault deposit and exit transactions.",
+  },
+  EARN: {
+    name: "Earn",
+    description: "Vault transaction flows and Earn button configuration endpoints.",
+  },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
@@ -73,6 +82,7 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
+  OPENAPI_TAG.PUBLIC_EARN,
 ];
 
 const OPENAPI_TAGS = [
@@ -91,6 +101,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
+  OPENAPI_TAG.EARN,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -106,6 +117,13 @@ function registerApiKeyAuth(registry: OpenAPIRegistry) {
 }
 
 function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
+  registry.registerComponent("securitySchemes", "clerkBearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "JWT",
+    description: "Clerk JWT bearer token for dashboard authentication.",
+  });
+
   registry.registerComponent("securitySchemes", "sessionCookie", {
     type: "apiKey",
     in: "cookie",
@@ -125,6 +143,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
   registerApiKeyPaths(registry);
   registerCustodyPaths(registry);
+  registerPublicEarnPaths(registry);
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
@@ -141,6 +160,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerMemberPaths(registry);
   registerAuthPaths(registry);
   registerCustodyPaths(registry);
+  registerEarnPaths(registry);
   registerProjectPaths(registry);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);

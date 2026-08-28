@@ -139,6 +139,11 @@
       "import": "./src/ramps/providers/moonpay/client.ts",
       "default": "./src/ramps/providers/moonpay/client.ts"
     },
+    "./ramps/providers/moonpay/settlement": {
+      "types": "./src/ramps/providers/moonpay/settlement.ts",
+      "import": "./src/ramps/providers/moonpay/settlement.ts",
+      "default": "./src/ramps/providers/moonpay/settlement.ts"
+    },
     "./ramps/providers/stripe/client": {
       "types": "./src/ramps/providers/stripe/client.ts",
       "import": "./src/ramps/providers/stripe/client.ts",

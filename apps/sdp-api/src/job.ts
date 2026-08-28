@@ -86,13 +86,9 @@ const MANAGED_CHECKIN_MARGIN_MINUTES = 4;
  *    Reconciliation Cadence is their effective cadence, the same degradation
  *    from the per-minute crontab that pending-transfers accepts. Fatal.
  * 4. **Rings indexing poll** — behind no gate here, because the job itself
- *    early-returns unless the rings flag is on AND `HELIUS_RINGS_ADAPTER` is
- *    `http`, which is why the in-process runner also schedules it
- *    unconditionally. This job is the poll's only tick on managed deployments;
- *    without it an operation that reached `indexing` would neither complete nor
- *    ever time out. The configured cadence sits well inside the 30-minute
- *    indexing budget, so the degradation from the per-minute crontab costs
- *    nothing. Fatal.
+ *    early-returns unless the rings flag is on. This job is the poll's only tick
+ *    on managed deployments; without it an operation that reached `indexing`
+ *    would neither complete nor ever time out. Fatal.
  * 5. **Earn vault-movement reconciliation** — deliberately outside the Earn
  *    gate: signed vault intents are an outbox, not feature state, so disabling
  *    new deposits cannot strand old ones. Fatal.

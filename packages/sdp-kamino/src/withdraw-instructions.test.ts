@@ -8,6 +8,7 @@ import {
   buildShareAccountCloseInstruction,
   buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
+  isShareAtaCloseInstruction,
   KVAULT_BURN_ALL_SHARES_SENTINEL,
   KVAULT_SHARE_REDEEMING_DISCRIMINATORS,
   type RoleTaggedInstruction,
@@ -277,5 +278,63 @@ describe("buildShareAccountCloseInstruction", () => {
     expect(
       close({ ataBaseUnitsBeforeExit: 0n, redeemedBaseUnits: 0n, ownerTotalBaseUnits: 0n })
     ).not.toBeNull();
+  });
+});
+
+describe("isShareAtaCloseInstruction", () => {
+  const SHARE_ATA = address("6cugf3w232LzY17wXHHWXKwv4oGAgpHbkp7mmHx5FnPL");
+  const OWNER_ADDRESS = address("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
+
+  /** The exact shape klend-sdk 10.0.0 emits in `postWithdrawIxs` on a full exit. */
+  function sdkClose(overrides: Partial<Instruction> = {}): Instruction {
+    return {
+      programAddress: TOKEN_PROGRAM_ADDRESS,
+      accounts: [
+        { address: SHARE_ATA, role: 1 },
+        { address: OWNER_ADDRESS, role: 1 },
+        { address: OWNER_ADDRESS, role: 2 },
+      ],
+      data: Uint8Array.from([9]),
+      ...overrides,
+    } as Instruction;
+  }
+
+  it("matches the SDK's own close of the share ATA", () => {
+    expect(isShareAtaCloseInstruction(sdkClose(), SHARE_ATA)).toBe(true);
+  });
+
+  it("matches SDP's own close builder output, so the strip-then-append order is load-bearing", async () => {
+    const built = buildShareAccountCloseInstruction({
+      shareAta: SHARE_ATA,
+      owner: createNoopSigner(OWNER_ADDRESS),
+      ataBaseUnitsBeforeExit: 500n,
+      redeemedBaseUnits: 500n,
+      ownerTotalBaseUnits: 500n,
+    });
+    expect(built).not.toBeNull();
+    expect(isShareAtaCloseInstruction(built as Instruction, SHARE_ATA)).toBe(true);
+  });
+
+  it("ignores a close of a DIFFERENT account: not SDP's to own", () => {
+    expect(isShareAtaCloseInstruction(sdkClose(), OWNER_ADDRESS)).toBe(false);
+  });
+
+  it("ignores other token instructions on the share ATA", () => {
+    expect(
+      isShareAtaCloseInstruction(
+        sdkClose({ data: Uint8Array.from([3, 0, 0, 0, 0, 0, 0, 0, 0]) }),
+        SHARE_ATA
+      )
+    ).toBe(false);
+  });
+
+  it("ignores a CloseAccount-shaped instruction from another program", () => {
+    expect(
+      isShareAtaCloseInstruction(sdkClose({ programAddress: KVAULT_PROGRAM }), SHARE_ATA)
+    ).toBe(false);
+  });
+
+  it("ignores an instruction with no data", () => {
+    expect(isShareAtaCloseInstruction(sdkClose({ data: undefined }), SHARE_ATA)).toBe(false);
   });
 });

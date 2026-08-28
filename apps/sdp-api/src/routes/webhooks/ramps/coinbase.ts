@@ -5,8 +5,8 @@ import { z } from "zod";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { AppContext, WebhookProcessor } from "./processor";
-import { applyRampSettlementEvent } from "./settlements";
 
 const COINBASE_ORDER_STATUS = {
   ONRAMP_ORDER_STATUS_PENDING_PAYMENT: "awaiting_payment",
@@ -225,6 +225,6 @@ export class CoinbaseWebhookProcessor implements WebhookProcessor<unknown, RampS
       getLogger().info(`[coinbase webhook] ignored event: ${event.reason}`);
       return;
     }
-    await applyRampSettlementEvent(c, event);
+    await applyRampSettlementEvent(c.env, event);
   }
 }

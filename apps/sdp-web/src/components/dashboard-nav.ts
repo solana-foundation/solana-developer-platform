@@ -15,7 +15,6 @@ import {
   ShieldCheckIcon,
   TrendingUpIcon,
   UsersIcon,
-  VenetianMaskIcon,
   WalletIcon,
 } from "lucide-react";
 import type { useTranslations } from "@/i18n/provider";
@@ -70,9 +69,37 @@ export function dashboardSubnavStorageKey(key: DashboardSubnavKey): string {
   return `sdp.dashboard.${key}-subnav-open`;
 }
 
+export type DashboardSubnavState = Record<DashboardSubnavKey, boolean>;
+
+/**
+ * Reveal a section's pages.
+ *
+ * Deliberately not a toggle. Following a top-level item is a request to go
+ * there, so a second click on the section you are already in must not hide the
+ * pages you are looking at (HOO-1218). The chevron remains the control that can
+ * close one.
+ *
+ * Returns the same object when nothing changes, so a caller holding this in
+ * React state does not re-render for a click that decided nothing.
+ */
+export function withSubnavOpen(
+  current: DashboardSubnavState,
+  key: DashboardSubnavKey
+): DashboardSubnavState {
+  return current[key] ? current : { ...current, [key]: true };
+}
+
+/** Flip one section, which is what the chevron does. */
+export function withSubnavToggled(
+  current: DashboardSubnavState,
+  key: DashboardSubnavKey
+): DashboardSubnavState {
+  return { ...current, [key]: !current[key] };
+}
+
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean
+  _privateChannelsEnabled: boolean
 ): SubNavItem[] {
   return [
     {
@@ -105,15 +132,6 @@ export function getPaymentsActions(
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
       icon: RepeatIcon,
     },
-    ...(privateChannelsEnabled
-      ? [
-          {
-            label: t("Shared.dashboardShell.privateChannels"),
-            href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.privateChannels,
-            icon: VenetianMaskIcon,
-          },
-        ]
-      : []),
   ];
 }
 
@@ -145,6 +163,7 @@ export function getNavSections(
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
+    paymentsEnabled: boolean;
     pendingApprovalCount: number | null;
     privateChannelsEnabled: boolean;
   }
@@ -175,13 +194,17 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.issuance,
           icon: CoinsIcon,
         },
-        {
-          label: t("Shared.dashboardShell.payments"),
-          href: DASHBOARD_SIDE_NAV_HREFS.payments,
-          icon: ArrowLeftRightIcon,
-          children: getPaymentsActions(t, options.privateChannelsEnabled),
-          subnavKey: "payments",
-        },
+        ...(options.paymentsEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.payments"),
+                href: DASHBOARD_SIDE_NAV_HREFS.payments,
+                icon: ArrowLeftRightIcon,
+                children: getPaymentsActions(t, options.privateChannelsEnabled),
+                subnavKey: "payments" as const,
+              },
+            ]
+          : []),
         ...(options.marketsEnabled && options.earnEnabled && marketsActions.length > 0
           ? [
               {

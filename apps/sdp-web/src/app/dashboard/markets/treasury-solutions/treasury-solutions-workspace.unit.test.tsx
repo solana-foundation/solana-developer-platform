@@ -7,9 +7,26 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
 
+// jsdom implements no matchMedia, and the design-system SegmentedControl (the
+// PRO-1742 cluster toggle) reads it through motion's useReducedMotion.
+if (!window.matchMedia) {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
+
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as "sandbox" | "production",
   programProvider: "ground",
+  // Every cluster value useEarnStrategies was asked for, across renders.
+  strategiesClusterRequests: [] as Array<"devnet" | "mainnet-beta" | undefined>,
   refreshStrategies: vi.fn(),
   refreshPositions: vi.fn(),
   refreshPrograms: vi.fn(),
@@ -90,54 +107,85 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
 }));
 
 vi.mock("../earn/earn-program-data", () => ({
-  useEarnStrategies: () => ({
-    error:
-      mocks.strategiesUnavailable || mocks.strategiesStaleError
-        ? new Error("catalogue unavailable")
-        : undefined,
-    isLoading: false,
-    refresh: mocks.refreshStrategies,
-    strategies: mocks.strategiesUnavailable
-      ? undefined
-      : [
+  useEarnStrategies: (options?: { cluster?: "devnet" | "mainnet-beta" }) => {
+    mocks.strategiesClusterRequests.push(options?.cluster);
+    // The mirrored mainnet shelf (PRO-1742), served only on the explicit
+    // opt-in — rows arrive `fundable: false`, exactly as the API derives them.
+    if (options?.cluster === "mainnet-beta") {
+      return {
+        error: undefined,
+        isLoading: false,
+        refresh: mocks.refreshStrategies,
+        strategies: [
           {
-            id: "earn_strategy_live",
+            id: "earn_strategy_mainnet_mirror",
             provider: "kamino",
-            providerReference: "Kvault11111111111111111111111111111111111",
-            name: "Kamino USDC Vault",
+            providerReference: "KvaultMainnet111111111111111111111111111111",
+            name: "Kamino JLP Vault",
             sourceKind: "defi",
             depositMints: [USDC_MINT],
-            shareMint: SHARE_MINT,
+            shareMint: "ShareMainnet111111111111111111111111111111",
             apyType: "variable",
-            currentApy: "0.062",
+            currentApy: "0.081",
             liquidityTerm: "instant",
             status: "active",
-            hostCluster: "devnet",
-            fundable: true,
-            createdAt: "2026-08-18T00:00:00.000Z",
-            updatedAt: "2026-08-18T00:00:00.000Z",
-          },
-          {
-            id: "earn_strategy_catalogue_only",
-            provider: "kamino",
-            providerReference: "KvaultCatalogue1111111111111111111111111111",
-            name: "Kamino PYUSD Vault",
-            sourceKind: "defi",
-            depositMints: [USDC_MINT],
-            ...(mocks.strategyMissingShareMint
-              ? {}
-              : { shareMint: mocks.corruptStableShareMint ? USDC_MINT : CATALOGUE_SHARE_MINT }),
-            apyType: "variable",
-            currentApy: "0.041",
-            liquidityTerm: "instant",
-            status: "active",
-            hostCluster: "devnet",
-            fundable: true,
+            hostCluster: "mainnet-beta",
+            fundable: false,
             createdAt: "2026-08-18T00:00:00.000Z",
             updatedAt: "2026-08-18T00:00:00.000Z",
           },
         ],
-  }),
+      };
+    }
+    return {
+      error:
+        mocks.strategiesUnavailable || mocks.strategiesStaleError
+          ? new Error("catalogue unavailable")
+          : undefined,
+      isLoading: false,
+      refresh: mocks.refreshStrategies,
+      strategies: mocks.strategiesUnavailable
+        ? undefined
+        : [
+            {
+              id: "earn_strategy_live",
+              provider: "kamino",
+              providerReference: "Kvault11111111111111111111111111111111111",
+              name: "Kamino USDC Vault",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              shareMint: SHARE_MINT,
+              apyType: "variable",
+              currentApy: "0.062",
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
+            {
+              id: "earn_strategy_catalogue_only",
+              provider: "kamino",
+              providerReference: "KvaultCatalogue1111111111111111111111111111",
+              name: "Kamino PYUSD Vault",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              ...(mocks.strategyMissingShareMint
+                ? {}
+                : { shareMint: mocks.corruptStableShareMint ? USDC_MINT : CATALOGUE_SHARE_MINT }),
+              apyType: "variable",
+              currentApy: "0.041",
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
+          ],
+    };
+  },
   useEarnVaultPositions: () => ({
     // Real SWR keeps stale data alongside an error; the workspace guard is
     // what must refuse to render it as live.
@@ -309,6 +357,7 @@ function renderWorkspace() {
 beforeEach(() => {
   mocks.environment = "sandbox";
   mocks.programProvider = "ground";
+  mocks.strategiesClusterRequests = [];
   mocks.withdrawalsByProgram = {};
   mocks.vaultDeposits = [];
   mocks.vaultWithdrawals = [];
@@ -814,5 +863,76 @@ describe("TreasurySolutionsWorkspace", () => {
     // that never mounted.
     await waitFor(() => expect(screen.getByText("Legacy treasury program")).toBeTruthy());
     expect(screen.queryAllByTestId("vault-deposit-outcome-tracker")).toHaveLength(0);
+  });
+});
+
+describe("TreasurySolutionsWorkspace — catalogue cluster toggle (PRO-1742)", () => {
+  it("browses the mirrored mainnet shelf behind the toggle, naming the cluster on the row", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    // Default view: the environment's own shelf, no opt-in sent to the seam.
+    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
+    expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
+
+    const toggle = screen.getByLabelText("Catalogue cluster");
+    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
+
+    // The card re-reads with the explicit opt-in…
+    expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
+
+    // …and the mirrored row renders its Deposit disabled with the cluster
+    // named as the reason — never the bare "Unavailable" collapse.
+    const row = screen.getByText("Kamino JLP Vault").closest("tr");
+    expect(row).not.toBeNull();
+    const cells = within(row as HTMLTableRowElement);
+    expect(cells.getByText("Mainnet only")).toBeTruthy();
+    expect(cells.queryByText("Unavailable")).toBeNull();
+    const deposit = cells.getByRole("button", { name: "Deposit" });
+    expect(deposit.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("renders no cluster toggle in production — there is no other shelf to offer", () => {
+    mocks.environment = "production";
+    renderWorkspace();
+
+    expect(screen.queryByLabelText("Catalogue cluster")).toBeNull();
+    expect(screen.queryByText("Devnet")).toBeNull();
+    // Production reads its default shelf; the opt-in never reaches the seam.
+    expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
+  });
+
+  it("normalizes toggling back to the environment's own cluster into the shared default key", async () => {
+    // Selecting Devnet after Mainnet must re-join the environment-default SWR
+    // key (cluster: undefined) rather than pinning a second, permanently
+    // distinct cache entry of the identical shelf under the literal "devnet".
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const toggle = screen.getByLabelText("Catalogue cluster");
+    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
+    expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
+
+    await user.click(within(toggle).getByRole("button", { name: "Devnet" }));
+    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
+    expect(mocks.strategiesClusterRequests).not.toContain("devnet");
+  });
+
+  it("refreshes the shared default shelf ONCE per click, and the mirror separately once toggled", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    // On the default shelf both strategy hooks share one SWR key: one click,
+    // one revalidation of it (the paged fetch must not run twice).
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(1);
+
+    // Once the toggle leaves the default, the mirror shelf is a second key and
+    // earns its own refresh.
+    const toggle = screen.getByLabelText("Catalogue cluster");
+    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
+    mocks.refreshStrategies.mockClear();
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
   });
 });

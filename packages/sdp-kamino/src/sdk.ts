@@ -28,6 +28,7 @@ import {
   buildShareAccountCloseInstruction,
   buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
+  isShareAtaCloseInstruction,
   type RoleTaggedInstruction,
   resolveBurnAllSentinel,
 } from "./withdraw-instructions";
@@ -444,7 +445,16 @@ export async function buildKaminoWithdrawPlan(
       role: "post" as const,
       sharesBaseUnits: null,
     })),
-  ];
+  ]
+    // klend-sdk 10.0.0 closes the emptied share ATA itself on a full exit
+    // (rides in `postWithdrawIxs`), refunding the OWNER unconditionally. SDP
+    // owns that close — the refund destination is attribution-aware (rent a
+    // sponsor funded goes back to the sponsor; see
+    // `buildShareAccountCloseInstruction` below) — so the SDK's copy is
+    // removed and the close appended at the end of this function stays the
+    // plan's ONE close. Keeping both fails the exit outright: SPL CloseAccount
+    // meets an already-closed account and dies with InvalidAccountData.
+    .filter((entry) => !isShareAtaCloseInstruction(entry.instruction, consolidation.shareAta));
 
   const maximumBalanceGuard = await buildMaximumWithdrawalBalanceGuard({
     requestedBaseUnits,

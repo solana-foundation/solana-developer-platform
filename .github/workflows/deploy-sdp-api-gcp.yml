@@ -33,10 +33,12 @@ jobs:
       JOB: sdp-dev-api-public-cron
       WORKER_SERVICE: sdp-dev-worker
       MIGRATE_JOB: sdp-dev-api-public-migrate
-      PII_MIGRATE_JOB: sdp-dev-counterparty-pii-migrate
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -76,8 +78,6 @@ jobs:
             "${JOB}" "${REGION}" "${PROJECT_ID}"
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          gcloud run jobs update "${PII_MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
       - name: Update worker image
         run: |
@@ -92,3 +92,12 @@ jobs:
             cat "${describe_err}" >&2
             exit 1
           fi
+
+  smoke:
+    name: Post-deploy dev smoke
+    needs: deploy
+    permissions:
+      contents: read
+    uses: ./.github/workflows/sdp-dev-smoke.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}

@@ -1,9 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type {
-  CustodyConfigSummary,
-  OrganizationRpcProvider,
-  RpcConnectionListResponse,
-} from "@sdp/types";
+import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
 import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
@@ -23,6 +19,11 @@ import {
   resolveRampIntegrations,
   resolveRpcIntegrations,
 } from "../integrations-status";
+import {
+  collectConnections,
+  findProvidersWithOwnKey,
+  findServingProvider,
+} from "../rpc-serving-provider.server";
 import { IntegrationDetailView } from "./integration-detail-view";
 
 async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
@@ -42,15 +43,6 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
  * Tenant connections for one provider. Read through the session client because
  * the internal routes refuse API keys; a failure is not fatal to the page, it
  * just means the BYOK section has nothing to show.
- */
-const CONNECTION_PAGE_SIZE = 50;
-
-/**
- * Tenant connections for one provider.
- *
- * Pages to the end before filtering: the list is organization-wide, so
- * truncating at one page and then narrowing by provider would hide credentials
- * that exist but sit past the cut.
  *
  * Returns `null` when the read fails rather than an empty array. An empty array
  * means "you have none and are running on SDP's", which is a claim we cannot
@@ -74,24 +66,79 @@ async function getByokConnections(provider: string, canManage: boolean) {
 
   try {
     const client = await createSdpApiClient();
-    const collected: RpcConnectionListResponse["connections"] = [];
-    let offset = 0;
-    let total = 0;
+    // Both scopes: connections are made on the project now (HOO-1226), but the
+    // organization-scoped ones made before that still exist and the relay
+    // refuses to route while one is sitting there. Hiding them would leave the
+    // tenant reading an error with nothing on screen to act on.
+    const [projectScoped, organizationScoped] = await Promise.all([
+      collectConnections(client, "project"),
+      collectConnections(client, "organization"),
+    ]);
 
-    do {
-      const payload = await client.fetch<RpcConnectionListResponse>(
-        `/internal/dashboard/rpc/connections?scope=organization&limit=${CONNECTION_PAGE_SIZE}&offset=${offset}`
-      );
-      collected.push(...payload.connections);
-      total = payload.pagination.total;
-      offset += CONNECTION_PAGE_SIZE;
-      // A page that comes back short means the list ended, whatever total says.
-      if (payload.connections.length < CONNECTION_PAGE_SIZE) {
-        break;
-      }
-    } while (collected.length < total);
+    const all = [...projectScoped, ...organizationScoped];
 
-    return collected.filter((connection) => connection.provider === provider);
+    // Every live project connection, across all six providers. The list handed
+    // to the section is narrowed to this provider, so counting inside it made
+    // "the only connection routing this project" true on every page at once —
+    // a Ready key sitting beside a serving one warned that deactivating it
+    // would fall back to SDP's, when it routes nothing either way.
+    const liveProjectConnections = all.filter(
+      (connection) => connection.scope === "project" && connection.status !== "deactivated"
+    ).length;
+
+    return {
+      connections: all.filter((connection) => connection.provider === provider),
+      liveProjectConnections,
+      servingProvider: findServingProvider(all),
+      // A provider the project holds its own key for is usable whatever this
+      // deployment carries, so the header must not call it Not configured.
+      providersWithOwnKey: findProvidersWithOwnKey(all),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Flatten the loader's answer into the props the view takes. The sentinels
+ * (`undefined` not an RPC provider, `"restricted"` not permitted, `null` the
+ * read failed) name no serving provider, so they pass straight through.
+ */
+function resolveByokProps(result: Awaited<ReturnType<typeof getByokConnections>>) {
+  if (result === undefined || result === null || result === "restricted") {
+    return {
+      byokConnections: result,
+      liveProjectConnections: 0,
+      servingProvider: null,
+      providersWithOwnKey: [] as string[],
+    };
+  }
+  return {
+    byokConnections: result.connections,
+    liveProjectConnections: result.liveProjectConnections,
+    servingProvider: result.servingProvider,
+    providersWithOwnKey: result.providersWithOwnKey,
+  };
+}
+
+/**
+ * Whose credentials the organization runs on. `null` when it could not be
+ * read: the control is hidden rather than shown defaulted, because rendering
+ * "SDP-managed" at an organization that is actually on its own keys is the
+ * kind of wrong that gets acted on.
+ */
+async function getRpcCredentialMode(
+  canManage: boolean
+): Promise<{ mode: "managed" | "byok"; liveConnections: number } | null> {
+  if (!canManage) {
+    return null;
+  }
+
+  try {
+    const client = await createSdpApiClient();
+    return await client.fetch<{ mode: "managed" | "byok"; liveConnections: number }>(
+      "/internal/dashboard/rpc/credential-mode"
+    );
   } catch {
     return null;
   }
@@ -127,14 +174,17 @@ export default async function IntegrationDetailPage({
   }
   const organizationId = onboarding.organization.id;
 
-  const [availability, connectedProviders] = await Promise.all([
+  const [availability, connectedProviders, credentialModeState, byokState] = await Promise.all([
     fetchProviderAvailability(projectClient.request, organizationId),
     getConnectedCustodyProviders(projectClient.request).catch(() => null),
+    getRpcCredentialMode(dashboardAccess.capabilities.canManageOrgSettings),
+    getByokConnections(provider, dashboardAccess.capabilities.canManageOrgSettings),
   ]);
 
   // The shell only routes here after onboarding, so a missing setting means
   // the organization runs on SDP's default RPC, not "none".
   const activeRpcProvider = onboarding.setup?.rpcProvider ?? "default";
+  const byok = resolveByokProps(byokState);
 
   const detail = resolveIntegrationDetail({
     provider,
@@ -147,6 +197,11 @@ export default async function IntegrationDetailPage({
           }),
     rpc: resolveRpcIntegrations({
       selectedProvider: activeRpcProvider,
+      // The header badge answers the same question the panel under it does, so
+      // it has to read the same source. It used to read the selection alone and
+      // say Connected on a provider the project's traffic never touched.
+      servingProvider: byok.servingProvider,
+      providersWithOwnKey: byok.providersWithOwnKey,
       entries: availability.providers.rpc,
     }),
     ramps: resolveRampIntegrations(availability.providers.ramps),
@@ -168,10 +223,9 @@ export default async function IntegrationDetailPage({
               isEnabledInDeployment:
                 availability.providers.rpc[provider as OrganizationRpcProvider]?.enabled ?? false,
               organizationId,
-              byokConnections: await getByokConnections(
-                provider,
-                dashboardAccess.capabilities.canManageOrgSettings
-              ),
+              ...byok,
+              credentialMode: credentialModeState?.mode ?? null,
+              liveConnectionCount: credentialModeState?.liveConnections ?? 0,
             }
           : undefined
       }

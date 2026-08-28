@@ -1,4 +1,3 @@
-import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isDecimalString } from "@sdp/solana/amount";
 import type {
   EarnVaultDepositRecord,
@@ -9,11 +8,7 @@ import type {
   EarnVaultWithdrawalsPage,
   SdpEnvironment,
 } from "@sdp/types";
-import {
-  type EarnProviderId,
-  earnDepositStyle,
-  isVaultDirectDepositEnabled,
-} from "@sdp/types/provider-access";
+import { type EarnProviderId, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
@@ -61,10 +56,6 @@ import {
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import {
-  assertEarnProviderSurfaced,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
@@ -76,7 +67,7 @@ import {
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import { assertStrategyDepositable } from "./admission";
+import { assertVaultDepositAdmissible } from "./admission";
 import { parseParams, parseQuery } from "./shared";
 
 /**
@@ -274,24 +265,12 @@ export async function extractEarnVaultDepositPolicyCandidate(
     throw internalError(`Earn strategy ${strategy.id} has no share mint`);
   }
 
-  // Shape check before anything else: a custodial provider reaching this route
-  // would silently skip its wallet-provisioning model.
-  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
-    throw badRequest(
-      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
-    );
-  }
-  if (!isEarnProviderId(strategy.provider)) {
-    throw providerNotConfigured(
-      `Earn provider ${strategy.provider} is not available in this deployment`
-    );
-  }
-  const provider = strategy.provider;
-
   // MONEY-IN GATES, in the same order and with the same meaning as
   // `POST /programs` (see routes/earn/CLAUDE.md → "Gate asymmetry"). Opening a
   // vault position is a new commitment, so it takes all of:
   //
+  //   shape       — a custodial provider reaching this route would silently
+  //                 skip its wallet-provisioning model.
   //   surfacing   — "SDP does not offer this provider", which no per-org
   //                 override can lift, and which reads differently from
   //                 entitlement. Checked first so a caller is never pointed at
@@ -303,18 +282,12 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //                 an operator's deliberate stop during an exploit or depeg —
   //                 stayed fundable by id.
   //
-  // Money-OUT must never inherit any of these (ADR 0002): un-offering a
-  // provider closes the door in, never the door out.
-  assertEarnProviderSurfaced(provider);
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    provider,
-    environment === "sandbox"
-  );
-  assertStrategyDepositable(strategy, environment);
+  // The sequence is SHARED with the button-configuration PUT
+  // (handlers/admission.ts) so the config a builder saves and the deposit this
+  // route accepts cannot drift apart. Money-OUT must never inherit any of
+  // these (ADR 0002): un-offering a provider closes the door in, never the
+  // door out.
+  const provider = await assertVaultDepositAdmissible(c, strategy);
 
   // The wallet must be one SDP can sign for, and the binding must carry a WRITE
   // scope. `wallets:read` on a binding only proves the key may LOOK at the

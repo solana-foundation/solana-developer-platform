@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { OnrampStepContent } from "./components/onramp-step-content";
+import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OnrampWizard, useOnrampWizard } from "./hooks/use-onramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
@@ -77,6 +78,11 @@ export function OnrampRail({
     (wizard.onboarding?.status === "customer_verifying" ||
       wizard.onboarding?.status === "funding_account_provisioning");
 
+  const summaryDetails = [
+    ...preStepSummaryDetails(t, counterpartyName, methodLabel),
+    ...wizard.summaryDetails,
+  ];
+  const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const transferTerminal = wizard.transferStatus
     ? isTerminalRampTransferStatus(wizard.transferStatus.status)
     : false;
@@ -97,19 +103,18 @@ export function OnrampRail({
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
-      summary={
-        <WizardSummaryList
-          details={[
-            ...preStepSummaryDetails(t, counterpartyName, methodLabel),
-            ...wizard.summaryDetails,
-          ]}
-        />
+      summary={<WizardSummaryList details={summaryDetails} />}
+      header={
+        hostedStage && wizard.transferStatus?.status !== "completed" ? (
+          <RampStatusInline direction="onramp" hosted transfer={wizard.transferStatus} />
+        ) : undefined
       }
       secondaryLabel={
         wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined
       }
       confirmSecondary={wizard.onTransactionStage}
       secondaryDisabled={wizard.isCanceling}
+      hideSecondary={transferTerminal}
       footerActions={
         transferTerminal ? (
           <Button asChild type="button">

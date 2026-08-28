@@ -24,6 +24,7 @@ const MODULE_METADATA = [
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/helius-rings",
+      "@sdp/helius-rings-sdk",
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/payments",
@@ -84,6 +85,13 @@ const MODULE_METADATA = [
     ],
   },
   {
+    name: "bigint-buffer",
+    directory: "packages/bigint-buffer",
+    purpose:
+      "Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding.",
+    allowedDependencies: [],
+  },
+  {
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
@@ -136,6 +144,13 @@ const MODULE_METADATA = [
     directory: "packages/sdp-helius-rings",
     purpose: "Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet).",
     allowedDependencies: [],
+  },
+  {
+    name: "@sdp/helius-rings-sdk",
+    directory: "packages/sdp-helius-rings-sdk",
+    purpose:
+      "Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads.",
+    allowedDependencies: ["@sdp/helius-rings"],
   },
   {
     name: "@sdp/private-channels",

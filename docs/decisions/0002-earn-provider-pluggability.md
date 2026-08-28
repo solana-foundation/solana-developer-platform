@@ -569,7 +569,9 @@ about cluster deployment. Check the chain for a per-cluster program id.
   production.** Provider-neutral, at the single writer of `earn_strategies`. It
   does not trust a client to get this right, and it is independent of the
   delist pass — which would otherwise leave stale mainnet rows behind whenever a
-  devnet read failed.
+  devnet read failed. *(Superseded 2026-08-26, PRO-1742 addendum below: mainnet
+  rows now DO enter non-production, but only through the sync's browse-only
+  mirror lane; the refusal survives as the own-lane foreign-cluster drop.)*
 - **No metrics outside production.** The bulk metrics endpoint is mainnet's, so
   `listStrategyMetrics` returns `[]` elsewhere and sandbox rows render no rate.
   A devnet APY would mean blending devnet Klend reserve rates — SDK-sized work
@@ -898,3 +900,165 @@ need a live `getConfig`, because only the running service knows what it was
 deployed with, so that assertion ships here behind
 `EARN_KORA_SPONSORSHIP_SMOKE` and goes unconditional once sdp-infra#64 reaches
 devnet.
+
+## Addendum (2026-08-26) — sandbox mirrors the mainnet catalogue behind a cluster toggle (PRO-1742)
+
+This reverses one rule of the 2026-08-14 addendum: "the catalogue sync refuses
+to STORE a mainnet instrument outside production". Reviewing the curated
+mainnet catalogue (what SDP actually offers customers) previously required
+doing that review IN production; now the surface that offers a review
+affordance, sandbox, can show the real shelf without being able to fund it.
+
+**Two lanes per non-production environment.** The hourly sync writes each
+non-production environment twice: the provider's OWN catalogue for that
+environment (the fundable shelf, exactly as before), plus a browse-only MIRROR
+of the production pass's accepted mainnet shelf. One fetch per data source per
+pass; the mirror is a second WRITE, never a second provider read. Reads default
+to the environment's own cluster; the mirror is an explicit `?cluster=` opt-in
+(the Treasury strategies card's toggle, sandbox-only). Mirrored rows derive
+`fundable: false` on every read and every provider mutation refuses them
+(`isClusterFundableInEnvironment`), so the honesty the old persistence refusal
+protected lives in the read model and the UI. The refusal itself survives as
+the own-lane foreign-cluster drop: a provider's non-production source reporting
+mainnet instruments is still drift, warned and skipped.
+
+**Each lane delists only the cluster sub-shelf it is the truth for**
+(`deleteUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
+set can never tear down the other lane's rows. The mirror lane additionally
+converges to EMPTY on a reliable "nothing is listed" answer: a successful
+production fetch with no accepted mainnet rows, or a steady-state skip (stub
+provider, production credentials absent or revoked). The usual empty-keep-set
+refusal stays absolute for fundable own shelves, where a wrong delete costs a
+customer a vault mid-deposit; the asymmetry flips for the mirror because its
+rows are browse-only and re-mirrored hourly, while refusing would serve
+orphaned "production catalogue" rows forever after production stopped vouching
+for them. The repository enforces that an authorized-empty delist is
+cluster-scoped, never environment-wide.
+
+**Accepted cap: the mirror is faithful only for cluster-distinct references.**
+The upsert key stays (provider, provider_reference, environment) with no
+cluster, so a reference listed by BOTH of an environment's truth sources
+collides; the environment's own (fundable) row wins the write and the mirror
+under-reports exactly those references (warned hourly, and the collided
+reference stays in the mirror's delist keep set so a failed own-lane write can
+never read as a delisting). Kamino's address-keyed references never collide. A
+provider keying both catalogues by a shared slug (Ground's `source.id`) would
+collide on every shared slug once surfaced. Decision: keep the bare triple.
+Extending the key to the cluster would make every bare-triple consumer
+(`updateStrategyMetrics` above all) hit both rows; revisit only if a slug-keyed
+provider ever needs a faithful mirror.
+
+**Accepted staleness, and one fidelity gap.** Mirrored rows refresh at the
+HOURLY catalogue cadence: the mirror upsert carries the snapshot's
+`currentApy` and `riskMetadata`, and the five-minute metrics pass deliberately
+does not cross environments (it matches the bare triple, so it would need the
+collision protection above). And the mirror carries the provider SNAPSHOT, not
+production's stored row, so an operator `paused`/`deprecated` on the
+production row does not propagate to the sandbox mirror row. Both are
+review-surface fidelity gaps, not deposit paths: `fundable: false` holds
+throughout.
+
+## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
+
+The B2B2C money path ships. An *external wallet* is a **non-custodial wallet**
+the partner's platform connects — SDP holds no key for it, and its owner is
+not an SDP tenant. Every prior vault money path resolved an exact custody
+wallet and signed from it. The contract decided here: **SDP builds and returns
+an unsigned
+transaction for the external wallet to sign, and records the movement when the
+signed transaction is submitted back, before SDP broadcasts it.**
+
+### The load-bearing question: who broadcasts
+
+The vault runtime is built around record-before-broadcast, and a caller-signed
+flow moves the point at which the signature becomes knowable. The answer that
+preserves the invariant is that **SDP stays the broadcaster**: the partner
+returns the signed bytes to `POST /v1/earn/external-wallet/deposits` (or
+`/withdrawals`), SDP verifies them, records the `earn_movements` row durably —
+signature, wire bytes, blockhash window — and only then sends. Every recovery
+property carries over unchanged: an ambiguous send leaves a reconcilable
+`requested` row, the sweep rebroadcasts the recorded bytes while the blockhash
+lives, and an unlanded transaction expires honestly. A partner CAN broadcast the
+signed bytes itself — nothing can stop the holder of a signed transaction — but
+the contract records the movement only on submit, and a same-signature
+rebroadcast by SDP is idempotent, so a partner that broadcasts AND submits still
+converges on one correct ledger row.
+
+### Not a third execution model
+
+An external-wallet movement is a `vault_direct` movement: one signed
+transaction, recorded before broadcast, chain lifecycle, same reconciler, same
+transition matrix, same org-scoped idempotency anchor. The execution model names
+HOW money moves on chain, not whose key signed. The signer distinction is a
+column pair — exactly one of `custody_wallet_id` and `owner_address` per vault
+row (migration 0070) — and every treasury read scopes by custody wallet, so
+external-wallet rows are structurally invisible to those surfaces rather than
+filtered by convention.
+
+### The two-call shape, and why the build persists
+
+Each direction is BUILD then SUBMIT. The build runs the gates, asks the
+provider for the plan, appends a memo carrying the built transaction's id
+(the on-chain identity the custody flow gives the idempotency key), simulates
+with the owner as fee payer, compiles, and persists the unsigned transaction
+(`earn_external_wallet_transactions`). Persisting is what makes the submit
+verifiable: the submit proves the returned bytes are a transaction SDP built by
+comparing MESSAGE bytes against the stored build, verifies the owner's ed25519
+signature over them, and takes nothing but signatures from the wire. Client
+bytes are never trusted for any movement fact.
+
+Idempotency is two composed protections. The submit's required
+`Idempotency-Key` anchors the movement (org-scoped, the 0059 rule), so a
+partner retry resolves the original movement; and each BUILD is consumable at
+most once (`movement_id`, guarded under a row lock), so a second key against
+the same build answers 409 instead of ledgering one on-chain transaction twice.
+The fingerprint includes the build id: a key retried against a REBUILT
+transaction is a different request and conflicts rather than silently replaying.
+
+### Gates, and the asymmetry again
+
+- **Deposit build**: the full money-in stack, unchanged in order and meaning —
+  environment capability (`isVaultDirectDepositEnabled`; production stays
+  closed by the same constant as the treasury deposit), the production
+  `minSharesOut` floor, surfacing, entitlement, catalogue admission.
+- **Withdrawal build**: exit safety in its strongest form. 404-scoping
+  (organization, environment, EXACT project, owner shape) and capability (501)
+  only. The exit works while the provider is disabled for new deposits.
+- **The gate moment is the build.** A signed transaction lives only inside its
+  blockhash window (~1 minute), so submit-time re-checks buy almost nothing —
+  and a partner already holding signed bytes could broadcast them anyway. What
+  SDP controls is what it will BUILD and what it records.
+- **No wallet policy, deliberately.** Wallet policy governs the organization's
+  custody and stands between a request and `createOrgSigner`; this path never
+  resolves a signer and moves the OWNER's money on the owner's own
+  signature, which IS the authorization. There is no signing sink for the
+  value-moving conformance inventory to find.
+
+### Scoping: the external wallet belongs to the partner org AND project
+
+The claim key for an external-wallet position is (org, **project**, environment,
+provider, vault, owner) — stricter than the custody claim, where the project is
+attribution only. A partner's sibling project is a different integration
+surface: it must not learn the position exists, let alone exit it. Movements
+carry the exact-claim FK onto (vault, owner) the way custody movements do onto
+(vault, wallet).
+
+### Accepted costs, stated so they are not rediscovered
+
+- **Owner pays everything** — fee and rent — until sponsorship lands. Kora
+  sponsorship for caller-signed movements is PRO-1744 (p0, follows separately;
+  co-signing a stranger's transaction is its own decision). The share-ATA rent
+  funder is recorded as NULL (the signing wallet paid and keeps it), so the
+  exit's rent refund defaults back to the owner with no attribution to carry.
+- **Live hydration of an external-wallet position reads the OWNER's balance in
+  that vault**, which includes shares acquired outside SDP. That is the honest
+  non-custodial answer — the chain cannot attribute fungible shares to SDP
+  movements — and the per-wallet read surface (PRO-1724) inherits it as a
+  documented property, not a bug.
+- **A partner that broadcasts itself and never submits leaves the movement
+  unledgered.** The contract requires submission through SDP; the memo-bound
+  build id makes such a transaction attributable after the fact, but nothing
+  writes the row.
+- **An unconsumed build is inert garbage** that expires with its blockhash; rows
+  accumulate until a cleanup sweep exists. Nothing reads them but their own
+  submit.
