@@ -48,6 +48,7 @@ registration. Everything harder is still ahead.
 | `HELIUS_RINGS_RPC_URL` | URL | Helius Solana RPC the Rings SDK reads and submits through, API key already applied. Required once Rings is enabled. |
 | `HELIUS_RINGS_INDEXER_URL` | URL | Photon indexer. Required once Rings is enabled. |
 | `HELIUS_RINGS_PROVER_URL` | URL | Proving service. Required once Rings is enabled. |
+| `HELIUS_RINGS_RING_RPC_URL` | URL | Helius ring RPC, which mints custom-ring auditor keys. Only ring bring-up needs it; absent, submitting a ring program id fails with `config_error` while everything else keeps working. |
 | `HELIUS_RINGS_ALLOW_INSECURE_HTTP` | `false` (default) / `true` | Permits plain-http upstreams. The public devnet indexer and prover are http on a real host, and the SDK refuses to dial them without this. In plaintext an indexer response reveals which notes an identity owns, so it is opt-in per environment rather than inferred from the URL. |
 | `SOLANA_NETWORK` | must be `devnet` | `HeliusRingsService` refuses to construct on any other network, and the schema pins `helius_rings_wallets.network` to `'devnet'`. Going to mainnet is a deliberate forward migration, not a config flip. |
 
@@ -173,6 +174,65 @@ resolved by **binding a different custody wallet** to the private wallet. That
 address is spent for Rings — SDP will not take it back — and the operator pays
 one wallet, not an unrecoverable balance. Provisioning surfaces the conflict as
 a `409` naming the owner, which is the signal to bind elsewhere.
+
+## Custom rings
+
+One custom ring per project. A custom ring is its own on-chain program
+(generated from the [`zolana-ring`](https://github.com/helius-labs/zolana-ring)
+cargo template); deposits into it are ring-bound, so only that ring's own
+instructions can ever spend the notes, and every ring transfer carries a
+message the ring's auditor key can decrypt. SDP operates a ring but does not
+deploy its program — the TypeScript SDK has no program-deploy capability.
+
+### Ops runbook: deploying a project's ring program
+
+1. Generate and build the ring program:
+   `cargo generate --git https://github.com/helius-labs/zolana-ring`, then
+   build per the template's README. One vetted binary can serve every project;
+   each deployment mints a distinct program id.
+2. Deploy to devnet with the upgrade authority set to one of the project's
+   active custody wallets:
+   `solana program deploy --upgrade-authority <custody-pubkey> <ring.so>`.
+   Bring-up signs as the upgrade authority through custody, so a program whose
+   authority custody does not hold cannot be brought up. Fund that custody
+   wallet with devnet SOL first: it fee-pays every bring-up transaction and
+   rents the config, ring-auth, and reader-record accounts.
+3. Hand the program id to the project admin. They enter it in the dashboard's
+   *Custom ring* card (or `POST /v1/helius-rings/ring`).
+
+SDP then completes bring-up through the SDK: an auditor key from the ring RPC
+(`HELIUS_RINGS_RING_RPC_URL`), the ring's create-config instruction, its
+shielded-pool registration, and a read grant naming the config authority as
+the ring's initial reader, each signed through custody and confirmed on chain.
+The recorded ring row moves `pending → active`, with any failure recorded on
+the row.
+
+### Semantics worth knowing
+
+- **Fail closed.** From the moment a ring row exists, shield and sync for the
+  project refuse to run (`config_error`) until the ring is `active`. A project
+  that declared a ring never silently deposits into the default public ring.
+- **Resume, never re-key.** Bring-up is idempotent against on-chain state:
+  re-submitting the same program id resumes from whatever already landed
+  (config present, pool registration missing, and so on). An existing on-chain
+  config is adopted as it stands — re-keying a live ring would orphan its
+  auditor.
+- **No re-pointing once active.** Submitting a different program id replaces a
+  ring that never went active (a mistyped id binds no notes, so correcting it
+  strands nothing) and is a `409` once the ring is active. Moving a project off
+  a live ring would strand every ring-bound note; that is a deliberate
+  migration, not a config flip.
+- **Balances partition.** With an active ring, sync reports only notes bound to
+  that ring. Default-pool notes a wallet held before the ring existed stop
+  appearing — they are not spendable through the project's flows.
+- **Auditor key.** Held by the Helius ring RPC, never by SDP; the config's
+  public half is recorded on the ring row and echoed by `GET /ring`.
+
+Ring withdrawals, transfers, audit reads and grants to further readers are not
+implemented; the gateway still refuses every non-shield money flow. Bring-up's
+initial grant makes the custody-held config authority the ring's only reader,
+so serving decrypted reads (or granting a third-party reader, which only the
+authority can sign) needs a future custody-signed endpoint.
 
 ## Background jobs
 
