@@ -209,13 +209,19 @@ export function earnMovementsProxyQuery(request: Request): ProxyQueryValidation 
 
   for (const key of incoming.keys()) {
     if (!allowed.has(key)) {
-      return { ok: false, message: `Unsupported earn movements query parameter: ${key}` };
+      return {
+        ok: false,
+        message: `Unsupported Embedded Yield movements query parameter: ${key}`,
+      };
     }
   }
 
   for (const key of allowed) {
     if (incoming.getAll(key).length > 1) {
-      return { ok: false, message: `Earn movements query parameter must be unique: ${key}` };
+      return {
+        ok: false,
+        message: `Embedded Yield movements query parameter must be unique: ${key}`,
+      };
     }
   }
 
@@ -223,7 +229,10 @@ export function earnMovementsProxyQuery(request: Request): ProxyQueryValidation 
   const limit = incoming.get("limit");
   if (limit !== null) {
     if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
-      return { ok: false, message: "Earn movements limit must be an integer from 1 to 100" };
+      return {
+        ok: false,
+        message: "Embedded Yield movements limit must be an integer from 1 to 100",
+      };
     }
     query.set("limit", limit);
   }
@@ -235,7 +244,7 @@ export function earnMovementsProxyQuery(request: Request): ProxyQueryValidation 
       before.length > MAX_CURSOR_LENGTH ||
       !/^[A-Za-z0-9_-]+$/.test(before)
     ) {
-      return { ok: false, message: "Earn movements cursor is invalid" };
+      return { ok: false, message: "Embedded Yield movements cursor is invalid" };
     }
     query.set("before", before);
   }
@@ -243,7 +252,10 @@ export function earnMovementsProxyQuery(request: Request): ProxyQueryValidation 
   const direction = incoming.get("direction");
   if (direction !== null) {
     if (direction !== "deposit" && direction !== "withdrawal") {
-      return { ok: false, message: "Earn movements direction must be deposit or withdrawal" };
+      return {
+        ok: false,
+        message: "Embedded Yield movements direction must be deposit or withdrawal",
+      };
     }
     query.set("direction", direction);
   }
@@ -258,7 +270,7 @@ export function earnMovementsProxyQuery(request: Request): ProxyQueryValidation 
     const value = incoming.get(key);
     if (value === null) continue;
     if (value.length === 0 || value.length > maxLength || !/^[A-Za-z0-9_-]+$/.test(value)) {
-      return { ok: false, message: `Earn movements ${key} is invalid` };
+      return { ok: false, message: `Embedded Yield movements ${key} is invalid` };
     }
     query.set(key, value);
   }

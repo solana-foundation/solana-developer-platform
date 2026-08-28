@@ -16,6 +16,7 @@ export const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   WORKSPACE_LOADING_PATH,
   "/pay/:token",
+  "/embedded-yield/integrate/:token",
   "/earn/integrate/:token",
   "/",
   "/docs(.*)",

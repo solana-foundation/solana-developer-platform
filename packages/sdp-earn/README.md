@@ -299,9 +299,10 @@ The external-wallet flow in one pass (PRO-1722):
    `failed`; the exit mirrors the deposit and takes only 404-scoping plus
    capability (ADR 0002 exit safety), so it works while deposits are closed.
 
-The button builder's engineering handoff (`/earn/integrate/:token`) emits this
-exact contract as its server snippet; the treasury dashboard flows use the
-SDP-signed routes. Deeper docs: gates and scoping in
+The button builder's engineering handoff (`/embedded-yield/integrate/:token`)
+emits this exact contract as its server snippet; legacy `/earn/integrate/:token`
+links permanently redirect there. The treasury dashboard flows use the SDP-signed
+routes. Deeper docs: gates and scoping in
 `apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
 `packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002
 (2026-08-26 addendum, "External wallets: caller-signed vault movements").
@@ -316,7 +317,7 @@ a deployed environment stays dark until it is switched on. `sdp-api` and
 API-side the hierarchy is owned by `isEarnEnabled`
 (`apps/sdp-api/src/lib/feature-flags.ts`); web-side the two flags declared in
 `apps/sdp-web/src/flags.ts` gate the nested route segments
-(`dashboard/markets/layout.tsx` → `markets/earn/layout.tsx`). The flags are
+(`dashboard/markets/layout.tsx`). The flags are
 module visibility, not the provider on/off lever — see the ADR 0002 addendum.
 
 ## Architecture: where everything lives
@@ -397,12 +398,13 @@ apps/sdp-api/src/
                                    invariants below).
 
 apps/sdp-web/src/app/
-  dashboard/markets/earn/          The dashboard module: earn-workspace
+  dashboard/markets/embedded-yield/ Canonical customer-facing route files.
+  dashboard/markets/earn/          Shared internal dashboard module: earn-workspace
                                    (overview), deposit/ (wizard + funding),
                                    earn-withdraw-modal, earn-program-data
                                    (SWR seam over the BFF), presentation
                                    helpers. All live data — no mocks.
-  api/dashboard/markets/earn/      BFF proxies to /v1/earn/*.
+  api/dashboard/markets/earn/      Internal BFF proxies to /v1/earn/*; unchanged.
 ```
 
 ## Catalogue data: the sync cron and metrics refresh
@@ -544,5 +546,6 @@ pnpm --filter @sdp/earn typecheck
 ```
 
 API-layer earn tests (routes, repository, availability) live in
-`apps/sdp-api` and run under vitest + testcontainers; web module tests live in
-`apps/sdp-web/src/app/dashboard/markets/earn`.
+`apps/sdp-api` and run under vitest + testcontainers. Canonical web route files
+live in `apps/sdp-web/src/app/dashboard/markets/embedded-yield`; shared internal
+module tests remain in `apps/sdp-web/src/app/dashboard/markets/earn`.
