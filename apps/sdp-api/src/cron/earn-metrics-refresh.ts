@@ -175,6 +175,12 @@ async function refreshProviderMetrics(
   }
 
   if (metrics === undefined) {
+    logVendorCallFailure(
+      client.provider,
+      "listStrategyMetrics",
+      new Error(`provider metrics exceeded the ${EARN_PROVIDER_METRICS_DEADLINE_MS}ms deadline`),
+      startedAt
+    );
     // Logged at error, not warn: the whole point of this pass is that a rate is
     // stays bounded by the frequent refresh cadence, and a provider that
     // cannot answer
