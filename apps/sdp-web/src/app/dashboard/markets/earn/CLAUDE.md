@@ -70,18 +70,21 @@ program create still sends the body `requestId` form.
 
 ## Routes
 
-- `page.tsx` → `EarnProgramWorkspace` — the Earn Program page: pick a strategy
-  from the live catalogue, then continue to the button builder.
-- `button-builder/page.tsx` → `EarnButtonBuilder` — the customer-facing button
-  preview plus a generated **server-side** integration snippet for the
+- `/dashboard/markets/embedded-yield` → `EarnProgramWorkspace`: pick a strategy
+  from the live catalogue, then continue to the button builder. The canonical
+  page and loading files live in `../embedded-yield/`; this directory keeps
+  shared internal Earn modules and legacy route shims only.
+- `/dashboard/markets/embedded-yield/button-builder` → `EarnButtonBuilder`: the
+  customer-facing button preview plus a generated **server-side** integration snippet for the
   EXTERNAL-WALLET flow (PRO-1722): build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
   snippet — a B2B2C partner cannot name a custody wallet. It also loads the
   saved project configuration.
-- `/earn/integrate/[token]` is the public, no-index engineering handoff. It is
-  intentionally outside the dashboard route and does not require Clerk auth.
+- `/embedded-yield/integrate/[token]` is the public, no-index engineering
+  handoff. It is intentionally outside the dashboard route and does not require
+  Clerk auth. Legacy `/earn/integrate/[token]` links permanently redirect there.
 - Both are `dynamic = "force-dynamic"` and resolve `loadEarnProviderAccess()`
   server-side per request. Provider access is organization-scoped; caching it
   would hand one org's entitlement to another.
@@ -124,8 +127,8 @@ program create still sends the body `requestId` form.
   the PUT was in flight must survive, and `hasUnsavedChanges` stays honest), and
   saved accent colors are uppercased on entry so lowercase-hex API writes still
   match the preset swatches. Saving produces a stable public
-  `/earn/integrate/:token` handoff for partner engineers. That page needs no
-  dashboard sign-in and never exposes tenant data or an API key; when the
+  `/embedded-yield/integrate/:token` handoff for partner engineers. That page
+  needs no dashboard sign-in and never exposes tenant data or an API key; when the
   configured strategy is hidden, delisted, or paused the API reports
   `strategyAvailable: false` and the page renders a stale notice instead of the
   snippet. The public read is three-way: only a definitive 404 renders
@@ -452,8 +455,8 @@ What makes this worth a section: **nothing catches it but a browser.** The types
 are correct, so `tsc` passes; the unit tests mock the module, so they pass; lint
 sees nothing. Any future server-side read of a dashboard constant belongs in a
 directive-free module for the same reason — and a surfacing change wants one
-browser pass on `/dashboard/markets/earn` and
-`/dashboard/markets/earn/button-builder`.
+browser pass on `/dashboard/markets/embedded-yield` and
+`/dashboard/markets/embedded-yield/button-builder`.
 
 ## Rules
 

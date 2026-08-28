@@ -21,7 +21,7 @@ describe("MarketsLanding", () => {
 
   it("links each path to its existing subnav destination", () => {
     expect(markup).toContain('href="/dashboard/markets/treasury-solutions"');
-    expect(markup).toContain('href="/dashboard/markets/earn"');
+    expect(markup).toContain('href="/dashboard/markets/embedded-yield"');
   });
 
   it("names the audience for both paths", () => {

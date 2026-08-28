@@ -25,10 +25,18 @@ describe("public web routes", () => {
     );
   });
 
-  it("keeps the exact Earn engineering handoff route unauthenticated", () => {
+  it("keeps canonical and legacy Embedded Yield handoff routes unauthenticated", () => {
+    expect(
+      isPublicRoute(
+        new NextRequest("https://dashboard.example.com/embedded-yield/integrate/public-token")
+      )
+    ).toBe(true);
     expect(
       isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate/public-token"))
     ).toBe(true);
+    expect(
+      isPublicRoute(new NextRequest("https://dashboard.example.com/embedded-yield/integrate"))
+    ).toBe(false);
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate"))).toBe(
       false
     );
@@ -38,7 +46,9 @@ describe("public web routes", () => {
       )
     ).toBe(false);
     expect(
-      isPublicRoute(new NextRequest("https://dashboard.example.com/dashboard/markets/earn"))
+      isPublicRoute(
+        new NextRequest("https://dashboard.example.com/dashboard/markets/embedded-yield")
+      )
     ).toBe(false);
   });
 });
