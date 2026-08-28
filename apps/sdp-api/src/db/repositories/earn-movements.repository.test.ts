@@ -886,6 +886,19 @@ describe("Unified earn movement ledger (postgres)", () => {
   });
 
   describe("reconciliation queue", () => {
+    // The claim is a tenant-UNSCOPED sweep, but this file's outer beforeEach
+    // deletes only its own organizations' rows. A sibling file that ran earlier
+    // on this worker's database leaves its last test's movements behind
+    // (seedTestDatabase truncates before each test, never after the last), and
+    // an older foreign requested/submitted row then outsorts this test's fresh
+    // rows in the quota, flipping the counted split. The queue tests assert
+    // global behavior, so they start from a globally empty queue.
+    beforeEach(async () => {
+      await getDb(env)
+        .prepare("DELETE FROM earn_movements WHERE execution_model = 'vault_direct'")
+        .run();
+    });
+
     it("prioritizes blockhash-bound work over older confirmed rows", async () => {
       const db = getDb(env);
       const confirmed = await ledger.createSignedVaultDepositIntent(intent());
