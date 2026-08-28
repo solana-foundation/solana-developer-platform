@@ -139,7 +139,10 @@ export function HeliusRingsWorkspace({
     return () => clearInterval(timer);
   }, [settling, tick]);
 
-  const gatewayPending = health !== null && health.gateway !== "green";
+  // Any upstream red — the composer surfaces a heads-up so the operator isn't
+  // surprised when the pipeline stops mid-flight on that upstream.
+  const upstreamsRed =
+    health !== null && RINGS_HEALTH_COMPONENTS.some((component) => health[component] === "red");
   const alerts = healthAlerts(health);
 
   const handleCreate = useCallback(async () => {
@@ -340,7 +343,7 @@ export function HeliusRingsWorkspace({
         </CardContent>
       </Card>
 
-      <OperationComposer wallets={wallets} gatewayRed={gatewayPending} onPrepared={refresh} />
+      <OperationComposer wallets={wallets} gatewayRed={upstreamsRed} onPrepared={refresh} />
 
       <ActivityCard operations={operations} onChanged={refresh} onSelect={setDetailOperationId} />
 

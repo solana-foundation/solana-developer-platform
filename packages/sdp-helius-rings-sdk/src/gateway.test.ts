@@ -33,8 +33,10 @@ describe("createRingsGateway", () => {
       allowInsecureHttp: false,
     }).probeHealth();
 
-    expect(health.gateway).toBe("red");
-    expect(health.detail?.gateway).toContain("CLIENT_INVALID_CONFIG");
+    // Client-init failure surfaces on each component tile so the reason
+    // reaches the operator whichever they look at.
+    expect(health.rpc).toBe("red");
+    expect(health.detail?.rpc).toContain("CLIENT_INVALID_CONFIG");
   });
 
   it("classifies an invalid configured tree without exposing its value", async () => {
@@ -91,8 +93,8 @@ describe("createRingsGateway", () => {
       allowInsecureHttp: false,
     }).probeHealth();
 
-    expect(health.detail?.gateway).toMatch(/^client unavailable: .+/);
-    expect(health.detail?.gateway).not.toBe("client unavailable: unknown error");
+    expect(health.detail?.rpc).toMatch(/^client unavailable: .+/);
+    expect(health.detail?.rpc).not.toBe("client unavailable: unknown error");
     expect(JSON.stringify(health)).not.toContain("super-secret-key");
   });
 });

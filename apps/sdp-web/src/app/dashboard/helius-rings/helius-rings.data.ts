@@ -7,7 +7,7 @@
 export type RingsHealthStatus = "green" | "amber" | "red";
 
 /** Mirrors RUNTIME_HEALTH_COMPONENTS in @sdp/helius-rings, in the API's order. */
-export const RINGS_HEALTH_COMPONENTS = ["rpc", "prover", "photon", "gateway"] as const;
+export const RINGS_HEALTH_COMPONENTS = ["rpc", "prover", "photon"] as const;
 export type RingsHealthComponent = (typeof RINGS_HEALTH_COMPONENTS)[number];
 
 export type RingsHealth = Record<RingsHealthComponent, RingsHealthStatus> & {

@@ -9,7 +9,6 @@
       "component_rpc": "RPC",
       "component_prover": "Prover",
       "component_photon": "Photon indexer",
-      "component_gateway": "Gateway",
       "status_green": "Operational",
       "status_amber": "Degraded",
       "status_red": "Unavailable",
@@ -134,7 +133,7 @@
       "summaryOperation": "Operation",
       "summaryAmount": "Amount",
       "summaryRecipient": "Recipient",
-      "gatewayRedNotice": "The Rings gateway is unavailable. You can still compose and confirm — the operation will run through policy and record an honest gateway failure."
+      "gatewayRedNotice": "One or more Rings upstreams are unavailable. You can still compose and confirm — the operation will run through policy and record an honest upstream failure."
     },
     "detail": {
       "title": "Operation detail",

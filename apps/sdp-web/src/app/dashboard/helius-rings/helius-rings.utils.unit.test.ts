@@ -94,7 +94,7 @@ describe("readShieldedAmount", () => {
 });
 
 function health(overrides: Partial<RingsHealth> = {}): RingsHealth {
-  return { rpc: "green", prover: "green", photon: "green", gateway: "green", ...overrides };
+  return { rpc: "green", prover: "green", photon: "green", ...overrides };
 }
 
 describe("healthReason", () => {
@@ -120,16 +120,14 @@ describe("healthAlerts", () => {
           rpc: "red",
           prover: "red",
           photon: "red",
-          gateway: "red",
           detail: {
             "rpc.reason": reason,
             "prover.reason": reason,
             "photon.reason": reason,
-            "gateway.reason": reason,
           },
         })
       )
-    ).toEqual([{ components: ["rpc", "prover", "photon", "gateway"], reason }]);
+    ).toEqual([{ components: ["rpc", "prover", "photon"], reason }]);
   });
 
   it("keeps distinct reasons apart, in component order", () => {
@@ -151,7 +149,7 @@ describe("healthAlerts", () => {
     expect(
       healthAlerts(health({ detail: { "rpc.reason": "stale note on a healthy probe" } }))
     ).toEqual([]);
-    expect(healthAlerts(health({ gateway: "red" }))).toEqual([]);
+    expect(healthAlerts(health({ rpc: "red" }))).toEqual([]);
     expect(healthAlerts(null)).toEqual([]);
   });
 });

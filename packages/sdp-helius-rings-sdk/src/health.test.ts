@@ -58,7 +58,7 @@ describe("probeRingsHealth", () => {
   it("reports every component green and omits detail when all three answer", async () => {
     const health = await probeRingsHealth(input());
 
-    expect(health).toEqual({ rpc: "green", photon: "green", prover: "green", gateway: "green" });
+    expect(health).toEqual({ rpc: "green", photon: "green", prover: "green" });
     expect(health.detail).toBeUndefined();
   });
 
@@ -207,17 +207,4 @@ describe("probeRingsHealth", () => {
     });
   });
 
-  it("keeps the in-process gateway green even when every upstream is down", async () => {
-    const health = await probeRingsHealth(
-      input({
-        client: { getLatestBlockhash: () => Promise.reject(new Error("no")) },
-        fetch: fetchStub({
-          indexer: () => Promise.reject(new Error("no")),
-          prover: () => Promise.reject(new Error("no")),
-        }),
-      })
-    );
-
-    expect(health.gateway).toBe("green");
-  });
 });

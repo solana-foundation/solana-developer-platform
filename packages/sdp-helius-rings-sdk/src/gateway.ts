@@ -40,7 +40,7 @@ export interface RingsGatewayConfig {
   readonly healthTimeoutMs?: number;
 }
 
-const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red", gateway: "red" };
+const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red" };
 
 function describeClientFailure(error: unknown, config: RingsGatewayConfig): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
@@ -89,9 +89,13 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
       try {
         resolved = await withHealthTimeout(client(), config.healthTimeoutMs);
       } catch (error) {
+        // The Zolana client couldn't even initialize — none of the per-upstream
+        // probes ran. Repeat the reason on each so the operator sees it whichever
+        // tile they look at.
+        const reason = `client unavailable: ${describeClientFailure(error, config)}`;
         return {
           ...ALL_RED,
-          detail: { gateway: `client unavailable: ${describeClientFailure(error, config)}` },
+          detail: { rpc: reason, photon: reason, prover: reason },
         };
       }
 

@@ -42,7 +42,6 @@ const ALL_GREEN: RuntimeHealth = {
   rpc: "green",
   prover: "green",
   photon: "green",
-  gateway: "green",
 };
 
 /** FNV-1a, hex-encoded — deterministic bytes without a crypto dependency. */

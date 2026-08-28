@@ -155,12 +155,10 @@ export class UnconfiguredRingsGateway implements RingsGatewayPort {
       rpc: "red",
       photon: "red",
       prover: "red",
-      gateway: "red",
       detail: {
         rpc: this.reason,
         photon: this.reason,
         prover: this.reason,
-        gateway: this.reason,
       },
     };
   }

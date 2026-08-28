@@ -50,7 +50,7 @@ export const KEY_KINDS = ["viewing", "nullifier"] as const;
 
 export const MATERIAL_TAGS = ["simulated", "live"] as const;
 
-export const RUNTIME_HEALTH_COMPONENTS = ["rpc", "prover", "photon", "gateway"] as const;
+export const RUNTIME_HEALTH_COMPONENTS = ["rpc", "prover", "photon"] as const;
 
 export const RUNTIME_HEALTH_STATUSES = ["green", "amber", "red"] as const;
 

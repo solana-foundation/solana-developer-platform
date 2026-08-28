@@ -1311,22 +1311,23 @@ describe("HeliusRingsService", () => {
   });
 
   describe("probeHealth", () => {
-    it("records gateway red when the port is not implemented", async () => {
+    it("records every component red when the port is not implemented", async () => {
       const health = await service().probeHealth();
 
-      expect(health.gateway).toBe("red");
       // Unobserved components read red, not green.
+      expect(health.rpc).toBe("red");
       expect(health.prover).toBe("red");
+      expect(health.photon).toBe("red");
     });
 
     it("records the gateway's component statuses when reachable", async () => {
       const health = await service({
         gateway: new InMemoryRingsGateway({
-          health: { rpc: "green", prover: "amber", photon: "green", gateway: "green" },
+          health: { rpc: "green", prover: "amber", photon: "green" },
         }),
       }).probeHealth();
 
-      expect(health).toMatchObject({ rpc: "green", prover: "amber", gateway: "green" });
+      expect(health).toMatchObject({ rpc: "green", prover: "amber", photon: "green" });
     });
 
     it("carries the probe's reason through to the response", async () => {
@@ -1339,7 +1340,6 @@ describe("HeliusRingsService", () => {
             rpc: "red",
             prover: "green",
             photon: "amber",
-            gateway: "green",
             detail: { rpc: "timed out", photon: "reported unhealthy" },
           },
         }),
@@ -1357,13 +1357,12 @@ describe("HeliusRingsService", () => {
 
       const health = await service({ gateway }).probeHealth();
 
-      // Not just the gateway: the probe is the only observer of the other
-      // three, so a probe that did not run leaves no evidence about any of them.
+      // The probe is the only observer of these components, so a probe that
+      // did not run leaves no evidence about any of them.
       expect(health).toMatchObject({
         rpc: "red",
         prover: "red",
         photon: "red",
-        gateway: "red",
       });
     });
   });
