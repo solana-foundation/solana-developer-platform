@@ -212,8 +212,6 @@ describe("startCron", () => {
   it("emits a sdp_cron_run proof-of-life event when a monitored tick runs", async () => {
     const bg = makeBg();
     const observability = makeObservability();
-    // Invoke the monitored work like Sentry would, so the proof-of-life
-    // wrapper around it actually runs.
     vi.mocked(observability.withMonitor).mockImplementation((_slug, fn) => fn());
     startCron({ env: {} as Env, bg, observability });
 

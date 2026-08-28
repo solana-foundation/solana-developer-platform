@@ -455,9 +455,6 @@ describe("runCronJob", () => {
     expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
   });
 
-  // The sdp_cron_run event is the log-based proof-of-life the Grafana staleness
-  // alert counts: exactly one event per managed monitor per execution, emitted
-  // whether or not Sentry is enabled, no-op ticks included.
   it("emits one sdp_cron_run event per managed tick", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
 
