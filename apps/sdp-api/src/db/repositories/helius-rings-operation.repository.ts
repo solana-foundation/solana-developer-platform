@@ -271,11 +271,11 @@ export interface HeliusRingsOperationRepository {
   /**
    * Rewrites a signed failure's code to `manual_reconciliation_required`, in place.
    *
-   * State stays `failed`; only the failure triple moves. Guarded so it only
-   * fires on a signed failure that has not already been escalated.
+   * State and failure_message stay put — the original message names the actual
+   * reason. Only failure_code and retryable move.
    */
   escalateToManualReconciliation(
-    input: HeliusRingsProjectScope & { id: string; message: string }
+    input: HeliusRingsProjectScope & { id: string }
   ): Promise<HeliusRingsOperationRow | null>;
   /**
    * Terminal failure. Writes the full failure triple the DB CHECK requires.

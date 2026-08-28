@@ -608,13 +608,9 @@ export class HeliusRingsService {
     const settled = await this.completeIfIndexed(operationId);
     if (settled.state === "completed") return settled;
 
-    const message = operation.outer_tx_signature
-      ? `signed transaction ${operation.outer_tx_signature} did not land after its blockhash expired; reconcile it on chain before starting another`
-      : "signed bytes did not land after their blockhash expired; reconcile on chain before starting another";
     const escalated = await this.operations.escalateToManualReconciliation({
       ...this.tenant,
       id: operation.id,
-      message,
     });
     if (!escalated) return this.toPrivateOperation(await this.requireOperation(operation.id));
 

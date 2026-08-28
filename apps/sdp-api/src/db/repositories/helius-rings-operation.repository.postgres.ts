@@ -477,16 +477,14 @@ export function createPostgresHeliusRingsOperationRepository(
       return result.results.map(mapRow);
     },
 
-    async escalateToManualReconciliation(
-      input: HeliusRingsProjectScope & { id: string; message: string }
-    ) {
-      // CAS against the same guard the query uses: only a signed failure whose
-      // code is not already manual_reconciliation_required is escalated.
+    async escalateToManualReconciliation(input: HeliusRingsProjectScope & { id: string }) {
+      // failure_message deliberately untouched: the original names the actual
+      // reason (rpc error, preflight rejection); overwriting it with a generic
+      // "blockhash expired" would lose the only diagnostic the row carries.
       const row = await db
         .prepare(
           `UPDATE helius_rings_operations
               SET failure_code = 'manual_reconciliation_required',
-                  failure_message = ?,
                   retryable = false,
                   updated_at = sdp_iso_now()
             WHERE id = ?
@@ -498,7 +496,7 @@ export function createPostgresHeliusRingsOperationRepository(
               AND failure_code <> 'manual_reconciliation_required'
           RETURNING *`
         )
-        .bind(input.message, input.id, input.organizationId, input.projectId)
+        .bind(input.id, input.organizationId, input.projectId)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },

@@ -69,6 +69,8 @@ export interface RingsOperationSummary {
 export interface RingsOperationEvent {
   kind: string;
   createdAt: string;
+  /** Redacted server-side; free-form. Consumers must not trust individual keys. */
+  payload?: Record<string, unknown> | null;
 }
 
 export interface RingsOperationDetail extends RingsOperationSummary {

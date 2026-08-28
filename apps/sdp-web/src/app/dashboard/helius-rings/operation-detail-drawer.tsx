@@ -53,7 +53,7 @@ export function OperationDetailDrawer({
 
   return (
     <Modal isOpen={operationId !== null} ariaLabel={title} onClose={onClose} size="md">
-      <div className="flex flex-col gap-4 p-6 pr-14">
+      <div className="flex max-h-[calc(100vh-4rem)] flex-col gap-4 overflow-y-auto p-6 pr-14">
         <h2 className="text-base font-medium text-primary">{title}</h2>
 
         {error ? <Callout variant="danger">{error}</Callout> : null}
@@ -116,7 +116,7 @@ export function OperationDetailDrawer({
                 <ol className="flex flex-col gap-1.5">
                   {keyedEvents.map((event) => (
                     <li key={event.key} className="flex items-baseline justify-between gap-4">
-                      <span className="text-sm text-primary">{event.kind}</span>
+                      <span className="text-sm text-primary">{formatEventKind(event)}</span>
                       <span className="text-sm text-secondary">
                         {formatTimeOfDay(event.createdAt, locale)}
                       </span>
@@ -130,6 +130,14 @@ export function OperationDetailDrawer({
       </div>
     </Modal>
   );
+}
+
+// `state.transitioned` alone hides the useful bit — surface the destination
+// state from the event payload so the timeline reads as a state trace.
+function formatEventKind(event: RingsOperationDetail["events"][number]): string {
+  if (event.kind !== "state.transitioned") return event.kind;
+  const to = event.payload && typeof event.payload === "object" ? event.payload.to : undefined;
+  return typeof to === "string" ? `state.transitioned(${to})` : event.kind;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
