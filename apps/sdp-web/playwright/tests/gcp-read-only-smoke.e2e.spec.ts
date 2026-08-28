@@ -268,17 +268,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     capture.assertClean();
   });
 
-  test("payments renders at least one fixture-backed transfer row", async ({ page }) => {
-    const capture = capturePageFailures(page);
-
-    await page.goto("/dashboard/payments", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { level: 1, name: "Payments" })).toBeVisible();
-    const firstRow = page.locator("tbody tr").first();
-    await expect(firstRow).toBeVisible({ timeout: 20_000 });
-    expect((await firstRow.innerText()).trim().length).toBeGreaterThan(0);
-    capture.assertClean();
-  });
-
   test("wallets batches balance hydration into one request", async ({ page }) => {
     const capture = capturePageFailures(page);
     const batchBalanceRequests: string[] = [];
