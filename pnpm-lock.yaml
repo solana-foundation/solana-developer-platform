@@ -147,6 +147,9 @@ importers:
       '@sdp/veda':
         specifier: workspace:*
         version: link:../../packages/sdp-veda
+      '@sdp/wisdomtree':
+        specifier: workspace:*
+        version: link:../../packages/sdp-wisdomtree
       '@sentry/node':
         specifier: 10.70.0
         version: 10.70.0(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))
