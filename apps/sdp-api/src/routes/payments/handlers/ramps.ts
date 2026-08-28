@@ -38,6 +38,7 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentTransferRow,
@@ -57,6 +58,7 @@ import {
   redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
+import { assertApprovedRampRedirectUrl } from "@/lib/ramps/redirect-destinations";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -101,6 +103,12 @@ import {
   resolveMuralOnrampAccount,
   resolveMuralRequirements,
 } from "./ramps/mural";
+import {
+  assertRampQuoteBindingMatches,
+  isRampQuoteBindingExpired,
+  type RampQuoteBinding,
+  rampQuoteExpiryProviderData,
+} from "./ramps/quote-binding";
 import { stripeOnrampQuote } from "./ramps/stripe";
 
 type OnrampCurrencyPair = {
@@ -265,6 +273,7 @@ async function resolveRampQuoteRequest(
   walletIdOrAddress: string
 ): Promise<RampQuotePolicyResolved> {
   assertRampCorridorSupported(direction, input);
+  assertApprovedRampRedirectUrl(c.env, input.redirectUrl);
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
 
@@ -404,6 +413,21 @@ async function persistRampQuoteTransfer(
   input: PersistRampQuoteTransferInput
 ): Promise<string> {
   const repository = getPaymentsRepository(c);
+  const isOnramp = input.direction === "onramp";
+  const binding: RampQuoteBinding = {
+    organizationId: input.scope.auth.organizationId,
+    projectId: input.projectId,
+    walletId: input.wallet.walletId,
+    counterpartyId: input.counterparty.id,
+    direction: input.direction,
+    token: rampTransferTokenMint(input.cryptoToken, c.env),
+    sourceAddress: isOnramp ? null : input.walletAddress,
+    destinationAddress: isOnramp ? input.walletAddress : null,
+    amount: input.cryptoAmount,
+    fiatCurrency: input.fiatCurrency,
+    fiatAmount: input.fiatAmount,
+  };
+
   const existing = await repository.getTransferByProviderReference({
     provider: input.quote.provider,
     providerReference: input.quote.id,
@@ -411,36 +435,56 @@ async function persistRampQuoteTransfer(
     projectId: input.projectId,
   });
   if (existing) {
+    // Idempotent replay only: the same reference with any changed input, or a
+    // reference whose bound session/quote already expired, fails closed.
+    assertRampQuoteBindingMatches(existing, binding);
+    if (isRampQuoteBindingExpired(existing)) {
+      throw conflict("Provider quote/session reference has expired; create a new quote.");
+    }
     return existing.id;
   }
 
   const apiKey = c.get("apiKey");
-  const isOnramp = input.direction === "onramp";
-  const created = await repository.createTransfer({
-    organizationId: input.scope.auth.organizationId,
-    projectId: input.projectId,
-    walletId: input.wallet.walletId,
-    counterpartyId: input.counterparty.id,
-    sourceAddress: isOnramp ? null : input.walletAddress,
-    destinationAddress: isOnramp ? input.walletAddress : null,
-    token: rampTransferTokenMint(input.cryptoToken, c.env),
-    amount: input.cryptoAmount,
-    memo: null,
-    type: input.direction,
-    direction: isOnramp ? "inbound" : "outbound",
-    status: rampQuoteTransferStatus(input.quote),
-    provider: input.quote.provider,
-    providerReference: input.quote.id,
-    deliveryMode: input.quote.deliveryMode,
-    fiatCurrency: input.fiatCurrency,
-    fiatAmount: input.fiatAmount,
-    rampsMemo: input.rampsMemo,
-    providerData: input.providerData ?? {},
-    serializedTx: null,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: apiKey ? apiKey.id : null,
-  });
+  let created: PaymentTransferRow | null;
+  try {
+    created = await repository.createTransfer({
+      organizationId: binding.organizationId,
+      projectId: binding.projectId,
+      walletId: binding.walletId,
+      counterpartyId: binding.counterpartyId,
+      sourceAddress: binding.sourceAddress,
+      destinationAddress: binding.destinationAddress,
+      token: binding.token,
+      amount: binding.amount,
+      memo: null,
+      type: input.direction,
+      direction: isOnramp ? "inbound" : "outbound",
+      status: rampQuoteTransferStatus(input.quote),
+      provider: input.quote.provider,
+      providerReference: input.quote.id,
+      deliveryMode: input.quote.deliveryMode,
+      fiatCurrency: binding.fiatCurrency,
+      fiatAmount: binding.fiatAmount,
+      rampsMemo: input.rampsMemo,
+      providerData: {
+        ...(input.providerData ?? {}),
+        ...rampQuoteExpiryProviderData(input.quote),
+      },
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: apiKey ? apiKey.id : null,
+    });
+  } catch (error) {
+    // The (provider, provider_reference) unique index spans all tenants: a
+    // reference already bound outside this tenant's scope surfaces here.
+    if (isPostgresUniqueViolation(error)) {
+      throw conflict(
+        "Provider quote/session reference is already bound to a different ramp transfer."
+      );
+    }
+    throw error;
+  }
 
   if (!created) {
     throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
