@@ -416,12 +416,13 @@ rates come from the same paged endpoint the catalogue uses.
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, live
-  metrics, vault-direct (deposit + read) and vault-withdraw. All are
-  method-presence guards in capabilities.ts and a provider may implement any
-  subset — Kamino has live metrics and vault-direct, Veda has vault-direct.
-  NOBODY implements vault-withdraw yet, which is a statement about SDP's
-  plumbing rather than about anyone's right to their money (see
-  `docs/decisions/0003-veda-vault-withdrawals.md`).
+  metrics, vault-direct (deposit + read), vault-withdraw, and deposit
+  eligibility. All are method-presence guards in capabilities.ts, and a
+  provider may implement any subset. `supportsDepositEligibility` is a
+  provider-side KYC check MONEY-IN paths consult, never exits; WisdomTree
+  implements it over its Connect wallet registry. Vault-withdraw capability is
+  a statement about SDP's plumbing rather than about anyone's right to their
+  money (see `docs/decisions/0003-veda-vault-withdrawals.md`).
 - **`sponsoredPrograms(cluster)` is a REQUIRED member of
   `EarnVaultDirectProvider`, not an optional capability** (PRO-1736). It returns
   every program the client may emit an instruction for, as plain base58 strings,
