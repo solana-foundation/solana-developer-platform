@@ -190,6 +190,33 @@ describe("applyRampSettlementEvent", () => {
     expect(dispatchWorkflowEvent).not.toHaveBeenCalled();
   });
 
+  it("does not write a provider-customer link from a refused event", async () => {
+    await seedTransfer({
+      id: "xfr_refused_link",
+      reference: "order_refused_link",
+      status: "settling",
+    });
+    await applyRampSettlementEvent(env, {
+      provider: "coinbase",
+      kind: "failed",
+      reference: "order_refused_link",
+      error: "declined",
+    });
+
+    await applyRampSettlementEvent(env, {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_refused_link",
+      receivedAmount: "9",
+      providerCustomerId: "cust_from_losing_event",
+    });
+
+    const links = await getDb(env)
+      .prepare("SELECT id FROM counterparty_provider_accounts")
+      .all<{ id: string }>();
+    expect(links.results).toHaveLength(0);
+  });
+
   it("makes exact retries idempotent", async () => {
     await seedTransfer({ id: "xfr_retry", reference: "order_retry", status: "settling" });
     const event: RampSettlementEvent = {

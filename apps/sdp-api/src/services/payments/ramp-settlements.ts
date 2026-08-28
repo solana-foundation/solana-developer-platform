@@ -95,12 +95,15 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
   }
 
   // The status transition and the provider-customer link derive from one
-  // provider event, so they land or roll back together.
+  // provider event, so they land or roll back together — and an event whose
+  // transition was refused (lost race, out-of-order redelivery) has no
+  // effects at all: no link write, no workflow trigger.
   const applied = await getDb(env).transaction(async (tx) => {
     const client = asTransactionalClient(tx);
     const updated =
       await createSystemTransactionalPaymentsRepository(client).updateTransferStatusGuarded(update);
     if (
+      updated !== null &&
       event.providerCustomerId !== undefined &&
       transfer.counterparty_id !== null &&
       transfer.project_id !== null
