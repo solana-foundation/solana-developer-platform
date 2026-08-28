@@ -14,7 +14,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
-  earnProgram: "/dashboard/markets/earn",
+  earnProgram: "/dashboard/markets/embedded-yield",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
