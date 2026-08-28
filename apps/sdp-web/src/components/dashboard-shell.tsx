@@ -79,6 +79,8 @@ import {
   getNavSections,
   type NavItem,
   type NavSection,
+  withSubnavOpen,
+  withSubnavToggled,
 } from "@/components/dashboard-nav";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
@@ -218,6 +220,7 @@ function SidebarGroup({
   showTopSeparator,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
   variant,
 }: {
   title: string;
@@ -228,6 +231,12 @@ function SidebarGroup({
   showTopSeparator: boolean;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  /**
+   * Open a section without closing it again. Following a top-level item is a
+   * request to go there, so it reveals the section's pages; toggling would
+   * collapse the submenu of the page being navigated to (HOO-1218).
+   */
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
@@ -262,7 +271,15 @@ function SidebarGroup({
               <div className="relative flex items-center">
                 <Link
                   href={item.href}
-                  onClick={onNavigate}
+                  onClick={() => {
+                    // The chevron still toggles. This only ever opens, so a
+                    // second click on the section you are already in does not
+                    // hide its pages.
+                    if (subnavKey) {
+                      onSubnavOpen(subnavKey);
+                    }
+                    onNavigate?.();
+                  }}
                   title={isCollapsed ? item.label : undefined}
                   aria-label={
                     isCollapsed && item.badge
@@ -382,6 +399,7 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
 }: {
   bottomNavItems: NavItem[];
   navSections: NavSection[];
@@ -393,6 +411,7 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -433,6 +452,7 @@ function DashboardSidebarContent({
             showTopSeparator={idx > 0}
             openSubnavs={openSubnavs}
             onSubnavToggle={onSubnavToggle}
+            onSubnavOpen={onSubnavOpen}
             variant={variant}
           />
         ))}
@@ -611,14 +631,33 @@ export function DashboardShell({
     subnavHydratedRef.current = true;
   }, []);
 
+  const persistSubnav = (key: DashboardSubnavKey, open: boolean) => {
+    if (subnavHydratedRef.current) {
+      window.localStorage.setItem(dashboardSubnavStorageKey(key), String(open));
+    }
+  };
+
+  // Both handlers compute the next state from the rendered value and write to
+  // storage outside the setter. React may replay a state updater, so a
+  // localStorage write placed inside one runs more than once.
   const toggleSubnav = (key: DashboardSubnavKey) => {
-    setOpenSubnavs((current) => {
-      const next = { ...current, [key]: !current[key] };
-      if (subnavHydratedRef.current) {
-        window.localStorage.setItem(dashboardSubnavStorageKey(key), String(next[key]));
-      }
-      return next;
-    });
+    const next = withSubnavToggled(openSubnavs, key);
+    setOpenSubnavs(next);
+    persistSubnav(key, next[key]);
+  };
+
+  /**
+   * Following a top-level item opens its section (HOO-1218). Persisted like a
+   * toggle, because a section opened by navigating is still the reader's last
+   * expressed preference and should survive a reload.
+   */
+  const openSubnav = (key: DashboardSubnavKey) => {
+    const next = withSubnavOpen(openSubnavs, key);
+    if (next === openSubnavs) {
+      return;
+    }
+    setOpenSubnavs(next);
+    persistSubnav(key, true);
   };
 
   useEffect(() => {
@@ -757,6 +796,7 @@ export function DashboardShell({
             onOrganizationSwitchingChange={setOrganizationSwitching}
             openSubnavs={openSubnavs}
             onSubnavToggle={toggleSubnav}
+            onSubnavOpen={openSubnav}
           />
           <button
             type="button"
@@ -819,6 +859,7 @@ export function DashboardShell({
                 onOrganizationSwitchingChange={setOrganizationSwitching}
                 openSubnavs={openSubnavs}
                 onSubnavToggle={toggleSubnav}
+                onSubnavOpen={openSubnav}
               />
             </div>
           </div>

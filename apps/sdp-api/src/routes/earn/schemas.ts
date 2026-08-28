@@ -362,6 +362,83 @@ export const earnVaultWithdrawalParamsSchema = earnVaultMovementParamsSchema;
  */
 export const earnVaultWithdrawalsQuerySchema = earnVaultMovementsQuerySchema;
 
+// ---------------------------------------------------------------------------
+// External-wallet (caller-signed) vault flows (PRO-1722): SDP builds unsigned
+// transactions for a wallet it does not custody, and records the movement when
+// the signed transaction is submitted back.
+// ---------------------------------------------------------------------------
+
+/** Same trim + isAddress convention as the payments destination schema. */
+const solanaOwnerAddressSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim() : value),
+  z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
+    message: "ownerAddress must be a base58 Solana address",
+  })
+);
+
+/**
+ * Build one unsigned deposit transaction for an external wallet. Shares the
+ * custody deposit's amount/floor shapes; the wallet is an ADDRESS, because
+ * there is no custody row to name.
+ */
+export const earnExternalWalletDepositTransactionSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** The external wallet that will sign, own the shares, and pay the fee. */
+  ownerAddress: solanaOwnerAddressSchema,
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
+  /** Optional slippage floor, in shares, as a decimal string. */
+  minSharesOut: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
+    .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
+    .optional(),
+});
+
+/**
+ * Build one unsigned exit transaction for an external-wallet position. The
+ * caller names its own POSITION, never a strategy and never a raw vault
+ * address, for the same ADR 0002 exit-safety reason as the custody exit.
+ */
+export const earnExternalWalletWithdrawalTransactionSchema = z.object({
+  /** The `earn_positions` row being exited. */
+  positionId: z.string().min(1).max(128),
+  /** Shares to redeem, decimal string in share units. */
+  shares: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
+});
+
+/**
+ * Submit the signed bytes back, both directions. `signedTransaction` is
+ * bounded by Solana's own packet limit (1,232 bytes is at most 1,644 base64
+ * characters); anything larger could never broadcast, so it is refused at the
+ * schema. Idempotency is header-only, exactly like the custody vault routes:
+ * the chain has no request dedupe to anchor a body key to.
+ */
+export const earnExternalWalletSubmitSchema = z.object({
+  /** The built transaction (`transactionId` from the build response). */
+  transactionId: z.string().min(1).max(128),
+  /** Base64 wire bytes of the signed transaction. */
+  signedTransaction: z
+    .string()
+    .min(1)
+    .max(1700)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/, "signedTransaction must be base64"),
+  /** Retired on this route, same as the custody vault routes. */
+  requestId: z
+    .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
+    .optional(),
+});
+
 /**
  * The cross-provider movement feed.
  *

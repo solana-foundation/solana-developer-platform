@@ -15,7 +15,6 @@
       "transferListMissing": "Transfer list response is missing transfer data.",
       "transferLookupFailed": "Transfer lookup failed ({status}).",
       "transferLookupMissing": "Transfer lookup response is missing transfer data.",
-      "transferLookupMultiple": "Transfer lookup returned multiple transfers.",
       "transferCancellationFailed": "Transfer cancellation failed ({status}).",
       "rampEstimateRequestFailed": "Ramp estimate request failed ({status}).",
       "rampEstimateMissing": "Ramp estimate response is missing estimates.",
@@ -164,9 +163,6 @@
       "providerDeposit": "{provider} deposit",
       "quoteRequestFailedStatus": "Ramp quote request failed ({status}).",
       "quoteResponseMissingDetails": "Ramp quote response is missing quote details.",
-      "creatingQuote": "Creating quote.",
-      "widgetReady": "Widget ready.",
-      "quoteReady": "Quote ready.",
       "unableToCreateQuote": "Unable to create quote.",
       "quoteRequestFailed": "Ramp quote request failed.",
       "settingUpAccount": "Setting up your account.",
@@ -207,7 +203,6 @@
       "selectCounterparty": "Select a counterparty",
       "searchCounterparties": "Search counterparties",
       "counterpartiesLoadFailed": "Failed to load counterparties.",
-      "openFullScreen": "Open full screen",
       "selectField": "Select {field}",
       "search": "Search…",
       "stripeLoadError": "Couldn't load Stripe checkout",
@@ -243,7 +238,9 @@
         "updated": "Transfer status updated",
         "currentProviderStatus": "Current provider status: {status}.",
         "preparing": "Preparing transfer status",
-        "preparingDescription": "We are waiting for the transfer record tied to this quote."
+        "preparingDescription": "We are waiting for the transfer record tied to this quote.",
+        "waitingForPayment": "Waiting for payment",
+        "waitingForPaymentHostedDescription": "Complete the payment in the provider window above. This deposit updates automatically once the provider confirms it."
       }
     },
     "onchainSend": {
@@ -661,10 +658,12 @@
       "payoutStatus": "Payout status",
       "payoutAmount": "Payout amount",
       "cryptoTransferId": "Crypto transfer ID",
-      "solanaSignature": "Solana signature",
+      "solanaSignature": "Onchain signature",
       "moneygramError": "MoneyGram error",
       "lastUpdated": "Last updated",
-      "copy": "Copy {label}"
+      "copy": "Copy {label}",
+      "viewReceipt": "View receipt",
+      "receipt": "Receipt"
     },
     "requestFailed": "Request failed.",
     "submitting": "Submitting...",
