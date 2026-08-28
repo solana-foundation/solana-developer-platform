@@ -302,15 +302,16 @@ export function useRampWizard<TId extends string>(
   };
   const retryQuoteCreation = () => void runQuoteCreation();
   const readyForQuote = isLastStep && requirements.onboarding?.status === "ready" && quote === null;
-  const runQuoteCreationRef = useRef(runQuoteCreation);
-  runQuoteCreationRef.current = runQuoteCreation;
+  // Deliberately no dependency array: the attempted-guard makes the body a
+  // once-per-instance no-op, and running on every commit means the latest
+  // closure fires without a render-time ref write.
   useEffect(() => {
     if (!readyForQuote || quoteCreationAttempted.current) {
       return;
     }
     quoteCreationAttempted.current = true;
-    void runQuoteCreationRef.current();
-  }, [readyForQuote]);
+    void runQuoteCreation();
+  });
 
   const advanceRequirementsAndProceed = async () => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
