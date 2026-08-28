@@ -462,6 +462,7 @@ async function persistRampQuoteTransfer(
       id: input.transferId,
       organizationId: binding.organizationId,
       projectId: binding.projectId,
+      custodyWalletId: binding.custodyWalletId,
       walletId: binding.walletId,
       counterpartyId: binding.counterpartyId,
       sourceAddress: binding.sourceAddress,
