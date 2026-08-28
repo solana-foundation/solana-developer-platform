@@ -25,8 +25,6 @@ interface RampWizardShellProps {
   children: ReactNode;
   /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
   header?: ReactNode;
-  /** Persistent right-hand rail; when present it replaces the "View summary" modal. */
-  aside?: ReactNode;
   summary?: ReactNode;
   footerActions?: ReactNode;
   hidePrimary?: boolean;
@@ -50,7 +48,6 @@ export function RampWizardShell({
   onCounterpartyCreated,
   children,
   header,
-  aside,
   summary,
   footerActions,
   hidePrimary,
@@ -70,9 +67,7 @@ export function RampWizardShell({
           total: steps.length,
         })}
         header={header}
-        aside={aside}
-        maxWidthClassName={aside === undefined ? undefined : "max-w-6xl"}
-        summary={aside === undefined ? summary : undefined}
+        summary={summary}
         footer={
           <div className="flex items-center justify-between gap-3">
             {hideSecondary ? (

@@ -17,12 +17,20 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
 function transferStatusCopy(
   t: Translate,
   direction: RampDirection,
-  status: string
+  status: string,
+  hosted: boolean
 ): TransferStatusCopy {
   const onramp = direction === "onramp";
   switch (status) {
     case "pending":
     case "awaiting_payment":
+      if (hosted) {
+        return {
+          title: t("DashboardPayments.ramps.status.waitingForPayment"),
+          description: t("DashboardPayments.ramps.status.waitingForPaymentHostedDescription"),
+          state: "loading",
+        };
+      }
       return {
         title: onramp
           ? t("DashboardPayments.ramps.status.waitingForFunding")
@@ -99,13 +107,16 @@ function statusIcon(state: TransferStatusCopy["state"]) {
 export function RampStatusPanel({
   direction,
   transfer,
+  hosted = false,
 }: {
   direction: RampDirection;
   transfer: PaymentTransferSummary | null | undefined;
+  /** The customer pays inside an embedded provider window, not via copied instructions. */
+  hosted?: boolean;
 }) {
   const t = useTranslations();
   const copy: TransferStatusCopy = transfer
-    ? transferStatusCopy(t, direction, transfer.status)
+    ? transferStatusCopy(t, direction, transfer.status, hosted)
     : {
         title: t("DashboardPayments.ramps.status.preparing"),
         description: t("DashboardPayments.ramps.status.preparingDescription"),

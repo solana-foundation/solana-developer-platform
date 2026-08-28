@@ -239,7 +239,9 @@
         "updated": "Transfer status updated",
         "currentProviderStatus": "Current provider status: {status}.",
         "preparing": "Preparing transfer status",
-        "preparingDescription": "We are waiting for the transfer record tied to this quote."
+        "preparingDescription": "We are waiting for the transfer record tied to this quote.",
+        "waitingForPayment": "Waiting for payment",
+        "waitingForPaymentHostedDescription": "Complete the payment in the provider window above. This deposit updates automatically once the provider confirms it."
       }
     },
     "onchainSend": {

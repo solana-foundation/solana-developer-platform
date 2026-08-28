@@ -191,6 +191,11 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
             src={quote.hostedUrl}
           />
         )}
+        {transferStatus?.status === "completed" ? null : (
+          <div className="rounded-lg border border-border-default bg-warning-bg p-4">
+            <RampStatusPanel direction="onramp" hosted transfer={transferStatus} />
+          </div>
+        )}
       </div>
     );
   }
