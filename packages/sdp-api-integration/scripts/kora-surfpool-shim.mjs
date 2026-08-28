@@ -127,6 +127,16 @@ async function handleRpc(method, params) {
   }
 }
 
+function isAlreadyProcessedError(error) {
+  return /already (been )?processed/i.test(String(error?.message ?? error));
+}
+
+function transactionSignature(signedTransaction) {
+  const decoded = getTransactionDecoder().decode(base64.encode(signedTransaction));
+  const [firstSignature] = Object.values(decoded.signatures);
+  return base58.decode(firstSignature);
+}
+
 async function sendTransactionWithRetry(signedTransaction) {
   const params = [
     signedTransaction,
@@ -136,9 +146,19 @@ async function sendTransactionWithRetry(signedTransaction) {
       preflightCommitment: "confirmed",
     },
   ];
-  const signature = await solanaRpc("sendTransaction", params, {
-    timeoutMs: sendTransactionTimeoutMs,
-  });
+  let signature;
+  try {
+    signature = await solanaRpc("sendTransaction", params, {
+      timeoutMs: sendTransactionTimeoutMs,
+    });
+  } catch (error) {
+    if (!isAlreadyProcessedError(error)) {
+      throw error;
+    }
+    signature = transactionSignature(signedTransaction);
+    console.warn(`Transaction ${signature} was already processed; treating the send as landed.`);
+    return signature;
+  }
 
   if (await waitForTransactionStatus(signature)) {
     return signature;
