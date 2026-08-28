@@ -33,12 +33,6 @@ type TransferDetailFieldSpec<TSettlement> =
       text: (settlement: TSettlement) => string | null;
     }
   | {
-      kind: "link";
-      labelKey: MessageKey;
-      textKey: MessageKey;
-      href: (settlement: TSettlement, context: TransferDetailFieldContext) => string | null;
-    }
-  | {
       kind: "explorerTx";
       labelKey: MessageKey;
       signature: (settlement: TSettlement) => string | null;
@@ -53,19 +47,7 @@ export interface ProviderTransferDetailRow {
   mono?: boolean;
 }
 
-function moonpayReceiptUrl(transactionId: string, cluster: SolanaCluster): string {
-  const host =
-    cluster === "mainnet-beta" ? "https://buy.moonpay.com" : "https://buy-sandbox.moonpay.com";
-  return `${host}/transaction_receipt?transactionId=${encodeURIComponent(transactionId)}`;
-}
-
 const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] = [
-  {
-    kind: "link",
-    labelKey: "DashboardPayments.transferDetails.receipt",
-    textKey: "DashboardPayments.transferDetails.viewReceipt",
-    href: (settlement, { cluster }) => moonpayReceiptUrl(settlement.transactionId, cluster),
-  },
   {
     kind: "text",
     labelKey: "DashboardPayments.transferDetails.providerFee",
@@ -166,13 +148,6 @@ function rowsFromSpecs<TSettlement>(
         const text = spec.text(settlement);
         if (text !== null) {
           rows.push({ label: t(spec.labelKey), value: text });
-        }
-        break;
-      }
-      case "link": {
-        const href = spec.href(settlement, context);
-        if (href !== null) {
-          rows.push({ label: t(spec.labelKey), value: t(spec.textKey), href });
         }
         break;
       }
