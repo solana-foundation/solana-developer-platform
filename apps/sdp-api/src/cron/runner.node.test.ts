@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundRunner } from "@/runtime/background";
+import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
@@ -39,6 +40,11 @@ const fakeTask = {
   off: vi.fn(),
   once: vi.fn(),
 };
+
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent: vi.fn(),
+}));
 
 vi.mock("node-cron", () => ({
   schedule: (...args: unknown[]) => scheduleMock(...args),
@@ -200,6 +206,29 @@ describe("startCron", () => {
         schedule: { type: "crontab", value: "*/5 * * * *" },
         checkinMargin: 3,
       }
+    );
+  });
+
+  it("emits a sdp_cron_run proof-of-life event when a monitored tick runs", async () => {
+    const bg = makeBg();
+    const observability = makeObservability();
+    vi.mocked(observability.withMonitor).mockImplementation((_slug, fn) => fn());
+    startCron({ env: {} as Env, bg, observability });
+
+    (scheduleMock.mock.calls[3][1] as () => void)();
+    const passed = vi.mocked(runWorkflowExecutions).mock.calls[0][0].observability;
+    await passed?.withMonitor("sdp-api-run-workflow-executions", async () => undefined, {
+      schedule: { type: "crontab", value: "*/5 * * * *" },
+    });
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_cron_run",
+        monitor: "sdp-api-run-workflow-executions",
+        status: "ok",
+        duration_ms: expect.any(Number),
+      })
     );
   });
 

@@ -75,6 +75,9 @@ jobs:
           VERCEL_ENV: production
         run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run test:e2e:gcp-smoke
 
+      - name: Private-channels vendor sandbox smoke
+        run: pnpm test:private-channels
+
       - name: Report run to Loki
         if: always()
         continue-on-error: true

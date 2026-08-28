@@ -107,6 +107,7 @@ async function seedRampEventTransfer(params: {
   providerReference: string;
   type: "onramp" | "offramp";
   amount?: string;
+  providerData?: Record<string, unknown>;
 }): Promise<void> {
   const now = new Date().toISOString();
   await getDb(env)
@@ -136,7 +137,7 @@ async function seedRampEventTransfer(params: {
       "hosted",
       "USD",
       "25",
-      {},
+      params.providerData ?? {},
       null,
       null,
       null,
@@ -1164,6 +1165,239 @@ describe("Payments routes — ramps", () => {
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("ramp session and destination binding", () => {
+    const MONEYGRAM_WIDGET_URL = "https://playground.xramps.moneygram.com/widget?intent=transfer";
+
+    function moneygramSessionJwt(expSeconds: number): string {
+      const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+      return `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ exp: expSeconds })}.sig`;
+    }
+
+    function moneygramSessionResponse(params: {
+      sessionId: string;
+      widgetUrl?: string;
+      expSeconds?: number;
+    }): Response {
+      return new Response(
+        JSON.stringify({
+          sessionToken: moneygramSessionJwt(
+            params.expSeconds ?? Math.floor(Date.now() / 1000) + 3600
+          ),
+          sessionId: params.sessionId,
+          widgetUrl: params.widgetUrl ?? MONEYGRAM_WIDGET_URL,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    async function createMoneygramOnrampQuote(
+      counterpartyId: string,
+      fiatAmount: string
+    ): Promise<Response> {
+      return app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moneygram",
+            counterpartyId,
+            destinationWallet: TEST_WALLET_ID,
+            cryptoToken: "USDC",
+            fiatCurrency: "USD",
+            fiatAmount,
+          }),
+        },
+        env
+      );
+    }
+
+    it.each([
+      ["http://example.com/onramp-done", "insecure scheme"],
+      ["//example.com/onramp-done", "protocol-relative"],
+      ["https://evil.example.net/onramp-done", "unapproved host"],
+    ])("rejects a hostile redirectUrl (%s — %s)", async (redirectUrl) => {
+      const counterpartyId = await seedCounterparty({ externalId: "moonpay_redirect_guard" });
+
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            destinationWallet: TEST_WALLET_ID,
+            cryptoToken: "SOL",
+            fiatCurrency: "USD",
+            fiatAmount: "120.50",
+            redirectUrl,
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("redirectUrl");
+    });
+
+    it("creates a MoneyGram session quote bound to the session expiry", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "moneygram_bind_happy" });
+      const expSeconds = Math.floor(Date.now() / 1000) + 3600;
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          moneygramSessionResponse({ sessionId: "mg_sess_bind_1", expSeconds })
+        );
+
+      const res = await createMoneygramOnrampQuote(counterpartyId, "25");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { quote: { sessionId: string; widgetUrl: string; expiresAt?: string } };
+      };
+      expect(body.data.quote.sessionId).toBe("mg_sess_bind_1");
+      const widgetUrl = new URL(body.data.quote.widgetUrl);
+      expect(widgetUrl.origin).toBe("https://playground.xramps.moneygram.com");
+      expect(widgetUrl.searchParams.get("mode")).toBe("on-ramp");
+      expect(body.data.quote.expiresAt).toBe(new Date(expSeconds * 1000).toISOString());
+
+      const row = await getDb(env)
+        .prepare(
+          `SELECT provider_data FROM payment_transfers
+           WHERE provider = 'moneygram' AND provider_reference = 'mg_sess_bind_1'`
+        )
+        .first<{ provider_data: { rampQuote?: { expiresAt?: string } } }>();
+      expect(row?.provider_data.rampQuote?.expiresAt).toBe(
+        new Date(expSeconds * 1000).toISOString()
+      );
+      fetchSpy.mockRestore();
+    });
+
+    it("fails closed when MoneyGram returns an untrusted widget URL", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "moneygram_bad_widget" });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        moneygramSessionResponse({
+          sessionId: "mg_sess_hostile_1",
+          widgetUrl: "http://playground.xramps.moneygram.com/widget",
+        })
+      );
+
+      const res = await createMoneygramOnrampQuote(counterpartyId, "25");
+
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("untrusted widget URL");
+
+      const row = await getDb(env)
+        .prepare(
+          `SELECT id FROM payment_transfers
+           WHERE provider = 'moneygram' AND provider_reference = 'mg_sess_hostile_1'`
+        )
+        .first<{ id: string }>();
+      expect(row ?? null).toBeNull();
+      fetchSpy.mockRestore();
+    });
+
+    it("replays a session quote idempotently but fails closed on input mutation", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "moneygram_bind_reuse" });
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_reuse_1" }))
+        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_reuse_1" }))
+        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_reuse_1" }));
+
+      const created = await createMoneygramOnrampQuote(counterpartyId, "25");
+      expect(created.status).toBe(200);
+
+      const replayed = await createMoneygramOnrampQuote(counterpartyId, "25");
+      expect(replayed.status).toBe(200);
+
+      const mutated = await createMoneygramOnrampQuote(counterpartyId, "26");
+      expect(mutated.status).toBe(409);
+      const body = (await mutated.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("already bound");
+      fetchSpy.mockRestore();
+    });
+
+    it("fails closed when the provider reference is already bound to another tenant", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "moneygram_cross_tenant" });
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind("org_other_tenant", "Other Tenant", "other-tenant", "enterprise", "active")
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, source_address, destination_address,
+             token, amount, memo, type, direction, status, provider, provider_reference,
+             delivery_mode, provider_data, created_at, updated_at
+           ) VALUES (?, ?, NULL, ?, NULL, ?, 'USDC', NULL, NULL, 'onramp', 'inbound', 'pending',
+                     'moneygram', ?, 'session_widget', ?::jsonb, ?, ?)`
+        )
+        .bind(
+          "xfr_moneygram_foreign_tenant",
+          "org_other_tenant",
+          "wallet_other_tenant",
+          TEST_SOLANA_ADDRESSES.wallet2,
+          "mg_sess_foreign_1",
+          {},
+          now,
+          now
+        )
+        .run();
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_foreign_1" }));
+
+      const res = await createMoneygramOnrampQuote(counterpartyId, "25");
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("already bound");
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects a MoneyGram signed event after the bound session expired", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_moneygram_expired_session",
+        provider: "moneygram",
+        providerReference: "moneygram_session_expired",
+        type: "offramp",
+        providerData: { rampQuote: { expiresAt: "2020-01-01T00:00:00.000Z" } },
+      });
+
+      const res = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            kind: "signed",
+            sessionId: "moneygram_session_expired",
+            cryptoTransferId: "xfr_any_leg",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("expired");
     });
   });
 });
