@@ -177,23 +177,27 @@ a `409` naming the owner, which is the signal to bind elsewhere.
 
 ## Custom rings
 
-One custom ring per project. A custom ring is its own on-chain program
-(generated from the [`zolana-ring`](https://github.com/helius-labs/zolana-ring)
-cargo template); deposits into it are ring-bound, so only that ring's own
-instructions can ever spend the notes, and every ring transfer carries a
-message the ring's auditor key can decrypt. SDP operates a ring but does not
+One custom ring per project. A custom ring is its own on-chain program;
+deposits into it are ring-bound, so only that ring's own instructions can ever
+spend the notes, and every ring transfer carries a message the ring's auditor
+key can decrypt. Ring membership is a property of each note, not of a wallet:
+one private wallet holds default-pool notes and ring-bound notes side by side,
+and each operation names the ring it targets. SDP operates a ring but does not
 deploy its program — the TypeScript SDK has no program-deploy capability.
 
 ### Ops runbook: deploying a project's ring program
 
-1. Generate and build the ring program:
-   `cargo generate --git https://github.com/helius-labs/zolana-ring`, then
-   build per the template's README. One vetted binary can serve every project;
-   each deployment mints a distinct program id.
-2. Deploy to devnet with the upgrade authority set to one of the project's
-   active custody wallets:
-   `solana program deploy --upgrade-authority <custody-pubkey> <ring.so>`.
-   Bring-up signs as the upgrade authority through custody, so a program whose
+1. Get the `zolana-ring` CLI from the `custom-rings` release of
+   [`helius-labs/zolana`](https://github.com/helius-labs/zolana). (The old
+   `zolana-ring` cargo-generate template repo is archived; the CLI replaced
+   it.) `zolana-ring new` writes the ring's `ring.toml` and program keypair —
+   each project gets a distinct program id.
+2. Deploy to devnet with `zolana-ring deploy`, with the upgrade authority set
+   to one of the project's active custody wallets. The CLI downloads its
+   release's ring program binary, checks it against the lockfile built into
+   the CLI, and after deploying reads the account back and refuses to report
+   success unless the bytes on chain hash to the file it deployed. Bring-up
+   signs as the upgrade authority through custody, so a program whose
    authority custody does not hold cannot be brought up. Fund that custody
    wallet with devnet SOL first: it fee-pays every bring-up transaction and
    rents the config, ring-auth, and reader-record accounts.
@@ -209,9 +213,15 @@ the row.
 
 ### Semantics worth knowing
 
-- **Fail closed.** From the moment a ring row exists, shield and sync for the
-  project refuse to run (`config_error`) until the ring is `active`. A project
-  that declared a ring never silently deposits into the default public ring.
+- **Per-operation selection.** A shield names its ring (`ring: "default" |
+  "custom"`, default `"default"`). Default-ring operations and sync are never
+  blocked by the custom ring's state. `ring: "custom"` is a `400` while no
+  ring row exists and a `503` (`config_error`) until bring-up completes; the
+  resolved program id is pinned on the operation row at prepare time and never
+  re-resolved, so an approval granted days later — and any retry — runs
+  against the ring the reviewer saw. The pinned ring also joins the intent
+  key: the same shield aimed at a different ring is a second operation, not a
+  replay.
 - **Resume, never re-key.** Bring-up is idempotent against on-chain state:
   re-submitting the same program id resumes from whatever already landed
   (config present, pool registration missing, and so on). An existing on-chain
@@ -222,9 +232,11 @@ the row.
   strands nothing) and is a `409` once the ring is active. Moving a project off
   a live ring would strand every ring-bound note; that is a deliberate
   migration, not a config flip.
-- **Balances partition.** With an active ring, sync reports only notes bound to
-  that ring. Default-pool notes a wallet held before the ring existed stop
-  appearing — they are not spendable through the project's flows.
+- **Balances are tagged per ring.** Sync returns every unspent note the wallet
+  holds, grouped by `ringProgramId` (`null` = the default public pool). The
+  groups never merge into one number: value cannot cross a ring boundary
+  inside a spend, so a merged figure would overstate what any single operation
+  can move.
 - **Auditor key.** Held by the Helius ring RPC, never by SDP; the config's
   public half is recorded on the ring row and echoed by `GET /ring`.
 
