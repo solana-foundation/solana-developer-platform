@@ -65,7 +65,8 @@ async function fetchPriceChunk(
     logVendorCallFailure(
       "jupiter",
       "price",
-      new Error(`price request returned ${response.status}`)
+      new Error(`price request returned ${response.status}`),
+      startedAt
     );
     return prices;
   }
