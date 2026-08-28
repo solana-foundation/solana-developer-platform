@@ -21,6 +21,20 @@ export interface RecordWorkflowSecretRetirementInput {
   secretRef: string | null;
   secretVersionRef: string;
   error: string;
+  /**
+   * When the sweeper may first act on this row, ISO-8601.
+   *
+   * Omit for an obligation that is due the moment it is recorded — a version
+   * already orphaned by a committed write. Supply a future time for a
+   * PROVISIONAL obligation, recorded before the write that would reference the
+   * version: the row must exist in case that write never lands, but until the
+   * request has had its chance to commit, acting on it would destroy a version
+   * the transaction is about to make live.
+   *
+   * On conflict this is applied only when supplied, so re-reporting a version
+   * never resets a backoff the sweeper is serving.
+   */
+  nextAttemptAt?: string | null;
 }
 
 // Durable queue of secret versions whose destroy call failed. Not tenant-scoped: the

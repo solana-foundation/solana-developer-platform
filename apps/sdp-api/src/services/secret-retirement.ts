@@ -87,6 +87,18 @@ const QUEUE_BACKOFF_MS = 50;
 const DESTROY_ATTEMPTS = 3;
 const DESTROY_BACKOFF_MS = 50;
 
+// How long a PROVISIONAL obligation is withheld from the sweeper.
+//
+// That row is committed before the transaction that would reference its
+// version, so for a moment the queue says "destroy this" about a version a
+// request is still about to make live. Due immediately, a sweep landing inside
+// that window destroys the key and the transaction then commits rows pointing
+// at nothing — the credential is installed dead. The grace period covers the
+// rest of the request by a wide margin; worker loss is still collected, just a
+// few minutes later, and lateness costs nothing here while destroying a live
+// credential costs the tenant their connection.
+const PROVISIONAL_GRACE_MS = 15 * 60 * 1000;
+
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -95,7 +107,9 @@ async function queueRetirement(
   env: Env,
   context: SecretRetirementContext,
   stored: StoredCredentialSecret,
-  reason: string
+  reason: string,
+  // Absent → due now, which is only ever right for a version already orphaned.
+  nextAttemptAt?: string
 ): Promise<boolean> {
   const secretVersionRef = destroyableVersionRef(stored);
   if (!secretVersionRef) {
@@ -112,6 +126,7 @@ async function queueRetirement(
         secretRef: stored.secretRef ?? null,
         secretVersionRef,
         error: reason,
+        nextAttemptAt: nextAttemptAt ?? null,
       });
       return true;
     } catch {
@@ -177,7 +192,11 @@ export async function queuePendingSecretVersion(
     env,
     context,
     stored as StoredCredentialSecret,
-    "written for a row that has not committed yet"
+    "written for a row that has not committed yet",
+    // Held back from the sweeper: this version is not orphaned yet, it is
+    // unreferenced only because the request that will reference it is still
+    // running. Acting on it now would destroy a key about to go live.
+    new Date(Date.now() + PROVISIONAL_GRACE_MS).toISOString()
   );
   if (queued) {
     return;
@@ -292,7 +311,16 @@ export async function destroySecretVersion(
 
   if (!destroyed) {
     const reason = failure instanceof Error ? failure.message : String(failure);
-    const queued = await queueRetirement(env, context, stored as StoredCredentialSecret, reason);
+    // Due now, explicitly: reaching here means the version really is orphaned,
+    // so if a provisional row is standing with a grace period, this revokes it
+    // and hands the version to the next sweep.
+    const queued = await queueRetirement(
+      env,
+      context,
+      stored as StoredCredentialSecret,
+      reason,
+      new Date().toISOString()
+    );
     // A failed refresh may still leave an earlier (pre-commit) record standing,
     // so ask before claiming nothing will collect it. An unreadable answer
     // counts as not queued: the flag summons a human when nothing else acts.
