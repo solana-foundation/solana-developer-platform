@@ -1,4 +1,5 @@
 import type {
+  EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
   EarnPortfolioWalletProvider,
   EarnVaultDepositQuoteProvider,
@@ -158,6 +159,26 @@ export function supportsVaultWithdrawQuote(
     Record<(typeof VAULT_WITHDRAW_QUOTE_METHODS)[number], unknown>
   >;
   return VAULT_WITHDRAW_QUOTE_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const DEPOSIT_ELIGIBILITY_METHODS = ["checkDepositEligibility"] as const satisfies readonly Exclude<
+  keyof EarnDepositEligibilityProvider,
+  keyof EarnVaultProvider
+>[];
+
+/**
+ * Capability discovery for the optional deposit-eligibility contract — same
+ * method-presence rule as the guards above. Consulted by MONEY-IN paths only
+ * (ADR 0002: an exit must never inherit this gate); a provider without the
+ * capability is simply not eligibility-gated.
+ */
+export function supportsDepositEligibility(
+  client: EarnVaultProvider
+): client is EarnDepositEligibilityProvider {
+  const candidate = client as Partial<
+    Record<(typeof DEPOSIT_ELIGIBILITY_METHODS)[number], unknown>
+  >;
+  return DEPOSIT_ELIGIBILITY_METHODS.every((method) => typeof candidate[method] === "function");
 }
 
 const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly Exclude<
