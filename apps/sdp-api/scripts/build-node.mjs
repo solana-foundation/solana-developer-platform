@@ -32,22 +32,6 @@ function resolveOrcaWasm() {
   return path.join(path.dirname(orca), "orca_whirlpools_core_js_bindings_bg.wasm");
 }
 
-/**
- * Resolve bigint-buffer's browser build, which is its pure-JavaScript
- * implementation and never attempts to load the vulnerable native binding.
- *
- * The package is transitive, so walk the real klend -> Raydium -> buffer-layout
- * dependency path instead of relying on pnpm hoisting. If that graph moves, the
- * build fails here and the dependency-boundary check must be reviewed too.
- */
-function resolveSafeBigintBuffer() {
-  const kaminoAnchor = path.resolve("../../packages/sdp-kamino/package.json");
-  const klend = createRequire(kaminoAnchor).resolve("@kamino-finance/klend-sdk");
-  const raydium = createRequire(klend).resolve("@raydium-io/raydium-sdk-v2");
-  const bufferLayoutUtils = createRequire(raydium).resolve("@solana/buffer-layout-utils");
-  return createRequire(bufferLayoutUtils).resolve("bigint-buffer/dist/browser.js");
-}
-
 // CJS interop banner for ESM output: pg and other native-backed deps still
 // reach for require/__filename/__dirname even when bundled as ESM.
 const banner =
@@ -77,18 +61,12 @@ await esbuild.build({
   format: "esm",
   outdir: "dist",
   external: ["pg-native", "@sentry/profiling-node"],
-  // bigint-buffer@1.1.5 has no patched release. Its browser entry is the
-  // package's pure-JS implementation, so execution can be registered without
-  // placing the vulnerable native loader in any API artifact.
-  alias: { "bigint-buffer": resolveSafeBigintBuffer() },
   banner: { js: banner },
 });
 
-// klend-sdk's dependency graph declares bigint-buffer@1.1.5, whose native
-// binding has GHSA-3gc7-fjrx-p6mg and no patched release. The alias above forces
-// its pure-JS browser implementation. Keep that replacement honest: fail the
-// build if a future graph change pulls the native loader into ANY shipped
-// JavaScript entry point.
+// The workspace override for bigint-buffer is pure JavaScript and has no native
+// loader. Keep that replacement honest: fail the build if a future graph change
+// pulls the vulnerable loader from GHSA-3gc7-fjrx-p6mg into any shipped entry.
 for (const entryPoint of Object.keys(entryPoints)) {
   const output = path.join("dist", `${entryPoint}.js`);
   // The safe browser implementation can retain a harmless generated variable

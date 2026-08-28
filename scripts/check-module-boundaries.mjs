@@ -83,6 +83,13 @@ const MODULE_METADATA = [
     ],
   },
   {
+    name: "bigint-buffer",
+    directory: "packages/bigint-buffer",
+    purpose:
+      "Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding.",
+    allowedDependencies: [],
+  },
+  {
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
