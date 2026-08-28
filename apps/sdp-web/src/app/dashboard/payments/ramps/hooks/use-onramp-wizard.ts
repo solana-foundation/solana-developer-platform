@@ -80,7 +80,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       insertAfter: "MEMO",
       direction: "onramp",
     },
-    advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
     buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>

@@ -94,7 +94,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       insertAfter: "MEMO",
       direction: "offramp",
     },
-    advanceRequirementsBeforeQuote: true,
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
     buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>

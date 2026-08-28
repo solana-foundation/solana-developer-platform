@@ -1,11 +1,6 @@
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 
-/**
- * SWR key factory for the payments dashboard. Every payments cache key is
- * declared here once so shared keys cannot drift apart across call sites and
- * key parameters stay typed.
- */
 export const paymentsQueryKeys = {
   actionCounterparties: () => "payments-action-counterparties",
   actionWallets: () => "payments-action-wallets",
@@ -13,8 +8,7 @@ export const paymentsQueryKeys = {
     ["onramp-transfer-status", transferId] as const,
   offrampTransferStatus: ({ transferId }: { transferId: string }) =>
     ["offramp-transfer-status", transferId] as const,
-  readyQuote: ({ direction }: { direction: RampDirection | "ramp" }) =>
-    ["ready-quote", direction] as const,
+  readyQuote: ({ direction }: { direction: RampDirection }) => ["ready-quote", direction] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
   rampEstimate: ({
