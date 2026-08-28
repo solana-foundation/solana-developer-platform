@@ -81,6 +81,7 @@ export async function provisionCustomRing(
 
   // An existing config is adopted, never overwritten: re-keying a live ring
   // would orphan its auditor, and update paths are deliberately out of reach.
+  let custodySigned = false;
   let config = await readRingConfig(deps.client, ringProgramId);
   if (config === undefined) {
     const authority = await readUpgradeAuthority(deps.client, ringProgramId);
@@ -96,6 +97,7 @@ export async function provisionCustomRing(
       ringProgramId,
       expectedTag: CREATE_CONFIG_TAG,
     });
+    custodySigned = true;
 
     // Confirmation says the transaction landed, not that the account holds
     // what was intended.
@@ -121,6 +123,7 @@ export async function provisionCustomRing(
       ringProgramId,
       expectedTag: INIT_SPP_RING_CONFIG_TAG,
     });
+    custodySigned = true;
   }
 
   // The config authority becomes its own initial reader, as the ring pipeline
@@ -138,6 +141,15 @@ export async function provisionCustomRing(
       ringProgramId,
       expectedTag: GRANT_READ_ACCESS_TAG,
     });
+    custodySigned = true;
+  }
+
+  // Every landed transaction above proves custody holds the config authority.
+  // A fully-registered ring lands nothing, so adoption must prove it another
+  // way: without this, a project could activate — and bind its deposits to —
+  // a ring whose authority, auditor, and reader grants belong to someone else.
+  if (!custodySigned) {
+    await proveCustodyHoldsAuthority(deps, config.authority);
   }
 
   return { auditorPublicKeyHex: hex(config.auditorPublicKey.toUncompressed()) };
@@ -237,6 +249,35 @@ async function requestAuditorKey(
     genesisHash: getBase58Encoder().encode(genesisHash) as Bytes32,
     authority: custodyMessageSigner(deps.signMessage, authority),
   });
+}
+
+/**
+ * Proves custody can sign as the ring's config authority by signing a random
+ * challenge. Nothing is broadcast; the signature is discarded. Any refusal or
+ * malformed answer reads as one thing: this project's custody does not hold
+ * the key that administers the ring.
+ */
+async function proveCustodyHoldsAuthority(
+  deps: ProvisionRingDeps,
+  authority: Address
+): Promise<void> {
+  const challenge = new Uint8Array(32);
+  crypto.getRandomValues(challenge);
+  let signature: string;
+  try {
+    signature = await deps.signMessage(getBase64Codec().decode(challenge), authority);
+  } catch {
+    throw new HeliusRingsError(
+      "conflict",
+      "the ring's config authority is not a key this project's custody can sign with; the ring belongs to another operator"
+    );
+  }
+  if (getBase64Codec().encode(signature).length !== 64) {
+    throw new HeliusRingsError(
+      "gateway_unavailable",
+      "custody returned a malformed message signature"
+    );
+  }
 }
 
 /**

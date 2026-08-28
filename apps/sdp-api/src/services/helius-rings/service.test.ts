@@ -1050,6 +1050,25 @@ describe("HeliusRingsService", () => {
       expect(replay).toMatchObject({ status: "active", auditorPublicKeyHex: "04ff" });
     });
 
+    it("answers a lost re-point race with a conflict, not a 500", async () => {
+      // Another admin re-points the row while this bring-up runs: markActive's
+      // program-id guard then matches nothing. The on-chain work is idempotent,
+      // so the caller re-submits rather than staring at an internal error.
+      const rings = createHeliusRingsProjectRingRepository(env);
+      const svc = service({
+        gateway: gatewayStub({ provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }) }),
+        projectRings: {
+          ...rings,
+          markActive: async () => null,
+        },
+      });
+
+      await expect(svc.createProjectRing({ ringProgramId: RING_PROGRAM })).rejects.toMatchObject({
+        code: "conflict",
+        message: expect.stringContaining("re-pointed while bring-up ran"),
+      });
+    });
+
     it("refuses ring:custom before reserving when no ring was ever recorded", async () => {
       const svc = liveishService();
 

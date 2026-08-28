@@ -289,7 +289,13 @@ export class HeliusRingsService {
         auditorPublicKey: provisioned.auditorPublicKeyHex,
       });
       if (!active) {
-        throw new AppError("INTERNAL_ERROR", "ring activation matched no row");
+        // A concurrent submission re-pointed the row under this bring-up (the
+        // guard matches on program id). The on-chain work is idempotent, so
+        // re-submitting the same id resumes it; a 500 would hide that.
+        throw new HeliusRingsError(
+          "conflict",
+          "the project's ring was re-pointed while bring-up ran; re-submit the intended program id"
+        );
       }
       return mapHeliusRingsProjectRingRow(active);
     } catch (error) {

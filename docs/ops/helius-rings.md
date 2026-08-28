@@ -226,7 +226,9 @@ the row.
   re-submitting the same program id resumes from whatever already landed
   (config present, pool registration missing, and so on). An existing on-chain
   config is adopted as it stands — re-keying a live ring would orphan its
-  auditor.
+  auditor. Adopting a fully-registered ring lands no transaction, so custody
+  first proves it holds the config authority by signing a challenge; a ring
+  administered by someone else's key is refused with a `409`.
 - **No re-pointing once active.** Submitting a different program id replaces a
   ring that never went active (a mistyped id binds no notes, so correcting it
   strands nothing) and is a `409` once the ring is active. Moving a project off

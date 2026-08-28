@@ -197,7 +197,7 @@ describe("provisionCustomRing", () => {
     expect(request.authority.address).toBe(AUTHORITY);
   });
 
-  it("adopts an existing fully-registered ring without signing anything", async () => {
+  it("adopts a fully-registered ring once custody proves the config authority", async () => {
     const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
       await derivedAddresses();
     const { deps } = harness(
@@ -213,6 +213,34 @@ describe("provisionCustomRing", () => {
     // Re-keying a live ring would orphan its auditor, so nothing is rewritten.
     expect(result.auditorPublicKeyHex).toBe(hex(AUDITOR.toUncompressed()));
     expect(createAuditorKey).not.toHaveBeenCalled();
+    expect(deps.signTransaction).not.toHaveBeenCalled();
+    // Adoption lands no transaction, so the challenge is the only proof that
+    // this project's custody administers the ring.
+    expect(deps.signMessage).toHaveBeenCalledTimes(1);
+    expect(deps.signMessage).toHaveBeenCalledWith(expect.any(String), AUTHORITY);
+  });
+
+  it("refuses to adopt a ring whose config authority custody cannot sign for", async () => {
+    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
+      await derivedAddresses();
+    const { deps } = harness(
+      new Map<string, unknown>([
+        [configAddress, configAccount(AUTHORITY, configBump)],
+        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
+        [grantRecord, grantRecordAccount(grantRecordBump)],
+      ])
+    );
+    deps.signMessage.mockRejectedValue(new Error("custody controls no wallet for this owner"));
+
+    const error = await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM }).then(
+      () => null,
+      (thrown: unknown) => thrown
+    );
+
+    // Activating anyway would bind the project's deposits to a ring whose
+    // authority, auditor, and reader grants belong to someone else.
+    expect(error).toMatchObject({ code: "conflict" });
+    expect((error as Error).message).toContain("another operator");
     expect(deps.signTransaction).not.toHaveBeenCalled();
   });
 
