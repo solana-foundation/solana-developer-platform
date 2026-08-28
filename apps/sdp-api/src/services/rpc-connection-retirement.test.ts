@@ -12,7 +12,7 @@ import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { deactivateRpcConnection, submitRpcConnection } from "@/services/rpc-connection.service";
-import { queuePendingSecretVersion } from "@/services/secret-retirement";
+import { clearQueuedSecretVersion, queuePendingSecretVersion } from "@/services/secret-retirement";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
@@ -259,6 +259,33 @@ describe("BYOK RPC secret retirement", () => {
 
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
     expect(await retirementRows(stored.secretVersionRef)).toHaveLength(1);
+  });
+
+  it("aborts the committing transaction if the obligation was swept first", async () => {
+    // The grace period makes a sweep during the in-flight window unlikely, but
+    // nothing bounds how long the caller's transaction takes, so it cannot be
+    // the guarantee. Clearing is a compare-and-swap: if the obligation is gone
+    // the version is gone with it, and the rows must not commit pointing at a
+    // destroyed secret.
+    const stored = {
+      storageBackend: "gcp_secret_manager" as const,
+      secretRef: "projects/sdp-test/secrets/pcred_swept",
+      secretVersionRef: "projects/sdp-test/secrets/pcred_swept/versions/1",
+    };
+
+    // Nothing on record — the state a sweep leaves behind.
+    await expect(clearQueuedSecretVersion(getDb(appEnv), stored)).rejects.toThrow(
+      /retired while this request was still running/i
+    );
+
+    // With the obligation standing, the same call is the ordinary cancel.
+    await queuePendingSecretVersion(appEnv, stored, {
+      provider: "rpc_connection",
+      orgId: ORG_ID,
+      sourceId: "pcred_swept",
+    });
+    await expect(clearQueuedSecretVersion(getDb(appEnv), stored)).resolves.toBeUndefined();
+    expect(await retirementRows(stored.secretVersionRef)).toEqual([]);
   });
 
   it("refuses the create and takes the version back when the obligation cannot be recorded", async () => {

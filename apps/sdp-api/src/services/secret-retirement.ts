@@ -103,6 +103,13 @@ function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Secret Manager's answer for destroying a version twice. The sweeper reads it
+// the same way (`services/jobs/retire-workflow-secrets.ts`): the version is
+// gone, which is all this ever wanted.
+function isAlreadyDestroyed(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("FAILED_PRECONDITION");
+}
+
 async function queueRetirement(
   env: Env,
   context: SecretRetirementContext,
@@ -226,6 +233,16 @@ export async function queuePendingSecretVersion(
  * inside the transaction that commits the row referencing the version — the
  * only ordering in which a rejected write cannot leave a credential nobody
  * knows about.
+ *
+ * A compare-and-swap, not a delete: the obligation MUST still be standing, and
+ * finding it gone aborts the transaction. That is what makes the grace period
+ * in `queuePendingSecretVersion` a courtesy rather than a load-bearing timing
+ * assumption — nothing enforces how long the caller's transaction takes, so if
+ * a sweep ever does reach the version first, the credential and connection
+ * rows must not commit pointing at a secret that no longer exists. The caller
+ * retries and writes a fresh version instead.
+ *
+ * @throws AppError SERVICE_UNAVAILABLE when the obligation is already gone.
  */
 export async function clearQueuedSecretVersion(
   exec: Pick<AppDb, "prepare">,
@@ -235,7 +252,12 @@ export async function clearQueuedSecretVersion(
   if (!secretVersionRef) {
     return;
   }
-  await deleteWorkflowSecretRetirement(exec, secretVersionRef);
+  const cleared = await deleteWorkflowSecretRetirement(exec, secretVersionRef);
+  if (!cleared) {
+    throw serviceUnavailable(
+      "The credential secret was retired while this request was still running; nothing was created — retry the request"
+    );
+  }
 }
 
 /**
@@ -302,6 +324,14 @@ export async function destroySecretVersion(
       destroyed = true;
       break;
     } catch (error) {
+      // A version that is already gone is the outcome this call wanted — the
+      // answer Secret Manager gives when a sweep got there first, which is
+      // exactly the race `clearQueuedSecretVersion` aborts on. Treating it as
+      // a failure would queue work for a version that no longer exists.
+      if (isAlreadyDestroyed(error)) {
+        destroyed = true;
+        break;
+      }
       failure = error;
       if (attempt < DESTROY_ATTEMPTS) {
         await pause(DESTROY_BACKOFF_MS * attempt);

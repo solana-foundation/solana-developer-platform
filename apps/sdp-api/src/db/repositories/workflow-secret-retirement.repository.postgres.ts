@@ -70,11 +70,20 @@ export async function insertWorkflowSecretRetirement(
 export async function deleteWorkflowSecretRetirement(
   exec: Pick<AppDb, "prepare">,
   secretVersionRef: string
-): Promise<void> {
-  await exec
-    .prepare("DELETE FROM workflow_action_secret_retirements WHERE secret_version_ref = ?")
+): Promise<boolean> {
+  // RETURNING so the caller can tell "cancelled the obligation" from "there was
+  // nothing to cancel". For a write that is about to reference this version the
+  // difference is decisive: nothing to cancel means the sweeper already took
+  // the version, and committing would point live rows at a destroyed secret.
+  const row = await exec
+    .prepare(
+      `DELETE FROM workflow_action_secret_retirements
+        WHERE secret_version_ref = ?
+        RETURNING secret_version_ref`
+    )
     .bind(secretVersionRef)
-    .run();
+    .first<{ secret_version_ref: string }>();
+  return Boolean(row);
 }
 
 export function createPostgresWorkflowSecretRetirementsRepository(
