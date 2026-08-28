@@ -42,10 +42,23 @@ UPDATE rpc_connections AS c
   FROM rpc_duplicate_losers AS loser
  WHERE loser.id = c.id;
 
--- The credential goes with the connection, exactly as
--- `deactivateConnectionCredential` does it. Withdrawing the row and leaving an
--- active credential behind would strand usable secret material that nothing
+-- The credential goes with the connection, the way
+-- `deactivateConnectionCredential` retires it. Withdrawing the row and leaving
+-- an active credential behind would strand usable secret material that nothing
 -- can reach or retire.
+--
+-- Only when the credential is the loser's alone, which is where this parts
+-- company with that function. `rpc_connections_credential_scope_check` in 0060
+-- lets a project connection borrow an organization credential, so one
+-- credential can back rows in several scope_keys while this deduplication
+-- partitions by scope_key. Retiring it on the loser's behalf would null the
+-- ciphertext out from under a row that is still serving, either in the
+-- winner's own partition or in another project's. `deleteCredentialIfOrphaned`
+-- already takes the same precaution, for the same reason its comment gives.
+-- The losers are already `deactivated` by the update above, so a live row here
+-- is by definition somebody else. `custody_connections` shares this table but
+-- cannot collide: the composite foreign key matches on `provider`, and the
+-- custody and RPC provider vocabularies have nothing in common.
 --
 -- On `encrypted_db` the ciphertext is the secret, so nulling it destroys it and
 -- the check constraint permits a null payload once the status is `deactivated`.
@@ -58,7 +71,13 @@ UPDATE provider_credentials AS pc
        updated_at = sdp_iso_now()
   FROM rpc_duplicate_losers AS loser
  WHERE loser.provider_credential_id = pc.id
-   AND pc.status <> 'deactivated';
+   AND pc.status <> 'deactivated'
+   AND NOT EXISTS (
+       SELECT 1
+         FROM rpc_connections AS keeper
+        WHERE keeper.provider_credential_id = pc.id
+          AND keeper.status <> 'deactivated'
+   );
 
 CREATE UNIQUE INDEX IF NOT EXISTS rpc_connections_one_live_per_provider
     ON rpc_connections (organization_id, scope_key, network, provider)
