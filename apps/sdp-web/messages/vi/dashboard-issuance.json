@@ -499,7 +499,8 @@
       "sortNameDesc": "Tên Z–A",
       "clearFilters": "Xóa tất cả",
       "noTokensOnPage": "Không có Asset trên trang này.",
-      "loadingAssets": "Đang tải Assets…"
+      "loadingAssets": "Đang tải Assets…",
+      "clearSearch": "Xóa tìm kiếm"
     },
     "list": {
       "toggleDetails": "Bật/tắt chi tiết {name}",
