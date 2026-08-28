@@ -28,6 +28,16 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 export interface EarnRuntimeEnvironment {
   GROUND_API_KEY?: string;
   GROUND_SANDBOX_API_KEY?: string;
+  /**
+   * WisdomTree Connect credentials, PACKED as one JSON value per environment:
+   * `{"clientId","clientSecret","username","password"}` — the OAuth2 password
+   * grant needs all four, and the env-key vocabulary is one `<PROVIDER>_API_KEY`
+   * per environment (see the drift test in apps/sdp-api). Parsed and validated
+   * in providers/wisdomtree/connect.ts; a missing or malformed value throws
+   * PROVIDER_NOT_CONFIGURED before any network call.
+   */
+  WISDOMTREE_API_KEY?: string;
+  WISDOMTREE_SANDBOX_API_KEY?: string;
   SOLANA_RPC_URL?: string;
 }
 
