@@ -99,6 +99,7 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   }
   if (
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
     pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`
   ) {
     return "earn-program";

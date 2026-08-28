@@ -331,6 +331,22 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
+  /** External-wallet vault claims, exact-project scoped, newest first. */
+  listExternalWalletPositions(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress?: string;
+    limit: number;
+    before: EarnMovementCursor | null;
+  }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
+  /** Whether this exact partner project has ever claimed a position for the owner. */
+  hasExternalWalletPositionOwner(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+  }): Promise<boolean>;
   /**
    * The cross-provider movement feed: one chronological history spanning both
    * execution models, which is what neither legacy table could serve alone.
@@ -895,6 +911,71 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<EarnPositionRow>();
       const rows = result.results ?? [];
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listExternalWalletPositions(params) {
+      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
+      const ownerClause = params.ownerAddress ? "AND owner_address = ?" : "";
+      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
+      const ownerValues = params.ownerAddress ? [params.ownerAddress] : [];
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_positions
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND environment = ?
+               AND kind = 'vault_direct'
+               AND owner_address IS NOT NULL
+               AND activated_at IS NOT NULL
+               AND (
+                 closed_at IS NULL
+                 OR EXISTS (
+                   SELECT 1
+                   FROM earn_movements reentry
+                   WHERE reentry.position_id = earn_positions.id
+                     AND reentry.direction = 'deposit'
+                     AND reentry.status IN ('requested', 'submitted')
+                 )
+               )
+               AND EXISTS (
+                 SELECT 1
+                 FROM earn_movements movement
+                 WHERE movement.position_id = earn_positions.id
+                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
+               )
+               ${ownerClause}
+               ${beforeClause}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          ...ownerValues,
+          ...beforeValues,
+          params.limit + 1
+        )
+        .all<EarnPositionRow>();
+      const rows = result.results ?? [];
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async hasExternalWalletPositionOwner(params) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS present
+             FROM earn_positions
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND environment = ?
+              AND kind = 'vault_direct'
+              AND owner_address = ?
+            LIMIT 1`
+        )
+        .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
+        .first<{ present: number }>();
+      return Boolean(row);
     },
 
     async listMovements(params) {

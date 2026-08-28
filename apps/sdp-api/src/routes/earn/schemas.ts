@@ -369,7 +369,7 @@ export const earnVaultWithdrawalsQuerySchema = earnVaultMovementsQuerySchema;
 // ---------------------------------------------------------------------------
 
 /** Same trim + isAddress convention as the payments destination schema. */
-const solanaOwnerAddressSchema = z.preprocess(
+export const solanaOwnerAddressSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim() : value),
   z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
     message: "ownerAddress must be a base58 Solana address",
@@ -438,6 +438,19 @@ export const earnExternalWalletSubmitSchema = z.object({
     .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
     .optional(),
 });
+
+export const earnExternalWalletPositionParamsSchema = z
+  .object({ ownerAddress: solanaOwnerAddressSchema })
+  .strict();
+
+export const earnExternalWalletPositionsQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const earnExternalWalletPositionSummaryQuerySchema = z.object({}).strict();
 
 /**
  * The cross-provider movement feed.
