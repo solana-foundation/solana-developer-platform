@@ -71,6 +71,7 @@ function buildMoonpaySettlement(
   return {
     provider: "moonpay",
     status,
+    transactionId: data.id,
     baseCurrencyCode: amounts.baseCurrency.code.toUpperCase(),
     baseCurrencyAmount: amounts.baseCurrencyAmount,
     quoteCurrencyCode: amounts.currency.code.toUpperCase(),
