@@ -5,6 +5,7 @@ import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 
 interface TransferStatusCopy {
   title: string;
@@ -89,19 +90,53 @@ function transferStatusCopy(
   }
 }
 
-function statusIcon(state: TransferStatusCopy["state"]) {
+function statusIcon(state: TransferStatusCopy["state"], sizeClassName = "size-5") {
   switch (state) {
     case "success":
-      return <CheckCircle2Icon className="size-5 text-success" />;
+      return <CheckCircle2Icon className={cn(sizeClassName, "text-success")} />;
     case "error":
-      return <XCircleIcon className="size-5 text-error" />;
+      return <XCircleIcon className={cn(sizeClassName, "text-error")} />;
     case "loading":
-      return <Loader2Icon className="size-5 animate-spin text-secondary" />;
+      return <Loader2Icon className={cn(sizeClassName, "animate-spin text-secondary")} />;
     default: {
       const exhaustive: never = state;
       throw new Error(`Unhandled transfer status state: ${exhaustive}`);
     }
   }
+}
+
+/**
+ * Compact one-line status for the wizard title row: icon and title only, the
+ * subtle sibling of RampStatusPanel for stages where the provider window is
+ * the hero.
+ *
+ * @param props - Direction, the polled transfer, and the hosted-copy flag.
+ * @returns The inline status, or null before the first poll result.
+ */
+export function RampStatusInline({
+  direction,
+  transfer,
+  hosted = false,
+}: {
+  direction: RampDirection;
+  transfer: PaymentTransferSummary | null | undefined;
+  /** The customer pays inside an embedded provider window, not via copied instructions. */
+  hosted?: boolean;
+}) {
+  const t = useTranslations();
+  const copy: TransferStatusCopy = transfer
+    ? transferStatusCopy(t, direction, transfer.status, hosted)
+    : {
+        title: t("DashboardPayments.ramps.status.preparing"),
+        description: t("DashboardPayments.ramps.status.preparingDescription"),
+        state: "loading",
+      };
+  return (
+    <span className="flex items-center gap-2 text-sm font-medium text-secondary">
+      {statusIcon(copy.state, "size-4")}
+      {copy.title}
+    </span>
+  );
 }
 
 export function RampStatusPanel({

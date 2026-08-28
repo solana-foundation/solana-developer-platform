@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { OnrampStepContent } from "./components/onramp-step-content";
+import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OnrampWizard, useOnrampWizard } from "./hooks/use-onramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
@@ -81,6 +82,7 @@ export function OnrampRail({
     ...preStepSummaryDetails(t, counterpartyName, methodLabel),
     ...wizard.summaryDetails,
   ];
+  const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const transferTerminal = wizard.transferStatus
     ? isTerminalRampTransferStatus(wizard.transferStatus.status)
     : false;
@@ -102,6 +104,11 @@ export function OnrampRail({
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
       summary={<WizardSummaryList details={summaryDetails} />}
+      header={
+        hostedStage ? (
+          <RampStatusInline direction="onramp" hosted transfer={wizard.transferStatus} />
+        ) : undefined
+      }
       secondaryLabel={
         wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined
       }
