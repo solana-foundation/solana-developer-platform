@@ -28,6 +28,7 @@ import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import {
   buildExternalWalletDepositTransaction,
   buildExternalWalletWithdrawalTransaction,
@@ -91,15 +92,14 @@ type EarnExternalWalletWithdrawalTransactionBody = z.output<
 type EarnExternalWalletSubmitBody = z.output<typeof earnExternalWalletSubmitSchema>;
 
 const EXTERNAL_POSITION_PAGE_SIZE = 100;
-const EXTERNAL_POSITION_PAGE_LIMIT = 100;
 
 /**
  * GET /v1/earn/external-wallet/positions/summary: complete live portfolio for
  * one partner project, grouped by strategy and by token.
  *
  * The claim table is keyset-paged to the end before any total is returned. A
- * repeated/non-advancing cursor or a portfolio beyond the safety limit fails
- * the request instead of serving a plausible-looking partial total.
+ * repeated or non-advancing cursor fails the request instead of serving a
+ * plausible-looking partial total.
  */
 export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   parseQuery(c, earnExternalWalletPositionSummaryQuerySchema);
@@ -119,8 +119,22 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   );
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
+  const summary = summarizeExternalWalletPositions(holdings, live);
+  if (summary.unavailablePositionCount > 0) {
+    getLogger().warn(
+      {
+        event: "sdp_api_earn_external_wallet_position_summary_unavailable",
+        organization_id: auth.organizationId,
+        project_id: projectId,
+        environment,
+        position_count: summary.positionCount,
+        unavailable_position_count: summary.unavailablePositionCount,
+      },
+      "external-wallet position summary: live values unavailable"
+    );
+  }
   const response: EarnExternalWalletPositionSummaryResponse = {
-    summary: summarizeExternalWalletPositions(holdings, live),
+    summary,
   };
   return success(c, response);
 }
@@ -179,7 +193,7 @@ export async function collectAllExternalWalletPositionRows(
   const seenBounds = new Set<string>();
   let before: VaultPositionCursor | null = null;
 
-  for (let page = 0; page < EXTERNAL_POSITION_PAGE_LIMIT; page += 1) {
+  while (true) {
     const result = await readPage(before);
     rows.push(...result.rows);
     if (!result.hasMore) return rows;
@@ -196,8 +210,6 @@ export async function collectAllExternalWalletPositionRows(
     seenBounds.add(key);
     before = next;
   }
-
-  throw internalError("External-wallet position pagination exceeded its safety limit");
 }
 
 function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPositionCursor): boolean {
@@ -587,6 +599,8 @@ function summarizeExternalWalletPositions(
     const strategyKey = JSON.stringify([holding.provider, holding.vaultAddress]);
     let strategy = strategies.get(strategyKey);
     if (!strategy) {
+      // Rows are collected newest first, so the first claim intentionally owns
+      // the display label when old deposits for one vault used different copy.
       strategy = {
         provider: holding.provider,
         providerReference: holding.vaultAddress,
@@ -618,9 +632,9 @@ function summarizeExternalWalletPositions(
       }))
       .sort(
         (left, right) =>
-          left.label.localeCompare(right.label) ||
-          left.provider.localeCompare(right.provider) ||
-          left.providerReference.localeCompare(right.providerReference)
+          compareWireStrings(left.label, right.label) ||
+          compareWireStrings(left.provider, right.provider) ||
+          compareWireStrings(left.providerReference, right.providerReference)
       ),
     totalsByToken: [...tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),
   };
@@ -661,7 +675,13 @@ function finalizeTokenTotal(total: MutableTokenTotal): EarnExternalWalletTokenTo
 }
 
 function tokenTotalOrder(left: EarnExternalWalletTokenTotal, right: EarnExternalWalletTokenTotal) {
-  return left.tokenMint.localeCompare(right.tokenMint);
+  return compareWireStrings(left.tokenMint, right.tokenMint);
+}
+
+function compareWireStrings(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function toExternalWalletTransactionWire(built: EarnExternalWalletTransactionRow) {

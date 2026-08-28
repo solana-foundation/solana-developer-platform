@@ -108,7 +108,7 @@ describe("EmbeddedYieldDashboard", () => {
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
 
-    expect(screen.getByText(/1 live position values are unavailable/)).toBeTruthy();
+    expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
     expect(document.body.textContent).not.toContain("0 USDC");
   });

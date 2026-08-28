@@ -18,7 +18,7 @@ describe("Markets route loading states", () => {
 
   it("preserves the Earn workspace skeleton while configuration loads", () => {
     expect(renderToStaticMarkup(<EmbeddedYieldConfigureLoading />)).toBe(
-      renderToStaticMarkup(<EarnLoading />)
+      renderToStaticMarkup(<EmbeddedYieldLoading />)
     );
   });
 });

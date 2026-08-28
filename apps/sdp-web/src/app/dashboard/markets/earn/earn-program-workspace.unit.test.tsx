@@ -112,6 +112,10 @@ describe("EarnProgramWorkspace", () => {
       "/dashboard/markets/embedded-yield/button-builder?strategy=earn_strategy_live"
     );
     expect(document.body.textContent).not.toContain("Mock");
+    const desktopTable = screen.getByRole("region");
+    expect(desktopTable.className).toContain("[&_table]:min-w-[52rem]");
+    expect(desktopTable.className).toContain("[&_table]:table-fixed");
+    expect(desktopTable.getAttribute("style")).toBeNull();
   });
 
   it("previews a mainnet strategy from sandbox with explicit warnings", async () => {

@@ -95,7 +95,7 @@
       "portfolioEmptyDescription": "Configure Embedded Yield, then customer positions will appear here after their deposits are recorded.",
       "portfolioErrorTitle": "Customer portfolio unavailable",
       "portfolioErrorDescription": "The complete live portfolio could not be loaded. No balances are shown until every page is confirmed.",
-      "incompletePortfolio": "{count} live position values are unavailable. Affected totals are withheld rather than shown as zero or partial.",
+      "incompletePortfolio": "Live values are unavailable for {count} position(s). Affected totals are withheld rather than shown as zero or partial.",
       "valueUnavailable": "Unavailable",
       "introTitle": "Choose the yield strategy your customers will see",
       "introDescription": "Start from the live provider catalogue, preview the customer action, and generate a server-side integration against the real vault-deposit API.",

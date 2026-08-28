@@ -259,6 +259,30 @@ describe("external-wallet position reads", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("continues one wallet past one hundred strict cursor pages", async () => {
+    let page = 0;
+    const fetchMock = vi.fn(async () => {
+      const current = page;
+      page += 1;
+      return new Response(
+        JSON.stringify({
+          data: {
+            positions: [externalWalletPosition(`p${current}`)],
+            hasMore: current < 100,
+            nextCursor: current < 100 ? `cursor_${current}` : null,
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).resolves.toHaveLength(101);
+    expect(fetchMock).toHaveBeenCalledTimes(101);
+  });
+
   it("fails loudly when a wallet cursor repeats", async () => {
     const fetchMock = vi.fn(
       async () =>

@@ -44,13 +44,14 @@ export async function hydrateVaultPositions(
   }
 
   const live = new Map<string, HydratedVaultPositionValue>();
-  const hydrationJobs: Array<() => Promise<void>> = [];
-  const deadline = createVaultDeadline();
+  const hydrationJobs: Array<{
+    provider: string;
+    owner: string;
+    positionCount: number;
+    hydrate: () => Promise<void>;
+  }> = [];
 
   for (const [provider, providerPositions] of byProvider) {
-    const client = resolveVaultDirectClient(c.env, provider, deadline);
-    if (!client) continue;
-
     const byOwner = new Map<string, HydratableVaultPosition[]>();
     for (const position of providerPositions) {
       const ownerPositions = byOwner.get(position.ownerAddress);
@@ -59,52 +60,98 @@ export async function hydrateVaultPositions(
     }
 
     for (const [owner, ownerPositions] of byOwner) {
-      const trustedByReference = new Map(
-        ownerPositions.map((position) => [position.providerReference, position] as const)
-      );
-      hydrationJobs.push(async () => {
-        const snapshots = await client.readVaultPositions(earnRuntime(c), {
-          owner,
-          providerReferences: ownerPositions.map((position) => position.providerReference),
-        });
-        for (const snapshot of snapshots) {
-          const trusted = trustedByReference.get(snapshot.providerReference);
-          if (
-            !trusted ||
-            snapshot.owner !== owner ||
-            snapshot.cluster !== earnClusterFor(environment) ||
-            snapshot.tokenMint !== trusted.tokenMint ||
-            snapshot.shareMint !== trusted.shareMint ||
-            !isBoundedSnapshotAmount(snapshot.shares) ||
-            !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
-            (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
-          ) {
-            getLogger().warn(
-              {
-                provider,
-                owner,
-                providerReference: snapshot.providerReference,
-                snapshotOwner: snapshot.owner,
-                snapshotCluster: snapshot.cluster,
-                snapshotTokenMint: snapshot.tokenMint,
-                snapshotShareMint: snapshot.shareMint,
-              },
-              "vault position: ignored live snapshot with mismatched identity"
-            );
-            continue;
-          }
-          live.set(trusted.id, {
-            shares: snapshot.shares,
-            withdrawableShares: snapshot.withdrawableShares,
-            tokenValue: snapshot.tokenValue,
+      const trustedByReference = new Map<string, HydratableVaultPosition[]>();
+      for (const position of ownerPositions) {
+        const trusted = trustedByReference.get(position.providerReference);
+        if (trusted) trusted.push(position);
+        else trustedByReference.set(position.providerReference, [position]);
+      }
+      hydrationJobs.push({
+        provider,
+        owner,
+        positionCount: ownerPositions.length,
+        hydrate: async () => {
+          // The concurrency queue may wait behind many other owners. Give each
+          // live read its own external-call budget when it actually starts.
+          const client = resolveVaultDirectClient(c.env, provider, createVaultDeadline());
+          if (!client) return;
+          const snapshots = await client.readVaultPositions(earnRuntime(c), {
+            owner,
+            providerReferences: [...trustedByReference.keys()],
           });
-        }
+          for (const snapshot of snapshots) {
+            const trustedPositions = trustedByReference.get(snapshot.providerReference);
+            if (
+              !trustedPositions ||
+              snapshot.owner !== owner ||
+              snapshot.cluster !== earnClusterFor(environment) ||
+              !isBoundedSnapshotAmount(snapshot.shares) ||
+              !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
+              (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
+            ) {
+              getLogger().warn(
+                {
+                  provider,
+                  owner,
+                  providerReference: snapshot.providerReference,
+                  snapshotOwner: snapshot.owner,
+                  snapshotCluster: snapshot.cluster,
+                  snapshotTokenMint: snapshot.tokenMint,
+                  snapshotShareMint: snapshot.shareMint,
+                },
+                "vault position: ignored live snapshot with mismatched identity"
+              );
+              continue;
+            }
+
+            let matched = false;
+            for (const trusted of trustedPositions) {
+              if (
+                snapshot.tokenMint !== trusted.tokenMint ||
+                snapshot.shareMint !== trusted.shareMint
+              ) {
+                continue;
+              }
+              matched = true;
+              live.set(trusted.id, {
+                shares: snapshot.shares,
+                withdrawableShares: snapshot.withdrawableShares,
+                tokenValue: snapshot.tokenValue,
+              });
+            }
+            if (!matched) {
+              getLogger().warn(
+                {
+                  provider,
+                  owner,
+                  providerReference: snapshot.providerReference,
+                  snapshotTokenMint: snapshot.tokenMint,
+                  snapshotShareMint: snapshot.shareMint,
+                },
+                "vault position: ignored live snapshot with mismatched asset identity"
+              );
+            }
+          }
+        },
       });
     }
   }
 
   if (hydrationJobs.length > 0) {
-    await mapSettledWithConcurrency(hydrationJobs, 8, (hydrate) => hydrate());
+    const settled = await mapSettledWithConcurrency(hydrationJobs, 8, (job) => job.hydrate());
+    settled.forEach((result, index) => {
+      if (result.status !== "rejected") return;
+      const job = hydrationJobs[index];
+      getLogger().warn(
+        {
+          provider: job?.provider,
+          owner: job?.owner,
+          positionCount: job?.positionCount,
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        },
+        "vault position: live hydration unavailable"
+      );
+    });
   }
   return live;
 }

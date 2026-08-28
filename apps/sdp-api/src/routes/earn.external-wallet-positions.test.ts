@@ -13,11 +13,19 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const readVaultPositions = vi.hoisted(() => vi.fn());
+const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
+  const readVaultPositions = vi.fn();
+  return {
+    readVaultPositions,
+    resolveVaultDirectClient: vi.fn((_env: unknown, _provider: string, _deadline: unknown) => ({
+      readVaultPositions,
+    })),
+  };
+});
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  resolveVaultDirectClient: () => ({ readVaultPositions }),
+  resolveVaultDirectClient,
 }));
 
 const ORG = "org_external_position_reads";
@@ -207,6 +215,10 @@ describe("external-wallet position reads", () => {
         },
       ],
     });
+    expect(resolveVaultDirectClient).toHaveBeenCalledTimes(2);
+    expect(resolveVaultDirectClient.mock.calls[0]?.[2]).not.toBe(
+      resolveVaultDirectClient.mock.calls[1]?.[2]
+    );
   });
 
   it("returns exactly one wallet and leaves an unreadable live value unavailable", async () => {
@@ -320,5 +332,25 @@ describe("external-wallet position reads", () => {
         hasMore: true,
       }))
     ).rejects.toThrow("pagination did not advance");
+  });
+
+  it("continues past one hundred pages until the keyset reader is complete", async () => {
+    let page = 0;
+    const rows = await collectAllExternalWalletPositionRows(async () => {
+      const current = page;
+      page += 1;
+      return {
+        rows: [
+          {
+            id: `earn_position_${String(200 - current).padStart(3, "0")}`,
+            created_at: "2026-08-28T00:00:00.000Z",
+          } as EarnPositionRow,
+        ],
+        hasMore: current < 100,
+      };
+    });
+
+    expect(rows).toHaveLength(101);
+    expect(page).toBe(101);
   });
 });

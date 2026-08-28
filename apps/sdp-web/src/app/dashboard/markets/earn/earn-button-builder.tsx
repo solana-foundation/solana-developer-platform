@@ -173,7 +173,8 @@ function builderEmptyState(input: {
       descriptionKey: "DashboardMarkets.earnProgram.missingStrategyDescription",
     };
   }
-  if (input.availability !== "available" && !input.previewOnly) {
+  const previewSelectable = input.previewOnly && input.availability === "cluster_unavailable";
+  if (input.availability !== "available" && !previewSelectable) {
     return {
       messageKey: "DashboardMarkets.earnProgram.unavailableStrategyTitle",
       descriptionKey: unavailableDescriptionKey(input.availability),

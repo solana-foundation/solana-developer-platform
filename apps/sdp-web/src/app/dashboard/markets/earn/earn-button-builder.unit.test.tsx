@@ -44,6 +44,7 @@ const mainnetStrategy: EarnStrategy = {
 
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
+  mainnetFundable: false,
   saveEarnButtonConfiguration: vi.fn(),
   strategyClusters: [] as Array<SolanaCluster | undefined>,
 }));
@@ -56,7 +57,10 @@ vi.mock("./earn-program-data", () => ({
   useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
     mocks.strategyClusters.push(options?.cluster);
     return {
-      strategies: options?.cluster === "mainnet-beta" ? [mainnetStrategy] : [liveStrategy],
+      strategies:
+        options?.cluster === "mainnet-beta"
+          ? [{ ...mainnetStrategy, fundable: mocks.mainnetFundable }]
+          : [liveStrategy],
       error: undefined,
       isLoading: false,
     };
@@ -86,6 +90,7 @@ function renderWithEnglish(children: ReactNode) {
 
 afterEach(() => {
   mocks.environment = "sandbox";
+  mocks.mainnetFundable = false;
   mocks.strategyClusters.length = 0;
   vi.clearAllMocks();
   cleanup();
@@ -307,6 +312,25 @@ describe("EarnButtonBuilder", () => {
       "/dashboard/markets/embedded-yield/configure?cluster=mainnet-beta"
     );
     expect(mocks.saveEarnButtonConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("does not let a mainnet deep link bypass provider access", () => {
+    mocks.mainnetFundable = true;
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        configureHref="/dashboard/markets/embedded-yield/configure"
+        earnHref="/dashboard/markets/embedded-yield"
+        projectId="project_original"
+        providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
+        strategyCluster="mainnet-beta"
+        strategyId={mainnetStrategy.id}
+      />
+    );
+
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
+    expect(screen.queryByText("Mainnet vault preview")).toBeNull();
   });
 
   it("dead-ends on a failed configuration load only when no strategy is selected", () => {

@@ -346,7 +346,7 @@ export function EarnProgramWorkspace({
                     />
                   ))}
                 </div>
-                <Table className="hidden table-fixed md:block" style={{ minWidth: "52rem" }}>
+                <Table className="hidden md:block [&_table]:min-w-[52rem] [&_table]:table-fixed">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[38%]">

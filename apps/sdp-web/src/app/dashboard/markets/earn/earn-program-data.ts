@@ -545,9 +545,11 @@ export function useEarnVaultPositions() {
 }
 
 const EXTERNAL_WALLET_POSITIONS_PAGE_SIZE = 100;
-const EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT = 100;
 
-/** Reads every live position for exactly one partner end-user wallet. */
+/**
+ * Reads every live position for exactly one partner end-user wallet.
+ * Kept at the strict dashboard boundary for the planned wallet drill-down.
+ */
 export async function fetchEarnExternalWalletPositions(
   ownerAddress: string
 ): Promise<EarnExternalWalletPosition[]> {
@@ -555,7 +557,7 @@ export async function fetchEarnExternalWalletPositions(
   const seenCursors = new Set<string>();
   let before: string | undefined;
 
-  for (let page = 1; page <= EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT; page += 1) {
+  while (true) {
     const query = new URLSearchParams({ limit: String(EXTERNAL_WALLET_POSITIONS_PAGE_SIZE) });
     if (before) query.set("before", before);
     const { status, body } = await requestJson<{ data: EarnExternalWalletPositionsPage }>(
@@ -575,8 +577,6 @@ export async function fetchEarnExternalWalletPositions(
     seenCursors.add(nextCursor);
     before = nextCursor;
   }
-
-  throw new Error("External-wallet positions pagination exceeded its safety limit");
 }
 
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
@@ -594,7 +594,7 @@ export function useEarnExternalWalletPositionSummary() {
   const { data, error, isLoading, mutate } = useSWR(
     "dashboard-earn-external-wallet-position-summary",
     () => fetchEarnExternalWalletPositionSummary(),
-    { refreshInterval: 15_000 }
+    { refreshInterval: 60_000 }
   );
   return { summary: data, error, isLoading, refresh: () => void mutate() };
 }
