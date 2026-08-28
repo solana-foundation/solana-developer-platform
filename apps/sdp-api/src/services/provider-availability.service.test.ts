@@ -65,6 +65,8 @@ const providerEnvKeys = [
   "PERENA_API_KEY",
   "PERENA_SANDBOX_API_KEY",
   "JUPITER_SWAP_API_KEY",
+  "WISDOMTREE_API_KEY",
+  "WISDOMTREE_SANDBOX_API_KEY",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -707,6 +709,7 @@ describe("provider-availability.service", () => {
       kamino: false,
       jupiter_lend: false,
       ondo: false,
+      wisdomtree: false,
     });
   });
 
