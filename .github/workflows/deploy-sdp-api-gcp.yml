@@ -123,3 +123,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
         run: ./scripts/notify-slack.sh
+
+  smoke:
+    name: Post-deploy dev smoke
+    needs: deploy
+    permissions:
+      contents: read
+    uses: ./.github/workflows/sdp-dev-smoke.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}

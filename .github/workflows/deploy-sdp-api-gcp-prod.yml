@@ -320,6 +320,13 @@ jobs:
             echo 'docs/ops/managed-reconciliation-monitor-migration.md'
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Run prod canary against the promoted revision
+        if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
+        timeout-minutes: 5
+        run: |
+          gcloud run jobs execute sdp-prod-canary \
+            --region "${REGION}" --project "${PROJECT_ID}" --wait
+
       - name: Roll back incomplete rollout
         if: ${{ always() }}
         timeout-minutes: 5
