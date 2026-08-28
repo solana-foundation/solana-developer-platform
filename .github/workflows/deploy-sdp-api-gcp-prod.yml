@@ -98,7 +98,7 @@ jobs:
       # so prod runs the artifact that was scanned and signed — never a rebuild.
       - name: Verify and promote release image
         if: ${{ inputs.release_sha != '' }}
-        timeout-minutes: 30
+        timeout-minutes: 75
         run: |
           set -euo pipefail
           SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
@@ -106,11 +106,11 @@ jobs:
           # parallel with this deploy: wait out the build-and-sign window
           # before treating a missing tag or signature as a failure.
           SRC_DIGEST=""
-          for attempt in $(seq 1 40); do
+          for attempt in $(seq 1 130); do
             if SRC_DIGEST="$(crane digest "${SRC_BASE}:${{ inputs.release_tag }}" 2>/dev/null)"; then
               break
             fi
-            echo "release image tag not in GHCR yet (attempt ${attempt}/40); retrying in 30s"
+            echo "release image tag not in GHCR yet (attempt ${attempt}/130); retrying in 30s"
             sleep 30
           done
           if [[ -z "${SRC_DIGEST}" ]]; then
