@@ -1,6 +1,7 @@
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { COINBASE_HOSTED_APPROVED_HOSTS, checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { divideDecimalAmounts, sumDecimalAmounts } from "../../../decimal";
@@ -327,7 +328,16 @@ export class CoinbaseRampClient implements RampProvider {
       }
     );
 
-    const hostedUrl = new URL(paymentLink.url);
+    // The dashboard iframes this URL and trusts its origin for postMessage
+    // events, so anything but HTTPS on the approved payment-link host fails closed.
+    const destination = checkRampDestination(paymentLink.url, [...COINBASE_HOSTED_APPROVED_HOSTS]);
+    if (!destination.ok) {
+      throw providerUnavailable("Coinbase returned an untrusted payment link URL.", {
+        provider: this.id,
+        reason: destination.reason,
+      });
+    }
+    const hostedUrl = destination.url;
     hostedUrl.searchParams.set("useApplePaySandbox", "true");
 
     // The payment link URL is a signed, time-limited credential — never log it.

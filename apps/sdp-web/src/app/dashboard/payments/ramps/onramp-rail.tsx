@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { OnrampStepContent } from "./components/onramp-step-content";
 import { RampStatusInline } from "./components/ramp-status-panel";
@@ -36,7 +37,7 @@ function onrampPrimaryAction(
 ): () => void {
   switch (true) {
     case verificationUrl !== undefined:
-      return () => window.open(verificationUrl, "_blank", "noopener");
+      return () => openExternalRampUrl(verificationUrl);
     case wizard.isLastStep:
       return wizard.finish;
     default:

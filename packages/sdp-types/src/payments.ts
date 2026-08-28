@@ -963,6 +963,8 @@ export type PaymentRampQuote =
       sessionToken: string;
       sessionId: string;
       widgetUrl: string;
+      /** ISO timestamp when the widget session expires (decoded from the session JWT). */
+      expiresAt?: string;
     })
   | (BasePaymentRampQuote & {
       provider: "stripe";
