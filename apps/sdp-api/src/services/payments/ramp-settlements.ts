@@ -7,6 +7,7 @@ import {
   createSystemTransactionalPaymentsRepository,
   isRampTransferType,
 } from "@/db/repositories";
+import { logEvent } from "@/runtime/money-path-events";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 
@@ -98,7 +99,7 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
   // provider event, so they land or roll back together — and an event whose
   // transition was refused (lost race, out-of-order redelivery) has no
   // effects at all: no link write, no workflow trigger.
-  const applied = await getDb(env).transaction(async (tx) => {
+  const { applied, linkedReference } = await getDb(env).transaction(async (tx) => {
     const client = asTransactionalClient(tx);
     const updated =
       await createSystemTransactionalPaymentsRepository(client).updateTransferStatusGuarded(update);
@@ -108,16 +109,40 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
       transfer.counterparty_id !== null &&
       transfer.project_id !== null
     ) {
-      await createPostgresCounterpartyProviderAccountsRepository(client).upsertProviderAccount({
+      const link = await createPostgresCounterpartyProviderAccountsRepository(
+        client
+      ).upsertProviderAccount({
         organizationId: transfer.organization_id,
         projectId: transfer.project_id,
         counterpartyId: transfer.counterparty_id,
         provider: event.provider,
         providerCustomerReference: event.providerCustomerId,
       });
+      return { applied: true, linkedReference: link.provider_customer_reference };
     }
-    return updated !== null;
+    return { applied: updated !== null, linkedReference: null };
   });
+
+  // First-write-wins: the event reported a different provider customer than the
+  // counterparty's canonical link. The displaced reference is preserved in the
+  // link row's metadata; surface it for operators.
+  if (
+    linkedReference !== null &&
+    event.providerCustomerId !== undefined &&
+    linkedReference !== event.providerCustomerId
+  ) {
+    logEvent("warn", {
+      event: "sdp_api_counterparty_provider_reference_mismatch",
+      flow: "ramp-settlement",
+      organization_id: transfer.organization_id,
+      project_id: transfer.project_id,
+      transfer_id: transfer.id,
+      counterparty_id: transfer.counterparty_id,
+      provider: event.provider,
+      canonical_reference: linkedReference,
+      mismatched_reference: event.providerCustomerId,
+    });
+  }
 
   // Workflow trigger seam: a settled ramp fires onramp_settled / offramp_settled —
   // only when the settled transition actually landed. A settled event that lost a

@@ -44,9 +44,22 @@ export function createPostgresCounterpartyProviderAccountsRepository(
            ) VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT (counterparty_id, provider)
            DO UPDATE SET
-             provider_customer_reference = EXCLUDED.provider_customer_reference,
              status = 'active',
-             updated_at = sdp_iso_now()
+             updated_at = sdp_iso_now(),
+             metadata = CASE
+               WHEN counterparty_provider_accounts.provider_customer_reference
+                    = EXCLUDED.provider_customer_reference
+                 THEN counterparty_provider_accounts.metadata
+               WHEN coalesce(counterparty_provider_accounts.metadata -> 'mismatchedReferences', '[]'::jsonb)
+                    @> to_jsonb(EXCLUDED.provider_customer_reference)
+                 THEN counterparty_provider_accounts.metadata
+               ELSE jsonb_set(
+                 counterparty_provider_accounts.metadata,
+                 '{mismatchedReferences}',
+                 coalesce(counterparty_provider_accounts.metadata -> 'mismatchedReferences', '[]'::jsonb)
+                   || to_jsonb(EXCLUDED.provider_customer_reference)
+               )
+             END
            WHERE counterparty_provider_accounts.organization_id = EXCLUDED.organization_id
              AND counterparty_provider_accounts.project_id = EXCLUDED.project_id
            RETURNING *`

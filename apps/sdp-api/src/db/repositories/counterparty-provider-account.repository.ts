@@ -27,12 +27,13 @@ export interface UpsertCounterpartyProviderAccountInput {
 
 export interface CounterpartyProviderAccountsRepository {
   /**
-   * Links a counterparty to its provider-side customer identity, updating the
-   * reference in place when the provider reports a different customer for the
-   * same counterparty (latest customer wins).
+   * Links a counterparty to its provider-side customer identity. The first
+   * reference seen is canonical: a later event reporting a different customer
+   * does not overwrite it — the displaced reference is appended to
+   * `metadata.mismatchedReferences` so drift is observable instead of silent.
    *
    * @param input - Tenant scope, counterparty, provider, and the provider-side reference.
-   * @returns The linked row.
+   * @returns The linked row, carrying the canonical reference.
    */
   upsertProviderAccount(
     input: UpsertCounterpartyProviderAccountInput

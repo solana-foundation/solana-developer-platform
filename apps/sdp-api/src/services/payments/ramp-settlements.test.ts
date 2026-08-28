@@ -205,6 +205,39 @@ describe("applyRampSettlementEvent", () => {
     expect(dispatchWorkflowEvent).not.toHaveBeenCalled();
   });
 
+  it("keeps the first provider customer canonical and records a later mismatch", async () => {
+    await seedCounterparty();
+    await seedTransfer({
+      id: "xfr_first_wins",
+      reference: "order_first_wins",
+      status: "pending",
+      counterpartyId: COUNTERPARTY_ID,
+    });
+    await applyRampSettlementEvent(env, {
+      provider: "coinbase",
+      kind: "awaiting_payment",
+      reference: "order_first_wins",
+      providerCustomerId: "cust_first",
+    });
+    await applyRampSettlementEvent(env, {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_first_wins",
+      receivedAmount: "9",
+      providerCustomerId: "cust_second",
+    });
+
+    const link = await getDb(env)
+      .prepare(
+        `SELECT provider_customer_reference, metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ?`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ provider_customer_reference: string; metadata: Record<string, unknown> }>();
+    expect(link?.provider_customer_reference).toBe("cust_first");
+    expect(link?.metadata).toEqual({ mismatchedReferences: ["cust_second"] });
+  });
+
   it("links the customer from the winning event and never from a refused one", async () => {
     await seedCounterparty();
     await seedTransfer({
