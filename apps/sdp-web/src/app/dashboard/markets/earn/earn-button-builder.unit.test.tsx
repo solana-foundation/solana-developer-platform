@@ -92,7 +92,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
@@ -141,7 +141,9 @@ describe("EarnButtonBuilder", () => {
       await screen.findByText("Configuration saved. The handoff link is current.")
     ).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+      screen.getByRole("link", {
+        name: /embedded-yield\/integrate\/PublicEarnButtonToken123/,
+      })
     ).toBeTruthy();
 
     // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
@@ -163,7 +165,7 @@ describe("EarnButtonBuilder", () => {
     expect(code).not.toContain("requestId");
     expect(code).not.toContain("developers.solana.com/earn/buttons");
     expect(screen.getByRole("link", { name: "Done" }).getAttribute("href")).toBe(
-      "/dashboard/markets/earn"
+      "/dashboard/markets/embedded-yield"
     );
   });
 
@@ -181,7 +183,7 @@ describe("EarnButtonBuilder", () => {
           kind: "ready",
           configuration: { ...savedConfiguration, style: "accent", accentColor: "#9945FF" },
         }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -216,7 +218,7 @@ describe("EarnButtonBuilder", () => {
           kind: "ready",
           configuration: { ...savedConfiguration, style: "accent", accentColor: "#9945ff" },
         }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -235,7 +237,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "error" }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId={liveStrategy.id}
@@ -244,7 +246,7 @@ describe("EarnButtonBuilder", () => {
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(screen.getByRole("alert").textContent).toContain(
-      "The saved Earn button configuration could not be loaded"
+      "The saved Embedded Yield button configuration could not be loaded"
     );
     expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
       "disabled",
@@ -256,7 +258,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "error" }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -270,7 +272,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -284,7 +286,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId=""
@@ -293,7 +295,9 @@ describe("EarnButtonBuilder", () => {
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+      screen.getByRole("link", {
+        name: /embedded-yield\/integrate\/PublicEarnButtonToken123/,
+      })
     ).toBeTruthy();
   });
 
@@ -301,7 +305,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -311,7 +315,9 @@ describe("EarnButtonBuilder", () => {
     expect(lightRadio.checked).toBe(true);
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+      screen.getByRole("link", {
+        name: /embedded-yield\/integrate\/PublicEarnButtonToken123/,
+      })
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
       "disabled",
@@ -325,7 +331,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId={liveStrategy.id}
@@ -345,7 +351,7 @@ describe("EarnButtonBuilder", () => {
     const view = renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         key="saved-configuration"
         projectId="project_original"
         providerAccess={providerAccess}
@@ -356,7 +362,7 @@ describe("EarnButtonBuilder", () => {
       <I18nProvider locale="en" messages={getMessages("en")}>
         <EarnButtonBuilder
           configurationLoad={noConfiguration}
-          earnHref="/dashboard/markets/earn"
+          earnHref="/dashboard/markets/embedded-yield"
           key="empty-configuration"
           projectId="project_next"
           providerAccess={providerAccess}
@@ -368,14 +374,14 @@ describe("EarnButtonBuilder", () => {
     await waitFor(() => {
       expect((screen.getByRole("radio", { name: /^Ink/ }) as HTMLInputElement).checked).toBe(true);
     });
-    expect(screen.queryByRole("link", { name: /earn\/integrate\// })).toBeNull();
+    expect(screen.queryByRole("link", { name: /embedded-yield\/integrate\// })).toBeNull();
   });
 
   it("offers a recovery route when the live strategy id no longer resolves", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_removed"
@@ -384,9 +390,9 @@ describe("EarnButtonBuilder", () => {
 
     expect(screen.getByText("Strategy no longer available")).toBeTruthy();
     expect(screen.getByText(/no longer in the live catalogue/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Return to Earn" }).getAttribute("href")).toBe(
-      "/dashboard/markets/earn"
-    );
+    expect(
+      screen.getByRole("link", { name: "Return to Embedded Yield" }).getAttribute("href")
+    ).toBe("/dashboard/markets/embedded-yield");
     expect(screen.queryByText("iOS preview")).toBeNull();
   });
 
@@ -395,7 +401,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
@@ -411,7 +417,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={{ kamino: { entitled: true, configured: false, enabled: false } }}
         strategyId="earn_strategy_live"
