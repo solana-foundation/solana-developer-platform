@@ -6,7 +6,7 @@ import { Callout } from "@/components/ui/callout";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchRingsOperationDetail, type RingsOperationDetail } from "./helius-rings.data";
-import { formatTimeOfDay, formatWhen } from "./helius-rings.utils";
+import { formatAssetAmount, formatTimeOfDay, formatWhen } from "./helius-rings.utils";
 
 /**
  * Operation detail: identity, failure (code + message, verbatim), and the
@@ -79,7 +79,7 @@ export function OperationDetailDrawer({
               {detail.amountRaw ? (
                 <DetailRow
                   label={t("DashboardHeliusRings.activity.amount")}
-                  value={detail.amountRaw}
+                  value={formatAssetAmount(detail.amountRaw, detail.assetMint)}
                 />
               ) : null}
               <DetailRow

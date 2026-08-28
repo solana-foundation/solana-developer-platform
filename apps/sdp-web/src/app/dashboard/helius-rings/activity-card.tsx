@@ -22,7 +22,7 @@ import {
   retryRingsOperation,
   voidRingsOperation,
 } from "./helius-rings.data";
-import { formatWhen, isSettling, shortenOperationId } from "./helius-rings.utils";
+import { formatAssetAmount, formatWhen, isSettling, shortenOperationId } from "./helius-rings.utils";
 
 const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
   draft: "default",
@@ -225,7 +225,9 @@ export function ActivityCard({
                         ) : null}
                       </span>
                     </TableCell>
-                    <TableCell>{operation.amountRaw ?? "—"}</TableCell>
+                    <TableCell>
+                      {formatAssetAmount(operation.amountRaw, operation.assetMint)}
+                    </TableCell>
                     <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>
                     <TableCell>
                       {action && label ? (

@@ -5,6 +5,7 @@
  */
 
 import {
+  RINGS_ALLOWLISTED_ASSETS,
   RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsHealthComponent,
@@ -85,6 +86,41 @@ export function readShieldedAmount(amountRaw: string, decimals: number | null): 
   const text = formatBaseUnits(amountRaw, decimals ?? 0);
   if (text === null) return { scale: "unrenderable" };
   return { scale: decimals === null ? "baseUnits" : "exact", text };
+}
+
+// Whole part with optional fraction. Reject a bare `.` or a leading `.`.
+const AMOUNT_DECIMAL = /^\d+(?:\.\d+)?$/;
+
+/**
+ * Parses a user-typed decimal amount ("1.01") into its uint64 base-unit form
+ * ("1010000000" at 9 decimals). Returns `null` for anything that would need
+ * more fractional digits than the mint carries — refusing dust is safer than
+ * silently truncating it.
+ */
+export function parseDecimalToBaseUnits(decimal: string, decimals: number): string | null {
+  if (!AMOUNT_DECIMAL.test(decimal)) return null;
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_DECIMALS) return null;
+
+  const [whole, fraction = ""] = decimal.split(".");
+  if (fraction.length > decimals) return null;
+
+  const combined = `${whole}${fraction.padEnd(decimals, "0")}`.replace(/^0+(?=\d)/, "");
+  return combined === "" ? "0" : combined;
+}
+
+/**
+ * Renders a stored amount as "<value> <symbol>" at the mint's scale, or the raw
+ * base-unit digits if the mint is unknown to us. Never a bare number, so the
+ * operator can tell 1 lamport from 1 SOL at a glance.
+ */
+export function formatAssetAmount(amountRaw: string | null, assetMint: string | null): string {
+  if (!amountRaw) return "—";
+  const asset = assetMint
+    ? RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === assetMint)
+    : undefined;
+  if (!asset) return amountRaw;
+  const formatted = formatBaseUnits(amountRaw, asset.decimals);
+  return formatted === null ? amountRaw : `${formatted} ${asset.symbol}`;
 }
 
 /**

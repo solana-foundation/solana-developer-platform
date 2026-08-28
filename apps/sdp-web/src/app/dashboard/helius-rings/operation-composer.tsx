@@ -13,6 +13,7 @@ import {
   type RingsOpType,
   type RingsWallet,
 } from "./helius-rings.data";
+import { formatAssetAmount, parseDecimalToBaseUnits } from "./helius-rings.utils";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -29,7 +30,8 @@ interface ComposerDraft {
   walletId: string | null;
   opType: RingsOpType;
   assetMint: string;
-  amountRaw: string;
+  /** User-typed decimal amount, e.g. "1.01". Converted to base units at submit. */
+  amountDecimal: string;
   recipient: string;
 }
 
@@ -37,13 +39,22 @@ const EMPTY_DRAFT: ComposerDraft = {
   walletId: null,
   opType: "shield",
   assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
-  amountRaw: "",
+  amountDecimal: "",
   recipient: "",
 };
 
+function assetOf(mint: string) {
+  return RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === mint);
+}
+
+function draftAmountRaw(draft: ComposerDraft): string | null {
+  const asset = assetOf(draft.assetMint);
+  return asset ? parseDecimalToBaseUnits(draft.amountDecimal, asset.decimals) : null;
+}
+
 function isDraftComplete(draft: ComposerDraft): boolean {
   if (draft.walletId === null) return false;
-  if (!/^\d+$/.test(draft.amountRaw)) return false;
+  if (draftAmountRaw(draft) === null) return false;
   return draft.opType !== "withdraw" || draft.recipient.trim().length > 0;
 }
 
@@ -52,7 +63,7 @@ function buildSummaryRows(
   draft: ComposerDraft,
   wallets: RingsWallet[]
 ): Array<[string, string]> {
-  const asset = RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === draft.assetMint);
+  const amountRaw = draftAmountRaw(draft);
   const rows: Array<[string, string]> = [
     [
       t("DashboardHeliusRings.composer.summaryWallet"),
@@ -64,7 +75,7 @@ function buildSummaryRows(
     ],
     [
       t("DashboardHeliusRings.composer.summaryAmount"),
-      `${draft.amountRaw} (${asset?.symbol ?? "?"} ${t("DashboardHeliusRings.composer.baseUnits")})`,
+      formatAssetAmount(amountRaw, draft.assetMint),
     ],
   ];
   if (draft.opType === "withdraw") {
@@ -97,6 +108,8 @@ export function OperationComposer({
 
   const handleConfirm = useCallback(async () => {
     if (!draft.walletId) return;
+    const amountRaw = draftAmountRaw(draft);
+    if (amountRaw === null) return;
     setSubmitting(true);
     setPhase({ name: "review", error: null });
     let prepared: Awaited<ReturnType<typeof prepareRingsOperation>>;
@@ -104,7 +117,7 @@ export function OperationComposer({
       prepared = await prepareRingsOperation({
         walletId: draft.walletId,
         opType: draft.opType,
-        asset: { mint: draft.assetMint, amountRaw: draft.amountRaw },
+        asset: { mint: draft.assetMint, amountRaw },
         to: draft.opType === "withdraw" ? draft.recipient.trim() : undefined,
       });
     } finally {
@@ -242,10 +255,14 @@ function ComposeStep({
         </Field>
         <Field label={t("DashboardHeliusRings.composer.amount")}>
           <Input
-            inputMode="numeric"
-            value={draft.amountRaw}
-            placeholder="1000000"
-            onChange={(event) => onPatch({ amountRaw: event.target.value.replace(/\D/g, "") })}
+            inputMode="decimal"
+            value={draft.amountDecimal}
+            placeholder="1.01"
+            // Digits + at most one dot. Rejects letters and stray punctuation
+            // client-side; parseDecimalToBaseUnits enforces per-mint precision.
+            onChange={(event) =>
+              onPatch({ amountDecimal: event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1") })
+            }
           />
         </Field>
       </div>

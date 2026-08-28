@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { RingsHealth } from "./helius-rings.data";
 import {
+  formatAssetAmount,
   formatBaseUnits,
   healthAlerts,
   healthReason,
+  parseDecimalToBaseUnits,
   readShieldedAmount,
   shortenShieldedAddress,
 } from "./helius-rings.utils";
+
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
 /**
  * A shielded amount is a uint64 count of base units, so each expectation below
@@ -90,6 +95,49 @@ describe("readShieldedAmount", () => {
     expect(readShieldedAmount("1.5", null)).toEqual({ scale: "unrenderable" });
     expect(readShieldedAmount("-1", 6)).toEqual({ scale: "unrenderable" });
     expect(readShieldedAmount("1000000", 256)).toEqual({ scale: "unrenderable" });
+  });
+});
+
+describe("parseDecimalToBaseUnits", () => {
+  it("scales integer amounts by the mint's decimals", () => {
+    expect(parseDecimalToBaseUnits("1", 9)).toBe("1000000000");
+    expect(parseDecimalToBaseUnits("0", 9)).toBe("0");
+    expect(parseDecimalToBaseUnits("42", 6)).toBe("42000000");
+  });
+
+  it("preserves the fraction exactly up to the mint's precision", () => {
+    expect(parseDecimalToBaseUnits("1.01", 9)).toBe("1010000000");
+    expect(parseDecimalToBaseUnits("0.000000001", 9)).toBe("1");
+    expect(parseDecimalToBaseUnits("1.5", 6)).toBe("1500000");
+  });
+
+  it("refuses more precision than the mint carries", () => {
+    // Truncating silently would send a smaller amount than the operator typed.
+    expect(parseDecimalToBaseUnits("1.0000000001", 9)).toBeNull();
+    expect(parseDecimalToBaseUnits("0.0000001", 6)).toBeNull();
+  });
+
+  it("refuses shapes that are not a decimal number", () => {
+    for (const s of ["", ".", ".5", "1.", "-1", "1e9", "0x1", "1,5", " 1", "1 ", "abc"]) {
+      expect(parseDecimalToBaseUnits(s, 9)).toBeNull();
+    }
+  });
+});
+
+describe("formatAssetAmount", () => {
+  it("renders the amount at the mint's scale, suffixed with the symbol", () => {
+    expect(formatAssetAmount("1010000000", SOL_MINT)).toBe("1.01 SOL");
+    expect(formatAssetAmount("1", SOL_MINT)).toBe("0.000000001 SOL");
+    expect(formatAssetAmount("1500000", USDC_MINT)).toBe("1.5 USDC");
+  });
+
+  it("falls back to raw digits for an unknown mint", () => {
+    expect(formatAssetAmount("123", "unknown-mint")).toBe("123");
+  });
+
+  it("reads a missing amount as an em dash", () => {
+    expect(formatAssetAmount(null, SOL_MINT)).toBe("—");
+    expect(formatAssetAmount("", SOL_MINT)).toBe("—");
   });
 });
 
