@@ -105,7 +105,7 @@ export function OnrampRail({
       onCounterpartyCreated={() => {}}
       summary={<WizardSummaryList details={summaryDetails} />}
       header={
-        hostedStage ? (
+        hostedStage && wizard.transferStatus?.status !== "completed" ? (
           <RampStatusInline direction="onramp" hosted transfer={wizard.transferStatus} />
         ) : undefined
       }
@@ -114,6 +114,7 @@ export function OnrampRail({
       }
       confirmSecondary={wizard.onTransactionStage}
       secondaryDisabled={wizard.isCanceling}
+      hideSecondary={transferTerminal}
       footerActions={
         transferTerminal ? (
           <Button asChild type="button">

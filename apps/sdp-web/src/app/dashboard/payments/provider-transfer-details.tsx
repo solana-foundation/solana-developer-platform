@@ -62,7 +62,7 @@ function moonpayReceiptUrl(transactionId: string, cluster: SolanaCluster): strin
 const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] = [
   {
     kind: "link",
-    labelKey: "DashboardPayments.transferDetails.moonpayReceipt",
+    labelKey: "DashboardPayments.transferDetails.receipt",
     textKey: "DashboardPayments.transferDetails.viewReceipt",
     href: (settlement, { cluster }) => moonpayReceiptUrl(settlement.transactionId, cluster),
   },

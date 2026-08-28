@@ -662,8 +662,8 @@
       "moneygramError": "MoneyGram error",
       "lastUpdated": "Last updated",
       "copy": "Copy {label}",
-      "moonpayReceipt": "MoonPay receipt",
-      "viewReceipt": "View receipt"
+      "viewReceipt": "View receipt",
+      "receipt": "Receipt"
     },
     "requestFailed": "Request failed.",
     "submitting": "Submitting...",
