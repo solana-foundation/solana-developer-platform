@@ -14,6 +14,7 @@ import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
+import { runWithCronRunEvent } from "@/cron/run-event";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
@@ -284,7 +285,7 @@ function createManagedTickRunner({
     const monitorSlug = getManagedMonitorSlug(monitor);
     const checkIn = checkIns.get(monitor);
     try {
-      const result = await work();
+      const result = await runWithCronRunEvent(monitorSlug, work);
       if (checkIn) {
         observability?.captureCheckIn({ ...checkIn, status: "ok" });
       }

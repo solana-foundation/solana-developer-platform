@@ -39,11 +39,15 @@ export default defineConfig({
       reportsDirectory: "./coverage/node",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/types/**", "src/db/migrations/**"],
+      // Ratchet floors: autoUpdate raises them in place whenever a local
+      // coverage run beats them, and CI enforces the committed values so
+      // coverage can only go up.
       thresholds: {
         statements: 70,
         branches: 70,
         functions: 70,
         lines: 70,
+        autoUpdate: true,
       },
     },
     testTimeout: 30_000,
