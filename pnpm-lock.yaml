@@ -349,6 +349,9 @@ importers:
       '@flags-sdk/vercel':
         specifier: 1.4.6
         version: 1.4.6(flags@4.2.4(@opentelemetry/api@1.9.1)(next@16.2.12(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.62.1)(@types/node@26.1.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(next@16.2.12(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.62.1)(@types/node@26.1.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
+      '@moonpay/moonpay-react':
+        specifier: 1.10.8
+        version: 1.10.8(react@19.2.8)
       '@sdp/issuance':
         specifier: workspace:*
         version: link:../../packages/sdp-issuance
@@ -1797,6 +1800,11 @@ packages:
 
   '@mdx-js/mdx@3.1.1':
     resolution: {integrity: sha512-f6ZO2ifpwAQIpzGWaBQT2TXxPv6z3RBzQKpVftEWN78Vl/YweF1uwussDx8ECAXVtr3Rs89fKyG9YlzUs9DyGQ==}
+
+  '@moonpay/moonpay-react@1.10.8':
+    resolution: {integrity: sha512-QAK7uCfG66H2G4SbyGtSpS9RzP0Ah0hNUGA8i3FUDWpXsRocW5UlPXWV8jkp7O8rCzHWtgKQvgCoMgpJUJozTg==}
+    peerDependencies:
+      react: '>=16'
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     resolution: {integrity: sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==}
@@ -8875,11 +8883,6 @@ packages:
       uglify-js:
         optional: true
 
-  terser@5.48.0:
-    resolution: {integrity: sha512-J/9An6vs9Us6wKRriSFXBWdRZapREHqFzdNUKk0pmu804EMR6dr6winwo7e5JDxN4xahxQsuysyYFwlwj4XN/Q==}
-    engines: {node: '>=10'}
-    hasBin: true
-
   terser@5.50.0:
     resolution: {integrity: sha512-CN9BVxWhgS/hRxtUMjtC2uRWSTcSfQFHMDWma6sKKfIivCD91sM+FOPfvwoaRMqCSrUpe1nv3jDamd9eEQ4y+w==}
     engines: {node: '>=10'}
@@ -10451,6 +10454,10 @@ snapshots:
       vfile: 6.0.3
     transitivePeerDependencies:
       - supports-color
+
+  '@moonpay/moonpay-react@1.10.8(react@19.2.8)':
+    dependencies:
+      react: 19.2.8
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
@@ -18695,17 +18702,10 @@ snapshots:
       '@jridgewell/trace-mapping': 0.3.31
       jest-worker: 27.5.1
       schema-utils: 4.3.3
-      terser: 5.48.0
+      terser: 5.50.0
       webpack: 5.106.1(lightningcss@1.32.0)
     optionalDependencies:
       lightningcss: 1.32.0
-
-  terser@5.48.0:
-    dependencies:
-      '@jridgewell/source-map': 0.3.11
-      acorn: 8.18.0
-      commander: 2.20.3
-      source-map-support: 0.5.21
 
   terser@5.50.0:
     dependencies:
@@ -18713,7 +18713,6 @@ snapshots:
       acorn: 8.18.0
       commander: 2.20.3
       source-map-support: 0.5.21
-    optional: true
 
   testcontainers@12.0.4:
     dependencies:

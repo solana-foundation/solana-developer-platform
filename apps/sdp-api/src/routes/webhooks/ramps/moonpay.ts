@@ -1,8 +1,10 @@
 import { readRecord, readString } from "@sdp/payments/json";
 import {
   moonpayBuyTransactionSchema,
+  moonpaySellTransactionSchema,
+  moonpaySellTransactionSettlementEvent,
   moonpayTransactionSettlementEvent,
-} from "@sdp/payments/ramps/providers/moonpay/settlement";
+} from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
@@ -99,6 +101,22 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
       throw badRequest("MoonPay webhook body must be an object", { provider: this.provider });
     }
     const type = readString(root.type);
+    if (
+      type === "sell_transaction_created" ||
+      type === "sell_transaction_updated" ||
+      type === "sell_transaction_failed" ||
+      type === "sell_transaction_requote_required"
+    ) {
+      const sellTransactionData = moonpaySellTransactionSchema.safeParse(root.data);
+      if (!sellTransactionData.success) {
+        throw badRequest(`MoonPay "${type}" webhook carries a malformed sell transaction`, {
+          provider: this.provider,
+          errors: sellTransactionData.error.issues,
+        });
+      }
+      return moonpaySellTransactionSettlementEvent(sellTransactionData.data);
+    }
+
     if (
       type !== "transaction_created" &&
       type !== "transaction_updated" &&

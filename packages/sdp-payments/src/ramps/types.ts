@@ -3,6 +3,7 @@ import type {
   CounterpartyProviderData,
   PaymentRampEstimate,
   PaymentRampQuote,
+  RampCryptoDeposit,
   RampTransferSettlement,
   SdpEnvironment,
 } from "@sdp/types";
@@ -128,7 +129,16 @@ interface BaseRampSettlementEvent {
 }
 
 export type RampSettlementEvent =
-  | (BaseRampSettlementEvent & { kind: "awaiting_payment" })
+  | (BaseRampSettlementEvent & {
+      kind: "awaiting_payment";
+      /**
+       * Off-ramp only: where the provider expects the crypto deposit, when the
+       * event reports it. `null` withdraws a previously issued instruction
+       * (e.g. the provider requires a requote before accepting the deposit);
+       * absent leaves any stored instruction untouched.
+       */
+      cryptoDeposit?: RampCryptoDeposit | null;
+    })
   | (BaseRampSettlementEvent & { kind: "settling" })
   | (BaseRampSettlementEvent & {
       kind: "settled";
@@ -174,7 +184,6 @@ export interface RampOnrampQuoteInput {
   externalCustomerId: string;
   /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
   customerId?: string;
-  redirectUrl?: string;
   bvnkCompliance?: BvnkComplianceInput;
   /** Buyer contact required by Coinbase headless create-order; sourced from the counterparty. */
   email?: string;
@@ -200,7 +209,6 @@ export interface RampOfframpQuoteInput {
   payoutAccountId?: string;
   /** Handler-provisioned merchant-owned BVNK off-ramp fiat wallet id. */
   bvnkOfframpWalletId?: string;
-  redirectUrl?: string;
   bvnkCompliance?: BvnkComplianceInput;
 }
 

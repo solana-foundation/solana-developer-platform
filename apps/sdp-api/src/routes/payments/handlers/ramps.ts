@@ -692,7 +692,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
-        redirectUrl: input.redirectUrl,
       });
       break;
     }
@@ -708,7 +707,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
         customerId,
-        redirectUrl: input.redirectUrl,
       });
       break;
     }
@@ -823,7 +821,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
         externalCustomerId: counterparty.id,
-        redirectUrl: input.redirectUrl,
       });
       break;
     }

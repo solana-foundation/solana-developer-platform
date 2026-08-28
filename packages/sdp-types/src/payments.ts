@@ -180,6 +180,14 @@ export type RampTransferSettlement =
   | LightsparkRampSettlement
   | CoinbaseRampSettlement;
 
+/** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
+export interface RampCryptoDeposit {
+  /** Provider-owned wallet address the crypto must be sent to. */
+  destinationAddress: string;
+  /** Crypto amount the provider expects, in display units. */
+  amount: string;
+}
+
 export interface MoneygramTransferDetails {
   transactionId?: string;
   referenceNumber?: string;
@@ -211,6 +219,7 @@ export interface PaymentTransferSummary {
   fiatCurrency?: string;
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
+  cryptoDeposit?: RampCryptoDeposit;
   moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;

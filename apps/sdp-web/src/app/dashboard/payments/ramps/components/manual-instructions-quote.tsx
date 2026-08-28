@@ -232,7 +232,7 @@ export interface InstructionAction {
   doneLabel: string;
 }
 
-function InstructionActionButton({ action }: { action: InstructionAction }) {
+export function InstructionActionButton({ action }: { action: InstructionAction }) {
   return (
     <Button
       type="button"

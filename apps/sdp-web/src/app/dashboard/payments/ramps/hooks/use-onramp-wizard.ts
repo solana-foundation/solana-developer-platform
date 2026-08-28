@@ -90,7 +90,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         cryptoToken,
         fiatCurrency: selectedRampPair.fiatCurrency,
         fiatAmount: fields.amount.trim(),
-        redirectUrl: `${window.location.origin}/dashboard/payments`,
         // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
         domain: window.location.hostname,
         rampsMemo,

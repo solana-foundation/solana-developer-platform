@@ -1,9 +1,12 @@
 "use client";
 
+import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { toRampCryptoToken } from "@/lib/ramps";
 import { WizardSummaryList } from "../wizard-summary-list";
+import { InstructionActionButton } from "./components/manual-instructions-quote";
 import { OfframpStepContent } from "./components/offramp-step-content";
 import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
@@ -91,6 +94,22 @@ export function OfframpRail({
               {t("DashboardPayments.goToTransaction")}
             </Link>
           </Button>
+        ) : wizard.depositTarget ? (
+          <InstructionActionButton
+            action={{
+              loading: wizard.onchainSendLoading,
+              succeeded: wizard.onchainSendResult !== null,
+              disabled: !wizard.canSendOnchain,
+              onClick: () => void wizard.sendCryptoToDeposit(),
+              icon: <SendIcon />,
+              idleLabel: t("DashboardPayments.ramps.sendCrypto", {
+                amount: wizard.depositTarget.amount,
+                token: toRampCryptoToken(wizard.selectedRampPair.assetRail).toUpperCase(),
+              }),
+              busyLabel: t("DashboardPayments.ramps.sending"),
+              doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
+            }}
+          />
         ) : null
       }
       hidePrimary={wizard.currentStepId === "COMPLETE"}

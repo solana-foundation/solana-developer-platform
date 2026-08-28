@@ -137,3 +137,112 @@ export function moonpayTransactionSettlementEvent(
   }
   return { provider: "moonpay", kind, reference, ...providerCustomer };
 }
+
+const MOONPAY_SELL_TRANSACTION_STATUS = {
+  waitingForDeposit: "awaiting_payment",
+  requoteRequired: "awaiting_payment",
+  pending: "settling",
+  completed: "settled",
+  failed: "failed",
+} as const satisfies Record<string, RampSettlementEvent["kind"]>;
+
+/**
+ * One MoonPay Sell transaction as it arrives in `sell_transaction_*` webhook
+ * `data`. `status` stays an open string so a status MoonPay ships later maps
+ * to an ignore event instead of a parse failure.
+ */
+export const moonpaySellTransactionSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  customerId: z.string().optional(),
+  externalTransactionId: z.string().nullish(),
+  failureReason: z.string().nullish(),
+  baseCurrencyAmount: z.number().optional(),
+  quoteCurrencyAmount: z.number().optional(),
+  depositWallet: z.object({ walletAddress: z.string() }).nullish(),
+});
+export type MoonpaySellTransactionData = z.infer<typeof moonpaySellTransactionSchema>;
+
+/**
+ * Maps one MoonPay Sell transaction to the provider-agnostic settlement
+ * event. While the sale waits for its deposit the event carries the deposit
+ * wallet and expected crypto amount, so SDP can send the crypto on the
+ * customer's behalf — MoonPay may issue a NEW deposit wallet when the
+ * customer re-confirms the sale, so the latest event always wins. A
+ * `requoteRequired` sale stays awaiting payment but carries `cryptoDeposit:
+ * null`: the pending instruction is withdrawn until the customer accepts the
+ * new quote.
+ *
+ * @param data - The MoonPay sell transaction payload (webhook `data`).
+ * @returns The settlement event, or an ignore event for unmatchable payloads.
+ */
+export function moonpaySellTransactionSettlementEvent(
+  data: MoonpaySellTransactionData
+): RampSettlementEvent {
+  const reference = data.externalTransactionId;
+  if (!reference) {
+    return { provider: "moonpay", kind: "ignore", reason: "missing_external_transaction_id" };
+  }
+
+  if (!Object.hasOwn(MOONPAY_SELL_TRANSACTION_STATUS, data.status)) {
+    return {
+      provider: "moonpay",
+      kind: "ignore",
+      reason: `unsupported_status:${data.status}`,
+    };
+  }
+  const kind =
+    MOONPAY_SELL_TRANSACTION_STATUS[data.status as keyof typeof MOONPAY_SELL_TRANSACTION_STATUS];
+  const providerCustomer = data.customerId ? { providerCustomerId: data.customerId } : {};
+  switch (kind) {
+    case "awaiting_payment": {
+      if (data.status === "requoteRequired") {
+        return {
+          provider: "moonpay",
+          kind,
+          reference,
+          ...providerCustomer,
+          cryptoDeposit: null,
+        };
+      }
+      return {
+        provider: "moonpay",
+        kind,
+        reference,
+        ...providerCustomer,
+        ...(data.depositWallet && data.baseCurrencyAmount !== undefined
+          ? {
+              cryptoDeposit: {
+                destinationAddress: data.depositWallet.walletAddress,
+                amount: String(data.baseCurrencyAmount),
+              },
+            }
+          : {}),
+      };
+    }
+    case "settled":
+      return {
+        provider: "moonpay",
+        kind,
+        reference,
+        ...providerCustomer,
+        ...(data.quoteCurrencyAmount !== undefined
+          ? { receivedAmount: String(data.quoteCurrencyAmount) }
+          : {}),
+      };
+    case "failed":
+      return {
+        provider: "moonpay",
+        kind,
+        reference,
+        ...providerCustomer,
+        ...(data.failureReason ? { error: data.failureReason } : {}),
+      };
+    case "settling":
+      return { provider: "moonpay", kind, reference, ...providerCustomer };
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`Unhandled MoonPay sell settlement kind: ${exhaustive}`);
+    }
+  }
+}
