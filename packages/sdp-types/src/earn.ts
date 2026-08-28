@@ -246,6 +246,64 @@ export interface EarnVaultPositionsPage {
   nextCursor: string | null;
 }
 
+/** One live position held by a partner end user's external wallet. */
+export interface EarnExternalWalletPosition {
+  id: string;
+  ownerAddress: string;
+  provider: string;
+  providerReference: string;
+  label: string;
+  tokenMint: string;
+  shareMint: string;
+  createdAt: string;
+  closedAt: string | null;
+  /** Absent when the live provider read failed; unavailable is never encoded as zero. */
+  shares?: string;
+  /** Absent when the live provider read failed. */
+  withdrawableShares?: string;
+  /** Deposit-token value, absent when the live provider read failed. */
+  tokenValue?: string;
+}
+
+/** Keyset page for exactly one external wallet. */
+export interface EarnExternalWalletPositionsPage {
+  ownerAddress: string;
+  positions: EarnExternalWalletPosition[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+export interface EarnExternalWalletTokenTotal {
+  tokenMint: string;
+  walletCount: number;
+  positionCount: number;
+  unavailablePositionCount: number;
+  /** Absent when any contributing position is unavailable, so the total is never partial. */
+  tokenValue?: string;
+}
+
+export interface EarnExternalWalletStrategyTotal {
+  provider: string;
+  providerReference: string;
+  label: string;
+  walletCount: number;
+  positionCount: number;
+  totalsByToken: EarnExternalWalletTokenTotal[];
+}
+
+/** Complete live aggregate for one partner project across its end-user wallets. */
+export interface EarnExternalWalletPositionSummary {
+  walletCount: number;
+  positionCount: number;
+  unavailablePositionCount: number;
+  totalsByStrategy: EarnExternalWalletStrategyTotal[];
+  totalsByToken: EarnExternalWalletTokenTotal[];
+}
+
+export interface EarnExternalWalletPositionSummaryResponse {
+  summary: EarnExternalWalletPositionSummary;
+}
+
 /** JSON body for POST /v1/earn/vault-deposits. Idempotency is header-only. */
 export interface EarnVaultDepositRequest {
   strategyId: string;
@@ -386,6 +444,97 @@ export interface EarnVaultWithdrawalsPage {
   withdrawals: EarnVaultWithdrawal[];
   hasMore: boolean;
   nextCursor: string | null;
+}
+
+/**
+ * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
+ *
+ * An external wallet is a NON-CUSTODIAL wallet the partner's platform
+ * connects; SDP holds no key for it and never signs. Each direction is two
+ * calls: a BUILD returns an unsigned transaction to sign, and a SUBMIT
+ * takes the signed bytes back, records the movement, then broadcasts. These
+ * surfaces postdate the unified ledger, so statuses are the ledger's own
+ * vault vocabulary (`requested … finalized`), never the legacy deposit one.
+ */
+
+/** One unsigned transaction SDP built for an external wallet to sign. */
+export interface EarnExternalWalletTransaction {
+  /** Names the built transaction on the submit call. Single-use. */
+  transactionId: string;
+  /**
+   * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
+   * exactly these bytes (fee payer is the owner) and the partner returns the
+   * signed encoding on the submit call; any other change is refused there.
+   */
+  transaction: string;
+  /** Block height after which these exact bytes can no longer land. */
+  lastValidBlockHeight: string;
+  ownerAddress: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument. */
+  providerReference: string;
+  tokenMint: string;
+  shareMint: string;
+}
+
+/** Response body of POST /v1/earn/external-wallet/deposit-transactions. */
+export interface EarnExternalWalletDepositTransactionResponse {
+  transaction: EarnExternalWalletTransaction & {
+    /** Deposit amount encoded in the transaction, vault-token units. */
+    amount: string;
+    /** Slippage floor encoded in the transaction, share units, or null. */
+    minSharesOut: string | null;
+    strategy: {
+      id: string;
+      name: string;
+      provider: string;
+      providerReference: string;
+      hostCluster: SolanaCluster;
+    };
+  };
+}
+
+/** Response body of POST /v1/earn/external-wallet/withdrawal-transactions. */
+export interface EarnExternalWalletWithdrawalTransactionResponse {
+  transaction: EarnExternalWalletTransaction & {
+    /** The external-wallet position being exited. */
+    positionId: string;
+    /** Shares encoded in the transaction, share units. */
+    shares: string;
+  };
+}
+
+/** One recorded external-wallet vault movement, either direction. */
+export interface EarnExternalWalletMovement {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument. */
+  providerReference: string;
+  direction: EarnMovementDirection;
+  status: EarnVaultDirectMovementStatus;
+  signature: string;
+  ownerAddress: string;
+  /** Requested quantity, denominated in `denomination`. */
+  amount: string;
+  /** Token mint for a deposit; share mint for a withdrawal. */
+  denomination: string;
+  failureReason: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+  settledAt: string | null;
+  /** Present on POST responses; true when the idempotency anchor was replayed. */
+  replayed?: boolean;
+}
+
+/** Response body of POST /v1/earn/external-wallet/deposits. */
+export interface EarnExternalWalletDepositResponse {
+  deposit: EarnExternalWalletMovement;
+}
+
+/** Response body of POST /v1/earn/external-wallet/withdrawals. */
+export interface EarnExternalWalletWithdrawalResponse {
+  withdrawal: EarnExternalWalletMovement;
 }
 
 /**

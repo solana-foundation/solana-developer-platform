@@ -114,7 +114,12 @@ describe("PrivyCredentialForm", () => {
     const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
     expect(secret.value).toBe("shh-secret");
 
-    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+    // Found rather than queried: the alert renders from the state update, but
+    // the submit button only returns to this label once the transition behind
+    // it settles, which can be a tick later. The sibling cases survive by
+    // typing a correction first, which yields those ticks; this one asserts
+    // and clicks straight through.
+    await user.click(await screen.findByRole("button", { name: "Connect and verify" }));
     await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
     // The key was never spent, so the corrected submission may reuse it.
     expect(submittedKey(1)).toBe(submittedKey(0));

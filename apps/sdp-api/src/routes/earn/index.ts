@@ -11,6 +11,14 @@ import {
   getPublicEarnButtonConfiguration,
   upsertEarnButtonConfiguration,
 } from "./handlers/button-configurations";
+import {
+  createEarnExternalWalletDeposit,
+  createEarnExternalWalletDepositTransaction,
+  createEarnExternalWalletWithdrawal,
+  createEarnExternalWalletWithdrawalTransaction,
+  getEarnExternalWalletPositionSummary,
+  listEarnExternalWalletPositions,
+} from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
   createEarnProgram,
@@ -39,6 +47,9 @@ import {
 } from "./handlers/vault";
 import {
   earnButtonConfigurationSchema,
+  earnExternalWalletDepositTransactionSchema,
+  earnExternalWalletSubmitSchema,
+  earnExternalWalletWithdrawalTransactionSchema,
   earnProgramCreateSchema,
   earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
@@ -85,6 +96,20 @@ earn.put(
 // Strategy catalogue (source: DB, admitted only by the sync cron).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
+
+// B2B2C live holdings (PRO-1724). Summary is declared before the owner path so
+// the literal segment can never be captured as a Solana address. No
+// `wallets:read`: these are end-user wallets SDP does not custody.
+earn.get(
+  "/external-wallet/positions/summary",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletPositionSummary
+);
+earn.get(
+  "/external-wallet/positions/:ownerAddress",
+  requirePermissions("earn:read"),
+  listEarnExternalWalletPositions
+);
 
 // Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
 // from a custody wallet, so unlike /programs there is no provider wallet to
@@ -166,6 +191,44 @@ earn.get(
   "/vault-positions",
   requirePermissions("earn:read", "wallets:read"),
   listEarnVaultPositions
+);
+
+// External-wallet (caller-signed) vault flows (PRO-1722): the B2B2C money
+// path, where an external (non-custodial) wallet signs. Each direction is a
+// BUILD (returns an unsigned transaction; full money-in gates on the deposit,
+// exit-safety scoping only on the withdrawal) and a SUBMIT (verifies the
+// signature over the exact built message, records the movement, broadcasts).
+//
+// Deliberately NO `policyGate` and NO `wallets:read`, and that is not the
+// deposit route's cautionary tale repeating: wallet policy governs the org's
+// own custody and stands between a request and `createOrgSigner`. These routes
+// never resolve a signer and never touch custody — the owner's own
+// signature is the authorization, and there is no signing sink here for the
+// value-moving conformance inventory to find. `earn:write` still gates all
+// four, because building and recording money movements is a write surface.
+earn.post(
+  "/external-wallet/deposit-transactions",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletDepositTransactionSchema),
+  createEarnExternalWalletDepositTransaction
+);
+earn.post(
+  "/external-wallet/deposits",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletSubmitSchema),
+  createEarnExternalWalletDeposit
+);
+earn.post(
+  "/external-wallet/withdrawal-transactions",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletWithdrawalTransactionSchema),
+  createEarnExternalWalletWithdrawalTransaction
+);
+earn.post(
+  "/external-wallet/withdrawals",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletSubmitSchema),
+  createEarnExternalWalletWithdrawal
 );
 
 // The cross-provider movement feed (source: earn_movements). One chronological

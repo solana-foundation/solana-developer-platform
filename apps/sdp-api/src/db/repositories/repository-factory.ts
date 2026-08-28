@@ -1,5 +1,5 @@
 // biome-ignore-all lint/security/noSecrets: repository and method identifiers are not credentials
-import { getDb } from "@/db";
+import { type AppDb, getDb } from "@/db";
 import { bindRepositoryToTenant, type TenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
@@ -84,6 +84,18 @@ export function createPaymentsRepository(env: Env, scope: TenantScope): Payments
 
 export function createSystemPaymentsRepository(env: Env): PaymentsRepository {
   return createPostgresPaymentsRepository(getDb(env));
+}
+
+/**
+ * System payments repository bound to a transactional client, for system
+ * paths (webhook settlement, reconciliation jobs) whose writes must share a
+ * transaction with other repositories.
+ *
+ * @param db - The transactional database client.
+ * @returns The unscoped payments repository on that client.
+ */
+export function createSystemTransactionalPaymentsRepository(db: AppDb): PaymentsRepository {
+  return createPostgresPaymentsRepository(db);
 }
 
 export function createPaymentSubscriptionsRepository(

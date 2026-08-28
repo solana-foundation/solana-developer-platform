@@ -123,6 +123,8 @@ export interface RampWebhookValidationContext {
 interface BaseRampSettlementEvent {
   provider: RampProviderId;
   reference: string;
+  /** Provider-side customer identifier observed on the event, when the provider reports one. */
+  providerCustomerId?: string;
 }
 
 export type RampSettlementEvent =

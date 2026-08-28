@@ -119,6 +119,8 @@ BEGIN
     'earn_positions',
     'earn_movements',
     'earn_button_configurations',
+    'earn_external_wallet_transactions',
+    'counterparty_provider_accounts',
     'rpc_connections',
     'helius_rings_wallets',
     'helius_rings_operations'

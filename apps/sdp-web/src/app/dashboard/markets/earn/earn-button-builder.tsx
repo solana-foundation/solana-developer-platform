@@ -5,6 +5,7 @@ import {
   type EarnButtonConfiguration,
   type EarnButtonStyle,
   type EarnStrategy,
+  type SolanaCluster,
 } from "@sdp/types";
 import { ArrowLeftIcon, Code2Icon, InfoIcon } from "lucide-react";
 import Link from "next/link";
@@ -12,6 +13,7 @@ import { useEffect, useReducer, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
 import {
   Card,
   CardAction,
@@ -42,10 +44,12 @@ import {
 } from "./earn-surfacing";
 
 type EarnButtonBuilderProps = {
+  configureHref?: string;
   configurationLoad: EarnButtonConfigurationLoad;
   earnHref: string;
   projectId: string | null;
   providerAccess: EarnProviderAccess | null;
+  strategyCluster?: SolanaCluster;
   strategyId?: string;
 };
 
@@ -140,6 +144,7 @@ function builderEmptyState(input: {
   selectedStrategyId: string | undefined;
   strategy: EarnStrategy | undefined;
   availability: EarnVaultDepositAvailability | undefined;
+  previewOnly: boolean;
 }): { messageKey: MessageKey; descriptionKey: MessageKey } | null {
   if (input.catalogueError) {
     return {
@@ -168,7 +173,8 @@ function builderEmptyState(input: {
       descriptionKey: "DashboardMarkets.earnProgram.missingStrategyDescription",
     };
   }
-  if (input.availability !== "available") {
+  const previewSelectable = input.previewOnly && input.availability === "cluster_unavailable";
+  if (input.availability !== "available" && !previewSelectable) {
     return {
       messageKey: "DashboardMarkets.earnProgram.unavailableStrategyTitle",
       descriptionKey: unavailableDescriptionKey(input.availability),
@@ -178,15 +184,21 @@ function builderEmptyState(input: {
 }
 
 export function EarnButtonBuilder({
+  configureHref,
   configurationLoad,
   earnHref,
   projectId,
   providerAccess,
+  strategyCluster,
   strategyId,
 }: EarnButtonBuilderProps) {
+  const strategyPickerHref =
+    configureHref && strategyCluster
+      ? `${configureHref}?cluster=${encodeURIComponent(strategyCluster)}`
+      : (configureHref ?? earnHref);
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const { strategies, error, isLoading } = useEarnStrategies();
+  const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategyCluster });
   const [builderState, dispatch] = useReducer(
     earnButtonBuilderReducer,
     configurationLoad,
@@ -207,12 +219,17 @@ export function EarnButtonBuilder({
   const availability = strategy
     ? earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess)
     : undefined;
+  const isMainnetPreview =
+    sdpEnvironment === "sandbox" &&
+    strategyCluster === "mainnet-beta" &&
+    strategy?.hostCluster === "mainnet-beta";
   const emptyState = builderEmptyState({
     catalogueError: error,
     configurationError: configurationLoad.kind === "error",
     selectedStrategyId,
     strategy,
     availability,
+    previewOnly: isMainnetPreview,
   });
   if (emptyState) {
     return (
@@ -220,7 +237,9 @@ export function EarnButtonBuilder({
         <ListEmptyState
           action={
             <Button asChild variant="secondary">
-              <Link href={earnHref}>{t("DashboardMarkets.earnProgram.returnToEarn")}</Link>
+              <Link href={strategyPickerHref}>
+                {t("DashboardMarkets.earnProgram.returnToEarn")}
+              </Link>
             </Button>
           }
           description={t(emptyState.descriptionKey)}
@@ -239,7 +258,7 @@ export function EarnButtonBuilder({
     savedConfiguration.style !== style ||
     savedConfiguration.accentColor !== accentColor;
   const sharePath =
-    !hasUnsavedChanges && savedConfiguration
+    !isMainnetPreview && !hasUnsavedChanges && savedConfiguration
       ? earnButtonIntegrationPath(savedConfiguration.publicToken)
       : null;
   const shareLink = sharePath
@@ -249,6 +268,7 @@ export function EarnButtonBuilder({
     : null;
 
   async function saveConfiguration() {
+    if (isMainnetPreview) return;
     dispatch({ type: "saveStarted" });
     try {
       if (!projectId) {
@@ -280,7 +300,7 @@ export function EarnButtonBuilder({
     <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto w-full max-w-6xl space-y-5">
         <Button asChild iconLeft={<ArrowLeftIcon />} size="sm" variant="secondary">
-          <Link href={earnHref}>{t("DashboardMarkets.earnProgram.back")}</Link>
+          <Link href={strategyPickerHref}>{t("DashboardMarkets.earnProgram.back")}</Link>
         </Button>
 
         <div className="max-w-3xl">
@@ -305,13 +325,21 @@ export function EarnButtonBuilder({
           </div>
         ) : null}
 
+        {isMainnetPreview ? (
+          <Callout title={t("DashboardMarkets.earnProgram.mainnetPreviewTitle")} variant="warning">
+            {t("DashboardMarkets.earnProgram.mainnetPreviewDescription")}
+          </Callout>
+        ) : null}
+
         <Card>
           <CardHeader>
             <CardTitle>{t("DashboardMarkets.earnProgram.selectedStrategy")}</CardTitle>
             <CardDescription>{availableStrategy.provider}</CardDescription>
             <CardAction>
               <Button asChild size="sm" variant="ghost">
-                <Link href={earnHref}>{t("DashboardMarkets.earnProgram.changeStrategy")}</Link>
+                <Link href={strategyPickerHref}>
+                  {t("DashboardMarkets.earnProgram.changeStrategy")}
+                </Link>
               </Button>
             </CardAction>
           </CardHeader>
@@ -363,7 +391,11 @@ export function EarnButtonBuilder({
             </CardAction>
           </CardHeader>
           <CardContent className="space-y-5">
-            <EarnButtonEngineeringHandoff shareLink={shareLink} sharePath={sharePath} />
+            <EarnButtonEngineeringHandoff
+              previewOnly={isMainnetPreview}
+              shareLink={shareLink}
+              sharePath={sharePath}
+            />
 
             <CodeBlock
               code={integrationCode}
@@ -381,6 +413,7 @@ export function EarnButtonBuilder({
             hasUnsavedChanges={hasUnsavedChanges}
             isSaving={isSaving}
             onSave={() => void saveConfiguration()}
+            previewOnly={isMainnetPreview}
             saveError={saveError}
           />
         </Card>

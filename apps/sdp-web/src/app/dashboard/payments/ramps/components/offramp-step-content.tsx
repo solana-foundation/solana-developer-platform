@@ -18,6 +18,7 @@ import { hasOnboardingLifecycle } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
+import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
@@ -114,6 +115,9 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     requirementsBlocker,
     sourceTokenMint,
     refreshQuote,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
     onboarding,
     retryOnboarding,
     memoRows,
@@ -187,6 +191,16 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}
+      />
+    );
+  }
+
+  if (currentStepId === "COMPLETE" && !quote && quoteCreationError) {
+    return (
+      <RampQuoteError
+        error={quoteCreationError}
+        retrying={quoteCreationRetrying}
+        onRetry={() => void retryQuoteCreation()}
       />
     );
   }

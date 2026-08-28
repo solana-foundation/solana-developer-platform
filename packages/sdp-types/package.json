@@ -64,6 +64,11 @@
       "import": "./src/ramp-requirements.ts",
       "default": "./src/ramp-requirements.ts"
     },
+    "./ramp-destinations": {
+      "types": "./src/ramp-destinations.ts",
+      "import": "./src/ramp-destinations.ts",
+      "default": "./src/ramp-destinations.ts"
+    },
     "./generated/ramp-support": {
       "types": "./src/generated/ramp-support.generated.ts",
       "import": "./src/generated/ramp-support.generated.ts",

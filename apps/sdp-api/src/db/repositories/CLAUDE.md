@@ -51,6 +51,14 @@ Things that will bite:
   as a vault deposit.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
+- **A vault row's signer is a column pair, not a new model** (PRO-1722,
+  migration 0070): exactly one of `custody_wallet_id` (SDP signs) and
+  `owner_address` (an external wallet SDP holds no key for signs) is set, on
+  positions and movements alike. External-wallet submits consume a row of
+  `earn_external_wallet_transactions` — locked FIRST, consumable at most once —
+  inside the same transaction that inserts the movement, so one built
+  transaction can never ledger twice; that consume is written HERE, with the
+  single ledger writer, not in the built-transactions repository.
 
 The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md).
 Architecture and the migration inventory are in

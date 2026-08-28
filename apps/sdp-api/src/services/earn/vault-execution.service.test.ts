@@ -27,6 +27,7 @@ import { resetClusterEndpointProofs } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   broadcastVaultTransaction,
+  compileUnsignedVaultTransaction,
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
@@ -117,6 +118,36 @@ afterEach(() => {
 });
 
 describe("vault execution validation", () => {
+  it("refuses caller-signed transactions that require any signer besides the owner", async () => {
+    const extraSigner = await generateKeyPairSigner();
+    const externalPlan: EarnVaultTransactionPlan = {
+      ...plan,
+      instructions: [
+        {
+          programAddress: "11111111111111111111111111111111",
+          accounts: [{ address: extraSigner.address, role: AccountRole.READONLY_SIGNER }],
+          data: "",
+        },
+      ],
+    };
+
+    expect(() =>
+      compileUnsignedVaultTransaction({
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: externalPlan.assetIdentity,
+        plan: externalPlan,
+        owner: ownerAddress,
+        prepared: {
+          plan: externalPlan,
+          lookupTables: {},
+          blockhash,
+          lastValidBlockHeight: 100n,
+        },
+      })
+    ).toThrow("must require only the owner signature");
+  });
+
   it("blocks every raw execution path before RPC or signing on wrong genesis", async () => {
     genesisSend.mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
     const owner = createNoopSigner(ownerAddress);
@@ -240,6 +271,45 @@ describe("vault execution validation", () => {
     });
     expect(walletPays.ok).toBe(true);
     expect(feePayerOf(simulatedWire.at(-1) ?? "")).toBe(ownerAddress);
+  });
+
+  it("translates a fee-payer simulation failure into a readable verdict", async () => {
+    simulateSend.mockResolvedValueOnce({ value: { err: "AccountNotFound", logs: [] } });
+
+    const result = await simulateVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan,
+      owner: ownerAddress,
+      rpcUrl,
+      fee: { kind: "wallet-pays" },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a failed simulation");
+    expect(result.error).toContain("the wallet holds no SOL");
+    expect(result.error).toContain("AccountNotFound");
+    expect(result.fault).toBe("caller");
+  });
+
+  it("marks a sponsored fee-payer failure as SDP's fault", async () => {
+    simulateSend.mockResolvedValueOnce({ value: { err: "AccountNotFound", logs: [] } });
+
+    const result = await simulateVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan,
+      owner: ownerAddress,
+      rpcUrl,
+      fee: { kind: "sponsored", feePayment: feePayment(), sponsor: feePayerAddress },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a failed simulation");
+    expect(result.error).toContain("SDP's fee sponsor holds no SOL");
+    expect(result.fault).toBe("sponsor");
   });
 
   it("rejects lookup-table transport failures instead of returning a simulation verdict", async () => {

@@ -1,11 +1,15 @@
 import { readRecord, readString } from "@sdp/payments/json";
+import {
+  moonpayBuyTransactionSchema,
+  moonpayTransactionSettlementEvent,
+} from "@sdp/payments/ramps/providers/moonpay/settlement";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { MoonpayRampSettlement, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { AppContext, WebhookProcessor } from "./processor";
-import { applyRampSettlementEvent } from "./settlements";
 
 function readMoonpayWebhookKey(
   env: Record<string, string | undefined>,
@@ -46,82 +50,6 @@ function parseMoonpaySignatureV2Header(
   }
 
   return timestamp && signature ? { timestamp, signature } : null;
-}
-
-const MOONPAY_TRANSACTION_STATUS = {
-  waitingPayment: "awaiting_payment",
-  pending: "settling",
-  waitingAuthorization: "settling",
-  completed: "settled",
-  failed: "failed",
-} as const satisfies Record<string, RampSettlementEvent["kind"]>;
-type MoonpayTransactionStatus = keyof typeof MOONPAY_TRANSACTION_STATUS;
-
-interface MoonpayTransactionWebhook {
-  type: "transaction_created" | "transaction_updated" | "transaction_failed";
-  data: {
-    id: string;
-    status: MoonpayTransactionStatus;
-    externalTransactionId: string | null;
-    failureReason: string | null;
-    baseCurrencyAmount?: number;
-    quoteCurrencyAmount?: number;
-    feeAmount?: number;
-    extraFeeAmount?: number;
-    networkFeeAmount?: number;
-    areFeesIncluded?: boolean;
-    usdRate?: number;
-    cryptoTransactionId?: string | null;
-    baseCurrency?: { code: string };
-    currency?: { code: string };
-  };
-}
-
-function buildMoonpaySettlement(
-  data: MoonpayTransactionWebhook["data"],
-  status: MoonpayRampSettlement["status"]
-): MoonpayRampSettlement | undefined {
-  const {
-    baseCurrency,
-    currency,
-    baseCurrencyAmount,
-    quoteCurrencyAmount,
-    feeAmount,
-    extraFeeAmount,
-    networkFeeAmount,
-    areFeesIncluded,
-    usdRate,
-    cryptoTransactionId,
-    failureReason,
-  } = data;
-  if (
-    !baseCurrency ||
-    !currency ||
-    baseCurrencyAmount === undefined ||
-    quoteCurrencyAmount === undefined ||
-    feeAmount === undefined ||
-    extraFeeAmount === undefined ||
-    networkFeeAmount === undefined ||
-    areFeesIncluded === undefined ||
-    usdRate === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    provider: "moonpay",
-    status,
-    baseCurrencyCode: baseCurrency.code.toUpperCase(),
-    baseCurrencyAmount,
-    quoteCurrencyCode: currency.code.toUpperCase(),
-    quoteCurrencyAmount,
-    feeAmount,
-    extraFeeAmount,
-    networkFeeAmount,
-    areFeesIncluded,
-    usdRate,
-    ...(cryptoTransactionId ? { cryptoTransactionId } : {}),
-    ...(failureReason ? { failureReason } : {}),
-  };
 }
 
 export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSettlementEvent> {
@@ -179,50 +107,14 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
       return { provider: this.provider, kind: "ignore", reason: `unsupported_event:${type}` };
     }
 
-    const transactionData = readRecord(root.data);
-    if (!transactionData) {
-      throw badRequest(`MoonPay "${type}" webhook is missing transaction data`, {
+    const transactionData = moonpayBuyTransactionSchema.safeParse(root.data);
+    if (!transactionData.success) {
+      throw badRequest(`MoonPay "${type}" webhook carries a malformed transaction`, {
         provider: this.provider,
+        errors: transactionData.error.issues,
       });
     }
-    const data = transactionData as MoonpayTransactionWebhook["data"];
-
-    const reference = data.externalTransactionId;
-    if (!reference) {
-      return { provider: this.provider, kind: "ignore", reason: "missing_external_transaction_id" };
-    }
-
-    const kind = MOONPAY_TRANSACTION_STATUS[data.status];
-    if (!kind) {
-      return {
-        provider: this.provider,
-        kind: "ignore",
-        reason: `unsupported_status:${data.status}`,
-      };
-    }
-    if (kind === "failed") {
-      const settlement = buildMoonpaySettlement(data, "failed");
-      return {
-        provider: this.provider,
-        kind,
-        reference,
-        ...(data.failureReason ? { error: data.failureReason } : {}),
-        ...(settlement ? { settlement } : {}),
-      };
-    }
-    if (kind === "settled") {
-      const settlement = buildMoonpaySettlement(data, "completed");
-      return {
-        provider: this.provider,
-        kind,
-        reference,
-        ...(data.quoteCurrencyAmount !== undefined
-          ? { receivedAmount: String(data.quoteCurrencyAmount) }
-          : {}),
-        ...(settlement ? { settlement } : {}),
-      };
-    }
-    return { provider: this.provider, kind, reference };
+    return moonpayTransactionSettlementEvent(transactionData.data);
   }
 
   async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlementEvent) {
@@ -230,6 +122,6 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
       getLogger().info(`[moonpay webhook] ignored event: ${event.reason}`);
       return;
     }
-    await applyRampSettlementEvent(c, event);
+    await applyRampSettlementEvent(c.env, event);
   }
 }

@@ -24,6 +24,7 @@ import {
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { cn } from "@/lib/utils";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
@@ -413,7 +414,7 @@ function BvnkInstruction({
                   variant="secondary"
                   size="xs"
                   className="shrink-0"
-                  onClick={() => window.open(verificationUrl, "_blank", "noopener")}
+                  onClick={() => openExternalRampUrl(verificationUrl)}
                 >
                   {t("DashboardPayments.manualInstructions.completeVerification")}
                 </Button>

@@ -32,6 +32,7 @@ import {
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
@@ -232,7 +233,9 @@ function CreateRequestModal({
     mutate: mutateAccounts,
   } = useSWR(
     selectedCounterpartyId
-      ? ["payment-request-counterparty-accounts", selectedCounterpartyId]
+      ? paymentsQueryKeys.paymentRequestCounterpartyAccounts({
+          counterpartyId: selectedCounterpartyId,
+        })
       : null,
     ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }

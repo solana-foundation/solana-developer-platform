@@ -14,6 +14,7 @@ import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
+import { runWithCronRunEvent } from "@/cron/run-event";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
@@ -288,8 +289,11 @@ function createManagedTickRunner({
       // Reconciliation is cross-tenant by nature: every tick runs under a
       // named system database identity so row-level security (migration 0073)
       // admits it explicitly rather than by accident. Wrapped here rather than
-      // at each call site so no future tick can forget it.
-      const result = await runWithSystemDatabaseIdentity(`job:${monitor}`, work);
+      // at each call site so no future tick can forget it, and outside the run
+      // event so anything that layer ever persists is covered too.
+      const result = await runWithSystemDatabaseIdentity(`job:${monitor}`, () =>
+        runWithCronRunEvent(monitorSlug, work)
+      );
       if (checkIn) {
         observability?.captureCheckIn({ ...checkIn, status: "ok" });
       }

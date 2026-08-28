@@ -4,6 +4,7 @@ import { SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
 import { ArrowRightIcon } from "lucide-react";
 import Image from "next/image";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
@@ -22,7 +23,7 @@ const SKELETON_ROWS = [
 export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId: string }) {
   const t = useTranslations();
   const { data, error } = useSWR(
-    ["counterparty-recent-transfers", counterpartyId],
+    paymentsQueryKeys.counterpartyRecentTransfers({ counterpartyId }),
     () =>
       fetchTransfers(
         {

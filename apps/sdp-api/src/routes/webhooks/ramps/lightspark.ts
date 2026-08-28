@@ -6,8 +6,8 @@ import type { LightsparkGridAmount, LightsparkRampSettlement, SdpEnvironment } f
 import { AppError, badRequest } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { AppContext, WebhookProcessor } from "./processor";
-import { applyRampSettlementEvent } from "./settlements";
 
 const LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES = {
   "OUTGOING_PAYMENT.PENDING": "awaiting_payment",
@@ -243,6 +243,6 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<unknown, Ram
       getLogger().info(`[lightspark webhook] ignored event: ${event.reason}`);
       return;
     }
-    await applyRampSettlementEvent(c, event);
+    await applyRampSettlementEvent(c.env, event);
   }
 }

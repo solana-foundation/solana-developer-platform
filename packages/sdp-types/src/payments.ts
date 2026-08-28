@@ -128,6 +128,8 @@ export interface LightsparkGridAmount {
 export interface MoonpayRampSettlement {
   provider: "moonpay";
   status: "completed" | "failed";
+  /** MoonPay's own transaction id — the key for their transaction receipt page. */
+  transactionId: string;
   baseCurrencyCode: string;
   baseCurrencyAmount: number;
   quoteCurrencyCode: string;
@@ -961,6 +963,8 @@ export type PaymentRampQuote =
       sessionToken: string;
       sessionId: string;
       widgetUrl: string;
+      /** ISO timestamp when the widget session expires (decoded from the session JWT). */
+      expiresAt?: string;
     })
   | (BasePaymentRampQuote & {
       provider: "stripe";
