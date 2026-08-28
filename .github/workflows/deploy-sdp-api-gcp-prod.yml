@@ -37,7 +37,7 @@ jobs:
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
        (github.event_name == 'workflow_dispatch' && inputs.image_sha != ''))
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     environment: production
     env:
       PROJECT_ID: solana-developer-platform
