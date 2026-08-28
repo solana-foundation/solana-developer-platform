@@ -33,6 +33,6 @@ export const paymentsQueryKeys = {
   paymentRequestCounterpartyAccounts: ({ counterpartyId }: { counterpartyId: string }) =>
     ["payment-request-counterparty-accounts", counterpartyId] as const,
   transactionFilterOptions: ({ projectId }: { projectId: string }) =>
-    ["payments-transaction-filter-options-v2", projectId] as const,
+    ["payments-transaction-filter-options", projectId] as const,
   counterpartyFieldOptions: () => "counterparty-field-options",
 };
