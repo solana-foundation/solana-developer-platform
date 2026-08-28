@@ -179,6 +179,13 @@ export function HeliusRingsWorkspace({
     };
   }, [custodyWallets]);
 
+  // One custody wallet = one private wallet. Anything already bound (including a
+  // pending row: it holds the slot too) drops out of the create form.
+  const availableCustodyWallets = useMemo(() => {
+    const boundIds = new Set(wallets.map((wallet) => wallet.sdpWalletId));
+    return custodyWallets.filter((wallet) => !boundIds.has(wallet.walletId));
+  }, [custodyWallets, wallets]);
+
   return (
     <div className="flex flex-col gap-6">
       <Callout variant="warning">{t("DashboardHeliusRings.devnetBanner")}</Callout>
@@ -227,69 +234,6 @@ export function HeliusRingsWorkspace({
           <CardDescription>{t("DashboardHeliusRings.wallets.description")}</CardDescription>
         </CardHeader>
         <CardContent className="flex min-w-0 flex-col gap-4">
-          {wallets.length === 0 ? (
-            <p className="text-sm text-secondary">{t("DashboardHeliusRings.wallets.empty")}</p>
-          ) : (
-            <div className="min-w-0 overflow-x-auto">
-              <Table className="min-w-0 [&_table]:table-fixed">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[18%]">
-                      {t("DashboardHeliusRings.wallets.name")}
-                    </TableHead>
-                    <TableHead className="w-[16%]">
-                      {t("DashboardHeliusRings.wallets.backingWallet")}
-                    </TableHead>
-                    <TableHead className="w-[18%]">
-                      {t("DashboardHeliusRings.wallets.shieldedAddress")}
-                    </TableHead>
-                    <TableHead className="w-[16%]">
-                      {t("DashboardHeliusRings.wallets.balance")}
-                    </TableHead>
-                    <TableHead className="w-[10%]">
-                      {t("DashboardHeliusRings.activity.state")}
-                    </TableHead>
-                    <TableHead className="w-[22%]">
-                      {t("DashboardHeliusRings.identity.column")}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {wallets.map((wallet) => (
-                    <TableRow key={wallet.id}>
-                      <TableCell className="min-w-0">{wallet.name}</TableCell>
-                      <TableCell className="min-w-0">{custodyLabel(wallet.sdpWalletId)}</TableCell>
-                      <TableCell className="min-w-0">
-                        {wallet.shieldedAddress === null ? (
-                          t("DashboardHeliusRings.wallets.shieldedAddressPending")
-                        ) : (
-                          <ShieldedAddress address={wallet.shieldedAddress} />
-                        )}
-                      </TableCell>
-                      <TableCell className="min-w-0 align-top">
-                        <ShieldedBalanceCard wallet={wallet} />
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={WALLET_BADGE[wallet.status]}>
-                          {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
-                        </Badge>
-                      </TableCell>
-                      {/* Only for a wallet stuck `pending`: a provisioned wallet's
-                          identity is re-derived and pinned on every read. */}
-                      <TableCell className="min-w-0 align-top">
-                        {wallet.status === "pending" ? (
-                          <WalletIdentityCheck wallet={wallet} />
-                        ) : (
-                          t("DashboardHeliusRings.identity.notApplicable")
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-
           {createError ? (
             <Callout variant="danger" live>
               {createError}
@@ -299,6 +243,10 @@ export function HeliusRingsWorkspace({
           {custodyWallets.length === 0 ? (
             <p className="text-sm text-secondary">
               {t("DashboardHeliusRings.wallets.noCustodyWallets")}
+            </p>
+          ) : availableCustodyWallets.length === 0 ? (
+            <p className="text-sm text-secondary">
+              {t("DashboardHeliusRings.wallets.allCustodyWalletsBound")}
             </p>
           ) : (
             <div className="flex flex-wrap items-end gap-3">
@@ -312,7 +260,7 @@ export function HeliusRingsWorkspace({
                   onValueChange={setSelectedCustodyWallet}
                   placeholder={t("DashboardHeliusRings.wallets.createWalletPlaceholder")}
                 >
-                  {custodyWallets.map((wallet) => (
+                  {availableCustodyWallets.map((wallet) => (
                     <SelectItem key={wallet.walletId} value={wallet.walletId}>
                       {wallet.label ?? wallet.walletId}
                     </SelectItem>
@@ -338,6 +286,69 @@ export function HeliusRingsWorkspace({
                   ? t("DashboardHeliusRings.wallets.creating")
                   : t("DashboardHeliusRings.wallets.create")}
               </Button>
+            </div>
+          )}
+
+          <hr className="border-border-default" role="presentation" />
+
+          {wallets.length === 0 ? (
+            <p className="text-sm text-secondary">{t("DashboardHeliusRings.wallets.empty")}</p>
+          ) : (
+            <div className="min-w-0 overflow-x-auto">
+              <Table className="min-w-0 [&_table]:table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[22%]">
+                      {t("DashboardHeliusRings.wallets.name")}
+                    </TableHead>
+                    <TableHead className="w-[20%]">
+                      {t("DashboardHeliusRings.wallets.backingWallet")}
+                    </TableHead>
+                    <TableHead className="w-[22%]">
+                      {t("DashboardHeliusRings.wallets.shieldedAddress")}
+                    </TableHead>
+                    <TableHead className="w-[22%]">
+                      {t("DashboardHeliusRings.wallets.balance")}
+                    </TableHead>
+                    <TableHead className="w-[14%]">
+                      {t("DashboardHeliusRings.activity.state")}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {wallets.map((wallet) => (
+                    <TableRow key={wallet.id}>
+                      <TableCell className="min-w-0">{wallet.name}</TableCell>
+                      <TableCell className="min-w-0">{custodyLabel(wallet.sdpWalletId)}</TableCell>
+                      <TableCell className="min-w-0 align-top">
+                        {wallet.shieldedAddress === null ? (
+                          // A stuck-pending row is the one case the identity
+                          // check helps with: the button sits under the empty
+                          // address so the diagnosis is where the problem is.
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-sm text-secondary">
+                              {t("DashboardHeliusRings.wallets.shieldedAddressPending")}
+                            </span>
+                            {wallet.status === "pending" ? (
+                              <WalletIdentityCheck wallet={wallet} />
+                            ) : null}
+                          </div>
+                        ) : (
+                          <ShieldedAddress address={wallet.shieldedAddress} />
+                        )}
+                      </TableCell>
+                      <TableCell className="min-w-0 align-top">
+                        <ShieldedBalanceCard wallet={wallet} />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={WALLET_BADGE[wallet.status]}>
+                          {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
