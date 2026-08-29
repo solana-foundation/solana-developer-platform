@@ -28,18 +28,35 @@ test("automatic production deploys are called from the protected main release fl
   assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
 });
 
-test("manual production redeploy always skips builds and migrations", () => {
+test("builds and migrations run for release and merge deploys, never manual redeploys", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
   assert.match(
     workflow,
-    /- name: Build and push image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+    /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch'\)\) && 'true' \|\| 'false' \}\}/
   );
   assert.match(
     workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+    /- name: Build and push image\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
+  );
+  assert.match(
+    workflow,
+    /- name: Run database migrations\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
   );
   assert.match(workflow, /--build-arg GIT_SHA="\$\{DEPLOY_IMAGE_SHA\}"/);
   assert.match(workflow, /sdp-api-public:\$\{DEPLOY_IMAGE_SHA\}/);
+});
+
+test("the version-tagged image is exclusive to releases", () => {
+  assert.match(workflow, /if \[ -n "\$\{RELEASE_TAG\}" \]; then\n\s+VERSION=/);
+  assert.doesNotMatch(workflow, /docker push "\$\{VERSION_IMAGE\}"\n\s+docker push "\$\{SHA_IMAGE\}"/);
+});
+
+test("merge deploys skip the internal smoke gate but require the caller's", () => {
+  assert.match(workflow, /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-dev-smoke\.yml/);
+  assert.match(
+    workflow,
+    /\(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' && needs\.smoke\.result == 'skipped'\)/
+  );
 });
 
 test("candidate is revision-specific and Cloud Run-ready before promotion", () => {

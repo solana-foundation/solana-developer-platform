@@ -1,0 +1,87 @@
+name: SDP Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Services to deploy (auto = detect from changed files vs HEAD^)"
+        required: false
+        type: choice
+        default: auto
+        options: [auto, none, api]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    outputs:
+      api: ${{ steps.detect.outputs.api }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 2
+
+      - id: detect
+        env:
+          MODE: ${{ inputs.services || 'auto' }}
+        run: |
+          set -euo pipefail
+          CHANGED_FILES=""
+          if [ "${{ github.event_name }}" = "push" ]; then
+            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+          fi
+          match() { echo "$CHANGED_FILES" | grep -qE "$1"; }
+
+          api=false
+          case "$MODE" in
+            none) ;;
+            api) api=true ;;
+            auto|*)
+              if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                api=true
+              elif match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod)?)?\.yml|\.github/workflows/sdp-dev-smoke\.yml)"; then
+                api=true
+              fi
+              ;;
+          esac
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+          echo "Services to deploy: api=$api" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-api-dev:
+    name: sdp-api — dev + smoke
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
+
+  deploy-api-prod:
+    name: sdp-api — prod
+    needs: [changes, deploy-api-dev]
+    if: >-
+      needs.changes.outputs.api == 'true' &&
+      github.event_name == 'push' &&
+      !startsWith(github.event.head_commit.message, 'chore(main): release')
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
+    with:
+      image_sha: ${{ github.sha }}

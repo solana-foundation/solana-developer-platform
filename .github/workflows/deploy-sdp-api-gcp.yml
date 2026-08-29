@@ -2,15 +2,10 @@ name: Deploy sdp-api to Cloud Run (dev)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "apps/sdp-api/**"
-      - "packages/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".github/workflows/deploy-sdp-api-gcp.yml"
+  workflow_call:
+    secrets:
+      DOPPLER_TOKEN_CI:
+        required: true
 
 permissions:
   contents: read
@@ -102,18 +97,3 @@ jobs:
     secrets:
       DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
 
-  deploy-prod:
-    name: Continuous deploy to production
-    needs: smoke
-    if: >-
-      github.event_name == 'push' &&
-      github.repository == 'solana-foundation/solana-developer-platform' &&
-      !startsWith(github.event.head_commit.message, 'chore(main): release')
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
-    secrets:
-      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
-    with:
-      image_sha: ${{ github.sha }}
