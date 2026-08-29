@@ -215,15 +215,20 @@ describe("RpcByokSection", () => {
     expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
   });
 
-  it("still lets a stranded organization connection be deactivated", () => {
-    // The hold-to-confirm behaviour itself is covered by the button's own
-    // tests; what matters here is that the way out is still offered.
+  it("still lets a stranded organization connection be deactivated", async () => {
+    // The only way out of a row that cannot be rotated or checked. Gating this
+    // on "is live" instead of "is not already deactivated" strands it.
+    const user = userEvent.setup();
     renderSection({
       connections: [connection({ scope: "organization", projectId: null, isDefault: false })],
     });
 
-    expect(screen.getByRole("button", { name: /Deactivate/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Test key" })).toBeNull();
+
+    // One click, no confirmation: the design review asked for deactivate to be
+    // an ordinary control rather than a five second press-and-hold.
+    await user.click(screen.getByRole("button", { name: /Deactivate/ }));
+    expect(deactivateRpcConnectionAction).toHaveBeenCalledTimes(1);
   });
 
   it("offers delete on a deactivated connection and nothing that would error", async () => {
@@ -259,15 +264,18 @@ describe("RpcByokSection", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("keeps the deactivate control on a stranded organization row", () => {
-    // The only way out of a row that cannot be rotated or checked. Gating this
-    // on "is live" instead of "is not already deactivated" strands it.
+  it("offers deactivate or delete on a row, never both", () => {
     renderSection({
-      connections: [connection({ scope: "organization", projectId: null, isDefault: false })],
+      connections: [
+        connection(),
+        connection({ id: "rconn_2", status: "deactivated", isDefault: false }),
+      ],
     });
 
-    expect(screen.getByRole("button", { name: /Deactivate/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    // A live row can be withdrawn but not removed; a withdrawn one is the
+    // other way round. Showing both would offer an action that always errors.
+    expect(screen.getAllByRole("button", { name: /Deactivate/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
   });
 
   it("asks for the replacement key instead of making people re-add", async () => {

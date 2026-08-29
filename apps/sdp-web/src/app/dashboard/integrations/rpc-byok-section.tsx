@@ -1,13 +1,19 @@
 "use client";
 
 import { rpcProviderNeedsEndpoint, type SafeRpcConnection } from "@sdp/types";
-import { ActivityIcon, EyeIcon, EyeOffIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import {
+  ActivityIcon,
+  CircleSlashIcon,
+  EyeIcon,
+  EyeOffIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Input } from "@/components/ui/input";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
@@ -336,24 +342,22 @@ function ConnectionRow({
                   : t("Shared.integrations.rpcByokRotate")}
               </Button>
             ) : null}
-            {/* Held rather than clicked, and still the loud one on the row:
-                  this destroys the stored key and there is no way back
-                  (HOO-1230). The prototype quietened it on the premise that
-                  deactivation is reversible; it is not, so the treatment stays
-                  until the lifecycle does change (HOO-776).
-
-                  Offered on every row that is not already deactivated, which
+            {/* Offered on every row that is not already deactivated, which
                   includes stranded organization-scoped rows -- those cannot be
                   rotated or checked, so this is their only way out. */}
             {isDeactivated ? null : (
-              <HoldToConfirmButton
-                label={t("Shared.integrations.rpcByokDeactivate")}
-                holdingLabel={t("Shared.integrations.rpcByokDeactivateHolding")}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                iconLeft={<CircleSlashIcon />}
                 disabled={pendingId === connection.id}
-                onConfirm={() => {
+                onClick={() => {
                   onAction(deactivateRpcConnectionAction, connection.id);
                 }}
-              />
+              >
+                {t("Shared.integrations.rpcByokDeactivate")}
+              </Button>
             )}
             {isDeactivated ? (
               <Button
