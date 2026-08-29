@@ -29,7 +29,7 @@ export async function getPrivateChannelOverview(c: AppContext) {
 
   const instance = mapPrivateChannelInstanceRow(row);
   const projectRpc = await loadPrivateChannelProjectRpcClient(c);
-  const overview = await getInstanceOverview(instance, projectRpc.rpc);
+  const overview = await getInstanceOverview(c.env, instance, projectRpc.rpc);
 
   const health = overview.gateway.health;
   if (health.status === "unreachable") {

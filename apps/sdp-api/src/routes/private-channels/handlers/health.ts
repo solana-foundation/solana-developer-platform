@@ -10,11 +10,15 @@ import { healthQuerySchema } from "../schemas";
  * `PrivateChannelHealth` DTO for every probe outcome (ready/degraded/unreachable);
  * only a missing `gatewayUrl` is a 400. The DTO omits upstream response bodies by
  * construction.
+ *
+ * A gateway that is not on this deployment's egress allowlist reports as
+ * `unreachable` like any other endpoint SDP cannot reach, so the response says
+ * nothing about which other origins are approved.
  */
 export async function getPrivateChannelHealth(c: AppContext) {
   const parsed = healthQuerySchema.safeParse({ gatewayUrl: c.req.query("gatewayUrl") });
   if (!parsed.success) {
     throw badRequest("gatewayUrl query parameter is required");
   }
-  return success(c, await probeInstanceHealth(parsed.data.gatewayUrl));
+  return success(c, await probeInstanceHealth(c.env, parsed.data.gatewayUrl));
 }

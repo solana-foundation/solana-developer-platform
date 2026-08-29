@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { SANDBOX_DEFAULTS } from "./constants";
 import { probeGatewayHealth } from "./health";
+import { fetchProbeTransport } from "./transport.test-support";
 
 const RUN_SMOKE =
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
@@ -16,7 +17,7 @@ const RUN_SMOKE =
 
 describe.skipIf(!RUN_SMOKE)("Private Channels sandbox smoke", () => {
   it("probes the sandbox gateway as ready", async () => {
-    const result = await probeGatewayHealth(SANDBOX_DEFAULTS.gatewayUrl);
+    const result = await probeGatewayHealth(SANDBOX_DEFAULTS.gatewayUrl, fetchProbeTransport);
     expect(result.status).toBe("ready");
   });
 });

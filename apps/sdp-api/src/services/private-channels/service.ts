@@ -5,13 +5,17 @@ import {
   probeConnection,
   probeGatewayHealth,
 } from "@sdp/private-channels";
+import { type ProbeTransport, truncateProbeDetail } from "@sdp/private-channels/transport";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
   PrivateChannelHealth,
   PrivateChannelInstance,
   PrivateChannelInstanceOverview,
+  PrivateChannelProbeResult,
 } from "@sdp/types";
+import type { Env } from "@/types/env";
+import { createPrivateChannelProbeTransport } from "./egress";
 
 const RPC_TIMEOUT_MS = 5000;
 
@@ -26,20 +30,45 @@ function toHealthDto(result: GatewayHealthResult): PrivateChannelHealth {
   return { status: "ready", latencyMs: result.latencyMs };
 }
 
+/**
+ * The connect-time probe as it goes over the wire. The engine result carries
+ * per-endpoint sub-results; this keeps the status, the latency and a truncated
+ * reason, which is everything the connect form's badges render. Returning the
+ * engine result directly would relay whatever the candidate gateway put in its
+ * `/health` body back to the caller who chose that gateway.
+ */
+export function toProbeResultDto(result: ConnectionProbeResult): PrivateChannelProbeResult {
+  return {
+    ok: result.ok,
+    gateway: toHealthDto(result.gateway),
+    rpc: result.rpc.ok
+      ? { ok: true, latencyMs: result.rpc.latencyMs, version: result.rpc.version }
+      : { ok: false, latencyMs: result.rpc.latencyMs, error: result.rpc.error },
+    auth: result.auth.ok
+      ? { ok: true, latencyMs: result.auth.latencyMs }
+      : { ok: false, latencyMs: result.auth.latencyMs, error: result.auth.error },
+  };
+}
+
 /** Pre-connect gateway probe (candidate URL from the connect form) → wire DTO. */
-export async function probeInstanceHealth(gatewayUrl: string): Promise<PrivateChannelHealth> {
-  return toHealthDto(await probeGatewayHealth(gatewayUrl));
+export async function probeInstanceHealth(
+  env: Env,
+  gatewayUrl: string
+): Promise<PrivateChannelHealth> {
+  return toHealthDto(await probeGatewayHealth(gatewayUrl, createPrivateChannelProbeTransport(env)));
 }
 
 /**
  * Full connect-time verification: gateway (`/health` + `/ready`) AND chain RPC
  * (`getVersion`). Returned raw so the caller can attach both sub-results to a
- * 400 response for the client's status badges.
+ * 400 response for the client's status badges — pass it through
+ * {@link toProbeResultDto} before it leaves the API.
  */
 export async function verifyInstanceConnection(
+  env: Env,
   input: ConnectionProbeInput
 ): Promise<ConnectionProbeResult> {
-  return probeConnection(input);
+  return probeConnection(input, createPrivateChannelProbeTransport(env));
 }
 
 interface JsonRpcResponse<T> {
@@ -50,15 +79,18 @@ interface JsonRpcResponse<T> {
 }
 
 // Minimal JSON-RPC POST to the gateway. Throws on network / non-2xx / error.
+// The gateway URL is the project's own input, so this goes through the guarded
+// probe transport rather than `fetch` — see ./egress.
 async function jsonRpc<T>(
+  transport: ProbeTransport,
   url: string,
   method: string,
   params: unknown[] = [],
   headers: Record<string, string> = {}
 ): Promise<T> {
-  const res = await fetch(url, {
+  const res = await transport({
+    url,
     method: "POST",
-    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
@@ -66,10 +98,21 @@ async function jsonRpc<T>(
       ...headers,
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    timeoutMs: RPC_TIMEOUT_MS,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const body = (await res.json()) as JsonRpcResponse<T>;
-  if (body.error) throw new Error(body.error.message || `JSON-RPC ${body.error.code ?? ""}`);
+
+  let body: JsonRpcResponse<T>;
+  try {
+    body = JSON.parse(res.text) as JsonRpcResponse<T>;
+  } catch {
+    throw new Error("JSON-RPC response was not valid JSON.");
+  }
+  if (body.error) {
+    throw new Error(
+      truncateProbeDetail(body.error.message ?? "") || `JSON-RPC ${body.error.code ?? ""}`
+    );
+  }
   if (body.result === undefined) throw new Error("JSON-RPC response missing result.");
   return body.result;
 }
@@ -79,7 +122,7 @@ function toError(reason: unknown): string {
     if (reason.name === "TimeoutError" || reason.name === "AbortError") {
       return `Timed out after ${RPC_TIMEOUT_MS} ms.`;
     }
-    return reason.message || "Request failed.";
+    return truncateProbeDetail(reason.message) || "Request failed.";
   }
   return "Request failed.";
 }
@@ -96,12 +139,18 @@ function settledOrNull<T, U>(p: Promise<T>, map: (v: T) => U): Promise<U | null>
 // Post-connect overview. Gateway JSON-RPC = SPC channel chain; projectRpc =
 // Solana L1 (where the escrow program + instance actually live).
 export async function getInstanceOverview(
+  env: Env,
   input: OverviewInput,
   projectRpc: SolanaRpc
 ): Promise<PrivateChannelInstanceOverview> {
   const authBase = input.authUrl;
   const escrowInstanceAddress = assertValidAddress(input.escrowInstanceAddr, "escrowInstanceAddr");
   const escrowProgramAddress = assertValidAddress(input.escrowProgramId, "escrowProgramId");
+  // The stored gateway and auth URLs were allowlisted when the instance was
+  // connected, but the allowlist is deployment config and can change: a row
+  // written before an origin was removed must not keep its reach, so the
+  // overview re-checks through the same transport rather than trusting the row.
+  const transport = createPrivateChannelProbeTransport(env);
 
   const [
     gatewayHealth,
@@ -112,10 +161,11 @@ export async function getInstanceOverview(
     escrowProgram,
     auth,
   ] = await Promise.all([
-    probeGatewayHealth(input.gatewayUrl),
-    settledOrNull(jsonRpc<number>(input.gatewayUrl, "getSlot"), (v) => v),
+    probeGatewayHealth(input.gatewayUrl, transport),
+    settledOrNull(jsonRpc<number>(transport, input.gatewayUrl, "getSlot"), (v) => v),
     settledOrNull(
       jsonRpc<{ context: { slot: number }; value: { blockhash: string } }>(
+        transport,
         input.gatewayUrl,
         "getLatestBlockhash"
       ),
@@ -158,10 +208,11 @@ export async function getInstanceOverview(
       return { present: true, executable: r.value.value.executable };
     }),
     Promise.allSettled([
-      fetch(`${authBase.replace(/\/$/, "")}/health`, {
+      transport({
+        url: `${authBase.trim().replace(/\/$/, "")}/health`,
         method: "GET",
-        signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
         headers: { Accept: "application/json" },
+        timeoutMs: RPC_TIMEOUT_MS,
       }),
     ]).then(([r]): PrivateChannelInstanceOverview["auth"] => {
       if (r.status === "rejected") {

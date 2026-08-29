@@ -1,3 +1,4 @@
+import { type ProbeTransport, truncateProbeDetail } from "./transport";
 import { parseHttpUrl } from "./url";
 
 const PROBE_TIMEOUT_MS = 5000;
@@ -19,7 +20,7 @@ function toErrorMessage(error: unknown): string {
     if (error.name === "TimeoutError" || error.name === "AbortError") {
       return `Timed out after ${PROBE_TIMEOUT_MS} ms.`;
     }
-    return error.message || "RPC probe failed.";
+    return truncateProbeDetail(error.message) || "RPC probe failed.";
   }
   return "RPC probe failed.";
 }
@@ -29,8 +30,14 @@ function toErrorMessage(error: unknown): string {
  * issuing `getVersion`. Success returns the reported `solana-core` version.
  * Non-JSON, non-2xx, JSON-RPC errors, and network timeouts all resolve as
  * `{ ok: false }`; never throws.
+ *
+ * The endpoint is caller-supplied, so the request goes out through `transport`
+ * — see `./transport`.
  */
-export async function probeSolanaRpc(url: string): Promise<SolanaRpcProbeResult> {
+export async function probeSolanaRpc(
+  url: string,
+  transport: ProbeTransport
+): Promise<SolanaRpcProbeResult> {
   const startedAt = Date.now();
   const parsed = parseHttpUrl(url, "Chain RPC URL");
   if ("error" in parsed) {
@@ -39,9 +46,9 @@ export async function probeSolanaRpc(url: string): Promise<SolanaRpcProbeResult>
   const target = parsed.url.toString();
 
   try {
-    const res = await fetch(target, {
+    const res = await transport({
+      url: target,
       method: "POST",
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       // Set an explicit User-Agent: some public RPC providers reject or
       // throttle requests without one.
       headers: {
@@ -56,9 +63,9 @@ export async function probeSolanaRpc(url: string): Promise<SolanaRpcProbeResult>
         method: "getVersion",
         params: [],
       }),
+      timeoutMs: PROBE_TIMEOUT_MS,
     });
     const latencyMs = Date.now() - startedAt;
-    const text = await res.text();
 
     if (!res.ok) {
       return { ok: false, latencyMs, error: `HTTP ${res.status}` };
@@ -66,7 +73,7 @@ export async function probeSolanaRpc(url: string): Promise<SolanaRpcProbeResult>
 
     let body: SolanaRpcVersionResponse;
     try {
-      body = JSON.parse(text) as SolanaRpcVersionResponse;
+      body = JSON.parse(res.text) as SolanaRpcVersionResponse;
     } catch {
       return { ok: false, latencyMs, error: "Response was not valid JSON." };
     }
@@ -75,14 +82,16 @@ export async function probeSolanaRpc(url: string): Promise<SolanaRpcProbeResult>
       return {
         ok: false,
         latencyMs,
-        error: body.error.message?.trim() || `JSON-RPC error ${body.error.code ?? ""}`.trim(),
+        error:
+          truncateProbeDetail(body.error.message ?? "") ||
+          `JSON-RPC error ${body.error.code ?? ""}`.trim(),
       };
     }
     const version = body.result?.["solana-core"];
     if (typeof version !== "string" || !version) {
       return { ok: false, latencyMs, error: "Response missing solana-core version." };
     }
-    return { ok: true, latencyMs, version };
+    return { ok: true, latencyMs, version: truncateProbeDetail(version) };
   } catch (error) {
     return { ok: false, latencyMs: Date.now() - startedAt, error: toErrorMessage(error) };
   }

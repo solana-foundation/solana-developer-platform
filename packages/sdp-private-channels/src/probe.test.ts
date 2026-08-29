@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { probeConnection } from "./probe";
 import { probeSolanaRpc } from "./rpc";
+import { fetchProbeTransport } from "./transport.test-support";
 
 function stubFetch(impl: (url: string, init?: RequestInit) => Promise<Response>): void {
   vi.stubGlobal(
@@ -26,7 +27,7 @@ const AUTH_URL = "http://auth.test:8903";
 function baseInput() {
   return {
     gatewayUrl: GATEWAY_URL,
-    probeRpc: () => probeSolanaRpc(CHAIN_RPC_URL),
+    probeRpc: () => probeSolanaRpc(CHAIN_RPC_URL, fetchProbeTransport),
     authUrl: AUTH_URL,
   };
 }
@@ -48,7 +49,7 @@ describe("probeConnection", () => {
       });
     });
 
-    const result = await probeConnection(baseInput());
+    const result = await probeConnection(baseInput(), fetchProbeTransport);
 
     expect(result.ok).toBe(true);
     expect(result.gateway.status).toBe("ready");
@@ -71,7 +72,7 @@ describe("probeConnection", () => {
       );
     });
 
-    const result = await probeConnection(baseInput());
+    const result = await probeConnection(baseInput(), fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     expect(result.gateway.status).toBe("ready");
@@ -91,7 +92,7 @@ describe("probeConnection", () => {
       });
     });
 
-    const result = await probeConnection(baseInput());
+    const result = await probeConnection(baseInput(), fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     expect(result.gateway.status).toBe("unreachable");
@@ -111,7 +112,7 @@ describe("probeConnection", () => {
       });
     });
 
-    const result = await probeConnection(baseInput());
+    const result = await probeConnection(baseInput(), fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     expect(result.gateway.status).toBe("ready");

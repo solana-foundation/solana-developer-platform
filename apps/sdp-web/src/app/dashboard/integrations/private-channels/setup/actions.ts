@@ -1,10 +1,11 @@
 "use server";
 
-import {
-  type ConnectionProbeResult,
-  privateChannelInstanceInputSchema,
-} from "@sdp/private-channels";
-import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
+import { privateChannelInstanceInputSchema } from "@sdp/private-channels";
+import type {
+  PrivateChannelInstance,
+  PrivateChannelInstanceInput,
+  PrivateChannelProbeResult,
+} from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
@@ -68,7 +69,7 @@ const connectionProbeDetailsSchema = z.object({
 export type FieldErrors = Partial<Record<keyof PrivateChannelInstanceInput, string>>;
 
 export type TestConnectionResult =
-  | { kind: "probe"; probe: ConnectionProbeResult }
+  | { kind: "probe"; probe: PrivateChannelProbeResult }
   | { kind: "validation"; fieldErrors: FieldErrors }
   | { kind: "request-error"; message: string };
 
@@ -89,7 +90,7 @@ export async function testConnectionAction(input: {
 
   try {
     const client = await createSdpApiClient();
-    const probe = await client.fetch<ConnectionProbeResult>("/v1/private-channels/probe", {
+    const probe = await client.fetch<PrivateChannelProbeResult>("/v1/private-channels/probe", {
       method: "POST",
       body: JSON.stringify(parsed.data),
     });
@@ -106,7 +107,7 @@ export async function testConnectionAction(input: {
 export type ConnectPrivateChannelResult =
   | { ok: true; instance: PrivateChannelInstance }
   | { ok: false; kind: "validation"; fieldErrors: FieldErrors }
-  | { ok: false; kind: "probe"; probe: ConnectionProbeResult; message: string }
+  | { ok: false; kind: "probe"; probe: PrivateChannelProbeResult; message: string }
   | { ok: false; kind: "conflict-active"; message: string; activeInstance: PrivateChannelInstance }
   | {
       ok: false;

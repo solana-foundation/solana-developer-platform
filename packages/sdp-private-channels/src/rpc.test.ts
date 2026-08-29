@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { probeSolanaRpc } from "./rpc";
+import { fetchProbeTransport } from "./transport.test-support";
 
 function stubFetchOnce(response: Response | Error): void {
   const impl = () =>
@@ -26,7 +27,7 @@ describe("probeSolanaRpc", () => {
   it("returns the solana-core version on success", async () => {
     stubFetchOnce(versionResponse("1.18.4"));
 
-    const result = await probeSolanaRpc("https://api.devnet.solana.com");
+    const result = await probeSolanaRpc("https://api.devnet.solana.com", fetchProbeTransport);
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("narrowing");
@@ -46,7 +47,7 @@ describe("probeSolanaRpc", () => {
       )
     );
 
-    const result = await probeSolanaRpc("https://api.devnet.solana.com");
+    const result = await probeSolanaRpc("https://api.devnet.solana.com", fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("narrowing");
@@ -56,7 +57,7 @@ describe("probeSolanaRpc", () => {
   it("returns ok:false when HTTP status is non-2xx", async () => {
     stubFetchOnce(new Response("bad gateway", { status: 502 }));
 
-    const result = await probeSolanaRpc("https://api.devnet.solana.com");
+    const result = await probeSolanaRpc("https://api.devnet.solana.com", fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("narrowing");
@@ -66,7 +67,7 @@ describe("probeSolanaRpc", () => {
   it("returns ok:false when the fetch rejects", async () => {
     stubFetchOnce(new TypeError("fetch failed"));
 
-    const result = await probeSolanaRpc("https://api.devnet.solana.com");
+    const result = await probeSolanaRpc("https://api.devnet.solana.com", fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("narrowing");
@@ -85,7 +86,7 @@ describe("probeSolanaRpc", () => {
       )
     );
 
-    const result = await probeSolanaRpc("https://api.devnet.solana.com");
+    const result = await probeSolanaRpc("https://api.devnet.solana.com", fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("narrowing");
@@ -96,7 +97,7 @@ describe("probeSolanaRpc", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await probeSolanaRpc("");
+    const result = await probeSolanaRpc("", fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("narrowing");
@@ -108,7 +109,7 @@ describe("probeSolanaRpc", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await probeSolanaRpc("ftp://example.com");
+    const result = await probeSolanaRpc("ftp://example.com", fetchProbeTransport);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("narrowing");

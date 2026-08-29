@@ -15,8 +15,10 @@ import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import {
+  assertApprovedPrivateChannelDestinations,
   mapPrivateChannelError,
   provisionPrincipal,
+  toProbeResultDto,
   verifyInstanceConnection,
 } from "@/services/private-channels";
 import type { AppContext } from "../context";
@@ -73,8 +75,16 @@ export const connectPrivateChannelInstance = async (
     );
   }
 
+  // Refuse an unapproved destination before probing it, so the operator gets a
+  // field error naming the URL rather than a generic "unreachable" from a probe
+  // that was never going to be allowed to leave.
+  assertApprovedPrivateChannelDestinations(c.env, {
+    gatewayUrl: input.gatewayUrl,
+    authUrl: input.authUrl,
+  });
+
   // Re-probe server-side: a tampered client could otherwise POST unreachable config.
-  const probe = await verifyInstanceConnection({
+  const probe = await verifyInstanceConnection(c.env, {
     gatewayUrl: input.gatewayUrl,
     authUrl: input.authUrl,
     probeRpc: () =>
@@ -85,7 +95,10 @@ export const connectPrivateChannelInstance = async (
   });
   if (!probe.ok) {
     // AppError responses are returned silently by app.onError; log diagnostics here.
-    // The resolved RPC endpoint and credentials never reach logs or persistence.
+    // The resolved RPC endpoint and credentials never reach logs or persistence,
+    // and the probe is logged in its bounded form so a gateway cannot write an
+    // arbitrary payload into this deployment's logs by failing a health check.
+    const summary = toProbeResultDto(probe);
     getLogger().warn(
       redactCredentialSecrets({
         organizationId: auth.organizationId,
@@ -93,17 +106,17 @@ export const connectPrivateChannelInstance = async (
         gatewayUrl: input.gatewayUrl,
         authUrl: input.authUrl,
         rpcProvider: projectRpc.target.providerId,
-        gateway: probe.gateway,
-        rpc: probe.rpc,
-        auth: probe.auth,
+        gateway: summary.gateway,
+        rpc: summary.rpc,
+        auth: summary.auth,
       }),
       "connectPrivateChannelInstance: connection probe failed"
     );
-    throw badRequest("Connection check failed", {
-      gateway: probe.gateway,
-      rpc: probe.rpc,
-      auth: probe.auth,
-    });
+    // The bounded DTO, not the engine result: this detail is echoed to the
+    // client that nominated the gateway, and the engine result carries what
+    // that gateway answered with.
+    const { ok: _ok, ...detail } = toProbeResultDto(probe);
+    throw badRequest("Connection check failed", detail);
   }
 
   const existingByGateway = await repo.findByProjectAndGateway({
@@ -229,8 +242,13 @@ export const updatePrivateChannelInstance = async (
     );
   }
 
+  assertApprovedPrivateChannelDestinations(c.env, {
+    gatewayUrl: input.gatewayUrl,
+    authUrl: input.authUrl,
+  });
+
   const projectRpc = await loadPrivateChannelProjectRpcClient(c);
-  const probe = await verifyInstanceConnection({
+  const probe = await verifyInstanceConnection(c.env, {
     gatewayUrl: input.gatewayUrl,
     authUrl: input.authUrl,
     probeRpc: () =>
@@ -240,6 +258,7 @@ export const updatePrivateChannelInstance = async (
       }),
   });
   if (!probe.ok) {
+    const summary = toProbeResultDto(probe);
     getLogger().warn(
       redactCredentialSecrets({
         organizationId: auth.organizationId,
@@ -247,17 +266,14 @@ export const updatePrivateChannelInstance = async (
         gatewayUrl: input.gatewayUrl,
         authUrl: input.authUrl,
         rpcProvider: projectRpc.target.providerId,
-        gateway: probe.gateway,
-        rpc: probe.rpc,
-        auth: probe.auth,
+        gateway: summary.gateway,
+        rpc: summary.rpc,
+        auth: summary.auth,
       }),
       "updatePrivateChannelInstance: connection probe failed"
     );
-    throw badRequest("Connection check failed", {
-      gateway: probe.gateway,
-      rpc: probe.rpc,
-      auth: probe.auth,
-    });
+    const { ok: _ok, ...detail } = toProbeResultDto(probe);
+    throw badRequest("Connection check failed", detail);
   }
 
   const row = await repo.updateActive({ id: active.id, ...scope, ...input });
