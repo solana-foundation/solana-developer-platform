@@ -574,16 +574,29 @@ describe("provider-availability.service", () => {
   it("reports earn provider availability from override entitlement plus configured credentials", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
+      .bind(
+        JSON.stringify({ providerOverrides: { earn: { ground: true, veda: true } } }),
+        TEST_ORG_ID
+      )
       .run();
+    env.GROUND_API_KEY = "ground_test_key";
     env.VEDA_API_KEY = "veda_test_key";
 
     const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
 
-    expect(availability.providers.earn.veda).toEqual({
+    expect(availability.providers.earn.ground).toEqual({
       entitled: true,
       configured: true,
       enabled: true,
+    });
+    // Entitled and configured, and still not enabled: the partner intake
+    // register blocks Veda. `entitled` and `configured` stay literally true so
+    // the response keeps saying why, and only `enabled` — "usable right now" —
+    // takes the third term.
+    expect(availability.providers.earn.veda).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: false,
     });
     expect(availability.providers.earn.upshift).toEqual({
       entitled: false,
@@ -595,26 +608,48 @@ describe("provider-availability.service", () => {
   it("re-checks earn credentials for the requested mode like ramps", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { ground: true } } }), TEST_ORG_ID)
+      .run();
+    env.GROUND_API_KEY = "ground_production_key";
+
+    await expect(
+      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "ground", false)
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "ground", true)
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: "Ground is not configured for sandbox mode.",
+    });
+  });
+
+  /**
+   * The intake gate runs ahead of entitlement and credentials, so a blocked
+   * partner is refused with its own message rather than being pointed at an
+   * activation door that no override opens.
+   */
+  it("refuses a partner the intake register blocks, before entitlement or credentials", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
       .run();
     env.VEDA_API_KEY = "veda_production_key";
 
     await expect(
       assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "veda", false)
-    ).resolves.toBeUndefined();
-
-    await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "veda", true)
     ).rejects.toMatchObject({
-      code: "PROVIDER_NOT_CONFIGURED",
-      message: "Veda is not configured for sandbox mode.",
+      code: "FORBIDDEN",
+      message: "Veda has not passed SDP's partner security intake and cannot be used.",
     });
   });
 
   it("assertEarnProviderConfigured gates on credentials only, ignoring entitlement (exit safety)", () => {
     // No earn override is granted, so zero providers are entitled, but
     // withdrawals must still pass as long as the provider credentials exist
-    // for the mode.
+    // for the mode. Veda is also blocked by the partner intake register, which
+    // this path must ignore for the same reason it ignores entitlement:
+    // blocking a partner closes the way in, never the way out.
     env.VEDA_API_KEY = "veda_production_key";
 
     expect(() => assertEarnProviderConfigured(env, "veda", false)).not.toThrow();

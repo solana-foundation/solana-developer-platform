@@ -64,6 +64,11 @@
       "import": "./src/ramps/fetch.ts",
       "default": "./src/ramps/fetch.ts"
     },
+    "./ramps/partner-egress": {
+      "types": "./src/ramps/partner-egress.ts",
+      "import": "./src/ramps/partner-egress.ts",
+      "default": "./src/ramps/partner-egress.ts"
+    },
     "./ramps/requirements": {
       "types": "./src/ramps/requirements.ts",
       "import": "./src/ramps/requirements.ts",

@@ -14,7 +14,7 @@ Build the smallest honest skeleton for the capabilities the provider supports. R
 
 ## 1. Add the closed provider id
 
-Add the lowercase id to `RAMP_PROVIDERS` in `packages/sdp-types/src/provider-access.ts`. `GENERAL_PROVIDER_DEFAULTS.ramps` currently enables every registered ramp for every organization; availability still fails closed when deployment credentials are absent. Registration is therefore a launch decision, not a hidden stub. Do not add the id until the implemented capability is safe to surface.
+Add the lowercase id to `RAMP_PROVIDERS` in `packages/sdp-types/src/provider-access.ts`. `GENERAL_PROVIDER_DEFAULTS.ramps` currently enables every registered ramp for every organization; availability still fails closed when deployment credentials are absent, and again when the partner intake register has not cleared the provider. Registration is therefore a launch decision, not a hidden stub. Do not add the id until the implemented capability is safe to surface.
 
 Run these immediately and follow every exhaustive error:
 
@@ -25,6 +25,16 @@ pnpm --filter sdp-web typecheck
 ```
 
 The compiler is only part of the checklist; Zod unions, translations, and ordered UI lists may not fail automatically.
+
+## 1b. Record the partner intake
+
+Adding the id makes `PARTNER_INTAKE` in `packages/sdp-types/src/partner-intake.ts` incomplete, which is a compile error. Fill in the record: owner, data map, personal-data egress and field allowlist, retention, disablement plan, credential scope, failure behavior, and DPA ownership.
+
+Start with `clearance: { status: "blocked", reason: ... }` and leave it there for the whole build. The provider is refused at `assertProviderAvailable` until it is cleared, which is the point — an integration must not reach production because its credentials were provisioned. Do not use `provisional`; that status exists only for integrations predating the register, and `partner-intake.drift.test.ts` fails if the list grows.
+
+Clearing it is a review, not an edit: see `docs/security/partner-security-intake.md`.
+
+If the provider forwards an object of collected identity fields rather than assembling the request field by field, set `personalDataEgress: "allowlisted_bag"`, list every permitted dotted path, and call `enforcePartnerFieldAllowlist` at the client method that sends it — as `createBvnkCustomer` does.
 
 ## 2. Add the package adapter
 
@@ -129,6 +139,7 @@ pnpm --filter @sdp/payments lint
 pnpm --filter @sdp/payments test
 pnpm --filter @sdp/api typecheck
 pnpm --filter @sdp/api test -- <focused-test-files>
+pnpm --filter @sdp/api test -- src/services/partner-intake.drift.test.ts
 pnpm --filter sdp-web typecheck
 pnpm --filter sdp-web check:i18n
 pnpm check:module-boundaries

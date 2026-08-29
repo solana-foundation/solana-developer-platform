@@ -54,6 +54,11 @@
       "import": "./src/private-channels.ts",
       "default": "./src/private-channels.ts"
     },
+    "./partner-intake": {
+      "types": "./src/partner-intake.ts",
+      "import": "./src/partner-intake.ts",
+      "default": "./src/partner-intake.ts"
+    },
     "./provider-access": {
       "types": "./src/provider-access.ts",
       "import": "./src/provider-access.ts",

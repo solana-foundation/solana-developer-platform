@@ -18,6 +18,12 @@ How Doppler is used for local development, secret-aware CI, and Vercel configura
 
 Read this when setting up local development, configuring CI, rotating secrets, or investigating environment drift.
 
+### [Partner Security Intake](../security/partner-security-intake.md)
+
+The register every third party must have a record in before it receives credentials, personal data, or funds-flow data, and how its clearance is enforced at runtime.
+
+Read this before enabling a new provider in production, when a partner is compromised or terminated, or when deciding which lever disables one.
+
 ## Common Tasks
 
 ### Deploy a change to dev

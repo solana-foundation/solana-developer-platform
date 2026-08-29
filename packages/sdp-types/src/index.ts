@@ -15,6 +15,7 @@ export * from "./kamino-programs";
 export * from "./kyc";
 export * from "./organizations";
 export * from "./pagination";
+export * from "./partner-intake";
 export * from "./payment-rails";
 export * from "./payments";
 export * from "./permissions";

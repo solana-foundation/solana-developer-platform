@@ -7,6 +7,7 @@ import {
   EARN_PROVIDERS,
   type EarnProviderId,
   isEarnProviderSurfaced,
+  isPartnerIntakeCleared,
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
@@ -132,7 +133,13 @@ function publicApiDefinition(label: string): ProviderAvailabilityDefinition {
   return { label, isConfigured: () => true };
 }
 
-const PROVIDER_AVAILABILITY_DEFINITIONS = {
+/**
+ * Exported for `partner-intake.drift.test.ts`, which probes each `isConfigured`
+ * to recover the env keys it really reads and pins them against the credential
+ * scope recorded in the partner intake register. Nothing in the runtime reaches
+ * for this directly — use `isProviderConfigured` or `getProviderAvailability`.
+ */
+export const PROVIDER_AVAILABILITY_DEFINITIONS = {
   custody: {
     local: {
       label: "Local",
@@ -538,7 +545,20 @@ function applySelfHostedEntitlements<T extends string>(
   return next;
 }
 
+/**
+ * `entitled` and `configured` stay literally true — they answer "is this
+ * organization allowed to use it" and "are its credentials present", and the
+ * intake gate changes neither. Only `enabled`, which means "usable right now",
+ * takes the third term, so a partner the register blocks is never offered by a
+ * surface that reads this response.
+ *
+ * The response shape is deliberately unchanged. Platform-level refusals already
+ * live outside `ProviderAvailabilityEntry` — `EARN_PROVIDER_SURFACING` works the
+ * same way — because they are not organization-scoped facts and no override
+ * lifts them.
+ */
 function buildAvailabilityEntries<T extends string>(
+  family: OrganizationProviderFamily,
   entitled: Record<T, boolean>,
   configured: Record<T, boolean>
 ): Record<T, ProviderAvailabilityEntry> {
@@ -546,13 +566,14 @@ function buildAvailabilityEntries<T extends string>(
     Object.keys(entitled).map((key) => {
       const isEntitled = entitled[key as T] ?? false;
       const isConfigured = configured[key as T] ?? false;
+      const isCleared = isPartnerIntakeCleared(family, key);
 
       return [
         key,
         {
           entitled: isEntitled,
           configured: isConfigured,
-          enabled: isEntitled && isConfigured,
+          enabled: isEntitled && isConfigured && isCleared,
         },
       ];
     })
@@ -594,11 +615,15 @@ export async function getProviderAvailability(
   return {
     tier: resolved.tier,
     providers: {
-      custody: buildAvailabilityEntries(entitled.custody, configured.custody),
-      rpc: buildAvailabilityEntries(entitled.rpc, configured.rpc),
-      compliance: buildAvailabilityEntries(entitled.compliance, configured.compliance),
-      ramps: buildAvailabilityEntries(entitled.ramps, configured.ramps),
-      earn: buildAvailabilityEntries(entitled.earn, configured.earn),
+      custody: buildAvailabilityEntries("custody", entitled.custody, configured.custody),
+      rpc: buildAvailabilityEntries("rpc", entitled.rpc, configured.rpc),
+      compliance: buildAvailabilityEntries(
+        "compliance",
+        entitled.compliance,
+        configured.compliance
+      ),
+      ramps: buildAvailabilityEntries("ramps", entitled.ramps, configured.ramps),
+      earn: buildAvailabilityEntries("earn", entitled.earn, configured.earn),
     },
   };
 }
@@ -611,6 +636,14 @@ export async function isPersistedCustodyCompletionEnabled(
   source: "stored" | "runtime"
 ): Promise<boolean> {
   if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
+    return false;
+  }
+
+  // The `stored` branch below answers on `entitled` alone, which the intake gate
+  // deliberately does not touch. Check clearance explicitly so a blocked partner
+  // cannot have an organization install its credentials — the one path where
+  // credential setup runs ahead of any availability decision.
+  if (!isPartnerIntakeCleared("custody", provider)) {
     return false;
   }
 
@@ -636,6 +669,12 @@ function getAvailabilityMessage(
   entry: ProviderAvailabilityEntry
 ): string {
   const label = getProviderLabel(family, providerId);
+
+  // Ahead of the entitlement message for the same reason the gate runs first:
+  // an uncleared partner has no activation door to send the caller to.
+  if (!isPartnerIntakeCleared(family, providerId)) {
+    return `${label} has not passed SDP's partner security intake and cannot be used.`;
+  }
 
   if (!entry.entitled) {
     if (isSelfHostedDeployment(env)) {
@@ -696,6 +735,8 @@ export async function assertProviderAvailable(
   providerId: string,
   testMode?: boolean
 ): Promise<void> {
+  assertPartnerIntakeCleared(family, providerId);
+
   const access = await getProviderAvailability(env, db, organizationId);
   const entry = access.providers[family][
     providerId as keyof (typeof access.providers)[typeof family]
@@ -740,6 +781,42 @@ export async function assertProviderAvailable(
 }
 
 /**
+ * Platform-level gate: the partner security intake (`PARTNER_INTAKE` in
+ * @sdp/types, threats SDP-017/SDP-018, `docs/security/partner-security-intake.md`).
+ *
+ * A partner whose register entry is `blocked` has not passed the data-handling
+ * review, so SDP must not reach it — however complete its credentials are and
+ * whatever the organization is entitled to. Provisioning keys is what usually
+ * launches an integration by accident; this is the check that makes that
+ * insufficient.
+ *
+ * Unlike `assertEarnProviderSurfaced` this one IS folded into
+ * `assertProviderAvailable`, and the difference is deliberate. Surfacing is one
+ * family's commercial decision applied at one route, so a separate call at that
+ * route is auditable. Clearance applies to all five families and every route
+ * that touches a partner already funnels through this gate — reproducing it at
+ * each call site would be a standing opportunity to forget one, which for a
+ * security control is the failure that matters.
+ *
+ * It runs FIRST, before the organization is even loaded: the refusal is about
+ * SDP's relationship with the partner, so it must not depend on, or leak, tenant
+ * state. The message says something different from the entitlement one for the
+ * same reason surfacing does — pointing a caller at an activation door that does
+ * not exist is worse than a plain refusal.
+ */
+export function assertPartnerIntakeCleared(
+  family: OrganizationProviderFamily,
+  providerId: string
+): void {
+  if (!isPartnerIntakeCleared(family, providerId)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `${getProviderLabel(family, providerId)} has not passed SDP's partner security intake and cannot be used.`
+    );
+  }
+}
+
+/**
  * Platform-level gate: opening a NEW position with a provider SDP does not
  * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types).
  *
@@ -769,6 +846,11 @@ export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
  * funds can never be trapped behind a sales/tier decision. Only the
  * credential/mode check applies here — deposits use the full
  * assertProviderAvailable gate.
+ *
+ * That includes the partner intake gate, whose absence here is the point:
+ * blocking a partner mid-review must close the way IN without stranding a
+ * position taken while it was open. A withdrawal from a provider we have since
+ * blocked is exactly the operation we want to succeed.
  */
 export function assertEarnProviderConfigured(
   env: Env,

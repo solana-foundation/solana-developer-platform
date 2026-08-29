@@ -33,6 +33,7 @@ import {
 import { hmacSha256Base64 } from "../../../hash";
 import { readRecord, readString } from "../../../json";
 import { type ProviderRequestInit, providerFetch } from "../../fetch";
+import { enforcePartnerFieldAllowlist } from "../../partner-egress";
 import {
   isActiveIso4217CurrencyCode,
   isSolanaCryptoAsset,
@@ -521,6 +522,15 @@ export interface CreateBvnkCustomerInput {
    */
   externalReference: string;
   signedAgreementSessionReference: string;
+  /**
+   * The counterparty's identity fields, in BVNK's own shape.
+   *
+   * Untyped because BVNK's individual schema varies by country and the builder
+   * assembles it from just-in-time collected data. `createBvnkCustomer` runs it
+   * through the partner intake allowlist before it reaches the wire, so the
+   * looseness here costs a refused request rather than an undeclared field
+   * leaving SDP.
+   */
   individual: Record<string, unknown>;
 }
 
@@ -786,7 +796,10 @@ export class BvnkRampClient implements RampProvider {
         type: "individual",
         externalReference: input.externalReference,
         signedAgreementSessionReference: input.signedAgreementSessionReference,
-        individual: input.individual,
+        // The last point before identity fields leave SDP, which is why the
+        // check lives here rather than in the caller: a second builder, or a
+        // rewired just-in-time collection path, still has to come through it.
+        individual: enforcePartnerFieldAllowlist("ramps", this.id, input.individual),
       },
     });
     return parseBvnkCustomerState(response);

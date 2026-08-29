@@ -175,8 +175,15 @@ export function resolveRpcIntegrations(input: {
 /**
  * A deployment-wide rail is on or off; no organization ever connects one, so
  * these families never report `active`. All three flags, not just `enabled`:
- * the API derives it as entitled && configured, so anything less than
- * agreement between them is a payload we should not read a promise out of.
+ * the API derives it as entitled && configured && cleared by the partner
+ * security intake, so anything less than agreement between them is a payload we
+ * should not read a promise out of.
+ *
+ * A partner the intake blocks lands in `not_configured` — the closest bucket a
+ * deployment-wide rail has. That is imprecise (its credentials may well be
+ * present) but not misleading: the rail is off and no organization action turns
+ * it on. `docs/security/partner-security-intake.md` is where the real reason
+ * lives.
  */
 function railIsOn(entry: ProviderAvailabilityEntry | undefined): boolean {
   return entry?.entitled === true && entry.configured && entry.enabled;
