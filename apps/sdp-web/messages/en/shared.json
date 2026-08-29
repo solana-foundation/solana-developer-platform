@@ -418,6 +418,7 @@
     "rpcByokLastActiveByok": "This organization runs only on its own credentials, so withdrawing this key stops RPC instead of falling back to SDP's.",
     "rpcByokServingHasSpare": "Withdrawing this key will not hand over to your other keys. Switch to the provider you want first.",
     "rpcByokDelete": "Delete",
+    "rpcByokDeleteConfirm": "Delete this connection? Its key was destroyed when it was deactivated, so this only clears the record.",
     "rpcByokDeleted": "Connection deleted.",
     "rpcModeTitle": "Run entirely on your own credentials",
     "rpcModeToggle": "Run entirely on your own credentials",

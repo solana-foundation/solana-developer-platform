@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { SafeRpcConnection } from "@sdp/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -235,8 +235,39 @@ describe("RpcByokSection", () => {
     expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
     expect(screen.getByText(/stored key was destroyed/)).toBeTruthy();
 
+    // Delete asks before it acts now, so the row control opens the strip and
+    // the strip's own button is what actually deletes.
     await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(deleteRpcConnectionAction).not.toHaveBeenCalled();
+
+    const confirmation = screen.getByRole("alert");
+    await user.click(within(confirmation).getByRole("button", { name: "Delete" }));
     expect(deleteRpcConnectionAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("backs out of a delete without touching the connection", async () => {
+    const user = userEvent.setup();
+    renderSection({
+      connections: [connection({ status: "deactivated", isDefault: false })],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = screen.getByRole("alert");
+    await user.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+
+    expect(deleteRpcConnectionAction).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the deactivate control on a stranded organization row", () => {
+    // The only way out of a row that cannot be rotated or checked. Gating this
+    // on "is live" instead of "is not already deactivated" strands it.
+    renderSection({
+      connections: [connection({ scope: "organization", projectId: null, isDefault: false })],
+    });
+
+    expect(screen.getByRole("button", { name: /Deactivate/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("asks for the replacement key instead of making people re-add", async () => {
