@@ -79,13 +79,19 @@ export function IntegrationDetailSkeleton() {
       data-loading-layout="integration-detail"
     >
       {/* The header is the one block that is not a section: a provider mark,
-          the name with its status beside it, and the primary action opposite. */}
-      <div className="flex h-[104px] items-center justify-between gap-4 rounded-2xl border border-border-subtle bg-surface-raised p-6">
+          the name with its status beside it, and the primary action opposite.
+
+          Wraps and grows exactly as the loaded header does (`flex flex-wrap`,
+          no fixed height). A fixed 104px row could not wrap, so on a narrow
+          viewport the placeholders overflowed it and then the real header --
+          which does wrap -- landed taller, jumping the page it was supposed to
+          be holding still. `min-h` keeps the desktop height it reserves. */}
+      <div className="flex min-h-[104px] flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-subtle bg-surface-raised p-6">
         <div className="flex min-w-0 items-center gap-4">
           <div className="h-12 w-12 shrink-0 rounded-full bg-fill-subtle" />
           <div className="min-w-0 space-y-2">
-            <div className="h-5 w-44 rounded bg-fill-subtle" />
-            <div className="h-4 w-28 rounded bg-fill-subtle" />
+            <div className="h-5 w-44 max-w-full rounded bg-fill-subtle" />
+            <div className="h-4 w-28 max-w-full rounded bg-fill-subtle" />
           </div>
         </div>
         <div className="h-9 w-32 shrink-0 rounded-[10px] bg-fill-subtle" />
