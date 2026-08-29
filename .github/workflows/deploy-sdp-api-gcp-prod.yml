@@ -42,7 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      (inputs.release_sha != '' || github.event_name == 'workflow_dispatch')
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -413,7 +415,8 @@ jobs:
     needs: [smoke, deploy]
     if: >-
       always() &&
-      github.repository == 'solana-foundation/solana-developer-platform'
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      (inputs.release_sha != '' || github.event_name == 'workflow_dispatch')
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
