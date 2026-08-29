@@ -1,8 +1,14 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import type {
   EarnExternalWalletDepositResponse,
   EarnExternalWalletDepositTransactionResponse,
   EarnExternalWalletMovement,
+  EarnExternalWalletPosition,
+  EarnExternalWalletPositionSummary,
+  EarnExternalWalletPositionSummaryResponse,
+  EarnExternalWalletPositionsPage,
+  EarnExternalWalletTokenTotal,
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
@@ -22,6 +28,7 @@ import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import {
   buildExternalWalletDepositTransaction,
   buildExternalWalletWithdrawalTransaction,
@@ -35,12 +42,22 @@ import {
 } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { getEarnRepository, resolveSdpEnvironment } from "../context";
-import type {
-  earnExternalWalletDepositTransactionSchema,
-  earnExternalWalletSubmitSchema,
-  earnExternalWalletWithdrawalTransactionSchema,
+import {
+  type earnExternalWalletDepositTransactionSchema,
+  earnExternalWalletPositionParamsSchema,
+  earnExternalWalletPositionSummaryQuerySchema,
+  earnExternalWalletPositionsQuerySchema,
+  type earnExternalWalletSubmitSchema,
+  type earnExternalWalletWithdrawalTransactionSchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
+import { parseParams, parseQuery } from "./shared";
+import {
+  decodeVaultPositionCursor,
+  encodeVaultPositionCursor,
+  type VaultPositionCursor,
+} from "./vault-position-cursor";
+import { type HydratedVaultPositionValue, hydrateVaultPositions } from "./vault-position-hydration";
 
 /**
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
@@ -73,6 +90,134 @@ type EarnExternalWalletWithdrawalTransactionBody = z.output<
   typeof earnExternalWalletWithdrawalTransactionSchema
 >;
 type EarnExternalWalletSubmitBody = z.output<typeof earnExternalWalletSubmitSchema>;
+
+const EXTERNAL_POSITION_PAGE_SIZE = 100;
+
+/**
+ * GET /v1/earn/external-wallet/positions/summary: complete live portfolio for
+ * one partner project, grouped by strategy and by token.
+ *
+ * The claim table is keyset-paged to the end before any total is returned. A
+ * repeated or non-advancing cursor fails the request instead of serving a
+ * plausible-looking partial total.
+ */
+export async function getEarnExternalWalletPositionSummary(c: AppContext) {
+  parseQuery(c, earnExternalWalletPositionSummaryQuerySchema);
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+
+  const rows = await collectAllExternalWalletPositionRows((before) =>
+    repo.listExternalWalletPositions({
+      organizationId: auth.organizationId,
+      projectId,
+      environment,
+      limit: EXTERNAL_POSITION_PAGE_SIZE,
+      before,
+    })
+  );
+  const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
+  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
+  const summary = summarizeExternalWalletPositions(holdings, live);
+  if (summary.unavailablePositionCount > 0) {
+    getLogger().warn(
+      {
+        event: "sdp_api_earn_external_wallet_position_summary_unavailable",
+        organization_id: auth.organizationId,
+        project_id: projectId,
+        environment,
+        position_count: summary.positionCount,
+        unavailable_position_count: summary.unavailablePositionCount,
+      },
+      "external-wallet position summary: live values unavailable"
+    );
+  }
+  const response: EarnExternalWalletPositionSummaryResponse = {
+    summary,
+  };
+  return success(c, response);
+}
+
+/** GET /v1/earn/external-wallet/positions/:ownerAddress: one end user's holdings. */
+export async function listEarnExternalWalletPositions(c: AppContext) {
+  const { ownerAddress } = parseParams(c, earnExternalWalletPositionParamsSchema);
+  const query = parseQuery(c, earnExternalWalletPositionsQuerySchema);
+  const before = query.before ? decodeVaultPositionCursor(query.before) : null;
+  if (query.before && !before) {
+    throw badRequest("Invalid external-wallet position pagination cursor");
+  }
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+
+  // Existence and ownership intentionally collapse to one 404. This separate
+  // scoped check keeps a valid wallet answerable on an empty later page.
+  const owned = await repo.hasExternalWalletPositionOwner({
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    ownerAddress,
+  });
+  if (!owned) throw notFound("Earn external wallet");
+
+  const page = await repo.listExternalWalletPositions({
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    ownerAddress,
+    limit: query.limit,
+    before,
+  });
+  const holdings = page.rows.map((row) => requireExternalWalletHolding(row, projectId));
+  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
+  const last = holdings.at(-1);
+  const response: EarnExternalWalletPositionsPage = {
+    ownerAddress,
+    positions: holdings.map((holding) =>
+      toExternalWalletPositionWire(holding, live.get(holding.id))
+    ),
+    hasMore: page.hasMore,
+    nextCursor: page.hasMore && last ? encodeVaultPositionCursor(last.createdAt, last.id) : null,
+  };
+  return success(c, response);
+}
+
+export async function collectAllExternalWalletPositionRows(
+  readPage: (
+    before: VaultPositionCursor | null
+  ) => Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>
+): Promise<EarnPositionRow[]> {
+  const rows: EarnPositionRow[] = [];
+  const seenBounds = new Set<string>();
+  let before: VaultPositionCursor | null = null;
+
+  while (true) {
+    const result = await readPage(before);
+    rows.push(...result.rows);
+    if (!result.hasMore) return rows;
+
+    const last = result.rows.at(-1);
+    if (!last) {
+      throw internalError("External-wallet position pagination ended before completion");
+    }
+    const next = { createdAt: last.created_at, id: last.id };
+    const key = JSON.stringify(next);
+    if ((before && !cursorStrictlyPrecedes(next, before)) || seenBounds.has(key)) {
+      throw internalError("External-wallet position pagination did not advance");
+    }
+    seenBounds.add(key);
+    before = next;
+  }
+}
+
+function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPositionCursor): boolean {
+  return (
+    next.createdAt < before.createdAt ||
+    (next.createdAt === before.createdAt && next.id < before.id)
+  );
+}
 
 /**
  * POST /v1/earn/external-wallet/deposit-transactions — build one unsigned deposit
@@ -340,6 +485,8 @@ interface ExternalWalletHolding {
   tokenMint: string;
   shareMint: string;
   shareAtaRentFunder: string | null;
+  createdAt: string;
+  closedAt: string | null;
 }
 
 /**
@@ -371,7 +518,170 @@ function toExternalWalletHolding(
     tokenMint: row.token_mint,
     shareMint: row.share_mint,
     shareAtaRentFunder: row.share_ata_rent_funder,
+    createdAt: row.created_at,
+    closedAt: row.closed_at,
   };
+}
+
+function requireExternalWalletHolding(
+  row: EarnPositionRow,
+  projectId: string
+): ExternalWalletHolding {
+  const holding = toExternalWalletHolding(row, projectId);
+  if (!holding) {
+    throw internalError(`Earn external-wallet position ${row.id} has an invalid claim shape`);
+  }
+  return holding;
+}
+
+function toExternalWalletPositionWire(
+  holding: ExternalWalletHolding,
+  hydrated: HydratedVaultPositionValue | undefined
+): EarnExternalWalletPosition {
+  return {
+    id: holding.id,
+    ownerAddress: holding.ownerAddress,
+    provider: holding.provider,
+    providerReference: holding.vaultAddress,
+    label: holding.label,
+    tokenMint: holding.tokenMint,
+    shareMint: holding.shareMint,
+    createdAt: holding.createdAt,
+    closedAt: holding.closedAt,
+    shares: hydrated?.shares,
+    withdrawableShares: hydrated?.withdrawableShares,
+    tokenValue: hydrated?.tokenValue,
+  };
+}
+
+function toHydratableHolding(holding: ExternalWalletHolding) {
+  return {
+    id: holding.id,
+    provider: holding.provider,
+    providerReference: holding.vaultAddress,
+    ownerAddress: holding.ownerAddress,
+    tokenMint: holding.tokenMint,
+    shareMint: holding.shareMint,
+  };
+}
+
+interface MutableTokenTotal {
+  tokenMint: string;
+  owners: Set<string>;
+  values: string[];
+  positionCount: number;
+  unavailablePositionCount: number;
+}
+
+interface MutableStrategyTotal {
+  provider: string;
+  providerReference: string;
+  label: string;
+  owners: Set<string>;
+  positionCount: number;
+  tokens: Map<string, MutableTokenTotal>;
+}
+
+function summarizeExternalWalletPositions(
+  holdings: readonly ExternalWalletHolding[],
+  live: ReadonlyMap<string, HydratedVaultPositionValue>
+): EarnExternalWalletPositionSummary {
+  const owners = new Set<string>();
+  const strategies = new Map<string, MutableStrategyTotal>();
+  const tokens = new Map<string, MutableTokenTotal>();
+  let unavailablePositionCount = 0;
+
+  for (const holding of holdings) {
+    owners.add(holding.ownerAddress);
+    const value = live.get(holding.id)?.tokenValue;
+    if (value === undefined) unavailablePositionCount += 1;
+
+    const strategyKey = JSON.stringify([holding.provider, holding.vaultAddress]);
+    let strategy = strategies.get(strategyKey);
+    if (!strategy) {
+      // Rows are collected newest first, so the first claim intentionally owns
+      // the display label when old deposits for one vault used different copy.
+      strategy = {
+        provider: holding.provider,
+        providerReference: holding.vaultAddress,
+        label: holding.label,
+        owners: new Set(),
+        positionCount: 0,
+        tokens: new Map(),
+      };
+      strategies.set(strategyKey, strategy);
+    }
+    strategy.owners.add(holding.ownerAddress);
+    strategy.positionCount += 1;
+    addToTokenTotal(strategy.tokens, holding, value);
+    addToTokenTotal(tokens, holding, value);
+  }
+
+  return {
+    walletCount: owners.size,
+    positionCount: holdings.length,
+    unavailablePositionCount,
+    totalsByStrategy: [...strategies.values()]
+      .map((strategy) => ({
+        provider: strategy.provider,
+        providerReference: strategy.providerReference,
+        label: strategy.label,
+        walletCount: strategy.owners.size,
+        positionCount: strategy.positionCount,
+        totalsByToken: [...strategy.tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),
+      }))
+      .sort(
+        (left, right) =>
+          compareWireStrings(left.label, right.label) ||
+          compareWireStrings(left.provider, right.provider) ||
+          compareWireStrings(left.providerReference, right.providerReference)
+      ),
+    totalsByToken: [...tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),
+  };
+}
+
+function addToTokenTotal(
+  totals: Map<string, MutableTokenTotal>,
+  holding: ExternalWalletHolding,
+  tokenValue: string | undefined
+) {
+  let total = totals.get(holding.tokenMint);
+  if (!total) {
+    total = {
+      tokenMint: holding.tokenMint,
+      owners: new Set(),
+      values: [],
+      positionCount: 0,
+      unavailablePositionCount: 0,
+    };
+    totals.set(holding.tokenMint, total);
+  }
+  total.owners.add(holding.ownerAddress);
+  total.positionCount += 1;
+  if (tokenValue === undefined) total.unavailablePositionCount += 1;
+  else total.values.push(tokenValue);
+}
+
+function finalizeTokenTotal(total: MutableTokenTotal): EarnExternalWalletTokenTotal {
+  return {
+    tokenMint: total.tokenMint,
+    walletCount: total.owners.size,
+    positionCount: total.positionCount,
+    unavailablePositionCount: total.unavailablePositionCount,
+    ...(total.unavailablePositionCount === 0
+      ? { tokenValue: sumDecimalAmounts(total.values) }
+      : {}),
+  };
+}
+
+function tokenTotalOrder(left: EarnExternalWalletTokenTotal, right: EarnExternalWalletTokenTotal) {
+  return compareWireStrings(left.tokenMint, right.tokenMint);
+}
+
+function compareWireStrings(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function toExternalWalletTransactionWire(built: EarnExternalWalletTransactionRow) {

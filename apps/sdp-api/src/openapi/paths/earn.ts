@@ -3,6 +3,8 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import {
   earnButtonConfigurationPublicParamsSchema,
   earnButtonConfigurationSchema,
+  earnExternalWalletPositionParamsSchema,
+  earnExternalWalletPositionsQuerySchema,
 } from "@/routes/earn/schemas";
 import { errorResponseSchema } from "../schemas/base";
 import {
@@ -10,6 +12,8 @@ import {
   earnExternalWalletDepositResponse,
   earnExternalWalletDepositTransactionRequest,
   earnExternalWalletDepositTransactionResponse,
+  earnExternalWalletPositionSummaryResponse,
+  earnExternalWalletPositionsResponse,
   earnExternalWalletSubmitRequest,
   earnExternalWalletWithdrawalResponse,
   earnExternalWalletWithdrawalTransactionRequest,
@@ -117,6 +121,52 @@ function registerEarnExternalWalletPaths(
   // path. Each direction is a BUILD (returns an unsigned transaction for the
   // customer's own wallet to sign) and a SUBMIT (verifies the signature over
   // the exact built message, records the movement, then broadcasts).
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/positions/summary",
+    tags: ["Earn"],
+    summary: "Get external-wallet position totals",
+    operationId: "getEarnExternalWalletPositionSummary",
+    description:
+      "Returns a complete live aggregate across the active partner project's end-user wallets, " +
+      "grouped by strategy and token. The service pages every stored claim before hydration. " +
+      "A total is omitted when any contributing live value is unavailable, never reported as zero or partial.",
+    security,
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Complete external-wallet position aggregate",
+        content: jsonContent(earnExternalWalletPositionSummaryResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/positions/{ownerAddress}",
+    tags: ["Earn"],
+    summary: "List one external wallet's positions",
+    operationId: "listEarnExternalWalletPositions",
+    description:
+      "Returns one strict keyset page of live positions for an end-user wallet in the active " +
+      "partner project. A wallet outside that scope answers 404. Live fields are absent when " +
+      "provider hydration is unavailable, never replaced with zero.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      params: earnExternalWalletPositionParamsSchema,
+      query: earnExternalWalletPositionsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "External-wallet position page",
+        content: jsonContent(earnExternalWalletPositionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
   registry.registerPath({
     method: "post",
     path: "/v1/earn/external-wallet/deposit-transactions",

@@ -2152,6 +2152,24 @@
       "name": "Earn",
       "item": [
         {
+          "name": "Get external-wallet position totals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/positions/summary",
+            "description": "Returns a complete live aggregate across the active partner project's end-user wallets, grouped by strategy and token. The service pages every stored claim before hydration. A total is omitted when any contributing live value is unavailable, never reported as zero or partial."
+          }
+        },
+        {
+          "name": "List one external wallet's positions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/positions/{{ownerAddress}}",
+            "description": "Returns one strict keyset page of live positions for an end-user wallet in the active partner project. A wallet outside that scope answers 404. Live fields are absent when provider hydration is unavailable, never replaced with zero."
+          }
+        },
+        {
           "name": "Build an unsigned external-wallet deposit transaction",
           "request": {
             "method": "POST",

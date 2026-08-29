@@ -1,4 +1,3 @@
-import { isDecimalString } from "@sdp/solana/amount";
 import type {
   EarnVaultDepositRecord,
   EarnVaultDepositResponse,
@@ -18,7 +17,6 @@ import {
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
   AppError,
   badRequest,
@@ -37,7 +35,6 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -46,8 +43,6 @@ import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
-import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
-import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import {
@@ -57,7 +52,7 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { AppContext } from "../context";
-import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
+import { getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   earnVaultDepositParamsSchema,
   type earnVaultDepositSchema,
@@ -69,6 +64,8 @@ import {
 } from "../schemas";
 import { assertVaultDepositAdmissible } from "./admission";
 import { parseParams, parseQuery } from "./shared";
+import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
+import { hydrateVaultPositions } from "./vault-position-hydration";
 
 /**
  * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
@@ -956,104 +953,34 @@ export async function listEarnVaultPositions(c: AppContext) {
   // them — and a hydration request is never built against a blank vault address.
   const rows = page.rows.map(toVaultHolding);
 
-  // Group by provider so each client reads its whole shelf in one pass, sharing
-  // one slot across the vaults — a per-position read would price a multi-vault
-  // page against drifting slots.
-  const byProvider = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const providerRows = byProvider.get(row.provider);
-    if (providerRows) providerRows.push(row);
-    else byProvider.set(row.provider, [row]);
-  }
-
   const walletAddresses = new Map(
     scopedWallets.map((wallet) => [wallet.id, wallet.publicKey] as const)
   );
-  const live = new Map<
-    string,
-    {
-      shares: string;
-      withdrawableShares: string;
-      tokenValue: string | undefined;
-    }
-  >();
-  const hydrationJobs: Array<() => Promise<void>> = [];
-  const deadline = createVaultDeadline();
-
-  for (const [provider, providerRows] of byProvider) {
-    const client = resolveVaultDirectClient(c.env, provider, deadline);
-    if (!client) continue;
-    const byWallet = new Map<string, typeof rows>();
-    for (const row of providerRows) {
-      const walletRows = byWallet.get(row.custodyWalletId);
-      if (walletRows) walletRows.push(row);
-      else byWallet.set(row.custodyWalletId, [row]);
-    }
-    for (const [walletId, walletRows] of byWallet) {
-      const owner = walletAddresses.get(walletId);
-      if (!owner) continue;
-      const trustedIdentity = new Map(
-        walletRows.map((row) => [
-          row.vaultAddress,
-          { tokenMint: row.tokenMint, shareMint: row.shareMint },
-        ])
-      );
-      const references = walletRows.map((row) => row.vaultAddress);
-      hydrationJobs.push(async () => {
-        const snapshots = await client.readVaultPositions(earnRuntime(c), {
-          owner,
-          providerReferences: references,
-        });
-        for (const snapshot of snapshots) {
-          const trusted = trustedIdentity.get(snapshot.providerReference);
-          if (
-            !trusted ||
-            snapshot.owner !== owner ||
-            snapshot.cluster !== earnClusterFor(environment) ||
-            snapshot.tokenMint !== trusted.tokenMint ||
-            snapshot.shareMint !== trusted.shareMint ||
-            !isBoundedSnapshotAmount(snapshot.shares) ||
-            !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
-            (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
-          ) {
-            getLogger().warn(
-              {
-                provider,
-                walletId,
-                providerReference: snapshot.providerReference,
-                snapshotOwner: snapshot.owner,
-                snapshotCluster: snapshot.cluster,
-                snapshotTokenMint: snapshot.tokenMint,
-                snapshotShareMint: snapshot.shareMint,
-              },
-              "vault position: ignored live snapshot with mismatched identity"
-            );
-            continue;
-          }
-          live.set(vaultPositionLiveKey(provider, walletId, snapshot.providerReference), {
-            shares: snapshot.shares,
-            withdrawableShares: snapshot.withdrawableShares,
-            tokenValue: snapshot.tokenValue,
-          });
-        }
-      });
-    }
-  }
-
-  if (hydrationJobs.length > 0) {
-    // Failed reads intentionally leave only their rows unhydrated; never report
-    // zero when the chain could not be read. In-flight RPC work stays bounded.
-    await mapSettledWithConcurrency(hydrationJobs, 8, (hydrate) => hydrate());
-  }
+  const live = await hydrateVaultPositions(
+    c,
+    environment,
+    rows.map((row) => {
+      const ownerAddress = walletAddresses.get(row.custodyWalletId);
+      if (!ownerAddress) {
+        throw internalError(`Earn vault position ${row.id} has no readable custody owner`);
+      }
+      return {
+        id: row.id,
+        provider: row.provider,
+        providerReference: row.vaultAddress,
+        ownerAddress,
+        tokenMint: row.tokenMint,
+        shareMint: row.shareMint,
+      };
+    })
+  );
 
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.createdAt, last.id) : null;
 
   return success(c, {
     positions: rows.map((row) => {
-      const hydrated = live.get(
-        vaultPositionLiveKey(row.provider, row.custodyWalletId, row.vaultAddress)
-      );
+      const hydrated = live.get(row.id);
       return {
         id: row.id,
         provider: row.provider,
@@ -1073,40 +1000,6 @@ export async function listEarnVaultPositions(c: AppContext) {
     hasMore,
     nextCursor,
   });
-}
-
-function vaultPositionLiveKey(provider: string, walletId: string, reference: string): string {
-  return JSON.stringify([provider, walletId, reference]);
-}
-
-function isBoundedSnapshotAmount(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 128 && isDecimalString(value);
-}
-
-const vaultPositionCursorSchema = z.object({
-  // `created_at` is ordered as canonical UTC text, so accepting offsets or a
-  // different precision would make a syntactically valid cursor sort wrongly.
-  createdAt: z.string().datetime({ precision: 3 }),
-  // Shape and bound only, for the same reason as the movement cursor above:
-  // holdings carry `earn_vault_position_…` ids the unification preserved beside
-  // `earn_position_…` for newer ones. Lowercase is still asserted because
-  // PostgreSQL compares the prefixed id as text in the keyset tuple.
-  id: z
-    .string()
-    .min(1)
-    .max(128)
-    .refine((id) => id === id.toLowerCase()),
-});
-
-function encodeVaultPositionCursor(createdAt: string, id: string): string {
-  return encodeKeysetCursor(createdAt, id);
-}
-
-function decodeVaultPositionCursor(cursor: string): { createdAt: string; id: string } | null {
-  const decoded = decodeKeysetCursor(cursor);
-  if (!decoded) return null;
-  const parsed = vaultPositionCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });
-  return parsed.success ? parsed.data : null;
 }
 
 // ---------------------------------------------------------------------------

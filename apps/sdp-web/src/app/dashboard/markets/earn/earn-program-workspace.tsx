@@ -1,19 +1,34 @@
 "use client";
 
-import { isVaultDirectDepositEnabled } from "@sdp/types";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  isVaultDirectDepositEnabled,
+  SOLANA_CLUSTER_LABELS,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+} from "@sdp/types";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
 import {
   CheckIcon,
   Code2Icon,
   InfoIcon,
+  Layers3Icon,
   ListChecksIcon,
   PanelsTopLeftIcon,
-  SparklesIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Callout } from "@/components/ui/callout";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
   Table,
@@ -53,7 +68,7 @@ function ProgramIntro() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <SparklesIcon aria-hidden="true" className="size-5 text-secondary" />
+          <Layers3Icon aria-hidden="true" className="size-5 text-secondary" />
           {t("DashboardMarkets.earnProgram.introTitle")}
         </CardTitle>
         <CardDescription className="max-w-3xl leading-6">
@@ -95,25 +110,50 @@ const PROGRAM_AVAILABILITY_LABELS = {
   provider_unavailable: "DashboardMarkets.earnProgram.providerUnavailable",
 } as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
 
+type StrategyOptionProps = {
+  locale: string;
+  onSelect: (strategyId: string) => void;
+  providerAccess: EarnProviderAccess | null;
+  previewSelectable: boolean;
+  sdpEnvironment: Parameters<typeof earnVaultDepositAvailability>[1];
+  selected: boolean;
+  strategy: Parameters<typeof earnVaultDepositAvailability>[0];
+};
+
+function strategyOptionState({
+  previewSelectable,
+  providerAccess,
+  sdpEnvironment,
+  strategy,
+}: Pick<
+  StrategyOptionProps,
+  "previewSelectable" | "providerAccess" | "sdpEnvironment" | "strategy"
+>) {
+  const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
+  return {
+    asset: earnStrategyAsset(strategy),
+    availability,
+    supported:
+      availability === "available" || (previewSelectable && availability === "cluster_unavailable"),
+  };
+}
+
 function StrategyRow({
   locale,
   onSelect,
   providerAccess,
+  previewSelectable,
   sdpEnvironment,
   selected,
   strategy,
-}: {
-  locale: string;
-  onSelect: (strategyId: string) => void;
-  providerAccess: EarnProviderAccess | null;
-  sdpEnvironment: Parameters<typeof earnVaultDepositAvailability>[1];
-  selected: boolean;
-  strategy: Parameters<typeof earnVaultDepositAvailability>[0];
-}) {
+}: StrategyOptionProps) {
   const t = useTranslations();
-  const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
-  const supported = availability === "available";
-  const asset = earnStrategyAsset(strategy);
+  const { asset, availability, supported } = strategyOptionState({
+    previewSelectable,
+    providerAccess,
+    sdpEnvironment,
+    strategy,
+  });
 
   return (
     <TableRow className={cn(selected && "bg-fill-subtle")}>
@@ -152,18 +192,76 @@ function StrategyRow({
   );
 }
 
+function StrategyMobileRow({
+  locale,
+  onSelect,
+  providerAccess,
+  previewSelectable,
+  sdpEnvironment,
+  selected,
+  strategy,
+}: StrategyOptionProps) {
+  const t = useTranslations();
+  const { availability, supported } = strategyOptionState({
+    previewSelectable,
+    providerAccess,
+    sdpEnvironment,
+    strategy,
+  });
+
+  return (
+    <div className={cn("flex items-center gap-3 px-4 py-3", selected && "bg-fill-subtle")}>
+      <div className="min-w-0 flex-1 space-y-2">
+        <EarnStrategyIdentity strategy={strategy} />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium tracking-tight text-primary tabular-nums">
+            {formatProviderApy(strategy.currentApy, locale)}
+          </span>
+          <EarnDepositAvailabilityBadge
+            availability={availability}
+            labels={PROGRAM_AVAILABILITY_LABELS}
+            strategy={strategy}
+          />
+        </div>
+      </div>
+      <Button
+        aria-pressed={selected}
+        disabled={!supported}
+        iconLeft={selected ? <CheckIcon /> : undefined}
+        onClick={() => onSelect(strategy.id)}
+        size="sm"
+        type="button"
+        variant={selected ? "default" : "secondary"}
+      >
+        {t(
+          selected ? "DashboardMarkets.earnProgram.selected" : "DashboardMarkets.earnProgram.select"
+        )}
+      </Button>
+    </div>
+  );
+}
+
 export function EarnProgramWorkspace({
   builderHref,
+  initialCluster,
   providerAccess,
 }: {
   builderHref: string;
+  initialCluster?: SolanaCluster;
   providerAccess: EarnProviderAccess | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const router = useRouter();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const { strategies, error, isLoading } = useEarnStrategies();
+  const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
+  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(() =>
+    initialCluster === environmentCluster ? undefined : initialCluster
+  );
+  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
+  const activeCluster = strategiesCluster ?? environmentCluster;
+  const isMainnetPreview = sdpEnvironment === "sandbox" && activeCluster === "mainnet-beta";
+  const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategiesCluster });
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
 
   if (isLoading) return <EarnProgramSkeleton />;
@@ -174,7 +272,14 @@ export function EarnProgramWorkspace({
 
   const continueToBuilder = () => {
     if (!selectedStrategy) return;
-    router.push(`${builderHref}?strategy=${encodeURIComponent(selectedStrategy.id)}`);
+    const query = new URLSearchParams({ strategy: selectedStrategy.id });
+    if (isMainnetPreview) query.set("cluster", "mainnet-beta");
+    router.push(`${builderHref}?${query}`);
+  };
+
+  const changeCluster = (cluster: SolanaCluster) => {
+    setSelectedStrategyId(null);
+    setCatalogueCluster(cluster === environmentCluster ? undefined : cluster);
   };
 
   return (
@@ -191,7 +296,26 @@ export function EarnProgramWorkspace({
         <Card className="overflow-hidden">
           <CardHeader>
             <CardTitle>{t("DashboardMarkets.earnProgram.selectTitle")}</CardTitle>
-            <CardDescription>{t("DashboardMarkets.earnProgram.selectDescription")}</CardDescription>
+            <CardDescription>
+              {t(
+                isMainnetPreview
+                  ? "DashboardMarkets.earnProgram.mainnetCatalogueDescription"
+                  : "DashboardMarkets.earnProgram.selectDescription"
+              )}
+            </CardDescription>
+            {sdpEnvironment === "sandbox" ? (
+              <CardAction>
+                <SegmentedControl
+                  aria-label={t("DashboardMarkets.earnProgram.clusterToggleLabel")}
+                  items={SOLANA_CLUSTERS.map((cluster) => ({
+                    value: cluster,
+                    label: SOLANA_CLUSTER_LABELS[cluster],
+                  }))}
+                  onValueChange={(value) => value && changeCluster(value as SolanaCluster)}
+                  value={activeCluster}
+                />
+              </CardAction>
+            ) : null}
           </CardHeader>
           <CardContent className="px-0">
             {error ? (
@@ -207,8 +331,22 @@ export function EarnProgramWorkspace({
                 message={t("DashboardMarkets.earnProgram.catalogueEmptyTitle")}
               />
             ) : (
-              <div className="overflow-x-auto border-y border-border-subtle">
-                <Table className="table-fixed" style={{ minWidth: "52rem" }}>
+              <div className="border-y border-border-subtle">
+                <div className="divide-y divide-border-default md:hidden">
+                  {rows.map((strategy) => (
+                    <StrategyMobileRow
+                      key={strategy.id}
+                      locale={locale}
+                      onSelect={setSelectedStrategyId}
+                      providerAccess={providerAccess}
+                      previewSelectable={isMainnetPreview}
+                      sdpEnvironment={sdpEnvironment}
+                      selected={selectedStrategyId === strategy.id}
+                      strategy={strategy}
+                    />
+                  ))}
+                </div>
+                <Table className="hidden md:block [&_table]:min-w-[52rem] [&_table]:table-fixed">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[38%]">
@@ -235,6 +373,7 @@ export function EarnProgramWorkspace({
                         locale={locale}
                         onSelect={setSelectedStrategyId}
                         providerAccess={providerAccess}
+                        previewSelectable={isMainnetPreview}
                         sdpEnvironment={sdpEnvironment}
                         selected={selectedStrategyId === strategy.id}
                         strategy={strategy}
@@ -246,18 +385,29 @@ export function EarnProgramWorkspace({
             )}
 
             <div className="flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex max-w-2xl items-start gap-2 text-xs leading-5 text-tertiary">
-                <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                <p>
-                  {t(
-                    providerAccess === null
-                      ? "DashboardMarkets.earnProgram.accessDisclosure"
-                      : depositsEnabled
-                        ? "DashboardMarkets.earnProgram.rateDisclosure"
-                        : "DashboardMarkets.earnProgram.productionDisclosure"
-                  )}
-                </p>
-              </div>
+              {isMainnetPreview && selectedStrategy ? (
+                <Callout
+                  className="max-w-3xl flex-1"
+                  live
+                  title={t("DashboardMarkets.earnProgram.mainnetPreviewTitle")}
+                  variant="warning"
+                >
+                  {t("DashboardMarkets.earnProgram.mainnetPreviewDescription")}
+                </Callout>
+              ) : (
+                <div className="flex max-w-2xl items-start gap-2 text-xs leading-5 text-tertiary">
+                  <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  <p>
+                    {t(
+                      providerAccess === null
+                        ? "DashboardMarkets.earnProgram.accessDisclosure"
+                        : depositsEnabled
+                          ? "DashboardMarkets.earnProgram.rateDisclosure"
+                          : "DashboardMarkets.earnProgram.productionDisclosure"
+                    )}
+                  </p>
+                </div>
+              )}
               <Button disabled={!selectedStrategy} onClick={continueToBuilder} type="button">
                 {t("DashboardMarkets.earnProgram.continue")}
               </Button>
