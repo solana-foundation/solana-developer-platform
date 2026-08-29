@@ -4,6 +4,7 @@ import type { SafeRpcConnection } from "@sdp/types";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submitRpcConnectionAction = vi.fn();
@@ -252,6 +253,70 @@ describe("RpcByokSection", () => {
     const confirmation = screen.getByRole("alert");
     await user.click(within(confirmation).getByRole("button", { name: "Delete Production key" }));
     expect(deleteRpcConnectionAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps what was typed when adding a connection is refused", async () => {
+    // Same reason the rotate form stays open on a refusal: the field holds a
+    // secret the reader pasted once. Clearing it on failure makes them go and
+    // find it again to retry.
+    const user = userEvent.setup();
+    submitRpcConnectionAction.mockResolvedValue({
+      status: "error",
+      message: "Provider rejected the key.",
+    });
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
+    await user.type(screen.getByLabelText(/API key/i), "tenant-key-9999");
+    await user.click(screen.getByRole("button", { name: "Save connection" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Provider rejected the key.", expect.anything());
+    const name = screen.getByRole("textbox", { name: /Connection name/i }) as HTMLInputElement;
+    expect(name.value).toBe("Prod");
+  });
+
+  it("keeps the rotate form open when the replacement key is refused", async () => {
+    // Rotation only closes on success, because the field holds the key the
+    // reader just typed. Closing on a refusal would throw it away and leave
+    // them to find it again.
+    const user = userEvent.setup();
+    rotateRpcConnectionAction.mockResolvedValue({
+      status: "error",
+      message: "Provider rejected the key.",
+    });
+    renderSection({ connections: [connection()] });
+
+    await user.click(screen.getByRole("button", { name: "Rotate key" }));
+    await user.type(screen.getByLabelText(/New API key/i), "replacement-key-1234");
+    // Exactly "Rotate": the row's own control reads "Rotate key".
+    await user.click(screen.getByRole("button", { name: "Rotate" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Provider rejected the key.", expect.anything());
+    expect(screen.getByLabelText(/New API key/i)).toBeTruthy();
+  });
+
+  it("surfaces why a refused delete did not happen", async () => {
+    // The row cannot tell the difference between a delete that did nothing and
+    // one that was refused, so the server's reason has to reach the reader
+    // rather than the strip just closing as though it worked.
+    const user = userEvent.setup();
+    deleteRpcConnectionAction.mockResolvedValue({
+      status: "error",
+      message: "Connection is still serving traffic.",
+    });
+    renderSection({
+      connections: [connection({ status: "deactivated", isDefault: false })],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = screen.getByRole("alert");
+    await user.click(within(confirmation).getByRole("button", { name: "Delete Production key" }));
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Connection is still serving traffic.",
+      expect.anything()
+    );
   });
 
   it("backs out of a delete without touching the connection", async () => {

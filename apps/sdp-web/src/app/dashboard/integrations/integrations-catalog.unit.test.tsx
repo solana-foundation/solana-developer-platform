@@ -43,6 +43,7 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
         ]}
         ramps={[{ provider: "moonpay", label: "MoonPay", status: "enabled" }]}
         compliance={[{ provider: "range", label: "Range", status: "request_access" }]}
+        privacy={overrides.privacy}
       />
     </I18nProvider>
   );
@@ -155,6 +156,35 @@ describe("IntegrationsCatalog filtering", () => {
     expect(labels).not.toContain("Privy");
     expect(labels).not.toContain("Para");
     expect(labels).not.toContain("Turnkey");
+  });
+
+  it("says so plainly when a provider's state could not be read", () => {
+    // A privacy instance whose active flag came back null. It is neither on nor
+    // off, and saying either would be a guess about something the page failed
+    // to load -- so it gets its own wording and the warning treatment rather
+    // than being folded into "Not connected".
+    renderCatalog({
+      privacy: [{ provider: "private-channels", label: "Private Channels", status: "unknown" }],
+    });
+
+    expect(visibleRowLabels()).toContain("Private Channels");
+    expect(screen.getByText("Status unavailable")).toBeTruthy();
+  });
+
+  it("keeps an unreadable state out of every chip", async () => {
+    const user = userEvent.setup();
+    renderCatalog({
+      privacy: [{ provider: "private-channels", label: "Private Channels", status: "unknown" }],
+    });
+
+    // Only "All" shows it. Claiming it is connected, not connected, or
+    // requestable would each assert something nobody actually knows.
+    for (const chip of ["Connected", "Not connected", "Available on request"]) {
+      await user.click(screen.getByRole("button", { name: chip }));
+      expect(visibleRowLabels()).not.toContain("Private Channels");
+    }
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(visibleRowLabels()).toContain("Private Channels");
   });
 
   it("offers only the four states the catalog can be read in", async () => {
