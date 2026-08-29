@@ -246,6 +246,64 @@ export interface EarnVaultPositionsPage {
   nextCursor: string | null;
 }
 
+/** One live position held by a partner end user's external wallet. */
+export interface EarnExternalWalletPosition {
+  id: string;
+  ownerAddress: string;
+  provider: string;
+  providerReference: string;
+  label: string;
+  tokenMint: string;
+  shareMint: string;
+  createdAt: string;
+  closedAt: string | null;
+  /** Absent when the live provider read failed; unavailable is never encoded as zero. */
+  shares?: string;
+  /** Absent when the live provider read failed. */
+  withdrawableShares?: string;
+  /** Deposit-token value, absent when the live provider read failed. */
+  tokenValue?: string;
+}
+
+/** Keyset page for exactly one external wallet. */
+export interface EarnExternalWalletPositionsPage {
+  ownerAddress: string;
+  positions: EarnExternalWalletPosition[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+export interface EarnExternalWalletTokenTotal {
+  tokenMint: string;
+  walletCount: number;
+  positionCount: number;
+  unavailablePositionCount: number;
+  /** Absent when any contributing position is unavailable, so the total is never partial. */
+  tokenValue?: string;
+}
+
+export interface EarnExternalWalletStrategyTotal {
+  provider: string;
+  providerReference: string;
+  label: string;
+  walletCount: number;
+  positionCount: number;
+  totalsByToken: EarnExternalWalletTokenTotal[];
+}
+
+/** Complete live aggregate for one partner project across its end-user wallets. */
+export interface EarnExternalWalletPositionSummary {
+  walletCount: number;
+  positionCount: number;
+  unavailablePositionCount: number;
+  totalsByStrategy: EarnExternalWalletStrategyTotal[];
+  totalsByToken: EarnExternalWalletTokenTotal[];
+}
+
+export interface EarnExternalWalletPositionSummaryResponse {
+  summary: EarnExternalWalletPositionSummary;
+}
+
 /** JSON body for POST /v1/earn/vault-deposits. Idempotency is header-only. */
 export interface EarnVaultDepositRequest {
   strategyId: string;

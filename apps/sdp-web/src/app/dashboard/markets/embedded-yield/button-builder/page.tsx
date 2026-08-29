@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTERS } from "@sdp/types";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { getSelectedProjectId } from "@/lib/sdp-api";
 import { EarnButtonBuilder } from "../../earn/earn-button-builder";
@@ -10,9 +11,9 @@ export const dynamic = "force-dynamic";
 export default async function EmbeddedYieldButtonBuilderPage({
   searchParams,
 }: {
-  searchParams: Promise<{ strategy?: string | string[] }>;
+  searchParams: Promise<{ cluster?: string | string[]; strategy?: string | string[] }>;
 }) {
-  const [{ strategy }, providerAccess, configuration, projectId] = await Promise.all([
+  const [{ cluster, strategy }, providerAccess, configuration, projectId] = await Promise.all([
     searchParams,
     loadEarnProviderAccess(),
     loadEarnButtonConfiguration(),
@@ -22,13 +23,17 @@ export default async function EmbeddedYieldButtonBuilderPage({
     configuration.kind === "ready" && configuration.configuration
       ? `${projectId ?? "no-project"}:${configuration.configuration.id}:${configuration.configuration.updatedAt}`
       : `${projectId ?? "no-project"}:${configuration.kind}`;
+  const strategyCluster =
+    typeof cluster === "string" ? SOLANA_CLUSTERS.find((value) => value === cluster) : undefined;
   return (
     <EarnButtonBuilder
+      configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`}
       earnHref={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
       configurationLoad={configuration}
       key={configurationKey}
       projectId={projectId ?? null}
       providerAccess={providerAccess}
+      strategyCluster={strategyCluster}
       strategyId={typeof strategy === "string" && strategy !== "" ? strategy : undefined}
     />
   );

@@ -390,7 +390,10 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`) {
+  if (
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`
+  ) {
     return {
       title: t("Shared.dashboardShell.configureEarnButton"),
       titlePosition: "center",

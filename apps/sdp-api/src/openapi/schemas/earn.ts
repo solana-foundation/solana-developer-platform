@@ -246,3 +246,82 @@ export const earnExternalWalletDepositResponse = successResponseSchema(
 export const earnExternalWalletWithdrawalResponse = successResponseSchema(
   z.object({ withdrawal: earnExternalWalletMovementSchema })
 );
+
+const earnLiveDecimalAmountSchema = z
+  .string()
+  .max(128)
+  .regex(/^\d+(\.\d+)?$/)
+  .openapi({
+    description: "Live decimal value returned by the vault provider; never a float.",
+    example: "25.42",
+  });
+
+const earnExternalWalletPositionSchema = z
+  .object({
+    id: z.string().openapi({ example: "earn_position_example" }),
+    ownerAddress: earnOwnerAddressSchema,
+    provider: z.string().openapi({ example: "kamino" }),
+    providerReference: z.string().openapi({
+      description: "The vault's on-chain address.",
+      example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+    }),
+    label: z.string().openapi({ example: "Allez USDC" }),
+    tokenMint: z.string().openapi({ example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }),
+    shareMint: z.string().openapi({ example: "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2" }),
+    createdAt: isoDateTimeSchema,
+    closedAt: isoDateTimeSchema.nullable(),
+    shares: earnLiveDecimalAmountSchema.optional().openapi({
+      description:
+        "Live share balance. Absent when hydration is unavailable; never coerced to zero.",
+    }),
+    withdrawableShares: earnLiveDecimalAmountSchema.optional().openapi({
+      description: "Live immediately redeemable shares. Absent when hydration is unavailable.",
+    }),
+    tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
+      description: "Live deposit-token value. Absent when hydration is unavailable.",
+    }),
+  })
+  .openapi({ description: "One live vault position owned by a partner end-user wallet." });
+
+const earnExternalWalletTokenTotalSchema = z.object({
+  tokenMint: z.string().openapi({ example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }),
+  walletCount: z.number().int().nonnegative(),
+  positionCount: z.number().int().nonnegative(),
+  unavailablePositionCount: z.number().int().nonnegative(),
+  tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
+    description:
+      "Exact live total. Absent when any contributing position is unavailable, so partial money is never presented as complete.",
+  }),
+});
+
+const earnExternalWalletStrategyTotalSchema = z.object({
+  provider: z.string().openapi({ example: "kamino" }),
+  providerReference: z.string().openapi({
+    example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+  }),
+  label: z.string().openapi({ example: "Allez USDC" }),
+  walletCount: z.number().int().nonnegative(),
+  positionCount: z.number().int().nonnegative(),
+  totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+});
+
+export const earnExternalWalletPositionsResponse = successResponseSchema(
+  z.object({
+    ownerAddress: earnOwnerAddressSchema,
+    positions: z.array(earnExternalWalletPositionSchema),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  })
+);
+
+export const earnExternalWalletPositionSummaryResponse = successResponseSchema(
+  z.object({
+    summary: z.object({
+      walletCount: z.number().int().nonnegative(),
+      positionCount: z.number().int().nonnegative(),
+      unavailablePositionCount: z.number().int().nonnegative(),
+      totalsByStrategy: z.array(earnExternalWalletStrategyTotalSchema),
+      totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+    }),
+  })
+);

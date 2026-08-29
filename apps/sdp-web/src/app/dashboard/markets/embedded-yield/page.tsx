@@ -1,16 +1,10 @@
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { EarnProgramWorkspace } from "../earn/earn-program-workspace";
-import { loadEarnProviderAccess } from "../earn/earn-provider-access.server";
+import { EmbeddedYieldDashboard } from "../earn/embedded-yield-dashboard";
 
-/** Provider access is organization-scoped and must be resolved per request. */
-export const dynamic = "force-dynamic";
-
-export default async function EmbeddedYieldPage() {
-  const providerAccess = await loadEarnProviderAccess();
+export default function EmbeddedYieldPage() {
   return (
-    <EarnProgramWorkspace
-      builderHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`}
-      providerAccess={providerAccess}
+    <EmbeddedYieldDashboard
+      configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`}
     />
   );
 }

@@ -8,11 +8,19 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const readVaultPositions = vi.hoisted(() => vi.fn());
+const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
+  const readVaultPositions = vi.fn();
+  return {
+    readVaultPositions,
+    resolveVaultDirectClient: vi.fn((_env: unknown, _provider: string, _deadline: unknown) => ({
+      readVaultPositions,
+    })),
+  };
+});
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  resolveVaultDirectClient: () => ({ readVaultPositions }),
+  resolveVaultDirectClient,
 }));
 
 const ORG = "org_vault_positions";
@@ -163,7 +171,7 @@ beforeEach(async () => {
   readVaultPositions.mockImplementation(
     async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
       input.providerReferences.map((providerReference) => ({
-        vaultAddress: providerReference,
+        providerReference,
         owner: input.owner,
         cluster: "devnet",
         shares: "1",
@@ -295,6 +303,53 @@ describe("GET /v1/earn/vault-positions", () => {
     });
     expect(body.data.positions[0]).not.toHaveProperty("shares");
     expect(body.data.positions[0]).not.toHaveProperty("tokenValue");
+  });
+
+  it("hydrates every custody row that projects the same owner and vault", async () => {
+    const duplicateWalletId = "cwlt_vault_positions_duplicate_owner";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(duplicateWalletId, CONFIG_A, "privy_vault_positions_duplicate_owner", PUBLIC_KEY_A)
+      .run();
+    await createPosition({ providerReference: "vault_shared_owner" });
+    await createPosition({
+      walletId: duplicateWalletId,
+      providerReference: "vault_shared_owner",
+      signature: "sig_vault_shared_owner",
+    });
+    readVaultPositions.mockResolvedValue([
+      {
+        providerReference: "vault_shared_owner",
+        owner: PUBLIC_KEY_A,
+        cluster: "devnet",
+        shares: "8",
+        withdrawableShares: "7",
+        tokenValue: "6.5",
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+      },
+    ]);
+
+    const response = await getPositions();
+    const body = (await response.json()) as {
+      data: { positions: Array<Record<string, unknown>> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.positions).toHaveLength(2);
+    expect(body.data.positions).toEqual([
+      expect.objectContaining({ shares: "8", withdrawableShares: "7", tokenValue: "6.5" }),
+      expect.objectContaining({ shares: "8", withdrawableShares: "7", tokenValue: "6.5" }),
+    ]);
+    expect(readVaultPositions).toHaveBeenCalledWith(expect.anything(), {
+      owner: PUBLIC_KEY_A,
+      providerReferences: ["vault_shared_owner"],
+    });
+    expect(resolveVaultDirectClient).toHaveBeenCalledTimes(1);
   });
 
   it.each([
