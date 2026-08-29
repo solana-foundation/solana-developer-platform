@@ -422,11 +422,18 @@ function ConnectionRow({
             >
               {t("Shared.integrations.rpcByokCancel")}
             </Button>
+            {/* Named for the connection rather than just "Delete": while the
+                strip is open the row carries two buttons reading Delete, and
+                the one that actually destroys the record should not be the
+                ambiguous one to anything reading the page aloud. */}
             <Button
               type="button"
               size="sm"
               variant="destructive"
               iconLeft={<Trash2Icon />}
+              aria-label={t("Shared.integrations.rpcByokDeleteNamed", {
+                name: connection.providerCredential.label,
+              })}
               disabled={pendingId === connection.id}
               onClick={() => {
                 setConfirmingDelete(false);

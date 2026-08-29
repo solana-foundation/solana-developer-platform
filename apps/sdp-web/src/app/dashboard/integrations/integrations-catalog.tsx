@@ -33,8 +33,9 @@ type Translate = ReturnType<typeof useTranslations>;
 const EMPTY_PRIVACY: IntegrationEntry<PrivacyProviderId>[] = [];
 
 /**
- * One vocabulary for the chips and the pills, so a chip can never select a set
- * that looks different from the thing it names.
+ * What each chip asks for. Deliberately coarser than the pill wording
+ * below: a chip names a group, so "Connected" covers every way a provider can
+ * be on rather than only the one this organization switched on itself.
  */
 function filterLabel(filter: StatusFilter, t: Translate): string {
   switch (filter) {
@@ -44,7 +45,7 @@ function filterLabel(filter: StatusFilter, t: Translate): string {
       return t("Shared.integrations.statusActive");
     case "on_request":
       return t("Shared.integrations.statusOnRequest");
-    default:
+    case "not_connected":
       return t("Shared.integrations.statusNotConnected");
   }
 }

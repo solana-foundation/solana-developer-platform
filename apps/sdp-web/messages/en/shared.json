@@ -421,6 +421,7 @@
     "rpcByokServingHasSpare": "Withdrawing this key will not hand over to your other keys. Switch to the provider you want first.",
     "rpcByokDelete": "Delete",
     "rpcByokDeleteConfirm": "Delete this connection? Its key was destroyed when it was deactivated, so this only clears the record.",
+    "rpcByokDeleteNamed": "Delete {name}",
     "rpcByokDeleted": "Connection deleted.",
     "rpcModeTitle": "Run entirely on your own credentials",
     "rpcModeToggle": "Run entirely on your own credentials",

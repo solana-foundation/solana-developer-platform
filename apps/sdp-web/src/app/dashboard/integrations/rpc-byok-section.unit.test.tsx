@@ -245,8 +245,12 @@ describe("RpcByokSection", () => {
     await user.click(screen.getByRole("button", { name: "Delete" }));
     expect(deleteRpcConnectionAction).not.toHaveBeenCalled();
 
+    // The confirming button names the connection. Two controls reading only
+    // "Delete" sit on the row while the strip is open, and the destructive one
+    // should not be the ambiguous one -- asking for it by the bare word here
+    // would match the opener instead.
     const confirmation = screen.getByRole("alert");
-    await user.click(within(confirmation).getByRole("button", { name: "Delete" }));
+    await user.click(within(confirmation).getByRole("button", { name: "Delete Production key" }));
     expect(deleteRpcConnectionAction).toHaveBeenCalledTimes(1);
   });
 
