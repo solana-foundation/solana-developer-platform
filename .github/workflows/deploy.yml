@@ -24,7 +24,7 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: github.repository == 'solana-foundation/solana-developer-platform' && github.ref == 'refs/heads/main'
     outputs:
       api: ${{ steps.detect.outputs.api }}
     steps:
@@ -38,14 +38,11 @@ jobs:
           MODE: ${{ inputs.services || 'auto' }}
         run: |
           set -euo pipefail
-          CHANGED_FILES=""
-          if [ "${{ github.event_name }}" = "push" ]; then
-            BEFORE="${{ github.event.before }}"
-            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
-              CHANGED_FILES=$(git diff --name-only "$BEFORE" HEAD)
-            else
-              CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
-            fi
+          BEFORE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+            CHANGED_FILES=$(git diff --name-only "$BEFORE" HEAD)
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
           fi
           match() { echo "$CHANGED_FILES" | grep -qE "$1"; }
 
@@ -54,9 +51,7 @@ jobs:
             none) ;;
             api) api=true ;;
             auto|*)
-              if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                api=true
-              elif match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod)?)?\.yml|\.github/workflows/sdp-dev-smoke\.yml)"; then
+              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod)?)?\.yml|\.github/workflows/sdp-dev-smoke\.yml)"; then
                 api=true
               fi
               ;;
