@@ -493,7 +493,8 @@ export interface PaymentRecurringPayment {
   id: string;
   organizationId: string;
   projectId: string;
-  sourceWalletId: string;
+  sourceCustodyWalletId: string | null;
+  sourceProviderWalletId: string;
   sourceAddress: string;
   counterpartyId: string;
   counterpartyAccountId: string;
@@ -613,7 +614,7 @@ export interface CreatePaymentSubscriptionCollectionAttemptRequest {
 }
 
 export interface CreatePaymentRecurringPaymentRequest {
-  sourceWalletId: string;
+  sourceCustodyWalletId: string;
   counterpartyId: string;
   counterpartyAccountId: string;
   token: string;
@@ -624,7 +625,7 @@ export interface CreatePaymentRecurringPaymentRequest {
 }
 
 export interface UpdatePaymentRecurringPaymentRequest {
-  sourceWalletId?: string;
+  sourceCustodyWalletId?: string;
   counterpartyId?: string;
   counterpartyAccountId?: string;
   token?: string;

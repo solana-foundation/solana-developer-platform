@@ -39,6 +39,7 @@ async function findPendingCollectionApproval(input: {
   env: Env;
   organizationId: string;
   projectId: string;
+  custodyWalletId: string;
   recurringPaymentId: string;
   collectionDueAt: string;
 }): Promise<PendingCollectionApprovalRow | null> {
@@ -57,17 +58,51 @@ async function findPendingCollectionApproval(input: {
           AND ar.status IN ('pending', 'approved')
          JOIN policy_evaluations pe
            ON pe.approval_request_id = ar.id
-        WHERE wo.organization_id = ?
-          AND wo.project_id = ?
-          AND wo.operation_type = 'recurring_payment_collection'
-          AND wo.status IN ('pending_approval', 'executing')
+         WHERE wo.organization_id = ?
+           AND wo.project_id = ?
+           AND wo.operation_type = 'recurring_payment_collection'
+           AND wo.custody_wallet_id = ?
+           AND wo.status IN ('pending_approval', 'executing')
           AND wo.raw_payload->>'recurringPaymentId' = ?
           AND wo.raw_payload->>'collectionDueAt' = ?
         ORDER BY pe.created_at DESC
         LIMIT 1`
     )
-    .bind(input.organizationId, input.projectId, input.recurringPaymentId, input.collectionDueAt)
+    .bind(
+      input.organizationId,
+      input.projectId,
+      input.custodyWalletId,
+      input.recurringPaymentId,
+      input.collectionDueAt
+    )
     .first<PendingCollectionApprovalRow>();
+}
+
+export async function assertNoPendingRecurringCollectionApproval(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  custodyWalletId: string;
+  recurringPaymentId: string;
+  collectionDueAt: string | null;
+}): Promise<void> {
+  if (!input.collectionDueAt) return;
+
+  const pending = await findPendingCollectionApproval({
+    ...input,
+    collectionDueAt: input.collectionDueAt,
+  });
+  if (pending) {
+    throw new AppError(
+      "CONFLICT",
+      "Recurring payment source cannot change while a collection approval is pending",
+      {
+        walletOperationId: pending.wallet_operation_id,
+        policyEvaluationId: pending.policy_evaluation_id,
+        approvalRequestId: pending.approval_request_id,
+      }
+    );
+  }
 }
 
 /**
@@ -114,6 +149,7 @@ export async function enforceRecurringPaymentPolicy(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      custodyWalletId: input.sourceWallet.id,
       recurringPaymentId,
       collectionDueAt,
     });

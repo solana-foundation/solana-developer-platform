@@ -5,6 +5,7 @@ import type {
   PaymentRecurringPayment,
   PaymentRecurringPaymentStatus,
   PaymentSubscriptionCollectionAttempt,
+  UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
 import {
   AlertCircleIcon,
@@ -375,7 +376,9 @@ export function RecurringPaymentDetailWorkspace({
   const [editingPayment, setEditingPayment] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentValidationError, setPaymentValidationError] = useState<string | null>(null);
-  const [selectedWalletId, setSelectedWalletId] = useState(recurringPayment.sourceWalletId);
+  const [selectedCustodyWalletId, setSelectedCustodyWalletId] = useState(
+    recurringPayment.sourceCustodyWalletId ?? ""
+  );
   const [selectedReceivingAccountId, setSelectedReceivingAccountId] = useState(
     recurringPayment.counterpartyAccountId
   );
@@ -389,7 +392,7 @@ export function RecurringPaymentDetailWorkspace({
   const [selectedAmount, setSelectedAmount] = useState(recurringPayment.amount);
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
-  const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceWalletId);
+  const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
   const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
   const receivingAccount =
     counterpartyAccounts.find((account) => account.id === recurringPayment.counterpartyAccountId) ??
@@ -437,7 +440,7 @@ export function RecurringPaymentDetailWorkspace({
     setSelectedToken(recurringPayment.token);
     setSelectedSchedulePreset(schedulePresetForPeriodHours(recurringPayment.periodHours));
     setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-    setSelectedWalletId(recurringPayment.sourceWalletId);
+    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId ?? "");
     setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
     setPaymentValidationError(null);
     setEditingPayment(true);
@@ -466,7 +469,7 @@ export function RecurringPaymentDetailWorkspace({
       setPaymentValidationError(t("DashboardPayments.recurring.selectCurrency"));
       return;
     }
-    if (!selectedWalletId) {
+    if (!selectedCustodyWalletId) {
       setPaymentValidationError(t("DashboardPayments.recurring.selectFundingWallet"));
       return;
     }
@@ -475,13 +478,7 @@ export function RecurringPaymentDetailWorkspace({
       return;
     }
 
-    const updates: {
-      amount?: string;
-      token?: string;
-      periodHours?: number;
-      sourceWalletId?: string;
-      counterpartyAccountId?: string;
-    } = {};
+    const updates: UpdatePaymentRecurringPaymentRequest = {};
     if (amount !== recurringPayment.amount) {
       updates.amount = amount;
     }
@@ -491,8 +488,8 @@ export function RecurringPaymentDetailWorkspace({
     if (periodHours !== recurringPayment.periodHours) {
       updates.periodHours = periodHours;
     }
-    if (selectedWalletId !== recurringPayment.sourceWalletId) {
-      updates.sourceWalletId = selectedWalletId;
+    if (selectedCustodyWalletId !== recurringPayment.sourceCustodyWalletId) {
+      updates.sourceCustodyWalletId = selectedCustodyWalletId;
     }
     if (selectedReceivingAccountId !== recurringPayment.counterpartyAccountId) {
       updates.counterpartyAccountId = selectedReceivingAccountId;
@@ -687,12 +684,10 @@ export function RecurringPaymentDetailWorkspace({
                     ) : (
                       <span className="min-w-0 truncate">{sourceWalletLabel}</span>
                     )}
-                    {wallet ? (
-                      <CopyableValue
-                        value={wallet.publicKey}
-                        label={shortenAddress(wallet.publicKey)}
-                      />
-                    ) : null}
+                    <CopyableValue
+                      value={wallet?.publicKey ?? recurringPayment.sourceAddress}
+                      label={shortenAddress(wallet?.publicKey ?? recurringPayment.sourceAddress)}
+                    />
                   </span>
                 </div>
                 <div className="group flex min-h-12 items-center justify-between gap-4 py-3">
@@ -789,13 +784,13 @@ export function RecurringPaymentDetailWorkspace({
             </div>
             <Combobox
               label={t("DashboardPayments.recurring.fundingWallet")}
-              value={selectedWalletId}
+              value={selectedCustodyWalletId}
               onChange={(value) => {
-                setSelectedWalletId(value);
+                setSelectedCustodyWalletId(value);
                 setPaymentValidationError(null);
               }}
               options={wallets.map((entry) => ({
-                value: entry.walletId,
+                value: entry.id,
                 label: walletLabel(entry, entry.walletId),
                 description: shortenAddress(entry.publicKey),
               }))}

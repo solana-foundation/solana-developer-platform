@@ -186,7 +186,7 @@ async function createRecurringPaymentForActivation(headers: Record<string, strin
       method: "POST",
       headers,
       body: JSON.stringify({
-        sourceWalletId: TEST_WALLET_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
         counterpartyId,
         counterpartyAccountId,
         token: DEVNET_USDC_MINT,
@@ -240,7 +240,7 @@ describe("Payments routes — recurring", () => {
     );
   });
 
-  it("rejects an ambiguous Provider wallet ID before creating recurring work", async () => {
+  it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "ambiguous_recurring_wallet",
     });
@@ -276,7 +276,7 @@ describe("Payments routes — recurring", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -287,13 +287,12 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(response.status).toBe(201);
     expect(
       await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_recurring_payments")
-        .first<{ count: number }>()
-    ).toEqual({ count: 0 });
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments")
+        .first<{ source_custody_wallet_id: string }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
   });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
@@ -313,7 +312,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -329,7 +328,8 @@ describe("Payments routes — recurring", () => {
       data: {
         recurringPayment: {
           id: string;
-          sourceWalletId: string;
+          sourceCustodyWalletId: string;
+          sourceProviderWalletId: string;
           counterpartyId: string;
           counterpartyAccountId: string;
           destinationAddress: string;
@@ -340,7 +340,8 @@ describe("Payments routes — recurring", () => {
       };
     };
     expect(createBody.data.recurringPayment.id).toMatch(/^prp_/);
-    expect(createBody.data.recurringPayment.sourceWalletId).toBe(TEST_WALLET_ID);
+    expect(createBody.data.recurringPayment.sourceCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(createBody.data.recurringPayment.sourceProviderWalletId).toBe(TEST_WALLET_ID);
     expect(createBody.data.recurringPayment.counterpartyId).toBe(counterpartyId);
     expect(createBody.data.recurringPayment.counterpartyAccountId).toBe(counterpartyAccountId);
     expect(createBody.data.recurringPayment.destinationAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
@@ -373,6 +374,28 @@ describe("Payments routes — recurring", () => {
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
   });
 
+  it("fails closed before signing when a recurring payment has no exact wallet pin", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL WHERE id = ?")
+      .bind(recurringPaymentId)
+      .run();
+    const signerCalls = createOrgSignerForCustodyWalletMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
+  });
+
   it("restricts recurring payment tokens to USD stablecoins and project-issued tokens", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -391,7 +414,7 @@ describe("Payments routes — recurring", () => {
           method: "POST",
           headers,
           body: JSON.stringify({
-            sourceWalletId: TEST_WALLET_ID,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             counterpartyId,
             counterpartyAccountId,
             token,
@@ -506,7 +529,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -663,7 +686,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -833,6 +856,25 @@ describe("Payments routes — recurring", () => {
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
+    const replacementCustodyWalletId = "cwlt_recurring_replacement";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_replacement', ?, ?, 'active')`
+        )
+        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
+    ]);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
     const replacementPlanSignature =
@@ -870,12 +912,98 @@ describe("Payments routes — recurring", () => {
       .bind(firstCollectionAt, activated.id)
       .run();
 
+    const approvalOperationId = "wop_recurring_source_change_fence";
+    const approvalRequestId = "appr_recurring_source_change_fence";
+    const policyEvaluationId = "peval_recurring_source_change_fence";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO wallet_operations
+             (id, organization_id, project_id, custody_wallet_id, wallet_id, source,
+              operation_family, operation_type, raw_payload, status)
+           VALUES (?, ?, ?, ?, ?, 'api', 'payment', 'recurring_payment_collection',
+                   ?::jsonb, 'pending_approval')`
+        )
+        .bind(
+          approvalOperationId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_CUSTODY_WALLET_ID,
+          TEST_WALLET_ID,
+          JSON.stringify({
+            recurringPaymentId: activated.id,
+            collectionDueAt: activated.nextCollectionDueAt,
+          })
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_requests
+             (id, organization_id, project_id, wallet_operation_id, status)
+           VALUES (?, ?, ?, ?, 'pending')`
+        )
+        .bind(approvalRequestId, TEST_ORG.id, TEST_PROJECT.id, approvalOperationId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO policy_evaluations
+             (id, wallet_operation_id, decision, reason_code, requires_approval,
+              approval_request_id)
+           VALUES (?, ?, 'approval_required', 'test_source_change_fence', true, ?)`
+        )
+        .bind(policyEvaluationId, approvalOperationId, approvalRequestId),
+    ]);
+
+    const replacementRequest = {
+      sourceCustodyWalletId: replacementCustodyWalletId,
+      amount: "35.00",
+      periodHours: 48,
+      nextCollectionDueAt: null,
+    };
+    const signerCallsBeforeFence = createOrgSignerForCustodyWalletMock.mock.calls.length;
+    const providerCallsBeforeFence = signAndSendMock.mock.calls.length;
+    const blockedUpdateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(replacementRequest),
+      },
+      env
+    );
+    expect(blockedUpdateRes.status).toBe(409);
+    const blockedUpdateBody = (await blockedUpdateRes.json()) as {
+      error: {
+        details: {
+          walletOperationId: string;
+          policyEvaluationId: string;
+          approvalRequestId: string;
+        };
+      };
+    };
+    expect(blockedUpdateBody.error.details).toEqual({
+      walletOperationId: approvalOperationId,
+      policyEvaluationId,
+      approvalRequestId,
+    });
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCallsBeforeFence);
+    expect(signAndSendMock).toHaveBeenCalledTimes(providerCallsBeforeFence);
+    expect(
+      await getDb(env)
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ source_custody_wallet_id: string | null }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
+
+    await getDb(env)
+      .prepare("UPDATE approval_requests SET status = 'rejected' WHERE id = ?")
+      .bind(approvalRequestId)
+      .run();
+
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
       {
         method: "PATCH",
         headers,
-        body: JSON.stringify({ amount: "35.00", periodHours: 48, nextCollectionDueAt: null }),
+        body: JSON.stringify(replacementRequest),
       },
       env
     );
@@ -885,6 +1013,7 @@ describe("Payments routes — recurring", () => {
       data: {
         recurringPayment: {
           status: string;
+          sourceCustodyWalletId: string;
           amount: string;
           periodHours: number;
           planId: string;
@@ -896,6 +1025,7 @@ describe("Payments routes — recurring", () => {
     };
     expect(updateBody.data.recurringPayment).toMatchObject({
       status: "active",
+      sourceCustodyWalletId: replacementCustodyWalletId,
       amount: "35.00",
       periodHours: 48,
       authorizationSignature: replacementAuthSignature,
@@ -915,7 +1045,8 @@ describe("Payments routes — recurring", () => {
       .first<{ status: string }>();
     const attempt = await getDb(env)
       .prepare(
-        `SELECT mode, status, stage, plan_creation_signature, authorization_signature, old_cancel_signature
+        `SELECT mode, status, stage, new_source_custody_wallet_id,
+                plan_creation_signature, authorization_signature, old_cancel_signature
            FROM payment_recurring_payment_update_attempts
           WHERE recurring_payment_id = ?`
       )
@@ -924,6 +1055,7 @@ describe("Payments routes — recurring", () => {
         mode: string;
         status: string;
         stage: string;
+        new_source_custody_wallet_id: string | null;
         plan_creation_signature: string | null;
         authorization_signature: string | null;
         old_cancel_signature: string | null;
@@ -934,6 +1066,7 @@ describe("Payments routes — recurring", () => {
       mode: "replacement",
       status: "confirmed",
       stage: "finalize",
+      new_source_custody_wallet_id: replacementCustodyWalletId,
       plan_creation_signature: replacementPlanSignature,
       authorization_signature: replacementAuthSignature,
       old_cancel_signature: oldCancelSignature,
@@ -4235,7 +4368,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4330,7 +4463,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4518,7 +4651,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4701,7 +4834,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4820,7 +4953,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,

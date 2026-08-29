@@ -61,34 +61,46 @@ async function resolveSourceWallet(
   env: Env,
   row: PaymentRecurringPaymentRow
 ): Promise<CustodyWallet | null> {
-  try {
-    const wallet = await new CustodyRuntimeTargets(
-      getDb(env),
-      env,
-      new Map()
-    ).findOperationalWallet({
-      organizationId: row.organization_id,
-      projectId: row.project_id,
-      walletId: row.source_wallet_id,
-    });
-    if (!wallet || wallet.publicKey !== row.source_address) {
-      return null;
-    }
-    return wallet;
-  } catch (error) {
-    if (error instanceof AppError && error.code === "CONFLICT") {
-      getLogger().warn(
-        {
-          organization_id: row.organization_id,
-          project_id: row.project_id,
-          recurring_payment_id: row.id,
-          reason: "ambiguous_source_wallet",
-        },
-        "collectDueRecurringPayments: skipped ambiguous recurring payment source wallet"
-      );
-    }
-    throw error;
+  if (!row.source_custody_wallet_id) {
+    getLogger().warn(
+      {
+        organization_id: row.organization_id,
+        project_id: row.project_id,
+        recurring_payment_id: row.id,
+        reason: "unresolved_source_wallet",
+      },
+      "collectDueRecurringPayments: recurring payment has no exact source wallet"
+    );
+    return null;
   }
+
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(env),
+    env,
+    new Map()
+  ).findOperationalWalletById({
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    custodyWalletId: row.source_custody_wallet_id,
+  });
+  if (
+    !wallet ||
+    wallet.walletId !== row.source_wallet_id ||
+    wallet.publicKey !== row.source_address
+  ) {
+    getLogger().warn(
+      {
+        organization_id: row.organization_id,
+        project_id: row.project_id,
+        recurring_payment_id: row.id,
+        custody_wallet_id: row.source_custody_wallet_id,
+        reason: "source_wallet_mismatch",
+      },
+      "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
+    );
+    return null;
+  }
+  return wallet;
 }
 
 function shouldSkipCollectionError(error: unknown): boolean {

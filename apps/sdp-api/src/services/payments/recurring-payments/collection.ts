@@ -39,6 +39,7 @@ import {
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import { createSigningService } from "@/services/domain/signing.service";
 import {
   createTransferSignedSubmissionStore,
   isDefiniteSubmissionError,
@@ -56,6 +57,7 @@ import {
 import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   activationErrorMessage,
+  assertRecurringPaymentSourceWallet,
   confirmSubscriptionSignature,
   sendSubscriptionInstructions,
 } from "./shared";
@@ -265,6 +267,8 @@ async function verifyRecurringPaymentCollection(input: {
     input.attempt.token === input.recurringPayment.token &&
     input.attempt.amount === input.recurringPayment.amount &&
     attemptMetadata.recurringPaymentId === input.recurringPayment.id &&
+    (input.transfer.custody_wallet_id === null ||
+      input.transfer.custody_wallet_id === input.recurringPayment.source_custody_wallet_id) &&
     input.transfer.wallet_id === input.recurringPayment.source_wallet_id &&
     input.transfer.counterparty_id === input.recurringPayment.counterparty_id &&
     input.transfer.source_address === input.recurringPayment.source_address &&
@@ -1100,12 +1104,7 @@ export async function collectRecurringPayment(input: {
   initiatedByKeyId: string | null;
   collectionSource?: RecurringCollectionSource;
 }): Promise<RecurringPaymentCollectionResult> {
-  if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
-    throw badRequest("Recurring payment source wallet does not match request");
-  }
-  if (input.recurringPayment.source_address !== input.sourceWallet.publicKey) {
-    throw badRequest("Recurring payment source address does not match wallet");
-  }
+  assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   if (!input.recurringPayment.plan_id || !input.recurringPayment.subscription_id) {
     throw new AppError("CONFLICT", "Recurring payment is missing subscription records");
   }
@@ -1150,6 +1149,12 @@ export async function collectRecurringPayment(input: {
     if (recovered) {
       return recovered;
     }
+
+    await createSigningService(input.env).admitRuntimeExecution(
+      input.organizationId,
+      input.projectId,
+      input.sourceWallet.id
+    );
 
     if (input.recurringPayment.status !== "active") {
       throw new AppError("CONFLICT", "Recurring payment must be active before collection");

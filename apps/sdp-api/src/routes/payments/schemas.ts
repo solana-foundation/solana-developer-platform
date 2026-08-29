@@ -299,8 +299,8 @@ export const paymentRecurringPaymentStatusSchema = z.enum([
   "expired",
 ]);
 
-export const createRecurringPaymentSchema = z.object({
-  sourceWalletId: z.string().min(1),
+export const createRecurringPaymentSchema = z.strictObject({
+  sourceCustodyWalletId: z.string().min(1),
   counterpartyId: z.string().min(1),
   counterpartyAccountId: z.string().min(1),
   token: paymentTokenSchema,
@@ -319,8 +319,8 @@ export const createRecurringPaymentSchema = z.object({
 });
 
 export const updateRecurringPaymentSchema = z
-  .object({
-    sourceWalletId: z.string().min(1).optional(),
+  .strictObject({
+    sourceCustodyWalletId: z.string().min(1).optional(),
     counterpartyId: z.string().min(1).optional(),
     counterpartyAccountId: z.string().min(1).optional(),
     token: paymentTokenSchema.optional(),

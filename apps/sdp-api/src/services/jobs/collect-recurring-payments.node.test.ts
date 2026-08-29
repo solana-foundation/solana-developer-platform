@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   cancelRecurringPayment: vi.fn(),
   collectRecurringPayment: vi.fn(),
   resumeRecurringPayment: vi.fn(),
-  findOperationalWallet: vi.fn(),
+  findOperationalWalletById: vi.fn(),
   queryCalls: [] as Array<{ query: string; bindings: Array<string | number> }>,
   rows: {
     due: [] as PaymentRecurringPaymentRow[],
@@ -39,7 +39,7 @@ vi.mock("@/db", () => ({
 
 vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
   CustodyRuntimeTargets: class {
-    findOperationalWallet = mocks.findOperationalWallet;
+    findOperationalWalletById = mocks.findOperationalWalletById;
   },
 }));
 
@@ -64,6 +64,7 @@ function recurringRow(
     id: `prp_${status}`,
     organization_id: "org_1",
     project_id: "proj_1",
+    source_custody_wallet_id: "cwlt_1",
     source_wallet_id: "wallet_1",
     source_address: "source_address",
     counterparty_id: "cpty_1",
@@ -108,12 +109,13 @@ describe("collectDueRecurringPayments", () => {
     mocks.cancelRecurringPayment.mockReset();
     mocks.collectRecurringPayment.mockReset();
     mocks.resumeRecurringPayment.mockReset();
-    mocks.findOperationalWallet.mockReset();
+    mocks.findOperationalWalletById.mockReset();
     mocks.queryCalls.length = 0;
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
     mocks.rows.staleCollection = [];
-    mocks.findOperationalWallet.mockResolvedValue({
+    mocks.findOperationalWalletById.mockResolvedValue({
+      id: "cwlt_1",
       walletId: "wallet_1",
       publicKey: "source_address",
     });
@@ -222,25 +224,22 @@ describe("collectDueRecurringPayments", () => {
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
   });
 
-  it("skips an ambiguous recurring source wallet and emits redacted telemetry", async () => {
+  it("fails closed when a recurring payment has no exact source wallet", async () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-    mocks.rows.due = [recurringRow("active")];
-    mocks.findOperationalWallet.mockRejectedValue(
-      new AppError("CONFLICT", "Custody wallet ownership is ambiguous")
-    );
+    mocks.rows.due = [recurringRow("active", { source_custody_wallet_id: null })];
 
     const result = await collectDueRecurringPayments({} as Env);
 
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       {
         organization_id: "org_1",
         project_id: "proj_1",
         recurring_payment_id: "prp_active",
-        reason: "ambiguous_source_wallet",
+        reason: "unresolved_source_wallet",
       },
-      "collectDueRecurringPayments: skipped ambiguous recurring payment source wallet"
+      "collectDueRecurringPayments: recurring payment has no exact source wallet"
     );
     warn.mockRestore();
   });

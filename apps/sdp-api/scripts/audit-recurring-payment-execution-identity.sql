@@ -1,0 +1,122 @@
+\set ON_ERROR_STOP on
+
+-- Read-only cutover and rollback audit. Retained wallet history participates
+-- in identity matching; wallet status is intentionally not filtered.
+
+\echo '=== 1. Null Recurring Payment identities by exactly-one resolution ==='
+WITH wallet_scope AS (
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_configs config ON config.id = wallet.custody_config_id
+  UNION ALL
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
+), resolutions AS (
+  SELECT recurring.id, recurring.status,
+         (SELECT COUNT(*) FROM wallet_scope wallet
+          WHERE wallet.organization_id = recurring.organization_id
+            AND ((wallet.owner_kind = 'config'
+                  AND (wallet.project_id = recurring.project_id OR wallet.project_id IS NULL))
+              OR (wallet.owner_kind = 'connection'
+                  AND wallet.project_id = recurring.project_id))
+            AND wallet.wallet_id = recurring.source_wallet_id
+            AND wallet.public_key = recurring.source_address) AS match_count
+  FROM payment_recurring_payments recurring
+  WHERE recurring.source_custody_wallet_id IS NULL
+)
+SELECT status,
+       COUNT(*) FILTER (WHERE match_count = 1) AS resolvable_unique,
+       COUNT(*) FILTER (WHERE match_count = 0) AS unresolved_zero,
+       COUNT(*) FILTER (WHERE match_count > 1) AS ambiguous_multi
+FROM resolutions
+GROUP BY status
+ORDER BY status;
+
+\echo '=== 1a. Unresolved or ambiguous Recurring Payments (up to 100) ==='
+WITH wallet_scope AS (
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_configs config ON config.id = wallet.custody_config_id
+  UNION ALL
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
+), resolutions AS (
+  SELECT recurring.id, recurring.organization_id, recurring.project_id, recurring.status,
+         (SELECT COUNT(*) FROM wallet_scope wallet
+          WHERE wallet.organization_id = recurring.organization_id
+            AND ((wallet.owner_kind = 'config'
+                  AND (wallet.project_id = recurring.project_id OR wallet.project_id IS NULL))
+              OR (wallet.owner_kind = 'connection'
+                  AND wallet.project_id = recurring.project_id))
+            AND wallet.wallet_id = recurring.source_wallet_id
+            AND wallet.public_key = recurring.source_address) AS match_count
+  FROM payment_recurring_payments recurring
+  WHERE recurring.source_custody_wallet_id IS NULL
+)
+SELECT id, organization_id, project_id, status, match_count
+FROM resolutions
+WHERE match_count <> 1
+ORDER BY organization_id, id
+LIMIT 100;
+
+\echo '=== 2. Persisted recurring pins that disagree with retained evidence (must be zero) ==='
+WITH wallet_scope AS (
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_configs config ON config.id = wallet.custody_config_id
+  UNION ALL
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
+), mismatches AS (
+  SELECT 'recurring_payment'::TEXT AS resource, recurring.id,
+         recurring.source_custody_wallet_id AS custody_wallet_id
+  FROM payment_recurring_payments recurring
+  WHERE recurring.source_custody_wallet_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM wallet_scope wallet
+      WHERE wallet.id = recurring.source_custody_wallet_id
+        AND wallet.organization_id = recurring.organization_id
+        AND ((wallet.owner_kind = 'config'
+              AND (wallet.project_id = recurring.project_id OR wallet.project_id IS NULL))
+          OR (wallet.owner_kind = 'connection' AND wallet.project_id = recurring.project_id))
+        AND wallet.wallet_id = recurring.source_wallet_id
+        AND wallet.public_key = recurring.source_address
+    )
+  UNION ALL
+  SELECT 'update_attempt', attempt.id, attempt.new_source_custody_wallet_id
+  FROM payment_recurring_payment_update_attempts attempt
+  WHERE attempt.new_source_custody_wallet_id IS NOT NULL
+    AND (
+      NOT EXISTS (
+        SELECT 1 FROM wallet_scope wallet
+        WHERE wallet.id = attempt.new_source_custody_wallet_id
+          AND wallet.organization_id = attempt.organization_id
+          AND ((wallet.owner_kind = 'config'
+                AND (wallet.project_id = attempt.project_id OR wallet.project_id IS NULL))
+            OR (wallet.owner_kind = 'connection' AND wallet.project_id = attempt.project_id))
+      )
+      OR (
+        attempt.changed_fields @> ARRAY['sourceCustodyWalletId']::TEXT[]
+        AND attempt.after_values ->> 'sourceCustodyWalletId'
+            IS DISTINCT FROM attempt.new_source_custody_wallet_id
+      )
+    )
+)
+SELECT * FROM mismatches ORDER BY resource, id LIMIT 100;
+
+\echo '=== 2a. Source-changing update attempts without their proposed exact pin (must be zero) ==='
+SELECT id, organization_id, project_id, recurring_payment_id, status, stage
+FROM payment_recurring_payment_update_attempts
+WHERE changed_fields && ARRAY['sourceCustodyWalletId', 'sourceWalletId']::TEXT[]
+  AND new_source_custody_wallet_id IS NULL
+ORDER BY organization_id, id
+LIMIT 100;
