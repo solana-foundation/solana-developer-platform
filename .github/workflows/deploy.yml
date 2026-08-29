@@ -57,10 +57,10 @@ jobs:
               ;;
           esac
           echo "api=$api" >> "$GITHUB_OUTPUT"
-          echo "Services to deploy: api=$api" >> "$GITHUB_STEP_SUMMARY"
+          echo "Services to deploy: api=$api (api carries the worker, cron, and migrate jobs — one image)" >> "$GITHUB_STEP_SUMMARY"
 
   deploy-api-dev:
-    name: sdp-api — dev + smoke
+    name: sdp-api + worker + cron — dev + smoke
     needs: changes
     if: needs.changes.outputs.api == 'true'
     permissions:
@@ -71,7 +71,7 @@ jobs:
       DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
 
   deploy-api-prod:
-    name: sdp-api — prod
+    name: sdp-api + worker + cron — prod
     needs: [changes, deploy-api-dev]
     if: >-
       needs.changes.outputs.api == 'true' &&
