@@ -322,6 +322,8 @@
     "statusEnabled": "Enabled",
     "statusRequestAccess": "Request access",
     "statusNotConfigured": "Not configured",
+    "statusNotConnected": "Not connected",
+    "statusOnRequest": "Available on request",
     "ctaConfigure": "Configure",
     "ctaManage": "Manage",
     "ctaRequestAccess": "Request access",

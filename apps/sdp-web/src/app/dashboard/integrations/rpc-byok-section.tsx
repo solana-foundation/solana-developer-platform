@@ -359,12 +359,14 @@ function ConnectionRow({
                 {t("Shared.integrations.rpcByokDeactivate")}
               </Button>
             )}
+            {/* Secondary styling rather than red: this control only opens the
+                  question, and the strip it opens carries the warning. Red on
+                  both said "danger" twice for one decision. */}
             {isDeactivated ? (
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="text-error hover:text-error"
                 iconLeft={<Trash2Icon />}
                 aria-expanded={confirmingDelete}
                 disabled={pendingId === connection.id}
