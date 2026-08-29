@@ -5,8 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const read = (name) =>
-  fs.readFileSync(path.resolve(here, `../.github/workflows/${name}`), "utf8");
+const read = (name) => fs.readFileSync(path.resolve(here, `../.github/workflows/${name}`), "utf8");
 const orchestrator = read("deploy.yml");
 const devWorkflow = read("deploy-sdp-api-gcp.yml");
 
@@ -35,5 +34,8 @@ test("service selection is path-filtered with a manual override", () => {
   assert.match(orchestrator, /git diff --name-only HEAD\^ HEAD/);
   assert.match(orchestrator, /options: \[auto, none, api\]/);
   assert.match(orchestrator, /apps\/sdp-api\//);
-  assert.match(orchestrator, /concurrency:\n\s+group: sdp-deploy-main\n\s+cancel-in-progress: false/);
+  assert.match(
+    orchestrator,
+    /concurrency:\n\s+group: sdp-deploy-main\n\s+cancel-in-progress: false/
+  );
 });

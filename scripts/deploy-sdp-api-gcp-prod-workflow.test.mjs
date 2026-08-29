@@ -48,11 +48,17 @@ test("builds and migrations run for release and merge deploys, never manual rede
 
 test("the version-tagged image is exclusive to releases", () => {
   assert.match(workflow, /if \[ -n "\$\{RELEASE_TAG\}" \]; then\n\s+VERSION=/);
-  assert.doesNotMatch(workflow, /docker push "\$\{VERSION_IMAGE\}"\n\s+docker push "\$\{SHA_IMAGE\}"/);
+  assert.doesNotMatch(
+    workflow,
+    /docker push "\$\{VERSION_IMAGE\}"\n\s+docker push "\$\{SHA_IMAGE\}"/
+  );
 });
 
 test("merge deploys skip the internal smoke gate but require the caller's", () => {
-  assert.match(workflow, /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-dev-smoke\.yml/);
+  assert.match(
+    workflow,
+    /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-dev-smoke\.yml/
+  );
   assert.match(
     workflow,
     /\(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' && needs\.smoke\.result == 'skipped'\)/
