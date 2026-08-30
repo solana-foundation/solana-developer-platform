@@ -139,27 +139,19 @@ export function HeliusRingsWorkspace({
     return custodyWallets.filter((wallet) => !boundIds.has(wallet.walletId));
   }, [custodyWallets, wallets]);
 
-  // Keep the selection valid: auto-select the sole wallet, clear if it vanishes.
-  useEffect(() => {
-    if (wallets.length === 0) {
-      if (selectedWalletId !== null) setSelectedWalletId(null);
-      return;
-    }
-    const stillPresent = wallets.some((wallet) => wallet.id === selectedWalletId);
-    if (!stillPresent) setSelectedWalletId(wallets.length === 1 ? wallets[0].id : null);
-  }, [wallets, selectedWalletId]);
-
-  const selectedWallet = useMemo(
-    () => wallets.find((wallet) => wallet.id === selectedWalletId) ?? null,
-    [wallets, selectedWalletId]
-  );
+  // Derive the effective selection rather than reconcile a stored id in an
+  // effect: falls back to the sole wallet when nothing is selected or when the
+  // stored id no longer resolves. No paint frame with stale state.
+  const selectedWallet =
+    wallets.find((wallet) => wallet.id === selectedWalletId) ??
+    (wallets.length === 1 ? wallets[0] : null);
 
   const filteredOperations = useMemo(
     () =>
-      selectedWalletId === null
+      selectedWallet === null
         ? []
-        : operations.filter((operation) => operation.walletId === selectedWalletId),
-    [operations, selectedWalletId]
+        : operations.filter((operation) => operation.walletId === selectedWallet.id),
+    [operations, selectedWallet]
   );
 
   return (
@@ -174,7 +166,7 @@ export function HeliusRingsWorkspace({
         wallets={wallets}
         custodyWallets={custodyWallets}
         availableCustodyWallets={availableCustodyWallets}
-        selectedWalletId={selectedWalletId}
+        selectedWalletId={selectedWallet?.id ?? null}
         onSelect={setSelectedWalletId}
         balancesTick={balancesTick}
         onCreated={refresh}
@@ -192,18 +184,13 @@ export function HeliusRingsWorkspace({
             <WalletOverview wallet={selectedWallet} refreshTick={balancesTick} />
             <OperationComposer
               key={selectedWallet.id}
-              wallets={[selectedWallet]}
+              wallet={selectedWallet}
               recipientOptions={wallets.filter(
                 (wallet) => wallet.id !== selectedWallet.id && wallet.shieldedAddress !== null
               )}
-              custody={(() => {
-                const custody = custodyByWalletId.get(selectedWallet.sdpWalletId);
-                if (!custody) return null;
-                return {
-                  name: custody.label ?? custody.walletId,
-                  publicKey: custody.publicKey,
-                };
-              })()}
+              custodyPublicKey={
+                custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
+              }
               gatewayRed={upstreamsRed}
               onPrepared={refresh}
             />

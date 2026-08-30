@@ -257,74 +257,54 @@ export interface PrepareRingsOperationInput {
   to?: string;
 }
 
-export async function prepareRingsOperation(
-  input: PrepareRingsOperationInput
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch("/api/dashboard/helius-rings/operations", {
+type OperationResult = { operation?: RingsOperationDetail; error?: string };
+
+async function postOperation(
+  path: string,
+  body?: Record<string, unknown>
+): Promise<OperationResult> {
+  const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...input, clientNonce: crypto.randomUUID() }),
+    ...(body !== undefined && {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
     cache: "no-store",
   });
   const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
+  if (!result.ok) return { error: result.error };
   return { operation: result.data.operation };
+}
+
+export function prepareRingsOperation(input: PrepareRingsOperationInput): Promise<OperationResult> {
+  return postOperation("/api/dashboard/helius-rings/operations", {
+    ...input,
+    clientNonce: crypto.randomUUID(),
+  });
 }
 
 /** The approval verdict is read server-side, so this carries no body. */
-export async function executeRingsOperation(
-  operationId: string
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch(
-    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`,
-    { method: "POST", cache: "no-store" }
+export function executeRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`
   );
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { operation: result.data.operation };
 }
 
-export async function retryRingsOperation(
-  operationId: string
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch(
+export function retryRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
     `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/retry`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientNonce: crypto.randomUUID() }),
-      cache: "no-store",
-    }
+    { clientNonce: crypto.randomUUID() }
   );
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { operation: result.data.operation };
 }
 
-export async function voidRingsOperation(
+export function voidRingsOperation(
   operationId: string,
   signature: string
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch(
+): Promise<OperationResult> {
+  return postOperation(
     `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/void`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signature }),
-      cache: "no-store",
-    }
+    { signature }
   );
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { operation: result.data.operation };
 }
 
 /** Devnet assets seeded in the rings allowlist. */

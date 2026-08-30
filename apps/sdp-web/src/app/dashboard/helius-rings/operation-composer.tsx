@@ -15,11 +15,6 @@ import {
 } from "./helius-rings.data";
 import { formatAssetAmount, parseDecimalToBaseUnits } from "./helius-rings.utils";
 
-export interface CustodySummary {
-  readonly name: string;
-  readonly publicKey: string;
-}
-
 type Translate = ReturnType<typeof useTranslations>;
 
 // UI tab labels map 1:1 to server op types; `transfer_registered` is what the
@@ -69,7 +64,6 @@ function isDraftComplete(draft: ComposerDraft): boolean {
 function buildSummaryRows(
   t: Translate,
   draft: ComposerDraft,
-  custody: CustodySummary | null,
   recipientOptions: readonly RingsWallet[]
 ): Array<[string, string]> {
   const amountRaw = draftAmountRaw(draft);
@@ -95,32 +89,27 @@ function buildSummaryRows(
 
 /** Compose then review; confirming hands the operation to Activity. */
 export function OperationComposer({
-  wallets,
+  wallet,
   recipientOptions,
-  custody,
+  custodyPublicKey,
   gatewayRed,
   onPrepared,
 }: {
-  wallets: RingsWallet[];
+  wallet: RingsWallet;
   /** Other private wallets in the same project the sender can transfer to. */
   recipientOptions: RingsWallet[];
-  /** Custody wallet backing the selected private wallet — name + Solana pubkey. */
-  custody: CustodySummary | null;
+  /** Solana pubkey of the custody wallet backing this private wallet. */
+  custodyPublicKey: string | null;
   gatewayRed: boolean;
   onPrepared: () => Promise<void>;
 }) {
   const t = useTranslations();
 
-  // Workspace selection guarantees exactly one wallet by the time we mount, but
-  // guard anyway so a stale prop doesn't submit against a missing id.
-  const wallet = wallets[0] ?? null;
-  const walletId = wallet?.id ?? null;
-
-  // Switching wallet is a fresh session — the workspace passes `key={walletId}`
-  // so React remounts this whole subtree, resetting draft/phase/started/started
+  // Switching wallet is a fresh session — the workspace passes `key={wallet.id}`
+  // so React remounts this whole subtree, resetting draft/phase/started
   // without an effect that would let old state paint for a frame.
   const [phase, setPhase] = useState<Phase>({ name: "compose" });
-  const [draft, setDraft] = useState<ComposerDraft>(() => newDraft(walletId ?? ""));
+  const [draft, setDraft] = useState<ComposerDraft>(() => newDraft(wallet.id));
   const [submitting, setSubmitting] = useState(false);
   const [started, setStarted] = useState(false);
 
@@ -140,17 +129,10 @@ export function OperationComposer({
       // input. Transfer uses the recipient private wallet's shielded address.
       const to =
         draft.opType === "withdraw"
-          ? (custody?.publicKey ?? undefined)
+          ? (custodyPublicKey ?? undefined)
           : draft.opType === "transfer_registered"
             ? draft.recipient.trim()
             : undefined;
-      if ((draft.opType === "withdraw" || draft.opType === "transfer_registered") && !to) {
-        setPhase({
-          name: "review",
-          error: t("DashboardHeliusRings.composer.prepareFailed"),
-        });
-        return;
-      }
       prepared = await prepareRingsOperation({
         walletId: draft.walletId,
         opType: draft.opType,
@@ -171,11 +153,11 @@ export function OperationComposer({
     setPhase({ name: "compose" });
     setDraft(newDraft(draft.walletId, draft.opType));
     await onPrepared();
-  }, [draft, custody, onPrepared, t]);
+  }, [draft, custodyPublicKey, onPrepared, t]);
 
   const summaryRows = useMemo(
-    () => (wallet ? buildSummaryRows(t, draft, custody, recipientOptions) : []),
-    [t, draft, wallet, custody, recipientOptions]
+    () => buildSummaryRows(t, draft, recipientOptions),
+    [t, draft, recipientOptions]
   );
 
   return (
@@ -204,7 +186,6 @@ export function OperationComposer({
             />
             <ComposeStep
               draft={draft}
-              custody={custody}
               recipientOptions={recipientOptions}
               onPatch={patchDraft}
               onReview={() => setPhase({ name: "review", error: null })}
@@ -276,13 +257,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ComposeStep({
   draft,
-  custody,
   recipientOptions,
   onPatch,
   onReview,
 }: {
   draft: ComposerDraft;
-  custody: CustodySummary | null;
   recipientOptions: readonly RingsWallet[];
   onPatch: (patch: Partial<ComposerDraft>) => void;
   onReview: () => void;

@@ -1,22 +1,13 @@
 "use client";
 
 import { Loader2, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatCurrencyAmount } from "@/app/dashboard/payments/payments-overview.utils";
-import {
-  type RingsWallet,
-  type RingsWalletSync,
-  syncRingsWallet,
-} from "./helius-rings.data";
+import { type RingsWallet, type RingsWalletSync } from "./helius-rings.data";
 import { formatAssetAmount } from "./helius-rings.utils";
-
-type BalancesState =
-  | { name: "loading" }
-  | { name: "observed"; sync: RingsWalletSync }
-  | { name: "failed" };
+import { useRingsBalance } from "./use-rings-balance";
 
 /**
  * Wallet header + full balance summary for the selected wallet. This is the
@@ -32,26 +23,10 @@ export function WalletOverview({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const [state, setState] = useState<BalancesState>({ name: "loading" });
-  const [manualTick, setManualTick] = useState(0);
-
-  useEffect(() => {
-    if (wallet.shieldedAddress === null) return;
-    let cancelled = false;
-    setState({ name: "loading" });
-    void (async () => {
-      try {
-        const result = await syncRingsWallet(wallet.id);
-        if (cancelled) return;
-        setState(result.sync ? { name: "observed", sync: result.sync } : { name: "failed" });
-      } catch {
-        if (!cancelled) setState({ name: "failed" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [wallet.id, wallet.shieldedAddress, refreshTick, manualTick]);
+  const { state, refresh } = useRingsBalance(
+    wallet.shieldedAddress === null ? null : wallet.id,
+    refreshTick
+  );
 
   const reading = state.name === "loading";
   const refreshLabel = t(
@@ -69,7 +44,7 @@ export function WalletOverview({
             disabled={reading || wallet.shieldedAddress === null}
             aria-label={refreshLabel}
             title={refreshLabel}
-            onClick={() => setManualTick((current) => current + 1)}
+            onClick={refresh}
           >
             {reading ? (
               <Loader2 className="animate-spin" aria-hidden="true" />
