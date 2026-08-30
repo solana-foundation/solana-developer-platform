@@ -775,6 +775,28 @@ describe("HeliusRingsService", () => {
         );
         expect(replay.state).toBe("voided");
       });
+
+      it("refuses to void when the signature actually landed and completes the row instead", async () => {
+        const operation = await strandedSignedFailure("nonce-void-landed");
+
+        // Fresh gateway that reports the signature indexed — Photon caught up
+        // between the failure being recorded and the operator's assertion.
+        const gateway = new InMemoryRingsGateway({
+          buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+        });
+        gateway.recordSubmission(operation.signature);
+
+        await expect(
+          liveishService({ gateway }).voidOperation(
+            operation.id,
+            operation.signature,
+            actorContext
+          )
+        ).rejects.toMatchObject({ code: "conflict" });
+
+        const reloaded = await liveishService({ gateway }).getOperation(operation.id);
+        expect(reloaded.state).toBe("completed");
+      });
     });
 
     it("refuses to retry an operation that was already signed", async () => {

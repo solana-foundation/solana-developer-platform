@@ -543,7 +543,12 @@ export class HeliusRingsService {
    *
    * The signature must match the row: voiding is an assertion, not an
    * observation, and naming the wrong transaction would release the wallet for
-   * a payment that may still be in flight.
+   * a payment that may still be in flight. A fresh Photon read backs the
+   * assertion at commit time: if the transaction actually landed, this promotes
+   * the row to `completed` and refuses the void, so the wallet slot is never
+   * released while the value has already moved. `verifyIndexed` throws on
+   * gateway or RPC error, so a transient outage fails the void loudly rather
+   * than releasing the slot on stale evidence.
    */
   async voidOperation(
     operationId: string,
@@ -571,6 +576,15 @@ export class HeliusRingsService {
       throw new HeliusRingsError(
         "conflict",
         "the signature does not match this operation's signed transaction"
+      );
+    }
+
+    const indexed = await this.gateway.verifyIndexed(operation.outer_tx_signature);
+    if (indexed) {
+      await this.settleReconciled(operation, indexed);
+      throw new HeliusRingsError(
+        "conflict",
+        `operation ${operation.id} settled on chain and has been completed; voiding is refused`
       );
     }
 
