@@ -16,6 +16,8 @@ import {
   createEarnExternalWalletDepositTransaction,
   createEarnExternalWalletWithdrawal,
   createEarnExternalWalletWithdrawalTransaction,
+  getEarnExternalWalletPositionSummary,
+  listEarnExternalWalletPositions,
 } from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
@@ -94,6 +96,20 @@ earn.put(
 // Strategy catalogue (source: DB, admitted only by the sync cron).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
+
+// B2B2C live holdings (PRO-1724). Summary is declared before the owner path so
+// the literal segment can never be captured as a Solana address. No
+// `wallets:read`: these are end-user wallets SDP does not custody.
+earn.get(
+  "/external-wallet/positions/summary",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletPositionSummary
+);
+earn.get(
+  "/external-wallet/positions/:ownerAddress",
+  requirePermissions("earn:read"),
+  listEarnExternalWalletPositions
+);
 
 // Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
 // from a custody wallet, so unlike /programs there is no provider wallet to

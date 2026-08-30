@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import type { EarnButtonConfiguration, EarnStrategy, SdpEnvironment } from "@sdp/types";
+import type {
+  EarnButtonConfiguration,
+  EarnStrategy,
+  SdpEnvironment,
+  SolanaCluster,
+} from "@sdp/types";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -27,9 +32,21 @@ const liveStrategy: EarnStrategy = {
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
 
+const mainnetStrategy: EarnStrategy = {
+  ...liveStrategy,
+  id: "earn_strategy_mainnet",
+  providerReference: "KvaultMainnet111111111111111111111111111111",
+  name: "Kamino JLP Vault",
+  shareMint: "ShareMainnet111111111111111111111111111111",
+  hostCluster: "mainnet-beta",
+  fundable: false,
+};
+
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
+  mainnetFundable: false,
   saveEarnButtonConfiguration: vi.fn(),
+  strategyClusters: [] as Array<SolanaCluster | undefined>,
 }));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -37,7 +54,17 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 }));
 
 vi.mock("./earn-program-data", () => ({
-  useEarnStrategies: () => ({ strategies: [liveStrategy], error: undefined, isLoading: false }),
+  useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
+    mocks.strategyClusters.push(options?.cluster);
+    return {
+      strategies:
+        options?.cluster === "mainnet-beta"
+          ? [{ ...mainnetStrategy, fundable: mocks.mainnetFundable }]
+          : [liveStrategy],
+      error: undefined,
+      isLoading: false,
+    };
+  },
 }));
 
 vi.mock("./earn-button-configuration-data", () => ({
@@ -63,6 +90,8 @@ function renderWithEnglish(children: ReactNode) {
 
 afterEach(() => {
   mocks.environment = "sandbox";
+  mocks.mainnetFundable = false;
+  mocks.strategyClusters.length = 0;
   vi.clearAllMocks();
   cleanup();
 });
@@ -252,6 +281,56 @@ describe("EarnButtonBuilder", () => {
       "disabled",
       false
     );
+  });
+
+  it("renders a mainnet vault as a sandbox preview without offering persistence", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        configureHref="/dashboard/markets/embedded-yield/configure"
+        earnHref="/dashboard/markets/embedded-yield"
+        projectId="project_original"
+        providerAccess={providerAccess}
+        strategyCluster="mainnet-beta"
+        strategyId={mainnetStrategy.id}
+      />
+    );
+
+    expect(mocks.strategyClusters).toContain("mainnet-beta");
+    expect(screen.getAllByText("Kamino JLP Vault").length).toBeGreaterThan(0);
+    expect(screen.getByText("Mainnet vault preview")).toBeTruthy();
+    expect(screen.getByText(/Production project is required/)).toBeTruthy();
+    expect(
+      screen.getByText(/Public handoff links are created from a Production project/)
+    ).toBeTruthy();
+    expect(screen.getByText(/strategyId: "earn_strategy_mainnet"/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
+      "disabled",
+      true
+    );
+    expect(screen.getByRole("link", { name: "Change strategy" }).getAttribute("href")).toBe(
+      "/dashboard/markets/embedded-yield/configure?cluster=mainnet-beta"
+    );
+    expect(mocks.saveEarnButtonConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("does not let a mainnet deep link bypass provider access", () => {
+    mocks.mainnetFundable = true;
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        configureHref="/dashboard/markets/embedded-yield/configure"
+        earnHref="/dashboard/markets/embedded-yield"
+        projectId="project_original"
+        providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
+        strategyCluster="mainnet-beta"
+        strategyId={mainnetStrategy.id}
+      />
+    );
+
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
+    expect(screen.queryByText("Mainnet vault preview")).toBeNull();
   });
 
   it("dead-ends on a failed configuration load only when no strategy is selected", () => {
