@@ -6,7 +6,6 @@ import {
   healthAlerts,
   healthReason,
   parseDecimalToBaseUnits,
-  readShieldedAmount,
   shortenShieldedAddress,
 } from "./helius-rings.utils";
 
@@ -65,36 +64,6 @@ describe("formatBaseUnits", () => {
     // Above a u8: padding to it would allocate against a value no mint has.
     expect(formatBaseUnits("1000000", 256)).toBeNull();
     expect(formatBaseUnits("1000000", Number.NaN)).toBeNull();
-  });
-});
-
-describe("readShieldedAmount", () => {
-  it("renders at the mint's scale when the API reported one", () => {
-    expect(readShieldedAmount("1500000", 6)).toEqual({ scale: "exact", text: "1.5" });
-    expect(readShieldedAmount("18446744073709551615", 9)).toEqual({
-      scale: "exact",
-      text: "18446744073.709551615",
-    });
-  });
-
-  it("keeps a real zero scale apart from an unknown one", () => {
-    // Identical digits, different claims: only the first says this mint has no
-    // fraction. Collapsing them makes 1.50 USDC read as 1500000 whole tokens.
-    expect(readShieldedAmount("1500000", 0)).toEqual({ scale: "exact", text: "1500000" });
-    expect(readShieldedAmount("1500000", null)).toEqual({ scale: "baseUnits", text: "1500000" });
-  });
-
-  it("carries an unknown scale's digits through exactly", () => {
-    expect(readShieldedAmount("18446744073709551615", null)).toEqual({
-      scale: "baseUnits",
-      text: "18446744073709551615",
-    });
-  });
-
-  it("renders nothing for an amount that is not a count of base units", () => {
-    expect(readShieldedAmount("1.5", null)).toEqual({ scale: "unrenderable" });
-    expect(readShieldedAmount("-1", 6)).toEqual({ scale: "unrenderable" });
-    expect(readShieldedAmount("1000000", 256)).toEqual({ scale: "unrenderable" });
   });
 });
 

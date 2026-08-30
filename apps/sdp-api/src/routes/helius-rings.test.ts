@@ -176,11 +176,13 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("GET /health reports the unconfigured gateway red", async () => {
+  it("GET /health reports every upstream red when the gateway is unconfigured", async () => {
     const res = await app.request("/v1/helius-rings/health", { headers: authHeaders() }, env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { health: Record<string, string> } };
-    expect(body.data.health.gateway).toBe("red");
+    expect(body.data.health.rpc).toBe("red");
+    expect(body.data.health.prover).toBe("red");
+    expect(body.data.health.photon).toBe("red");
   });
 
   it("GET /wallets lists the project's rings wallets", async () => {

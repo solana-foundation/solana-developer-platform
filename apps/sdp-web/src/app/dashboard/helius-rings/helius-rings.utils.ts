@@ -41,12 +41,6 @@ export function formatWhen(iso: string, locale: string): string {
   });
 }
 
-export function formatTimeOfDay(iso: string, locale: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString(locale, { timeStyle: "medium" });
-}
-
 /** Digits only: a shielded amount is an unsigned integer count of base units. */
 const BASE_UNITS = /^\d+$/;
 
@@ -69,23 +63,6 @@ export function formatBaseUnits(amountRaw: string, decimals: number): string | n
   const whole = padded.slice(0, padded.length - decimals);
   const fraction = padded.slice(padded.length - decimals).replace(/0+$/, "");
   return fraction === "" ? whole : `${whole}.${fraction}`;
-}
-
-/**
- * How a shielded amount may be shown. `baseUnits` is distinct from a zero
- * scale: the digits are identical, but only one claims the mint has no
- * fraction, and the caller has to label them differently.
- */
-export type ShieldedAmount =
-  | { scale: "exact"; text: string }
-  | { scale: "baseUnits"; text: string }
-  | { scale: "unrenderable" };
-
-/** Reads a balance at its mint's scale, or as base units when none was reported. */
-export function readShieldedAmount(amountRaw: string, decimals: number | null): ShieldedAmount {
-  const text = formatBaseUnits(amountRaw, decimals ?? 0);
-  if (text === null) return { scale: "unrenderable" };
-  return { scale: decimals === null ? "baseUnits" : "exact", text };
 }
 
 // Whole part with optional fraction. Reject a bare `.` or a leading `.`.
