@@ -6,12 +6,15 @@ import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import type { MessageKey } from "@/i18n/messages";
 import {
   fetchRingsOperationDetail,
   type RingsOperationDetail,
   type RingsOperationState,
 } from "./helius-rings.data";
 import { formatAssetAmount, formatWhen } from "./helius-rings.utils";
+
+type Translate = ReturnType<typeof useTranslations>;
 
 // Mirrors activity-card.tsx so completed reads green here too, not default grey.
 const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
@@ -151,7 +154,7 @@ export function OperationDetailDrawer({
                         </div>
                         <div className={last ? "flex flex-col" : "flex flex-col pb-2"}>
                           <span className="text-[11px] font-medium text-primary">
-                            {formatEventKind(event)}
+                            {formatEventKind(event, t)}
                           </span>
                           <span className="text-[10px] text-secondary">
                             {formatWhen(event.createdAt, locale)}
@@ -172,39 +175,43 @@ export function OperationDetailDrawer({
 
 // Short human-facing label per event kind and per target state; falls back to
 // the raw kind so a new upstream event is visible rather than silently missing.
-const STATE_LABEL: Record<string, string> = {
-  draft: "Draft",
-  preparing: "Preparing",
-  approval_required: "Awaiting approval",
-  proving: "Proving",
-  ready_to_sign: "Signing",
-  submitted: "Submitted",
-  indexing: "Indexing",
-  completed: "Completed",
-  failed: "Failed",
-  voided: "Voided",
+const TIMELINE_STATES = new Set<RingsOperationState>([
+  "draft",
+  "preparing",
+  "approval_required",
+  "proving",
+  "ready_to_sign",
+  "submitted",
+  "indexing",
+  "completed",
+  "failed",
+  "voided",
+]);
+
+const EVENT_KEY: Record<string, MessageKey> = {
+  "operation.created": "DashboardHeliusRings.detail.event_created",
+  "operation.retried": "DashboardHeliusRings.detail.event_retried",
+  "policy.evaluated": "DashboardHeliusRings.detail.event_policyEvaluated",
+  "approval.requested": "DashboardHeliusRings.detail.event_approvalRequested",
+  "approval.granted": "DashboardHeliusRings.detail.event_approvalGranted",
+  "proof.received": "DashboardHeliusRings.detail.event_proofReceived",
+  "transaction.submitted": "DashboardHeliusRings.detail.event_transactionSubmitted",
+  "operation.completed": "DashboardHeliusRings.detail.event_completed",
+  "operation.failed": "DashboardHeliusRings.detail.event_failed",
+  "operation.voided": "DashboardHeliusRings.detail.event_voided",
+  "operation.escalated": "DashboardHeliusRings.detail.event_escalated",
 };
 
-const EVENT_LABEL: Record<string, string> = {
-  "operation.created": "Created",
-  "operation.retried": "Retried",
-  "policy.evaluated": "Policy checked",
-  "approval.requested": "Approval requested",
-  "approval.granted": "Approved",
-  "proof.received": "Proved",
-  "transaction.submitted": "Broadcast",
-  "operation.completed": "Completed",
-  "operation.failed": "Failed",
-  "operation.voided": "Voided",
-  "operation.escalated": "Escalated",
-};
-
-function formatEventKind(event: RingsOperationDetail["events"][number]): string {
+function formatEventKind(event: RingsOperationDetail["events"][number], t: Translate): string {
   if (event.kind === "state.transitioned") {
     const to = event.payload && typeof event.payload === "object" ? event.payload.to : undefined;
-    if (typeof to === "string") return STATE_LABEL[to] ?? to;
+    if (typeof to === "string" && TIMELINE_STATES.has(to as RingsOperationState)) {
+      return t(`DashboardHeliusRings.detail.timelineState_${to as RingsOperationState}`);
+    }
+    if (typeof to === "string") return to;
   }
-  return EVENT_LABEL[event.kind] ?? event.kind;
+  const key = EVENT_KEY[event.kind];
+  return key ? t(key) : event.kind;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
