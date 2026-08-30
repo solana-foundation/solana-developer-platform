@@ -54,9 +54,7 @@ describe("resolveRingsHeliusRpcConfig", () => {
 describe("requireRingsHeliusRpcUrl", () => {
   it("returns the resolved URL when the config is complete", () => {
     expect(
-      requireRingsHeliusRpcUrl(
-        envOf({ SOLANA_RPC_HELIUS_URL: "https://rpc.example/preset-key" })
-      )
+      requireRingsHeliusRpcUrl(envOf({ SOLANA_RPC_HELIUS_URL: "https://rpc.example/preset-key" }))
     ).toBe("https://rpc.example/preset-key");
   });
 
