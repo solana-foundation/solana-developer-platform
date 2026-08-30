@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import type { EarnButtonConfiguration, EarnStrategy, SdpEnvironment } from "@sdp/types";
+import type {
+  EarnButtonConfiguration,
+  EarnStrategy,
+  SdpEnvironment,
+  SolanaCluster,
+} from "@sdp/types";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -27,9 +32,21 @@ const liveStrategy: EarnStrategy = {
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
 
+const mainnetStrategy: EarnStrategy = {
+  ...liveStrategy,
+  id: "earn_strategy_mainnet",
+  providerReference: "KvaultMainnet111111111111111111111111111111",
+  name: "Kamino JLP Vault",
+  shareMint: "ShareMainnet111111111111111111111111111111",
+  hostCluster: "mainnet-beta",
+  fundable: false,
+};
+
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
+  mainnetFundable: false,
   saveEarnButtonConfiguration: vi.fn(),
+  strategyClusters: [] as Array<SolanaCluster | undefined>,
 }));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -37,7 +54,17 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 }));
 
 vi.mock("./earn-program-data", () => ({
-  useEarnStrategies: () => ({ strategies: [liveStrategy], error: undefined, isLoading: false }),
+  useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
+    mocks.strategyClusters.push(options?.cluster);
+    return {
+      strategies:
+        options?.cluster === "mainnet-beta"
+          ? [{ ...mainnetStrategy, fundable: mocks.mainnetFundable }]
+          : [liveStrategy],
+      error: undefined,
+      isLoading: false,
+    };
+  },
 }));
 
 vi.mock("./earn-button-configuration-data", () => ({
@@ -63,6 +90,8 @@ function renderWithEnglish(children: ReactNode) {
 
 afterEach(() => {
   mocks.environment = "sandbox";
+  mocks.mainnetFundable = false;
+  mocks.strategyClusters.length = 0;
   vi.clearAllMocks();
   cleanup();
 });
@@ -92,7 +121,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
@@ -141,7 +170,9 @@ describe("EarnButtonBuilder", () => {
       await screen.findByText("Configuration saved. The handoff link is current.")
     ).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+      screen.getByRole("link", {
+        name: /embedded-yield\/integrate\/PublicEarnButtonToken123/,
+      })
     ).toBeTruthy();
 
     // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
@@ -163,7 +194,7 @@ describe("EarnButtonBuilder", () => {
     expect(code).not.toContain("requestId");
     expect(code).not.toContain("developers.solana.com/earn/buttons");
     expect(screen.getByRole("link", { name: "Done" }).getAttribute("href")).toBe(
-      "/dashboard/markets/earn"
+      "/dashboard/markets/embedded-yield"
     );
   });
 
@@ -181,7 +212,7 @@ describe("EarnButtonBuilder", () => {
           kind: "ready",
           configuration: { ...savedConfiguration, style: "accent", accentColor: "#9945FF" },
         }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -216,7 +247,7 @@ describe("EarnButtonBuilder", () => {
           kind: "ready",
           configuration: { ...savedConfiguration, style: "accent", accentColor: "#9945ff" },
         }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -235,7 +266,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "error" }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId={liveStrategy.id}
@@ -244,7 +275,7 @@ describe("EarnButtonBuilder", () => {
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(screen.getByRole("alert").textContent).toContain(
-      "The saved Earn button configuration could not be loaded"
+      "The saved Embedded Yield button configuration could not be loaded"
     );
     expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
       "disabled",
@@ -252,11 +283,61 @@ describe("EarnButtonBuilder", () => {
     );
   });
 
+  it("renders a mainnet vault as a sandbox preview without offering persistence", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        configureHref="/dashboard/markets/embedded-yield/configure"
+        earnHref="/dashboard/markets/embedded-yield"
+        projectId="project_original"
+        providerAccess={providerAccess}
+        strategyCluster="mainnet-beta"
+        strategyId={mainnetStrategy.id}
+      />
+    );
+
+    expect(mocks.strategyClusters).toContain("mainnet-beta");
+    expect(screen.getAllByText("Kamino JLP Vault").length).toBeGreaterThan(0);
+    expect(screen.getByText("Mainnet vault preview")).toBeTruthy();
+    expect(screen.getByText(/Production project is required/)).toBeTruthy();
+    expect(
+      screen.getByText(/Public handoff links are created from a Production project/)
+    ).toBeTruthy();
+    expect(screen.getByText(/strategyId: "earn_strategy_mainnet"/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
+      "disabled",
+      true
+    );
+    expect(screen.getByRole("link", { name: "Change strategy" }).getAttribute("href")).toBe(
+      "/dashboard/markets/embedded-yield/configure?cluster=mainnet-beta"
+    );
+    expect(mocks.saveEarnButtonConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("does not let a mainnet deep link bypass provider access", () => {
+    mocks.mainnetFundable = true;
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        configureHref="/dashboard/markets/embedded-yield/configure"
+        earnHref="/dashboard/markets/embedded-yield"
+        projectId="project_original"
+        providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
+        strategyCluster="mainnet-beta"
+        strategyId={mainnetStrategy.id}
+      />
+    );
+
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
+    expect(screen.queryByText("Mainnet vault preview")).toBeNull();
+  });
+
   it("dead-ends on a failed configuration load only when no strategy is selected", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "error" }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -270,7 +351,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -284,7 +365,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId=""
@@ -293,7 +374,9 @@ describe("EarnButtonBuilder", () => {
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+      screen.getByRole("link", {
+        name: /embedded-yield\/integrate\/PublicEarnButtonToken123/,
+      })
     ).toBeTruthy();
   });
 
@@ -301,7 +384,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
       />
@@ -311,7 +394,9 @@ describe("EarnButtonBuilder", () => {
     expect(lightRadio.checked).toBe(true);
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+      screen.getByRole("link", {
+        name: /embedded-yield\/integrate\/PublicEarnButtonToken123/,
+      })
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
       "disabled",
@@ -325,7 +410,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId={liveStrategy.id}
@@ -345,7 +430,7 @@ describe("EarnButtonBuilder", () => {
     const view = renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         key="saved-configuration"
         projectId="project_original"
         providerAccess={providerAccess}
@@ -356,7 +441,7 @@ describe("EarnButtonBuilder", () => {
       <I18nProvider locale="en" messages={getMessages("en")}>
         <EarnButtonBuilder
           configurationLoad={noConfiguration}
-          earnHref="/dashboard/markets/earn"
+          earnHref="/dashboard/markets/embedded-yield"
           key="empty-configuration"
           projectId="project_next"
           providerAccess={providerAccess}
@@ -368,14 +453,14 @@ describe("EarnButtonBuilder", () => {
     await waitFor(() => {
       expect((screen.getByRole("radio", { name: /^Ink/ }) as HTMLInputElement).checked).toBe(true);
     });
-    expect(screen.queryByRole("link", { name: /earn\/integrate\// })).toBeNull();
+    expect(screen.queryByRole("link", { name: /embedded-yield\/integrate\// })).toBeNull();
   });
 
   it("offers a recovery route when the live strategy id no longer resolves", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_removed"
@@ -384,9 +469,9 @@ describe("EarnButtonBuilder", () => {
 
     expect(screen.getByText("Strategy no longer available")).toBeTruthy();
     expect(screen.getByText(/no longer in the live catalogue/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Return to Earn" }).getAttribute("href")).toBe(
-      "/dashboard/markets/earn"
-    );
+    expect(
+      screen.getByRole("link", { name: "Return to Embedded Yield" }).getAttribute("href")
+    ).toBe("/dashboard/markets/embedded-yield");
     expect(screen.queryByText("iOS preview")).toBeNull();
   });
 
@@ -395,7 +480,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
@@ -411,7 +496,7 @@ describe("EarnButtonBuilder", () => {
     renderWithEnglish(
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
-        earnHref="/dashboard/markets/earn"
+        earnHref="/dashboard/markets/embedded-yield"
         projectId="project_original"
         providerAccess={{ kamino: { entitled: true, configured: false, enabled: false } }}
         strategyId="earn_strategy_live"

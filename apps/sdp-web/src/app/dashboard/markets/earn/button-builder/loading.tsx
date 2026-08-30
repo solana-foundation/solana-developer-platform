@@ -1,5 +1,1 @@
-import { EarnProgramSkeleton } from "../../markets-route-skeletons";
-
-export default function EarnButtonBuilderLoading() {
-  return <EarnProgramSkeleton />;
-}
+export { default } from "../../embedded-yield/button-builder/loading";

@@ -1,4 +1,5 @@
 import type {
+  EarnExternalWalletPosition,
   EarnProgramWithdrawalRecord,
   EarnProgramWithdrawalRecordStatus,
   EarnStrategy,
@@ -9,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEarnVaultDeposit,
   earnProgramsRefreshInterval,
+  fetchEarnExternalWalletPositionSummary,
+  fetchEarnExternalWalletPositions,
   fetchEarnProgramDeposits,
   fetchEarnProgramsState,
   fetchEarnProgramWithdrawals,
@@ -218,6 +221,116 @@ describe("fetchEarnVaultPositions", () => {
       "Vault positions pagination did not advance"
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+function externalWalletPosition(id: string): EarnExternalWalletPosition {
+  return {
+    id,
+    ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    provider: "kamino",
+    providerReference: `${id}-ref`,
+    label: id,
+    tokenMint: USDC,
+    shareMint: `${id}-share-mint`,
+    createdAt: TIMESTAMP,
+    closedAt: null,
+    tokenValue: "1.05",
+  };
+}
+
+describe("external-wallet position reads", () => {
+  it("pages one wallet to the end", async () => {
+    const pages = [
+      { positions: [externalWalletPosition("p1")], hasMore: true, nextCursor: "cursor_1" },
+      { positions: [externalWalletPosition("p2")], hasMore: false, nextCursor: null },
+    ];
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: pages.shift() }), {
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).resolves.toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues one wallet past one hundred strict cursor pages", async () => {
+    let page = 0;
+    const fetchMock = vi.fn(async () => {
+      const current = page;
+      page += 1;
+      return new Response(
+        JSON.stringify({
+          data: {
+            positions: [externalWalletPosition(`p${current}`)],
+            hasMore: current < 100,
+            nextCursor: current < 100 ? `cursor_${current}` : null,
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).resolves.toHaveLength(101);
+    expect(fetchMock).toHaveBeenCalledTimes(101);
+  });
+
+  it("fails loudly when a wallet cursor repeats", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              positions: [externalWalletPosition("p1")],
+              hasMore: true,
+              nextCursor: "same_cursor",
+            },
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).rejects.toThrow("External-wallet positions pagination did not advance");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the complete aggregate summary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                summary: {
+                  walletCount: 2,
+                  positionCount: 3,
+                  unavailablePositionCount: 0,
+                  totalsByStrategy: [],
+                  totalsByToken: [],
+                },
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    await expect(fetchEarnExternalWalletPositionSummary()).resolves.toMatchObject({
+      walletCount: 2,
+      positionCount: 3,
+    });
   });
 });
 

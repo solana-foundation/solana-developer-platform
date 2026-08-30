@@ -51,4 +51,20 @@ describe("saveEarnButtonConfiguration", () => {
       }
     );
   });
+
+  it("uses the client product name when a saved configuration response is invalid", async () => {
+    mocks.dashboardFetch.mockResolvedValueOnce({ ok: true, status: 200, data: {} });
+
+    await expect(
+      saveEarnButtonConfiguration({
+        projectId: "project_original",
+        strategyId: "earn_strategy_example",
+        style: "accent",
+        accentColor: "#9945FF",
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: "Invalid Embedded Yield button configuration response",
+    });
+  });
 });

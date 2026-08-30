@@ -157,7 +157,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
 | `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
-| `/dashboard/markets/earn` → 404 | same flags, web side (segment guards) |
+| `/dashboard/markets/embedded-yield` → 404 | same flags, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here |
 | Dashboard "provider not configured" (503) | no `GROUND_SANDBOX_API_KEY` |
 | "requires manual activation" | org lacks the earn provider override |
 | API waits then dies on boot | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won |
