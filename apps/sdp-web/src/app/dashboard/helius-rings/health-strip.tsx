@@ -32,9 +32,7 @@ export function HealthStrip({
   return (
     <div className="rounded-[var(--sdp-surface-radius)] bg-surface-raised px-4 py-2.5 shadow-sm ring-1 ring-border-default">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-        <span className="font-medium text-primary">
-          {t("DashboardHeliusRings.health.title")}
-        </span>
+        <span className="font-medium text-primary">{t("DashboardHeliusRings.health.title")}</span>
         {RINGS_HEALTH_COMPONENTS.map((component) => {
           const status = health?.[component] ?? "red";
           const label = t(`DashboardHeliusRings.health.component_${component}`);

@@ -8,7 +8,8 @@ import {
 
 // Zolana's real Wallet needs a full identity; the cache only compares by
 // reference and fingerprint, so any object stands in as a marker.
-const fakeWallet = (label: string) => ({ label }) as unknown as Parameters<typeof setCachedWallet>[1];
+const fakeWallet = (label: string) =>
+  ({ label }) as unknown as Parameters<typeof setCachedWallet>[1];
 
 afterEach(() => clearWalletCache());
 

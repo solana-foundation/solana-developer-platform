@@ -7,12 +7,14 @@
  * Env: HELIUS_RINGS_RPC_URL (or falls back to public devnet)
  */
 
+/** biome-ignore-all lint/security/noSecrets: base58 mint addresses are public constants, not secrets. */
+
 import {
+  getProtocolConfigAddress,
   getSolInterfaceAddress,
+  getSplAssetCounterAddress,
   getSplAssetRegistryAddress,
   getSplAssetVaultAddress,
-  getSplAssetCounterAddress,
-  getProtocolConfigAddress,
 } from "@heliuslabs/zolana/addresses";
 import { address, createSolanaRpc } from "@solana/kit";
 

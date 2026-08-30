@@ -1,8 +1,8 @@
 "use client";
 
-import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatCurrencyAmount } from "@/app/dashboard/payments/payments-overview.utils";
-import { type RingsWallet } from "./helius-rings.data";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import type { RingsWallet } from "./helius-rings.data";
 import { useRingsBalance } from "./use-rings-balance";
 
 /**

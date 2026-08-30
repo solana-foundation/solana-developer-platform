@@ -206,5 +206,4 @@ describe("probeRingsHealth", () => {
       prover: "unreachable",
     });
   });
-
 });

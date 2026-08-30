@@ -209,13 +209,7 @@ export function OperationComposer({
 }
 
 // Segmented control: three buttons that read as one connected group.
-function OpTabs({
-  value,
-  onSelect,
-}: {
-  value: RingsOpType;
-  onSelect: (op: RingsOpType) => void;
-}) {
+function OpTabs({ value, onSelect }: { value: RingsOpType; onSelect: (op: RingsOpType) => void }) {
   const t = useTranslations();
   return (
     <div
@@ -337,7 +331,6 @@ function ComposeStep({
     </>
   );
 }
-
 
 function ReviewStep({
   rows,

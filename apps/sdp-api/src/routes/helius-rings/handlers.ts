@@ -176,9 +176,7 @@ async function priceRingsBalances(
 
   const anyPriced = enriched.some((balance) => typeof balance.usdValue === "number");
   const totalUsd = anyPriced
-    ? Number(
-        enriched.reduce((sum, balance) => sum + (balance.usdValue ?? 0), 0).toFixed(2)
-      )
+    ? Number(enriched.reduce((sum, balance) => sum + (balance.usdValue ?? 0), 0).toFixed(2))
     : null;
   return { balances: enriched, totalUsd };
 }

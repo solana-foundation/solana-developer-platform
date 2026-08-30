@@ -20,6 +20,7 @@ export function useRingsBalance(
   const [manualTick, setManualTick] = useState(0);
   const [state, setState] = useState<RingsBalanceState>({ name: "loading" });
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick and manualTick are trigger-only deps — a change re-runs the sync but the values aren't read inside.
   useEffect(() => {
     if (walletId === null) return;
     let cancelled = false;

@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { Modal } from "@/components/ui/modal";
-import { useLocale, useTranslations } from "@/i18n/provider";
 import type { MessageKey } from "@/i18n/messages";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   fetchRingsOperationDetail,
   type RingsOperationDetail,

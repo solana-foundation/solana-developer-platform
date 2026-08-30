@@ -22,7 +22,12 @@ import {
   retryRingsOperation,
   voidRingsOperation,
 } from "./helius-rings.data";
-import { formatAssetAmount, formatWhen, isSettling, shortenOperationId } from "./helius-rings.utils";
+import {
+  formatAssetAmount,
+  formatWhen,
+  isSettling,
+  shortenOperationId,
+} from "./helius-rings.utils";
 
 const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
   draft: "default",

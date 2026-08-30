@@ -124,10 +124,7 @@ function assertOperationEnabled(opType: PrivateOperationInput["opType"]): void {
     );
   }
   if (opType === "transfer_anonymous") {
-    throw new HeliusRingsError(
-      "invalid_input",
-      "anonymous transfer is not enabled in this build"
-    );
+    throw new HeliusRingsError("invalid_input", "anonymous transfer is not enabled in this build");
   }
 }
 
@@ -1083,7 +1080,7 @@ export class HeliusRingsService {
     }
     const rows = await this.wallets.listWallets({ ...this.tenant });
     const recipient = rows.find((row) => row.shielded_address === shieldedAddress);
-    if (!recipient || !recipient.owner_address || !recipient.shielded_address) {
+    if (!recipient?.owner_address || !recipient.shielded_address) {
       throw new HeliusRingsError(
         "invalid_input",
         "the private transfer recipient must be a provisioned wallet in this project"

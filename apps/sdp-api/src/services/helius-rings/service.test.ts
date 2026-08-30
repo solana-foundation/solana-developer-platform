@@ -787,11 +787,7 @@ describe("HeliusRingsService", () => {
         gateway.recordSubmission(operation.signature);
 
         await expect(
-          liveishService({ gateway }).voidOperation(
-            operation.id,
-            operation.signature,
-            actorContext
-          )
+          liveishService({ gateway }).voidOperation(operation.id, operation.signature, actorContext)
         ).rejects.toMatchObject({ code: "conflict" });
 
         const reloaded = await liveishService({ gateway }).getOperation(operation.id);

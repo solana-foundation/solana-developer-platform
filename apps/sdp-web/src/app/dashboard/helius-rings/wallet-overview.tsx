@@ -1,11 +1,11 @@
 "use client";
 
 import { Loader2, RefreshCw } from "lucide-react";
+import { formatCurrencyAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatCurrencyAmount } from "@/app/dashboard/payments/payments-overview.utils";
-import { type RingsWallet, type RingsWalletSync } from "./helius-rings.data";
+import type { RingsWallet, RingsWalletSync } from "./helius-rings.data";
 import { formatAssetAmount } from "./helius-rings.utils";
 import { useRingsBalance } from "./use-rings-balance";
 

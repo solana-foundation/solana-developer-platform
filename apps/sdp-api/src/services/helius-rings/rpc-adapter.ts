@@ -84,7 +84,9 @@ interface ClassifiedSubmitError {
 function classifySubmitError(error: unknown): ClassifiedSubmitError {
   const fallback = error instanceof Error ? error.message : "transaction submission failed";
 
-  if (isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)) {
+  if (
+    isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
+  ) {
     const causeMessage = error.cause instanceof Error ? error.cause.message : null;
     const poolErrorName = decodeShieldedPoolCustomError(error);
     const namedCause =

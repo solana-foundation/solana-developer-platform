@@ -82,10 +82,9 @@ describe("0067_helius_rings_money_flows owner/identity pair", () => {
     );
     await expectSqlstate(
       () =>
-        client.query(
-          `UPDATE helius_rings_wallets SET owner_address = 'owner' WHERE id = $1`,
-          [walletId]
-        ),
+        client.query(`UPDATE helius_rings_wallets SET owner_address = 'owner' WHERE id = $1`, [
+          walletId,
+        ]),
       CHECK_VIOLATION
     );
   });
