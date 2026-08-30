@@ -89,31 +89,34 @@ export function HeliusRingsWorkspace({
 
   // Kept fresh through `tickRef` so the interval effect below doesn't
   // re-subscribe every time `operations`/`refresh` change; only the toggle
-  // between settling/idle re-arms it.
+  // between settling/idle re-arms it. The ref is written inside an effect,
+  // not during render, to keep the render pass pure.
   const tickRef = useRef<() => Promise<void>>(async () => {});
-  tickRef.current = async () => {
-    if (ticking.current) return;
-    ticking.current = true;
-    try {
-      // Settlement is otherwise driven only by the sweep, so a completed
-      // transaction shows as `indexing` until the next minute boundary. Asking
-      // here makes the row track Photon instead of the cron.
-      //
-      // Only `indexing`: the endpoint reads Photon and completes from what it
-      // finds, whereas for a row still waiting on custody the same call
-      // concludes that signing died and fails it. Single-pass loop avoids the
-      // `.filter().map()` two-pass over the same list.
-      const pending: Promise<unknown>[] = [];
-      for (const operation of operations) {
-        if (operation.state !== "indexing") continue;
-        pending.push(executeRingsOperation(operation.id).catch(() => undefined));
+  useEffect(() => {
+    tickRef.current = async () => {
+      if (ticking.current) return;
+      ticking.current = true;
+      try {
+        // Settlement is otherwise driven only by the sweep, so a completed
+        // transaction shows as `indexing` until the next minute boundary. Asking
+        // here makes the row track Photon instead of the cron.
+        //
+        // Only `indexing`: the endpoint reads Photon and completes from what it
+        // finds, whereas for a row still waiting on custody the same call
+        // concludes that signing died and fails it. Single-pass loop avoids the
+        // `.filter().map()` two-pass over the same list.
+        const pending: Promise<unknown>[] = [];
+        for (const operation of operations) {
+          if (operation.state !== "indexing") continue;
+          pending.push(executeRingsOperation(operation.id).catch(() => undefined));
+        }
+        await Promise.all(pending);
+        await refresh();
+      } finally {
+        ticking.current = false;
       }
-      await Promise.all(pending);
-      await refresh();
-    } finally {
-      ticking.current = false;
-    }
-  };
+    };
+  }, [operations, refresh]);
 
   useEffect(() => {
     if (!settling) return;

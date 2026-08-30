@@ -67,8 +67,9 @@ const PREFLIGHT_LOG_TAIL = 3;
 // `Program log: …` (program self-logs) and `Program X failed: …` (program-level
 // panic reasons) are the two log shapes that carry diagnosis. Frame markers —
 // invoke/success/consumed — never do, so filtering them out keeps the row
-// message focused on the actual reason.
-const DIAGNOSTIC_LOG_LINE = /^Program (?:log|data|return): |failed:/;
+// message focused on the actual reason. Both alternatives are anchored so
+// `failed:` appearing inside a log body doesn't slip through on its own.
+const DIAGNOSTIC_LOG_LINE = /^Program (?:(?:log|data|return): |\S+ failed:)/;
 
 interface ClassifiedSubmitError {
   failureCode: RingsAdapterFailureCode;
