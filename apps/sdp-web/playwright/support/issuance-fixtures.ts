@@ -45,6 +45,8 @@ export const issuanceFixturesPath = path.join(__dirname, "../.fixtures/issuance.
 
 export function writeIssuanceFixtures(fixtures: IssuanceFixtures): void {
   fs.mkdirSync(path.dirname(issuanceFixturesPath), { recursive: true });
+  // This gitignored Playwright path is fixed; local API data cannot choose an arbitrary file.
+  // codeql[js/http-to-file-access]
   fs.writeFileSync(issuanceFixturesPath, JSON.stringify(fixtures, null, 2));
 }
 

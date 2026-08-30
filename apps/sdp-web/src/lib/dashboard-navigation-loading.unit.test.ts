@@ -32,8 +32,8 @@ describe("dashboard loading route", () => {
     ["/dashboard/payments/recurring/payment-1", "recurring-payment-detail"],
     ["/dashboard/markets", "markets-landing"],
     ["/dashboard/markets/treasury-solutions", "treasury-solutions"],
-    ["/dashboard/markets/earn", "earn-program"],
-    ["/dashboard/markets/earn/button-builder", "earn-program"],
+    ["/dashboard/markets/embedded-yield", "earn-program"],
+    ["/dashboard/markets/embedded-yield/button-builder", "earn-program"],
     ["/dashboard/tokens", "token-holdings"],
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
@@ -75,8 +75,8 @@ describe("integrations route", () => {
 describe("dashboard navigation active state", () => {
   it.each([
     "/dashboard/markets/treasury-solutions",
-    "/dashboard/markets/earn",
-    "/dashboard/markets/earn/button-builder",
+    "/dashboard/markets/embedded-yield",
+    "/dashboard/markets/embedded-yield/button-builder",
   ])("keeps Markets active at %s", (pathname) => {
     expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
   });
@@ -89,7 +89,10 @@ describe("dashboard navigation active state", () => {
       )
     ).toBe(true);
     expect(
-      isDashboardNavItemActive("/dashboard/markets/earn", "/dashboard/markets/treasury-solutions")
+      isDashboardNavItemActive(
+        "/dashboard/markets/embedded-yield",
+        "/dashboard/markets/treasury-solutions"
+      )
     ).toBe(false);
   });
 

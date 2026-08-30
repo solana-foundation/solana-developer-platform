@@ -55,24 +55,14 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
   async function seedCounterpartyAccount() {
     const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
-    const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(
-      getDb(env),
-      env.counterpartyPiiCipher
-    );
+    const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(getDb(env));
     const counterparty = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       externalId: null,
       entityType: "individual",
       displayName: "Acme Recipient",
-      email: "acme@example.com",
-      identity: {
-        firstName: "Acme",
-        lastName: "Recipient",
-        dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-      },
+      providerData: {},
       createdBy: TEST_USER.id,
     });
     if (!counterparty) {

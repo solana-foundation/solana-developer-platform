@@ -1,12 +1,34 @@
+import type {
+  ReadIdentityInput,
+  ReadIdentityResult,
+  RingsGatewayPort,
+  SyncPhotonInput,
+  SyncPhotonResult,
+} from "@sdp/helius-rings";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+/**
+ * The one seam these tests reach through; everything else runs for real. Left
+ * unset, the environment picks the gateway as it would in production.
+ */
+const gatewayOverride = vi.hoisted(() => ({ current: null as unknown }));
+
+vi.mock("@/services/helius-rings/gateway", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/helius-rings/gateway")>();
+  return {
+    ...actual,
+    resolveRingsGateway: (...args: Parameters<typeof actual.resolveRingsGateway>) =>
+      (gatewayOverride.current as RingsGatewayPort | null) ?? actual.resolveRingsGateway(...args),
+  };
+});
 
 const TEST_ORG = { id: "org_hr_route", name: "Rings Route Org", slug: "rings-route-org" };
 const TEST_PROJECT = { id: "prj_hr_route", slug: "rings-route-project" };
@@ -128,6 +150,7 @@ describe("Helius Rings routes", () => {
 
   afterEach(async () => {
     env.HELIUS_RINGS_ENABLED = originalFlag;
+    gatewayOverride.current = null;
     await clearKVStores(env);
   });
 
@@ -137,7 +160,7 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("GET /health reports the unimplemented gateway red", async () => {
+  it("GET /health reports the unconfigured gateway red", async () => {
     const res = await app.request("/v1/helius-rings/health", { headers: authHeaders() }, env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { health: Record<string, string> } };
@@ -197,8 +220,8 @@ describe("Helius Rings routes", () => {
       };
     };
 
-    // Default policy is implicit allow, so the operation advances until the
-    // port call — which the NotImplemented gateway refuses.
+    // Default policy is implicit allow, so the operation advances to the port
+    // call, which the unconfigured gateway refuses.
     expect(body.data.operation.state).toBe("failed");
     expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
       code: "gateway_unavailable",
@@ -279,5 +302,200 @@ describe("Helius Rings routes", () => {
       clientNonce: "route-nonce-5",
     });
     expect(res.status).toBe(400);
+  });
+
+  describe("POST /wallets/:walletId/sync", () => {
+    const SHIELDED_ADDRESS = "rings1route_sync";
+
+    /** Marks the fixture wallet provisioned without going through a gateway. */
+    async function markProvisioned(): Promise<void> {
+      const row = await createHeliusRingsWalletRepository(env).markProvisioned({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        id: ringsWalletId,
+        shieldedAddress: SHIELDED_ADDRESS,
+        materialTag: "live",
+        expectedStatus: "pending",
+      });
+      if (!row) throw new Error("rings wallet fixture was not marked provisioned");
+    }
+
+    function readWallet() {
+      return createHeliusRingsWalletRepository(env).getWalletById({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        id: ringsWalletId,
+      });
+    }
+
+    it("returns balances, the degraded flag and the observation, and records the cursor", async () => {
+      await markProvisioned();
+      const seen: SyncPhotonInput[] = [];
+      const observed: SyncPhotonResult = {
+        cursor: "2026-08-26T12:00:00.000Z",
+        balances: [
+          {
+            mint: "So11111111111111111111111111111111111111112",
+            // Past 2^53: a JSON number would have rounded it.
+            amountRaw: "18446744073709551615",
+            decimals: 9,
+            symbol: "SOL",
+          },
+        ],
+        indexedOperationSignatures: [],
+        degraded: true,
+      };
+      gatewayOverride.current = {
+        syncPhoton: async (input: SyncPhotonInput) => {
+          seen.push(input);
+          return observed;
+        },
+      } as unknown as RingsGatewayPort;
+
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          balances: Array<{ mint: string; amountRaw: string }>;
+          degraded: boolean;
+          observedAt: string;
+        };
+      };
+
+      expect(body.data).toMatchObject({ degraded: true, observedAt: observed.cursor });
+      expect(body.data.balances[0]?.amountRaw).toBe("18446744073709551615");
+      // The stored identity is pinned so a derivation mismatch fails rather
+      // than answering with someone else's balances.
+      expect(seen[0]).toMatchObject({
+        walletId: ringsWalletId,
+        owner: "HrRouteTestPublicKey111111111111111111111111",
+        expectedShieldedAddress: SHIELDED_ADDRESS,
+      });
+      expect((await readWallet())?.sync_cursor).toBe(observed.cursor);
+    });
+
+    it("404s an unknown wallet", async () => {
+      const res = await post("/v1/helius-rings/wallets/hrw_missing/sync", {});
+      expect(res.status).toBe(404);
+    });
+
+    // The test environment configures no Rings upstreams, so a provisioned
+    // wallet reaches the port and is refused there.
+    it("503s through the unconfigured gateway and leaves the cursor alone", async () => {
+      await markProvisioned();
+
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
+      expect(res.status).toBe(503);
+      expect((await readWallet())?.sync_cursor).toBeNull();
+    });
+
+    // 400, not 503: the fix is to provision the wallet, not to wait.
+    it("400s a wallet with no shielded identity yet", async () => {
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
+      expect(res.status).toBe(400);
+    });
+
+    it("403s without payments:write", async () => {
+      const readOnlyKey = { id: "key_hr_sync_ro", raw: "sk_test_helius_rings_ro" };
+      const keyHash = await hashString(readOnlyKey.raw, env.API_KEY_PEPPER);
+      await seedCachedApiKey(env, keyHash, {
+        ...TEST_CACHED_API_KEY,
+        id: readOnlyKey.id,
+        role: "api_readonly",
+        permissions: ["payments:read"],
+      });
+
+      const res = await app.request(
+        `/v1/helius-rings/wallets/${ringsWalletId}/sync`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${readOnlyKey.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        },
+        env
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe("GET /wallets/:walletId/identity", () => {
+    const PUBLISHED: ReadIdentityResult = {
+      status: "foreign",
+      derivedShieldedAddress: "rings1route_derived",
+      publishedShieldedAddress: "rings1route_published",
+      mismatch: "nullifier_key",
+    };
+
+    function get(path: string, token = TEST_API_KEY.raw) {
+      return app.request(path, { headers: { Authorization: `Bearer ${token}` } }, env);
+    }
+
+    it("returns the on-chain verdict beside the identity our row records", async () => {
+      const seen: ReadIdentityInput[] = [];
+      gatewayOverride.current = {
+        readIdentity: async (input: ReadIdentityInput) => {
+          seen.push(input);
+          return PUBLISHED;
+        },
+      } as unknown as RingsGatewayPort;
+
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { identity: ReadIdentityResult & { recordedShieldedAddress: string | null } };
+      };
+
+      // The fixture wallet is `pending`, so there is nothing of ours to compare.
+      expect(body.data.identity).toEqual({ ...PUBLISHED, recordedShieldedAddress: null });
+      expect(seen[0]).toEqual({
+        walletId: ringsWalletId,
+        owner: "HrRouteTestPublicKey111111111111111111111111",
+      });
+    });
+
+    it("404s an unknown wallet", async () => {
+      const res = await get("/v1/helius-rings/wallets/hrw_missing/identity");
+      expect(res.status).toBe(404);
+    });
+
+    // The test environment configures no Rings upstreams, so the request reaches
+    // the port and is refused there.
+    it("503s through the unconfigured gateway", async () => {
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`);
+      expect(res.status).toBe(503);
+    });
+
+    // Read permission, unlike /sync's write: this advances no stored observation.
+    it("answers a key holding only payments:read", async () => {
+      const readOnlyKey = { id: "key_hr_identity_ro", raw: "sk_test_helius_rings_id_ro" };
+      await seedCachedApiKey(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: readOnlyKey.id,
+        role: "api_readonly",
+        permissions: ["payments:read"],
+      });
+      gatewayOverride.current = {
+        readIdentity: async () => PUBLISHED,
+      } as unknown as RingsGatewayPort;
+
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`, readOnlyKey.raw);
+      expect(res.status).toBe(200);
+    });
+
+    it("403s a key holding neither payments permission", async () => {
+      const otherKey = { id: "key_hr_identity_none", raw: "sk_test_helius_rings_id_none" };
+      await seedCachedApiKey(env, await hashString(otherKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: otherKey.id,
+        role: "api_readonly",
+        permissions: ["wallets:read"],
+      });
+
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`, otherKey.raw);
+      expect(res.status).toBe(403);
+    });
   });
 });

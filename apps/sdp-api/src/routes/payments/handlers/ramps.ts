@@ -1,3 +1,4 @@
+import { redactCredentialString } from "@sdp/custody";
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
@@ -37,6 +38,7 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentTransferRow,
@@ -53,12 +55,16 @@ import {
   counterpartyNotProvisioned,
   internalError,
   notFound,
+  redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
+import { assertApprovedRampRedirectUrl } from "@/lib/ramps/redirect-destinations";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import { describeError, logEvent } from "@/runtime/money-path-events";
+import { isSentryEnabled } from "@/runtime/observability";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -97,6 +103,12 @@ import {
   resolveMuralOnrampAccount,
   resolveMuralRequirements,
 } from "./ramps/mural";
+import {
+  assertRampQuoteBindingMatches,
+  isRampQuoteBindingExpired,
+  type RampQuoteBinding,
+  rampQuoteExpiryProviderData,
+} from "./ramps/quote-binding";
 import { stripeOnrampQuote } from "./ramps/stripe";
 
 type OnrampCurrencyPair = {
@@ -261,6 +273,7 @@ async function resolveRampQuoteRequest(
   walletIdOrAddress: string
 ): Promise<RampQuotePolicyResolved> {
   assertRampCorridorSupported(direction, input);
+  assertApprovedRampRedirectUrl(c.env, input.redirectUrl);
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
 
@@ -398,8 +411,23 @@ function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus
 async function persistRampQuoteTransfer(
   c: AppContext,
   input: PersistRampQuoteTransferInput
-): Promise<void> {
+): Promise<string> {
   const repository = getPaymentsRepository(c);
+  const isOnramp = input.direction === "onramp";
+  const binding: RampQuoteBinding = {
+    organizationId: input.scope.auth.organizationId,
+    projectId: input.projectId,
+    walletId: input.wallet.walletId,
+    counterpartyId: input.counterparty.id,
+    direction: input.direction,
+    token: rampTransferTokenMint(input.cryptoToken, c.env),
+    sourceAddress: isOnramp ? null : input.walletAddress,
+    destinationAddress: isOnramp ? input.walletAddress : null,
+    amount: input.cryptoAmount,
+    fiatCurrency: input.fiatCurrency,
+    fiatAmount: input.fiatAmount,
+  };
+
   const existing = await repository.getTransferByProviderReference({
     provider: input.quote.provider,
     providerReference: input.quote.id,
@@ -407,40 +435,61 @@ async function persistRampQuoteTransfer(
     projectId: input.projectId,
   });
   if (existing) {
-    return;
+    // Idempotent replay only: the same reference with any changed input, or a
+    // reference whose bound session/quote already expired, fails closed.
+    assertRampQuoteBindingMatches(existing, binding);
+    if (isRampQuoteBindingExpired(existing)) {
+      throw conflict("Provider quote/session reference has expired; create a new quote.");
+    }
+    return existing.id;
   }
 
   const apiKey = c.get("apiKey");
-  const isOnramp = input.direction === "onramp";
-  const created = await repository.createTransfer({
-    organizationId: input.scope.auth.organizationId,
-    projectId: input.projectId,
-    walletId: input.wallet.walletId,
-    counterpartyId: input.counterparty.id,
-    sourceAddress: isOnramp ? null : input.walletAddress,
-    destinationAddress: isOnramp ? input.walletAddress : null,
-    token: rampTransferTokenMint(input.cryptoToken, c.env),
-    amount: input.cryptoAmount,
-    memo: null,
-    type: input.direction,
-    direction: isOnramp ? "inbound" : "outbound",
-    status: rampQuoteTransferStatus(input.quote),
-    provider: input.quote.provider,
-    providerReference: input.quote.id,
-    deliveryMode: input.quote.deliveryMode,
-    fiatCurrency: input.fiatCurrency,
-    fiatAmount: input.fiatAmount,
-    rampsMemo: input.rampsMemo,
-    providerData: input.providerData ?? {},
-    serializedTx: null,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: apiKey ? apiKey.id : null,
-  });
+  let created: PaymentTransferRow | null;
+  try {
+    created = await repository.createTransfer({
+      organizationId: binding.organizationId,
+      projectId: binding.projectId,
+      walletId: binding.walletId,
+      counterpartyId: binding.counterpartyId,
+      sourceAddress: binding.sourceAddress,
+      destinationAddress: binding.destinationAddress,
+      token: binding.token,
+      amount: binding.amount,
+      memo: null,
+      type: input.direction,
+      direction: isOnramp ? "inbound" : "outbound",
+      status: rampQuoteTransferStatus(input.quote),
+      provider: input.quote.provider,
+      providerReference: input.quote.id,
+      deliveryMode: input.quote.deliveryMode,
+      fiatCurrency: binding.fiatCurrency,
+      fiatAmount: binding.fiatAmount,
+      rampsMemo: input.rampsMemo,
+      providerData: {
+        ...(input.providerData ?? {}),
+        ...rampQuoteExpiryProviderData(input.quote),
+      },
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: apiKey ? apiKey.id : null,
+    });
+  } catch (error) {
+    // The (provider, provider_reference) unique index spans all tenants: a
+    // reference already bound outside this tenant's scope surfaces here.
+    if (isPostgresUniqueViolation(error)) {
+      throw conflict(
+        "Provider quote/session reference is already bound to a different ramp transfer."
+      );
+    }
+    throw error;
+  }
 
   if (!created) {
     throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
   }
+  return created.id;
 }
 
 export async function advanceCounterpartyRequirements(
@@ -453,11 +502,7 @@ export async function advanceCounterpartyRequirements(
     case "moneygram":
       return readyCounterparty("moneygram", input.direction);
     case "lightspark": {
-      const customer = await ensureLightsparkCustomer(c, {
-        counterparty: input.counterparty,
-        projectId: input.projectId,
-        collectedData: input.collectedData,
-      });
+      const customer = ensureLightsparkCustomer(input.counterparty);
       if (input.direction === "offramp") {
         await ensureLightsparkPayoutAccount(c, {
           counterparty: input.counterparty,
@@ -499,10 +544,7 @@ export async function advanceCounterpartyRequirements(
         }
         return readyCounterparty("bvnk", input.direction);
       }
-      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId, {
-        fiatCurrency: input.fiatCurrency,
-        collectedData: input.collectedData,
-      });
+      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId);
       const scope = await resolveScope(c);
       const destinationWalletAddress = resolveWalletAddress(
         scope.wallets,
@@ -537,7 +579,7 @@ export async function advanceCounterpartyRequirements(
 /** Ceiling on simultaneous live provider estimate calls per request. */
 export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
 
-async function estimateAcrossProviders(
+export async function estimateAcrossProviders(
   c: AppContext,
   providers: readonly RampProviderId[],
   runProvider: (provider: RampProviderId, ctx: RampRuntimeContext) => Promise<PaymentRampEstimate>
@@ -556,6 +598,26 @@ async function estimateAcrossProviders(
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
+        }
+        const cause = error instanceof Error ? error : new Error(String(error));
+        logEvent("error", {
+          event: "sdp_api_ramp_provider_error",
+          provider,
+          organization_id: scope.auth.organizationId,
+          error_message: redactCredentialString(cause.message),
+          ...describeError(error),
+        });
+        const observability = c.get("observability");
+        if (observability && isSentryEnabled(c.env)) {
+          try {
+            observability.withScope((sentryScope) => {
+              sentryScope.setTag("provider", provider);
+              sentryScope.setTag("organization_id", scope.auth.organizationId);
+              observability.captureException(redactErrorForCapture(cause));
+            });
+          } catch {
+            // never let telemetry change the per-provider error contract
+          }
         }
         return {
           provider,
@@ -629,7 +691,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         redirectUrl: input.redirectUrl,
       });
       break;
@@ -644,7 +706,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         customerId,
         redirectUrl: input.redirectUrl,
       });
@@ -683,7 +745,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
       });
       break;
     }
@@ -694,8 +756,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
-        email: counterparty.email,
-        phone: counterparty.entity_type === "individual" ? counterparty.identity.phone : undefined,
         domain: input.domain,
       });
       break;
@@ -720,7 +780,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
   }
 
-  await persistRampQuoteTransfer(c, {
+  const transferId = await persistRampQuoteTransfer(c, {
     scope,
     projectId,
     counterparty,
@@ -736,7 +796,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     providerData: transferProviderData,
   });
 
-  return success(c, { quote });
+  return success(c, { quote, transferId });
 }
 
 export async function createOfframpQuote(c: AppContext): Promise<Response> {
@@ -762,7 +822,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         redirectUrl: input.redirectUrl,
       });
       break;
@@ -788,7 +848,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         customerId,
         payoutAccountId: payoutAccount.accountId,
       });
@@ -824,8 +884,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           cryptoAmount: input.cryptoAmount,
           sourceWalletAddress,
           paymentTransferId: pendingTransfer.id,
-          externalCustomerId: counterparty.external_id ?? counterparty.id,
-          bvnkCompliance: buildBvnkPartyDetails(counterparty, "ORIGINATOR"),
+          externalCustomerId: counterparty.id,
+          bvnkCompliance: buildBvnkPartyDetails(counterparty),
           bvnkOfframpWalletId: wallet.id,
         });
       } catch (error) {
@@ -847,7 +907,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
       });
       break;
     }
@@ -866,6 +926,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
     }
   }
 
+  let transferId: string;
   if (pendingTransfer) {
     await completePendingBvnkOfframpTransfer(c, {
       organizationId: scope.auth.organizationId,
@@ -874,8 +935,9 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       quote,
       status: rampQuoteTransferStatus(quote),
     });
+    transferId = pendingTransfer.id;
   } else {
-    await persistRampQuoteTransfer(c, {
+    transferId = await persistRampQuoteTransfer(c, {
       scope,
       projectId,
       counterparty,
@@ -891,7 +953,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
     });
   }
 
-  return success(c, { quote });
+  return success(c, { quote, transferId });
 }
 
 export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRampTransferSchema>) {

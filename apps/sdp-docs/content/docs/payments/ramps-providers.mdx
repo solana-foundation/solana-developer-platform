@@ -50,6 +50,8 @@ MoonPay normalizes token symbols internally — `USDC` is mapped to `usdc_sol`, 
 
 Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). `destinationWallet` / `sourceWallet` are your own custody wallet, same as every other provider — Lightspark's customer id and payout account are resolved server-side from the counterparty's Provider Requirements, not passed on the quote request.
 
+Counterparties no longer store identity or email fields. Existing Lightspark customers continue to resolve from provider data, but first-time customer creation currently fails with a clear error until just-in-time identity collection is connected.
+
 Lightspark quotes always return `deliveryMode: "manual_instructions"` — the response carries funding instructions to display to the payer, not a redirect URL.
 
 ## BVNK
@@ -66,7 +68,7 @@ Lightspark quotes always return `deliveryMode: "manual_instructions"` — the re
 
 BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
-BVNK is a travel-rule / compliance-sharing provider: it requires party details (name, address, and similar identity fields) to satisfy KYC sharing requirements. SDP builds those party details from the counterparty's own record when creating the quote — there is no compliance object to pass on the ramp request itself. Populate the counterparty's identity fields before quoting BVNK.
+BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. Counterparties no longer store those fields, so customer creation, payment-rule creation, and off-ramp compliance payloads currently fail with a clear error at the pending just-in-time collection seam.
 
 BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
 
@@ -90,7 +92,7 @@ MoneyGram quotes always return `deliveryMode: "session_widget"`: both onramp and
 
 Coinbase is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject with "Coinbase Onramp does not support off-ramp." Onramp quotes always return `deliveryMode: "hosted"`: SDP creates a guest-checkout Apple Pay order and returns its payment link as `hostedUrl`.
 
-Order creation (the quote step) is sandbox-only today — it requires buyer agreement and phone-OTP attestation timestamps that SDP's production flow does not yet collect, so a non-sandbox request fails loudly instead of sending a false attestation. Rate estimates have no such restriction and work in both modes. Onramp requires the counterparty to have an email and phone number.
+Order creation (the quote step) is sandbox-only today — it requires buyer agreement and phone-OTP attestation timestamps that SDP's production flow does not yet collect, so a non-sandbox request fails loudly instead of sending a false attestation. Rate estimates have no such restriction and work in both modes. Coinbase also requires email and phone values; quote creation currently fails at the pending just-in-time collection seam.
 
 ## Mural
 
@@ -102,6 +104,8 @@ Order creation (the quote step) is sandbox-only today — it requires buyer agre
 | `MURAL_PAY_SANDBOX_TRANSFER_API_KEY` | conditional | Sandbox equivalent of the transfer key. |
 
 Mural onramp is business-counterparty only (no individual entity type). A quote requires the counterparty's Mural organization and payin account already provisioned — through Provider Requirements onboarding (organization creation, terms-of-service acceptance, verification) — and returns `deliveryMode: "manual_instructions"` built from that account's active payin method; the quote step itself makes no live Mural call.
+
+Existing Mural organizations continue to resolve from provider data. First-time organization creation currently fails with a clear error until just-in-time identity collection is connected.
 
 Off-ramp rate estimates work today (a real call to Mural's fees endpoint), but off-ramp quote creation always throws — it is not implemented yet.
 

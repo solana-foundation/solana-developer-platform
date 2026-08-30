@@ -95,18 +95,18 @@ describe("validateBody", () => {
 
   it("renders a nested issue with its full dot path in the message", async () => {
     const nestedSchema = z.object({
-      identity: z.object({
+      profile: z.object({
         address: z.object({ line1: z.string().min(1) }),
       }),
     });
     const res = await post(
       createApp(nestedSchema),
-      JSON.stringify({ identity: { address: { line1: "" } } })
+      JSON.stringify({ profile: { address: { line1: "" } } })
     );
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.message).toContain("→ at identity.address.line1");
+    expect(body.error.message).toContain("→ at profile.address.line1");
     expect(body.error.details).toBeUndefined();
   });
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { Check, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,21 +18,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useCopy } from "@/lib/use-copy";
 import {
   createRingsWallet,
   fetchRingsHealth,
   fetchRingsOperations,
   fetchRingsWallets,
+  RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsHealthStatus,
   type RingsOperationState,
   type RingsOperationSummary,
   type RingsWallet,
 } from "./helius-rings.data";
-import { formatWhen } from "./helius-rings.utils";
+import { formatWhen, healthAlerts, shortenShieldedAddress } from "./helius-rings.utils";
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { RecoveryCard } from "./recovery-card";
+import { ShieldedBalanceCard } from "./shielded-balance-card";
+import { WalletIdentityCheck } from "./wallet-identity-check";
 import { ZonesCard } from "./zones-card";
 
 interface CustodyWalletOption {
@@ -39,8 +44,6 @@ interface CustodyWalletOption {
   label: string | null;
   publicKey: string;
 }
-
-const HEALTH_COMPONENTS = ["rpc", "prover", "photon", "gateway"] as const;
 
 const HEALTH_BADGE: Record<RingsHealthStatus, "success" | "warning" | "danger"> = {
   green: "success",
@@ -83,7 +86,7 @@ export function HeliusRingsWorkspace({
   const [walletName, setWalletName] = useState("");
   const [selectedCustodyWallet, setSelectedCustodyWallet] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [createNotice, setCreateNotice] = useState<"pending" | "failed" | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const loadFailedCopy = t("DashboardHeliusRings.errors.loadFailed");
 
@@ -108,24 +111,33 @@ export function HeliusRingsWorkspace({
   }, [refresh]);
 
   const gatewayPending = health !== null && health.gateway !== "green";
+  const alerts = healthAlerts(health);
 
   const handleCreate = useCallback(async () => {
     if (!selectedCustodyWallet || !walletName.trim()) return;
     setCreating(true);
-    setCreateNotice(null);
-    const result = await createRingsWallet({
-      walletId: selectedCustodyWallet,
-      name: walletName.trim(),
-    });
-    setCreating(false);
-    if (result.pendingIntegration) {
-      setCreateNotice("pending");
-    } else if (result.error) {
-      setCreateNotice("failed");
+    setCreateError(null);
+    try {
+      const result = await createRingsWallet({
+        walletId: selectedCustodyWallet,
+        name: walletName.trim(),
+      });
+      if (result.wallet) {
+        setWalletName("");
+        setCreateError(null);
+      } else {
+        // The server's reason verbatim: it is the only text naming what went wrong.
+        setCreateError(result.error ?? t("DashboardHeliusRings.wallets.createFailed"));
+      }
+    } catch {
+      setCreateError(t("DashboardHeliusRings.wallets.createFailed"));
+    } finally {
+      setCreating(false);
     }
-    setWalletName("");
+    // The row is reserved before provisioning, so a failure still leaves a
+    // pending wallet to show.
     await refresh();
-  }, [selectedCustodyWallet, walletName, refresh]);
+  }, [selectedCustodyWallet, walletName, refresh, t]);
 
   const custodyLabel = useMemo(() => {
     const byId = new Map(custodyWallets.map((wallet) => [wallet.walletId, wallet]));
@@ -148,7 +160,7 @@ export function HeliusRingsWorkspace({
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-4">
-            {HEALTH_COMPONENTS.map((component) => {
+            {RINGS_HEALTH_COMPONENTS.map((component) => {
               const status = health?.[component] ?? "red";
               return (
                 <div key={component} className="flex items-center gap-2">
@@ -162,59 +174,94 @@ export function HeliusRingsWorkspace({
               );
             })}
           </div>
-          {gatewayPending ? (
-            <p className="text-sm text-secondary">
-              {t("DashboardHeliusRings.health.pendingIntegration")}
+          {/* A red badge with no reason is a dead end, so the probe's own
+              classification is rendered rather than dropped. */}
+          {alerts.map((alert) => (
+            <p key={alert.reason} className="text-sm text-secondary">
+              {t("DashboardHeliusRings.health.reason", {
+                components: alert.components
+                  .map((component) => t(`DashboardHeliusRings.health.component_${component}`))
+                  .join(", "),
+                reason: alert.reason,
+              })}
             </p>
-          ) : null}
+          ))}
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>{t("DashboardHeliusRings.wallets.title")}</CardTitle>
           <CardDescription>{t("DashboardHeliusRings.wallets.description")}</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent className="flex min-w-0 flex-col gap-4">
           {wallets.length === 0 ? (
             <p className="text-sm text-secondary">{t("DashboardHeliusRings.wallets.empty")}</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("DashboardHeliusRings.wallets.name")}</TableHead>
-                  <TableHead>{t("DashboardHeliusRings.wallets.backingWallet")}</TableHead>
-                  <TableHead>{t("DashboardHeliusRings.wallets.shieldedAddress")}</TableHead>
-                  <TableHead>{t("DashboardHeliusRings.activity.state")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {wallets.map((wallet) => (
-                  <TableRow key={wallet.id}>
-                    <TableCell>{wallet.name}</TableCell>
-                    <TableCell>{custodyLabel(wallet.sdpWalletId)}</TableCell>
-                    <TableCell>
-                      {wallet.shieldedAddress ??
-                        t("DashboardHeliusRings.wallets.shieldedAddressPending")}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={WALLET_BADGE[wallet.status]}>
-                        {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
-                      </Badge>
-                    </TableCell>
+            <div className="min-w-0 overflow-x-auto">
+              <Table className="min-w-0 [&_table]:table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[18%]">
+                      {t("DashboardHeliusRings.wallets.name")}
+                    </TableHead>
+                    <TableHead className="w-[16%]">
+                      {t("DashboardHeliusRings.wallets.backingWallet")}
+                    </TableHead>
+                    <TableHead className="w-[18%]">
+                      {t("DashboardHeliusRings.wallets.shieldedAddress")}
+                    </TableHead>
+                    <TableHead className="w-[16%]">
+                      {t("DashboardHeliusRings.wallets.balance")}
+                    </TableHead>
+                    <TableHead className="w-[10%]">
+                      {t("DashboardHeliusRings.activity.state")}
+                    </TableHead>
+                    <TableHead className="w-[22%]">
+                      {t("DashboardHeliusRings.identity.column")}
+                    </TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {wallets.map((wallet) => (
+                    <TableRow key={wallet.id}>
+                      <TableCell className="min-w-0">{wallet.name}</TableCell>
+                      <TableCell className="min-w-0">{custodyLabel(wallet.sdpWalletId)}</TableCell>
+                      <TableCell className="min-w-0">
+                        {wallet.shieldedAddress === null ? (
+                          t("DashboardHeliusRings.wallets.shieldedAddressPending")
+                        ) : (
+                          <ShieldedAddress address={wallet.shieldedAddress} />
+                        )}
+                      </TableCell>
+                      <TableCell className="min-w-0 align-top">
+                        <ShieldedBalanceCard wallet={wallet} />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={WALLET_BADGE[wallet.status]}>
+                          {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
+                        </Badge>
+                      </TableCell>
+                      {/* Only for a wallet stuck `pending`: a provisioned wallet's
+                          identity is re-derived and pinned on every read. */}
+                      <TableCell className="min-w-0 align-top">
+                        {wallet.status === "pending" ? (
+                          <WalletIdentityCheck wallet={wallet} />
+                        ) : (
+                          t("DashboardHeliusRings.identity.notApplicable")
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
 
-          {createNotice === "pending" ? (
-            <Callout variant="info">
-              {t("DashboardHeliusRings.wallets.createPendingNotice")}
+          {createError ? (
+            <Callout variant="danger" live>
+              {createError}
             </Callout>
-          ) : null}
-          {createNotice === "failed" ? (
-            <Callout variant="danger">{t("DashboardHeliusRings.wallets.createFailed")}</Callout>
           ) : null}
 
           {custodyWallets.length === 0 ? (
@@ -318,5 +365,34 @@ export function HeliusRingsWorkspace({
         onClose={() => setDetailOperationId(null)}
       />
     </div>
+  );
+}
+
+/**
+ * Scan-shortened so an 88-char commitment cannot blow the layout; the copy
+ * control and `title` still carry the whole string.
+ */
+function ShieldedAddress({ address }: { address: string }) {
+  const t = useTranslations();
+  const { copied, copy } = useCopy();
+  const label = copied
+    ? t("DashboardHeliusRings.wallets.shieldedAddressCopied")
+    : t("DashboardHeliusRings.wallets.copyShieldedAddress");
+
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <span className="font-mono text-sm" title={address}>
+        {shortenShieldedAddress(address)}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        title={label}
+        onClick={() => void copy(address)}
+      >
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      </Button>
+    </span>
   );
 }

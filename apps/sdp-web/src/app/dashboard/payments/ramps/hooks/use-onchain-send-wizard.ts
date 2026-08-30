@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   createTransfer,
   fetchCounterpartyAccounts,
@@ -96,7 +97,7 @@ export function useOnchainSendWizard({
     isLoading: accountsLoading,
     mutate: mutateAccounts,
   } = useSWR(
-    counterpartyId ? ["counterparty-accounts", counterpartyId] : null,
+    counterpartyId ? paymentsQueryKeys.counterpartyAccounts({ counterpartyId }) : null,
     ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );

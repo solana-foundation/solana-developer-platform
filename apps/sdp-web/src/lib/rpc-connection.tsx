@@ -2,6 +2,7 @@
 
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { Badge } from "@/components/ui/badge";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { rpcProviderLabel } from "@/lib/rpc-providers";
@@ -21,8 +22,17 @@ type RpcProxyResponse = {
   };
 };
 
+/**
+ * Why a failed test failed. A mismatch is not an unreachable endpoint: the
+ * upstream answered, another provider just owned the request. Collapsing the
+ * two reported a healthy Alchemy connection as "Unreachable" beside its own
+ * 200 OK.
+ */
+export type RpcTestFailure = "mismatch" | "upstream" | "request_failed";
+
 export type RpcTestResult = {
   status: "success" | "error";
+  reason?: RpcTestFailure;
   message: string;
   requestedProvider: OrganizationRpcProvider;
   resolvedProvider?: string;
@@ -71,6 +81,7 @@ export async function runRpcProviderTest(
     if (!result.ok) {
       return {
         status: "error",
+        reason: "request_failed",
         message: result.error,
         requestedProvider,
         latencyMs,
@@ -85,9 +96,10 @@ export async function runRpcProviderTest(
     if (requestedProvider !== "default" && resolvedProvider !== requestedProvider) {
       return {
         status: "error",
+        reason: "mismatch",
         message: t("DashboardCustody.rpcTestMismatch", {
-          requested: requestedProvider,
-          resolved: resolvedProvider,
+          requested: rpcProviderLabel(requestedProvider),
+          resolved: rpcProviderLabel(resolvedProvider),
         }),
         requestedProvider,
         resolvedProvider,
@@ -102,6 +114,7 @@ export async function runRpcProviderTest(
     if (!upstream.ok) {
       return {
         status: "error",
+        reason: "upstream",
         message: t("DashboardCustody.rpcUpstreamReturned", {
           status: upstream.status,
           statusText: upstream.statusText,
@@ -134,6 +147,7 @@ export async function runRpcProviderTest(
   } catch (error) {
     return {
       status: "error",
+      reason: "request_failed",
       message: toRpcTestErrorMessage(error, t("DashboardCustody.failedToTestRpcProvider")),
       requestedProvider,
       latencyMs: Date.now() - startedAt,
@@ -141,22 +155,51 @@ export async function runRpcProviderTest(
   }
 }
 
+/**
+ * The relay's own vocabulary for how it picked an endpoint. Rendering the raw
+ * enum put `project_connection` in front of readers who have no reason to know
+ * the API's spelling.
+ */
+const SELECTION_MODE_KEYS: Record<string, MessageKey> = {
+  project_connection: "DashboardCustody.rpcSelectionProjectConnection",
+  organization_connection: "DashboardCustody.rpcSelectionOrganizationConnection",
+  project_provider: "DashboardCustody.rpcSelectionProjectProvider",
+  project_custom_provider: "DashboardCustody.rpcSelectionProjectCustomProvider",
+  organization_provider: "DashboardCustody.rpcSelectionOrganizationProvider",
+  round_robin_default: "DashboardCustody.rpcSelectionRoundRobinDefault",
+};
+
+/** Falls back to the raw mode so an unmapped one still says something. */
+function selectionModeLabel(mode: string, t: Translate): string {
+  const key = SELECTION_MODE_KEYS[mode];
+  return key ? t(key) : mode;
+}
+
 export function RpcTestResultPanel({ result }: { result: RpcTestResult }) {
   const t = useTranslations();
+  // Three outcomes, not two: a mismatch reached the upstream fine.
+  const badge =
+    result.status === "success"
+      ? { variant: "success" as const, label: t("DashboardCustody.rpcDetailReachable") }
+      : result.reason === "mismatch"
+        ? { variant: "warning" as const, label: t("DashboardCustody.rpcDetailMismatch") }
+        : { variant: "danger" as const, label: t("DashboardCustody.rpcDetailUnreachable") };
   return (
     <div className="rounded-xl border border-border-default bg-fill-subtle p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-primary">
           {t("DashboardCustody.rpcDetailTitle")}
         </span>
-        <Badge variant={result.status === "success" ? "success" : "danger"}>
-          {result.status === "success"
-            ? t("DashboardCustody.rpcDetailReachable")
-            : t("DashboardCustody.rpcDetailUnreachable")}
-        </Badge>
+        <Badge variant={badge.variant}>{badge.label}</Badge>
       </div>
       {result.status === "error" ? (
-        <p className="mt-2 text-sm text-error">{result.message}</p>
+        <p
+          className={
+            result.reason === "mismatch" ? "mt-2 text-sm text-warning" : "mt-2 text-sm text-error"
+          }
+        >
+          {result.message}
+        </p>
       ) : null}
       <dl className="mt-3 grid gap-2 text-sm">
         {result.resolvedProvider ? (
@@ -168,15 +211,15 @@ export function RpcTestResultPanel({ result }: { result: RpcTestResult }) {
         {result.selectionMode ? (
           <div className="flex items-center justify-between gap-3">
             <dt className="text-tertiary">{t("DashboardCustody.rpcDetailSelectionMode")}</dt>
-            <dd className="text-primary">{result.selectionMode}</dd>
+            <dd className="text-primary">{selectionModeLabel(result.selectionMode, t)}</dd>
           </div>
         ) : null}
         {result.endpoint ? (
           <div className="flex items-start justify-between gap-3">
             <dt className="shrink-0 text-tertiary">{t("DashboardCustody.rpcDetailEndpoint")}</dt>
-            <dd className="min-w-0 break-all text-right font-mono text-xs text-primary">
-              {result.endpoint}
-            </dd>
+            {/* Not a code surface: an endpoint in a settings row reads as
+                product UI, so it keeps the body text style. */}
+            <dd className="min-w-0 break-all text-right text-primary">{result.endpoint}</dd>
           </div>
         ) : null}
         {result.upstreamStatus !== undefined ? (
