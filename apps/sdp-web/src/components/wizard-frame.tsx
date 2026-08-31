@@ -11,6 +11,7 @@ interface WizardFrameProps {
   aside?: ReactNode;
   children: ReactNode;
   currentStep: number;
+  currentStepTitle?: string;
   description?: ReactNode;
   footer?: ReactNode;
   header?: ReactNode;
@@ -19,6 +20,7 @@ interface WizardFrameProps {
   /** Selection recap opened from the "View summary" button in a modal. */
   summary?: ReactNode;
   steps: readonly { label: string; title: string }[];
+  titleBadge?: ReactNode;
   /** Actions rendered to the right of the step progress indicator. */
   toolbarActions?: ReactNode;
 }
@@ -33,6 +35,7 @@ export function WizardFrame({
   aside,
   children,
   currentStep,
+  currentStepTitle,
   description,
   footer,
   header,
@@ -40,6 +43,7 @@ export function WizardFrame({
   progressLabel,
   summary,
   steps,
+  titleBadge,
   toolbarActions,
 }: WizardFrameProps) {
   const t = useTranslations();
@@ -51,7 +55,12 @@ export function WizardFrame({
     <>
       <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-2xl font-medium tracking-tight text-primary">{activeStep.title}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-medium tracking-tight text-primary">
+              {currentStepTitle ?? activeStep.title}
+            </h2>
+            {titleBadge}
+          </div>
           {description ? <div className="text-sm text-secondary">{description}</div> : null}
         </div>
         {header || showSummaryButton ? (

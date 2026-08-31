@@ -89,6 +89,9 @@ export function OnrampRail({
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
+      completionTitle={
+        wizard.transferStatus?.status === "completed" ? t("DashboardPayments.deposit") : undefined
+      }
       primaryDisabled={
         wizard.hostedQuoteLoading ||
         verificationPending ||

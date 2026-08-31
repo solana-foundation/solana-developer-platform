@@ -183,6 +183,7 @@
       "funded": "Depositado",
       "sent": "Enviado",
       "provider": "Provedor",
+      "payout": "Pagamento de saída",
       "finalFundedAmount": "Valor final depositado",
       "finalSentAmount": "Valor final enviado",
       "finalReceivedAmount": "Valor final recebido",

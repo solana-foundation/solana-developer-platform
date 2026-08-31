@@ -2,13 +2,7 @@
 
 import type { PaymentRampQuote, PaymentTransferSummary, SolanaCluster } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
-import {
-  ArrowRightIcon,
-  CheckCircle2Icon,
-  CheckIcon,
-  CopyIcon,
-  ExternalLinkIcon,
-} from "lucide-react";
+import { ArrowRightIcon, CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import {
   formatDisplayAmount,
   formatMinorCurrencyAmount,
@@ -303,36 +297,19 @@ export function RampCompleteScreen({
   });
 
   return (
-    <div className="flex flex-col items-center gap-6">
-      <div className="flex size-16 items-center justify-center rounded-full bg-success-bg text-success">
-        <CheckCircle2Icon className="size-8" />
+    <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
+      <CompletionAmountFlow sourceAmount={secondaryAmount} destinationAmount={primaryAmount} />
+      <div>
+        {detailRows.map((detail) => (
+          <TransferDetailRow
+            key={detail.label}
+            label={detail.label}
+            value={detail.value}
+            href={detail.href}
+            copyValue={detail.copyValue}
+          />
+        ))}
       </div>
-      <div className="space-y-1 text-center">
-        <p className="text-2xl font-medium tracking-tight text-primary">
-          {onramp
-            ? t("DashboardPayments.ramps.depositComplete")
-            : t("DashboardPayments.ramps.payoutComplete")}
-        </p>
-        <p className="text-sm text-tertiary">
-          {onramp
-            ? t("DashboardPayments.ramps.depositCompleteDescription")
-            : t("DashboardPayments.ramps.payoutCompleteDescription")}
-        </p>
-      </div>
-      <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
-        <CompletionAmountFlow sourceAmount={secondaryAmount} destinationAmount={primaryAmount} />
-        <div>
-          {detailRows.map((detail) => (
-            <TransferDetailRow
-              key={detail.label}
-              label={detail.label}
-              value={detail.value}
-              href={detail.href}
-              copyValue={detail.copyValue}
-            />
-          ))}
-        </div>
-      </section>
-    </div>
+    </section>
   );
 }

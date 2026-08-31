@@ -183,6 +183,7 @@
       "funded": "Fondeado",
       "sent": "Enviado",
       "provider": "Proveedor",
+      "payout": "Pago saliente",
       "finalFundedAmount": "Monto final fondeado",
       "finalSentAmount": "Monto final enviado",
       "finalReceivedAmount": "Monto final recibido",

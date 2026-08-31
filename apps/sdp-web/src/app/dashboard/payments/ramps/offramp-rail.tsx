@@ -59,6 +59,11 @@ export function OfframpRail({
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
+      completionTitle={
+        wizard.transferStatus?.status === "completed"
+          ? t("DashboardPayments.ramps.payout")
+          : undefined
+      }
       primaryDisabled={
         wizard.hostedQuoteLoading ||
         !wizard.canProceed ||

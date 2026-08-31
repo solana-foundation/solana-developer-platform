@@ -182,6 +182,7 @@
       "funded": "Đã nạp",
       "sent": "Đã gửi",
       "provider": "Provider",
+      "payout": "Chi trả",
       "finalFundedAmount": "Số tiền nạp cuối",
       "finalSentAmount": "Số tiền gửi cuối",
       "finalReceivedAmount": "Số tiền nhận cuối",

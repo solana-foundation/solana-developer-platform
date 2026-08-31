@@ -178,6 +178,7 @@
       "funded": "Funded",
       "sent": "Sent",
       "provider": "Provider",
+      "payout": "Payout",
       "finalFundedAmount": "Final funded amount",
       "finalSentAmount": "Final sent amount",
       "finalReceivedAmount": "Final received amount",

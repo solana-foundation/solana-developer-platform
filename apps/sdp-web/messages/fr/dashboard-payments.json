@@ -183,6 +183,7 @@
       "funded": "Financé",
       "sent": "Envoyé",
       "provider": "Fournisseur",
+      "payout": "Paiement",
       "finalFundedAmount": "Montant final financé",
       "finalSentAmount": "Montant final envoyé",
       "finalReceivedAmount": "Montant final reçu",
