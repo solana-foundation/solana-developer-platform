@@ -139,24 +139,17 @@ function completionDetailRows({
   const providerRows = providerTransferDetailRows(transfer, { cluster }, t).filter(
     (row) => !exchangeRate || row.key !== "DashboardPayments.transferDetails.exchangeRate"
   );
+  const receiptRow = providerRows.find(
+    (row) => row.key === "DashboardPayments.transferDetails.receipt"
+  );
+  const economicsRows = providerRows.filter(
+    (row) => row.key !== "DashboardPayments.transferDetails.receipt"
+  );
   return [
-    !primaryAmount && secondaryAmount
-      ? {
-          label: onramp ? t("DashboardPayments.ramps.funded") : t("DashboardPayments.ramps.sent"),
-          value: secondaryAmount,
-        }
-      : null,
     {
       label: t("DashboardPayments.ramps.provider"),
       value: getRampProviderLabel(quote.provider),
     },
-    exchangeRate
-      ? {
-          label: t("DashboardPayments.transferDetails.exchangeRate"),
-          value: exchangeRate,
-        }
-      : null,
-    ...providerRows,
     transfer.providerReference
       ? {
           label: t("DashboardPayments.transferDetails.providerReference"),
@@ -164,6 +157,24 @@ function completionDetailRows({
           copyValue: transfer.providerReference,
         }
       : null,
+    {
+      label: t("DashboardPayments.ramps.transferId"),
+      value: transfer.id,
+      copyValue: transfer.id,
+    },
+    !primaryAmount && secondaryAmount
+      ? {
+          label: onramp ? t("DashboardPayments.ramps.funded") : t("DashboardPayments.ramps.sent"),
+          value: secondaryAmount,
+        }
+      : null,
+    exchangeRate
+      ? {
+          label: t("DashboardPayments.transferDetails.exchangeRate"),
+          value: exchangeRate,
+        }
+      : null,
+    ...economicsRows,
     ...(onramp ? [] : offrampDepositRows(transfer, cluster, t)),
     ...lightsparkCompletionRows(quote, onramp, t),
     transfer.createdAt
@@ -178,11 +189,7 @@ function completionDetailRows({
           value: formatTimestamp(transfer.updatedAt, t),
         }
       : null,
-    {
-      label: t("DashboardPayments.ramps.transferId"),
-      value: transfer.id,
-      copyValue: transfer.id,
-    },
+    receiptRow ?? null,
   ].filter(isDetailRow);
 }
 
