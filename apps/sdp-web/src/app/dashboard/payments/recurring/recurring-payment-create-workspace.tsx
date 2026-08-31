@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { TokenMark } from "@/components/token-mark";
 import type { BadgeVariant } from "@/components/ui/badge";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -32,10 +33,7 @@ import {
 import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
-import {
-  PAYMENTS_ACTION_WALLETS_KEY,
-  usePaymentsActionWallets,
-} from "../ramps/hooks/use-payments-action-wallets";
+import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
 
@@ -64,8 +62,6 @@ interface RecurringPaymentCreateFields {
 }
 
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
-
-const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
 function resolveAccountAddress(account: CounterpartyAccount | null): string {
   if (!account) {
@@ -290,7 +286,7 @@ export function RecurringPaymentCreateWorkspace({
   });
 
   const { data: liveCounterpartiesResult, mutate: mutateCounterparties } = useSWR(
-    PAYMENTS_ACTION_COUNTERPARTIES_KEY,
+    paymentsQueryKeys.actionCounterparties(),
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
@@ -308,7 +304,9 @@ export function RecurringPaymentCreateWorkspace({
     isLoading: accountsLoading,
     mutate: mutateAccounts,
   } = useSWR(
-    fields.counterpartyId ? ["counterparty-accounts", fields.counterpartyId] : null,
+    fields.counterpartyId
+      ? paymentsQueryKeys.counterpartyAccounts({ counterpartyId: fields.counterpartyId })
+      : null,
     ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
@@ -426,8 +424,10 @@ export function RecurringPaymentCreateWorkspace({
     }));
     setFormError(null);
     if (counterpartyId) {
-      void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }, t));
-      void preload(["counterparty-accounts", counterpartyId], () =>
+      void preload(paymentsQueryKeys.actionWallets(), () =>
+        fetchWallets({ includeBalances: true }, t)
+      );
+      void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId }), () =>
         fetchCounterpartyAccounts(counterpartyId, t)
       );
     }

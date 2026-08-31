@@ -8,6 +8,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -141,6 +142,7 @@ export async function executeChunk(params: {
         projectId: resolved.projectId,
       })
     ).createTransfer({
+      id: generatePaymentTransferId(),
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
       walletId: resolved.sourceWallet.walletId,

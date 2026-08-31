@@ -29,6 +29,7 @@ import {
   type PaymentSubscriptionsRepository,
   type PaymentTransferRow,
 } from "@/db/repositories";
+import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { AppError, badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -1241,6 +1242,7 @@ export async function collectRecurringPayment(input: {
       const transactionPaymentsRepo = createPostgresPaymentsRepository(tx, tenantScope(input));
       const transactionSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
       const createdTransfer = await transactionPaymentsRepo.createTransfer({
+        id: generatePaymentTransferId(),
         organizationId: input.organizationId,
         projectId: input.projectId,
         walletId: input.sourceWallet.walletId,

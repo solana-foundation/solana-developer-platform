@@ -3,6 +3,8 @@ import type { SigningPort } from "@sdp/custody/signing";
 import { PrivySigner } from "@solana/keychain-privy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { RuntimeEnvCredentialSecretStore } from "@/services/credential-secret-store";
@@ -18,6 +20,7 @@ const PROJECT_ID = "prj_runtime_targets";
 const USER_ID = "usr_runtime_targets";
 const CONFIG_PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
 const CONNECTION_PUBLIC_KEY = "11111111111111111111111111111111";
+const SECOND_CONNECTION_PUBLIC_KEY = "Stake11111111111111111111111111111111111111";
 
 describe("CustodyRuntimeTargets", () => {
   const original = {
@@ -105,12 +108,399 @@ describe("CustodyRuntimeTargets", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  it("admits an exact active Config wallet without constructing a signer", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.admitRuntimeExecution({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${config.id}`,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("logs an unavailable exact Config admission without Provider access", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const custodyWalletId = `cwlt_${config.id}`;
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(custodyWalletId)
+      .run();
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.admitRuntimeExecution({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId,
+      })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "runtime_execution_unavailable" },
+    });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "privy",
+        targetKind: "config",
+        targetId: config.id,
+        custodyWalletId,
+        reason: "runtime_execution_unavailable",
+      },
+      "custody_runtime_target_unavailable"
+    );
+  });
+
+  it("exposes exact admission through the tenant-scoped SigningService", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const service = createSigningService(
+      env,
+      createTenantScope({ organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
+    );
+
+    await expect(
+      service.admitRuntimeExecution(ORGANIZATION_ID, PROJECT_ID, `cwlt_${config.id}`)
+    ).resolves.toBeUndefined();
+    expect(() =>
+      service.admitRuntimeExecution("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
+    ).toThrow(TenantScopeViolationError);
+    expect(() =>
+      service.getTransactionSignerForWalletRecord("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
+    ).toThrow(TenantScopeViolationError);
+  });
+
+  it("admits an active non-selected Connection without reading credentials", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const connection = await seedConnection();
+    await setProjectDefault(config.id, null);
+    const read = mockStoredCredentialRead();
+    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.admitRuntimeExecution({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${connection.id}`,
+      })
+    ).resolves.toBeUndefined();
+    expect(read).not.toHaveBeenCalled();
+    expect(createPrivySigner).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("pauses exact Connection admission before reading credentials when runtime is off", async () => {
+    const connection = await seedConnection();
+    env.PRIVY_BYOK_ENABLED = "false";
+    const read = mockStoredCredentialRead();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.admitRuntimeExecution({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${connection.id}`,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      statusCode: 403,
+      details: { reason: "runtime_execution_paused" },
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [PROJECT_ID, "cwlt_missing"],
+    ["prj_foreign", "cwlt_cconn_runtime_targets"],
+  ])("hides a missing or foreign exact wallet", async (projectId, custodyWalletId) => {
+    await seedConnection();
+    const read = mockStoredCredentialRead();
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.admitRuntimeExecution({
+        organizationId: ORGANIZATION_ID,
+        projectId,
+        custodyWalletId,
+      })
+    ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
+    expect(read).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId,
+        custodyWalletId,
+        reason: "exact_wallet_not_found",
+      },
+      "custody_runtime_target_unavailable"
+    );
+  });
+
+  it("preserves the exact signer's WALLET_NOT_FOUND compatibility code", async () => {
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        "cwlt_missing",
+        createConfigAdapterFactory()
+      )
+    ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: "cwlt_missing",
+        reason: "exact_wallet_not_found",
+      },
+      "custody_runtime_target_unavailable"
+    );
+  });
+
+  it.each(["wallet", "connection", "credential"] as const)(
+    "reports an inactive exact Connection %s as runtime-unavailable",
+    async (inactiveOwner) => {
+      const connection = await seedConnection();
+      if (inactiveOwner === "wallet") {
+        await getDb(env)
+          .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+          .bind(`cwlt_${connection.id}`)
+          .run();
+      } else if (inactiveOwner === "connection") {
+        await getDb(env)
+          .prepare(
+            `UPDATE custody_connections
+             SET status = 'deactivated', deactivated_at = sdp_iso_now()
+             WHERE id = ?`
+          )
+          .bind(connection.id)
+          .run();
+      } else {
+        await getDb(env)
+          .prepare("UPDATE provider_credentials SET status = 'retired' WHERE id = ?")
+          .bind(connection.credentialId)
+          .run();
+      }
+      const read = mockStoredCredentialRead();
+      const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.admitRuntimeExecution({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          custodyWalletId: `cwlt_${connection.id}`,
+        })
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        statusCode: 409,
+        details: { reason: "runtime_execution_unavailable" },
+      });
+      expect(read).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        {
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+          targetKind: "connection",
+          targetId: connection.id,
+          custodyWalletId: `cwlt_${connection.id}`,
+          reason: "connection_unusable",
+        },
+        "custody_runtime_target_unavailable"
+      );
+    }
+  );
+
+  it("rechecks an exact Connection immediately before reading credentials", async () => {
+    const connection = await seedConnection();
+    const read = mockStoredCredentialRead();
+    const getConfigAdapter = createConfigAdapterFactory();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await targets.admitRuntimeExecution({
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      custodyWalletId: `cwlt_${connection.id}`,
+    });
+    await getDb(env)
+      .prepare("UPDATE provider_credentials SET status = 'retired' WHERE id = ?")
+      .bind(connection.credentialId)
+      .run();
+
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${connection.id}`,
+        getConfigAdapter
+      )
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      details: { reason: "runtime_execution_unavailable" },
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(getConfigAdapter).not.toHaveBeenCalled();
+  });
+
+  it("signs with an exact non-default wallet under a non-selected Connection", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const connection = await seedConnection();
+    await setProjectDefault(config.id, null);
+    const custodyWalletId = `cwlt_${connection.id}_secondary`;
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, status
+         ) VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        custodyWalletId,
+        connection.id,
+        `${connection.walletId}_secondary`,
+        SECOND_CONNECTION_PUBLIC_KEY
+      )
+      .run();
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(`cwlt_${connection.id}`)
+      .run();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({ address: SECOND_CONNECTION_PUBLIC_KEY, chain_type: "solana" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const read = mockStoredCredentialRead();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.admitRuntimeExecution({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId,
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        custodyWalletId,
+        createConfigAdapterFactory()
+      )
+    ).resolves.toMatchObject({ address: SECOND_CONNECTION_PUBLIC_KEY });
+    expect(read).toHaveBeenCalledOnce();
+  });
+
+  it.each(["wallet", "config"] as const)(
+    "reports an inactive exact Config %s as runtime-unavailable",
+    async (inactiveOwner) => {
+      const config = await seedConfig({ provider: "privy" });
+      await getDb(env)
+        .prepare(
+          inactiveOwner === "wallet"
+            ? "UPDATE custody_wallets SET status = 'inactive' WHERE id = ?"
+            : "UPDATE custody_configs SET status = 'inactive' WHERE id = ?"
+        )
+        .bind(inactiveOwner === "wallet" ? `cwlt_${config.id}` : config.id)
+        .run();
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.admitRuntimeExecution({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          custodyWalletId: `cwlt_${config.id}`,
+        })
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        statusCode: 409,
+        details: { reason: "runtime_execution_unavailable" },
+      });
+    }
+  );
+
+  it("keeps inactive wallet rows out of the public wallet-record resolver", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(`cwlt_${config.id}`)
+      .run();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.resolve({
+        kind: "wallet_record",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${config.id}`,
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("rechecks an exact Config wallet before constructing its signer", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const getConfigAdapter = createConfigAdapterFactory();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await targets.admitRuntimeExecution({
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      custodyWalletId: `cwlt_${config.id}`,
+    });
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(`cwlt_${config.id}`)
+      .run();
+
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        getConfigAdapter
+      )
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "runtime_execution_unavailable" },
+    });
+    expect(getConfigAdapter).not.toHaveBeenCalled();
+  });
+
+  it("rejects an exact signer whose address does not match the wallet row", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        createConfigAdapterFactory(CONNECTION_PUBLIC_KEY)
+      )
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      details: { reason: "runtime_execution_unavailable" },
+    });
+  });
+
   it("rejects an exact Connection wallet while runtime is off before reading its secret", async () => {
     const config = await seedConfig({ provider: "privy" });
     const connection = await seedConnection();
     await setProjectDefault(config.id, null);
     env.PRIVY_BYOK_ENABLED = "false";
     const read = mockStoredCredentialRead();
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -131,6 +521,18 @@ describe("CustodyRuntimeTargets", () => {
       )
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     expect(read).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "privy",
+        targetKind: "connection",
+        targetId: connection.id,
+        custodyWalletId: null,
+        reason: "runtime_disabled",
+      },
+      "custody_runtime_target_unavailable"
+    );
   });
 
   it("uses the legacy Config for provider resolution while runtime is off", async () => {
@@ -494,10 +896,10 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(
+      targets.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
-        connection.walletId,
+        `cwlt_${connection.id}`,
         createConfigAdapterFactory()
       )
     ).rejects.toMatchObject({
@@ -766,14 +1168,14 @@ function mockStoredCredentialRead() {
   return read;
 }
 
-function createConfigAdapterFactory() {
+function createConfigAdapterFactory(signerAddress = CONFIG_PUBLIC_KEY) {
   const adapter = {
     providerId: "privy",
     getPublicKey: vi.fn().mockResolvedValue(CONFIG_PUBLIC_KEY),
     sign: vi.fn().mockResolvedValue({ status: "completed", signatures: new Map() }),
     requiresApproval: vi.fn().mockReturnValue(false),
     getTransactionSigner: vi.fn().mockResolvedValue({
-      address: CONFIG_PUBLIC_KEY,
+      address: signerAddress,
       signTransactions: vi.fn(),
     }),
   } as unknown as SigningPort;

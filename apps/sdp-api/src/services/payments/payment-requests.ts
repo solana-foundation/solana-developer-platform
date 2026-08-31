@@ -12,7 +12,10 @@ import {
 } from "@solana/pay";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
-import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
+import {
+  generatePaymentTransferId,
+  type PaymentTransferRow,
+} from "@/db/repositories/payments.repository";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
@@ -172,6 +175,7 @@ async function recordInboundTransfer(
   );
   try {
     const transfer = await paymentsRepo.createTransfer({
+      id: generatePaymentTransferId(),
       organizationId: row.organization_id,
       projectId,
       walletId: row.wallet_id,

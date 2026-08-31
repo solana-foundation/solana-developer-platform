@@ -28,6 +28,7 @@ async function resetPaymentTransfers(): Promise<void> {
 function transferInput(overrides: { suffix: string; token?: string; walletId?: string }) {
   const { suffix, token = "SOL", walletId = TEST_WALLET_ID } = overrides;
   return {
+    id: `xfr_${suffix}`,
     organizationId: TEST_ORG.id,
     projectId: null,
     walletId,
@@ -181,6 +182,109 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     expect(await readStatus("xfr_guard_ok")).toBe("canceled");
   });
 
+  it("claims an unoccupied off-ramp row for its on-chain deposit", async () => {
+    const depositAddress = "DepositAddress111";
+    const transfer = await repo.createTransfer({
+      ...transferInput({ suffix: "ramp-onchain" }),
+      destinationAddress: null,
+      type: "offramp",
+      status: "awaiting_payment",
+      provider: "moonpay",
+      providerData: {
+        cryptoDeposit: { destinationAddress: depositAddress, amount: "1.0" },
+      },
+    });
+    if (!transfer) throw new Error("Expected off-ramp transfer creation to succeed");
+
+    const updated = await repo.updateOnchainTransferForRamp({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      walletId: TEST_WALLET_ID,
+      sourceAddress: "Sourceramp-onchain",
+      destinationAddress: depositAddress,
+      token: "SOL",
+      amount: "1",
+      initiatedByKeyId: "key_ramp_onchain",
+      updatedAt: "2026-08-31T10:00:00.000Z",
+    });
+
+    expect(updated).toMatchObject({
+      id: transfer.id,
+      destination_address: depositAddress,
+      initiated_by_key_id: "key_ramp_onchain",
+      status: "processing",
+    });
+  });
+
+  it("does not claim an off-ramp row whose on-chain fields are occupied", async () => {
+    const depositAddress = "DepositAddress222";
+    const transfer = await repo.createTransfer({
+      ...transferInput({ suffix: "ramp-occupied" }),
+      destinationAddress: null,
+      type: "offramp",
+      status: "awaiting_payment",
+      provider: "moonpay",
+      providerData: {
+        cryptoDeposit: { destinationAddress: depositAddress, amount: "1" },
+      },
+      signature: "existing-ramp-signature",
+    });
+    if (!transfer) throw new Error("Expected off-ramp transfer creation to succeed");
+
+    await expect(
+      repo.updateOnchainTransferForRamp({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        walletId: TEST_WALLET_ID,
+        sourceAddress: "Sourceramp-occupied",
+        destinationAddress: depositAddress,
+        token: "SOL",
+        amount: "1",
+        initiatedByKeyId: "key_ramp_occupied",
+        updatedAt: "2026-08-31T10:00:00.000Z",
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("sets a provider reference once and permits only an exact replay", async () => {
+    const transfer = await repo.createTransfer({
+      ...transferInput({ suffix: "provider-reference-binding" }),
+      type: "offramp",
+      status: "pending",
+      provider: "moonpay",
+      providerReference: null,
+    });
+    if (!transfer) throw new Error("Expected MoonPay transfer creation to succeed");
+
+    const input = {
+      transferId: transfer.id,
+      provider: "moonpay" as const,
+      providerReference: "moonpay-transaction-1",
+      updatedAt: "2026-08-31T11:00:00.000Z",
+    };
+    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+      provider_reference: "moonpay-transaction-1",
+    });
+    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+      provider_reference: "moonpay-transaction-1",
+    });
+    await expect(
+      repo.setProviderReferenceIfEmpty({
+        ...input,
+        providerReference: "moonpay-transaction-2",
+        updatedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).resolves.toBeNull();
+    await expect(
+      repo.setProviderReferenceIfEmpty({
+        ...input,
+        provider: "coinbase",
+      })
+    ).resolves.toBeNull();
+  });
+
   it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
     await seedTransfer({ id: "xfr_guard_race", status: "settling" });
 
@@ -326,6 +430,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("persists idempotency metadata and looks it up by (org, key)", async () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const created = await repo.createTransfer({
+      id: "xfr_idempotency_metadata",
       organizationId: TEST_ORG.id,
       projectId: null,
       walletId: TEST_WALLET_ID,
@@ -591,8 +696,12 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       idempotencyFingerprint: "fp-1",
       idempotencyKey: "shared-key",
     };
-    const orgLevel = await repo.createTransfer({ ...base, projectId: null });
-    const projectScoped = await repo.createTransfer({ ...base, projectId: TEST_PROJECT_ID });
+    const orgLevel = await repo.createTransfer({ ...base, id: "xfr_org_level", projectId: null });
+    const projectScoped = await repo.createTransfer({
+      ...base,
+      id: "xfr_project_scoped",
+      projectId: TEST_PROJECT_ID,
+    });
     expect(orgLevel?.id).not.toBe(projectScoped?.id);
 
     const foundOrg = await repo.findTransferByIdempotency({
@@ -636,10 +745,10 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       initiatedByKeyId: null,
       idempotencyFingerprint: "fp-1",
     };
-    await repo.createTransfer({ ...base, idempotencyKey: "dup-key" });
-    await expect(repo.createTransfer({ ...base, idempotencyKey: "dup-key" })).rejects.toSatisfy(
-      (err: unknown) => isPostgresUniqueViolation(err)
-    );
+    await repo.createTransfer({ ...base, id: "xfr_dup_key_first", idempotencyKey: "dup-key" });
+    await expect(
+      repo.createTransfer({ ...base, id: "xfr_dup_key_second", idempotencyKey: "dup-key" })
+    ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
   });
 });
 

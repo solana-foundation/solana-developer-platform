@@ -513,6 +513,7 @@ export const listOfframpCurrenciesQuerySchema = z.object({
 
 export const createTransferSchema = z.object({
   projectId: z.string().min(1).optional(),
+  transferId: z.string().min(1).optional(),
   source: z.string().min(1),
   destination: solanaAddressSchema("destination"),
   token: paymentTokenSchema,
@@ -668,7 +669,6 @@ export const createOnrampQuoteSchema = z.object({
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
-  redirectUrl: z.string().url().optional(),
   rampsMemo: rampsMemoSchema.optional(),
   // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
   domain: z.string().min(1).optional(),
@@ -735,7 +735,6 @@ export const createOfframpQuoteSchema = z.object({
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
-  redirectUrl: z.string().url().optional(),
   rampsMemo: rampsMemoSchema.optional(),
 });
 
