@@ -163,61 +163,6 @@ export interface EarnStrategy {
   updatedAt: string;
 }
 
-/** Persisted customer-facing treatments supported by the Earn button builder. */
-export const EARN_BUTTON_STYLES = ["ink", "light", "accent"] as const;
-export type EarnButtonStyle = (typeof EARN_BUTTON_STYLES)[number];
-export const DEFAULT_EARN_BUTTON_ACCENT_COLOR = "#14F195";
-export const EARN_BUTTON_ACCENT_COLOR_PATTERN = /^#[0-9A-F]{6}$/i;
-
-/**
- * Shape of the public engineering-handoff token. The generator lives in the
- * API repository (`customAlphabet(..., EARN_BUTTON_PUBLIC_TOKEN_LENGTH)`);
- * every validator (API route params, OpenAPI, web client) must consume these
- * rather than restating the shape.
- */
-export const EARN_BUTTON_PUBLIC_TOKEN_LENGTH = 24;
-export const EARN_BUTTON_PUBLIC_TOKEN_PATTERN = /^[A-Za-z0-9_-]{24}$/;
-
-/**
- * One project's saved Earn integration handoff. The public token is safe to
- * share with an engineer: it resolves configuration only and never carries an
- * SDP API key.
- */
-export interface EarnButtonConfiguration {
-  id: string;
-  strategyId: string;
-  style: EarnButtonStyle;
-  accentColor: string;
-  publicToken: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EarnButtonConfigurationResponse {
-  configuration: EarnButtonConfiguration;
-}
-
-/** Public, unauthenticated subset served to an integration handoff page. */
-export interface PublicEarnButtonConfiguration {
-  strategyId: string;
-  strategyName: string | null;
-  provider: string | null;
-  style: EarnButtonStyle;
-  accentColor: string;
-  /**
-   * False when the configured strategy is no longer served by the catalogue
-   * read path (hidden, delisted, or not active). The handoff page must render
-   * a stale state instead of the integration snippet, and the display
-   * metadata above is withheld (`strategyName`/`provider` are null) so the
-   * unauthenticated route never names a strategy the catalogue hides.
-   */
-  strategyAvailable: boolean;
-}
-
-export interface PublicEarnButtonConfigurationResponse {
-  configuration: PublicEarnButtonConfiguration;
-}
-
 /**
  * Non-custodial vault positions — the custody wallet owns the vault shares and
  * SDP reads their current value live from the provider on every list request.

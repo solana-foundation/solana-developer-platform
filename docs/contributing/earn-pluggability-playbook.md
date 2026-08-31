@@ -530,7 +530,7 @@ create anything.
 `tsc` passes (the types are right), unit tests pass (they mock the module), lint
 is silent. **Only a browser catches it**, so finish a surfacing change by loading
 `/dashboard/markets/embedded-yield` and
-`/dashboard/markets/embedded-yield/button-builder` for real.
+`/dashboard/markets/embedded-yield/integrate` for real.
 
 ### Tests
 

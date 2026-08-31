@@ -1,9 +1,5 @@
 import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
 
-export function earnButtonIntegrationPath(publicToken: string): string {
-  return `/embedded-yield/integrate/${encodeURIComponent(publicToken)}`;
-}
-
 /**
  * The complete B2B2C loop, exactly as shipped (PRO-1722 + PRO-1772): the
  * partner's backend BUILDS an unsigned transaction for the customer's own
@@ -12,18 +8,32 @@ export function earnButtonIntegrationPath(publicToken: string): string {
  * and the reads close the loop: poll the movement to a terminal state, show
  * balance + earned, list activity, and withdraw the same way money came in.
  *
- * A server-only example by construction: the API key comes from process.env
- * and the browser/mobile button is expected to call this partner-owned
- * backend. The customer's key never leaves their wallet, and the partner's
- * key never reaches the browser. Callers that know the deployment's real API
- * base (the handoff page resolves one for its own fetch) pass it so the
- * snippet targets the same host.
+ * Server-only examples by construction: the API key comes from process.env
+ * and the browser/mobile app is expected to call this partner-owned backend.
+ * The customer's key never leaves their wallet, and the partner's key never
+ * reaches the browser. The treasury route (`/vault-deposits` +
+ * `custodyWalletId`) must not appear here — a B2B2C partner cannot name a
+ * custody wallet.
+ *
+ * The guide renders one section per concern so a partner engineer can read it
+ * top to bottom; the sections concatenate into one server module.
  */
-export function buildEarnServerIntegration(
+export interface EarnIntegrationSections {
+  /** Shared client setup: base URL, auth headers, response envelope. */
+  client: string;
+  /** Money in: build → customer signs → submit → poll to terminal. */
+  deposit: string;
+  /** Reads: balance + earned, activity feed, live positions. */
+  portfolio: string;
+  /** Money out: build the exit → customer signs → submit. */
+  withdraw: string;
+}
+
+export function buildEarnIntegrationSections(
   strategy: Pick<EarnStrategy, "id">,
   apiBaseUrl?: string
-): string {
-  return `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
+): EarnIntegrationSections {
+  const client = `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
 
 function sdpHeaders(extra: Record<string, string> = {}) {
   const apiKey = process.env.SDP_API_KEY;
@@ -46,9 +56,9 @@ async function sdpFetch(path: string, init?: RequestInit) {
     );
   }
   return result.data;
-}
+}`;
 
-/**
+  const deposit = `/**
  * Step 1 — build. SDP returns an UNSIGNED transaction for your customer's
  * wallet: it is the fee payer and the only required signer. Hand the base64
  * \`transaction\` to the wallet in the browser, e.g. with wallet-adapter:
@@ -124,9 +134,9 @@ export async function getEarnMovement(movementId: string) {
   );
   // { movementId, direction, status, amount, denomination, signature, ... }
   return data.movement;
-}
+}`;
 
-/**
+  const portfolio = `/**
  * Balance + total earned, grouped by deposit token. \`earned\` is stated only
  * when exact — otherwise it is ABSENT with \`earnedUnavailableReason\`, never
  * zero. Render an em dash or a spinner for an absent figure, never $0.
@@ -159,9 +169,9 @@ export async function listEarnPositions(ownerAddress: string) {
   );
   // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }] }
   return data.positions;
-}
+}`;
 
-/**
+  const withdraw = `/**
  * Withdraw, step 1 — build the unsigned exit for the customer's wallet to
  * sign. Exits keep working even when deposits are paused: money out is never
  * gated by money-in rules.
@@ -200,4 +210,15 @@ export async function submitEarnWithdrawal({
   });
   return data.withdrawal;
 }`;
+
+  return { client, deposit, portfolio, withdraw };
+}
+
+/** The sections joined into the one server module they document. */
+export function buildEarnServerIntegration(
+  strategy: Pick<EarnStrategy, "id">,
+  apiBaseUrl?: string
+): string {
+  const sections = buildEarnIntegrationSections(strategy, apiBaseUrl);
+  return [sections.client, sections.deposit, sections.portfolio, sections.withdraw].join("\n\n");
 }

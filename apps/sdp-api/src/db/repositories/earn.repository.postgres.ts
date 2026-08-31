@@ -1,6 +1,5 @@
 import type {
   EarnApyType,
-  EarnButtonStyle,
   EarnLiquidityTerm,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
@@ -10,10 +9,8 @@ import type {
 } from "@sdp/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
-import { internalError } from "@/lib/errors";
 import type {
   DeleteUnlistedEarnStrategiesInput,
-  EarnButtonConfigurationRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -23,15 +20,9 @@ import type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnStrategyMetricsInput,
-  UpsertEarnButtonConfigurationInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import {
-  generateEarnButtonConfigurationId,
-  generateEarnButtonConfigurationPublicToken,
-  generateEarnProviderWalletId,
-  generateEarnStrategyId,
-} from "./earn.repository";
+import { generateEarnProviderWalletId, generateEarnStrategyId } from "./earn.repository";
 import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
 
 /**
@@ -87,21 +78,6 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   };
 }
 
-function mapButtonConfigurationRow(row: Record<string, unknown>): EarnButtonConfigurationRow {
-  return {
-    id: row.id as string,
-    public_token: row.public_token as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    strategy_id: row.strategy_id as string,
-    style: row.style as EarnButtonStyle,
-    accent_color: row.accent_color as string,
-    created_by: row.created_by as string,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
-}
-
 /**
  * Shared count+page read for the earn list methods (same shape as the
  * payments-family where-builder idiom). Ordering is fixed at newest-first with
@@ -150,57 +126,6 @@ async function selectPage<Row>(
 
 export function createPostgresEarnRepository(db: AppDb): EarnRepository {
   return {
-    async getButtonConfiguration(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_button_configurations
-             WHERE organization_id = ? AND project_id = ?`
-        )
-        .bind(params.organizationId, params.projectId)
-        .first<Record<string, unknown>>();
-      return row ? mapButtonConfigurationRow(row) : null;
-    },
-
-    async getButtonConfigurationByPublicToken(publicToken) {
-      const row = await db
-        .prepare(`SELECT * FROM earn_button_configurations WHERE public_token = ?`)
-        .bind(publicToken)
-        .first<Record<string, unknown>>();
-      return row ? mapButtonConfigurationRow(row) : null;
-    },
-
-    async upsertButtonConfiguration(input: UpsertEarnButtonConfigurationInput) {
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_button_configurations (
-             id, public_token, organization_id, project_id,
-             strategy_id, style, accent_color, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (organization_id, project_id) DO UPDATE SET
-             strategy_id = EXCLUDED.strategy_id,
-             style = EXCLUDED.style,
-             accent_color = EXCLUDED.accent_color,
-             updated_at = sdp_iso_now()
-           RETURNING *`
-        )
-        .bind(
-          generateEarnButtonConfigurationId(),
-          generateEarnButtonConfigurationPublicToken(),
-          input.organizationId,
-          input.projectId,
-          input.strategyId,
-          input.style,
-          input.accentColor,
-          input.actorId
-        )
-        .first<Record<string, unknown>>();
-
-      if (!row) {
-        throw internalError("earn_button_configurations upsert returned no row");
-      }
-      return mapButtonConfigurationRow(row);
-    },
-
     async upsertStrategy(input: UpsertEarnStrategyInput) {
       const id = generateEarnStrategyId();
 

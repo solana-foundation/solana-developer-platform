@@ -301,10 +301,10 @@ The external-wallet flow in one pass (PRO-1722):
    `failed`; the exit mirrors the deposit and takes only 404-scoping plus
    capability (ADR 0002 exit safety), so it works while deposits are closed.
 
-The button builder's engineering handoff (`/embedded-yield/integrate/:token`)
-emits this exact contract as its server snippet; legacy `/earn/integrate/:token`
-links permanently redirect there. The treasury dashboard flows use the SDP-signed
-routes. Deeper docs: gates and scoping in
+The dashboard's Embedded Yield integration guide
+(`/dashboard/markets/embedded-yield/integrate`) emits this exact contract as
+its server snippets. The treasury dashboard flows use the SDP-signed routes.
+Deeper docs: gates and scoping in
 `apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
 `packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002
 (2026-08-26 addendum, "External wallets: caller-signed vault movements").

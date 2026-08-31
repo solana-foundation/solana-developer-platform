@@ -279,11 +279,10 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //                 an operator's deliberate stop during an exploit or depeg —
   //                 stayed fundable by id.
   //
-  // The sequence is SHARED with the button-configuration PUT
-  // (handlers/admission.ts) so the config a builder saves and the deposit this
-  // route accepts cannot drift apart. Money-OUT must never inherit any of
-  // these (ADR 0002): un-offering a provider closes the door in, never the
-  // door out.
+  // The sequence lives in handlers/admission.ts so a future second money-in
+  // caller shares it instead of re-deriving it. Money-OUT must never inherit
+  // any of these (ADR 0002): un-offering a provider closes the door in, never
+  // the door out.
   const provider = await assertVaultDepositAdmissible(c, strategy);
 
   // The wallet must be one SDP can sign for, and the binding must carry a WRITE

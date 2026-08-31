@@ -1,37 +1,26 @@
 import { SOLANA_CLUSTERS } from "@sdp/types";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { getSelectedProjectId } from "@/lib/sdp-api";
-import { EarnButtonBuilder } from "../../earn/earn-button-builder";
-import { loadEarnButtonConfiguration } from "../../earn/earn-button-configuration.server";
+import { EarnIntegrationGuide } from "../../earn/earn-integration-guide";
 import { loadEarnProviderAccess } from "../../earn/earn-provider-access.server";
 
 /** Provider access is organization-scoped and must be resolved per request. */
 export const dynamic = "force-dynamic";
 
-export default async function EmbeddedYieldButtonBuilderPage({
+export default async function EmbeddedYieldIntegratePage({
   searchParams,
 }: {
   searchParams: Promise<{ cluster?: string | string[]; strategy?: string | string[] }>;
 }) {
-  const [{ cluster, strategy }, providerAccess, configuration, projectId] = await Promise.all([
+  const [{ cluster, strategy }, providerAccess] = await Promise.all([
     searchParams,
     loadEarnProviderAccess(),
-    loadEarnButtonConfiguration(),
-    getSelectedProjectId(),
   ]);
-  const configurationKey =
-    configuration.kind === "ready" && configuration.configuration
-      ? `${projectId ?? "no-project"}:${configuration.configuration.id}:${configuration.configuration.updatedAt}`
-      : `${projectId ?? "no-project"}:${configuration.kind}`;
   const strategyCluster =
     typeof cluster === "string" ? SOLANA_CLUSTERS.find((value) => value === cluster) : undefined;
   return (
-    <EarnButtonBuilder
+    <EarnIntegrationGuide
       configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`}
       earnHref={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
-      configurationLoad={configuration}
-      key={configurationKey}
-      projectId={projectId ?? null}
       providerAccess={providerAccess}
       strategyCluster={strategyCluster}
       strategyId={typeof strategy === "string" && strategy !== "" ? strategy : undefined}

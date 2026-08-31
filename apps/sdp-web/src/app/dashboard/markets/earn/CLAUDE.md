@@ -19,10 +19,6 @@ api/dashboard/markets/earn/
   provider-query.ts                  allowlisted query passthrough — lives at
                                      the earn/ ROOT because its importers sit
                                      at several depths under programs/
-  button-configuration/route.ts      PUT project configuration (reads happen
-                                     server-side via createSdpApiClient — no
-                                     GET proxy, so nothing can call it without
-                                     the PUT's expectedProjectId guard)
   strategies/route.ts
   programs/route.ts                  GET list (page window) · POST create
   programs/[programId]/route.ts      GET one · PUT re-target
@@ -71,13 +67,12 @@ program create still sends the body `requestId` form.
 ## Routes
 
 - `/dashboard/markets/embedded-yield` → `EarnProgramWorkspace`: pick a strategy
-  from the live catalogue, then continue to the button builder. The canonical
-  page and loading files live in `../embedded-yield/`; this directory keeps
-  shared internal Earn modules and legacy route shims only.
-- `/dashboard/markets/embedded-yield/button-builder` → `EarnButtonBuilder`: the
-  customer-facing savings preview plus a generated **server-side** integration
-  snippet for the EXTERNAL-WALLET flow — since PRO-1772 the WHOLE loop, not
-  just the deposit (PRO-1722): build via
+  from the live catalogue, then continue to the integration guide. The
+  canonical page and loading files live in `../embedded-yield/`; this directory
+  keeps shared internal Earn modules and legacy route shims only.
+- `/dashboard/markets/embedded-yield/integrate` → `EarnIntegrationGuide`: the
+  sectioned **server-side** integration guide for the EXTERNAL-WALLET flow —
+  the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
   `GET …/movements/:movementId`, read `GET …/earnings/:ownerAddress`
@@ -85,17 +80,16 @@ program create still sends the body `requestId` form.
   render a dash, never $0), list `GET …/movements?ownerAddress=`, and exit via
   `…/withdrawal-transactions` + `…/withdrawals`. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
-  snippet — a B2B2C partner cannot name a custody wallet. It also loads the
-  saved project configuration. The device previews and the handoff page render
-  the shared `EarnSavingsCardPreview` (`earn-savings-preview.tsx`): balance,
-  total earned, deposit + withdraw, recent activity — static mock figures on
-  purpose, showing partners the shape their end users get.
-- `/embedded-yield/integrate/[token]` is the public, no-index engineering
-  handoff. It is intentionally outside the dashboard route and does not require
-  Clerk auth. Legacy `/earn/integrate/[token]` links permanently redirect there.
-- Both are `dynamic = "force-dynamic"` and resolve `loadEarnProviderAccess()`
-  server-side per request. Provider access is organization-scoped; caching it
-  would hand one org's entitlement to another.
+  snippets — a B2B2C partner cannot name a custody wallet. The guide is
+  entirely derived from the strategy catalogue: nothing is persisted, there is
+  no styling to save, and no public handoff token exists. (The UI builder that
+  used to hold those — styled previews, saved per-project configuration, the
+  public `/embedded-yield/integrate/:token` handoff page and its
+  `/v1/earn/button-configurations/*` API — was removed; migration 0074 dropped
+  its table. Do not reintroduce persisted presentation state here.)
+- Both routes are `dynamic = "force-dynamic"` and resolve
+  `loadEarnProviderAccess()` server-side per request. Provider access is
+  organization-scoped; caching it would hand one org's entitlement to another.
 - No layout of its own: `../layout.tsx` gates the whole Markets segment on
   both `markets()` and `earn()` (`notFound()`), enforced once there so no child
   layout suspends on a flag read (which would paint the parent's loading
@@ -122,33 +116,18 @@ program create still sends the body `requestId` form.
   `earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess)` and
   renders the answer as a badge; an unavailable row stays **visible with its
   Select button disabled**, never hidden and never silently enabled. Continue
-  routes to the builder with `?strategy=<id>`.
-- `earn-button-builder.tsx` — re-checks availability itself rather than trusting
-  the referrer, and refuses with a named empty state for each way in that can
-  fail (catalogue error / unknown strategy / environment, access, provider, or
-  strategy unavailable). A FAILED configuration load dead-ends the page only
-  when it also removes the strategy selection: with `?strategy=` present the
-  previews and snippet need no saved configuration, so the builder renders with
-  an inline warning instead. The live style controls persist one configuration
-  per organization and project through `/v1/earn/button-configurations/current`;
-  a save response never overwrites local style/accent state (an edit made while
-  the PUT was in flight must survive, and `hasUnsavedChanges` stays honest), and
-  saved accent colors are uppercased on entry so lowercase-hex API writes still
-  match the preset swatches. Saving produces a stable public
-  `/embedded-yield/integrate/:token` handoff for partner engineers. That page
-  needs no dashboard sign-in and never exposes tenant data or an API key; when the
-  configured strategy is hidden, delisted, or paused the API reports
-  `strategyAvailable: false` and the page renders a stale notice instead of the
-  snippet. The public read is three-way: only a definitive 404 renders
-  `notFound()`; any other non-OK answer (the endpoint shares the anonymous rate
-  bucket, so a burst of opens 429s) renders a retryable "temporarily
-  unavailable" notice — a valid link must never present as dead, and an
-  operational failure must never 500 the page. The
-  generated snippet remains server-only and says so because it carries a secret
-  API key.
-- `earn-button-preview.tsx` — `EARN_BUTTON_STYLES` and the preview chip. The
-  builder asserts its own options against that list at module load, so adding a
-  style in one place and not the other throws instead of rendering a blank.
+  routes to the integration guide with `?strategy=<id>`.
+- `earn-integration-guide.tsx` — re-checks availability itself rather than
+  trusting the referrer, and refuses with a named empty state for each way in
+  that can fail (catalogue error / unknown strategy / missing strategy /
+  environment, access, provider, or strategy unavailable). Renders the guide as
+  four ordered sections (client setup, deposits, reads, withdraw), each a card
+  over its slice of the one server module. The snippets remain server-only and
+  say so, because the module they document carries a secret API key.
+- `earn-integration-snippets.ts` — the snippet source,
+  `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
+  the sections joined). Pure string building so the exact wire contract is
+  unit-testable without rendering.
 - `earn-program-data.ts` — THE data seam, over the BFF proxies above.
   `useEarnStrategies()` is what this module's pages read today — it takes an
   optional `{ cluster }` (PRO-1742), the explicit opt-in that browses the
@@ -319,7 +298,7 @@ program create still sends the body `requestId` form.
 `earn-vault-withdraw-tracking.ts`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
 `EarnVaultWithdrawModal`, `EarnVaultDepositOutcomeTracker` and
 `EarnVaultWithdrawalOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn
-Program page (select a strategy → build a button → integrate the API), and the
+Program page (select a strategy → integrate the API), and the
 surface that reads positions, opens the vault-deposit modal and drives
 withdrawals is **Treasury Solutions**
 (`../treasury-solutions/treasury-solutions-workspace.tsx`), which consumes all
@@ -464,7 +443,7 @@ are correct, so `tsc` passes; the unit tests mock the module, so they pass; lint
 sees nothing. Any future server-side read of a dashboard constant belongs in a
 directive-free module for the same reason — and a surfacing change wants one
 browser pass on `/dashboard/markets/embedded-yield` and
-`/dashboard/markets/embedded-yield/button-builder`.
+`/dashboard/markets/embedded-yield/integrate`.
 
 ## Rules
 
@@ -498,7 +477,7 @@ browser pass on `/dashboard/markets/embedded-yield` and
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
   Inter only — monospace is forbidden, including for addresses; use
   `tabular-nums` for numeric alignment. The ONE exception is a genuine code
-  surface: the builder's `ui/code-block`, which is mono by design. Selection
+  surface: the integration guide's `ui/code-block`, which is mono by design. Selection
   state is `border-primary bg-fill-subtle` across the whole module. `Badge` is
   status-only.
 - **Nothing may overlap — provider and fund names run long.**
