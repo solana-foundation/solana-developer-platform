@@ -214,7 +214,44 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     });
 
     expect(marker).toMatchObject({ user_id: PCU_ID, instance_id: instanceA, pubkey: PUBKEY_A });
-    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toHaveLength(1);
+    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
+    await expect(repo.deletePendingRevocation(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(true);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
+  });
+
+  it("records cleanup independently when another identity owns the same pubkey", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_users (
+           id, organization_id, project_id, instance_id, name, is_default, disabled_at
+         ) VALUES (?, ?, ?, ?, 'Disabled', FALSE, sdp_iso_now())`
+      )
+      .bind(SECOND_PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, instanceA)
+      .run();
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_active",
+      pubkey: PUBKEY_A,
+    });
+
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: SECOND_PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_disabled",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toMatchObject({ user_id: SECOND_PCU_ID, pubkey: PUBKEY_A });
+
+    await expect(repo.findByInstanceAndPubkey(scope, instanceA, PUBKEY_A)).resolves.toMatchObject({
+      user_id: PCU_ID,
+    });
+    await expect(repo.listPendingRevocations(SECOND_PCU_ID, instanceA)).resolves.toHaveLength(1);
   });
 
   it("listByUserAndInstance is scoped to the instance (no cross-instance leak)", async () => {

@@ -3,6 +3,7 @@ import { conflict } from "@/lib/errors";
 import {
   generatePrivateChannelVerifiedWalletId,
   mapPrivateChannelVerifiedWalletRow,
+  mapPrivateChannelWalletRevocationRow,
   type PrivateChannelVerifiedWalletRepository,
   type UpsertVerifiedWalletInput,
 } from "./private-channel-verified-wallet.repository";
@@ -57,20 +58,14 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
     async recordPendingRevocation(input: UpsertVerifiedWalletInput) {
       const row = await db
         .prepare(
-          `INSERT INTO private_channel_verified_wallets (
+          `INSERT INTO private_channel_wallet_revocations (
                id, organization_id, project_id, user_id, instance_id,
                wallet_id, pubkey
              )
-             SELECT ?, ?, ?, ?, ?, ?, ?
-               FROM private_channel_users
-              WHERE id = ?
-                AND organization_id = ?
-                AND project_id = ?
-                AND instance_id = ?
-             ON CONFLICT (instance_id, pubkey) DO UPDATE
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
                    updated_at = sdp_iso_now()
-             WHERE private_channel_verified_wallets.user_id = excluded.user_id
           RETURNING *`
         )
         .bind(
@@ -80,17 +75,40 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           input.userId,
           input.instanceId,
           input.walletId,
-          input.pubkey,
-          input.userId,
-          input.organizationId,
-          input.projectId,
-          input.instanceId
+          input.pubkey
         )
         .first<Record<string, unknown>>();
       if (!row) {
         throw conflict("Could not record the wallet binding for cleanup.");
       }
-      return mapPrivateChannelVerifiedWalletRow(row);
+      return mapPrivateChannelWalletRevocationRow(row);
+    },
+
+    async listPendingRevocations(userId: string, instanceId: string) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM private_channel_wallet_revocations
+             WHERE user_id = ?
+               AND instance_id = ?
+             ORDER BY created_at ASC, id ASC`
+        )
+        .bind(userId, instanceId)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapPrivateChannelWalletRevocationRow);
+    },
+
+    async deletePendingRevocation(userId: string, instanceId: string, pubkey: string) {
+      const row = await db
+        .prepare(
+          `DELETE FROM private_channel_wallet_revocations
+             WHERE user_id = ?
+               AND instance_id = ?
+               AND pubkey = ?
+          RETURNING id`
+        )
+        .bind(userId, instanceId, pubkey)
+        .first<Record<string, unknown>>();
+      return row !== null;
     },
 
     async deleteByUserInstanceAndPubkey(userId: string, instanceId: string, pubkey: string) {

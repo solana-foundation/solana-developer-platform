@@ -113,11 +113,12 @@ async function revokeWalletWithSession(
     }
   });
 
-  return createPrivateChannelVerifiedWalletRepository(env).deleteByUserInstanceAndPubkey(
-    pcUser.id,
-    instance.id,
-    pubkey
-  );
+  const repo = createPrivateChannelVerifiedWalletRepository(env);
+  const [mirrorDeleted, markerDeleted] = await Promise.all([
+    repo.deleteByUserInstanceAndPubkey(pcUser.id, instance.id, pubkey),
+    repo.deletePendingRevocation(pcUser.id, instance.id, pubkey),
+  ]);
+  return mirrorDeleted || markerDeleted;
 }
 
 /**
@@ -304,15 +305,22 @@ export async function revokePrivateChannelPrincipalWallets(
   const scope = { organizationId: auth.organizationId, projectId };
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   requireActiveInstance(instance);
-  const wallets = await createPrivateChannelVerifiedWalletRepository(env).listByUserAndInstance(
-    principalId,
-    instance.id
-  );
-  if (wallets.length === 0) return [];
+  const repo = createPrivateChannelVerifiedWalletRepository(env);
+  const [wallets, pendingRevocations] = await Promise.all([
+    repo.listByUserAndInstance(principalId, instance.id),
+    repo.listPendingRevocations(principalId, instance.id),
+  ]);
+  const pubkeys = [
+    ...new Set([
+      ...wallets.map((wallet) => wallet.pubkey),
+      ...pendingRevocations.map((marker) => marker.pubkey),
+    ]),
+  ];
+  if (pubkeys.length === 0) return [];
 
   const session = await resolveWalletSession(env, auth, projectId, principalId, true);
-  for (const wallet of wallets) {
-    await revokeWalletWithSession(env, session, wallet.pubkey);
+  for (const pubkey of pubkeys) {
+    await revokeWalletWithSession(env, session, pubkey);
   }
-  return wallets.map((wallet) => wallet.pubkey);
+  return pubkeys;
 }
