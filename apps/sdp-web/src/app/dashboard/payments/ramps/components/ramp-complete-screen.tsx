@@ -2,7 +2,13 @@
 
 import type { PaymentRampQuote, PaymentTransferSummary, SolanaCluster } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
-import { CheckCircle2Icon, CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import {
+  ArrowRightIcon,
+  CheckCircle2Icon,
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+} from "lucide-react";
 import {
   formatDisplayAmount,
   formatMinorCurrencyAmount,
@@ -122,8 +128,6 @@ function completionDetailRows({
   cluster,
   onramp,
   tokenLabel,
-  primaryAmount,
-  secondaryAmount,
   t,
 }: {
   quote: PaymentRampQuote;
@@ -131,8 +135,6 @@ function completionDetailRows({
   cluster: SolanaCluster;
   onramp: boolean;
   tokenLabel: string | null | undefined;
-  primaryAmount: string | null;
-  secondaryAmount: string | null;
   t: Translate;
 }): CompletionDetailRow[] {
   const exchangeRate = rampExchangeRate(transfer, tokenLabel);
@@ -162,12 +164,6 @@ function completionDetailRows({
       value: transfer.id,
       copyValue: transfer.id,
     },
-    !primaryAmount && secondaryAmount
-      ? {
-          label: onramp ? t("DashboardPayments.ramps.funded") : t("DashboardPayments.ramps.sent"),
-          value: secondaryAmount,
-        }
-      : null,
     exchangeRate
       ? {
           label: t("DashboardPayments.transferDetails.exchangeRate"),
@@ -193,6 +189,27 @@ function completionDetailRows({
   ].filter(isDetailRow);
 }
 
+function CompletionAmountFlow({
+  sourceAmount,
+  destinationAmount,
+}: {
+  sourceAmount: string | null;
+  destinationAmount: string | null;
+}) {
+  if (!sourceAmount && !destinationAmount) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-1.5 border-b border-border-default pb-4 text-base font-medium text-primary">
+      {sourceAmount ? <span>{sourceAmount}</span> : null}
+      {sourceAmount && destinationAmount ? (
+        <ArrowRightIcon aria-hidden className="size-4 shrink-0 text-tertiary" />
+      ) : null}
+      {destinationAmount ? <span>{destinationAmount}</span> : null}
+    </div>
+  );
+}
+
 function TransferDetailRow({
   label,
   value,
@@ -207,7 +224,7 @@ function TransferDetailRow({
   const t = useTranslations();
   const { copy, copied } = useCopy(1200);
   return (
-    <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
+    <div className="flex min-h-12 items-center justify-between gap-4 py-2.5">
       <span className="shrink-0 text-sm text-tertiary">{label}</span>
       {href ? (
         <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -282,8 +299,6 @@ export function RampCompleteScreen({
     cluster,
     onramp,
     tokenLabel,
-    primaryAmount,
-    secondaryAmount,
     t,
   });
 
@@ -305,19 +320,7 @@ export function RampCompleteScreen({
         </p>
       </div>
       <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
-        {primaryAmount ? (
-          <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4">
-            <p className="text-3xl font-semibold tracking-tight text-primary">{primaryAmount}</p>
-            {secondaryAmount ? (
-              <p className="text-sm text-tertiary">
-                {onramp
-                  ? t("DashboardPayments.ramps.fundedWith")
-                  : t("DashboardPayments.ramps.from")}{" "}
-                {secondaryAmount}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        <CompletionAmountFlow sourceAmount={secondaryAmount} destinationAmount={primaryAmount} />
         <div>
           {detailRows.map((detail) => (
             <TransferDetailRow
