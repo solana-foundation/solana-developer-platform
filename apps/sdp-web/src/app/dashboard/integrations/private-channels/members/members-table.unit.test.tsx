@@ -42,15 +42,15 @@ function renderTable(principal: PrivateChannelPrincipalDto) {
 
 afterEach(cleanup);
 
-describe("Private Channels principals table", () => {
-  it("shows the automatic default principal", () => {
+describe("Private Channels identities table", () => {
+  it("shows the automatic default identity", () => {
     renderTable(principalFixture());
     expect(screen.getByText("Default")).toBeDefined();
-    expect(screen.getByText("1 principal for this project.")).toBeDefined();
+    expect(screen.getByText("1 identity for this project.")).toBeDefined();
     expect(screen.queryByRole("columnheader", { name: "Type" })).toBeNull();
   });
 
-  it("shows a named principal with an action menu", async () => {
+  it("shows a named identity with an action menu", async () => {
     const user = userEvent.setup();
     renderTable(principalFixture({ name: "EU treasury", isDefault: false }));
 
