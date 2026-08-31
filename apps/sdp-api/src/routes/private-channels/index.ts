@@ -205,25 +205,31 @@ privateChannels.delete(
 // Junction between a channel and an invited workspace user.
 privateChannels.post(
   "/channels/:channelId/memberships",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "project-members:write"),
   validateBody(addMembershipBodySchema),
   addChannelMembership
 );
 privateChannels.delete(
   "/channels/:channelId/memberships/:privateChannelUserId",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "project-members:write"),
   removeChannelMembership
 );
 
 // --- /users ---------------------------------------------------------------
 // Workspace-level invites: one row per SDP user with SPC credentials.
-privateChannels.get("/users", requirePermissions("payments:read"), listPrivateChannelUsers);
+privateChannels.get(
+  "/users",
+  requirePermissions("payments:read", "project-members:read"),
+  listPrivateChannelUsers
+);
 privateChannels.post(
   "/users",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "project-members:write"),
   validateBody(inviteMemberBodySchema),
   invitePrivateChannelUser
 );
+// The caller's own SPC identity is used by transfer/event authorization, so it
+// remains a payments read rather than exposing workspace membership management.
 // /users/me must come before /users/:id so `me` isn't matched as a param.
 privateChannels.get(
   "/users/me",
@@ -232,12 +238,12 @@ privateChannels.get(
 );
 privateChannels.get(
   "/users/:privateChannelUserId",
-  requirePermissions("payments:read"),
+  requirePermissions("payments:read", "project-members:read"),
   getPrivateChannelUser
 );
 privateChannels.delete(
   "/users/:privateChannelUserId",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "project-members:write"),
   deletePrivateChannelUser
 );
 

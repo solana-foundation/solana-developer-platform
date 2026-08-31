@@ -1,9 +1,13 @@
+import { auth } from "@clerk/nextjs/server";
+import { hasPermission } from "@sdp/types";
 import { notFound } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import { privateChannels } from "@/flags";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { PrivateChannelsHeaderTabs } from "./private-channels-header-tabs";
 import { loadInstance } from "./private-channels-page.data";
+import { SkeletonTabs } from "./private-channels-route-skeletons";
 
 export default async function PrivateChannelsLayout({ children }: { children: ReactNode }) {
   // Gate before the instance lookup: every leaf page checks the flag too, so without
@@ -14,7 +18,9 @@ export default async function PrivateChannelsLayout({ children }: { children: Re
   }
 
   const client = await createSdpApiClient();
-  const instance = await loadInstance(client);
+  const [instance, { orgRole }] = await Promise.all([loadInstance(client), auth()]);
+  const { permissions } = resolveDashboardAccess(orgRole);
+  const canReadMembers = hasPermission(permissions, "project-members:read");
 
   // The payments shell locks its viewport and clips overflow, so each segment owns
   // its own scrolling. Without this the tab strip stays put but anything below the
@@ -22,7 +28,15 @@ export default async function PrivateChannelsLayout({ children }: { children: Re
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0">
-        <PrivateChannelsHeaderTabs isConnected={instance.data?.isActive === true} />
+        {/* The tab strip reads `?tab=` via useSearchParams to drive the Overview's
+            playground pane; a Suspense boundary keeps that from opting the whole
+            segment into client-side rendering. */}
+        <Suspense fallback={<SkeletonTabs />}>
+          <PrivateChannelsHeaderTabs
+            isConnected={instance.data?.isActive === true}
+            canReadMembers={canReadMembers}
+          />
+        </Suspense>
       </div>
       {/* Gutters match the shell's header padding, which locked routes don't inherit.
           The gap under the tab strip lives here rather than on the strip so the first

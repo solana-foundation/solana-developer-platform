@@ -45,10 +45,10 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-function renderTabs(isConnected: boolean) {
+function renderTabs(isConnected: boolean, canReadMembers = true) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <PrivateChannelsHeaderTabs isConnected={isConnected} />
+      <PrivateChannelsHeaderTabs isConnected={isConnected} canReadMembers={canReadMembers} />
     </I18nProvider>
   );
 }
@@ -61,6 +61,18 @@ describe("PrivateChannelsHeaderTabs", () => {
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Overview",
       "Members",
+      "Deposit",
+      "Transfer",
+      "Withdraw",
+      "API Playground",
+    ]);
+  });
+
+  it("hides the Members tab without project-members:read permission", () => {
+    renderTabs(true, false);
+
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Overview",
       "Deposit",
       "Transfer",
       "Withdraw",

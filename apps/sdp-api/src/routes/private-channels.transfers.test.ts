@@ -595,18 +595,16 @@ describe("Private Channels — transfer access and routes", () => {
   });
 
   it("rejects a recipient wallet whose pubkey equals the sender", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO private_channel_verified_wallets
-           (id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey)
-         VALUES ('pcvw-pct-self', ?, ?, ?, ?, 'wallet-self', ?)`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, RECIPIENT_PC_USER_ID, INSTANCE_ID, ACTOR_ADDRESS)
-      .run();
-
+    // The actor's own verified wallet (`pcvw-pct-actor`, pubkey === sender) is an
+    // eligible recipient — the web filters it out of the picker via `isSelf`, but the
+    // pubkey self-check is what actually stops a self-transfer server-side. Selecting it
+    // must be rejected. This also drives the guard through a resolvable recipient id:
+    // eligible recipients are de-duplicated by pubkey (the initiator's own verification
+    // wins), so a second member's verification of the sender's pubkey is not separately
+    // selectable and would 404 at resolution instead of reaching this 400 check.
     const response = await postTransfer({
       walletId: ACTOR_WALLET_ID,
-      recipientVerifiedWalletId: "pcvw-pct-self",
+      recipientVerifiedWalletId: "pcvw-pct-actor",
       amount: "1.5",
     });
     expect(response.status).toBe(400);

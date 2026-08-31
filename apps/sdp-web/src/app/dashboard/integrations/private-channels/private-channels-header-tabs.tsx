@@ -20,7 +20,8 @@ import {
 // refetches an RSC payload. There is no Instance or Channels tab: the instance
 // (connect/disconnect) and channels are reached from links in the Overview's
 // Connected-instance card. The Events feed has no tab either — it's reached
-// from the Overview's "All activity" link.
+// from the Overview's "All activity" link. The Members tab is additionally gated
+// on the caller's `project-members:read` permission (see `canReadMembers`).
 
 /** The Overview route's `?tab=` value for its playground pane. */
 const PLAYGROUND_TAB = "playground";
@@ -68,9 +69,11 @@ const TABS = [
 
 interface Props {
   isConnected: boolean;
+  /** Whether the caller has `project-members:read` — gates the Members tab. */
+  canReadMembers: boolean;
 }
 
-export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
+export function PrivateChannelsHeaderTabs({ isConnected, canReadMembers }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   // Router state, not `useDashboardTab`: its window snapshot is only re-read
@@ -87,8 +90,11 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
     return null;
   }
 
-  // Keep the always-visible destinations available before an instance is connected.
-  const visible = TABS.filter((tab) => isConnected || !tab.requiresActive);
+  // Keep the always-visible destinations available before an instance is connected,
+  // and hide Members from callers without `project-members:read`.
+  const visible = TABS.filter(
+    (tab) => (isConnected || !tab.requiresActive) && (tab.id !== "members" || canReadMembers)
+  );
   if (visible.length === 0) return null;
 
   const onOverviewRoute = pathname.startsWith(PRIVATE_CHANNELS_OVERVIEW_PATH);
