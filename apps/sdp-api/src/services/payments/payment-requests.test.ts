@@ -199,6 +199,7 @@ describe("reconcilePaymentRequest", () => {
       env,
       createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
     ).createTransfer({
+      id: "xfr_conflicting_signature",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,

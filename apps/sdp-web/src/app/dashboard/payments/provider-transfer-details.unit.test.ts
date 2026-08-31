@@ -5,6 +5,8 @@ import { providerTransferDetailRows } from "./provider-transfer-details";
 function transferFixture(overrides: Partial<PaymentTransferSummary>): PaymentTransferSummary {
   return {
     id: "xfr_test",
+    custodyWalletId: "cwlt_test",
+    providerWalletId: "wallet_test",
     status: "completed",
     signature: null,
     rampsMemo: {},
