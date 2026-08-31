@@ -41,6 +41,14 @@ export interface PrivateChannelVerifiedWalletRepository {
    */
   upsert(input: UpsertVerifiedWalletInput): Promise<PrivateChannelVerifiedWalletRow>;
   /**
+   * Persist an upstream binding that must be revoked even though its identity
+   * became disabled before the normal mirror write. Disable retries enumerate
+   * this row, so a failed compensating SPC delete remains recoverable.
+   */
+  recordPendingRevocation(
+    input: UpsertVerifiedWalletInput
+  ): Promise<PrivateChannelVerifiedWalletRow>;
+  /**
    * Remove a verified wallet after a successful SPC delete, keyed on the unique
    * (user_id, instance_id, pubkey): a pubkey verified under another instance (or
    * by another identity) is untouched. Returns true if a row was deleted.

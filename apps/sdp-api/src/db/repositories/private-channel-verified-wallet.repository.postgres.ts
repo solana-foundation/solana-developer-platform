@@ -54,6 +54,45 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       return mapPrivateChannelVerifiedWalletRow(row);
     },
 
+    async recordPendingRevocation(input: UpsertVerifiedWalletInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO private_channel_verified_wallets (
+               id, organization_id, project_id, user_id, instance_id,
+               wallet_id, pubkey
+             )
+             SELECT ?, ?, ?, ?, ?, ?, ?
+               FROM private_channel_users
+              WHERE id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                AND instance_id = ?
+             ON CONFLICT (instance_id, pubkey) DO UPDATE
+               SET wallet_id = excluded.wallet_id,
+                   updated_at = sdp_iso_now()
+             WHERE private_channel_verified_wallets.user_id = excluded.user_id
+          RETURNING *`
+        )
+        .bind(
+          generatePrivateChannelVerifiedWalletId(),
+          input.organizationId,
+          input.projectId,
+          input.userId,
+          input.instanceId,
+          input.walletId,
+          input.pubkey,
+          input.userId,
+          input.organizationId,
+          input.projectId,
+          input.instanceId
+        )
+        .first<Record<string, unknown>>();
+      if (!row) {
+        throw conflict("Could not record the wallet binding for cleanup.");
+      }
+      return mapPrivateChannelVerifiedWalletRow(row);
+    },
+
     async deleteByUserInstanceAndPubkey(userId: string, instanceId: string, pubkey: string) {
       const row = await db
         .prepare(

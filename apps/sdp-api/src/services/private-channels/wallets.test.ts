@@ -50,6 +50,7 @@ let client: {
 };
 let verifiedRepo: {
   upsert: ReturnType<typeof vi.fn>;
+  recordPendingRevocation: ReturnType<typeof vi.fn>;
   deleteByUserInstanceAndPubkey: ReturnType<typeof vi.fn>;
   findByInstanceAndPubkey: ReturnType<typeof vi.fn>;
   listByUserAndInstance: ReturnType<typeof vi.fn>;
@@ -67,6 +68,11 @@ beforeEach(() => {
       wallet_id: WALLET_ID,
       pubkey: PUBKEY,
       verified_at: "2026-07-20T00:00:00Z",
+    }),
+    recordPendingRevocation: vi.fn().mockResolvedValue({
+      id: "pcvw_cleanup",
+      wallet_id: WALLET_ID,
+      pubkey: PUBKEY,
     }),
     deleteByUserInstanceAndPubkey: vi.fn().mockResolvedValue(true),
     findByInstanceAndPubkey: vi.fn().mockResolvedValue({
@@ -204,6 +210,32 @@ describe("verifyPrivateChannelWallet", () => {
     });
 
     expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
+    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledWith(
+      "pcu_1",
+      "pci_1",
+      PUBKEY
+    );
+  });
+
+  it("keeps a cleanup marker when late-binding revocation fails", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    principalRepo.getById.mockResolvedValue({
+      ...pcUser,
+      disabled_at: "2026-08-31T00:00:00.000Z",
+    });
+    client.deleteWallet.mockRejectedValue(
+      new PrivateChannelError("AUTH_UNAVAILABLE", "SPC unavailable")
+    );
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+
+    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledTimes(1);
+    expect(verifiedRepo.deleteByUserInstanceAndPubkey).not.toHaveBeenCalled();
   });
 
   it("does not revoke SPC on an unrelated persistence failure for an active identity", async () => {

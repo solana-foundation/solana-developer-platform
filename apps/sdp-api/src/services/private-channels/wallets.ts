@@ -219,8 +219,9 @@ export async function verifyPrivateChannelWallet(
   });
 
   let row: PrivateChannelVerifiedWalletRow;
+  const verifiedWalletRepo = createPrivateChannelVerifiedWalletRepository(env);
   try {
-    row = await createPrivateChannelVerifiedWalletRepository(env).upsert({
+    row = await verifiedWalletRepo.upsert({
       ...scope,
       userId: pcUser.id,
       instanceId: instance.id,
@@ -243,9 +244,17 @@ export async function verifyPrivateChannelWallet(
     }
     if (disabled) {
       try {
-        await withSpcAuth(spcAuth, async (token) => {
-          await client.deleteWallet(token, pubkey);
+        // Persist a durable cleanup marker before the compensating network
+        // call. If SPC is unavailable, the next disable retry can enumerate
+        // this row and try the revocation again.
+        await verifiedWalletRepo.recordPendingRevocation({
+          ...scope,
+          userId: pcUser.id,
+          instanceId: instance.id,
+          walletId,
+          pubkey,
         });
+        await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
       } catch (cleanupError) {
         getLogger().warn(
           { principalId: pcUser.id, instanceId: instance.id, cleanupError },

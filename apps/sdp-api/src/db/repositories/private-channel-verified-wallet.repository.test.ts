@@ -198,6 +198,25 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     expect(await repo.listByUserAndInstance(PCU_ID, instanceA)).toEqual([]);
   });
 
+  it("records a disabled identity's upstream binding for later cleanup", async () => {
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE private_channel_users SET disabled_at = sdp_iso_now() WHERE id = ?")
+      .bind(PCU_ID)
+      .run();
+
+    const marker = await repo.recordPendingRevocation({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+
+    expect(marker).toMatchObject({ user_id: PCU_ID, instance_id: instanceA, pubkey: PUBKEY_A });
+    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toHaveLength(1);
+  });
+
   it("listByUserAndInstance is scoped to the instance (no cross-instance leak)", async () => {
     await repo.upsert({
       ...scope,
