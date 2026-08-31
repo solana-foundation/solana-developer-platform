@@ -58,31 +58,25 @@ interface WalletSession {
 }
 
 /**
- * Shared preamble for the verify/delete write paths: require a user identity,
- * resolve the connected instance and the acting member's SPC user, and open a
- * cached SPC JWT handle.
+ * Shared preamble for the verify/delete write paths: resolve the connected
+ * instance and its default project principal, then open a cached SPC JWT handle.
  */
 async function resolveWalletSession(
   env: Env,
   auth: ApiKeyContext,
   projectId: string
 ): Promise<WalletSession> {
-  if (!auth.userId) {
-    throw forbidden(
-      "Managing verified wallets requires a user identity and is not available for API-key auth."
-    );
-  }
   const scope = { organizationId: auth.organizationId, projectId };
 
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   requireActiveInstance(instance);
 
-  const pcUser = await createPrivateChannelUserRepository(env).findByProjectAndUser(
+  const pcUser = await createPrivateChannelUserRepository(env).findDefaultPrincipal(
     scope,
-    auth.userId
+    instance.id
   );
   if (!pcUser) {
-    throw forbidden("You must be an invited Private Channels member to manage verified wallets.");
+    throw forbidden("This project has no active Private Channels principal.");
   }
 
   const client = createAuthClient(instance.auth_url, { timeoutMs: SPC_AUTH_TIMEOUT_MS });
@@ -101,21 +95,16 @@ export async function listPrivateChannelWallets(
   auth: ApiKeyContext,
   projectId: string
 ): Promise<PrivateChannelVerifiedWalletRow[]> {
-  if (!auth.userId) {
-    return [];
-  }
   const scope = { organizationId: auth.organizationId, projectId };
-  const pcUser = await createPrivateChannelUserRepository(env).findByProjectAndUser(
-    scope,
-    auth.userId
-  );
-  if (!pcUser) {
-    return [];
-  }
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   if (!instance) {
     return [];
   }
+  const pcUser = await createPrivateChannelUserRepository(env).findDefaultPrincipal(
+    scope,
+    instance.id
+  );
+  if (!pcUser) return [];
   return createPrivateChannelVerifiedWalletRepository(env).listByUserAndInstance(
     pcUser.id,
     instance.id

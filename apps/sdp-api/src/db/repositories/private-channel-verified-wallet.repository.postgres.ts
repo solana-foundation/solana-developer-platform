@@ -17,10 +17,11 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
                id, organization_id, project_id, user_id, instance_id,
                wallet_id, pubkey
              ) VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
+             ON CONFLICT (instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
                    verified_at = sdp_iso_now(),
                    updated_at = sdp_iso_now()
+             WHERE private_channel_verified_wallets.user_id = excluded.user_id
           RETURNING *`
         )
         .bind(

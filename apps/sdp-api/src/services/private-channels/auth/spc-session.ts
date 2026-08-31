@@ -1,8 +1,8 @@
-// SPC session: mint and cache a JWT for an invited member's SPC user.
+// SPC session: mint and cache a JWT for a project principal's SPC user.
 //
-// The SDP user never types SPC credentials. When the member was invited,
-// SDP generated an SPC password and stored it encrypted on the
-// private_channel_users row. Here we decrypt it and log in on the member's
+// An SDP actor never types SPC credentials. When SDP provisions a principal, it
+// generates an SPC password and stores it encrypted on the compatibility
+// private_channel_users row. Here we decrypt it and log in on the principal's
 // behalf to obtain the SPC-issued JWT that gates the wallet APIs.
 //
 // The token is a 24h JWT with no refresh token, so "refresh" = re-login. When a

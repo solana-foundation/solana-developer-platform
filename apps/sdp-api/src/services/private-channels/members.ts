@@ -1,12 +1,10 @@
-// Invite orchestration: derive an SPC username, generate a strong random
-// password, register with SPC, encrypt the password, insert the DB row.
-// SPC /register MUST succeed before we persist so a partial invite doesn't
-// leave a row without credentials.
+// Principal provisioning: derive an SPC username, generate a strong random
+// password, register with SPC, encrypt the password, then persist the principal.
 
 import { PrivateChannelError, spcRegister } from "@sdp/private-channels";
 import type {
   PrivateChannelUserRepository,
-  PrivateChannelUserWithIdentityRow,
+  PrivateChannelUserRow,
   ProjectScope,
 } from "@/db/repositories";
 import {
@@ -23,24 +21,23 @@ const SPC_USERNAME_SUFFIX_LEN = 5;
 // biome-ignore lint/security/noSecrets: Character alphabet, not a secret.
 const SPC_USERNAME_SUFFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
-export interface InviteMemberInput extends ProjectScope {
+export interface ProvisionPrincipalInput extends ProjectScope {
+  instanceId: string;
   authUrl: string;
-  targetUserId: string;
-  targetUserEmail: string;
-  invitedBy: string | null;
+  name: string;
+  isDefault: boolean;
+  createdBy: string | null;
 }
 
-export interface InviteMemberResult {
-  member: PrivateChannelUserWithIdentityRow;
-  /** Base64url token to embed in the invite URL. Persisted on the row. */
-  inviteToken: string;
+export interface ProvisionPrincipalResult {
+  principal: PrivateChannelUserRow;
+  created: boolean;
 }
 
-// email → SPC-safe username. Adds a short random suffix so collisions between
-// same-email invites across projects (or a project + external SPC instance)
-// don't fail the first try.
-function deriveUsername(email: string): string {
-  const slug = email.split("@")[0]?.replace(SPC_USERNAME_ALLOWED, "-") ?? "user";
+// Display name → SPC-safe username. The suffix prevents collisions between
+// principals with similar names on the same or an external SPC instance.
+function deriveUsername(name: string): string {
+  const slug = name.replace(SPC_USERNAME_ALLOWED, "-");
   // Reserve the separator + suffix so the final slice can never truncate the
   // suffix away (that would silently spend the collision space).
   const reserved = SPC_USERNAME_SUFFIX_LEN + 1;
@@ -69,56 +66,48 @@ function generatePassword(): string {
   return Buffer.from(bytes).toString("base64url");
 }
 
-function generateInviteToken(): string {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return Buffer.from(bytes).toString("base64url");
-}
-
-export async function inviteMember(
+/**
+ * Provision an SPC credential for a project principal. A principal represents a
+ * financial or operational participant; it never represents the SDP actor who
+ * clicked the button.
+ */
+export async function provisionPrincipal(
   env: SpcCredentialCipherEnv,
   repo: PrivateChannelUserRepository,
-  input: InviteMemberInput
-): Promise<InviteMemberResult> {
-  // Dup check: prevents burning an SPC username on a doomed insert.
-  const existing = await repo.findByProjectAndUser(input, input.targetUserId);
-  if (existing) {
-    throw new PrivateChannelError(
-      "CONFLICT",
-      "User is already invited to this Private Channels workspace."
-    );
+  input: ProvisionPrincipalInput
+): Promise<ProvisionPrincipalResult> {
+  if (input.isDefault) {
+    const existing = await repo.findDefaultPrincipal(input, input.instanceId);
+    if (existing) return { principal: existing, created: false };
   }
 
   const password = generatePassword();
   const cipher = createSpcCredentialCipher(env);
   const ciphertext = await cipher.encrypt(input.organizationId, password);
 
-  // Retry once on collision: SPC hard-fails on duplicate username; the random
-  // suffix makes second-attempt collisions effectively impossible.
-  let username = deriveUsername(input.targetUserEmail);
+  let username = deriveUsername(input.name);
   let registered: Awaited<ReturnType<typeof spcRegister>>;
   try {
     registered = await spcRegister(input.authUrl, { username, password });
-  } catch (err) {
-    if (err instanceof PrivateChannelError && err.code === "CONFLICT") {
-      username = deriveUsername(input.targetUserEmail);
+  } catch (error) {
+    if (error instanceof PrivateChannelError && error.code === "CONFLICT") {
+      username = deriveUsername(input.name);
       registered = await spcRegister(input.authUrl, { username, password });
     } else {
-      throw err;
+      throw error;
     }
   }
 
-  const inviteToken = generateInviteToken();
-  const member = await repo.create({
+  const principal = await repo.createPrincipal({
     organizationId: input.organizationId,
     projectId: input.projectId,
-    userId: input.targetUserId,
+    instanceId: input.instanceId,
+    name: input.name,
+    isDefault: input.isDefault,
     spcUserId: registered.id,
     spcUsername: registered.username,
     spcCredentialCiphertext: ciphertext,
-    invitedBy: input.invitedBy,
-    inviteToken,
+    createdBy: input.createdBy,
   });
-
-  return { member, inviteToken };
+  return { principal, created: true };
 }

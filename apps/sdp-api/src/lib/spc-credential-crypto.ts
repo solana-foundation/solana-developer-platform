@@ -1,4 +1,4 @@
-// Cipher for the SPC passwords SDP issues on behalf of invited members.
+// Cipher for the SPC passwords SDP owns for project principals.
 //
 // Shares the custody cipher router — legacy AES-GCM, or Cloud KMS envelope
 // encryption (`v2.` prefix) once SPC_CREDENTIAL_KMS_KEY_NAME is set — but under

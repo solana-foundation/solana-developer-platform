@@ -17,7 +17,14 @@ export interface PrivateChannelUserRow {
   id: string;
   organization_id: string;
   project_id: string;
-  user_id: string;
+  /** Legacy SDP-user link. New project principals do not belong to a human. */
+  user_id: string | null;
+  instance_id: string | null;
+  name: string;
+  is_default: boolean;
+  disabled_at: string | null;
+  created_by: string | null;
+  verified_wallet_count?: number;
   spc_user_id: string | null;
   spc_username: string | null;
   spc_credential_ciphertext: string | null;
@@ -31,7 +38,7 @@ export interface PrivateChannelUserRow {
 
 /** Row + joined columns from `users` (denormalized display fields) + verified-wallet count. */
 export interface PrivateChannelUserWithIdentityRow extends PrivateChannelUserRow {
-  user_email: string;
+  user_email: string | null;
   user_name: string | null;
   /** Number of wallets this member has verified (from private_channel_verified_wallets). */
   verified_wallet_count: number;
@@ -67,6 +74,16 @@ export interface CreatePrivateChannelUserInput extends ProjectScope {
   inviteToken: string | null;
 }
 
+export interface CreatePrivateChannelPrincipalInput extends ProjectScope {
+  instanceId: string;
+  name: string;
+  isDefault: boolean;
+  spcUserId: string;
+  spcUsername: string;
+  spcCredentialCiphertext: string;
+  createdBy: string | null;
+}
+
 export interface AddMembershipInput {
   channelId: string;
   privateChannelUserId: string;
@@ -78,6 +95,24 @@ export interface PrivateChannelUserRepositoryContext {
 }
 
 export interface PrivateChannelUserRepository {
+  /** Project principals for one connected instance, including disabled rows. */
+  listPrincipals(scope: ProjectScope, instanceId: string): Promise<PrivateChannelUserRow[]>;
+
+  /** The active default principal for an instance. */
+  findDefaultPrincipal(
+    scope: ProjectScope,
+    instanceId: string
+  ): Promise<PrivateChannelUserRow | null>;
+
+  /** The active default principal for the project's active instance. */
+  findDefaultPrincipalByProject(scope: ProjectScope): Promise<PrivateChannelUserRow | null>;
+
+  /** Insert a project principal after SPC registration succeeds. */
+  createPrincipal(input: CreatePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
+
+  /** Disable a non-default principal without erasing operation history. */
+  disablePrincipal(scope: ProjectScope, id: string): Promise<boolean>;
+
   /** Project-scoped list, joined with `users` for display fields. */
   listByProject(scope: ProjectScope): Promise<PrivateChannelUserWithIdentityRow[]>;
 
