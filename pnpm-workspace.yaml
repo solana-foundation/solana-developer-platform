@@ -3,24 +3,23 @@ packages:
   - packages/*
 
 catalog:
-  # Trial upgrade to satisfy upstream Solana keychain v1 peer requirements.
+  # Kit 7: what kora, subscriptions, surfpool and the @solana-program clients already peer; @solana/pay is the holdout, covered by peerDependencyRules.
   '@solana-program/system': 0.13.0
   '@solana-program/token': 0.15.0
   '@solana-program/token-2022': 0.15.0
-  '@solana/addresses': 6.10.0
-  '@solana/codecs': 6.10.0
-  '@solana/instructions': 6.10.0
-  '@solana/keys': 6.10.0
-  '@solana/kit': 6.10.0
+  '@solana/addresses': 7.1.1
+  '@solana/codecs': 7.1.1
+  '@solana/instructions': 7.1.1
+  '@solana/keys': 7.1.1
+  '@solana/kit': 7.1.1
   '@solana/mosaic-sdk': 0.1.1
-  '@solana/programs': 6.10.0
-  '@solana/rpc': 6.10.0
-  '@solana/signers': 6.10.0
-  '@solana/sysvars': 6.10.0
-  '@solana/transactions': 6.10.0
+  '@solana/programs': 7.1.1
+  '@solana/rpc': 7.1.1
+  '@solana/signers': 7.1.1
+  '@solana/sysvars': 7.1.1
+  '@solana/transactions': 7.1.1
 
-# Relaxed for the keychain v1 peer trial; flip back to true once its peer
-# ranges settle.
+# A strict resolve fails on peer ranges this repo does not control (typescript ^5 vs 6, kora's kit-plugin-* peers, klend's kit ^3); flipping it needs its own PR.
 strictPeerDependencies: false
 
 saveExact: true
