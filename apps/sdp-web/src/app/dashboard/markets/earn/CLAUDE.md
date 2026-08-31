@@ -176,7 +176,14 @@ program create still sends the body `requestId` form.
   record-before-broadcast window must carry the SAME key or the chain accepts
   the transfer twice — there is no provider-side dedupe behind this route — and
   a React ref dies with the modal and with the page load.
-  - The fingerprint is `(project, strategy, wallet, amount)`. The PROJECT is in
+  - The fingerprint is `(project, strategy, wallet, amount, toleranceBps)` —
+    the USER'S tolerance, never the quote-derived floor, because the
+    fingerprint must be reproducible from what the user can re-enter after a
+    reload or the cross-reload replay is fiction. "Raise the tolerance and
+    retry" still mints a fresh key. The floor a HELD key was minted with is
+    remembered separately and replayed verbatim (the API's own fingerprint
+    includes `minSharesOut` and refuses a replay whose floor changed); see
+    `rememberVaultDepositFloor` in earn-vault-deposit-tracking.ts. The PROJECT is in
     there because an organization-level custody config gives two projects the same
     `custody_wallets` row: without it, switching project in one tab and
     re-submitting the same strategy and amount reuses the first project's key, and
@@ -274,8 +281,17 @@ program create still sends the body `requestId` form.
   outcome. The result screen links the withdrawal transaction in Explorer.
   Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
-  (fingerprint: project, position, shares) under its own versioned
-  `sessionStorage` key.
+  (fingerprint: project, position, shares, minAmountOut — the derived exit
+  floor is in there for the same reason the deposit's is) under its own
+  versioned `sessionStorage` key.
+- `earn-vault-slippage.tsx` — the slippage-floor machinery BOTH vault modals
+  share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
+  mint's scale, floored, one-atom minimum), `isSlippageExceededRefusal` (the
+  API's `details.reason` seam), the debounced quote hook and the disclosure
+  section. One copy on purpose — two copies of a funds-protection rule is how
+  one drifts, the same reasoning as `earn-idempotency-key-store`. The floor is
+  derived from a LIVE provider quote, never from the caller's own input; an
+  unavailable quote DISABLES the action rather than guessing.
 - `earn-idempotency-key-store.ts` — the shared machinery behind BOTH tracking
   modules (storage tiers, quota divergence, approval holds, entry bounds), plus
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
