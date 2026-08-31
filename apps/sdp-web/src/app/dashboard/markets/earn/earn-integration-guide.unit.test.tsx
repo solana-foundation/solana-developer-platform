@@ -144,6 +144,11 @@ describe("EarnIntegrationGuide", () => {
     // A non-JSON error body (gateway 502 HTML) must still throw with the
     // status, not a bare SyntaxError, in the code partners copy-paste.
     expect(code).toContain("response.status");
+    // The positions helper pages to completion — a short first page must not
+    // hide withdrawable holdings from the copied withdraw flow — and fails
+    // loudly on a cursor that does not advance rather than looping.
+    expect(code).toContain("if (!data.hasMore) return positions;");
+    expect(code).toContain("cursor did not advance");
   });
 
   it("renders a mainnet vault as a sandbox preview with an explicit warning", () => {

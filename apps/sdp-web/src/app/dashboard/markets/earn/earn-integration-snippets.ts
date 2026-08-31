@@ -159,16 +159,27 @@ export async function listEarnActivity(ownerAddress: string, cursor?: string) {
 }
 
 /**
- * The customer's live positions. A withdrawal names a POSITION and a share
- * amount: read \`id\` and \`withdrawableShares\` here to drive the withdraw flow.
+ * The customer's live positions, paged to completion — a silently short list
+ * hides withdrawable money. A withdrawal names a POSITION and a share amount:
+ * read \`id\` and \`withdrawableShares\` here to drive the withdraw flow.
  */
 export async function listEarnPositions(ownerAddress: string) {
-  const data = await sdpFetch(
-    \`/v1/earn/external-wallet/positions/\${encodeURIComponent(ownerAddress)}\`,
-    { headers: sdpHeaders() }
-  );
-  // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }] }
-  return data.positions;
+  const positions = [];
+  let cursor;
+  do {
+    const query = cursor ? \`?before=\${encodeURIComponent(cursor)}\` : "";
+    const data = await sdpFetch(
+      \`/v1/earn/external-wallet/positions/\${encodeURIComponent(ownerAddress)}\${query}\`,
+      { headers: sdpHeaders() }
+    );
+    // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }], hasMore, nextCursor }
+    positions.push(...data.positions);
+    if (!data.hasMore) return positions;
+    if (!data.nextCursor || data.nextCursor === cursor) {
+      throw new Error("SDP positions cursor did not advance");
+    }
+    cursor = data.nextCursor;
+  } while (true);
 }`;
 
   const withdraw = `/**
