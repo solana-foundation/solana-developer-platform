@@ -262,14 +262,6 @@ jobs:
       - name: Check UI flow matrix
         run: pnpm check:ui-flow-coverage
 
-      - name: Upload coverage to Codecov
-        if: env.CI_IS_FORK_PULL_REQUEST != 'true'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: apps/sdp-api/coverage/node/lcov.info,apps/sdp-web/coverage/lcov.info
-          fail_ci_if_error: false
-
   build_api:
     name: Build API
     runs-on: ubuntu-latest
