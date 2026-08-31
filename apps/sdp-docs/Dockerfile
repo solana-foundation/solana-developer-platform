@@ -18,7 +18,6 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-docs/package.json ./apps/sdp-docs/
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
-COPY packages/sdp-helius-rings/package.json ./packages/sdp-helius-rings/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
@@ -37,7 +36,6 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-docs ./apps/sdp-docs
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
-COPY packages/sdp-helius-rings ./packages/sdp-helius-rings
 COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc
