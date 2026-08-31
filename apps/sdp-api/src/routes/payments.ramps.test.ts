@@ -524,6 +524,7 @@ describe("Payments routes — ramps", () => {
 
     const hostedUrl = new URL(body.data.quote.hostedUrl);
     expect(hostedUrl.origin).toBe(TEST_MOONPAY_OFFRAMP_URL);
+    expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.transferId);
     expect(hostedUrl.searchParams.has("redirectURL")).toBe(false);
     expect(hostedUrl.searchParams.get("lockAmount")).toBe("true");

@@ -50,12 +50,20 @@ export function WizardFrame({
   const [summaryOpen, setSummaryOpen] = useState(false);
   const activeStep = steps[currentStep];
   const showSummaryButton = summary !== undefined && currentStep > 0;
+  const hasTitleBadge = Boolean(titleBadge);
 
   const stepContent = (
     <>
-      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2">
+      <div
+        className={cn(
+          "mb-6 gap-3 sm:gap-4",
+          hasTitleBadge
+            ? "grid grid-cols-1 items-center text-center sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+            : "flex flex-col items-start sm:flex-row sm:items-center sm:justify-between"
+        )}
+      >
+        <div className={cn("min-w-0 space-y-1", hasTitleBadge && "sm:col-start-2")}>
+          <div className={cn("flex items-center gap-2", hasTitleBadge && "justify-center")}>
             <h2 className="text-2xl font-medium tracking-tight text-primary">
               {currentStepTitle ?? activeStep.title}
             </h2>
@@ -64,7 +72,12 @@ export function WizardFrame({
           {description ? <div className="text-sm text-secondary">{description}</div> : null}
         </div>
         {header || showSummaryButton ? (
-          <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
+          <div
+            className={cn(
+              "flex w-full shrink-0 items-center gap-3 sm:w-auto",
+              hasTitleBadge && "justify-center sm:col-start-3 sm:justify-self-end"
+            )}
+          >
             {header}
             {header && showSummaryButton ? (
               <span aria-hidden className="h-4 w-px bg-border-default" />
