@@ -8,7 +8,7 @@ export default defineConfig({
     environment: "node",
     coverage: {
       provider: "istanbul",
-      reporter: ["text-summary"],
+      reporter: ["text-summary", "lcov"],
       thresholds: {
         statements: 58.98,
         branches: 52.9,
