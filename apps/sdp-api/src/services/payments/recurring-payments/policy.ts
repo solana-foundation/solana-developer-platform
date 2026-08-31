@@ -36,15 +36,14 @@ interface PendingCollectionApprovalRow {
  * @returns The pending decision's rows, or null when none is pending.
  */
 async function findPendingCollectionApproval(input: {
-  env: Env;
-  db?: DatabaseExecutor;
+  db: DatabaseExecutor;
   organizationId: string;
   projectId: string;
   custodyWalletId: string;
   recurringPaymentId: string;
   collectionDueAt: string;
 }): Promise<PendingCollectionApprovalRow | null> {
-  return (input.db ?? getDb(input.env))
+  return input.db
     .prepare(
       `SELECT wo.id AS wallet_operation_id,
               pe.id AS policy_evaluation_id,
@@ -80,8 +79,7 @@ async function findPendingCollectionApproval(input: {
 }
 
 export async function assertNoPendingRecurringCollectionApproval(input: {
-  env: Env;
-  db?: DatabaseExecutor;
+  db: DatabaseExecutor;
   organizationId: string;
   projectId: string;
   custodyWalletId: string;
@@ -148,7 +146,7 @@ export async function enforceRecurringPaymentPolicy(input: {
     typeof collectionDueAt === "string"
   ) {
     const pending = await findPendingCollectionApproval({
-      env: input.env,
+      db: getDb(input.env),
       organizationId: input.organizationId,
       projectId: input.projectId,
       custodyWalletId: input.sourceWallet.id,

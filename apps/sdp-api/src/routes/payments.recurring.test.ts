@@ -236,6 +236,95 @@ async function activateRecurringPaymentForTest(headers: Record<string, string>) 
   return activateBody.data.recurringPayment;
 }
 
+async function activateRecurringPaymentForRuntimeDenialTest(headers: Record<string, string>) {
+  const sourceSigner = await generateKeyPairSigner();
+  await updateSeededWalletPublicKey(sourceSigner.address);
+  createOrgSignerMock.mockResolvedValue(sourceSigner);
+  mockRecurringActivationRpc();
+  return activateRecurringPaymentForTest(headers);
+}
+
+function recurringExecutionCallCounts() {
+  return {
+    feePaymentAdapter: createFeePaymentAdapterMock.mock.calls.length,
+    custodySigner: createOrgSignerForCustodyWalletMock.mock.calls.length,
+    accountInfo: getAccountInfoMock.mock.calls.length,
+    blockhash: getRecentBlockhashMock.mock.calls.length,
+    confirmation: confirmTransactionMock.mock.calls.length,
+    transaction: getTransactionMock.mock.calls.length,
+    send: sendTransactionMock.mock.calls.length,
+    delegation: fetchMaybeSubscriptionDelegationMock.mock.calls.length,
+  };
+}
+
+function denyRecurringRuntimeExecution() {
+  return vi.spyOn(SigningService.prototype, "admitRuntimeExecution").mockRejectedValue(
+    new AppError("CONFLICT", "Custody wallet is unavailable", {
+      reason: "runtime_execution_unavailable",
+    })
+  );
+}
+
+async function recurringExecutionSnapshot(recurringPaymentId: string) {
+  return getDb(env)
+    .prepare(
+      `SELECT to_jsonb(rp) AS recurring_payment,
+              (SELECT to_jsonb(ps)
+                 FROM payment_subscriptions ps
+                WHERE ps.id = rp.subscription_id) AS subscription,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_activation_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS activation_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_update_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS update_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_lifecycle_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS lifecycle_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_update_events e
+                WHERE e.recurring_payment_id = rp.id) AS update_events,
+              (SELECT COUNT(*)::int
+                 FROM wallet_operations wo
+                WHERE wo.organization_id = rp.organization_id
+                  AND wo.project_id = rp.project_id
+                  AND wo.raw_payload->>'recurringPaymentId' = rp.id) AS wallet_operations
+         FROM payment_recurring_payments rp
+        WHERE rp.id = ?`
+    )
+    .bind(recurringPaymentId)
+    .first();
+}
+
+async function expectRuntimeAdmissionDenialWithoutWrites(input: {
+  recurringPaymentId: string;
+  path: string;
+  method: "PATCH" | "POST";
+  headers: Record<string, string>;
+  body: string;
+}) {
+  const before = await recurringExecutionSnapshot(input.recurringPaymentId);
+  const executionCalls = recurringExecutionCallCounts();
+  const admission = denyRecurringRuntimeExecution();
+
+  try {
+    const response = await app.request(
+      input.path,
+      { method: input.method, headers: input.headers, body: input.body },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(admission).toHaveBeenCalledOnce();
+    expect(admission).toHaveBeenCalledWith(TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID);
+  } finally {
+    admission.mockRestore();
+  }
+
+  expect(await recurringExecutionSnapshot(input.recurringPaymentId)).toEqual(before);
+  expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+}
+
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
 
@@ -399,6 +488,76 @@ describe("Payments routes — recurring", () => {
 
     expect(response.status).toBe(409);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
+  });
+
+  it("does not claim activation when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId,
+      path: `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
+  it("does not claim an active update when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}`,
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ metadataUri: "https://example.com/recurring/blocked.json" }),
+    });
+  });
+
+  it("does not claim cancellation when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
+  it("does not claim resume when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+    const cancelResponse = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(cancelResponse.status).toBe(200);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}/resume`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
   });
 
   it("restricts recurring payment tokens to USD stablecoins and project-issued tokens", async () => {

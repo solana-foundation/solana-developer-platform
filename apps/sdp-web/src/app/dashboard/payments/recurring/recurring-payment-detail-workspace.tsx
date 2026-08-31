@@ -402,10 +402,11 @@ export function RecurringPaymentDetailWorkspace({
     recurringPayment.counterpartyAccountId
   );
   const receivingAccountAddress = accountAddress(receivingAccount);
+  const sourceWalletUnresolved = recurringPayment.sourceCustodyWalletId === null;
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
-  const isEditable = canEditRecurringPayment(recurringPayment.status);
-  const controlsDisabled = Boolean(pendingAction) || savingPayment;
+  const isEditable = !sourceWalletUnresolved && canEditRecurringPayment(recurringPayment.status);
+  const controlsDisabled = sourceWalletUnresolved || Boolean(pendingAction) || savingPayment;
 
   const submitAction = async (action: RecurringPaymentAction) => {
     if (pendingAction) {
@@ -573,13 +574,25 @@ export function RecurringPaymentDetailWorkspace({
             actionError={actionError}
             editable={isEditable}
             onEdit={openPaymentEditor}
-            disabled={savingPayment}
+            disabled={controlsDisabled}
             onAction={(action) => void submitAction(action)}
             onCancel={() => setCancelConfirmOpen(true)}
           />
         </div>
 
-        <RecurringPaymentLifecycleBand status={recurringPayment.status} actionError={actionError} />
+        {sourceWalletUnresolved ? (
+          <ActionBand
+            variant="warning"
+            title={t("DashboardPayments.recurring.sourceWalletUnresolved")}
+          >
+            {t("DashboardPayments.recurring.sourceWalletUnresolvedDescription")}
+          </ActionBand>
+        ) : (
+          <RecurringPaymentLifecycleBand
+            status={recurringPayment.status}
+            actionError={actionError}
+          />
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="flex flex-col gap-3">

@@ -1489,7 +1489,6 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
     }
 
     await assertNoPendingRecurringCollectionApproval({
-      env: input.env,
       db: tx,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1571,7 +1570,7 @@ export async function updateRecurringPayment(input: {
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
   if (sourceChanged) {
     await assertNoPendingRecurringCollectionApproval({
-      env: input.env,
+      db: getDb(input.env),
       organizationId: input.organizationId,
       projectId: input.projectId,
       custodyWalletId: input.sourceWallet.id,

@@ -829,6 +829,8 @@
       "readyToActivateDescription": "Creates the subscription and schedules the first payment.",
       "lifecycleActionUnavailable": "Lifecycle action unavailable",
       "lifecycleActionUnavailableDescription": "This recurring payment cannot be changed from its current status.",
+      "sourceWalletUnresolved": "Source wallet unavailable",
+      "sourceWalletUnresolvedDescription": "This recurring payment is not linked to an exact SDP Wallet, so its actions are unavailable.",
       "updatingPayment": "Updating recurring payment.",
       "actionFailed": "Recurring payment action failed.",
       "alreadyFundingWallet": "{wallet} is already the funding wallet.",
