@@ -151,7 +151,7 @@
       "disableTitle": "Désactiver l’identité",
       "disableDescription": "Désactivez « {name} ». Son historique d’opérations restera disponible.",
       "disabling": "Désactivation…",
-      "disable": "Désactiver",
+      "disable": "Désactiver l’identité",
       "disableSuccess": "Identité désactivée."
     },
     "deposit": {

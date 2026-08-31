@@ -162,7 +162,7 @@
       "disableTitle": "Disable identity",
       "disableDescription": "Disable “{name}”. Its operation history will remain available.",
       "disabling": "Disabling…",
-      "disable": "Disable",
+      "disable": "Disable identity",
       "disableSuccess": "Identity disabled."
     },
     "deposit": {

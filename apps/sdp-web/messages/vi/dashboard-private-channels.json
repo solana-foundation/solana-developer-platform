@@ -162,7 +162,7 @@
       "disableTitle": "Tắt danh tính",
       "disableDescription": "Tắt “{name}”. Lịch sử hoạt động vẫn được giữ lại.",
       "disabling": "Đang tắt…",
-      "disable": "Tắt",
+      "disable": "Tắt danh tính",
       "disableSuccess": "Đã tắt danh tính."
     },
     "deposit": {

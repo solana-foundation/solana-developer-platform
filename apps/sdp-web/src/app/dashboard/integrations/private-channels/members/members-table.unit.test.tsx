@@ -56,6 +56,6 @@ describe("Private Channels identities table", () => {
 
     expect(screen.getByText("EU treasury")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Actions for EU treasury" }));
-    expect(screen.getByRole("menuitem", { name: "Disable" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "Disable identity" })).toBeDefined();
   });
 });

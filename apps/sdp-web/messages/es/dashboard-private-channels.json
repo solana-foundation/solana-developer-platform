@@ -150,7 +150,7 @@
       "disableTitle": "Deshabilitar identidad",
       "disableDescription": "Deshabilita “{name}”. Su historial de operaciones seguirá disponible.",
       "disabling": "Deshabilitando…",
-      "disable": "Deshabilitar",
+      "disable": "Deshabilitar identidad",
       "disableSuccess": "Identidad deshabilitada."
     },
     "deposit": {
