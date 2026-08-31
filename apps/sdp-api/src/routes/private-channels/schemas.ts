@@ -18,11 +18,11 @@ export type ConnectPrivateChannelInstanceInput = z.infer<
 >;
 
 /** Body for `POST /probe`: SPC-owned URLs; Solana RPC comes from the project. */
-export const probeConnectionSchema = z.object({
-  gatewayUrl: z.string().min(1),
-  authUrl: z.string().min(1),
-  escrowProgramId: z.string().min(1),
-  escrowInstanceAddr: z.string().min(1),
+export const probeConnectionSchema = privateChannelInstanceInputSchema.pick({
+  gatewayUrl: true,
+  authUrl: true,
+  escrowProgramId: true,
+  escrowInstanceAddr: true,
 });
 
 /** Query params for `GET /health`. */
