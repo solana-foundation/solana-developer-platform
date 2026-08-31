@@ -11,16 +11,19 @@ export async function probePrivateChannelConnection(
 ) {
   const body = c.req.valid("json");
   const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+  const deployment =
+    body.escrowProgramId && body.escrowInstanceAddr
+      ? {
+          escrowProgramId: body.escrowProgramId,
+          escrowInstanceAddr: body.escrowInstanceAddr,
+        }
+      : undefined;
   return success(
     c,
     await verifyInstanceConnection({
       gatewayUrl: body.gatewayUrl,
       authUrl: body.authUrl,
-      probeRpc: () =>
-        projectRpc.probe({
-          escrowProgramId: body.escrowProgramId,
-          escrowInstanceAddr: body.escrowInstanceAddr,
-        }),
+      probeRpc: () => projectRpc.probe(deployment),
     })
   );
 }

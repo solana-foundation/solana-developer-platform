@@ -14,7 +14,7 @@ export interface PrivateChannelProjectRpcClient {
   cluster: SolanaCluster;
   rpc: SolanaRpc;
   target: ResolvedRpcTarget;
-  probe: (deployment: PrivateChannelDeploymentProbeInput) => Promise<SolanaRpcProbeResult>;
+  probe: (deployment?: PrivateChannelDeploymentProbeInput) => Promise<SolanaRpcProbeResult>;
 }
 
 export interface PrivateChannelDeploymentProbeInput {
@@ -91,10 +91,21 @@ export async function loadProjectRpcClient(
 export async function probeProjectRpcDeployment(
   rpc: SolanaRpc,
   cluster: SolanaCluster,
-  deployment: PrivateChannelDeploymentProbeInput
+  deployment?: PrivateChannelDeploymentProbeInput
 ): Promise<SolanaRpcProbeResult> {
   const startedAt = Date.now();
   try {
+    if (!deployment) {
+      const version = (await rpc.getVersion().send())["solana-core"];
+      return version
+        ? { ok: true, latencyMs: Date.now() - startedAt, version }
+        : {
+            ok: false,
+            latencyMs: Date.now() - startedAt,
+            error: "Response missing solana-core version.",
+          };
+    }
+
     const escrowProgramAddress = assertValidAddress(deployment.escrowProgramId, "escrowProgramId");
     const escrowInstanceAddress = assertValidAddress(
       deployment.escrowInstanceAddr,

@@ -40,6 +40,21 @@ const deployment = {
 };
 
 describe("probeProjectRpcDeployment", () => {
+  it("preserves the legacy connectivity-only probe when no deployment is supplied", async () => {
+    const getAccountInfo = vi.fn();
+    const rpc = {
+      getVersion: () => ({
+        send: vi.fn().mockResolvedValue({ "solana-core": "1.18.4" }),
+      }),
+      getAccountInfo,
+    } as unknown as SolanaRpc;
+
+    const result = await probeProjectRpcDeployment(rpc, "devnet");
+
+    expect(result).toMatchObject({ ok: true, version: "1.18.4" });
+    expect(getAccountInfo).not.toHaveBeenCalled();
+  });
+
   it("accepts an executable program and an instance owned by it", async () => {
     const result = await probeProjectRpcDeployment(rpcWithAccounts(), "devnet", deployment);
 
