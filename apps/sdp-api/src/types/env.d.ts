@@ -109,6 +109,15 @@ export interface Env {
   /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
+  /**
+   * Jupiter Swap API (swap-funded Earn deposits). Fail-closed: with no key
+   * present, a deposit that names a `sourceTokenMint` is refused before any
+   * network request — the same posture as an absent provider credential.
+   * The URL defaults to the keyed production base; override it only to pin a
+   * different deployment (e.g. a mock in tests).
+   */
+  JUPITER_SWAP_API_URL?: string;
+  JUPITER_SWAP_API_KEY?: string;
   SOLANA_RPC_ALCHEMY_URL?: string;
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;

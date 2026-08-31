@@ -52,8 +52,21 @@ export function vaultDepositRequestFingerprint(input: {
   strategyId: string;
   custodyWalletId: string;
   amount: string;
+  /**
+   * Swap-funded deposits only: the funding mint changes what leaves the
+   * wallet, so paying in a different token is a different request. Absent (not
+   * null) for an unswapped deposit, so every fingerprint minted before swaps
+   * existed keeps matching its held key.
+   */
+  sourceTokenMint?: string;
 }): string {
-  return JSON.stringify([input.projectId, input.strategyId, input.custodyWalletId, input.amount]);
+  return JSON.stringify([
+    input.projectId,
+    input.strategyId,
+    input.custodyWalletId,
+    input.amount,
+    ...(input.sourceTokenMint === undefined ? [] : [input.sourceTokenMint]),
+  ]);
 }
 
 export function claimVaultDepositIdempotencyKey(fingerprint: string): string {

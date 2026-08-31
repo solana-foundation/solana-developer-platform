@@ -1,7 +1,13 @@
 "use client";
 
 import { decimalScale } from "@sdp/solana/amount";
-import { type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
+  type EarnStrategy,
+  type EarnSwapSourceToken,
+  earnSwapSourceTokens,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -530,14 +536,34 @@ export function EarnVaultDepositModal({
     routedToken?.toUpperCase() ??
     (depositMint ? tokenSymbol(depositMint) : "—");
   const decimals = mintMetadata?.decimals;
-  const amountValidation = validateVaultDepositAmount(amountInput, decimals);
+  // What the deposit may be PAID in: the vault's own token first, then every
+  // other swap-source stablecoin deployed on the strategy's cluster. Paying in
+  // one of the others sends `sourceTokenMint`, and the API prepends a Jupiter
+  // swap inside the same transaction.
+  const fundingTokens = useMemo<EarnSwapSourceToken[]>(() => {
+    const own: EarnSwapSourceToken[] =
+      depositMint && decimals !== undefined
+        ? [{ symbol: symbol as EarnSwapSourceToken["symbol"], mint: depositMint, decimals }]
+        : [];
+    return [
+      ...own,
+      ...earnSwapSourceTokens(strategy.hostCluster).filter((token) => token.mint !== depositMint),
+    ];
+  }, [decimals, depositMint, strategy.hostCluster, symbol]);
+  const [fundingMint, setFundingMint] = useState<string | null>(null);
+  const fundingToken =
+    fundingTokens.find((token) => token.mint === fundingMint) ?? fundingTokens[0];
+  const swapActive = fundingToken !== undefined && fundingToken.mint !== depositMint;
+  const fundingSymbol = swapActive ? fundingToken.symbol : symbol;
+  const fundingDecimals = swapActive ? fundingToken.decimals : decimals;
+  const amountValidation = validateVaultDepositAmount(amountInput, fundingDecimals);
   const selectedWallet = useMemo(
     () => wallets?.find((wallet) => wallet.id === walletId && wallet.isRuntimeExecutionAllowed),
     [walletId, wallets]
   );
   const selectedWalletBalance =
-    selectedWallet && depositMint && decimals !== undefined
-      ? walletBalanceForMint(selectedWallet, depositMint, decimals)
+    selectedWallet && fundingToken && fundingDecimals !== undefined
+      ? walletBalanceForMint(selectedWallet, fundingToken.mint, fundingDecimals)
       : undefined;
   const overKnownBalance =
     amountValidation.kind === "valid" && selectedWalletBalance !== undefined
@@ -546,21 +572,82 @@ export function EarnVaultDepositModal({
   const backing = strategySourceLabel(strategy);
   const amountError = amountValidationMessage(amountInput, amountValidation, t);
 
+  async function submitResolvedIntent(
+    controller: AbortController,
+    wallet: EarnFundingWallet,
+    amount: string
+  ) {
+    // Keyed by the request itself and persisted per tab, so re-pressing submit
+    // after a timeout — or after a reload that lost this component entirely —
+    // replays the same key instead of signing a second transfer. A swap-funded
+    // deposit keys on the funding mint too: paying in a different token is a
+    // different request.
+    const fingerprint = vaultDepositRequestFingerprint({
+      projectId,
+      strategyId: strategy.id,
+      custodyWalletId: wallet.id,
+      amount,
+      ...(swapActive ? { sourceTokenMint: fundingToken.mint } : {}),
+    });
+    const resolvedKey = await resolveHeldIdempotencyKey(
+      vaultDepositIdempotencyKeyStore,
+      fingerprint,
+      controller.signal,
+      fetchEarnVaultDepositByRequestId
+    );
+    if (resolvedKey.kind === "aborted") return;
+    if (resolvedKey.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.deposit.vaultHeldKeyUnavailable"));
+      return;
+    }
+
+    // The value-moving POST deliberately takes NO abort signal. The server
+    // processes the request whether or not this component survives it, so
+    // aborting on unmount only blinds the client to an answer it needs: a
+    // 202 approval hold whose key was never PINNED stays on the 15-minute
+    // TTL while the approval itself lives for hours, and the eventual
+    // resubmit mints a fresh key — a second approval request for one intent.
+    // The controller still exists, but it gates the UI below, never the
+    // request or the key bookkeeping.
+    const result = await createEarnVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: wallet.id,
+        amount,
+        ...(swapActive
+          ? {
+              sourceTokenMint: fundingToken.mint,
+              swapSlippageBps: EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
+            }
+          : {}),
+      },
+      resolvedKey.key
+    );
+    // Key bookkeeping FIRST and unconditionally: the store outlives the
+    // component, so an unmount mid-flight must not skip recording what the
+    // server just answered.
+    applyIdempotencyKeyOutcome(vaultDepositIdempotencyKeyStore, fingerprint, result);
+    if (controller.signal.aborted) return;
+    const resolution = resolveDepositSubmission(
+      result,
+      amount,
+      walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed")),
+      t("DashboardEarn.deposit.vaultSubmitError"),
+      resolvedKey.wasHeld
+    );
+    if (resolution.kind === "error") {
+      setSubmitError(resolution.message);
+      return;
+    }
+    setOutcome(resolution.outcome);
+    if (resolution.deposited) onDeposited?.(resolution.deposited);
+  }
+
   async function submit() {
     if (submittingRef.current || !selectedWallet || amountValidation.kind !== "valid") {
       return;
     }
 
-    const amount = amountValidation.canonicalAmount;
-    // Keyed by the request itself and persisted per tab, so re-pressing submit
-    // after a timeout — or after a reload that lost this component entirely —
-    // replays the same key instead of signing a second transfer.
-    const fingerprint = vaultDepositRequestFingerprint({
-      projectId,
-      strategyId: strategy.id,
-      custodyWalletId: selectedWallet.id,
-      amount,
-    });
     const controller = new AbortController();
     requestControllerRef.current?.abort();
     requestControllerRef.current = controller;
@@ -571,53 +658,7 @@ export function EarnVaultDepositModal({
     setSubmitError(null);
 
     try {
-      const resolvedKey = await resolveHeldIdempotencyKey(
-        vaultDepositIdempotencyKeyStore,
-        fingerprint,
-        controller.signal,
-        fetchEarnVaultDepositByRequestId
-      );
-      if (resolvedKey.kind === "aborted") return;
-      if (resolvedKey.kind === "unavailable") {
-        setSubmitError(t("DashboardEarn.deposit.vaultHeldKeyUnavailable"));
-        return;
-      }
-      const idempotencyKey = resolvedKey.key;
-
-      // The value-moving POST deliberately takes NO abort signal. The server
-      // processes the request whether or not this component survives it, so
-      // aborting on unmount only blinds the client to an answer it needs: a
-      // 202 approval hold whose key was never PINNED stays on the 15-minute
-      // TTL while the approval itself lives for hours, and the eventual
-      // resubmit mints a fresh key — a second approval request for one intent.
-      // The controller still exists, but it gates the UI below, never the
-      // request or the key bookkeeping.
-      const result = await createEarnVaultDeposit(
-        {
-          strategyId: strategy.id,
-          custodyWalletId: selectedWallet.id,
-          amount,
-        },
-        idempotencyKey
-      );
-      // Key bookkeeping FIRST and unconditionally: the store outlives the
-      // component, so an unmount mid-flight must not skip recording what the
-      // server just answered.
-      applyIdempotencyKeyOutcome(vaultDepositIdempotencyKeyStore, fingerprint, result);
-      if (controller.signal.aborted) return;
-      const resolution = resolveDepositSubmission(
-        result,
-        amount,
-        walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed")),
-        t("DashboardEarn.deposit.vaultSubmitError"),
-        resolvedKey.wasHeld
-      );
-      if (resolution.kind === "error") {
-        setSubmitError(resolution.message);
-        return;
-      }
-      setOutcome(resolution.outcome);
-      if (resolution.deposited) onDeposited?.(resolution.deposited);
+      await submitResolvedIntent(controller, selectedWallet, amountValidation.canonicalAmount);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(
@@ -641,7 +682,7 @@ export function EarnVaultDepositModal({
     return (
       <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
         <div className="p-6" ref={contentRef}>
-          <DepositResult outcome={outcome} symbol={symbol} onClose={onClose} />
+          <DepositResult outcome={outcome} symbol={fundingSymbol} onClose={onClose} />
         </div>
       </Modal>
     );
@@ -662,23 +703,69 @@ export function EarnVaultDepositModal({
         </p>
 
         <DepositWalletPicker
-          decimals={decimals}
-          depositMint={depositMint}
+          decimals={fundingDecimals}
+          depositMint={fundingToken?.mint ?? depositMint}
           onSelect={(selectedWalletId) => {
             setWalletId(selectedWalletId);
             setSubmitError(null);
           }}
           selectedWalletId={walletId}
           submitting={submitting}
-          symbol={symbol}
+          symbol={fundingSymbol}
           wallets={wallets}
           walletsError={walletsError}
           walletsLoading={walletsLoading}
         />
 
+        {fundingTokens.length > 1 ? (
+          <fieldset className="mt-5" disabled={submitting}>
+            <legend className="text-sm font-medium text-primary">
+              {t("DashboardEarn.deposit.vaultPayWith")}
+            </legend>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {fundingTokens.map((token) => {
+                const checked = token.mint === (fundingToken?.mint ?? depositMint);
+                return (
+                  <label
+                    className={cn(
+                      "cursor-pointer rounded-lg border px-3 py-1.5 text-sm transition-colors",
+                      checked
+                        ? "border-primary bg-fill-subtle text-primary"
+                        : "border-border-default text-secondary hover:border-border-strong"
+                    )}
+                    key={token.mint}
+                  >
+                    <input
+                      checked={checked}
+                      className="sr-only"
+                      name="earn-vault-deposit-funding-token"
+                      onChange={() => {
+                        setFundingMint(token.mint);
+                        setSubmitError(null);
+                      }}
+                      type="radio"
+                      value={token.mint}
+                    />
+                    {token.symbol}
+                  </label>
+                );
+              })}
+            </div>
+            {swapActive ? (
+              <p className="mt-2 text-xs leading-5 text-secondary" role="note">
+                {t("DashboardEarn.deposit.vaultSwapNotice", {
+                  source: fundingSymbol,
+                  target: symbol,
+                  pct: String(EARN_SWAP_DEFAULT_SLIPPAGE_BPS / 100),
+                })}
+              </p>
+            ) : null}
+          </fieldset>
+        ) : null}
+
         <div className="mt-5 space-y-2">
           <Label htmlFor="earn-vault-deposit-amount">
-            {t("DashboardEarn.deposit.vaultAmount", { token: symbol })}
+            {t("DashboardEarn.deposit.vaultAmount", { token: fundingSymbol })}
           </Label>
           <Input
             aria-describedby="earn-vault-deposit-balance earn-vault-deposit-note"
@@ -699,7 +786,7 @@ export function EarnVaultDepositModal({
               ? selectedWalletBalance === undefined
                 ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                 : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                    amount: formatTokenQuantity(selectedWalletBalance, locale, symbol),
+                    amount: formatTokenQuantity(selectedWalletBalance, locale, fundingSymbol),
                   })
               : null}
           </div>
@@ -731,6 +818,17 @@ export function EarnVaultDepositModal({
               <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
               <dd className="text-right text-primary">
                 {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
+              </dd>
+            </div>
+          ) : null}
+          {swapActive ? (
+            <div className="flex items-baseline justify-between gap-5 py-1">
+              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultSwapRow")}</dt>
+              <dd className="text-right text-primary">
+                {t("DashboardEarn.deposit.vaultSwapVia", {
+                  source: fundingSymbol,
+                  target: symbol,
+                })}
               </dd>
             </div>
           ) : null}

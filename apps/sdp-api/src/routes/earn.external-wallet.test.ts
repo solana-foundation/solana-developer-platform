@@ -312,7 +312,7 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
-  buildExternalWalletDepositTransaction.mockResolvedValue(builtRow());
+  buildExternalWalletDepositTransaction.mockResolvedValue({ kind: "built", built: builtRow() });
   buildExternalWalletWithdrawalTransaction.mockResolvedValue(
     builtRow({
       direction: "withdrawal",
@@ -374,6 +374,193 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       amount: "25",
     });
     expect(res.status).toBe(404);
+  });
+
+  describe("swap-funded builds", () => {
+    // Devnet USDG — a supported swap-source mint on sandbox's cluster.
+    const SOURCE_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    const swapLeg = {
+      instructions: [],
+      lookupTableAddresses: [],
+      sourceAmount: "25",
+      quotedAmount: "24.99",
+      minOutAmount: "24.8",
+      priceImpactPct: "0.0001",
+      routeLabels: ["Whirlpool"],
+      slippageBps: 50,
+    };
+
+    it("passes a validated swap request through and reports the swap on the wire", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      buildExternalWalletDepositTransaction.mockResolvedValue({
+        kind: "built",
+        built: builtRow({ amount_requested: "24.8" }),
+        swap: swapLeg,
+      });
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        sourceTokenMint: SOURCE_MINT,
+      });
+
+      expect(res.status).toBe(200);
+      expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          amount: "25",
+          swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 2 },
+        })
+      );
+      const body = (await res.json()) as {
+        data: { transaction: { amount: string; swap: Record<string, unknown> } };
+      };
+      expect(body.data.transaction.amount).toBe("24.8");
+      expect(body.data.transaction.swap).toMatchObject({
+        sourceTokenMint: SOURCE_MINT,
+        sourceAmount: "25",
+        depositAmount: "24.8",
+        quotedAmount: "24.99",
+        slippageBps: 50,
+      });
+    });
+
+    it("treats a source equal to the strategy's own deposit mint as an unswapped build", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        sourceTokenMint: USDC_MINT,
+      });
+
+      expect(res.status).toBe(200);
+      const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
+      expect(input.swap).toBeUndefined();
+    });
+
+    it("enforces the tolerance bounds at the schema: 1..500 bps", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+
+      for (const swapSlippageBps of [0, 501]) {
+        const res = await post("deposit-transactions", {
+          strategyId: strategy.id,
+          ownerAddress: OWNER,
+          amount: "25",
+          sourceTokenMint: SOURCE_MINT,
+          swapSlippageBps,
+        });
+        expect(res.status).toBe(400);
+      }
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+
+      // The bounds are inclusive: both edges build.
+      for (const swapSlippageBps of [1, 500]) {
+        const res = await post("deposit-transactions", {
+          strategyId: strategy.id,
+          ownerAddress: OWNER,
+          amount: "25",
+          sourceTokenMint: SOURCE_MINT,
+          swapSlippageBps,
+        });
+        expect(res.status).toBe(200);
+      }
+      expect(buildExternalWalletDepositTransaction).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 500 },
+        })
+      );
+    });
+
+    it("refuses an unsupported source mint before any build", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        sourceTokenMint: OWNER,
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("not a supported swap funding token");
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    });
+
+    it("answers the split contract when the composed transaction cannot fit", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      buildExternalWalletDepositTransaction.mockResolvedValue({
+        kind: "swap_required",
+        swap: swapLeg,
+        swapTransaction: {
+          bytes: Uint8Array.from([1, 2, 3]),
+          lastValidBlockHeight: "361",
+        },
+      });
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        // The floor must SURVIVE the split: production requires one on the
+        // follow-up build, and elsewhere a floor-less rebuild selects the
+        // legacy unprotected deposit instruction.
+        minSharesOut: "24.5",
+        sourceTokenMint: SOURCE_MINT,
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          requiresSeparateSwap: boolean;
+          swap: { transaction: string; depositAmount: string };
+          followUp: { strategyId: string; amount: string; minSharesOut?: string };
+        };
+      };
+      expect(body.data.requiresSeparateSwap).toBe(true);
+      expect(body.data.swap.transaction).toBe(Buffer.from([1, 2, 3]).toString("base64"));
+      expect(body.data.swap.depositAmount).toBe("24.8");
+      expect(body.data.followUp).toEqual({
+        strategyId: strategy.id,
+        amount: "24.8",
+        minSharesOut: "24.5",
+      });
+    });
+
+    it("omits the follow-up floor only when the original request carried none", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      buildExternalWalletDepositTransaction.mockResolvedValue({
+        kind: "swap_required",
+        swap: swapLeg,
+        swapTransaction: {
+          bytes: Uint8Array.from([1, 2, 3]),
+          lastValidBlockHeight: "361",
+        },
+      });
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        sourceTokenMint: SOURCE_MINT,
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { followUp: Record<string, unknown> };
+      };
+      expect(body.data.followUp).toEqual({ strategyId: strategy.id, amount: "24.8" });
+    });
   });
 
   it("refuses a paused strategy (catalogue admission)", async () => {

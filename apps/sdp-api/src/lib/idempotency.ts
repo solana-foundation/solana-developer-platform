@@ -195,6 +195,15 @@ export interface EarnVaultDepositFingerprintInput {
   amount: string;
   /** The slippage floor, or null when none applies. */
   minSharesOut: string | null;
+  /**
+   * Swap-funded deposits only (both fields together, or neither): the funding
+   * mint changes WHAT MOVES out of the wallet, and the swap tolerance changes
+   * the deposit the transaction encodes. Deliberately optional rather than
+   * null-defaulted so every fingerprint recorded before swaps existed keeps
+   * matching byte-for-byte.
+   */
+  swapSourceTokenMint?: string;
+  swapSlippageBps?: number;
 }
 
 /** Canonicalize decimal spelling without rounding or passing through a float. */
@@ -233,6 +242,12 @@ export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerpr
       direction: "deposit",
       amount: normalizeDecimalString(input.amount),
       minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
+      ...(input.swapSourceTokenMint === undefined
+        ? {}
+        : {
+            swapSourceTokenMint: input.swapSourceTokenMint,
+            swapSlippageBps: input.swapSlippageBps ?? null,
+          }),
     })
   );
 
