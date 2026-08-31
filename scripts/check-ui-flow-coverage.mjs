@@ -18,7 +18,13 @@ export function auditFlowMatrix({ dashboardDir, specsDir, matrixPath }) {
     .map((cells) => ({ section: cells[1], spec: cells[3] }));
 
   const problems = [];
-  const rowSections = new Set(rows.map((row) => row.section));
+  const rowSections = new Set();
+  for (const row of rows) {
+    if (rowSections.has(row.section)) {
+      problems.push(`matrix has duplicate rows for section "${row.section}"`);
+    }
+    rowSections.add(row.section);
+  }
 
   for (const section of sections) {
     if (!rowSections.has(section)) {

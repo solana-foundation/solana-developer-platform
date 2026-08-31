@@ -100,3 +100,17 @@ test("multi-spec rows check every listed spec", () => {
     'matrix row "payments" references missing spec "payments-recurring.e2e.spec.ts"',
   ]);
 });
+
+test("duplicate rows for one section fail", () => {
+  const problems = auditFlowMatrix(
+    fixture({
+      sections: ["payments"],
+      specs: ["payments.e2e.spec.ts"],
+      rows: [
+        { section: "payments", spec: "payments.e2e.spec.ts" },
+        { section: "payments", spec: "GAP" },
+      ],
+    })
+  );
+  assert.deepEqual(problems, ['matrix has duplicate rows for section "payments"']);
+});
