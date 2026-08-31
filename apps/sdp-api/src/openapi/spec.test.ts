@@ -133,41 +133,6 @@ describe("OpenAPI spec", () => {
     );
   });
 
-  it("keeps Helius Rings internal and documents its ring management and operations", () => {
-    const internal = createOpenApiDocument();
-    const publicDocument = createPublicOpenApiDocument();
-
-    const ring = internal.paths?.["/v1/helius-rings/ring"];
-    expect(ring?.get?.operationId).toBe("getRingsProjectRing");
-    expect(ring?.post?.operationId).toBe("createRingsProjectRing");
-    expect(ring?.post?.security).toEqual([
-      { apiKeyAuth: [] },
-      { clerkBearerAuth: [] },
-      { sessionCookie: [] },
-    ]);
-    // Re-pointing an active ring and a lost bring-up race both answer 409.
-    expect(ring?.post?.responses?.["409"]).toBeDefined();
-
-    const prepare = internal.paths?.["/v1/helius-rings/operations"]?.post;
-    expect(prepare?.operationId).toBe("prepareRingsOperation");
-    const prepareBody = getJsonSchema(prepare?.requestBody);
-    expect(prepareBody.properties?.ring).toBeDefined();
-    expect(prepareBody.required).toContain("clientNonce");
-
-    for (const path of [
-      "/v1/helius-rings/health",
-      "/v1/helius-rings/wallets",
-      "/v1/helius-rings/wallets/{walletId}/sync",
-      "/v1/helius-rings/operations/{operationId}/execute",
-      "/v1/helius-rings/operations/{operationId}/retry",
-    ]) {
-      expect(internal.paths?.[path]).toBeDefined();
-      expect(publicDocument.paths?.[path]).toBeUndefined();
-    }
-    expect(publicDocument.paths?.["/v1/helius-rings/ring"]).toBeUndefined();
-    expect(publicDocument.tags?.map((tag) => tag.name)).not.toContain("Helius Rings");
-  });
-
   it("documents allowlist search/label filters and the labels endpoint", () => {
     const doc = createOpenApiDocument();
 

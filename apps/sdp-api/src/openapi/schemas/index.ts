@@ -8,7 +8,6 @@ export * from "./counterparties";
 export * from "./custody";
 export * from "./earn";
 export * from "./health";
-export * from "./helius-rings";
 export * from "./issuance";
 export * from "./onboarding";
 export * from "./organizations";

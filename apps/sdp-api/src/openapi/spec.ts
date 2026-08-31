@@ -11,7 +11,6 @@ import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyPaths } from "./paths/custody";
 import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
-import { registerHeliusRingsPaths } from "./paths/helius-rings";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerNotificationPaths } from "./paths/notifications";
@@ -50,10 +49,6 @@ const OPENAPI_TAG = {
   PRIVATE_CHANNELS: {
     name: "Private Channels",
     description: "Connected Solana Private Channels instance and gateway health.",
-  },
-  HELIUS_RINGS: {
-    name: "Helius Rings",
-    description: "Shielded rings wallets, per-project custom rings, and ring-bound operations.",
   },
   COMPLIANCE: { name: "Compliance", description: "Risk and compliance screening endpoints." },
   COUNTERPARTIES: {
@@ -103,7 +98,6 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.POLICIES,
   OPENAPI_TAG.PRIVATE_CHANNELS,
-  OPENAPI_TAG.HELIUS_RINGS,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
@@ -173,7 +167,6 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerPaymentsPaths(registry);
   registerPolicyPaths(registry);
   registerPrivateChannelsPaths(registry);
-  registerHeliusRingsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
