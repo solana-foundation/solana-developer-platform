@@ -14,8 +14,13 @@ export async function probePrivateChannelConnection(
   return success(
     c,
     await verifyInstanceConnection({
-      ...body,
-      probeRpc: projectRpc.probe,
+      gatewayUrl: body.gatewayUrl,
+      authUrl: body.authUrl,
+      probeRpc: () =>
+        projectRpc.probe({
+          escrowProgramId: body.escrowProgramId,
+          escrowInstanceAddr: body.escrowInstanceAddr,
+        }),
     })
   );
 }

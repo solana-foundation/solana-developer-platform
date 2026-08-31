@@ -360,6 +360,7 @@
       "statusDegraded": "Degradado",
       "statusUnreachable": "Inacessível",
       "statusFailed": "Falhou",
+      "projectRpcTestFailed": "O RPC do projeto não conseguiu verificar a implantação de escrow. Corrija a integração RPC do projeto ou os endereços da implantação e tente novamente.",
       "latency": "{ms} ms",
       "latencyWithVersion": "{ms} ms · v{version}",
       "connectSuccess": "Canal privado conectado.",

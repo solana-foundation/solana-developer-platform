@@ -70,10 +70,12 @@ export const privateChannelProbeBodySchema = z
   .object({
     gatewayUrl: z.string().min(1),
     authUrl: z.string().min(1),
+    escrowProgramId: solanaAddressSchema,
+    escrowInstanceAddr: solanaAddressSchema,
   })
   .openapi({
     description:
-      "Probe request body. The selected project's configured RPC is probed automatically.",
+      "Probe request body. The selected project's configured RPC verifies the escrow deployment automatically.",
   });
 
 const gatewayProbeResponseSchema = z.object({

@@ -21,6 +21,8 @@ export type ConnectPrivateChannelInstanceInput = z.infer<
 export const probeConnectionSchema = z.object({
   gatewayUrl: z.string().min(1),
   authUrl: z.string().min(1),
+  escrowProgramId: z.string().min(1),
+  escrowInstanceAddr: z.string().min(1),
 });
 
 /** Query params for `GET /health`. */
