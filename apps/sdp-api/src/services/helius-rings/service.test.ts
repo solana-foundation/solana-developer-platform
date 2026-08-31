@@ -477,6 +477,23 @@ describe("HeliusRingsService", () => {
       expect(replay.intentKey).toBe(computeIntentKey(operationInput()));
     });
 
+    it("fails a private transfer when the recipient shielded address is not a wallet in this project", async () => {
+      // WALLET_OWNER is a Solana pubkey, not a shielded address, so the recipient
+      // lookup by shielded_address returns no row and the pipeline records an
+      // invalid_input failure before any bytes are built.
+      const operation = await liveishService().prepareOperation(
+        operationInput({
+          clientNonce: "nonce-transfer-unknown-recipient",
+          opType: "transfer_registered",
+        }),
+        actorContext
+      );
+
+      expect(operation.state).toBe("failed");
+      expect(operation.failure).toMatchObject({ code: "invalid_input" });
+      expect(operation.failure?.message).toMatch(/private transfer recipient/);
+    });
+
     it("ends in failed:policy_denied when the policy denies", async () => {
       const operation = await service({ enforcePolicy: policyStub("deny") }).prepareOperation(
         operationInput({ clientNonce: "nonce-deny" }),
