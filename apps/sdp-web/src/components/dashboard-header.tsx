@@ -393,12 +393,12 @@ function getMarketsRoutePageConfig(
         ariaLabel: t("Shared.dashboardShell.markets"),
         tabs: [
           {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
-            label: t("Shared.dashboardShell.earnProgram"),
-          },
-          {
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
             label: t("Shared.dashboardShell.treasurySolutions"),
+          },
+          {
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+            label: t("Shared.dashboardShell.earnProgram"),
           },
         ],
       },

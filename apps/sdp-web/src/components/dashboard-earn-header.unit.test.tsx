@@ -28,12 +28,12 @@ describe("Markets dashboard headers", () => {
     expect(config.headerTabs).toBeUndefined();
     expect(config.routeTabs?.tabs).toEqual([
       {
-        href: "/dashboard/markets/embedded-yield",
-        label: "Shared.dashboardShell.earnProgram",
-      },
-      {
         href: "/dashboard/markets/treasury-solutions",
         label: "Shared.dashboardShell.treasurySolutions",
+      },
+      {
+        href: "/dashboard/markets/embedded-yield",
+        label: "Shared.dashboardShell.earnProgram",
       },
     ]);
   });

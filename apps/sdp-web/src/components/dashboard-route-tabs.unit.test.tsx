@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { DashboardRouteTabs } from "./dashboard-route-tabs";
 
 const tabs = [
-  { href: "/dashboard/markets/embedded-yield", label: "Embedded Yield" },
   { href: "/dashboard/markets/treasury-solutions", label: "Treasury" },
+  { href: "/dashboard/markets/embedded-yield", label: "Embedded Yield" },
 ] as const;
 
 describe("DashboardRouteTabs", () => {
@@ -19,6 +19,9 @@ describe("DashboardRouteTabs", () => {
 
     expect(markup).toContain('href="/dashboard/markets/embedded-yield"');
     expect(markup).toContain('href="/dashboard/markets/treasury-solutions"');
+    expect(markup.indexOf('>Treasury</a>')).toBeLessThan(
+      markup.indexOf('>Embedded Yield</a>')
+    );
     expect(markup).toContain('aria-current="page"');
     expect(markup).not.toContain("?tab=");
   });
