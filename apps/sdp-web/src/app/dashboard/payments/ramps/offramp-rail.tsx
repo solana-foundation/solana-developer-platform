@@ -1,14 +1,18 @@
 "use client";
 
+import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { toRampCryptoToken } from "@/lib/ramps";
 import { WizardSummaryList } from "../wizard-summary-list";
+import { InstructionActionButton } from "./components/manual-instructions-quote";
 import { OfframpStepContent } from "./components/offramp-step-content";
+import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
-import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 import type { RailProps } from "./ramp-action-page";
+import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";
 
 function offrampPrimaryLabel(wizard: OfframpWizard, t: ReturnType<typeof useTranslations>): string {
@@ -45,13 +49,19 @@ export function OfframpRail({
     onExit,
   });
 
-  const transferTerminal = wizard.transferStatus
-    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
-    : false;
+  const transferState = getRampTransferState(wizard.transferStatus?.status);
+  const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
+  const showInlineStatus =
+    wizard.onTransactionStage && (hostedStage || Boolean(wizard.depositTarget));
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
+      completionTitle={
+        wizard.transferStatus?.status === "completed"
+          ? t("DashboardPayments.ramps.payoutComplete")
+          : undefined
+      }
       primaryDisabled={
         wizard.hostedQuoteLoading ||
         !wizard.canProceed ||
@@ -72,18 +82,50 @@ export function OfframpRail({
           ]}
         />
       }
-      secondaryLabel={
-        wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined
+      header={
+        showInlineStatus ? (
+          <RampStatusInline
+            direction="offramp"
+            hosted={hostedStage}
+            transfer={wizard.transferStatus}
+          />
+        ) : undefined
       }
-      confirmSecondary={wizard.onTransactionStage}
+      secondaryLabel={
+        wizard.onTransactionStage && transferState.cancelable
+          ? t("DashboardPayments.counterparty.cancel")
+          : undefined
+      }
+      confirmSecondary={wizard.onTransactionStage && transferState.cancelable}
       secondaryDisabled={wizard.isCanceling}
+      hideSecondary={wizard.onTransactionStage && !transferState.cancelable}
       footerActions={
-        transferTerminal ? (
+        transferState.terminal ? (
           <Button asChild type="button">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               {t("DashboardPayments.goToTransaction")}
             </Link>
           </Button>
+        ) : wizard.depositTarget ? (
+          <InstructionActionButton
+            variant="default"
+            size="default"
+            action={{
+              loading: wizard.onchainSendLoading,
+              succeeded: wizard.onchainSendResult !== null,
+              disabled: !wizard.canSendOnchain || wizard.quoteExpired,
+              onClick: () => void wizard.sendCryptoToDeposit(),
+              icon: <SendIcon />,
+              idleLabel: wizard.quoteExpired
+                ? t("DashboardPayments.ramps.quoteExpired")
+                : t("DashboardPayments.ramps.sendCrypto", {
+                    amount: wizard.depositTarget.amount,
+                    token: toRampCryptoToken(wizard.selectedRampPair.assetRail).toUpperCase(),
+                  }),
+              busyLabel: t("DashboardPayments.ramps.sending"),
+              doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
+            }}
+          />
         ) : null
       }
       hidePrimary={wizard.currentStepId === "COMPLETE"}

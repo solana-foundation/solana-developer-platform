@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import { z } from "zod";
+import { earnQueryKeys } from "../earn-query-key";
 
 /**
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
@@ -88,7 +89,7 @@ export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
 }
 
 export function useEarnFundingWallets() {
-  const { data, error, isLoading, mutate } = useSWR("dashboard-earn-funding-wallets", () =>
+  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), () =>
     fetchFundingWallets()
   );
   return { wallets: data, error, isLoading, refresh: () => void mutate() };

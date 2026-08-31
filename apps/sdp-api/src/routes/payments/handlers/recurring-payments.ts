@@ -36,7 +36,7 @@ import {
   recurringPaymentIdParamsSchema,
   type updateRecurringPaymentSchema,
 } from "../schemas";
-import { resolveScope, resolveWallet } from "../wallets";
+import { assertFreshPaymentWalletAccess, resolveScope, resolveWallet } from "../wallets";
 
 function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringPayment {
   return {
@@ -302,6 +302,7 @@ export const collectRecurringPayment = async (
   const scope = await resolveScope(c);
   const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
   assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
+  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const collected = await collectRecurringPaymentRecord({
     env: c.env,

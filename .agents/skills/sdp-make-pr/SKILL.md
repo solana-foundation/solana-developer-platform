@@ -33,6 +33,8 @@ Example: `feat(payments): add retryable settlement polling`
 
 Do not require or search for an issue ticket. Mention one only when the user explicitly asks for it.
 
+Never emit one long flat bullet list: split the bullets under **bolded section labels**, adding bolded sub-labels when a section holds more than ~5 bullets (group by concern or domain). Dots always sit under a bolded label; a flat list is acceptable only for tiny PRs.
+
 Write the body with a concise summary first and the technical behavior second. Explain only the changed seam: name the user-visible or operational result, the mechanism that produces it, the important failure semantics, and the evidence that verifies it. Omit unchanged architecture and background that does not help review the diff.
 
 ```markdown

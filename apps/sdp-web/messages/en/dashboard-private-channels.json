@@ -382,6 +382,7 @@
       "statusFailed": "Failed",
       "gatewayNotReady": "Gateway responded but is not ready",
       "connectionTestFailed": "Some endpoints could not be reached. Check the highlighted connection details and try again.",
+      "projectRpcTestFailed": "The project RPC could not verify the escrow deployment. Fix the project's RPC integration or deployment addresses and try again.",
       "connectionRequestFailed": "We couldn't test the connection. Check the connection details and try again.",
       "latency": "{ms} ms",
       "latencyWithVersion": "{ms} ms · v{version}",

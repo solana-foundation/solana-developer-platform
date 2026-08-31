@@ -28,18 +28,28 @@ test("automatic production deploys are called from the protected main release fl
   assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
 });
 
-test("manual production redeploy always skips builds and migrations", () => {
+test("release deploys verify and promote the signed image; manual redeploys skip migrations", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
+  assert.doesNotMatch(workflow, /docker build/);
   assert.match(
     workflow,
-    /- name: Build and push image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+    /- name: Verify and promote release image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
   assert.match(
     workflow,
     /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
-  assert.match(workflow, /--build-arg GIT_SHA="\$\{DEPLOY_IMAGE_SHA\}"/);
-  assert.match(workflow, /sdp-api-public:\$\{DEPLOY_IMAGE_SHA\}/);
+  assert.match(workflow, /cosign verify "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
+  assert.match(workflow, /cosign copy --force "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
+  assert.match(workflow, /--certificate-github-workflow-sha "\$\{DEPLOY_IMAGE_SHA\}"/);
+  assert.match(workflow, /\$\{DEST_BASE\}:\$\{DEPLOY_IMAGE_SHA\}/);
+});
+
+test("manual redeploys verify the promoted image signature before rollout", () => {
+  assert.match(
+    workflow,
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ inputs\.release_sha == '' \}\}/
+  );
 });
 
 test("candidate is revision-specific and Cloud Run-ready before promotion", () => {
@@ -140,6 +150,6 @@ test("service and cron use the resolved digest", () => {
     workflow,
     /gcloud run jobs update "\$\{JOB\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
   );
-  assert.match(workflow, /timeout-minutes: 90/);
+  assert.match(workflow, /timeout-minutes: 150/);
   assert.match(workflow, /- name: Promote service and cron with rollback\n\s+timeout-minutes: 10/);
 });

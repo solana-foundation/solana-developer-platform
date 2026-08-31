@@ -39,6 +39,7 @@ import {
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
+import { runWithCronRunEvent } from "./run-event";
 import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
 import {
   runWorkflowSecretRetirements,
@@ -84,7 +85,7 @@ function withCheckinMargin(observability: Observability): Observability {
     captureException: (error) => observability.captureException(error),
     withScope: (callback) => observability.withScope(callback),
     withMonitor: (slug, work, options) =>
-      observability.withMonitor(slug, work, {
+      observability.withMonitor(slug, () => runWithCronRunEvent(slug, work), {
         checkinMargin: IN_PROCESS_CHECKIN_MARGIN_MINUTES,
         ...options,
       }),

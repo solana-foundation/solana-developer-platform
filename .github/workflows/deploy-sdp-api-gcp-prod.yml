@@ -24,12 +24,46 @@ on:
 permissions:
   contents: read
   id-token: write
+  packages: read
 
 concurrency:
   group: sdp-api-gcp-deploy-prod
   cancel-in-progress: false
 
 jobs:
+  notify-start:
+    name: Notify Slack — release started
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Notify Slack — deploy started
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: production
+          STATUS: started
+          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          COMMIT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEPLOY_SHA}" \
+            --jq '(.sha[0:7]) + " — " + (.commit.message | split("\n")[0])' 2>/dev/null || true)"
+          export COMMIT
+          ./scripts/notify-slack.sh
+
   smoke:
     name: Gate on dev smoke
     if: >-
@@ -53,7 +87,7 @@ jobs:
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
        (github.event_name == 'workflow_dispatch' && inputs.image_sha != ''))
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     environment: production
     env:
       PROJECT_ID: solana-developer-platform
@@ -84,20 +118,8 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
-      - name: Notify Slack — deploy started
-        continue-on-error: true
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_PROJECT: solana-developer-platform
-          DOPPLER_CONFIG: dev_ci
-          SERVICE: sdp-api
-          ENV: production
-          STATUS: started
-          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
-          ACTOR: ${{ github.actor }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_ID: ${{ github.run_id }}
-        run: ./scripts/notify-slack.sh
+      - name: Resolve commit summary
+        run: echo "COMMIT_LINE=$(git log -1 --format='%h — %s' "${DEPLOY_IMAGE_SHA}" 2>/dev/null || true)" >> "${GITHUB_ENV}"
 
       - name: Verify release identity
         if: ${{ inputs.release_sha != '' }}
@@ -113,21 +135,65 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       - name: Configure Docker for Artifact Registry
-        if: ${{ inputs.release_sha != '' }}
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-      - name: Build and push image
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@31b88efe9de28ae0ffa220711af4b60be9435f6e # v0.4
+
+      - name: Log in to GHCR
         if: ${{ inputs.release_sha != '' }}
-        timeout-minutes: 20
+        run: crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+
+      # The release image was scanned, built with SLSA provenance + SBOM
+      # attestations, and keyless-signed by release-images.yml. Verify that
+      # signature against the exact release commit and promote the SAME digest
+      # to Artifact Registry (cosign copy carries signatures and attestations),
+      # so prod runs the artifact that was scanned and signed — never a rebuild.
+      - name: Verify and promote release image
+        if: ${{ inputs.release_sha != '' }}
+        timeout-minutes: 75
         run: |
           set -euo pipefail
+          SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
+          # release-images.yml is triggered by the tag push and runs in
+          # parallel with this deploy: wait out the build-and-sign window
+          # before treating a missing tag or signature as a failure.
+          SRC_DIGEST=""
+          for attempt in $(seq 1 130); do
+            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${{ inputs.release_tag }}" 2>/dev/null)"; then
+              break
+            fi
+            echo "release image tag not in GHCR yet (attempt ${attempt}/130); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${SRC_DIGEST}" ]]; then
+            echo "release image ${SRC_BASE}:${{ inputs.release_tag }} never appeared in GHCR." >&2
+            exit 1
+          fi
+          verified=""
+          for attempt in $(seq 1 10); do
+            if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/tags/${{ inputs.release_tag }}" \
+              --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
+              verified=true
+              break
+            fi
+            echo "signature not verifiable yet (attempt ${attempt}/10); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${verified}" ]]; then
+            echo "cosign verification failed for ${SRC_BASE}@${SRC_DIGEST}." >&2
+            exit 1
+          fi
           VERSION="$(node -p "require('./package.json').version")"
-          VERSION_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${VERSION}"
-          SHA_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${DEPLOY_IMAGE_SHA}"
-          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${DEPLOY_IMAGE_SHA}" \
-            -t "${VERSION_IMAGE}" -t "${SHA_IMAGE}" .
-          docker push "${VERSION_IMAGE}"
-          docker push "${SHA_IMAGE}"
+          DEST_BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
+          cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
+          crane tag "${DEST_BASE}@${SRC_DIGEST}" "${VERSION}"
+          echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
 
       - name: Resolve immutable deploy image
         run: |
@@ -149,8 +215,25 @@ jobs:
             echo "Artifact Registry returned an invalid digest for ${tagged_image}." >&2
             exit 1
           fi
+          if [[ -n "${SRC_DIGEST:-}" && "${digest}" != "${SRC_DIGEST}" ]]; then
+            echo "Artifact Registry digest ${digest} does not match the verified release digest ${SRC_DIGEST}." >&2
+            exit 1
+          fi
           echo "IMAGE=${resolved_image}" >> "${GITHUB_ENV}"
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
+
+      # Rollback path (workflow_dispatch by git sha): the AR image must carry
+      # the signature copied at its original promotion. An image that predates
+      # signed promotion fails here by design; break-glass is documented in the
+      # HOO-991 design note.
+      - name: Verify rollback image signature
+        if: ${{ inputs.release_sha == '' }}
+        run: |
+          set -euo pipefail
+          cosign verify "${IMAGE}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@refs/tags/v.+$" \
+            --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"
 
       - name: Run database migrations
         if: ${{ inputs.release_sha != '' }}
@@ -320,6 +403,13 @@ jobs:
             echo 'docs/ops/managed-reconciliation-monitor-migration.md'
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Run prod canary against the promoted revision
+        if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
+        timeout-minutes: 5
+        run: |
+          gcloud run jobs execute sdp-prod-canary \
+            --region "${REGION}" --project "${PROJECT_ID}" --wait
+
       - name: Roll back incomplete rollout
         if: ${{ always() }}
         timeout-minutes: 5
@@ -359,18 +449,42 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" \
             --remove-tags "${CANDIDATE_TAG}"
 
+
+  notify-result:
+    name: Notify Slack — release result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    needs: [smoke, deploy]
+    if: >-
+      always() &&
+      github.repository == 'solana-foundation/solana-developer-platform'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
       - name: Notify Slack — deploy result
-        if: ${{ always() }}
-        continue-on-error: true
         env:
+          GH_TOKEN: ${{ github.token }}
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
           SERVICE: sdp-api
           ENV: production
-          STATUS: ${{ job.status }}
+          STATUS: >-
+            ${{ needs.deploy.result == 'success' && 'success' ||
+                (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
+                'failure' }}
           VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
-        run: ./scripts/notify-slack.sh
+        run: |
+          COMMIT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEPLOY_SHA}" \
+            --jq '(.sha[0:7]) + " — " + (.commit.message | split("\n")[0])' 2>/dev/null || true)"
+          export COMMIT
+          ./scripts/notify-slack.sh

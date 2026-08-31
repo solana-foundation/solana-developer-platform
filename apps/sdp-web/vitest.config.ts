@@ -6,6 +6,17 @@ export default defineConfig({
   test: {
     include: ["src/**/*.unit.test.{ts,tsx}"],
     environment: "node",
+    coverage: {
+      provider: "istanbul",
+      reporter: ["text-summary"],
+      thresholds: {
+        statements: 58.98,
+        branches: 52.9,
+        functions: 55.85,
+        lines: 59.58,
+        autoUpdate: true,
+      },
+    },
   },
   resolve: {
     alias: {

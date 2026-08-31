@@ -1,9 +1,4 @@
-import type {
-  RpcConnectionCheckStatus,
-  RpcConnectionLifecycle,
-  RpcConnectionNetwork,
-  RpcConnectionScope,
-} from "@sdp/types";
+import type { RpcConnectionLifecycle, RpcConnectionNetwork, RpcConnectionScope } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 
 /** The organization-scope sentinel `scope_key` is generated as. */
@@ -22,9 +17,6 @@ export interface RpcConnectionRow {
   status: RpcConnectionLifecycle;
   is_default: boolean;
   display_metadata: unknown;
-  last_check_status: RpcConnectionCheckStatus | null;
-  last_check_at: string | null;
-  last_check_failure_code: string | null;
   activated_at: string | null;
   deactivated_at: string | null;
   created_at: string;
@@ -49,9 +41,6 @@ const CONNECTION_COLUMN_NAMES = [
   "status",
   "is_default",
   "display_metadata",
-  "last_check_status",
-  "last_check_at",
-  "last_check_failure_code",
   "activated_at",
   "deactivated_at",
   "created_at",
@@ -164,6 +153,35 @@ export class RpcConnectionStore {
   }
 
   /**
+   * The connection this scope holds for one provider, if it still has one.
+   *
+   * Excludes `deactivated` rows because those are terminal: the secret is
+   * destroyed, so promoting one would report success and route nothing. Used to
+   * answer "does switching to this provider mean using their own key or ours".
+   */
+  async findLiveConnectionForProvider(params: {
+    organizationId: string;
+    scopeKey: string;
+    network: RpcConnectionNetwork;
+    provider: string;
+    executor?: DatabaseExecutor;
+  }): Promise<{ id: string; is_default: boolean } | null> {
+    const db = params.executor ?? this.db;
+    return db.queryOne<{ id: string; is_default: boolean }>(
+      `SELECT id, is_default
+         FROM rpc_connections
+        WHERE organization_id = ?
+          AND scope_key = ?
+          AND network = ?
+          AND provider = ?
+          AND status <> 'deactivated'
+        ORDER BY is_default DESC, created_at DESC
+        LIMIT 1`,
+      [params.organizationId, params.scopeKey, params.network, params.provider]
+    );
+  }
+
+  /**
    * Demote whatever currently holds the default slot for this scope and
    * network. Runs inside the activation transaction so the partial unique
    * index never sees two winners.
@@ -202,9 +220,6 @@ export class RpcConnectionStore {
               activated_at = COALESCE(activated_at, sdp_iso_now()),
               deactivated_at = NULL,
               is_default = ?,
-              last_check_status = 'success',
-              last_check_at = sdp_iso_now(),
-              last_check_failure_code = NULL,
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
@@ -281,6 +296,210 @@ export class RpcConnectionStore {
   }
 
   /**
+   * Point a connection at a freshly stored credential and retire the old one
+   * (HOO-1229).
+   *
+   * Both halves are one statement pair inside the caller's transaction: a
+   * connection pointing at a retired credential resolves to nothing, so a
+   * crash between them would take the project off its own key without anyone
+   * asking for that.
+   */
+  async repointConnectionCredential(params: {
+    organizationId: string;
+    connectionId: string;
+    scopeKeys: readonly string[];
+    /**
+     * The credential the caller read before it built the replacement. Matching
+     * on it makes this a compare-and-swap: two rotations racing each other both
+     * see the same previous credential, and without this both would commit. The
+     * last write would win while the other replacement stayed active with its
+     * secret stored, and the losing request would return a credential id the
+     * connection no longer used.
+     */
+    expectedCredentialId: string;
+    nextCredentialId: string;
+    nextCredentialScopeKey: string;
+    executor?: DatabaseExecutor;
+  }): Promise<RpcConnectionRow | null> {
+    const db = params.executor ?? this.db;
+    return db.queryOne<RpcConnectionRow>(
+      `UPDATE rpc_connections
+          SET provider_credential_id = ?,
+              provider_credential_scope_key = ?,
+              status = 'active',
+              updated_at = sdp_iso_now()
+        WHERE id = ?
+          AND organization_id = ?
+          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+          AND status <> 'deactivated'
+          AND provider_credential_id = ?
+        RETURNING ${CONNECTION_COLUMNS}`,
+      [
+        params.nextCredentialId,
+        params.nextCredentialScopeKey,
+        params.connectionId,
+        params.organizationId,
+        ...params.scopeKeys,
+        params.expectedCredentialId,
+      ]
+    );
+  }
+
+  /**
+   * Promote a freshly inserted credential straight to active. Rotation has
+   * already probed the key, so the `pending` state the insert starts in would
+   * only be a window where the connection resolves to nothing.
+   */
+  async activateCredentialById(params: {
+    organizationId: string;
+    providerCredentialId: string;
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    return db.execute(
+      `UPDATE provider_credentials
+          SET status = 'active',
+              last_validated_at = sdp_iso_now(),
+              last_failure_code = NULL,
+              updated_at = sdp_iso_now()
+        WHERE id = ?
+          AND organization_id = ?
+          AND status = 'pending'`,
+      [params.providerCredentialId, params.organizationId]
+    );
+  }
+
+  /** Retire a credential a rotation has replaced. */
+  async retireCredential(params: {
+    organizationId: string;
+    providerCredentialId: string;
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    return db.execute(
+      `UPDATE provider_credentials
+          SET status = 'retired',
+              encrypted_secret_payload = NULL,
+              updated_at = sdp_iso_now()
+        WHERE id = ?
+          AND organization_id = ?`,
+      [params.providerCredentialId, params.organizationId]
+    );
+  }
+
+  /**
+   * Live connections anywhere in the organization, across every project and
+   * network. Used to refuse a fail-closed switch that would have nothing to
+   * fall closed onto.
+   */
+  async countLiveConnectionsForOrganization(params: {
+    organizationId: string;
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    const row = await db.queryOne<{ live: number }>(
+      `SELECT COUNT(*)::int AS live
+         FROM rpc_connections c
+         JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+        WHERE c.organization_id = ?
+          AND c.status = 'active'
+          AND pc.status = 'active'`,
+      [params.organizationId]
+    );
+    return row?.live ?? 0;
+  }
+
+  /**
+   * How many connections a scope still has that are not withdrawn (HOO-1227).
+   *
+   * Deactivated rows are excluded because they are terminal: they hold no
+   * secret and route nothing, so counting them would block a project that has
+   * only ever had connections it already gave up.
+   */
+  async countLiveConnections(params: {
+    organizationId: string;
+    scopeKey: string;
+    network: RpcConnectionNetwork;
+    /**
+     * Narrow to one provider. A scope may hold a connection per provider now,
+     * so "does this project already have one" and "does this project already
+     * have an Alchemy one" are different questions and only the second blocks
+     * a save.
+     */
+    provider?: string;
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    // Built rather than parameterised against NULL: an untyped placeholder
+    // compared to NULL leaves Postgres unable to infer the parameter type.
+    const providerClause = params.provider ? " AND provider = ?" : "";
+    const values: unknown[] = [params.organizationId, params.scopeKey, params.network];
+    if (params.provider) {
+      values.push(params.provider);
+    }
+    const row = await db.queryOne<{ live: number }>(
+      `SELECT COUNT(*)::int AS live
+         FROM rpc_connections
+        WHERE organization_id = ?
+          AND scope_key = ?
+          AND network = ?
+          AND status <> 'deactivated'${providerClause}`,
+      values
+    );
+    return row?.live ?? 0;
+  }
+
+  /**
+   * Remove a deactivated connection and the credential it hung off (HOO-1219).
+   *
+   * Only `deactivated` rows match. Deactivation is what destroys the secret, so
+   * by the time a row is deletable there is nothing left to leak, and the
+   * credential row is a record of a key that no longer exists anywhere. The
+   * guard is in the WHERE clause rather than a prior read so a concurrent
+   * activation cannot slip between the check and the delete.
+   */
+  async deleteDeactivatedConnection(params: {
+    organizationId: string;
+    connectionId: string;
+    scopeKeys: readonly string[];
+    executor?: DatabaseExecutor;
+  }): Promise<{ id: string; provider_credential_id: string } | null> {
+    const db = params.executor ?? this.db;
+    return db.queryOne<{ id: string; provider_credential_id: string }>(
+      `DELETE FROM rpc_connections
+        WHERE id = ?
+          AND organization_id = ?
+          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+          AND status = 'deactivated'
+        RETURNING id, provider_credential_id`,
+      [params.connectionId, params.organizationId, ...params.scopeKeys]
+    );
+  }
+
+  /**
+   * Drop the credential a deleted connection pointed at, as long as nothing
+   * else still references it. A credential is per-connection today, but the
+   * rotation column is a self-reference, so checking is cheaper than assuming.
+   */
+  async deleteOrphanedCredential(params: {
+    organizationId: string;
+    providerCredentialId: string;
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    return db.execute(
+      `DELETE FROM provider_credentials
+        WHERE id = ?
+          AND organization_id = ?
+          AND status = 'deactivated'
+          AND NOT EXISTS (
+                SELECT 1 FROM rpc_connections c WHERE c.provider_credential_id = provider_credentials.id
+              )`,
+      [params.providerCredentialId, params.organizationId]
+    );
+  }
+
+  /**
    * Withdraw the credential together with its connection. The `encrypted_db`
    * ciphertext is dropped in the same statement: on self-hosted deployments it
    * is the secret itself, and a deactivated credential must not keep a
@@ -312,26 +531,45 @@ export class RpcConnectionStore {
     );
   }
 
-  async recordCheckFailure(params: {
+  /**
+   * Mark a connection as failing its check.
+   *
+   * The check *result* is no longer stored (HOO-1228), but the lifecycle flip
+   * is not a result -- it is what makes the relay fail closed instead of
+   * quietly answering on platform keys. The redacted code is reported to the
+   * caller and deliberately not written down.
+   */
+  /**
+   * Record that a probe rejected this connection.
+   *
+   * Matched on the credential the probe actually tested, not on the connection
+   * alone. A probe is a network call, so a rotation can land while one is in
+   * flight: the connection then points at a new, proven key, and writing the
+   * old verdict onto it would mark a working connection failed and clear it out
+   * of the default slot, failing the project closed over a key that no longer
+   * exists. The compare-and-swap makes the stale write miss instead.
+   *
+   * Returns the rows changed so a caller can tell a real failure from a verdict
+   * that arrived too late to mean anything.
+   */
+  async markCheckFailed(params: {
     organizationId: string;
     connectionId: string;
+    providerCredentialId: string;
     scopeKeys: readonly string[];
-    failureCode: string;
     executor?: DatabaseExecutor;
-  }): Promise<void> {
+  }): Promise<number> {
     const db = params.executor ?? this.db;
-    await db.execute(
+    return db.execute(
       `UPDATE rpc_connections
           SET status = 'failed',
               is_default = FALSE,
-              last_check_status = 'failed',
-              last_check_at = sdp_iso_now(),
-              last_check_failure_code = ?,
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
+          AND provider_credential_id = ?
           AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})`,
-      [params.failureCode, params.connectionId, params.organizationId, ...params.scopeKeys]
+      [params.connectionId, params.organizationId, params.providerCredentialId, ...params.scopeKeys]
     );
   }
 
@@ -349,6 +587,7 @@ export class RpcConnectionStore {
     id: string;
     label: string;
     status: string;
+    credential_version: number;
     storage_backend: string;
     secret_ref: string | null;
     secret_version_ref: string | null;
@@ -358,6 +597,7 @@ export class RpcConnectionStore {
       `SELECT pc.id,
               pc.label,
               pc.status,
+              pc.credential_version,
               pc.storage_backend,
               pc.secret_ref,
               pc.secret_version_ref,
@@ -425,7 +665,30 @@ export class RpcConnectionStore {
     const live = rows.find(
       (row) => row.status === "active" && row.is_default && row.credential_status === "active"
     );
-    return live ? { kind: "active", connectionId: live.id } : { kind: "unusable" };
+    if (live) {
+      return { kind: "active", connectionId: live.id };
+    }
+
+    /**
+     * Only a connection that was *meant* to serve and cannot may fail requests
+     * closed. Holding keys that are deliberately idle is an ordinary state now:
+     * a project keeps a key per provider, and choosing a provider it holds none
+     * for stands them all down so SDP's account answers.
+     *
+     * The absence of a default used to be the test, which conflated the two.
+     * `markCheckFailed` also clears `is_default`, so a broken connection and a
+     * stood-down one are indistinguishable by that flag: every deliberate
+     * switch onto a platform provider read as a fault and the relay refused
+     * every call with "no active default connection".
+     *
+     * A failed row still fails closed even though nothing points at it. The
+     * tenant last saw it serving, and quietly moving their traffic onto keys
+     * SDP pays for is the outcome this whole feature exists to prevent.
+     */
+    const broken = rows.some(
+      (row) => row.status !== "active" || (row.is_default && row.credential_status !== "active")
+    );
+    return broken ? { kind: "unusable" } : { kind: "none" };
   }
 
   /**

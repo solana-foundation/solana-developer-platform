@@ -1,8 +1,6 @@
-name: SDP dev read-only smoke
+name: SDP smoke canary
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -13,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sdp-dev-smoke
+  group: sdp-smoke-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -23,7 +21,7 @@ jobs:
     timeout-minutes: 20
     if: github.repository == 'solana-foundation/solana-developer-platform'
     env:
-      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV
+      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,SDP_FLAG_ORGANIZATION_ONBOARDING,SDP_FLAG_PRIVY_BYOK,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,PAYMENTS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
       PLAYWRIGHT_API_URL: https://api-dev.solana.com
       PLAYWRIGHT_USE_EXTERNAL_API: "1"
       PLAYWRIGHT_USE_NEXT_START: "1"
@@ -31,6 +29,7 @@ jobs:
       NEXT_PUBLIC_DISABLE_SENTRY: "1"
       NEXT_PUBLIC_SENTRY_DSN: ""
       PLAYWRIGHT_DISABLE_SENTRY: "1"
+      SENTRY_AUTH_TOKEN: ""
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,6 +48,9 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Pin the smoke flag posture
+        run: jq -r 'to_entries[] | .value.env + "=" + (.value.value|tostring)' apps/sdp-web/smoke-flags.json >> "$GITHUB_ENV"
+
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
@@ -65,11 +67,29 @@ jobs:
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run GCP read-only smoke
+        id: smoke
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           NODE_ENV: production
+          VERCEL_ENV: production
         run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run test:e2e:gcp-smoke
+
+      - name: Private-channels vendor sandbox smoke
+        run: pnpm test:private-channels
+
+      - name: Report run to Loki
+        if: always()
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          SMOKE_TARGET: dev
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh
 
       - name: Upload Playwright artifacts
         if: always()
@@ -81,17 +101,3 @@ jobs:
             apps/sdp-web/test-results
           if-no-files-found: ignore
 
-      - name: Notify Slack on failure
-        if: failure()
-        continue-on-error: true
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_PROJECT: solana-developer-platform
-          DOPPLER_CONFIG: dev_ci
-          SERVICE: sdp-dev-smoke
-          ENV: dev
-          STATUS: failure
-          ACTOR: ${{ github.actor }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_ID: ${{ github.run_id }}
-        run: ./scripts/notify-slack.sh

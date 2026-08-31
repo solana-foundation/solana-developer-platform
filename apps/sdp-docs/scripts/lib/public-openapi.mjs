@@ -8,6 +8,7 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "policies",
   "compliance",
   "asset-profiles",
+  "earn",
 ]);
 
 export const POSTMAN_COLLECTION_ROUTE = "/docs/postman/collection.json";

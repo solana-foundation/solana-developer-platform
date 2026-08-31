@@ -157,7 +157,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
 | `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
-| `/dashboard/markets/earn` → 404 | same flags, web side (segment guards) |
+| `/dashboard/markets/embedded-yield` → 404 | same flags, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here |
 | Dashboard "provider not configured" (503) | no `GROUND_SANDBOX_API_KEY` |
 | "requires manual activation" | org lacks the earn provider override |
 | API waits then dies on boot | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won |
@@ -207,7 +207,11 @@ address.
 
 Money moves for Kamino by SDP BUILDING an instruction, signing it with one of
 the organization's own custody wallets and submitting it — `@sdp/kamino` builds
-the plan, the API signs and submits (`POST /v1/earn/vault-deposits`). That
+the plan, the API signs and submits (`POST /v1/earn/vault-deposits`). Since
+PRO-1722 the same builders also serve the EXTERNAL-WALLET flow
+(`/v1/earn/external-wallet/*`), where the plan's `owner` is a wallet SDP does
+not custody and the OWNER signs instead of SDP — nothing changes on this
+package's side, because the builders always took the owner as a parameter. That
 package depends on this one, never the reverse: the hourly catalogue cron must
 not load a 13MB chain SDK it never calls.
 

@@ -5,6 +5,10 @@ const ROOT = process.cwd();
 const LOCKFILE = "pnpm-lock.yaml";
 const KAMINO_PACKAGE = "packages/sdp-kamino/package.json";
 const API_PACKAGE = "apps/sdp-api/package.json";
+const API_DOCKERFILE = "apps/sdp-api/Dockerfile";
+const API_DOCKERIGNORE = "apps/sdp-api/Dockerfile.dockerignore";
+const SAFE_BIGINT_PACKAGE = "packages/bigint-buffer/package.json";
+const SAFE_BIGINT_RESOLUTION = "link:packages/bigint-buffer";
 
 function packageJsonFiles(parent) {
   return readdirSync(path.join(ROOT, parent), { withFileTypes: true })
@@ -44,10 +48,35 @@ function assertExactConsumers(dependency, expected) {
 }
 
 // Only the private Kamino package may own klend-sdk, and only the API may ship
-// that package. A new web/docs/package consumer would create an artifact not
-// protected by the API bundle's pure-JS bigint-buffer replacement.
+// that package. bigint-buffer itself is replaced workspace-wide so unbundled
+// tools and tests cannot reach the abandoned package's native binding either.
 assertExactConsumers("@kamino-finance/klend-sdk", [KAMINO_PACKAGE]);
 assertExactConsumers("@sdp/kamino", [API_PACKAGE]);
+
+const safeBigintManifest = JSON.parse(readFileSync(path.join(ROOT, SAFE_BIGINT_PACKAGE), "utf8"));
+if (
+  safeBigintManifest.name !== "bigint-buffer" ||
+  safeBigintManifest.version !== "1.1.6" ||
+  safeBigintManifest.private !== true
+) {
+  throw new Error(
+    `${SAFE_BIGINT_PACKAGE} must remain the private bigint-buffer@1.1.6 compatibility package.`
+  );
+}
+
+const dockerfile = readFileSync(path.join(ROOT, API_DOCKERFILE), "utf8");
+for (const requiredCopy of [
+  "COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/",
+  "COPY packages/bigint-buffer ./packages/bigint-buffer",
+]) {
+  if (!dockerfile.includes(requiredCopy)) {
+    throw new Error(`${API_DOCKERFILE} must include: ${requiredCopy}`);
+  }
+}
+const dockerignore = readFileSync(path.join(ROOT, API_DOCKERIGNORE), "utf8");
+if (!dockerignore.includes("!packages/bigint-buffer")) {
+  throw new Error(`${API_DOCKERIGNORE} must include packages/bigint-buffer in the build context.`);
+}
 
 const lines = readFileSync(path.join(ROOT, LOCKFILE), "utf8").split(/\r?\n/);
 const bigintVersions = new Set();
@@ -75,11 +104,9 @@ for (const line of lines) {
   if (bigintDependency) directParents.set(snapshot, bigintDependency[1]);
 }
 
-if (bigintVersions.size !== 1 || !bigintVersions.has("1.1.5")) {
+if (bigintVersions.size !== 0) {
   throw new Error(
-    `Expected only bigint-buffer@1.1.5 in ${LOCKFILE}; found ${
-      [...bigintVersions].join(", ") || "none"
-    }.`
+    `Registry bigint-buffer versions re-entered ${LOCKFILE}: ${[...bigintVersions].join(", ")}.`
   );
 }
 
@@ -89,8 +116,10 @@ const allowedParents = new Set([
 ]);
 const normalizedParents = new Set();
 for (const [parent, version] of directParents) {
-  if (version !== "1.1.5") {
-    throw new Error(`${parent} resolves bigint-buffer to unexpected version ${version}.`);
+  if (version !== SAFE_BIGINT_RESOLUTION) {
+    throw new Error(
+      `${parent} resolves bigint-buffer to ${version}; expected ${SAFE_BIGINT_RESOLUTION}.`
+    );
   }
   const normalized = parent.replace(/\(.+$/, "");
   normalizedParents.add(normalized);
@@ -112,5 +141,5 @@ if (
 
 console.log(
   "Kamino dependency boundary OK: API -> @sdp/kamino -> klend-sdk -> " +
-    "@solana/buffer-layout-utils -> bigint-buffer@1.1.5"
+    "@solana/buffer-layout-utils -> workspace bigint-buffer@1.1.6 (pure JS)"
 );

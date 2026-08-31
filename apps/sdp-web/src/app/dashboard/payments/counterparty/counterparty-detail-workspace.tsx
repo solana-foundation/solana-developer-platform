@@ -5,13 +5,11 @@ import type {
   CounterpartyAccount,
   PaymentTransferSummary,
   RampProviderId,
-  RampTransferSettlement,
 } from "@sdp/types";
 import {
   ArrowRightIcon,
   BanknoteArrowDownIcon,
   BanknoteArrowUpIcon,
-  CakeIcon,
   CalendarIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -20,9 +18,6 @@ import {
   ExternalLinkIcon,
   HashIcon,
   LoaderCircleIcon,
-  MailIcon,
-  MapPinIcon,
-  PhoneIcon,
   PlusIcon,
   ReceiptTextIcon,
   ShieldCheckIcon,
@@ -57,12 +52,12 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
   formatDisplayAmount,
-  formatMinorCurrencyAmount,
   formatTimestamp,
   resolveTransferFlow,
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
+import { providerTransferDetailRows } from "../provider-transfer-details";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
@@ -498,7 +493,7 @@ function DetailRow({
 }) {
   const t = useTranslations();
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
+    <div className="flex h-12 items-center justify-between gap-4">
       <span className="shrink-0 text-sm text-tertiary">{label}</span>
       <div className="flex min-w-0 items-center gap-1.5">
         <span className={cn("truncate text-sm text-primary", mono && "font-mono text-xs")}>
@@ -512,85 +507,6 @@ function DetailRow({
         ) : null}
       </div>
     </div>
-  );
-}
-
-function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement }) {
-  const t = useTranslations();
-  if (settlement.provider === "moonpay") {
-    const rate =
-      settlement.quoteCurrencyAmount > 0
-        ? settlement.baseCurrencyAmount / settlement.quoteCurrencyAmount
-        : null;
-    return (
-      <>
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.providerFee")}
-          value={formatDisplayAmount(String(settlement.feeAmount), settlement.baseCurrencyCode)}
-        />
-        {settlement.networkFeeAmount > 0 ? (
-          <DetailRow
-            label={t("DashboardPayments.transferDetails.networkFee")}
-            value={formatDisplayAmount(
-              String(settlement.networkFeeAmount),
-              settlement.baseCurrencyCode
-            )}
-          />
-        ) : null}
-        {rate !== null ? (
-          <DetailRow
-            label={t("DashboardPayments.transferDetails.exchangeRate")}
-            value={`1 ${settlement.quoteCurrencyCode} = ${formatDisplayAmount(rate.toFixed(2), settlement.baseCurrencyCode)}`}
-          />
-        ) : null}
-      </>
-    );
-  }
-
-  if (settlement.provider === "coinbase") {
-    const providerFee = settlement.fees.find((fee) => fee.feeType === "FEE_TYPE_EXCHANGE");
-    const networkFee = settlement.fees.find((fee) => fee.feeType === "FEE_TYPE_NETWORK");
-    return (
-      <>
-        {providerFee ? (
-          <DetailRow
-            label={t("DashboardPayments.transferDetails.providerFee")}
-            value={formatDisplayAmount(providerFee.feeAmount, providerFee.feeCurrency)}
-          />
-        ) : null}
-        {networkFee && Number(networkFee.feeAmount) > 0 ? (
-          <DetailRow
-            label={t("DashboardPayments.transferDetails.networkFee")}
-            value={formatDisplayAmount(networkFee.feeAmount, networkFee.feeCurrency)}
-          />
-        ) : null}
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.exchangeRate")}
-          value={`1 ${settlement.purchaseCurrency} = ${formatDisplayAmount(settlement.exchangeRate, settlement.paymentCurrency)}`}
-        />
-      </>
-    );
-  }
-
-  const sentDecimal = settlement.sentAmount.amount / 10 ** settlement.sentAmount.decimals;
-  const receivedDecimal =
-    settlement.receivedAmount.amount / 10 ** settlement.receivedAmount.decimals;
-  const rate = receivedDecimal > 0 ? sentDecimal / receivedDecimal : null;
-  const fees = formatMinorCurrencyAmount(
-    settlement.fees,
-    settlement.sentAmount.currencyCode,
-    settlement.sentAmount.decimals
-  );
-  return (
-    <>
-      {fees ? <DetailRow label={t("DashboardPayments.transferDetails.fees")} value={fees} /> : null}
-      {rate !== null ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.exchangeRate")}
-          value={`1 ${settlement.receivedAmount.currencyCode} = ${rate.toFixed(4)} ${settlement.sentAmount.currencyCode}`}
-        />
-      ) : null}
-    </>
   );
 }
 
@@ -681,8 +597,8 @@ function TransferDetailModal({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border-default px-4">
-          <div className="divide-y divide-border-default">
+        <div className="rounded-2xl border border-border-default px-4 py-1">
+          <div>
             {isInbound ? (
               <>
                 {walletRow}
@@ -714,6 +630,12 @@ function TransferDetailModal({
                 copyValue={transfer.providerReference}
               />
             ) : null}
+            {transfer.status === "failed" && transfer.error ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.failureReason")}
+                value={transfer.error}
+              />
+            ) : null}
             {transfer.memo ? (
               <DetailRow
                 label={t("DashboardPayments.transferDetails.memo")}
@@ -730,7 +652,29 @@ function TransferDetailModal({
                 }
               />
             ) : null}
-            {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
+            {providerTransferDetailRows(transfer, { cluster }, t).map((row) => (
+              <DetailRow
+                key={row.key}
+                label={row.label}
+                value={
+                  row.href ? (
+                    <a
+                      href={row.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline"
+                    >
+                      {row.value}
+                      <ExternalLinkIcon className="size-3.5" />
+                    </a>
+                  ) : (
+                    row.value
+                  )
+                }
+                mono={row.mono}
+                copyValue={row.copyValue}
+              />
+            ))}
             {moneygram?.referenceNumber ? (
               <DetailRow
                 label={t("DashboardPayments.transferDetails.cashPickupCode")}
@@ -846,63 +790,6 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
   );
 }
 
-function buildPersonalInfoRows(
-  counterparty: Counterparty,
-  t: ReturnType<typeof useTranslations>
-): InfoRowData[] {
-  const rows: InfoRowData[] = [];
-
-  if (counterparty.entityType === "individual") {
-    const identity = counterparty.identity;
-    const fullName = [
-      identity.firstName,
-      identity.middleName,
-      identity.lastName,
-      identity.secondLastName,
-    ]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join(" ");
-    if (fullName)
-      rows.push({
-        label: t("DashboardPayments.counterparty.fullName"),
-        value: fullName,
-        icon: <UserIcon />,
-      });
-    rows.push({
-      label: t("DashboardPayments.counterparty.dateOfBirth"),
-      value: identity.dateOfBirth,
-      icon: <CakeIcon />,
-    });
-    rows.push({
-      label: t("DashboardPayments.counterparty.phone"),
-      value: identity.phone,
-      icon: <PhoneIcon />,
-    });
-  }
-
-  const address = counterparty.identity.address;
-  if (address) {
-    const formatted = [
-      address.line1,
-      address.line2,
-      address.city,
-      address.subdivisionCode,
-      address.postalCode,
-      address.countryCode,
-    ]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join(", ");
-    if (formatted)
-      rows.push({
-        label: t("DashboardPayments.counterparty.address"),
-        value: formatted,
-        icon: <MapPinIcon />,
-      });
-  }
-
-  return rows;
-}
-
 export function CounterpartyDetailWorkspace({
   counterparty,
   initialAccounts,
@@ -917,7 +804,6 @@ export function CounterpartyDetailWorkspace({
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"details" | "transactions">("details");
-  const personalInfoRows = buildPersonalInfoRows(counterparty, t);
 
   async function confirmDelete() {
     const result = await dashboardFetch(
@@ -993,10 +879,10 @@ export function CounterpartyDetailWorkspace({
           />
         ) : (
           <>
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-6">
               <section className="space-y-3">
                 <h3 className="text-2xl font-medium text-primary">
-                  {t("DashboardPayments.counterparty.identity")}
+                  {t("DashboardPayments.counterparty.details")}
                 </h3>
                 <div className="rounded-lg border border-border-default bg-surface-raised p-5">
                   <FieldList
@@ -1010,11 +896,6 @@ export function CounterpartyDetailWorkspace({
                         label: t("DashboardPayments.counterparty.transferType"),
                         value: toTitleCase(counterparty.entityType),
                         icon: <UsersIcon />,
-                      },
-                      {
-                        label: t("DashboardPayments.counterparty.email"),
-                        value: counterparty.email,
-                        icon: <MailIcon />,
                       },
                       {
                         label: t("DashboardPayments.counterparty.externalId"),
@@ -1037,21 +918,6 @@ export function CounterpartyDetailWorkspace({
                       },
                     ]}
                   />
-                </div>
-              </section>
-
-              <section className="space-y-3">
-                <h3 className="text-2xl font-medium text-primary">
-                  {t("DashboardPayments.counterparty.personalInformation")}
-                </h3>
-                <div className="rounded-lg border border-border-default bg-surface-raised p-5">
-                  {personalInfoRows.length > 0 ? (
-                    <FieldList rows={personalInfoRows} />
-                  ) : (
-                    <p className="text-sm text-tertiary">
-                      {t("DashboardPayments.counterparty.noPersonalInformation")}
-                    </p>
-                  )}
                 </div>
               </section>
             </div>

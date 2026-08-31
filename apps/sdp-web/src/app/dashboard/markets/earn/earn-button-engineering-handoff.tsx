@@ -7,9 +7,11 @@ import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 
 export function EarnButtonEngineeringHandoff({
+  previewOnly = false,
   shareLink,
   sharePath,
 }: {
+  previewOnly?: boolean;
   shareLink: string | null;
   sharePath: string | null;
 }) {
@@ -28,7 +30,11 @@ export function EarnButtonEngineeringHandoff({
             <Badge variant="outline">{t("DashboardMarkets.earnProgram.handoffPublic")}</Badge>
           </div>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">
-            {t("DashboardMarkets.earnProgram.shareDescription")}
+            {t(
+              previewOnly
+                ? "DashboardMarkets.earnProgram.mainnetHandoffDescription"
+                : "DashboardMarkets.earnProgram.shareDescription"
+            )}
           </p>
         </div>
       </div>
@@ -66,7 +72,11 @@ export function EarnButtonEngineeringHandoff({
         </div>
       ) : (
         <p className="mt-4 text-xs font-medium text-secondary">
-          {t("DashboardMarkets.earnProgram.unsavedHandoff")}
+          {t(
+            previewOnly
+              ? "DashboardMarkets.earnProgram.mainnetHandoffUnavailable"
+              : "DashboardMarkets.earnProgram.unsavedHandoff"
+          )}
         </p>
       )}
     </section>

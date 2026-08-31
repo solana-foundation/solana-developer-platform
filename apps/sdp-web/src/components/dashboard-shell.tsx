@@ -24,6 +24,7 @@ import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
 } from "@/app/dashboard/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
 import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
@@ -79,7 +80,10 @@ import {
   getNavSections,
   type NavItem,
   type NavSection,
+  withSubnavOpen,
+  withSubnavToggled,
 } from "@/components/dashboard-nav";
+import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
@@ -135,6 +139,8 @@ function resolvePageLoadingComponent(
       return IntegrationsSkeleton;
     case "integration-detail":
       return IntegrationDetailSkeleton;
+    case "private-channels-setup":
+      return PrivateChannelsSetupSkeleton;
     case "token-holdings":
       return TokenHoldingsLoading;
     case "wallets-overview":
@@ -218,6 +224,7 @@ function SidebarGroup({
   showTopSeparator,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
   variant,
 }: {
   title: string;
@@ -228,6 +235,12 @@ function SidebarGroup({
   showTopSeparator: boolean;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  /**
+   * Open a section without closing it again. Following a top-level item is a
+   * request to go there, so it reveals the section's pages; toggling would
+   * collapse the submenu of the page being navigated to (HOO-1218).
+   */
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
@@ -262,7 +275,15 @@ function SidebarGroup({
               <div className="relative flex items-center">
                 <Link
                   href={item.href}
-                  onClick={onNavigate}
+                  onClick={() => {
+                    // The chevron still toggles. This only ever opens, so a
+                    // second click on the section you are already in does not
+                    // hide its pages.
+                    if (subnavKey) {
+                      onSubnavOpen(subnavKey);
+                    }
+                    onNavigate?.();
+                  }}
                   title={isCollapsed ? item.label : undefined}
                   aria-label={
                     isCollapsed && item.badge
@@ -382,6 +403,7 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
 }: {
   bottomNavItems: NavItem[];
   navSections: NavSection[];
@@ -393,6 +415,7 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -433,6 +456,7 @@ function DashboardSidebarContent({
             showTopSeparator={idx > 0}
             openSubnavs={openSubnavs}
             onSubnavToggle={onSubnavToggle}
+            onSubnavOpen={onSubnavOpen}
             variant={variant}
           />
         ))}
@@ -549,7 +573,9 @@ export function DashboardShell({
     />
   ) : null;
   const headerTabs = pageConfig.headerTabs;
-  const hasHeaderTabs = Boolean(headerTabs);
+  const routeTabs = pageConfig.routeTabs;
+  const hasHeaderTabs = Boolean(headerTabs || routeTabs);
+  const isMarketsHeader = pageConfig.headerVariant === "markets";
   const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder =
@@ -611,14 +637,33 @@ export function DashboardShell({
     subnavHydratedRef.current = true;
   }, []);
 
+  const persistSubnav = (key: DashboardSubnavKey, open: boolean) => {
+    if (subnavHydratedRef.current) {
+      window.localStorage.setItem(dashboardSubnavStorageKey(key), String(open));
+    }
+  };
+
+  // Both handlers compute the next state from the rendered value and write to
+  // storage outside the setter. React may replay a state updater, so a
+  // localStorage write placed inside one runs more than once.
   const toggleSubnav = (key: DashboardSubnavKey) => {
-    setOpenSubnavs((current) => {
-      const next = { ...current, [key]: !current[key] };
-      if (subnavHydratedRef.current) {
-        window.localStorage.setItem(dashboardSubnavStorageKey(key), String(next[key]));
-      }
-      return next;
-    });
+    const next = withSubnavToggled(openSubnavs, key);
+    setOpenSubnavs(next);
+    persistSubnav(key, next[key]);
+  };
+
+  /**
+   * Following a top-level item opens its section (HOO-1218). Persisted like a
+   * toggle, because a section opened by navigating is still the reader's last
+   * expressed preference and should survive a reload.
+   */
+  const openSubnav = (key: DashboardSubnavKey) => {
+    const next = withSubnavOpen(openSubnavs, key);
+    if (next === openSubnavs) {
+      return;
+    }
+    setOpenSubnavs(next);
+    persistSubnav(key, true);
   };
 
   useEffect(() => {
@@ -757,6 +802,7 @@ export function DashboardShell({
             onOrganizationSwitchingChange={setOrganizationSwitching}
             openSubnavs={openSubnavs}
             onSubnavToggle={toggleSubnav}
+            onSubnavOpen={openSubnav}
           />
           <button
             type="button"
@@ -819,6 +865,7 @@ export function DashboardShell({
                 onOrganizationSwitchingChange={setOrganizationSwitching}
                 openSubnavs={openSubnavs}
                 onSubnavToggle={toggleSubnav}
+                onSubnavOpen={openSubnav}
               />
             </div>
           </div>
@@ -836,12 +883,14 @@ export function DashboardShell({
               shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
             ].join(" ")}
           >
-            <div className="shrink-0 space-y-4">
+            <div className={cn("shrink-0", !isMarketsHeader && "space-y-4")}>
               <div
                 className={cn(
                   shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
                   shouldLockViewportScroll
-                    ? "px-3 pt-5 md:px-6 md:pt-6"
+                    ? isMarketsHeader
+                      ? "px-4 pt-8 md:px-8 md:pt-10 xl:px-16 xl:pt-11"
+                      : "px-3 pt-5 md:px-6 md:pt-6"
                     : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6"
                 )}
               >
@@ -853,6 +902,7 @@ export function DashboardShell({
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
+                  alignTitleWithTabs={hasHeaderTabs && !isMarketsHeader}
                   showNotifications={assetProfilesEnabled}
                 />
               </div>
@@ -867,6 +917,12 @@ export function DashboardShell({
                   <div className="flex items-end px-3 md:px-6">
                     <DashboardHeaderTabs {...headerTabs} />
                   </div>
+                </div>
+              ) : null}
+
+              {routeTabs ? (
+                <div className="mt-6 border-b border-border-default px-4 md:px-8 xl:px-16">
+                  <DashboardRouteTabs {...routeTabs} pathname={pathname} />
                 </div>
               ) : null}
             </div>

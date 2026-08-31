@@ -6,6 +6,10 @@ import {
   EARN_TERMINAL_VAULT_MOVEMENT_STATUSES,
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
   EARN_VAULT_MOVEMENT_STATUSES,
+  type EarnExternalWalletPosition,
+  type EarnExternalWalletPositionSummary,
+  type EarnExternalWalletPositionSummaryResponse,
+  type EarnExternalWalletPositionsPage,
   type EarnPortfolioAllocationInput,
   type EarnPortfolioToken,
   type EarnPortfolioWalletSnapshot,
@@ -42,6 +46,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { earnQueryKeys } from "./earn-query-key";
 import {
   EARN_PROGRAM_CREATE_PROVIDER,
   EARN_PROGRAM_CREATION_ENABLED,
@@ -51,6 +56,10 @@ import {
 } from "./earn-surfacing";
 
 export type {
+  EarnExternalWalletPosition,
+  EarnExternalWalletPositionSummary,
+  EarnExternalWalletPositionSummaryResponse,
+  EarnExternalWalletPositionsPage,
   EarnProgram,
   EarnProgramDepositsResponse,
   EarnProgramResponse,
@@ -347,7 +356,7 @@ function announceCompletion(
 
 export function useEarnPrograms() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-programs",
+    earnQueryKeys.programs(),
     () => fetchEarnProgramsState(),
     {
       refreshInterval: earnProgramsRefreshInterval,
@@ -419,7 +428,7 @@ export async function fetchEarnProgramDeposits(
 /** Passing no programId issues no request — the honest form of "not ready yet". */
 export function useEarnProgramDeposits(programId: string | undefined) {
   const { data, error, isLoading } = useSWR(
-    programId ? ["dashboard-earn-program-deposits", programId] : null,
+    programId ? earnQueryKeys.programDeposits({ programId }) : null,
     () => fetchEarnProgramDeposits(programId as string),
     // Deposits land on-chain outside the dashboard, so keep the feed fresh.
     { refreshInterval: 15_000 }
@@ -481,7 +490,7 @@ export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
   // screen while the full paged fetch reruns, instead of tearing the table to
   // skeletons (same pattern as activity-tab and wallet-card-balance-value).
   const { data, error, isLoading, mutate } = useSWR(
-    ["dashboard-earn-strategies", cluster ?? "environment-default"],
+    earnQueryKeys.strategies({ cluster: cluster ?? "environment-default" }),
     () => fetchEarnStrategies(cluster),
     { keepPreviousData: true }
   );
@@ -529,11 +538,66 @@ export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
 /** Live position values refresh while the surface is mounted. */
 export function useEarnVaultPositions() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-vault-positions",
+    earnQueryKeys.vaultPositions(),
     () => fetchEarnVaultPositions(),
     { refreshInterval: 15_000 }
   );
   return { positions: data, error, isLoading, refresh: () => void mutate() };
+}
+
+const EXTERNAL_WALLET_POSITIONS_PAGE_SIZE = 100;
+
+/**
+ * Reads every live position for exactly one partner end-user wallet.
+ * Kept at the strict dashboard boundary for the planned wallet drill-down.
+ */
+export async function fetchEarnExternalWalletPositions(
+  ownerAddress: string
+): Promise<EarnExternalWalletPosition[]> {
+  const positions: EarnExternalWalletPosition[] = [];
+  const seenCursors = new Set<string>();
+  let before: string | undefined;
+
+  while (true) {
+    const query = new URLSearchParams({ limit: String(EXTERNAL_WALLET_POSITIONS_PAGE_SIZE) });
+    if (before) query.set("before", before);
+    const { status, body } = await requestJson<{ data: EarnExternalWalletPositionsPage }>(
+      `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`
+    );
+    if (status < 200 || status >= 300 || !body) {
+      throw new Error(errorMessage(body, status));
+    }
+
+    positions.push(...body.data.positions);
+    if (!body.data.hasMore) return positions;
+
+    const nextCursor = body.data.nextCursor;
+    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
+      throw new Error("External-wallet positions pagination did not advance");
+    }
+    seenCursors.add(nextCursor);
+    before = nextCursor;
+  }
+}
+
+export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
+  const { status, body } = await requestJson<{
+    data: EarnExternalWalletPositionSummaryResponse;
+  }>("/api/dashboard/markets/earn/external-wallet/positions/summary");
+  if (status < 200 || status >= 300 || !body) {
+    throw new Error(errorMessage(body, status));
+  }
+  return body.data.summary;
+}
+
+/** Live customer portfolio totals refresh while the Embedded Yield dashboard is mounted. */
+export function useEarnExternalWalletPositionSummary() {
+  const { data, error, isLoading, mutate } = useSWR(
+    "dashboard-earn-external-wallet-position-summary",
+    () => fetchEarnExternalWalletPositionSummary(),
+    { refreshInterval: 60_000 }
+  );
+  return { summary: data, error, isLoading, refresh: () => void mutate() };
 }
 
 /**
@@ -827,7 +891,7 @@ export async function fetchEarnVaultDepositByRequestId(
  */
 export function useEarnVaultDeposits() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-vault-deposits-in-flight",
+    earnQueryKeys.vaultDepositsInFlight(),
     () => fetchEarnVaultDeposits({ settled: false }),
     { refreshInterval: 30_000 }
   );
@@ -893,7 +957,7 @@ export function useEarnVaultDepositOutcomeToast(
   const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
-    movementId ? (["dashboard-earn-vault-deposit", movementId] as const) : null,
+    movementId ? earnQueryKeys.vaultDeposit({ movementId }) : null,
     // The id comes from the KEY, which only exists when it is defined — no cast,
     // and no second place that has to stay in sync with the null guard.
     ([, watchedId]) => fetchEarnVaultDeposit(watchedId),
@@ -1098,7 +1162,7 @@ export async function fetchEarnVaultWithdrawalsByRequestId(
  */
 export function useEarnVaultWithdrawals() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-vault-withdrawals-in-flight",
+    earnQueryKeys.vaultWithdrawalsInFlight(),
     () => fetchEarnVaultWithdrawals({ settled: false }),
     { refreshInterval: 30_000 }
   );
@@ -1135,7 +1199,7 @@ export function useEarnVaultWithdrawalOutcomeToast(
   const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
-    movementId ? (["dashboard-earn-vault-withdrawal", movementId] as const) : null,
+    movementId ? earnQueryKeys.vaultWithdrawal({ movementId }) : null,
     ([, watchedId]) => fetchEarnVaultWithdrawal(watchedId),
     {
       refreshInterval: (withdrawal) =>
@@ -1253,7 +1317,7 @@ export async function fetchEarnProgramWithdrawals(
 /** Passing no program id issues no ledger request. */
 export function useEarnProgramWithdrawals(programId: string | undefined) {
   const { data, error, isLoading, mutate } = useSWR(
-    programId ? ["dashboard-earn-program-withdrawals", programId] : null,
+    programId ? earnQueryKeys.programWithdrawals({ programId }) : null,
     () => fetchEarnProgramWithdrawals(programId as string),
     // Detect withdrawals created from another session while this dashboard is
     // open; the list is a cheap local-DB read and live outcome polling begins
@@ -1313,7 +1377,7 @@ export function useEarnWithdrawalOutcomeToast(
   const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
-    programId && withdrawalRef ? ["dashboard-earn-withdrawal", programId, withdrawalRef] : null,
+    programId && withdrawalRef ? earnQueryKeys.withdrawal({ programId, withdrawalRef }) : null,
     async () => {
       const result = await fetchEarnWithdrawal(programId as string, withdrawalRef as string);
       return result.ok ? result.data.data.withdrawal : undefined;
