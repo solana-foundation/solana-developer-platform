@@ -192,8 +192,18 @@ jobs:
           echo "IMAGE=${resolved_image}" >> "${GITHUB_ENV}"
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Gate merge deploys on pending migrations
+        if: ${{ env.BUILD_IMAGE == 'true' && inputs.release_sha == '' }}
+        run: |
+          set -euo pipefail
+          last_release="$(git describe --tags --abbrev=0 --match 'v*')"
+          if ! git diff --quiet "${last_release}"..HEAD -- apps/sdp-api/src/db/migrations; then
+            echo "::error::Migrations changed since ${last_release}. Schema changes deploy through a release (migrations stay human-reviewed and human-run); cut the release to ship them, after which merge deploys resume."
+            exit 1
+          fi
+
       - name: Run database migrations
-        if: ${{ env.BUILD_IMAGE == 'true' }}
+        if: ${{ inputs.release_sha != '' }}
         timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \

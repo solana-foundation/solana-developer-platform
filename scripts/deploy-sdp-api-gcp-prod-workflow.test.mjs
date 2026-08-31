@@ -28,7 +28,7 @@ test("automatic production deploys are called from the protected main release fl
   assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
 });
 
-test("builds and migrations run for release and merge deploys, never manual redeploys", () => {
+test("merge deploys build but never migrate, and stop when migrations are pending", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
   assert.match(
     workflow,
@@ -40,8 +40,13 @@ test("builds and migrations run for release and merge deploys, never manual rede
   );
   assert.match(
     workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
+    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
+  assert.match(
+    workflow,
+    /- name: Gate merge deploys on pending migrations\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' && inputs\.release_sha == '' \}\}/
+  );
+  assert.match(workflow, /git diff --quiet "\$\{last_release\}"\.\.HEAD -- apps\/sdp-api\/src\/db\/migrations/);
   assert.match(workflow, /--build-arg GIT_SHA="\$\{DEPLOY_IMAGE_SHA\}"/);
   assert.match(workflow, /sdp-api-public:\$\{DEPLOY_IMAGE_SHA\}/);
 });
