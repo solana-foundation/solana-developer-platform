@@ -384,7 +384,6 @@
       "setupDetailsDescription": "Ingresa los endpoints de Canales Privados y las direcciones de los programas desplegados para este proyecto. SDP usa el RPC configurado del proyecto automáticamente.",
       "gatewayNotReady": "El Gateway respondió pero no está listo",
       "connectionTestFailed": "No se pudieron alcanzar algunos endpoints. Revisa los detalles de conexión resaltados e inténtalo de nuevo.",
-      "projectRpcTestFailed": "El RPC del proyecto no pudo verificar el despliegue de escrow. Corrige la integración RPC del proyecto o las direcciones del despliegue e inténtalo de nuevo.",
       "connectionRequestFailed": "No pudimos probar la conexión. Revisa los detalles de conexión e inténtalo de nuevo."
     },
     "playground": {

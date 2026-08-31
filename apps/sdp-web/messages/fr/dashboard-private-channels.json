@@ -385,7 +385,6 @@
       "setupDetailsDescription": "Saisissez les endpoints Private Channels et les adresses des programmes déployés pour ce projet. SDP utilise automatiquement le RPC configuré du projet.",
       "gatewayNotReady": "La passerelle a répondu mais n'est pas prête",
       "connectionTestFailed": "Certains endpoints n'ont pas pu être atteints. Vérifiez les détails de connexion en surbrillance et réessayez.",
-      "projectRpcTestFailed": "Le RPC du projet n’a pas pu vérifier le déploiement d’escrow. Corrigez l’intégration RPC du projet ou les adresses du déploiement, puis réessayez.",
       "connectionRequestFailed": "Nous n'avons pas pu tester la connexion. Vérifiez les détails de connexion et réessayez."
     },
     "playground": {

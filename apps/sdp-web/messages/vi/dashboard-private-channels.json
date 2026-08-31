@@ -396,7 +396,6 @@
       "setupDetailsDescription": "Nhập endpoint Private Channels và địa chỉ program đã deploy cho project này. SDP tự động dùng RPC đã cấu hình của project.",
       "gatewayNotReady": "Gateway đã phản hồi nhưng chưa sẵn sàng",
       "connectionTestFailed": "Một số endpoint không kết nối được. Kiểm tra chi tiết kết nối được tô sáng và thử lại.",
-      "projectRpcTestFailed": "RPC của dự án không thể xác minh triển khai escrow. Hãy sửa tích hợp RPC của dự án hoặc địa chỉ triển khai rồi thử lại.",
       "connectionRequestFailed": "Không thể kiểm tra kết nối. Kiểm tra chi tiết kết nối và thử lại."
     }
   }
