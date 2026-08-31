@@ -44,6 +44,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/settings", "settings"],
     ["/dashboard/integrations", "integrations"],
     ["/dashboard/integrations/privy", "integration-detail"],
+    ["/dashboard/integrations/private-channels/setup", "private-channels-setup"],
     ["/dashboard/allowlist", "allowlist"],
   ])("maps %s to its exact route skeleton", (pathname, route) => {
     expect(resolveDashboardLoadingRoute(pathname)).toBe(route);
