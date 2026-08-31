@@ -1,7 +1,7 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
-import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
+import { supportsVaultDepositQuote, supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
-import type { EarnVaultDepositQuote } from "@sdp/earn/types";
+import type { EarnVaultDepositQuote, EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import type {
   EarnVaultDepositRecord,
   EarnVaultDepositResponse,
@@ -51,7 +51,10 @@ import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
-import { resolveVaultDirectClient } from "@/services/earn/execution-registry";
+import {
+  resolveVaultDirectClient,
+  resolveVaultWithdrawClient,
+} from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import { refusedBuildMessage } from "@/services/earn/vault-refusals";
@@ -75,6 +78,7 @@ import {
   earnVaultDepositsQuerySchema,
   earnVaultPositionsQuerySchema,
   earnVaultWithdrawalParamsSchema,
+  type earnVaultWithdrawalPreviewSchema,
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
@@ -1190,6 +1194,7 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
       provider: position.provider,
       positionId: position.id,
       shares: body.shares,
+      minAmountOut: body.minAmountOut ?? null,
     }),
   };
 
@@ -1285,6 +1290,72 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
 }
 
 /**
+ * POST /v1/earn/vault-withdrawal-previews — what redeeming these shares would
+ * pay right now, from the provider's own live accounting. The dashboard derives
+ * its `minAmountOut` floor from this quote, exactly as the deposit preview
+ * feeds the deposit floor.
+ *
+ * EXIT gates only (ADR 0002): position scoping and the read-side wallet
+ * binding, both answering 404 — no surfacing, no entitlement, no admission and
+ * no environment capability, because a quote in service of money-OUT must be
+ * reachable for a paused strategy, an un-surfaced provider and a revoked
+ * override alike. The only provider-shaped refusal is capability (501).
+ */
+export async function createEarnVaultWithdrawalPreview(
+  c: ValidatedBodyContext<typeof earnVaultWithdrawalPreviewSchema>
+) {
+  const body = c.req.valid("json");
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const positionRow = await repo.getPositionById({
+    organizationId: auth.organizationId,
+    environment,
+    positionId: body.positionId,
+  });
+  if (positionRow?.kind !== "vault_direct") {
+    throw notFound("Earn vault position");
+  }
+  const position = toVaultHolding(positionRow);
+
+  // The same binding scope as every vault read: a key bound away from the
+  // holding wallet must not learn anything through its position.
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
+  if (!scopedWallets.some((wallet) => wallet.id === position.custodyWalletId)) {
+    throw notFound("Earn vault position");
+  }
+
+  const deadline = createVaultDeadline();
+  const client = resolveVaultWithdrawClient(c.env, position.provider, deadline);
+  if (!client || !supportsVaultWithdrawQuote(client)) {
+    throw notImplemented(position.provider, "vault withdrawal quoting");
+  }
+
+  let quote: EarnVaultWithdrawQuote;
+  try {
+    quote = await client.quoteVaultWithdrawal(earnRuntime(c), {
+      providerReference: position.vaultAddress,
+      shares: body.shares,
+    });
+  } catch (error) {
+    // An unusable share count is the CALLER's, in the provider's own words —
+    // the same shared refusal vocabulary the deposit quote maps through.
+    const refusal = refusedBuildMessage(error);
+    if (refusal !== null) throw badRequest(refusal);
+    throw error;
+  }
+
+  return success(c, {
+    positionId: position.id,
+    assetsOut: quote.assetsOut,
+    assetDecimals: quote.assetDecimals,
+    blockingIssues: quote.blockingIssues,
+  });
+}
+
+/**
  * POST /v1/earn/vault-withdrawals — exit a vault position, signed by the
  * custody wallet that holds it. Build, simulate, sign, record, then broadcast;
  * the reconciliation sweep finishes an ambiguous send.
@@ -1317,6 +1388,7 @@ export async function createEarnVaultWithdrawal(
       shareMint: position.shareMint,
       wallet,
       shares: parsedData.shares,
+      minAmountOut: parsedData.minAmountOut,
       requestId,
       userId: auth.userId ?? null,
       apiKeyId: auth.apiKeyId ?? null,

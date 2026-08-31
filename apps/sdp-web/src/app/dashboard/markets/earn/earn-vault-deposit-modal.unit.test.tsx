@@ -766,7 +766,7 @@ describe("slippage tolerance helpers", () => {
     // Exact above 2^53 atoms.
     expect(floorForTolerance("10000000000000000", 6, 100)).toBe("9900000000000000");
     // A ZERO quote has no satisfiable floor: one atom would demand MORE than
-    // the vault expects to mint. `null` tells the caller to block, not clamp.
+    // the vault expects to return. `null` tells the caller to block, not clamp.
     expect(floorForTolerance("0", 6, 10)).toBeNull();
   });
 

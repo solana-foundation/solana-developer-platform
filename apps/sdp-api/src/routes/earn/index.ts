@@ -34,6 +34,7 @@ import {
   createEarnVaultDeposit,
   createEarnVaultDepositPreview,
   createEarnVaultWithdrawal,
+  createEarnVaultWithdrawalPreview,
   extractEarnVaultDepositPolicyCandidate,
   extractEarnVaultWithdrawalPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
@@ -54,6 +55,7 @@ import {
   earnProgramWithdrawalPreviewSchema,
   earnVaultDepositPreviewSchema,
   earnVaultDepositSchema,
+  earnVaultWithdrawalPreviewSchema,
   earnVaultWithdrawalSchema,
 } from "./schemas";
 
@@ -188,6 +190,21 @@ earn.post(
     findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
   }),
   createEarnVaultWithdrawal
+);
+// The exit QUOTE: a read with EXIT gates only — position scoping and the
+// read-side wallet binding (both 404), capability (501), and deliberately
+// nothing money-in-shaped (ADR 0002 exit safety): no surfacing, no
+// entitlement, no admission, no environment capability.
+earn.post(
+  "/vault-withdrawal-previews",
+  // wallets:read is NOT a money-in gate, so ADR 0002 does not argue for
+  // dropping it — and dropping it is load-bearing the wrong way: for a key
+  // with no wallet bindings the binding check is a documented no-op, so
+  // earn:read alone would read any org position's live payout here while
+  // GET /vault-positions answers the same key 403.
+  requirePermissions("earn:read", "wallets:read"),
+  validateBody(earnVaultWithdrawalPreviewSchema),
+  createEarnVaultWithdrawalPreview
 );
 // Withdrawal READS mirror the deposit reads: no policy gate, no provider gate,
 // collection before the `:movementId` route, `?requestId=` finds the whole leg

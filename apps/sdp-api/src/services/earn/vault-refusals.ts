@@ -9,10 +9,11 @@ import { SdpVedaError } from "@sdp/veda";
  * status code:
  *
  * - `INVALID_AMOUNT` — the number is unusable at the mint's scale, or below
- *   what the vault will mint a share for.
- * - `DEPOSIT_REFUSED` — the vault will not take this right now: paused, at its
- *   deposit cap, the asset disabled, the wallet short of balance.
- * - `COMPLIANCE_APPROVAL_REQUIRED` — the vault gates deposits on an approval
+ *   what the vault will move an atom for.
+ * - `DEPOSIT_REFUSED` / `WITHDRAW_REFUSED` — the vault will not take this
+ *   right now: paused, at a cap, the asset disabled, shares still inside the
+ *   post-deposit lock, redemption restricted to an authority.
+ * - `COMPLIANCE_APPROVAL_REQUIRED` — the vault gates the move on an approval
  *   from the provider's compliance service, which SDP does not implement. A
  *   definite, explainable refusal rather than an internal fault.
  *
@@ -21,13 +22,14 @@ import { SdpVedaError } from "@sdp/veda";
  * Anything else keeps bubbling: an unrecognised build failure is SDP's problem
  * to look at, and telling a customer their request was wrong would be a guess.
  *
- * Shared by the deposit BUILD and the deposit QUOTE on purpose: the quote runs
+ * Shared by the vault BUILDS and the deposit QUOTE on purpose: the quote runs
  * the same provider arithmetic, so the two paths refuse in the same words or
  * they drift.
  */
 const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
   "INVALID_AMOUNT",
   "DEPOSIT_REFUSED",
+  "WITHDRAW_REFUSED",
   "COMPLIANCE_APPROVAL_REQUIRED",
 ]);
 
