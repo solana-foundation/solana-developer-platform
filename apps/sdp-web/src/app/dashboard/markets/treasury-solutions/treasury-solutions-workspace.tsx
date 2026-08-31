@@ -47,14 +47,12 @@ import {
   type EarnFundingWallet,
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
-import { formatUsd } from "../earn/earn-format";
+import { earnProviderLabel, earnStrategyLiquidityLabel, formatUsd } from "../earn/earn-format";
 import {
   EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
   earnMintAsset,
-  earnProviderLabel,
   earnStrategyAsset,
-  earnStrategyLiquidityLabel,
   earnStrategyReferenceKey,
   formatProviderAmount,
   formatProviderApy,

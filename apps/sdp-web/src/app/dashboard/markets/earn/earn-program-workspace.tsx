@@ -36,12 +36,11 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { EarnProgramSkeleton } from "../markets-route-skeletons";
+import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
 import {
   EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
-  earnProviderLabel,
   earnStrategyAsset,
-  earnStrategyLiquidityLabel,
   formatProviderApy,
 } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
