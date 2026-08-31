@@ -1617,7 +1617,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -5294,7 +5294,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
             "required": true
           }
         ],

@@ -547,7 +547,6 @@ export const createTransferRequestSchema = createTransferSchemaBase
     transferId: withOpenApi(createTransferSchemaBase.shape.transferId, {
       description:
         "Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data.",
-      example: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
     }),
     sourceCustodyWalletId: withOpenApi(createTransferSchemaBase.shape.sourceCustodyWalletId, {
       description: "Exact SDP Wallet ID (`id` from `GET /v1/wallets`).",
@@ -577,6 +576,13 @@ export const createTransferRequestSchema = createTransferSchemaBase
   .openapi({
     description:
       "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
+    example: {
+      projectId: "prj_example",
+      sourceCustodyWalletId: "cwlt_example",
+      destination: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      amount: "100.00",
+    },
   });
 
 export const priorityFeeSchema = withOpenApi(priorityFeeSchemaBase, {
