@@ -65,12 +65,6 @@ const MODULE_METADATA = [
     ],
   },
   {
-    name: "@sdp/kit-augment",
-    directory: "packages/kit-augment",
-    purpose: "Shared @solana/kit type augmentation for the generated Codama clients.",
-    allowedDependencies: [],
-  },
-  {
     name: "@sdp/api-integration",
     directory: "packages/sdp-api-integration",
     purpose: "Maintainer integration harness for API endpoint and provider coverage.",
@@ -172,13 +166,13 @@ const MODULE_METADATA = [
     name: "@sdp/spc-escrow",
     directory: "packages/sdp-spc-escrow",
     purpose: "Generated @solana/kit client for the Private Channels escrow program.",
-    allowedDependencies: ["@sdp/kit-augment"],
+    allowedDependencies: [],
   },
   {
     name: "@sdp/spc-withdraw",
     directory: "packages/sdp-spc-withdraw",
     purpose: "Generated @solana/kit client for the Private Channels withdraw program.",
-    allowedDependencies: ["@sdp/kit-augment"],
+    allowedDependencies: [],
   },
   {
     name: "@sdp/types",

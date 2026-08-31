@@ -503,12 +503,6 @@ importers:
 
   packages/bigint-buffer: {}
 
-  packages/kit-augment:
-    dependencies:
-      '@solana/kit':
-        specifier: 'catalog:'
-        version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
-
   packages/sdp-api-integration:
     dependencies:
       '@sdp/private-channels':
@@ -857,9 +851,6 @@ importers:
 
   packages/sdp-spc-escrow:
     dependencies:
-      '@sdp/kit-augment':
-        specifier: workspace:*
-        version: link:../kit-augment
       '@solana-program/token':
         specifier: 'catalog:'
         version: 0.15.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
@@ -882,9 +873,6 @@ importers:
 
   packages/sdp-spc-withdraw:
     dependencies:
-      '@sdp/kit-augment':
-        specifier: workspace:*
-        version: link:../kit-augment
       '@solana-program/token':
         specifier: 'catalog:'
         version: 0.15.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
