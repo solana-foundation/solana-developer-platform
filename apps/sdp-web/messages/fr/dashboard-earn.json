@@ -1,6 +1,12 @@
 {
   "DashboardMarkets": {
     "treasury": {
+      "summaryDeposited": "Déposé",
+      "summaryApy": "APY est.",
+      "summaryApyCaption": "Taux en direct pondéré par la valeur des positions ouvertes",
+      "summaryApyUnavailable": "Indisponible tant que chaque position ouverte ne dispose pas d'une valeur et d'un taux en direct",
+      "viewAll": "Tout afficher",
+      "yourPosition": "Votre position",
       "walletDeployed": "Déployé dans les vaults",
       "walletsError": "Les Wallets n'ont pas pu être chargés. Actualisez pour réessayer.",
       "walletsEmptyTitle": "Aucun Wallet de custody actif",
