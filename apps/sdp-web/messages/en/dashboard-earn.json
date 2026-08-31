@@ -8,6 +8,12 @@
       "programAudience": "For payments platforms",
       "programDescription": "Let your customers earn inside your product. Pick a strategy, style the button, integrate the API."
     },
+    "liquidity": {
+      "instant": "Instant",
+      "delayed": "Delayed",
+      "delayedDay": "Delayed · 1 day",
+      "delayedDays": "Delayed · {days} days"
+    },
     "treasury": {
       "eyebrow": "Portfolio overview",
       "description": "Review custody balances for the selected project, provider strategies for its environment, and organization-wide custodial positions.",
@@ -54,6 +60,7 @@
       "strategy": "Strategy",
       "asset": "Asset",
       "apy": "APY",
+      "liquidity": "Liquidity",
       "balance": "Balance",
       "yourPosition": "Your position",
       "status": "Status",
@@ -116,6 +123,8 @@
       "strategy": "Strategy",
       "asset": "Strategy asset",
       "apy": "Customer APY",
+      "liquidity": "Liquidity",
+      "provider": "Provider",
       "availability": "Availability",
       "sandboxReady": "Sandbox ready",
       "unavailable": "Unavailable",

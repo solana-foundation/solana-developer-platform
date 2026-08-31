@@ -43,6 +43,26 @@ const mainnetStrategy: EarnStrategy = {
   fundable: false,
 };
 
+// Delayed liquidity with no observed APY: the table must name the redemption
+// delay and keep the APY placeholder rather than fabricating a rate.
+const delayedStrategy: EarnStrategy = {
+  id: "earn_strategy_delayed",
+  provider: "veda",
+  providerReference: "VedaFund1111111111111111111111111111111111",
+  name: "Veda Treasury Fund",
+  sourceKind: "rwa",
+  depositMints: ["So11111111111111111111111111111111111111112"],
+  shareMint: "ShareDelayed111111111111111111111111111111",
+  apyType: "fixed",
+  liquidityTerm: "delayed",
+  redemptionDelayDays: 7,
+  status: "active",
+  hostCluster: "devnet",
+  fundable: true,
+  createdAt: "2026-08-18T00:00:00.000Z",
+  updatedAt: "2026-08-18T00:00:00.000Z",
+};
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push }),
 }));
@@ -55,7 +75,8 @@ vi.mock("./earn-program-data", () => ({
   useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
     mocks.strategyClusters.push(options?.cluster);
     return {
-      strategies: options?.cluster === "mainnet-beta" ? [mainnetStrategy] : [liveStrategy],
+      strategies:
+        options?.cluster === "mainnet-beta" ? [mainnetStrategy] : [liveStrategy, delayedStrategy],
       error: undefined,
       isLoading: false,
     };
@@ -113,9 +134,30 @@ describe("EarnProgramWorkspace", () => {
     );
     expect(document.body.textContent).not.toContain("Mock");
     const desktopTable = screen.getByRole("region");
-    expect(desktopTable.className).toContain("[&_table]:min-w-[52rem]");
+    expect(desktopTable.className).toContain("[&_table]:min-w-[64rem]");
     expect(desktopTable.className).toContain("[&_table]:table-fixed");
     expect(desktopTable.getAttribute("style")).toBeNull();
+  });
+
+  it("renders liquidity and provider for every catalogue row (PRO-1721)", () => {
+    renderWithEnglish(
+      <EarnProgramWorkspace
+        integrateHref="/dashboard/markets/embedded-yield/integrate"
+        providerAccess={providerAccess}
+      />
+    );
+
+    const instantRow = getDesktopStrategyRow("Kamino USDC Vault");
+    expect(within(instantRow).getByText("Instant")).toBeTruthy();
+    // The human provider label, never the raw id.
+    expect(within(instantRow).getByText("Kamino")).toBeTruthy();
+
+    const delayedRow = getDesktopStrategyRow("Veda Treasury Fund");
+    expect(within(delayedRow).getByText("Delayed · 7 days")).toBeTruthy();
+    expect(within(delayedRow).getByText("Veda")).toBeTruthy();
+    // No observed APY renders the placeholder, never a fabricated rate.
+    expect(within(delayedRow).getByText("—")).toBeTruthy();
+    expect(delayedRow.textContent).not.toMatch(/\d%/);
   });
 
   it("previews a mainnet strategy from sandbox with explicit warnings", async () => {

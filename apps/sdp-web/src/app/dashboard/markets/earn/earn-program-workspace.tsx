@@ -39,7 +39,9 @@ import { EarnProgramSkeleton } from "../markets-route-skeletons";
 import {
   EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
+  earnProviderLabel,
   earnStrategyAsset,
+  earnStrategyLiquidityLabel,
   formatProviderApy,
 } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
@@ -146,6 +148,8 @@ function StrategyRow({
     sdpEnvironment,
     strategy,
   });
+  const liquidity = earnStrategyLiquidityLabel(strategy, t);
+  const provider = earnProviderLabel(strategy.provider);
 
   return (
     <TableRow className={cn(selected && "bg-fill-subtle")}>
@@ -153,8 +157,21 @@ function StrategyRow({
         <EarnStrategyIdentity strategy={strategy} />
       </TableCell>
       <TableCell className="text-sm text-secondary">{asset?.symbol ?? "—"}</TableCell>
+      {/* `cn` has no tailwind-merge, so clamping lives on child spans where
+          nothing competes; a long label truncates with the full string on
+          `title` instead of overflowing the next column under `table-fixed`. */}
+      <TableCell className="text-sm text-secondary">
+        <span className="block truncate" title={liquidity}>
+          {liquidity ?? "—"}
+        </span>
+      </TableCell>
       <TableCell className="text-lg font-medium tracking-tight text-primary tabular-nums">
         {formatProviderApy(strategy.currentApy, locale)}
+      </TableCell>
+      <TableCell className="text-sm text-secondary">
+        <span className="block truncate" title={provider}>
+          {provider}
+        </span>
       </TableCell>
       <TableCell>
         <EarnDepositAvailabilityBadge
@@ -200,6 +217,7 @@ function StrategyMobileRow({
     sdpEnvironment,
     strategy,
   });
+  const liquidity = earnStrategyLiquidityLabel(strategy, t);
 
   return (
     <div className={cn("flex items-center gap-3 px-4 py-3", selected && "bg-fill-subtle")}>
@@ -209,6 +227,7 @@ function StrategyMobileRow({
           <span className="text-sm font-medium tracking-tight text-primary tabular-nums">
             {formatProviderApy(strategy.currentApy, locale)}
           </span>
+          <span className="text-sm text-secondary">{liquidity ?? "—"}</span>
           <EarnDepositAvailabilityBadge
             availability={availability}
             labels={PROGRAM_AVAILABILITY_LABELS}
@@ -338,22 +357,28 @@ export function EarnProgramWorkspace({
                     />
                   ))}
                 </div>
-                <Table className="hidden md:block [&_table]:min-w-[52rem] [&_table]:table-fixed">
+                <Table className="hidden md:block [&_table]:min-w-[64rem] [&_table]:table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[38%]">
+                      <TableHead className="w-[26%]">
                         {t("DashboardMarkets.earnProgram.strategy")}
                       </TableHead>
-                      <TableHead className="w-[14%]">
+                      <TableHead className="w-[10%]">
                         {t("DashboardMarkets.earnProgram.asset")}
                       </TableHead>
-                      <TableHead className="w-[16%]">
+                      <TableHead className="w-[13%]">
+                        {t("DashboardMarkets.earnProgram.liquidity")}
+                      </TableHead>
+                      <TableHead className="w-[13%]">
                         {t("DashboardMarkets.earnProgram.apy")}
                       </TableHead>
-                      <TableHead className="w-[18%]">
+                      <TableHead className="w-[12%]">
+                        {t("DashboardMarkets.earnProgram.provider")}
+                      </TableHead>
+                      <TableHead className="w-[14%]">
                         {t("DashboardMarkets.earnProgram.availability")}
                       </TableHead>
-                      <TableHead align="right" className="w-[14%]">
+                      <TableHead align="right" className="w-[12%]">
                         <span className="sr-only">{t("DashboardMarkets.earnProgram.select")}</span>
                       </TableHead>
                     </TableRow>

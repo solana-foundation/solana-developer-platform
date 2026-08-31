@@ -52,7 +52,9 @@ import {
   EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
   earnMintAsset,
+  earnProviderLabel,
   earnStrategyAsset,
+  earnStrategyLiquidityLabel,
   earnStrategyReferenceKey,
   formatProviderAmount,
   formatProviderApy,
@@ -345,15 +347,17 @@ function StrategyTable({
 
   return (
     <div className="overflow-x-auto border-t border-border-subtle">
-      <Table className="table-fixed" style={{ minWidth: "62rem" }}>
+      <Table className="table-fixed" style={{ minWidth: "72rem" }}>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[28%]">{t("DashboardMarkets.treasury.position")}</TableHead>
-            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
-            <TableHead className="w-[17%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
-            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.apy")}</TableHead>
-            <TableHead className="w-[13%]">{t("DashboardMarkets.treasury.status")}</TableHead>
-            <TableHead align="right" className="w-[14%]">
+            <TableHead className="w-[20%]">{t("DashboardMarkets.treasury.position")}</TableHead>
+            <TableHead className="w-[10%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
+            <TableHead className="w-[13%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
+            <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.liquidity")}</TableHead>
+            <TableHead className="w-[9%]">{t("DashboardMarkets.treasury.apy")}</TableHead>
+            <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.provider")}</TableHead>
+            <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.status")}</TableHead>
+            <TableHead align="right" className="w-[12%]">
               {t("DashboardMarkets.treasury.actions")}
             </TableHead>
           </TableRow>
@@ -370,6 +374,8 @@ function StrategyTable({
               providerAccess
             );
             const canDeposit = availability === "available";
+            const liquidity = earnStrategyLiquidityLabel(strategy, t);
+            const provider = earnProviderLabel(strategy.provider);
             return (
               <TableRow key={strategy.id}>
                 <TableCell>
@@ -397,8 +403,22 @@ function StrategyTable({
                     </p>
                   ) : null}
                 </TableCell>
+                {/* `cn` has no tailwind-merge, so wrapping/clamping lives on
+                    child spans where nothing competes; a long label truncates
+                    with the full string on `title` instead of overflowing the
+                    next column under `table-fixed`. */}
+                <TableCell className="text-sm text-secondary">
+                  <span className="block truncate" title={liquidity}>
+                    {liquidity ?? "—"}
+                  </span>
+                </TableCell>
                 <TableCell className="text-sm font-medium text-primary tabular-nums">
                   {formatProviderApy(strategy.currentApy, locale)}
+                </TableCell>
+                <TableCell className="text-sm text-secondary">
+                  <span className="block truncate" title={provider}>
+                    {provider}
+                  </span>
                 </TableCell>
                 <TableCell>
                   <EarnDepositAvailabilityBadge
@@ -514,7 +534,9 @@ function ActiveVaultPositionsCard({
                         <p className="truncate text-sm text-primary" title={position.label}>
                           {position.label || shortenMarketAddress(position.providerReference)}
                         </p>
-                        <p className="mt-0.5 truncate text-xs text-tertiary">{position.provider}</p>
+                        <p className="mt-0.5 truncate text-xs text-tertiary">
+                          {earnProviderLabel(position.provider)}
+                        </p>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2 text-sm text-secondary">
@@ -610,7 +632,11 @@ function ExistingProgramsCard({
                     <TableCell className="text-sm text-primary">
                       {programName(program, t("DashboardMarkets.treasury.unnamedProgram"))}
                     </TableCell>
-                    <TableCell className="text-sm text-secondary">{program.provider}</TableCell>
+                    <TableCell className="text-sm text-secondary">
+                      <span className="block truncate" title={earnProviderLabel(program.provider)}>
+                        {earnProviderLabel(program.provider)}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-sm text-primary tabular-nums">
                       {formatProviderAmount(
                         program.wallet.balance.totalUsd,

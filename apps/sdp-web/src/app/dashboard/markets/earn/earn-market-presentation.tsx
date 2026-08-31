@@ -1,10 +1,15 @@
 "use client";
 
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import { type EarnStrategy, SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  type EarnProviderId,
+  type EarnStrategy,
+  SOLANA_CLUSTER_LABELS,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
-import type { MessageKey } from "@/i18n/messages";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
@@ -47,6 +52,48 @@ export function sumDecimalStrings(values: readonly string[]): string | undefined
   }, 0);
   const total = values.reduce((sum, value) => sum + parseDecimalAmount(value, scale), 0n);
   return formatDecimalAmount(total, scale);
+}
+
+/**
+ * Display labels for vault-infra provider ids. Exhaustive over the registry so
+ * a newly registered provider must state its label, but `strategy.provider` is
+ * an open read-model string, so an unknown id renders as-is rather than being
+ * hidden or renamed.
+ */
+const EARN_PROVIDER_LABELS = {
+  ground: "Ground",
+  kamino: "Kamino",
+  perena: "Perena",
+  upshift: "Upshift",
+  veda: "Veda",
+} as const satisfies Record<EarnProviderId, string>;
+
+export function earnProviderLabel(provider: string): string {
+  return Object.hasOwn(EARN_PROVIDER_LABELS, provider)
+    ? EARN_PROVIDER_LABELS[provider as EarnProviderId]
+    : provider;
+}
+
+/**
+ * Liquidity term for a catalogue row. `liquidityTerm` is typed closed but the
+ * read model is open wire data, so a value outside the vocabulary returns
+ * undefined and the caller renders its placeholder: a term is never invented.
+ * A delayed row without a usable day count still says "Delayed"; the day count
+ * renders only when it is a positive integer.
+ */
+export function earnStrategyLiquidityLabel(
+  strategy: EarnStrategy,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string | undefined {
+  if (strategy.liquidityTerm === "instant") return t("DashboardMarkets.liquidity.instant");
+  if (strategy.liquidityTerm !== "delayed") return undefined;
+  const days = strategy.redemptionDelayDays;
+  if (days === undefined || !Number.isInteger(days) || days <= 0) {
+    return t("DashboardMarkets.liquidity.delayed");
+  }
+  return days === 1
+    ? t("DashboardMarkets.liquidity.delayedDay")
+    : t("DashboardMarkets.liquidity.delayedDays", { days });
 }
 
 export { formatProviderAmount } from "./earn-format";
@@ -116,7 +163,7 @@ export function EarnStrategyIdentity({
           {strategy.name}
         </p>
         <p className="mt-0.5 truncate text-xs text-tertiary">
-          {[asset?.symbol, strategy.provider].filter(Boolean).join(" · ")}
+          {[asset?.symbol, earnProviderLabel(strategy.provider)].filter(Boolean).join(" · ")}
         </p>
       </div>
     </div>
