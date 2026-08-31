@@ -154,8 +154,11 @@ export interface PrivateChannelUserRepository {
     privateChannelUserId: string
   ): Promise<PrivateChannelMembershipWithChannelRow[]>;
 
-  /** Insert-if-not-exists. Returns the row (existing or newly created). */
-  addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow>;
+  /**
+   * Insert-if-not-exists while holding the principal row lock. Returns null
+   * when the principal is disabled before the insert can commit.
+   */
+  addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow | null>;
 
   /** Remove a user from a channel. Returns true if a row was deleted. */
   removeMembership(channelId: string, privateChannelUserId: string): Promise<boolean>;

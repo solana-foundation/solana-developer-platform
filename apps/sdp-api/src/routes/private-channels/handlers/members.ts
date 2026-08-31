@@ -131,21 +131,22 @@ export const disablePrivateChannelPrincipal = async (c: AppContext) => {
   if (principal.is_default) {
     throw conflict("The default Private Channels principal cannot be disabled.");
   }
-  const memberships = await repo.listMembershipsForUser(principal.id);
   try {
-    // First pass removes existing bindings while the identity is active. The
-    // second pass runs after disabling to catch a verification that raced with
-    // the first list and also makes a retried disable repair partial cleanup.
+    // Disable first. addMembership locks this same principal row, so an
+    // in-flight membership either commits before this transition (and is found
+    // below) or observes the disabled state and cannot insert.
     if (!principal.disabled_at) {
-      await revokePrivateChannelPrincipalWallets(c.env, auth, scope.projectId, principal.id);
       const disabled = await repo.disablePrincipal(scope, principal.id);
       if (!disabled) throw notFound("Private Channels principal");
     }
+    // Wallet verification has its own disabled-row guard and compensation.
+    // Repeating cleanup makes retries repair any partial external revocation.
     await revokePrivateChannelPrincipalWallets(c.env, auth, scope.projectId, principal.id);
   } catch (error) {
     throw mapPrivateChannelError(error);
   }
 
+  const memberships = await repo.listMembershipsForUser(principal.id);
   for (const membership of memberships) {
     await repo.removeMembership(membership.channel_id, principal.id);
     await emitMember(
@@ -185,6 +186,7 @@ export const addPrincipalChannelMembership = async (
     privateChannelUserId: principal.id,
     addedBy: auth.userId ?? null,
   });
+  if (!membership) throw notFound("Active Private Channels principal");
   if (!alreadyMember) {
     await emitMember(
       c,

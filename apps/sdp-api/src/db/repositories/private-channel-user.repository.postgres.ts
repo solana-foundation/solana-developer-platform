@@ -101,6 +101,7 @@ export function createPostgresPrivateChannelUserRepository(
             WHERE organization_id = ?
               AND project_id = ?
               AND instance_id = ?
+              AND spc_user_id IS NOT NULL
             ORDER BY is_default DESC, created_at ASC, id ASC`
         )
         .bind(scope.organizationId, scope.projectId, instanceId)
@@ -118,6 +119,7 @@ export function createPostgresPrivateChannelUserRepository(
               AND instance_id = ?
               AND is_default = TRUE
               AND disabled_at IS NULL
+              AND spc_user_id IS NOT NULL
             LIMIT 1`
         )
         .bind(scope.organizationId, scope.projectId, instanceId)
@@ -135,6 +137,7 @@ export function createPostgresPrivateChannelUserRepository(
               AND pcu.project_id = ?
               AND pcu.is_default = TRUE
               AND pcu.disabled_at IS NULL
+              AND pcu.spc_user_id IS NOT NULL
               AND pci.is_active = TRUE
             ORDER BY pci.created_at DESC, pci.id DESC
             LIMIT 1`
@@ -147,14 +150,28 @@ export function createPostgresPrivateChannelUserRepository(
     async reservePrincipal(input: ReservePrivateChannelPrincipalInput) {
       const row = await db
         .prepare(
-          `INSERT INTO private_channel_users (
+          `WITH stale_reservations AS (
+             DELETE FROM private_channel_users
+              WHERE organization_id = ?
+                AND project_id = ?
+                AND instance_id = ?
+                AND spc_user_id IS NULL
+                AND created_at::timestamptz < NOW() - INTERVAL '5 minutes'
+            RETURNING id
+           )
+           INSERT INTO private_channel_users (
                id, organization_id, project_id, instance_id, user_id,
                name, is_default, created_by,
                invited_by, invite_token
-             ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL)
+             )
+           SELECT ?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL
+             FROM (SELECT COUNT(*) FROM stale_reservations) cleanup
           RETURNING *`
         )
         .bind(
+          input.organizationId,
+          input.projectId,
+          input.instanceId,
           `pcu_${crypto.randomUUID()}`,
           input.organizationId,
           input.projectId,
@@ -376,27 +393,39 @@ export function createPostgresPrivateChannelUserRepository(
       return results.map(mapMembershipWithChannelRow);
     },
 
-    async addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow> {
+    async addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow | null> {
       // Idempotent: ON CONFLICT DO UPDATE (no-op) so we always return a row.
       // `RETURNING` on both insert + no-op update gives us the winning row's id
-      // even when the row already existed.
+      // even when the row already existed. Locking the active principal makes
+      // this insert serialize with disablePrincipal: either membership commits
+      // first and disable cleanup sees it, or disable wins and this returns null.
       const row = await db
         .prepare(
-          `INSERT INTO private_channel_memberships (
+          `WITH active_principal AS (
+             SELECT id
+               FROM private_channel_users
+              WHERE id = ?
+                AND disabled_at IS NULL
+                AND spc_user_id IS NOT NULL
+              FOR UPDATE
+           )
+           INSERT INTO private_channel_memberships (
                id, channel_id, private_channel_user_id, added_by
-             ) VALUES (?, ?, ?, ?)
+             )
+           SELECT ?, ?, id, ?
+             FROM active_principal
           ON CONFLICT (channel_id, private_channel_user_id) DO UPDATE
              SET added_at = private_channel_memberships.added_at
           RETURNING *`
         )
         .bind(
+          input.privateChannelUserId,
           generatePrivateChannelMembershipId(),
           input.channelId,
-          input.privateChannelUserId,
           input.addedBy
         )
         .first<Record<string, unknown>>();
-      if (!row) throw new Error("private_channel_memberships insert returned no row");
+      if (!row) return null;
       return {
         id: row.id as string,
         channel_id: row.channel_id as string,

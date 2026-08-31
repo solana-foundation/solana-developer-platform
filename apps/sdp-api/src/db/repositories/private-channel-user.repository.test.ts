@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { createPostgresPrivateChannelRepository } from "./private-channel.repository.postgres";
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
 import type { PrivateChannelUserRepository } from "./private-channel-user.repository";
 import { createPostgresPrivateChannelUserRepository } from "./private-channel-user.repository.postgres";
@@ -186,5 +187,84 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
     expect(listed.project_role).toBeNull();
     const fetched = await repo.getByProjectAndUser(scope, TEST_USER.id);
     expect(fetched?.project_role).toBeNull();
+  });
+
+  it("does not expose an incomplete default principal as active", async () => {
+    const instanceId = await connectInstance();
+
+    await expect(repo.findDefaultPrincipal(scope, instanceId)).resolves.toBeNull();
+
+    await getDb(env)
+      .prepare(
+        `UPDATE private_channel_users
+            SET spc_user_id = 'spc_default',
+                spc_username = 'default-user',
+                spc_credential_ciphertext = 'encrypted'
+          WHERE id = ?`
+      )
+      .bind(PCU_ID)
+      .run();
+
+    await expect(repo.findDefaultPrincipal(scope, instanceId)).resolves.toMatchObject({
+      id: PCU_ID,
+      spc_user_id: "spc_default",
+    });
+  });
+
+  it("reclaims a stale incomplete reservation before reserving the same name", async () => {
+    const instanceId = await connectInstance();
+    const db = getDb(env);
+    await db
+      .prepare(
+        `UPDATE private_channel_users
+            SET name = 'Treasury',
+                is_default = FALSE,
+                created_at = '2020-01-01T00:00:00.000Z'
+          WHERE id = ?`
+      )
+      .bind(PCU_ID)
+      .run();
+
+    const reserved = await repo.reservePrincipal({
+      ...scope,
+      instanceId,
+      name: "Treasury",
+      isDefault: false,
+      createdBy: TEST_USER.id,
+    });
+
+    expect(reserved.id).not.toBe(PCU_ID);
+    await expect(
+      db.prepare("SELECT id FROM private_channel_users WHERE id = ?").bind(PCU_ID).first()
+    ).resolves.toBeNull();
+  });
+
+  it("does not add a membership after its principal is disabled", async () => {
+    const instanceId = await connectInstance();
+    const db = getDb(env);
+    await db
+      .prepare(
+        `UPDATE private_channel_users
+            SET is_default = FALSE,
+                spc_user_id = 'spc_member',
+                spc_username = 'member-user',
+                spc_credential_ciphertext = 'encrypted'
+          WHERE id = ?`
+      )
+      .bind(PCU_ID)
+      .run();
+    const { channel } = await createPostgresPrivateChannelRepository(db).getOrCreateDefault({
+      ...scope,
+      instanceId,
+    });
+
+    await expect(repo.disablePrincipal(scope, PCU_ID)).resolves.toBe(true);
+    await expect(
+      repo.addMembership({
+        channelId: channel.id,
+        privateChannelUserId: PCU_ID,
+        addedBy: TEST_USER.id,
+      })
+    ).resolves.toBeNull();
   });
 });

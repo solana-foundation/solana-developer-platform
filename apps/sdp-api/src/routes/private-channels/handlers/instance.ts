@@ -166,6 +166,9 @@ export const connectPrivateChannelInstance = async (
       privateChannelUserId: principal.id,
       addedBy: auth.userId ?? null,
     });
+    if (!membership) {
+      throw new Error("default Private Channels principal became inactive during setup");
+    }
     if (!alreadyMember) defaultMembershipId = membership.id;
   } catch (error) {
     if (existingByGateway) await repo.deactivateActive(scope);

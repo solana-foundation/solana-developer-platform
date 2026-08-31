@@ -74,6 +74,9 @@ export async function createChannel(c: ValidatedBodyContext<typeof createChannel
       privateChannelUserId: principal.id,
       addedBy: auth.userId ?? null,
     });
+    if (!membership) {
+      throw conflict("The default Private Channels identity is not active");
+    }
     await emitMember(
       c,
       {
