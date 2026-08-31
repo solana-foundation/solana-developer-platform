@@ -154,8 +154,6 @@
       "creating": "Đang tạo…",
       "verifyingWallet": "Đang xác minh ví…",
       "retryWallet": "Thử xác minh lại",
-      "walletRetryTitle": "Đã tạo danh tính",
-      "walletRetryDescription": "Danh tính đã tồn tại nhưng việc xác minh ví chưa hoàn tất. Chọn một ví và thử lại.",
       "create": "Tạo danh tính",
       "createSuccess": "Đã tạo danh tính “{name}”.",
       "createSuccessWithWallet": "Đã tạo danh tính “{name}” và xác minh ví.",

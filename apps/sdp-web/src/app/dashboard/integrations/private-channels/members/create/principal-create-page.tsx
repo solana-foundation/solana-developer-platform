@@ -155,16 +155,6 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
             {t("DashboardPrivateChannels.members.noWalletsAfter")}
           </Callout>
         ) : null}
-
-        {createdPrincipalId ? (
-          <Callout
-            live
-            variant="warning"
-            title={t("DashboardPrivateChannels.members.walletRetryTitle")}
-          >
-            {t("DashboardPrivateChannels.members.walletRetryDescription")}
-          </Callout>
-        ) : null}
       </div>
     </WizardFrame>
   );

@@ -143,8 +143,6 @@
       "creating": "Création…",
       "verifyingWallet": "Vérification du wallet…",
       "retryWallet": "Réessayer la vérification",
-      "walletRetryTitle": "Identité créée",
-      "walletRetryDescription": "L’identité existe, mais la vérification du wallet n’est pas terminée. Sélectionnez un wallet et réessayez.",
       "create": "Créer l’identité",
       "createSuccess": "Identité « {name} » créée.",
       "createSuccessWithWallet": "Identité « {name} » créée et wallet vérifié.",

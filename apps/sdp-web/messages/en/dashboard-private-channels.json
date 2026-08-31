@@ -154,8 +154,6 @@
       "creating": "Creating…",
       "verifyingWallet": "Verifying wallet…",
       "retryWallet": "Retry verification",
-      "walletRetryTitle": "Principal created",
-      "walletRetryDescription": "The principal exists, but wallet verification did not finish. Select a wallet and retry.",
       "create": "Create principal",
       "createSuccess": "Principal “{name}” created.",
       "createSuccessWithWallet": "Principal “{name}” created and wallet verified.",
