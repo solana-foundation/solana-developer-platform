@@ -94,16 +94,21 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
     await client.query(`INSERT INTO custody_configs (id, organization_id, project_id) VALUES
       ('cfg_project', 'org_a', 'prj_a'),
       ('cfg_duplicate', 'org_a', 'prj_a'),
-      ('cfg_foreign', 'org_a', 'prj_b')`);
-    await client.query(`INSERT INTO custody_connections (id, organization_id, project_id) VALUES
-      ('conn_project', 'org_a', 'prj_a')`);
+      ('cfg_foreign', 'org_a', 'prj_b'),
+      ('cfg_shadow_org', 'org_a', NULL)`);
+    await client.query(`INSERT INTO custody_connections
+      (id, organization_id, project_id, status) VALUES
+      ('conn_project', 'org_a', 'prj_a', 'active'),
+      ('conn_shadow_project', 'org_a', 'prj_a', 'deactivated')`);
     await client.query(`INSERT INTO custody_wallets
       (id, custody_config_id, custody_connection_id, wallet_id, public_key) VALUES
       ('cw_project', 'cfg_project', NULL, 'provider_project', 'addr_project'),
       ('cw_connection', NULL, 'conn_project', 'provider_connection', 'addr_connection'),
       ('cw_duplicate_a', 'cfg_project', NULL, 'provider_duplicate', 'addr_duplicate'),
       ('cw_duplicate_b', 'cfg_duplicate', NULL, 'provider_duplicate', 'addr_duplicate'),
-      ('cw_foreign', 'cfg_foreign', NULL, 'provider_foreign', 'addr_foreign')`);
+      ('cw_foreign', 'cfg_foreign', NULL, 'provider_foreign', 'addr_foreign'),
+      ('cw_shadow_org', 'cfg_shadow_org', NULL, 'provider_shadow', 'addr_shadow'),
+      ('cw_shadow_connection', NULL, 'conn_shadow_project', 'provider_shadow', 'addr_shadow')`);
     await client.query(`INSERT INTO custody_wallets
       (id, custody_config_id, wallet_id, public_key, status) VALUES
       ('cw_rebound_old', 'cfg_project', 'provider_rebound', 'addr_rebound', 'inactive'),
@@ -120,6 +125,8 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
        'provider_duplicate', 'addr_duplicate', 'active'),
       ('rp_pinned_rebound', 'org_a', 'prj_a', 'cw_rebound_old',
        'provider_rebound', 'addr_rebound', 'active'),
+      ('rp_pinned_shadowed', 'org_a', 'prj_a', 'cw_shadow_org',
+       'provider_shadow', 'addr_shadow', 'active'),
       ('rp_mismatched', 'org_a', 'prj_a', 'cw_foreign',
        'provider_project', 'addr_project', 'active')`);
 
@@ -139,6 +146,7 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
       { id: "rp_mismatched", source_custody_wallet_id: "cw_foreign" },
       { id: "rp_pinned_ambiguous", source_custody_wallet_id: "cw_duplicate_a" },
       { id: "rp_pinned_rebound", source_custody_wallet_id: "cw_rebound_old" },
+      { id: "rp_pinned_shadowed", source_custody_wallet_id: "cw_shadow_org" },
       { id: "rp_project", source_custody_wallet_id: "cw_project" },
     ]);
 
@@ -241,6 +249,16 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
         project_id: "prj_a",
         provider_match_count: 1,
         source_custody_wallet_id: "cw_rebound_old",
+        status: "active",
+      },
+      {
+        evidence_match_count: 2,
+        id: "rp_pinned_shadowed",
+        legacy_custody_wallet_id: null,
+        organization_id: "org_a",
+        project_id: "prj_a",
+        provider_match_count: 2,
+        source_custody_wallet_id: "cw_shadow_org",
         status: "active",
       },
     ]);

@@ -1,7 +1,8 @@
 \set ON_ERROR_STOP on
 
 -- Read-only cutover and rollback audit. Cutover identity matching retains wallet
--- history; rollback checks mirror the legacy resolver's active-record filters.
+-- history; rollback checks also account for project Connections that shadow
+-- an otherwise usable Config fallback in the legacy resolver.
 
 \echo '=== 1. Null Recurring Payment identities by exactly-one resolution ==='
 WITH wallet_scope AS (
@@ -77,7 +78,19 @@ WITH legacy_wallet_scope AS (
          connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
-  WHERE wallet.status = 'active' AND connection.status = 'active'
+  WHERE (wallet.status = 'active' AND connection.status = 'active')
+     OR EXISTS (
+       SELECT 1
+       FROM custody_wallets fallback_wallet
+       JOIN custody_configs fallback_config
+         ON fallback_config.id = fallback_wallet.custody_config_id
+       WHERE fallback_config.organization_id = connection.organization_id
+         AND (fallback_config.project_id = connection.project_id
+           OR fallback_config.project_id IS NULL)
+         AND fallback_config.status = 'active'
+         AND fallback_wallet.status = 'active'
+         AND fallback_wallet.wallet_id = wallet.wallet_id
+     )
 ), resolutions AS (
   SELECT recurring.id, recurring.organization_id, recurring.project_id,
          recurring.source_custody_wallet_id, recurring.status,

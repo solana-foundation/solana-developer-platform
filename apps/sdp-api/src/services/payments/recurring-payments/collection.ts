@@ -369,16 +369,17 @@ async function createCollectionAttemptUnderRecurringLock(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
-  subscription: PaymentSubscriptionRow;
-  dueAt: string;
   attemptedAt: string;
   status: "processing" | "failed";
   error: string | null;
   metadata: Record<string, unknown>;
   enforceCooldown: boolean;
 }): Promise<PaymentSubscriptionCollectionAttemptRow | null> {
+  const subscriptionId = input.recurringPayment.subscription_id;
+  const dueAt = input.recurringPayment.next_collection_due_at;
+  if (!subscriptionId || !dueAt) return null;
+
   return getDb(input.env).transaction(async (tx) => {
     const locked = await tx
       .prepare(
@@ -388,7 +389,7 @@ async function createCollectionAttemptUnderRecurringLock(input: {
             AND organization_id = ?
             AND project_id = ?
             AND status = 'active'
-            AND source_custody_wallet_id = ?
+            AND source_custody_wallet_id IS NOT DISTINCT FROM ?
             AND source_wallet_id = ?
             AND source_address = ?
             AND subscription_id = ?
@@ -400,11 +401,11 @@ async function createCollectionAttemptUnderRecurringLock(input: {
         input.recurringPayment.id,
         input.organizationId,
         input.projectId,
-        input.sourceWallet.id,
-        input.sourceWallet.walletId,
-        input.sourceWallet.publicKey,
-        input.subscription.id,
-        input.dueAt,
+        input.recurringPayment.source_custody_wallet_id,
+        input.recurringPayment.source_wallet_id,
+        input.recurringPayment.source_address,
+        subscriptionId,
+        dueAt,
         input.attemptedAt
       )
       .first<{ id: string }>();
@@ -414,8 +415,8 @@ async function createCollectionAttemptUnderRecurringLock(input: {
     const activeAttempt = await subscriptionsRepo.getCollectionAttemptByDue({
       organizationId: input.organizationId,
       projectId: input.projectId,
-      subscriptionId: input.subscription.id,
-      dueAt: input.dueAt,
+      subscriptionId,
+      dueAt,
       statuses: ["pending", "processing", "confirmed"],
     });
     if (activeAttempt) return null;
@@ -431,8 +432,8 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       const recentFailure = await subscriptionsRepo.getCollectionAttemptByDue({
         organizationId: input.organizationId,
         projectId: input.projectId,
-        subscriptionId: input.subscription.id,
-        dueAt: input.dueAt,
+        subscriptionId,
+        dueAt,
         statuses: ["failed"],
       });
       if (recentFailure && recentFailure.updated_at > retryBefore) return null;
@@ -442,11 +443,11 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       id: `psca_${crypto.randomUUID()}`,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      subscriptionId: input.subscription.id,
+      subscriptionId,
       transferId: null,
       token: input.recurringPayment.token,
       amount: input.recurringPayment.amount,
-      dueAt: input.dueAt,
+      dueAt,
       attemptedAt: input.attemptedAt,
       status: input.status,
       signature: null,
@@ -458,17 +459,18 @@ async function createCollectionAttemptUnderRecurringLock(input: {
   });
 }
 
-async function journalAutomatedAdmissionFailure(input: {
+export async function journalAutomatedCollectionFailure(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
-  subscription: PaymentSubscriptionRow;
-  dueAt: string;
   initiatedByKeyId: string | null;
   error: unknown;
 }): Promise<void> {
+  const subscriptionId = input.recurringPayment.subscription_id;
+  const dueAt = input.recurringPayment.next_collection_due_at;
+  if (!subscriptionId || !dueAt) return;
+
   const attemptedAt = new Date().toISOString();
   const message = activationErrorMessage(input.error);
   const attempt = await createCollectionAttemptUnderRecurringLock({
@@ -490,8 +492,8 @@ async function journalAutomatedAdmissionFailure(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     recurringPaymentId: input.recurringPayment.id,
-    subscriptionId: input.subscription.id,
-    dueAt: input.dueAt,
+    subscriptionId,
+    dueAt,
     attemptId: attempt.id,
     error: message,
   });
@@ -1290,14 +1292,11 @@ export async function collectRecurringPayment(input: {
       );
     } catch (error) {
       if (input.collectionSource === "automated") {
-        await journalAutomatedAdmissionFailure({
+        await journalAutomatedCollectionFailure({
           env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          sourceWallet: input.sourceWallet,
           recurringPayment: input.recurringPayment,
-          subscription,
-          dueAt,
           initiatedByKeyId: input.initiatedByKeyId,
           error,
         });
@@ -1331,10 +1330,7 @@ export async function collectRecurringPayment(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      sourceWallet: input.sourceWallet,
       recurringPayment: input.recurringPayment,
-      subscription,
-      dueAt,
       attemptedAt: nowIso,
       status: "processing",
       error: null,

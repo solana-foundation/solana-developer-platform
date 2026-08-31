@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   activateRecurringPayment: vi.fn(),
   cancelRecurringPayment: vi.fn(),
   collectRecurringPayment: vi.fn(),
+  journalAutomatedCollectionFailure: vi.fn(),
   resumeRecurringPayment: vi.fn(),
   findOperationalWalletById: vi.fn(),
   queryCalls: [] as Array<{ query: string; bindings: Array<string | number> }>,
@@ -47,6 +48,7 @@ vi.mock("@/services/payments/recurring-payments", () => ({
   activateRecurringPayment: mocks.activateRecurringPayment,
   cancelRecurringPayment: mocks.cancelRecurringPayment,
   collectRecurringPayment: mocks.collectRecurringPayment,
+  journalAutomatedCollectionFailure: mocks.journalAutomatedCollectionFailure,
   resumeRecurringPayment: mocks.resumeRecurringPayment,
 }));
 
@@ -108,6 +110,7 @@ describe("collectDueRecurringPayments", () => {
     mocks.activateRecurringPayment.mockReset();
     mocks.cancelRecurringPayment.mockReset();
     mocks.collectRecurringPayment.mockReset();
+    mocks.journalAutomatedCollectionFailure.mockReset();
     mocks.resumeRecurringPayment.mockReset();
     mocks.findOperationalWalletById.mockReset();
     mocks.queryCalls.length = 0;
@@ -232,6 +235,7 @@ describe("collectDueRecurringPayments", () => {
 
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
+    expect(mocks.journalAutomatedCollectionFailure).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       {
         organization_id: "org_1",
@@ -261,6 +265,7 @@ describe("collectDueRecurringPayments", () => {
       custodyWalletId: "cwlt_1",
     });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
+    expect(mocks.journalAutomatedCollectionFailure).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       {
         organization_id: "org_1",

@@ -11,6 +11,7 @@ import {
   activateRecurringPayment,
   cancelRecurringPayment,
   collectRecurringPayment,
+  journalAutomatedCollectionFailure,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -126,6 +127,19 @@ async function collectRow(
   try {
     const sourceWallet = await resolveSourceWallet(env, row);
     if (!sourceWallet) {
+      await journalAutomatedCollectionFailure({
+        env,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        recurringPayment: row,
+        initiatedByKeyId: null,
+        error: new AppError(
+          "CONFLICT",
+          row.source_custody_wallet_id
+            ? "Recurring payment source wallet does not match its pin"
+            : "Recurring payment source wallet is unresolved"
+        ),
+      });
       return "failed";
     }
     await collectRecurringPayment({

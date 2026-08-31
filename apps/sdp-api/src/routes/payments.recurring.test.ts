@@ -4663,6 +4663,86 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("journals an unresolved automated collection once per cooldown", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPayment = await activateRecurringPaymentForTest(headers);
+    const now = new Date();
+    const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET source_custody_wallet_id = NULL, next_collection_due_at = ?
+            WHERE id = ?`
+        )
+        .bind(dueAt, recurringPayment.id),
+      getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPayment.subscriptionId),
+    ]);
+
+    expect(await collectDueRecurringPayments(env, now)).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 1,
+      skipped: 0,
+    });
+    expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 0,
+      skipped: 0,
+    });
+
+    const attempts = await getDb(env)
+      .prepare(
+        `SELECT status, error, metadata, transfer_id
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?`
+      )
+      .bind(recurringPayment.subscriptionId)
+      .all<{
+        status: string;
+        error: string | null;
+        metadata: { collectionSource?: string; retryAfterAt?: string };
+        transfer_id: string | null;
+      }>();
+    expect(attempts.results).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        transfer_id: null,
+        metadata: expect.objectContaining({
+          collectionSource: "automated",
+          retryAfterAt: expect.any(String),
+        }),
+      }),
+    ]);
+    expect(attempts.results[0]?.error).toContain("source wallet is unresolved");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
   it("journals one automated collection attempt when runtime admission denies the wallet", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
