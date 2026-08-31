@@ -513,7 +513,30 @@
       "unavailableEnvironmentDescription": "Nạp vault Earn mới chỉ dành cho sandbox cho đến khi vị thế vault xuất hiện trong danh mục production.",
       "unavailableAccessDescription": "Không thể xác minh quyền truy cập Provider cho tổ chức này, nên không thể cấu hình chiến lược một cách an toàn.",
       "unavailableProviderDescription": "Provider này chưa được bật cho tổ chức và môi trường dự án đã chọn.",
-      "returnToEarn": "Quay lại Earn"
+      "returnToEarn": "Quay lại Earn",
+      "dashboardEyebrow": "Danh mục khách hàng trực tiếp",
+      "dashboardDescription": "Xem mọi vị thế của người dùng cuối trong dự án này, được nhóm thành chế độ xem trực tiếp hoàn chỉnh. Giá trị làm mới từ nhà cung cấp và không bao giờ được ước tính.",
+      "configure": "Cấu hình Yield nhúng",
+      "configureExperience": "Cấu hình trải nghiệm khách hàng",
+      "customerWallets": "Wallet của khách hàng",
+      "livePositions": "Vị thế trực tiếp",
+      "assetsEarning": "Asset đang sinh lời",
+      "liveValue": "Giá trị trực tiếp",
+      "portfolioTitle": "Danh mục theo chiến lược",
+      "portfolioDescription": "Giá trị trực tiếp của khách hàng, được nhóm theo chiến lược và Token nạp.",
+      "portfolioEmptyTitle": "Chưa có vị thế khách hàng nào",
+      "portfolioEmptyDescription": "Cấu hình Yield nhúng, vị thế của khách hàng sẽ xuất hiện ở đây sau khi khoản nạp của họ được ghi nhận.",
+      "portfolioErrorTitle": "Danh mục khách hàng không khả dụng",
+      "portfolioErrorDescription": "Không thể tải danh mục trực tiếp đầy đủ. Số dư không được hiển thị cho đến khi mọi trang được xác nhận.",
+      "incompletePortfolio": "Giá trị trực tiếp không khả dụng cho {count} vị thế. Các tổng bị ảnh hưởng được giữ lại thay vì hiển thị là 0 hoặc một phần.",
+      "valueUnavailable": "Không khả dụng",
+      "clusterToggleLabel": "Mạng chiến lược",
+      "mainnetCatalogueDescription": "Xem trước các chiến lược Mainnet để lên kế hoạch tích hợp. Dự án Sandbox này không thể cấp vốn hoặc lưu chúng.",
+      "mainnetPreviewTitle": "Xem trước vault Mainnet",
+      "mainnetPreviewDescription": "Vault này chạy trên Mainnet. Bạn có thể xem trải nghiệm khách hàng và tích hợp tại đây, nhưng hãy chuyển sang dự án Production để lưu hoặc gửi khoản nạp.",
+      "mainnetPreviewFooter": "Chỉ xem trước trên Mainnet. Cần dự án Production để lưu hoặc kích hoạt tích hợp này.",
+      "mainnetHandoffDescription": "Liên kết bàn giao công khai được tạo từ dự án Production. Bạn vẫn có thể xem và sao chép ví dụ máy chủ bên dưới.",
+      "mainnetHandoffUnavailable": "Mở vault này từ dự án Production để tạo bàn giao kỹ thuật có thể chia sẻ."
     }
   }
 }
