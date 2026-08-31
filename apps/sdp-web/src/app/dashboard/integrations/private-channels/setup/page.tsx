@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import { loadInstance } from "../private-channels-page.data";
 import { PrivateChannelsConnectForm } from "./private-channels-connect-form";
 
@@ -40,11 +39,7 @@ export default async function PrivateChannelsPage() {
             {t("DashboardPrivateChannels.instance.setupDetailsDescription")}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {/* The form is still usable on a failed lookup (it falls back to the
-              sandbox defaults), so surface the error above it rather than
-              replacing it — otherwise a transient 500 blocks reconnecting. */}
-          {instance.ok ? null : <PrivateChannelsLoadError message={instance.error} />}
+        <CardContent>
           <PrivateChannelsConnectForm initialInstance={instance.data} />
         </CardContent>
       </Card>

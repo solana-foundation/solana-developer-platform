@@ -11,14 +11,16 @@ interface WizardFrameProps {
   aside?: ReactNode;
   children: ReactNode;
   currentStep: number;
+  currentStepTitle?: string;
   description?: ReactNode;
-  footer: ReactNode;
+  footer?: ReactNode;
   header?: ReactNode;
   maxWidthClassName?: string;
   progressLabel: string;
   /** Selection recap opened from the "View summary" button in a modal. */
   summary?: ReactNode;
   steps: readonly { label: string; title: string }[];
+  titleBadge?: ReactNode;
   /** Actions rendered to the right of the step progress indicator. */
   toolbarActions?: ReactNode;
 }
@@ -33,6 +35,7 @@ export function WizardFrame({
   aside,
   children,
   currentStep,
+  currentStepTitle,
   description,
   footer,
   header,
@@ -40,22 +43,41 @@ export function WizardFrame({
   progressLabel,
   summary,
   steps,
+  titleBadge,
   toolbarActions,
 }: WizardFrameProps) {
   const t = useTranslations();
   const [summaryOpen, setSummaryOpen] = useState(false);
   const activeStep = steps[currentStep];
   const showSummaryButton = summary !== undefined && currentStep > 0;
+  const hasTitleBadge = Boolean(titleBadge);
 
   const stepContent = (
     <>
-      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div
+        className={cn(
+          "mb-6 gap-3 sm:gap-4",
+          hasTitleBadge
+            ? "grid grid-cols-1 items-center text-center sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+            : "flex flex-col items-start sm:flex-row sm:items-center sm:justify-between"
+        )}
+      >
         <div className="min-w-0 space-y-1">
-          <h2 className="text-2xl font-medium tracking-tight text-primary">{activeStep.title}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-medium tracking-tight text-primary">
+              {currentStepTitle ?? activeStep.title}
+            </h2>
+            {titleBadge}
+          </div>
           {description ? <div className="text-sm text-secondary">{description}</div> : null}
         </div>
         {header || showSummaryButton ? (
-          <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
+          <div
+            className={cn(
+              "flex w-full shrink-0 items-center gap-3 sm:w-auto",
+              hasTitleBadge && "justify-center sm:col-start-3 sm:justify-self-end"
+            )}
+          >
             {header}
             {header && showSummaryButton ? (
               <span aria-hidden className="h-4 w-px bg-border-default" />
@@ -107,12 +129,14 @@ export function WizardFrame({
         </div>
       </div>
 
-      <footer
-        className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
-        data-wizard-actions
-      >
-        <div className={cn("mx-auto w-full", maxWidthClassName)}>{footer}</div>
-      </footer>
+      {footer ? (
+        <footer
+          className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+          data-wizard-actions
+        >
+          <div className={cn("mx-auto w-full", maxWidthClassName)}>{footer}</div>
+        </footer>
+      ) : null}
 
       {summary === undefined ? null : (
         <Modal

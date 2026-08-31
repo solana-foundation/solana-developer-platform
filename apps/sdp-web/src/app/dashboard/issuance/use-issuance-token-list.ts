@@ -12,6 +12,7 @@ import {
   isSameIssuanceListQuery,
   toIssuanceListUrlParams,
 } from "./issuance-list-query";
+import { issuanceQueryKeys } from "./issuance-query-key";
 import type { IssuanceTokenView } from "./issuance-token-fields";
 import {
   fetchIssuanceTokensClientPage,
@@ -58,18 +59,11 @@ function useDelayedFlag(value: boolean, delayMs: number): boolean {
   return value && elapsed;
 }
 
-const TOKENS_SWR_KEY = "issuance-tokens";
-
 /** Unfiltered slice for surfaces that need the project, not the filtered page. */
 export const ISSUANCE_UNFILTERED_QUERY: IssuanceListQuery = {
   ...DEFAULT_ISSUANCE_LIST_QUERY,
   pageSize: 100,
 };
-
-/** The query is the cache key — one entry per distinct request. */
-function tokensCacheKey(query: IssuanceListQuery) {
-  return [TOKENS_SWR_KEY, query] as const;
-}
 
 /**
  * Warms the SWR cache for the pages either side of the one on screen.
@@ -111,7 +105,9 @@ function useAdjacentPagePrefetch() {
       // Claimed before the request goes out so two renders can't both fetch it.
       markCached(target);
       void fetchIssuanceTokensClientPage(target)
-        .then((result) => writeCache(tokensCacheKey(target), result, { revalidate: false }))
+        .then((result) =>
+          writeCache(issuanceQueryKeys.tokens({ query: target }), result, { revalidate: false })
+        )
         .catch(() => {
           if (cachedRef.current.resultSet === resultSet) {
             cachedRef.current.pages.delete(page);
@@ -229,7 +225,7 @@ export function useIssuanceTokenList({
   const { data, error, isLoading, isValidating } = useSWR(
     // The key is the query itself — no timestamp in it, so relative date filters
     // stay cacheable and repeat requests dedupe.
-    tokensCacheKey(query),
+    issuanceQueryKeys.tokens({ query }),
     ([, listQuery]) => fetchIssuanceTokensClientPage(listQuery),
     {
       // The server already rendered this exact page; don't re-fetch on mount.
@@ -252,7 +248,9 @@ export function useIssuanceTokenList({
   // one, so the back arrow appeared to do nothing at all. Seeding the cache makes
   // the first page an ordinary hit like every other page that has been visited.
   useEffect(() => {
-    void writeCache(tokensCacheKey(initialQuery), initialPage, { revalidate: false });
+    void writeCache(issuanceQueryKeys.tokens({ query: initialQuery }), initialPage, {
+      revalidate: false,
+    });
   }, [initialPage, initialQuery, writeCache]);
 
   const tokens = data?.tokens ?? [];
@@ -349,7 +347,7 @@ export function useIssuanceTokenList({
  */
 export function useIssuancePlaygroundTokens(enabled: boolean): IssuanceTokenView[] | null {
   const { data } = useSWR(
-    enabled ? ([TOKENS_SWR_KEY, ISSUANCE_UNFILTERED_QUERY] as const) : null,
+    enabled ? issuanceQueryKeys.tokens({ query: ISSUANCE_UNFILTERED_QUERY }) : null,
     ([, listQuery]) => fetchIssuanceTokensClientPage(listQuery),
     { revalidateOnFocus: false, keepPreviousData: true }
   );

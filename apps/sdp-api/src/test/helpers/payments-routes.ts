@@ -54,6 +54,11 @@ export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createF
 
 export const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
 
+export const createOrgSignerForCustodyWalletMock = vi.spyOn(
+  solanaServices,
+  "createOrgSignerForCustodyWallet"
+);
+
 const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
 const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
@@ -162,7 +167,7 @@ export const TEST_MOONPAY_SECRET_KEY = "moonpay_secret_key";
 
 export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
-const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
 const TEST_LIGHTSPARK_GRID_CLIENT_ID = "lightspark_token_id";
 
@@ -610,6 +615,9 @@ export function installPaymentsRouteTestHooks(): void {
         ),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     createOrgSignerMock.mockResolvedValue(
+      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
+    );
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
 

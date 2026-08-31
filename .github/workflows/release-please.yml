@@ -181,6 +181,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: read
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
     secrets:
       DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}

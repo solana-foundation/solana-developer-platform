@@ -7,12 +7,17 @@ import type {
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { AppError, badRequest, internalError } from "@/lib/errors";
-import { buildTransferBatchFingerprint } from "@/lib/idempotency";
+import {
+  buildLegacyTransferBatchFingerprint,
+  buildTransferBatchFingerprint,
+} from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
   beginApprovedWalletOperationEffect,
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
@@ -20,6 +25,7 @@ import { walletOperationActorFromAuth } from "@/services/policy/enforcement.serv
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
 import type { createTransferBatchSchema } from "../../schemas";
+import { admitExactPaymentWallet, assertPaymentWalletExactAccess } from "../../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import { resolveBatchRequest } from "./resolve";
 import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
@@ -34,6 +40,7 @@ type TransferBatchResponse = Awaited<ReturnType<typeof buildTransferBatchRespons
 
 interface TransferBatchGateResolved extends ResolvedBatchRequest {
   idempotencyFingerprint: string;
+  legacyIdempotencyFingerprint: string;
 }
 
 async function assertApprovedBatchReplayCompleted(
@@ -60,6 +67,7 @@ async function assertApprovedBatchReplayCompleted(
       return !recipient.transferId || !transfersById.get(recipient.transferId)?.signature;
     });
   if (!incomplete) {
+    await assertApprovedWalletOperationCustodyWallet(c, response.batch.sourceCustodyWalletId);
     return;
   }
 
@@ -97,7 +105,15 @@ export async function extractTransferBatchPolicyCandidate(
   c: ValidatedBodyContext<typeof createTransferBatchSchema>
 ): Promise<PolicyGateExtraction> {
   const input = c.req.valid("json");
-  const resolved = await resolveBatchRequest(c, input, ["payments:write"]);
+  assertPaymentWalletExactAccess(c, input.sourceCustodyWalletId, ["payments:write"]);
+  const resolved = await resolveBatchRequest(
+    c,
+    input,
+    ["payments:write"],
+    c.req.header("Idempotency-Key") !== undefined && !isDryRunRequest(c)
+      ? input.sourceCustodyWalletId
+      : undefined
+  );
   const candidate: PolicyCandidate = {
     organizationId: resolved.scope.auth.organizationId,
     projectId: resolved.scope.auth.projectId,
@@ -118,6 +134,7 @@ export async function extractTransferBatchPolicyCandidate(
     },
     providerExtensions: {},
   };
+  const { sourceCustodyWalletId: _sourceCustodyWalletId, ...legacyBody } = input;
 
   return {
     candidate,
@@ -130,10 +147,13 @@ export async function extractTransferBatchPolicyCandidate(
     resolved: {
       ...resolved,
       idempotencyFingerprint: buildBatchIdempotencyFingerprint(resolved, input.options),
+      legacyIdempotencyFingerprint: buildLegacyBatchIdempotencyFingerprint(resolved, input.options),
     },
+    // HOO-1023: remove this legacy envelope when K2 rollback support ends.
+    executionRequestBody: { ...legacyBody, source: resolved.sourceWallet.walletId },
     rawPayload: {
       externalId: input.externalId === undefined ? null : input.externalId,
-      source: input.source,
+      source: resolved.sourceWallet.walletId,
       token: input.token,
       // Resolved destinations ride in the payload so an approved batch pins
       // the exact addresses that were evaluated: a counterparty account whose
@@ -152,6 +172,15 @@ export async function extractTransferBatchPolicyCandidate(
   };
 }
 
+export async function admitTransferBatchRuntimeExecution(
+  c: AppContext,
+  extraction: PolicyGateExtraction
+): Promise<void> {
+  // SAFETY: this callback is wired only beside extractTransferBatchPolicyCandidate in payments/index.ts.
+  const resolved = extraction.resolved as TransferBatchGateResolved;
+  await admitExactPaymentWallet(c, resolved.sourceWallet, ["payments:write"]);
+}
+
 /**
  * Build the batch idempotency fingerprint from the resolved request.
  *
@@ -164,6 +193,26 @@ function buildBatchIdempotencyFingerprint(
   options: CreateTransferBatchInput["options"]
 ): string {
   return buildTransferBatchFingerprint({
+    sourceCustodyWalletId: resolved.sourceWallet.id,
+    sourceAddress: resolved.sourceAddress,
+    token: resolved.tokenContext.token,
+    recipients: resolved.recipients.map((recipient) => ({
+      externalId: recipient.externalId,
+      counterpartyId: recipient.counterpartyId,
+      counterpartyAccountId: recipient.counterpartyAccountId,
+      destinationAddress: recipient.destinationAddress,
+      amount: recipient.amount,
+    })),
+    options,
+  });
+}
+
+function buildLegacyBatchIdempotencyFingerprint(
+  resolved: ResolvedBatchRequest,
+  options: CreateTransferBatchInput["options"]
+): string {
+  return buildLegacyTransferBatchFingerprint({
+    sourceCustodyWalletId: resolved.sourceWallet.id,
     sourceAddress: resolved.sourceAddress,
     token: resolved.tokenContext.token,
     recipients: resolved.recipients.map((recipient) => ({
@@ -196,7 +245,9 @@ export async function findTransferBatchIdempotentKeyReplay(
     resolved.scope.auth.organizationId,
     resolved.projectId,
     idempotencyKey,
-    resolved.idempotencyFingerprint
+    resolved.idempotencyFingerprint,
+    resolved.legacyIdempotencyFingerprint,
+    resolved.sourceWallet.id
   );
   if (replay === null) {
     return null;
@@ -239,11 +290,11 @@ export async function createTransferBatch(c: AppContext) {
 
   const feePayment = getFeePayment(c);
   const [signer, feePayer, lifetime] = await Promise.all([
-    solanaServices.createOrgSigner(
+    solanaServices.createOrgSignerForCustodyWallet(
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,
-      resolved.sourceWallet.walletId
+      resolved.sourceWallet.id
     ),
     feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
@@ -278,6 +329,7 @@ export async function createTransferBatch(c: AppContext) {
           organizationId: resolved.scope.auth.organizationId,
           projectId: resolved.projectId,
           externalId: body.externalId === undefined ? null : body.externalId,
+          sourceCustodyWalletId: resolved.sourceWallet.id,
           sourceWalletId: resolved.sourceWallet.walletId,
           sourceAddress: resolved.sourceAddress,
           token: resolved.tokenContext.token,
@@ -288,7 +340,8 @@ export async function createTransferBatch(c: AppContext) {
           options: body.options === undefined ? {} : body.options,
           initiatedByKeyId: resolved.scope.auth.id,
           idempotencyKey,
-          idempotencyFingerprint,
+          // HOO-1023: persist the K2 shape until rollback support ends.
+          idempotencyFingerprint: idempotencyKey ? resolved.legacyIdempotencyFingerprint : null,
         },
         recipients: resolved.recipients.map((recipient) => ({
           organizationId: resolved.scope.auth.organizationId,
@@ -312,7 +365,9 @@ export async function createTransferBatch(c: AppContext) {
         resolved.scope.auth.organizationId,
         resolved.projectId,
         idempotencyKey,
-        idempotencyFingerprint
+        idempotencyFingerprint,
+        resolved.legacyIdempotencyFingerprint,
+        resolved.sourceWallet.id
       );
       if (replay) {
         return respondToTransferBatchReplay(

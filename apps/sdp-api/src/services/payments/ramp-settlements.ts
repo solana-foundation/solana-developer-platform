@@ -29,11 +29,30 @@ const TERMINAL_RAMP_TRANSFER_STATUSES = [
   "canceled",
 ] as const satisfies readonly PaymentTransferStatus[];
 
+// awaiting_payment self-transition is allowed: a provider may issue a NEW
+// deposit wallet while still awaiting payment (MoonPay does on sale
+// re-confirmation), and the refreshed cryptoDeposit must land.
 const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
-  awaiting_payment: ["pending", "expired"],
-  settling: ["pending", "awaiting_payment", "expired"],
-  settled: ["pending", "awaiting_payment", "settling", "expired"],
-  failed: ["pending", "awaiting_payment", "settling", "expired"],
+  awaiting_payment: ["pending", "awaiting_payment", "expired"],
+  settling: ["pending", "awaiting_payment", "processing", "confirmed", "finalized", "expired"],
+  settled: [
+    "pending",
+    "awaiting_payment",
+    "processing",
+    "confirmed",
+    "finalized",
+    "settling",
+    "expired",
+  ],
+  failed: [
+    "pending",
+    "awaiting_payment",
+    "processing",
+    "confirmed",
+    "finalized",
+    "settling",
+    "expired",
+  ],
   expired: ["pending", "awaiting_payment", "settling"],
 } as const satisfies Record<
   Exclude<RampSettlementEvent["kind"], "ignore">,
@@ -74,6 +93,14 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
     toStatus: RAMP_SETTLEMENT_STATUS[event.kind],
     updatedAt: new Date().toISOString(),
   };
+  if (event.onchain) {
+    if (transfer.signature === null) {
+      update.signature = event.onchain.signature;
+    }
+    update.sourceAddress = event.onchain.sourceAddress;
+    update.destinationAddress = event.onchain.destinationAddress;
+    update.amount = event.onchain.amount;
+  }
   // Record the actual settled amount the provider reports: the fiat payout for
   // off-ramp, the delivered crypto for on-ramp.
   if (event.kind === "settled" && event.receivedAmount) {
@@ -85,6 +112,12 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
   }
   if ((event.kind === "failed" || event.kind === "expired") && event.error) {
     update.error = event.error;
+  }
+  // The provider's deposit instruction lets the dashboard send the crypto on
+  // the customer's behalf; each event replaces the previous instruction, and
+  // `null` withdraws it (requote pending) until the provider issues a new one.
+  if (event.kind === "awaiting_payment" && event.cryptoDeposit !== undefined) {
+    update.providerData = { cryptoDeposit: event.cryptoDeposit };
   }
   // Economics are captured only here, at the terminal settlement webhook — they are not
   // backfilled for transfers that settled before this shipped.

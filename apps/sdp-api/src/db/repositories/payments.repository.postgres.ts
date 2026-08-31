@@ -1,6 +1,7 @@
 import { type PaymentTransferStatus, tokenFilterAliases } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
+import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
   CreatePaymentTransferInput,
   ListTransfersByStatusInput,
@@ -10,7 +11,7 @@ import type {
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { generatePaymentTransferId, WALLET_TRANSFER_TYPES } from "./payments.repository";
+import { WALLET_TRANSFER_TYPES } from "./payments.repository";
 
 function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
@@ -50,6 +51,25 @@ function buildTransferListWhere(params: ListTransfersInput): {
   };
 
   addEquals("pt.project_id", params.projectId ?? undefined);
+  if (params.walletAuthorization) {
+    const authorizationClauses: string[] = [];
+    if (params.walletAuthorization.custodyWalletIds.length > 0) {
+      authorizationClauses.push(
+        `pt.custody_wallet_id IN (${buildInClause(params.walletAuthorization.custodyWalletIds.length)})`
+      );
+      values.push(...params.walletAuthorization.custodyWalletIds);
+    }
+    if (params.walletAuthorization.providerWalletIds.length > 0) {
+      authorizationClauses.push(
+        `(pt.custody_wallet_id IS NULL AND pt.wallet_id IN (${buildInClause(params.walletAuthorization.providerWalletIds.length)}))`
+      );
+      values.push(...params.walletAuthorization.providerWalletIds);
+    }
+    clauses.push(
+      authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
+    );
+  }
+  addEquals("pt.custody_wallet_id", params.custodyWalletId);
   addEquals("pt.wallet_id", params.walletId);
   // walletIds is an authorization allowlist, not an optional filter: an empty
   // list means "authorized for no wallet" and must match nothing, while the
@@ -135,6 +155,7 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     id: row.id as string,
     organization_id: row.organization_id as string,
     project_id: (row.project_id as string | null | undefined) ?? null,
+    custody_wallet_id: parseNullableCustodyWalletId(row.custody_wallet_id),
     wallet_id: row.wallet_id as string,
     counterparty_id: row.counterparty_id as string | null,
     counterparty_display_name: row.counterparty_display_name as string | null | undefined,
@@ -223,6 +244,7 @@ export function createPostgresPaymentsRepository(
              id,
              organization_id,
              project_id,
+             custody_wallet_id,
              wallet_id,
              counterparty_id,
              source_address,
@@ -249,13 +271,14 @@ export function createPostgresPaymentsRepository(
              confirmed_at,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
            RETURNING *`
         )
         .bind(
-          generatePaymentTransferId(),
+          input.id,
           input.organizationId,
           input.projectId,
+          input.custodyWalletId,
           input.walletId,
           input.counterpartyId,
           input.sourceAddress,
@@ -427,6 +450,62 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async updateOnchainTransferForRamp(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "type = 'offramp'",
+          "direction = 'outbound'",
+          "status = 'awaiting_payment'",
+          "custody_wallet_id = ?",
+          "wallet_id = ?",
+          "source_address = ?",
+          "token = ?",
+          "amount::numeric = ?::numeric",
+          "provider_data #>> '{cryptoDeposit,destinationAddress}' = ?",
+          "(provider_data #>> '{cryptoDeposit,amount}')::numeric = ?::numeric",
+          "destination_address IS NULL",
+          "signature IS NULL",
+          "serialized_tx IS NULL",
+          "signed_transaction IS NULL",
+          "last_valid_block_height IS NULL",
+          "submission_started_at IS NULL",
+          "slot IS NULL",
+          "block_time IS NULL",
+          "fee IS NULL",
+        ],
+        extraValues: [
+          input.transferId,
+          input.custodyWalletId,
+          input.walletId,
+          input.sourceAddress,
+          input.token,
+          input.amount,
+          input.destinationAddress,
+          input.amount,
+        ],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET destination_address = ?,
+               initiated_by_key_id = ?,
+               status = 'processing',
+               error = NULL,
+               updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *`
+        )
+        .bind(input.destinationAddress, input.initiatedByKeyId, input.updatedAt, ...scope.values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async markTransferSubmissionStarted(input) {
       assertScope(input);
       const scope = buildTransferScopeWhere({
@@ -468,6 +547,18 @@ export function createPostgresPaymentsRepository(
 
       const assignments = ["status = ?", "updated_at = ?"];
       const assignmentValues: unknown[] = [input.toStatus, input.updatedAt];
+      if (input.sourceAddress !== undefined) {
+        assignments.push("source_address = ?");
+        assignmentValues.push(input.sourceAddress);
+      }
+      if (input.destinationAddress !== undefined) {
+        assignments.push("destination_address = ?");
+        assignmentValues.push(input.destinationAddress);
+      }
+      if (input.signature !== undefined) {
+        assignments.push("signature = ?");
+        assignmentValues.push(input.signature);
+      }
       if (input.amount !== undefined) {
         assignments.push("amount = ?");
         assignmentValues.push(input.amount);
@@ -580,6 +671,27 @@ export function createPostgresPaymentsRepository(
       const row = await db
         .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
         .bind(...scope.values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async setProviderReferenceIfEmpty(input) {
+      const clauses = ["id = ?", "provider = ?"];
+      const values: unknown[] = [input.transferId, input.provider];
+      if (tenantScope) {
+        clauses.push("organization_id = ?", "project_id IS NOT DISTINCT FROM ?");
+        values.push(tenantScope.organizationId, tenantScope.projectId);
+      }
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET provider_reference = ?, updated_at = ?
+           WHERE ${clauses.join(" AND ")}
+             AND (provider_reference IS NULL OR provider_reference = ?)
+           RETURNING *`
+        )
+        .bind(input.providerReference, input.updatedAt, ...values, input.providerReference)
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;
