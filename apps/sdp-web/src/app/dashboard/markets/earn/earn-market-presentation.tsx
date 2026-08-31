@@ -98,11 +98,19 @@ export function EarnDepositAvailabilityBadge({
 }
 
 /** One strategy identity component shared by Treasury and Earn Program. */
-export function EarnStrategyIdentity({ strategy }: { strategy: EarnStrategy }) {
+export function EarnStrategyIdentity({
+  showAssetMark = true,
+  strategy,
+}: {
+  showAssetMark?: boolean;
+  strategy: EarnStrategy;
+}) {
   const asset = earnStrategyAsset(strategy);
   return (
     <div className="flex min-w-0 items-center gap-3">
-      {asset ? <TokenMark mint={asset.mint} size="md" symbol={asset.symbol} /> : null}
+      {showAssetMark && asset ? (
+        <TokenMark mint={asset.mint} size="md" symbol={asset.symbol} />
+      ) : null}
       <div className="min-w-0">
         <p className="line-clamp-2 break-words text-sm text-primary" title={strategy.name}>
           {strategy.name}

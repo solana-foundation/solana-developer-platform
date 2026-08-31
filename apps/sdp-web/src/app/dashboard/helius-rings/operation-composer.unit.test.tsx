@@ -15,8 +15,6 @@ vi.mock("./helius-rings.data", async (importOriginal) => ({
   prepareRingsOperation: mocks.prepareRingsOperation,
 }));
 
-vi.mock("./use-rings-zones", () => ({ useRingsZones: () => ({ zones: [] }) }));
-
 const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
 
 const WALLET: RingsWallet = {
@@ -40,6 +38,7 @@ const ACTIVE_RING: ProjectRing = {
 const PREPARED = {
   operation: {
     id: "hro_1",
+    walletId: WALLET.id,
     opType: "shield",
     state: "indexing",
     assetMint: null,
@@ -55,20 +54,20 @@ function renderComposer(projectRing: ProjectRing | null) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <OperationComposer
-        wallets={[WALLET]}
-        gatewayRed={false}
+        wallet={WALLET}
+        recipientOptions={[]}
+        custodyPublicKey="9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
         projectRing={projectRing}
+        gatewayRed={false}
         onPrepared={async () => {}}
       />
     </I18nProvider>
   );
 }
 
-/** Fills the minimal shield draft: wallet plus amount. */
+/** Fills the minimal shield draft: the decimal amount. */
 async function fillShield(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("combobox", { name: "Private wallet" }));
-  await user.click(await screen.findByRole("option", { name: "Treasury" }));
-  await user.type(screen.getByPlaceholderText("1000000"), "1000000");
+  await user.type(screen.getByPlaceholderText("1.01"), "1.5");
 }
 
 beforeEach(() => {
@@ -90,10 +89,22 @@ describe("OperationComposer ring selection", () => {
     await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     // Omitted, not "default": the field only exists to name the custom ring.
-    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ ring: undefined })
-    );
-    expect(screen.queryByText("Ring")).toBeNull();
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledTimes(1);
+    expect("ring" in (mocks.prepareRingsOperation.mock.calls[0]?.[0] ?? {})).toBe(false);
+  });
+
+  it("offers the ring only on the shield tab", async () => {
+    renderComposer(ACTIVE_RING);
+
+    expect(screen.getByRole("combobox", { name: "Ring" })).toBeTruthy();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Withdraw" }));
+    // A withdraw spends default-pool notes; a ring choice would misstate it.
+    expect(screen.queryByRole("combobox", { name: "Ring" })).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: "Shield" }));
+    expect(screen.getByRole("combobox", { name: "Ring" })).toBeTruthy();
   });
 
   it("disables the custom option, with the reason, while bring-up is unfinished", async () => {
@@ -122,5 +133,22 @@ describe("OperationComposer ring selection", () => {
     expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ ring: "custom" })
     );
+  });
+
+  it("forgets a custom choice when the operation leaves the shield tab", async () => {
+    renderComposer(ACTIVE_RING);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Ring" }));
+    await user.click(await screen.findByRole("option", { name: "Custom ring" }));
+    await user.click(screen.getByRole("tab", { name: "Withdraw" }));
+    await user.click(screen.getByRole("tab", { name: "Shield" }));
+
+    await fillShield(user);
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledTimes(1);
+    expect("ring" in (mocks.prepareRingsOperation.mock.calls[0]?.[0] ?? {})).toBe(false);
   });
 });

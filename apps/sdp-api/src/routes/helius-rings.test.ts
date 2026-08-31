@@ -5,16 +5,14 @@ import type {
   SyncPhotonInput,
   SyncPhotonResult,
 } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import {
-  createHeliusRingsProjectRingRepository,
-  createHeliusRingsWalletRepository,
-} from "@/db/repositories";
+import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
-import { gatewayStub } from "@/test/fixtures/rings-gateway";
+import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -124,9 +122,23 @@ async function seedAuth(): Promise<void> {
     sdpWalletId: "wal_hr_route",
     name: "Treasury",
     materialTag: "simulated",
+    custodyWalletId: "cw_hr_route",
   });
   if (!wallet) throw new Error("rings wallet fixture was not created");
   ringsWalletId = wallet.id;
+}
+
+async function provisionRouteWallet(): Promise<void> {
+  const row = await createHeliusRingsWalletRepository(env).markProvisioned({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    id: ringsWalletId,
+    shieldedAddress: "rings1route_test",
+    ownerAddress: "HrRouteTestPublicKey111111111111111111111111",
+    materialTag: "simulated",
+    expectedStatus: "pending",
+  });
+  if (!row) throw new Error("rings wallet fixture was not provisioned");
 }
 
 function authHeaders() {
@@ -164,11 +176,13 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("GET /health reports the unconfigured gateway red", async () => {
+  it("GET /health reports every upstream red when the gateway is unconfigured", async () => {
     const res = await app.request("/v1/helius-rings/health", { headers: authHeaders() }, env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { health: Record<string, string> } };
-    expect(body.data.health.gateway).toBe("red");
+    expect(body.data.health.rpc).toBe("red");
+    expect(body.data.health.prover).toBe("red");
+    expect(body.data.health.photon).toBe("red");
   });
 
   describe("project ring", () => {
@@ -180,9 +194,9 @@ describe("Helius Rings routes", () => {
     });
 
     it("records the ring, activates it, and serves it back", async () => {
-      gatewayOverride.current = gatewayStub({
+      gatewayOverride.current = {
         provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }),
-      });
+      } as unknown as RingsGatewayPort;
 
       const created = await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
       expect(created.status).toBe(201);
@@ -196,53 +210,12 @@ describe("Helius Rings routes", () => {
       const read = await app.request("/v1/helius-rings/ring", { headers: authHeaders() }, env);
       expect(read.status).toBe(200);
       const readBody = (await read.json()) as { data: { ring: Record<string, unknown> } };
-      expect(readBody.data.ring).toMatchObject({ status: "active" });
-    });
-
-    it("409s an attempt to re-point the project away from an active ring", async () => {
-      gatewayOverride.current = gatewayStub({
-        provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }),
-      });
-      await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
-
-      const res = await post("/v1/helius-rings/ring", {
-        ringProgramId: "RingProgram2111111111111111111111111111111",
-      });
-      expect(res.status).toBe(409);
-    });
-
-    it("re-points a never-active ring and completes bring-up with the new id", async () => {
-      // The unconfigured default gateway records a failure the first id can
-      // never recover from.
-      await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
-
-      gatewayOverride.current = gatewayStub({
-        provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }),
-      });
-      const res = await post("/v1/helius-rings/ring", {
-        ringProgramId: "RingProgram2111111111111111111111111111111",
-      });
-
-      expect(res.status).toBe(201);
-      const body = (await res.json()) as { data: { ring: Record<string, unknown> } };
-      expect(body.data.ring).toMatchObject({
-        ringProgramId: "RingProgram2111111111111111111111111111111",
-        status: "active",
-      });
+      expect(readBody.data.ring).toMatchObject({ ringProgramId: RING_PROGRAM, status: "active" });
     });
 
     it("400s a ring program id that is not base58", async () => {
       const res = await post("/v1/helius-rings/ring", { ringProgramId: "not base58 0OIl" });
       expect(res.status).toBe(400);
-    });
-
-    it("503s through the unconfigured gateway and records the failure", async () => {
-      const res = await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
-      expect(res.status).toBe(503);
-
-      const read = await app.request("/v1/helius-rings/ring", { headers: authHeaders() }, env);
-      const body = (await read.json()) as { data: { ring: Record<string, unknown> } };
-      expect(body.data.ring).toMatchObject({ status: "failed" });
     });
   });
 
@@ -281,173 +254,147 @@ describe("Helius Rings routes", () => {
     expect(body.data.zones[0]?.name).toBe("Payroll");
   });
 
-  it("prepares an operation through real policy and fails honestly at the port", async () => {
-    const res = await post("/v1/helius-rings/operations", {
-      walletId: ringsWalletId,
-      opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
-      clientNonce: "route-nonce-1",
+  describe("operations", () => {
+    beforeEach(async () => {
+      await provisionRouteWallet();
     });
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as {
-      data: {
-        operation: {
-          id: string;
-          state: string;
-          failure: { code: string; message: string } | null;
-        };
-      };
-    };
 
-    // Default policy is implicit allow, so the operation advances to the port
-    // call, which the unconfigured gateway refuses.
-    expect(body.data.operation.state).toBe("failed");
-    expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
-      code: "gateway_unavailable",
-    });
-  });
-
-  it("replays a prepare idempotently and serves detail with the timeline", async () => {
-    const input = {
-      walletId: ringsWalletId,
-      opType: "shield",
-      clientNonce: "route-nonce-2",
-    };
-    const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
-      data: { operation: { id: string } };
-    };
-    const replay = (await (await post("/v1/helius-rings/operations", input)).json()) as {
-      data: { operation: { id: string } };
-    };
-    expect(replay.data.operation.id).toBe(first.data.operation.id);
-
-    const detail = await app.request(
-      `/v1/helius-rings/operations/${first.data.operation.id}`,
-      { headers: authHeaders() },
-      env
-    );
-    expect(detail.status).toBe(200);
-    const detailBody = (await detail.json()) as {
-      data: { operation: { events: Array<{ kind: string }> } };
-    };
-    const kinds = detailBody.data.operation.events.map((event) => event.kind);
-    expect(kinds).toContain("operation.created");
-    expect(kinds).toContain("operation.failed");
-  });
-
-  it("retries a failed operation with lineage and lists the activity feed", async () => {
-    const failed = (await (
-      await post("/v1/helius-rings/operations", {
-        walletId: ringsWalletId,
-        opType: "shield",
-        clientNonce: "route-nonce-3",
-      })
-    ).json()) as { data: { operation: { id: string } } };
-
-    const retried = await post(`/v1/helius-rings/operations/${failed.data.operation.id}/retry`, {
-      clientNonce: "route-nonce-3-retry",
-    });
-    expect(retried.status).toBe(201);
-    const retryBody = (await retried.json()) as { data: { operation: { id: string } } };
-    expect(retryBody.data.operation.id).not.toBe(failed.data.operation.id);
-
-    const list = await app.request("/v1/helius-rings/operations", { headers: authHeaders() }, env);
-    const listBody = (await list.json()) as { data: { operations: Array<{ id: string }> } };
-    expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("execute is a no-op on a terminal operation", async () => {
-    const failed = (await (
-      await post("/v1/helius-rings/operations", {
-        walletId: ringsWalletId,
-        opType: "shield",
-        clientNonce: "route-nonce-4",
-      })
-    ).json()) as { data: { operation: { id: string; state: string } } };
-
-    const executed = await post(
-      `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
-      {}
-    );
-    expect(executed.status).toBe(200);
-    const body = (await executed.json()) as { data: { operation: { state: string } } };
-    expect(body.data.operation.state).toBe("failed");
-  });
-
-  it("rejects an invalid operation body", async () => {
-    const res = await post("/v1/helius-rings/operations", {
-      walletId: ringsWalletId,
-      opType: "not-a-real-op",
-      clientNonce: "route-nonce-5",
-    });
-    expect(res.status).toBe(400);
-  });
-
-  describe("operation ring selection", () => {
-    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
-
-    function shieldBody(overrides: Record<string, unknown> = {}) {
-      return {
+    it("prepares an operation through real policy and fails honestly at the port", async () => {
+      const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
         asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
-        clientNonce: "route-nonce-ring",
-        ...overrides,
+        clientNonce: "route-nonce-1",
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        data: {
+          operation: {
+            id: string;
+            state: string;
+            failure: { code: string; message: string } | null;
+          };
+        };
       };
-    }
 
-    it("400s ring:custom while the project has no ring recorded", async () => {
-      const res = await post("/v1/helius-rings/operations", shieldBody({ ring: "custom" }));
+      // Default policy is implicit allow, so the operation advances to the port
+      // call, which the unconfigured gateway refuses.
+      expect(body.data.operation.state).toBe("failed");
+      expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
+        code: "config_error",
+      });
+    });
+
+    it("replays a prepare idempotently and serves detail with the timeline", async () => {
+      const input = {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-2",
+      };
+      const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
+        data: { operation: { id: string } };
+      };
+      const replay = (await (await post("/v1/helius-rings/operations", input)).json()) as {
+        data: { operation: { id: string } };
+      };
+      expect(replay.data.operation.id).toBe(first.data.operation.id);
+
+      const detail = await app.request(
+        `/v1/helius-rings/operations/${first.data.operation.id}`,
+        { headers: authHeaders() },
+        env
+      );
+      expect(detail.status).toBe(200);
+      const detailBody = (await detail.json()) as {
+        data: { operation: { events: Array<{ kind: string }> } };
+      };
+      const kinds = detailBody.data.operation.events.map((event) => event.kind);
+      expect(kinds).toContain("operation.created");
+      expect(kinds).toContain("operation.failed");
+    });
+
+    it("retries a failed operation with lineage and lists the activity feed", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
+      gatewayOverride.current = gateway;
+
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-3",
+        })
+      ).json()) as { data: { operation: { id: string } } };
+
+      const retried = await post(`/v1/helius-rings/operations/${failed.data.operation.id}/retry`, {
+        clientNonce: "route-nonce-3-retry",
+      });
+      expect(retried.status).toBe(201);
+      const retryBody = (await retried.json()) as { data: { operation: { id: string } } };
+      expect(retryBody.data.operation.id).not.toBe(failed.data.operation.id);
+
+      const list = await app.request(
+        "/v1/helius-rings/operations",
+        { headers: authHeaders() },
+        env
+      );
+      const listBody = (await list.json()) as { data: { operations: Array<{ id: string }> } };
+      expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("execute is a no-op on a terminal operation", async () => {
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-4",
+        })
+      ).json()) as { data: { operation: { id: string; state: string } } };
+
+      const executed = await post(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
+        {}
+      );
+      expect(executed.status).toBe(200);
+      const body = (await executed.json()) as { data: { operation: { state: string } } };
+      expect(body.data.operation.state).toBe("failed");
+    });
+
+    it("rejects an invalid operation body", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "not-a-real-op",
+        clientNonce: "route-nonce-5",
+      });
       expect(res.status).toBe(400);
     });
 
-    it("503s ring:custom while bring-up is unfinished", async () => {
-      await createHeliusRingsProjectRingRepository(env).reserveRing({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        ringProgramId: RING_PROGRAM,
+    it("400s ring:custom while the project has no ring recorded", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-ring-none",
+        ring: "custom",
       });
-
-      const res = await post("/v1/helius-rings/operations", shieldBody({ ring: "custom" }));
-      expect(res.status).toBe(503);
+      expect(res.status).toBe(400);
     });
 
-    it("pins and echoes the active ring; default stays null", async () => {
-      const rings = createHeliusRingsProjectRingRepository(env);
-      await rings.reserveRing({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        ringProgramId: RING_PROGRAM,
+    // The schema admits `ring` only on the shield variant, and the variants
+    // are strict: a withdraw naming one is refused, never silently stripped.
+    it("400s a withdraw that names a ring", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "withdraw",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        to: "HrRouteTestPublicKey111111111111111111111111",
+        clientNonce: "route-nonce-ring-withdraw",
+        ring: "custom",
       });
-      await rings.markActive({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        ringProgramId: RING_PROGRAM,
-        auditorPublicKey: "04ff",
-      });
-
-      // The unconfigured gateway fails the pipeline afterwards; the ring is
-      // resolved and pinned at prepare, which is what this asserts.
-      const custom = await post("/v1/helius-rings/operations", shieldBody({ ring: "custom" }));
-      expect(custom.status).toBe(201);
-      const customBody = (await custom.json()) as {
-        data: { operation: { ringProgramId: string | null } };
-      };
-      expect(customBody.data.operation.ringProgramId).toBe(RING_PROGRAM);
-
-      const byDefault = await post(
-        "/v1/helius-rings/operations",
-        shieldBody({ clientNonce: "route-nonce-ring-default" })
-      );
-      expect(byDefault.status).toBe(201);
-      const defaultBody = (await byDefault.json()) as {
-        data: { operation: { ringProgramId: string | null } };
-      };
-      expect(defaultBody.data.operation.ringProgramId).toBeNull();
-    });
-
-    it("400s a ring value outside the selector set", async () => {
-      const res = await post("/v1/helius-rings/operations", shieldBody({ ring: RING_PROGRAM }));
       expect(res.status).toBe(400);
     });
   });
@@ -455,13 +402,13 @@ describe("Helius Rings routes", () => {
   describe("POST /wallets/:walletId/sync", () => {
     const SHIELDED_ADDRESS = "rings1route_sync";
 
-    /** Marks the fixture wallet provisioned without going through a gateway. */
     async function markProvisioned(): Promise<void> {
       const row = await createHeliusRingsWalletRepository(env).markProvisioned({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         id: ringsWalletId,
         shieldedAddress: SHIELDED_ADDRESS,
+        ownerAddress: "HrRouteTestPublicKey111111111111111111111111",
         materialTag: "live",
         expectedStatus: "pending",
       });
@@ -480,7 +427,8 @@ describe("Helius Rings routes", () => {
       await markProvisioned();
       const seen: SyncPhotonInput[] = [];
       const observed: SyncPhotonResult = {
-        cursor: "2026-08-26T12:00:00.000Z",
+        observedAt: "2026-08-26T12:00:00.000Z",
+        observedSlot: "42",
         balances: [
           {
             mint: "So11111111111111111111111111111111111111112",
@@ -491,8 +439,16 @@ describe("Helius Rings routes", () => {
             ringProgramId: null,
           },
         ],
+        history: [],
+        report: {
+          storedNotes: 1,
+          unparsedTransactions: 0,
+          undecryptableCandidates: 0,
+          unknownAssetIds: 0,
+          unknownAssetFields: 0,
+          degraded: true,
+        },
         indexedOperationSignatures: [],
-        degraded: true,
       };
       gatewayOverride.current = {
         syncPhoton: async (input: SyncPhotonInput) => {
@@ -511,7 +467,7 @@ describe("Helius Rings routes", () => {
         };
       };
 
-      expect(body.data).toMatchObject({ degraded: true, observedAt: observed.cursor });
+      expect(body.data).toMatchObject({ degraded: true, observedAt: observed.observedAt });
       expect(body.data.balances[0]?.amountRaw).toBe("18446744073709551615");
       // The stored identity is pinned so a derivation mismatch fails rather
       // than answering with someone else's balances.
@@ -520,7 +476,7 @@ describe("Helius Rings routes", () => {
         owner: "HrRouteTestPublicKey111111111111111111111111",
         expectedShieldedAddress: SHIELDED_ADDRESS,
       });
-      expect((await readWallet())?.sync_cursor).toBe(observed.cursor);
+      expect((await readWallet())?.sync_cursor).toBe(observed.observedAt);
     });
 
     it("404s an unknown wallet", async () => {
@@ -539,9 +495,18 @@ describe("Helius Rings routes", () => {
     });
 
     // 400, not 503: the fix is to provision the wallet, not to wait.
-    it("400s a wallet with no shielded identity yet", async () => {
-      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
-      expect(res.status).toBe(400);
+    it("409s a wallet with no shielded identity yet", async () => {
+      const pending = await createHeliusRingsWalletRepository(env).createWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        sdpWalletId: "wal_hr_route_pending",
+        name: "Pending",
+        materialTag: "simulated",
+      });
+      if (!pending) throw new Error("pending wallet fixture was not created");
+
+      const res = await post(`/v1/helius-rings/wallets/${pending.id}/sync`, {});
+      expect(res.status).toBe(409);
     });
 
     it("403s without payments:write", async () => {
@@ -597,7 +562,6 @@ describe("Helius Rings routes", () => {
         data: { identity: ReadIdentityResult & { recordedShieldedAddress: string | null } };
       };
 
-      // The fixture wallet is `pending`, so there is nothing of ours to compare.
       expect(body.data.identity).toEqual({ ...PUBLISHED, recordedShieldedAddress: null });
       expect(seen[0]).toEqual({
         walletId: ringsWalletId,

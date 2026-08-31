@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { BadgeVariant } from "@/components/ui/badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import {
-  createProjectRing,
-  fetchProjectRing,
-  type ProjectRing,
-  type ProjectRingStatus,
-} from "./helius-rings.data";
+import { createProjectRing, type ProjectRing, type ProjectRingStatus } from "./helius-rings.data";
 
 const STATUS_BADGE: Record<ProjectRingStatus, BadgeVariant> = {
   pending: "warning",
@@ -22,45 +17,28 @@ const STATUS_BADGE: Record<ProjectRingStatus, BadgeVariant> = {
   failed: "danger",
 };
 
-/** What the card knows so far; `loading` is distinct from "no ring recorded". */
-type RingState =
-  | { name: "loading" }
-  | { name: "none" }
-  | { name: "loaded"; ring: ProjectRing }
-  | { name: "failed"; message: string };
-
 /**
  * The project's one custom ring. Ops pre-deploys the ring program; submitting
  * its id here runs bring-up server-side (auditor key, config, pool
  * registration). Once active, shield operations can target the ring per
  * operation; default-ring operations are never blocked by it. A failed
  * bring-up's retry lives here too.
+ *
+ * Prop-driven like the other cards: the workspace owns the fetch, this card
+ * owns only its form state.
  */
-export function RingCard({ onRingChanged }: { onRingChanged?: () => void } = {}) {
+export function RingCard({
+  ring,
+  onChanged,
+}: {
+  ring: ProjectRing | null;
+  onChanged: () => Promise<void> | void;
+}) {
   const t = useTranslations();
 
-  const [state, setState] = useState<RingState>({ name: "loading" });
   const [ringProgramId, setRingProgramId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const loadFailedCopy = t("DashboardHeliusRings.errors.loadFailed");
-
-  const refresh = useCallback(async () => {
-    try {
-      const ring = await fetchProjectRing(loadFailedCopy);
-      setState(ring === null ? { name: "none" } : { name: "loaded", ring });
-    } catch (error) {
-      setState({
-        name: "failed",
-        message: error instanceof Error ? error.message : loadFailedCopy,
-      });
-    }
-  }, [loadFailedCopy]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const handleSubmit = useCallback(
     async (submittedRingProgramId: string) => {
@@ -79,16 +57,14 @@ export function RingCard({ onRingChanged }: { onRingChanged?: () => void } = {})
       }
       // The row is reserved before bring-up, so a failure still leaves a ring
       // (and its recorded failure) to show.
-      await refresh();
-      onRingChanged?.();
+      await onChanged();
     },
-    [onRingChanged, refresh, t]
+    [onChanged, t]
   );
 
   // A never-active ring binds no notes, so its id is correctable in place;
   // once active, the server refuses re-pointing and the input disappears.
-  const canSubmitNewId =
-    state.name === "none" || (state.name === "loaded" && state.ring.status !== "active");
+  const canSubmitNewId = ring === null || ring.status !== "active";
 
   return (
     <Card>
@@ -97,13 +73,11 @@ export function RingCard({ onRingChanged }: { onRingChanged?: () => void } = {})
         <CardDescription>{t("DashboardHeliusRings.ring.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {state.name === "failed" ? <Callout variant="danger">{state.message}</Callout> : null}
-
-        {state.name === "none" ? (
+        {ring === null ? (
           <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.none")}</p>
-        ) : null}
-
-        {state.name === "loaded" ? <RingDetails ring={state.ring} /> : null}
+        ) : (
+          <RingDetails ring={ring} />
+        )}
 
         {submitError ? (
           <Callout variant="danger" live>
@@ -113,7 +87,7 @@ export function RingCard({ onRingChanged }: { onRingChanged?: () => void } = {})
 
         {canSubmitNewId ? (
           <div className="flex flex-col gap-2">
-            {state.name === "loaded" ? (
+            {ring !== null ? (
               <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.repointHint")}</p>
             ) : null}
             <div className="flex flex-wrap items-end gap-3">
@@ -144,12 +118,12 @@ export function RingCard({ onRingChanged }: { onRingChanged?: () => void } = {})
 
         {/* Retry resumes bring-up with the recorded id; the input above is the
             way to re-point a never-active ring at a corrected one. */}
-        {state.name === "loaded" && state.ring.status !== "active" ? (
+        {ring !== null && ring.status !== "active" ? (
           <div>
             <Button
               variant="secondary"
               disabled={submitting}
-              onClick={() => void handleSubmit(state.ring.ringProgramId)}
+              onClick={() => void handleSubmit(ring.ringProgramId)}
             >
               {t(
                 submitting
