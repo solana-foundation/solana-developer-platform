@@ -886,9 +886,9 @@ describe("BVNK ramp webhook", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties (
-           id, organization_id, project_id, external_id, entity_type, display_name, email,
-           identity, provider_data, status, created_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+           id, organization_id, project_id, external_id, entity_type, display_name,
+           provider_data, status, created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
       )
       .bind(
         COUNTERPARTY_ID,
@@ -897,14 +897,6 @@ describe("BVNK ramp webhook", () => {
         null,
         "individual",
         "Webhook Buyer",
-        "buyer@example.com",
-        {
-          firstName: "Webhook",
-          lastName: "Buyer",
-          dateOfBirth: "1990-01-15",
-          phone: "+14155551234",
-          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-        },
         {
           bvnk: {
             customer: {
@@ -972,6 +964,7 @@ describe("BVNK ramp webhook", () => {
               {
                 walletId?: string;
                 ruleId?: string;
+                provisioningError?: string;
                 bankAccount?: { accountNumber?: string; bankName?: string };
               }
             >;
@@ -995,7 +988,7 @@ describe("BVNK ramp webhook", () => {
     expect((await readBvnk())?.customer?.status).toBe("VERIFIED");
   });
 
-  it("provisions the funding wallet and payment rule after customer verification succeeds", async () => {
+  it("provisions the funding wallet and records the pending-JIT rule error after customer verification succeeds", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1052,11 +1045,14 @@ describe("BVNK ramp webhook", () => {
     expect(res.status).toBe(200);
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(createWallet).toHaveBeenCalledTimes(1);
-    expect(createRule).toHaveBeenCalledTimes(1);
+    expect(createRule).not.toHaveBeenCalled();
 
     const entry = (await readBvnk())?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
     expect(entry?.walletId).toBe(WALLET_ID);
-    expect(entry?.ruleId).toBe("rule_webhook_verified_1");
+    expect(entry?.ruleId).toBeUndefined();
+    expect(entry?.provisioningError).toBe(
+      `BVNK onramp requires identity fields for counterparty ${COUNTERPARTY_ID} that are no longer stored; JIT collection is not wired yet`
+    );
 
     getProfile.mockRestore();
     createWallet.mockRestore();
@@ -1114,7 +1110,7 @@ describe("BVNK ramp webhook", () => {
     expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
   });
 
-  it("creates the payment rule when a wallet activates for a verified customer", async () => {
+  it("records the pending-JIT provisioning error when a wallet activates for a verified customer", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1165,7 +1161,7 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(createRule).toHaveBeenCalledTimes(1);
+    expect(createRule).not.toHaveBeenCalled();
 
     const row = await getDb(env)
       .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
@@ -1173,12 +1169,22 @@ describe("BVNK ramp webhook", () => {
       .first<{
         provider_data: {
           bvnk?: {
-            wallets?: Record<string, { ruleId?: string; bankAccount?: { accountNumber?: string } }>;
+            wallets?: Record<
+              string,
+              {
+                ruleId?: string;
+                provisioningError?: string;
+                bankAccount?: { accountNumber?: string };
+              }
+            >;
           };
         };
       }>();
     const entry = row?.provider_data.bvnk?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
-    expect(entry?.ruleId).toBe("rule_webhook_1");
+    expect(entry?.ruleId).toBeUndefined();
+    expect(entry?.provisioningError).toBe(
+      `BVNK onramp requires identity fields for counterparty ${COUNTERPARTY_ID} that are no longer stored; JIT collection is not wired yet`
+    );
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
 
     createRule.mockRestore();
@@ -2127,9 +2133,11 @@ describe("MoonPay ramp webhook", () => {
   const ORG_ID = "org_moonpay_webhook";
   const PROJECT_ID = "prj_moonpay_webhook";
   const USER_ID = "usr_moonpay_webhook";
-  const TRANSFER_ID = "pt_moonpay_webhook";
-  const EXTERNAL_TX_ID = "ramp_quote_moonpay_webhook";
+  const TRANSFER_ID = "xfr_moonpay_webhook";
+  const MOONPAY_TRANSACTION_ID = "0a5bb889-9afb-4b8d-835b-9b9855d67509";
   const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
+  const COUNTERPARTY_ID = "cpty_moonpay_webhook";
+  const MOONPAY_CUSTOMER_ID = "6e9fd8db-98e4-46f4-bd6e-6a3c30fdda19";
 
   function moonpaySignatureHeader(
     body: string,
@@ -2183,18 +2191,27 @@ describe("MoonPay ramp webhook", () => {
       .run();
     await getDb(env)
       .prepare(
+        `INSERT INTO counterparties (
+           id, organization_id, project_id, entity_type, display_name, status, created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(COUNTERPARTY_ID, ORG_ID, PROJECT_ID, "individual", "MoonPay Buyer", "active", USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
         `INSERT INTO payment_transfers (
-           id, organization_id, project_id, wallet_id, source_address, destination_address,
-           token, amount, memo, type, direction, status, provider, provider_reference,
-           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
-           initiated_by_key_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           id, organization_id, project_id, wallet_id, counterparty_id, source_address,
+           destination_address, token, amount, memo, type, direction, status, provider,
+           provider_reference, delivery_mode, fiat_currency, fiat_amount, provider_data,
+           signature, serialized_tx, initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TRANSFER_ID,
         ORG_ID,
         PROJECT_ID,
         "wallet_moonpay_webhook",
+        COUNTERPARTY_ID,
         null,
         "DestinationSolanaWallet111111111111111111111111",
         "SOL",
@@ -2204,7 +2221,7 @@ describe("MoonPay ramp webhook", () => {
         "inbound",
         "awaiting_payment",
         "moonpay",
-        EXTERNAL_TX_ID,
+        null,
         null,
         "USD",
         "47.73",
@@ -2232,9 +2249,10 @@ describe("MoonPay ramp webhook", () => {
     type: "transaction_updated",
     externalCustomerId: "MOONPAY-ONRAMP-0001",
     data: {
-      id: "0a5bb889-9afb-4b8d-835b-9b9855d67509",
+      id: MOONPAY_TRANSACTION_ID,
       status: "completed",
-      externalTransactionId: EXTERNAL_TX_ID,
+      customerId: MOONPAY_CUSTOMER_ID,
+      externalTransactionId: TRANSFER_ID,
       failureReason: null,
       baseCurrencyAmount: 47.73,
       quoteCurrencyAmount: 0.649,
@@ -2243,6 +2261,7 @@ describe("MoonPay ramp webhook", () => {
       networkFeeAmount: 0.27,
       areFeesIncluded: true,
       usdRate: 1,
+      walletAddress: "WebhookDestinationSolanaWallet111111111111111111",
       cryptoTransactionId: "t11paHKpm79qTHVgSQ4rr9PAqE7ZT87MWpi1f5Nim8XzPyc7aPux",
       baseCurrency: { code: "usd" },
       currency: { code: "sol" },
@@ -2254,15 +2273,24 @@ describe("MoonPay ramp webhook", () => {
     expect(res.status).toBe(200);
 
     const transfer = await getDb(env)
-      .prepare("SELECT status, amount, provider_data FROM payment_transfers WHERE id = ?")
+      .prepare(
+        `SELECT status, amount, destination_address, signature, provider_reference, provider_data
+         FROM payment_transfers WHERE id = ?`
+      )
       .bind(TRANSFER_ID)
       .first<{
         status: string;
         amount: string | null;
+        destination_address: string | null;
+        signature: string | null;
+        provider_reference: string | null;
         provider_data: { settlement?: Record<string, unknown> };
       }>();
     expect(transfer?.status).toBe("completed");
     expect(transfer?.amount).toBe("0.649");
+    expect(transfer?.provider_reference).toBe(MOONPAY_TRANSACTION_ID);
+    expect(transfer?.destination_address).toBe("WebhookDestinationSolanaWallet111111111111111111");
+    expect(transfer?.signature).toBe("t11paHKpm79qTHVgSQ4rr9PAqE7ZT87MWpi1f5Nim8XzPyc7aPux");
     expect(transfer?.provider_data.settlement).toMatchObject({
       provider: "moonpay",
       status: "completed",
@@ -2275,14 +2303,114 @@ describe("MoonPay ramp webhook", () => {
     });
   });
 
+  it("records a completed sell deposit on the correlated SDP transfer", async () => {
+    const sourceAddress = "WebhookSourceSolanaWallet111111111111111111111";
+    const destinationAddress = "WebhookMoonPayDepositWallet1111111111111111111";
+    const providerSignature =
+      "4gYf6JwRXvV9LhJqR6CjvhgpqpNrp41cYwHC1PJNBJdk6FHaaBxTkZQHUnwNi1trGf31FyHg6pQJfUmK4D3kVQnG";
+    const submittedSignature =
+      "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
+    const moonpayTransactionId = "cca8ef45-4aac-4a91-851a-02ff991eeef9";
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_transfers
+         SET type = 'offramp', direction = 'outbound', source_address = ?,
+             destination_address = NULL, amount = '0.2', fiat_amount = NULL, signature = ?
+         WHERE id = ?`
+      )
+      .bind(sourceAddress, submittedSignature, TRANSFER_ID)
+      .run();
+
+    const res = await sendMoonpayWebhook({
+      type: "sell_transaction_updated",
+      data: {
+        id: moonpayTransactionId,
+        status: "completed",
+        customerId: MOONPAY_CUSTOMER_ID,
+        externalTransactionId: TRANSFER_ID,
+        baseCurrencyAmount: 0.2,
+        quoteCurrencyAmount: 16.31,
+        refundWalletAddress: sourceAddress,
+        depositHash: providerSignature,
+        depositWallet: { walletAddress: destinationAddress },
+      },
+    });
+    expect(res.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare(
+        `SELECT status, amount, fiat_amount, source_address, destination_address,
+                signature, provider_reference
+         FROM payment_transfers WHERE id = ?`
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        amount: string | null;
+        fiat_amount: string | null;
+        source_address: string | null;
+        destination_address: string | null;
+        signature: string | null;
+        provider_reference: string | null;
+      }>();
+    expect(transfer).toEqual({
+      status: "completed",
+      amount: "0.2",
+      fiat_amount: "16.31",
+      source_address: sourceAddress,
+      destination_address: destinationAddress,
+      signature: submittedSignature,
+      provider_reference: moonpayTransactionId,
+    });
+  });
+
+  it("links the MoonPay customer to the counterparty and keeps the link stable on redelivery", async () => {
+    const first = await sendMoonpayWebhook(completedPayload);
+    expect(first.status).toBe(200);
+
+    const link = await getDb(env)
+      .prepare(
+        `SELECT id, counterparty_id, provider, provider_customer_reference, status
+         FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'moonpay'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        id: string;
+        counterparty_id: string;
+        provider: string;
+        provider_customer_reference: string;
+        status: string;
+      }>();
+    expect(link).toMatchObject({
+      counterparty_id: COUNTERPARTY_ID,
+      provider: "moonpay",
+      provider_customer_reference: MOONPAY_CUSTOMER_ID,
+      status: "active",
+    });
+
+    const second = await sendMoonpayWebhook(completedPayload);
+    expect(second.status).toBe(200);
+
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT id FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'moonpay'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .all<{ id: string }>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0].id).toBe(link?.id);
+  });
+
   it("still marks a transfer failed when an early-stage failure omits economics", async () => {
     const res = await sendMoonpayWebhook({
       type: "transaction_failed",
       externalCustomerId: "MOONPAY-ONRAMP-0001",
       data: {
-        id: "0a5bb889-9afb-4b8d-835b-9b9855d67509",
+        id: MOONPAY_TRANSACTION_ID,
         status: "failed",
-        externalTransactionId: EXTERNAL_TX_ID,
+        externalTransactionId: TRANSFER_ID,
         failureReason: "kyc_rejected",
       },
     });

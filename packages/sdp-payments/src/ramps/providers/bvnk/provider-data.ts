@@ -2,7 +2,6 @@ import type {
   BvnkBankFundingDetails,
   BvnkOnboardingStatus,
   BvnkPaymentRampInstruction,
-  CounterpartyEntityType,
   SdpEnvironment,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
@@ -30,14 +29,8 @@ export interface BvnkRuleEntityAddress {
 
 export type BvnkEntityType = "INDIVIDUAL" | "COMPANY";
 
-const BVNK_ENTITY_TYPE = {
-  individual: "INDIVIDUAL",
-  business: "COMPANY",
-} as const satisfies Record<CounterpartyEntityType, BvnkEntityType>;
-
 /**
- * Beneficiary entity for a BVNK on-ramp payment rule. The handler builds this
- * from the counterparty identity; the provider only serializes it.
+ * Beneficiary entity accepted by a BVNK on-ramp payment rule.
  */
 export interface BvnkRuleEntity {
   type: BvnkEntityType;
@@ -659,54 +652,15 @@ export async function bvnkRuleReference(
 }
 
 export function buildBvnkRuleEntity(counterparty: CounterpartyRow): BvnkRuleEntity {
-  const address = counterparty.identity.address;
-
-  return {
-    type: BVNK_ENTITY_TYPE[counterparty.entity_type],
-    customerIdentifier: counterparty.external_id ?? counterparty.id,
-    relationshipType: "SELF_OWNED",
-    ...(counterparty.entity_type === "individual"
-      ? {
-          firstName: counterparty.identity.firstName,
-          lastName: counterparty.identity.lastName,
-          dateOfBirth: counterparty.identity.dateOfBirth,
-        }
-      : { legalName: counterparty.display_name }),
-    address: {
-      addressLine1: address.line1,
-      ...(address.line2 ? { addressLine2: address.line2 } : {}),
-      ...(address.postalCode ? { postalCode: address.postalCode } : {}),
-      city: address.city,
-      countryCode: address.countryCode,
-      country: address.countryCode,
-      ...(address.subdivisionCode
-        ? { stateCode: normalizeBvnkStateCode(address.countryCode, address.subdivisionCode) }
-        : {}),
-    },
-  };
+  throw badRequest(
+    `BVNK onramp requires identity fields for counterparty ${counterparty.id} that are no longer stored; JIT collection is not wired yet`
+  );
 }
 
-export function buildBvnkPartyDetails(
-  counterparty: CounterpartyRow,
-  role: "ORIGINATOR" | "BENEFICIARY"
-): BvnkComplianceInput {
-  return {
-    partyDetails: [
-      {
-        type: role,
-        entityType: BVNK_ENTITY_TYPE[counterparty.entity_type],
-        relationshipType: "SELF_OWNED",
-        ...(counterparty.entity_type === "individual"
-          ? {
-              firstName: counterparty.identity.firstName,
-              lastName: counterparty.identity.lastName,
-              dateOfBirth: counterparty.identity.dateOfBirth,
-            }
-          : {}),
-        countryCode: counterparty.identity.address.countryCode,
-      },
-    ],
-  };
+export function buildBvnkPartyDetails(counterparty: CounterpartyRow): never {
+  throw badRequest(
+    `BVNK offramp requires identity fields for counterparty ${counterparty.id} that are no longer stored; JIT collection is not wired yet`
+  );
 }
 
 export function buildBvnkOnrampInstruction(

@@ -77,21 +77,25 @@ async function seedPendingConnection(
     connectionStatus?: string;
     isDefault?: boolean;
     projectId?: string;
+    /** One live connection per provider per scope, so a case seeding two needs two. */
+    provider?: string;
   } = {}
 ): Promise<void> {
   const db = getDb(env);
   const connectionStatus = options.connectionStatus ?? "pending";
+  const provider = options.provider ?? "helius";
   await db
     .prepare(
       `INSERT INTO provider_credentials (
          id, organization_id, project_id, provider, label, scope, source,
          storage_backend, encrypted_secret_payload, status, deactivated_at, created_by
-       ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
+       ) VALUES (?, ?, NULL, ?, 'Tenant credential', 'organization', 'stored',
                  'encrypted_db', 'secret', ?, ?, ?)`
     )
     .bind(
       credentialId,
       ORGANIZATION_ID,
+      provider,
       options.credentialStatus ?? "pending",
       options.credentialStatus === "deactivated" ? "2026-08-16T12:00:00.000Z" : null,
       USER_ID
@@ -106,13 +110,14 @@ async function seedPendingConnection(
          id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
          network, status, is_default, activated_at, deactivated_at, created_by
-       ) VALUES (?, ?, ?, 'helius', ?, ?, '__organization__',
+       ) VALUES (?, ?, ?, ?, ?, ?, '__organization__',
                  'devnet', ?, ?, ?, ?, ?)`
     )
     .bind(
       connectionId,
       ORGANIZATION_ID,
       options.projectId ?? null,
+      provider,
       options.projectId ? "project" : "organization",
       credentialId,
       connectionStatus,
@@ -328,6 +333,46 @@ describe("RpcConnectionStore.findScopeConnectionState", () => {
 
     const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
     expect(state).toEqual({ kind: "none" });
+  });
+
+  it("falls back to the platform when the tenant's keys are deliberately idle", async () => {
+    // Choosing a provider the project holds no key for stands the incumbent
+    // down: the key survives, nothing points at it, and SDP's account answers.
+    //
+    // `markCheckFailed` also clears `is_default`, so absence of a default was
+    // never evidence of a fault. Reading it as one made every switch onto a
+    // platform provider refuse with "no active default connection" while the
+    // page said the organization was running on SDP's.
+    await seedPendingConnection("rconn_state_idle", "pcred_state_idle", {
+      connectionStatus: "active",
+      credentialStatus: "active",
+      isDefault: false,
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "none" });
+  });
+
+  it("still fails closed when a broken key sits beside an idle one", async () => {
+    // The guarantee that must survive the change above: the tenant last saw
+    // this key serving, so answering on SDP's without saying so is exactly
+    // what they pay their own provider to avoid.
+    await seedPendingConnection("rconn_state_idle_ok", "pcred_state_idle_ok", {
+      connectionStatus: "active",
+      credentialStatus: "active",
+      isDefault: false,
+    });
+    // A different provider: one live connection per provider now, and the app
+    // itself already refuses a second key while a failed one is still there.
+    // The scope-wide lookup under test does not care which provider it is.
+    await seedPendingConnection("rconn_state_idle_bad", "pcred_state_idle_bad", {
+      connectionStatus: "failed",
+      credentialStatus: "active",
+      provider: "triton",
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "unusable" });
   });
 
   it("does not call a scope live that the effective lookup would not resolve", async () => {

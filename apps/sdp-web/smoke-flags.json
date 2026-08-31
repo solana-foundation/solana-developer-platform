@@ -1,0 +1,11 @@
+{
+  "homepage-open-signup": { "env": "SDP_FLAG_HOMEPAGE_OPEN_SIGNUP", "value": true },
+  "organization-onboarding": { "env": "SDP_FLAG_ORGANIZATION_ONBOARDING", "value": true },
+  "privy-byok": { "env": "SDP_FLAG_PRIVY_BYOK", "value": false },
+  "asset-profiles": { "env": "SDP_FLAG_ASSET_PROFILES", "value": true },
+  "private-channels": { "env": "PRIVATE_CHANNELS_ENABLED", "value": false },
+  "helius-rings": { "env": "HELIUS_RINGS_ENABLED", "value": false },
+  "payments": { "env": "PAYMENTS_ENABLED", "value": true },
+  "markets": { "env": "MARKETS_ENABLED", "value": false },
+  "earn": { "env": "EARN_ENABLED", "value": false }
+}

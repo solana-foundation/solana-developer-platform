@@ -8,12 +8,37 @@ import {
   buildTenantRpcTarget,
   isByokRpcProvider,
   maskTenantEndpoint,
+  requiresExplicitEndpoint,
+  resolveTenantEndpoint,
 } from "@sdp/rpc/byok";
 import { describe, expect, it } from "vitest";
 
 const KEY = "tenant-secret-key-1234";
 
 describe("buildTenantRpcTarget", () => {
+  it("authenticates Nodit by header, because a key in its path is ignored", () => {
+    // Verified against the live host: POST /<key> answers
+    // NO_AUTHENTICATION_FOUND, the same request with X-API-KEY answers
+    // AUTHENTICATION_FAILED. Sending no header at all is why a Nodit
+    // connection could pass its probe only against an endpoint needing no
+    // auth, and never against Nodit itself.
+    const target = buildTenantRpcTarget("nodit", {
+      endpointUrl: "https://solana-devnet.nodit.io",
+      apiKey: KEY,
+    });
+    expect(target.headers).toEqual({ "X-API-KEY": KEY });
+    expect(target.endpoint).toBe("https://solana-devnet.nodit.io");
+    expect(target.endpoint).not.toContain(KEY);
+  });
+
+  it("still templates a Nodit endpoint that already carries the placeholder", () => {
+    const target = buildTenantRpcTarget("nodit", {
+      endpointUrl: "https://solana-devnet.nodit.io/{API_KEY}",
+      apiKey: KEY,
+    });
+    expect(target.endpoint).toContain(encodeURIComponent(KEY));
+  });
+
   it("puts a Helius key in the query string", () => {
     const target = buildTenantRpcTarget("helius", {
       endpointUrl: "https://devnet.helius-rpc.com",
@@ -173,5 +198,62 @@ describe("assertReachableTenantEndpoint", () => {
   it("allows an ordinary vendor endpoint", () => {
     expect(() => assertReachableTenantEndpoint("https://devnet.helius-rpc.com")).not.toThrow();
     expect(() => assertReachableTenantEndpoint("https://example.quiknode.pro/abc/")).not.toThrow();
+  });
+});
+
+/**
+ * The published base URLs. Pinned because they are the one part of BYOK a
+ * tenant never sees before it is used: a wrong host fails at save with a
+ * provider rejection and reads as a bad key.
+ *
+ * Each was confirmed against the live host, which answers a JSON-RPC POST with
+ * an authentication error rather than a DNS failure or a 404.
+ */
+describe("DEFAULT_TENANT_ENDPOINTS", () => {
+  it("carries both clusters for every provider that has a shared host", () => {
+    for (const provider of ["helius", "alchemy", "validationcloud", "nodit"] as const) {
+      expect(resolveTenantEndpoint(provider, "devnet")).toMatch(/^https:\/\//);
+      expect(resolveTenantEndpoint(provider, "mainnet-beta")).toMatch(/^https:\/\//);
+    }
+  });
+
+  it("resolves Validation Cloud with the key templated into the path", () => {
+    const endpointUrl = resolveTenantEndpoint("validationcloud", "mainnet-beta");
+    expect(endpointUrl).toBe("https://mainnet.solana.validationcloud.io/v1/{API_KEY}");
+    const target = buildTenantRpcTarget("validationcloud", { endpointUrl, apiKey: KEY });
+    expect(target.endpoint).toBe(
+      `https://mainnet.solana.validationcloud.io/v1/${encodeURIComponent(KEY)}`
+    );
+  });
+
+  it("resolves Nodit without putting the key anywhere in the URL", () => {
+    const endpointUrl = resolveTenantEndpoint("nodit", "devnet");
+    expect(endpointUrl).toBe("https://solana-devnet.nodit.io");
+    const target = buildTenantRpcTarget("nodit", { endpointUrl, apiKey: KEY });
+    expect(target.endpoint).not.toContain(KEY);
+    expect(target.headers["X-API-KEY"]).toBe(KEY);
+  });
+
+  it("refuses to guess an account-specific host", () => {
+    // SDP's own are evocative-old-mansion.solana-devnet.quiknode.pro and
+    // solanaf-sdp-7436.devnet.rpcpool.com: the subdomain is the account, so
+    // there is nothing to publish and the tenant must supply it.
+    for (const provider of ["quicknode", "triton"] as const) {
+      expect(requiresExplicitEndpoint(provider)).toBe(true);
+      expect(() => resolveTenantEndpoint(provider, "devnet")).toThrow(/account-specific/i);
+    }
+  });
+
+  it("asks for an endpoint only where one cannot be resolved", () => {
+    for (const provider of BYOK_RPC_PROVIDERS) {
+      const needsEndpoint = requiresExplicitEndpoint(provider);
+      // The form and the resolver have to agree, or the field is hidden for a
+      // provider the API then refuses for want of an endpoint.
+      if (needsEndpoint) {
+        expect(() => resolveTenantEndpoint(provider, "devnet")).toThrow();
+      } else {
+        expect(resolveTenantEndpoint(provider, "devnet")).toBeTruthy();
+      }
+    }
   });
 });

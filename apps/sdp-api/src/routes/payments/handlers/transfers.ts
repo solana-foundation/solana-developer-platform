@@ -27,9 +27,10 @@ import {
   partiallySignTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
-import type { z } from "zod";
+import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
+  generatePaymentTransferId,
   type PaymentsRepository,
   RAMP_TRANSFER_TYPES,
   type PaymentTransferDirection as TransferDirection,
@@ -41,7 +42,15 @@ import {
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { getAuth } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
-import { AppError, accountFrozen, badRequest, badRequestQuery, solanaRpcError } from "@/lib/errors";
+import {
+  AppError,
+  accountFrozen,
+  badRequest,
+  badRequestQuery,
+  conflict,
+  notFound,
+  solanaRpcError,
+} from "@/lib/errors";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -199,6 +208,7 @@ async function createTransferRecord(
       }
 
       const createdRow = await repository.createTransfer({
+        id: generatePaymentTransferId(),
         organizationId: input.organizationId,
         projectId: input.projectId,
         walletId: input.walletId,
@@ -342,6 +352,85 @@ interface TransferPolicyResolved {
   privateTransfer: PrivateTransferRequest | undefined;
 }
 
+function rampTransferHasOnchainValues(transfer: TransferRow): boolean {
+  return (
+    transfer.destination_address !== null ||
+    transfer.signature !== null ||
+    transfer.serialized_tx !== null ||
+    transfer.signed_transaction !== null ||
+    transfer.last_valid_block_height !== null ||
+    transfer.submission_started_at !== null ||
+    transfer.slot !== null ||
+    transfer.block_time !== null ||
+    transfer.fee !== null
+  );
+}
+
+const rampCryptoDepositSchema = z.object({
+  destinationAddress: z.string(),
+  amount: z.string(),
+});
+
+function getRampCryptoDeposit(transfer: TransferRow) {
+  const result = rampCryptoDepositSchema.safeParse(transfer.provider_data.cryptoDeposit);
+  return result.success ? result.data : null;
+}
+
+async function updateOnchainTransferForRamp(
+  c: AppContext,
+  input: {
+    transferId: string;
+    scope: ResolvedScope;
+    operation: OutboundPaymentOperation;
+    destinationAddress: string;
+  }
+): Promise<TransferRow> {
+  const { transferId, scope, operation, destinationAddress } = input;
+  const tenant = {
+    transferId,
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+  };
+  const existing = await getPaymentsRepository(c).getTransferById(tenant);
+  if (!existing) throw notFound("Ramp transfer");
+
+  const deposit = getRampCryptoDeposit(existing);
+  if (
+    existing.type !== "offramp" ||
+    existing.direction !== "outbound" ||
+    existing.wallet_id !== operation.sourceWallet.walletId ||
+    existing.source_address !== operation.sourceWallet.publicKey ||
+    existing.token !== operation.token ||
+    existing.amount === null ||
+    compareDecimalAmounts(existing.amount, operation.amount) !== 0 ||
+    !deposit ||
+    deposit.destinationAddress !== destinationAddress ||
+    compareDecimalAmounts(deposit.amount, operation.amount) !== 0
+  ) {
+    throw badRequest("Transfer does not match the off-ramp deposit instruction");
+  }
+  if (existing.status !== "awaiting_payment" || rampTransferHasOnchainValues(existing)) {
+    throw conflict("Ramp transfer already has an on-chain transaction");
+  }
+
+  const updated = await runApprovedWalletOperationEffectTransaction(c, async (db) =>
+    createPostgresPaymentsRepository(db, getRequestTenantScope(c)).updateOnchainTransferForRamp({
+      ...tenant,
+      walletId: operation.sourceWallet.walletId,
+      sourceAddress: operation.sourceWallet.publicKey,
+      destinationAddress,
+      token: operation.token,
+      amount: operation.amount,
+      initiatedByKeyId: scope.auth.id,
+      updatedAt: new Date().toISOString(),
+    })
+  );
+  if (!updated) {
+    throw conflict("Ramp transfer already has an on-chain transaction");
+  }
+  return updated;
+}
+
 /**
  * Parse and resolve a create-transfer request into its policy candidate for
  * the policy gate: validated body, resolved scope and outbound operation, and
@@ -403,6 +492,7 @@ export async function findTransferIdempotentKeyReplay(
   idempotencyKey: string
 ): Promise<Response | null> {
   const body = extraction.body as CreateTransferBody;
+  if (body.transferId) return null;
   const { scope, operation, privateTransfer } = extraction.resolved as TransferPolicyResolved;
 
   const replay = await resolveTransferIdempotencyReplay(
@@ -1143,6 +1233,9 @@ export async function createTransfer(c: AppContext) {
   const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
 
   if (privateTransfer) {
+    if (body.transferId) {
+      throw badRequest("Private transfers cannot reuse a ramp transfer");
+    }
     assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);
     const mapped = await prepareMagicBlockPrivateTransferForOperation({
       c,
@@ -1208,19 +1301,30 @@ export async function createTransfer(c: AppContext) {
     }
   }
 
-  const { row: transfer, replayed } = await createTransferRecord(c, {
-    organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
-    walletId: operation.sourceWallet.walletId,
-    sourceAddress: operation.sourceWallet.publicKey,
-    destinationAddress: body.destination,
-    token: operation.token,
-    amount: operation.amount,
-    memo: body.memo,
-    status: "processing",
-    initiatedByKeyId: scope.auth.id,
-    idempotencyKey,
-  });
+  const reusedRampTransfer = body.transferId !== undefined;
+  const { row: transfer, replayed } = body.transferId
+    ? {
+        row: await updateOnchainTransferForRamp(c, {
+          transferId: body.transferId,
+          scope,
+          operation,
+          destinationAddress: body.destination,
+        }),
+        replayed: false,
+      }
+    : await createTransferRecord(c, {
+        organizationId: scope.auth.organizationId,
+        projectId: scope.auth.projectId,
+        walletId: operation.sourceWallet.walletId,
+        sourceAddress: operation.sourceWallet.publicKey,
+        destinationAddress: body.destination,
+        token: operation.token,
+        amount: operation.amount,
+        memo: body.memo,
+        status: "processing",
+        initiatedByKeyId: scope.auth.id,
+        idempotencyKey,
+      });
 
   if (replayed) {
     await assertApprovedTransferReplayCompleted(c, transfer);
@@ -1238,7 +1342,7 @@ export async function createTransfer(c: AppContext) {
         submissionStore
       );
       const updated = await updateTransferRecord(c, transfer, {
-        status: "confirmed",
+        status: reusedRampTransfer ? "settling" : "confirmed",
         signature: solResult.signature,
         slot: solResult.slot,
         blockTime: solResult.blockTime,
@@ -1258,7 +1362,7 @@ export async function createTransfer(c: AppContext) {
     );
 
     const updated = await updateTransferRecord(c, transfer, {
-      status: "confirmed",
+      status: reusedRampTransfer ? "settling" : "confirmed",
       signature: result.signature,
       slot: result.slot,
       blockTime: result.blockTime,

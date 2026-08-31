@@ -98,11 +98,19 @@ did not account for. Both were verified against the deployed configuration:
   ATA rent, so it over-reserves.
 
 Rent is **recoverable, but only because this package makes it so.** klend's
-`withdrawIxs` bundle carries no cleanup instructions, so the share ATA was never
-closed and its 2,039,280 lamports stayed locked in a zero-share account on every
-exit, whoever had paid. `buildShareAccountCloseInstruction`
+`withdrawIxs` bundle historically carried no cleanup instructions, so the share
+ATA was never closed and its 2,039,280 lamports stayed locked in a zero-share
+account on every exit, whoever had paid. `buildShareAccountCloseInstruction`
 (`./withdraw-instructions.ts`) closes it when the exit provably empties it and
-sends the rent to whoever actually funded it. Two rules that follow:
+sends the rent to whoever actually funded it.
+
+**The pinned SDK now closes it too, and that copy is stripped.** klend-sdk
+10.0.0 emits its own `CloseAccount` in `postWithdrawIxs` on a full exit,
+refunding the OWNER unconditionally. Two closes of one account cannot both
+land — the second fails with `InvalidAccountData` and takes the whole exit with
+it (found by a full-exit E2E against a surfpool devnet fork, 2026-08-26). The
+plan builder removes the SDK's copy (`isShareAtaCloseInstruction`), because
+SDP's close is the attribution-aware one. Two rules that follow:
 
 - **Pass the recorded funder, never the current sponsor.** Rent is paid when the
   account is created and the fee mode can flip before the exit, so `rentRefundTo`

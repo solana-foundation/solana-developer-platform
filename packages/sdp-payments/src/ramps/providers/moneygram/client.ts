@@ -6,6 +6,10 @@ import type {
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { getCryptoRailAssetLabel, type RampCurrencyLimit } from "@sdp/types/payment-rails";
+import {
+  checkRampDestination,
+  MONEYGRAM_WIDGET_APPROVED_HOSTS,
+} from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { estimateNotAvailable, providerNotConfigured, providerUnavailable } from "../../../errors";
@@ -349,7 +353,18 @@ export class MoneygramRampClient implements RampProvider {
       });
     }
 
-    const widgetUrl = new URL(parsed.data.widgetUrl);
+    // The dashboard loads this URL into the MoneyGram SDK and derives its API
+    // base from its origin, so anything but HTTPS on an approved host fails closed.
+    const destination = checkRampDestination(parsed.data.widgetUrl, [
+      ...MONEYGRAM_WIDGET_APPROVED_HOSTS,
+    ]);
+    if (!destination.ok) {
+      throw providerUnavailable("MoneyGram returned an untrusted widget URL.", {
+        provider: this.id,
+        reason: destination.reason,
+      });
+    }
+    const widgetUrl = destination.url;
     widgetUrl.searchParams.set("mode", widgetMode);
 
     return {
@@ -360,6 +375,34 @@ export class MoneygramRampClient implements RampProvider {
       sessionToken: parsed.data.sessionToken,
       sessionId: parsed.data.sessionId,
       widgetUrl: widgetUrl.toString(),
+      expiresAt: moneygramSessionExpiry(parsed.data.sessionToken),
     };
+  }
+}
+
+/** Sessions expire when their JWT does; MoneyGram documents a 1h TTL, used as the fallback. */
+const MONEYGRAM_SESSION_FALLBACK_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Reads the `exp` claim from the widget session JWT so the session's expiry can
+ * be bound to the transfer record. The token is not verified here — it is
+ * MoneyGram's credential, not ours — this only extracts the expiry it declares.
+ */
+export function moneygramSessionExpiry(sessionToken: string, now: number = Date.now()): string {
+  const fallback = new Date(now + MONEYGRAM_SESSION_FALLBACK_TTL_MS).toISOString();
+  const payloadSegment = sessionToken.split(".")[1];
+  if (!payloadSegment) {
+    return fallback;
+  }
+  try {
+    const base64 = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { exp?: unknown };
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || payload.exp <= 0) {
+      return fallback;
+    }
+    return new Date(payload.exp * 1000).toISOString();
+  } catch {
+    return fallback;
   }
 }

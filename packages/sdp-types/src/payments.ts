@@ -128,6 +128,8 @@ export interface LightsparkGridAmount {
 export interface MoonpayRampSettlement {
   provider: "moonpay";
   status: "completed" | "failed";
+  /** MoonPay's own transaction id — the key for their transaction receipt page. */
+  transactionId: string;
   baseCurrencyCode: string;
   baseCurrencyAmount: number;
   quoteCurrencyCode: string;
@@ -178,6 +180,14 @@ export type RampTransferSettlement =
   | LightsparkRampSettlement
   | CoinbaseRampSettlement;
 
+/** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
+export interface RampCryptoDeposit {
+  /** Provider-owned wallet address the crypto must be sent to. */
+  destinationAddress: string;
+  /** Crypto amount the provider expects, in display units. */
+  amount: string;
+}
+
 export interface MoneygramTransferDetails {
   transactionId?: string;
   referenceNumber?: string;
@@ -191,8 +201,9 @@ export interface MoneygramTransferDetails {
 export interface PaymentTransferSummary {
   id: string;
   walletId?: string;
-  status: string;
+  status: PaymentTransferStatus;
   signature: string | null;
+  error?: string | null;
   type?: string;
   direction?: string;
   source?: string;
@@ -209,6 +220,7 @@ export interface PaymentTransferSummary {
   fiatCurrency?: string;
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
+  cryptoDeposit?: RampCryptoDeposit;
   moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
@@ -961,6 +973,8 @@ export type PaymentRampQuote =
       sessionToken: string;
       sessionId: string;
       widgetUrl: string;
+      /** ISO timestamp when the widget session expires (decoded from the session JWT). */
+      expiresAt?: string;
     })
   | (BasePaymentRampQuote & {
       provider: "stripe";

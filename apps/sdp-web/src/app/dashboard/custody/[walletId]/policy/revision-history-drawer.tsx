@@ -15,19 +15,9 @@ import {
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";
+import { custodyQueryKeys } from "../../custody-query-key";
 import { PolicyRevisionExplorer } from "./policy-revision-explorer";
 import { fetchWalletRevisionHistoryAction } from "./revision-history.actions";
-
-/**
- * SWR cache key for a wallet's policy revision history; mutate it after a
- * revision is created so the drawer refetches on next open.
- *
- * @param walletId - The wallet whose history is cached.
- * @returns The cache key.
- */
-export function walletPolicyRevisionsKey(walletId: string): string {
-  return `wallet-policy-revisions-${walletId}`;
-}
 
 /**
  * "Revision history" trigger that opens the revision explorer in a right-side
@@ -107,7 +97,7 @@ export function RevisionHistoryDrawer({
     initialRevisionId && initialRevisionId !== "latest" ? initialRevisionId : defaultRevisionId
   );
   const { data } = useSWR(
-    open && !preloaded ? walletPolicyRevisionsKey(walletId) : null,
+    open && !preloaded ? custodyQueryKeys.walletPolicyRevisions({ walletId }) : null,
     () => fetchWalletRevisionHistoryAction(walletId),
     { revalidateOnFocus: false, revalidateIfStale: false, revalidateOnReconnect: false }
   );

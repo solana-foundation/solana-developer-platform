@@ -17,6 +17,7 @@ import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
+import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
@@ -54,6 +55,9 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     setCollectedField,
     requirementsBlocker,
     refreshQuote,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
     memoRows,
     setMemoRows,
   } = wizard;
@@ -109,6 +113,16 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
+  if (currentStepId === "PROVIDER" && !quote && quoteCreationError) {
+    return (
+      <RampQuoteError
+        error={quoteCreationError}
+        retrying={quoteCreationRetrying}
+        onRetry={() => void retryQuoteCreation()}
+      />
+    );
+  }
+
   if (
     currentStepId === "PROVIDER" &&
     onboarding &&
@@ -147,7 +161,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         <MoneygramRampWidget
           direction="onramp"
           quote={quote}
-          counterparty={selectedCounterparty}
           sourceWalletId={fields.walletId}
           sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
           sourceWalletAddress={selectedWallet.publicKey}
@@ -178,9 +191,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
             src={quote.hostedUrl}
           />
         )}
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
       </div>
     );
   }

@@ -19,7 +19,6 @@ import {
   isActiveIso4217CurrencyCode,
   isIso3166Alpha2CountryCode,
   RAMP_RAIL_DUMPS,
-  rampId,
   requireEnv,
   unreportedCurrencyLimit,
 } from "../../shared";
@@ -120,6 +119,16 @@ function normalizeMoonpayCurrencyCode(value: string): string {
     return `${normalized.slice(0, -"_SOLANA".length)}_SOL`.toLowerCase();
   }
   return normalized.toLowerCase();
+}
+
+function requireMoonpayTransferId(paymentTransferId: string | undefined): string {
+  if (!paymentTransferId) {
+    throw new SdpPaymentsError(
+      "INTERNAL_ERROR",
+      "MoonPay quote creation requires an SDP payment transfer id."
+    );
+  }
+  return paymentTransferId;
 }
 
 async function moonpaySignature(unsignedQuery: string, secretKey: string): Promise<string> {
@@ -433,14 +442,14 @@ export class MoonpayRampClient implements RampProvider {
     }
 
     const config = readMoonpayConfig(env, mode);
-    const quoteId = rampId("ramp_quote");
+    const quoteId = requireMoonpayTransferId(input.paymentTransferId);
     const hostedUrl = await buildSignedMoonpayWidgetUrl(config.onrampUrl, config.secretKey, {
       apiKey: config.apiKey,
       baseCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       baseCurrencyAmount: input.fiatAmount,
       currencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       walletAddress: input.destinationWalletAddress,
-      redirectURL: input.redirectUrl,
+      lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });
@@ -459,14 +468,14 @@ export class MoonpayRampClient implements RampProvider {
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
     const config = readMoonpayConfig(env, mode);
-    const quoteId = rampId("ramp_quote");
+    const quoteId = requireMoonpayTransferId(input.paymentTransferId);
     const hostedUrl = await buildSignedMoonpayWidgetUrl(config.offrampUrl, config.secretKey, {
       apiKey: config.apiKey,
       baseCurrencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       baseCurrencyAmount: input.cryptoAmount,
       quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       refundWalletAddress: input.sourceWalletAddress,
-      redirectURL: input.redirectUrl,
+      lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });

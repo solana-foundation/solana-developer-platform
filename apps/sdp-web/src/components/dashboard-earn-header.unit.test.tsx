@@ -27,8 +27,8 @@ describe("Markets dashboard headers", () => {
     expect(config.headerTabs).toBeUndefined();
   });
 
-  it("centers the Earn Program title without header tabs", () => {
-    const config = getDashboardPageConfig("/dashboard/markets/earn", t, false, false);
+  it("centers the Embedded Yield title without header tabs", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield", t, false, false);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.earnProgram",
@@ -38,9 +38,9 @@ describe("Markets dashboard headers", () => {
     expect(config.headerTabs).toBeUndefined();
   });
 
-  it("centers the Earn button builder title without header tabs", () => {
+  it("centers the Embedded Yield button builder title without header tabs", () => {
     const config = getDashboardPageConfig(
-      "/dashboard/markets/earn/button-builder",
+      "/dashboard/markets/embedded-yield/button-builder",
       t,
       false,
       false
@@ -52,5 +52,20 @@ describe("Markets dashboard headers", () => {
       contentWidthClass: "max-w-none",
     });
     expect(config.headerTabs).toBeUndefined();
+  });
+
+  it("uses the integration title for Embedded Yield configuration", () => {
+    const config = getDashboardPageConfig(
+      "/dashboard/markets/embedded-yield/configure",
+      t,
+      false,
+      false
+    );
+
+    expect(config).toMatchObject({
+      title: "Shared.dashboardShell.configureEarnButton",
+      titlePosition: "center",
+      contentWidthClass: "max-w-none",
+    });
   });
 });
