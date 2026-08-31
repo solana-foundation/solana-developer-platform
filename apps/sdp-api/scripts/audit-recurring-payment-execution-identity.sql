@@ -157,11 +157,27 @@ WITH wallet_scope AS (
 )
 SELECT * FROM mismatches ORDER BY resource, id LIMIT 100;
 
-\echo '=== 2a. Source-changing update attempts without their proposed exact pin (must be zero) ==='
+\echo '=== 2a. Source-changing update attempts missing a required exact pin (must be zero) ==='
 SELECT id, organization_id, project_id, recurring_payment_id, status, stage
 FROM payment_recurring_payment_update_attempts
-WHERE changed_fields && ARRAY['sourceCustodyWalletId', 'sourceWalletId']::TEXT[]
-  AND new_source_custody_wallet_id IS NULL
+WHERE new_source_custody_wallet_id IS NULL
+  AND (
+    changed_fields @> ARRAY['sourceCustodyWalletId']::TEXT[]
+    OR (
+      status = 'processing'
+      AND changed_fields @> ARRAY['sourceWalletId']::TEXT[]
+    )
+  )
+ORDER BY organization_id, id
+LIMIT 100;
+
+\echo '=== 2b. Terminal legacy source-changing attempts without an exact pin (informational) ==='
+SELECT id, organization_id, project_id, recurring_payment_id, status, stage
+FROM payment_recurring_payment_update_attempts
+WHERE new_source_custody_wallet_id IS NULL
+  AND status IN ('confirmed', 'failed')
+  AND changed_fields @> ARRAY['sourceWalletId']::TEXT[]
+  AND NOT changed_fields @> ARRAY['sourceCustodyWalletId']::TEXT[]
 ORDER BY organization_id, id
 LIMIT 100;
 

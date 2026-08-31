@@ -153,7 +153,10 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
        'failed', 'claim'),
       ('update_legacy_missing', 'org_a', 'prj_a', 'rp_project', NULL,
        ARRAY['sourceWalletId'], '{"sourceWalletId":"provider_project"}'::jsonb,
-       'failed', 'claim')`);
+       'failed', 'claim'),
+      ('update_legacy_processing', 'org_a', 'prj_a', 'rp_project', NULL,
+       ARRAY['sourceWalletId'], '{"sourceWalletId":"provider_project"}'::jsonb,
+       'processing', 'claim')`);
 
     await client.query(`INSERT INTO payment_recurring_payments
       (id, organization_id, project_id, source_custody_wallet_id,
@@ -250,17 +253,27 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
         { custody_wallet_id: "cw_foreign", id: "update_foreign", resource: "update_attempt" },
       ])
     );
-    expect((await client.query(auditSection(auditSql, "2a.", "3."))).rows).toEqual([
+    expect((await client.query(auditSection(auditSql, "2a.", "2b."))).rows).toEqual([
       {
-        id: "update_legacy_missing",
+        id: "update_legacy_processing",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        recurring_payment_id: "rp_project",
+        stage: "claim",
+        status: "processing",
+      },
+      {
+        id: "update_missing",
         organization_id: "org_a",
         project_id: "prj_a",
         recurring_payment_id: "rp_project",
         stage: "claim",
         status: "failed",
       },
+    ]);
+    expect((await client.query(auditSection(auditSql, "2b.", "3."))).rows).toEqual([
       {
-        id: "update_missing",
+        id: "update_legacy_missing",
         organization_id: "org_a",
         project_id: "prj_a",
         recurring_payment_id: "rp_project",
@@ -316,6 +329,16 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
         project_id: "prj_a",
         recurring_payment_id: "rp_canceling",
         stage: "submit",
+        status: "processing",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        attempt_kind: "update",
+        id: "update_legacy_processing",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        recurring_payment_id: "rp_project",
+        stage: "claim",
         status: "processing",
         updated_at: "2026-01-01T00:00:00.000Z",
       },
