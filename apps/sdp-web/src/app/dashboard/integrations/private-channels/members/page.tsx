@@ -9,9 +9,7 @@ import { MembersTable } from "./members-table";
 export default async function PrivateChannelsMembersPage() {
   await requirePrivateChannelsAccess();
 
-  const t = await getTranslations();
-
-  const client = await createSdpApiClient();
+  const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
   const principals = await loadPrincipals(client);
 
   return (
