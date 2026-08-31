@@ -7,7 +7,7 @@ export interface PrivateChannelVerifiedWalletRow {
   id: string;
   organization_id: string;
   project_id: string;
-  /** The private_channel_users row (SPC user) this wallet was verified under. */
+  /** The private_channel_users compatibility row (SPC identity) for this wallet. */
   user_id: string;
   instance_id: string;
   wallet_id: string;
@@ -32,7 +32,7 @@ export interface UpsertVerifiedWalletInput extends VerifiedWalletScope {
 
 export interface PrivateChannelVerifiedWalletRepository {
   /**
-   * Idempotently record a member's verified wallet. A re-verify of the same
+   * Idempotently record an identity's verified wallet. A re-verify of the same
    * (user_id, instance_id, pubkey) refreshes the row; a member may verify many
    * wallets per instance. Call this ONLY from the wallets domain
    * module's verify logic (services/private-channels/wallets.ts) — that flow is
@@ -43,7 +43,7 @@ export interface PrivateChannelVerifiedWalletRepository {
   /**
    * Remove a verified wallet after a successful SPC delete, keyed on the unique
    * (user_id, instance_id, pubkey): a pubkey verified under another instance (or
-   * by another member) is untouched. Returns true if a row was deleted.
+   * by another identity) is untouched. Returns true if a row was deleted.
    * Single-writer contract as for upsert.
    */
   deleteByUserInstanceAndPubkey(
@@ -51,7 +51,13 @@ export interface PrivateChannelVerifiedWalletRepository {
     instanceId: string,
     pubkey: string
   ): Promise<boolean>;
-  /** The member's verified wallets for one instance, newest first. */
+  /** Find the principal that owns a pubkey in one tenant-scoped SPC instance. */
+  findByInstanceAndPubkey(
+    scope: VerifiedWalletScope,
+    instanceId: string,
+    pubkey: string
+  ): Promise<PrivateChannelVerifiedWalletRow | null>;
+  /** The identity's verified wallets for one instance, newest first. */
   listByUserAndInstance(
     userId: string,
     instanceId: string

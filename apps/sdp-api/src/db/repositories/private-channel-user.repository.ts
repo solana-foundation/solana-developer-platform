@@ -1,7 +1,7 @@
-// Owns two tables:
-//   - `private_channel_users`        (workspace-level invite + SPC credential)
-//   - `private_channel_memberships`  (channel × user junction)
-// Rows FK to `users(id)`; SDP-native user identity stays in the `users` table.
+// Owns two compatibility-named tables:
+//   - `private_channel_users`        (project identity + SPC credential)
+//   - `private_channel_memberships`  (channel × identity junction)
+// New identities are project-scoped and do not belong to an SDP user.
 
 import type { RepositoryDbClient } from "./base";
 
@@ -74,14 +74,18 @@ export interface CreatePrivateChannelUserInput extends ProjectScope {
   inviteToken: string | null;
 }
 
-export interface CreatePrivateChannelPrincipalInput extends ProjectScope {
+export interface ReservePrivateChannelPrincipalInput extends ProjectScope {
   instanceId: string;
   name: string;
   isDefault: boolean;
+  createdBy: string | null;
+}
+
+export interface CompletePrivateChannelPrincipalInput extends ProjectScope {
+  id: string;
   spcUserId: string;
   spcUsername: string;
   spcCredentialCiphertext: string;
-  createdBy: string | null;
 }
 
 export interface AddMembershipInput {
@@ -107,8 +111,14 @@ export interface PrivateChannelUserRepository {
   /** The active default principal for the project's active instance. */
   findDefaultPrincipalByProject(scope: ProjectScope): Promise<PrivateChannelUserRow | null>;
 
-  /** Insert a project principal after SPC registration succeeds. */
-  createPrincipal(input: CreatePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
+  /** Reserve the unique local identity before creating its upstream SPC user. */
+  reservePrincipal(input: ReservePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
+
+  /** Attach the successfully registered SPC credentials to a reservation. */
+  completePrincipal(input: CompletePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
+
+  /** Remove a reservation that never received an SPC user. */
+  deletePrincipalReservation(scope: ProjectScope, id: string): Promise<boolean>;
 
   /** Disable a non-default principal without erasing operation history. */
   disablePrincipal(scope: ProjectScope, id: string): Promise<boolean>;

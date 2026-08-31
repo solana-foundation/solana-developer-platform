@@ -375,6 +375,7 @@ export {
 export { createPostgresPrivateChannelTransferRepository } from "./private-channel-transfer.repository.postgres";
 export type {
   AddMembershipInput,
+  CompletePrivateChannelPrincipalInput,
   CreatePrivateChannelUserInput,
   PrivateChannelMembershipRow,
   PrivateChannelMembershipWithChannelRow,
@@ -382,6 +383,7 @@ export type {
   PrivateChannelUserRepositoryContext,
   PrivateChannelUserRow,
   PrivateChannelUserWithIdentityRow,
+  ReservePrivateChannelPrincipalInput,
 } from "./private-channel-user.repository";
 export {
   generatePrivateChannelMembershipId,

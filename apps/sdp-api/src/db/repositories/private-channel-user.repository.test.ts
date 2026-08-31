@@ -89,6 +89,14 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       ...(gatewayUrl ? { gatewayUrl } : {}),
     });
     if (!created) throw new Error("createActive returned null");
+    await getDb(env)
+      .prepare(
+        `UPDATE private_channel_users
+            SET instance_id = ?, name = 'Default', is_default = TRUE
+          WHERE id = ?`
+      )
+      .bind(created.id, PCU_ID)
+      .run();
     return created.id;
   }
 
@@ -155,9 +163,8 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
     expect(listed.verified_wallet_count).toBe(0);
   });
 
-  // project_role sources from project_members via LEFT JOIN so orphaned PCU
-  // rows (user removed from project) stay visible for cleanup; invite-time
-  // enforcement lives in the invite handler.
+  // project_role sources from project_members via LEFT JOIN so orphaned legacy
+  // rows (user removed from project) stay visible for cleanup.
   it("surfaces the caller's project_members role", async () => {
     const db = getDb(env);
     await db

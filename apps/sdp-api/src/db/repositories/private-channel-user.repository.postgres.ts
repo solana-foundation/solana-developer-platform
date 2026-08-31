@@ -1,7 +1,7 @@
 import type { AppDb } from "@/db";
 import {
   type AddMembershipInput,
-  type CreatePrivateChannelPrincipalInput,
+  type CompletePrivateChannelPrincipalInput,
   type CreatePrivateChannelUserInput,
   generatePrivateChannelMembershipId,
   type PrivateChannelMembershipRow,
@@ -10,6 +10,7 @@ import {
   type PrivateChannelUserRow,
   type PrivateChannelUserWithIdentityRow,
   type ProjectScope,
+  type ReservePrivateChannelPrincipalInput,
 } from "./private-channel-user.repository";
 
 function mapUserRow(row: Record<string, unknown>): PrivateChannelUserRow {
@@ -143,15 +144,14 @@ export function createPostgresPrivateChannelUserRepository(
       return row ? mapUserRow(row) : null;
     },
 
-    async createPrincipal(input: CreatePrivateChannelPrincipalInput) {
+    async reservePrincipal(input: ReservePrivateChannelPrincipalInput) {
       const row = await db
         .prepare(
           `INSERT INTO private_channel_users (
                id, organization_id, project_id, instance_id, user_id,
-               name, is_default, spc_user_id, spc_username,
-               spc_credential_ciphertext, created_by,
+               name, is_default, created_by,
                invited_by, invite_token
-             ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL)
+             ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL)
           RETURNING *`
         )
         .bind(
@@ -161,14 +161,53 @@ export function createPostgresPrivateChannelUserRepository(
           input.instanceId,
           input.name,
           input.isDefault,
-          input.spcUserId,
-          input.spcUsername,
-          input.spcCredentialCiphertext,
           input.createdBy
         )
         .first<Record<string, unknown>>();
       if (!row) throw new Error("private channel principal insert returned no row");
       return mapUserRow(row);
+    },
+
+    async completePrincipal(input: CompletePrivateChannelPrincipalInput) {
+      const row = await db
+        .prepare(
+          `UPDATE private_channel_users
+              SET spc_user_id = ?,
+                  spc_username = ?,
+                  spc_credential_ciphertext = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND spc_user_id IS NULL
+          RETURNING *`
+        )
+        .bind(
+          input.spcUserId,
+          input.spcUsername,
+          input.spcCredentialCiphertext,
+          input.id,
+          input.organizationId,
+          input.projectId
+        )
+        .first<Record<string, unknown>>();
+      if (!row) throw new Error("private channel principal reservation could not be completed");
+      return mapUserRow(row);
+    },
+
+    async deletePrincipalReservation(scope, id) {
+      const row = await db
+        .prepare(
+          `DELETE FROM private_channel_users
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND spc_user_id IS NULL
+          RETURNING id`
+        )
+        .bind(id, scope.organizationId, scope.projectId)
+        .first<{ id: string }>();
+      return row !== null;
     },
 
     async disablePrincipal(scope, id) {

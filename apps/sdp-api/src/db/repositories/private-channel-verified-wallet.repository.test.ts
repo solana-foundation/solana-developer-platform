@@ -80,13 +80,14 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     instanceA = a.id;
     instanceB = b.id;
 
-    // The acting member (FK target for verified_wallets.user_id).
+    // The project identity (FK target for verified_wallets.user_id).
     await db
       .prepare(
-        `INSERT INTO private_channel_users (id, organization_id, project_id, user_id)
-           VALUES (?, ?, ?, ?)`
+        `INSERT INTO private_channel_users (
+           id, organization_id, project_id, user_id, instance_id, name, is_default
+         ) VALUES (?, ?, ?, ?, ?, 'Default', TRUE)`
       )
-      .bind(PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .bind(PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id, instanceA)
       .run();
 
     repo = createPostgresPrivateChannelVerifiedWalletRepository(db);
@@ -153,6 +154,48 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       code: "CONFLICT",
       message: "This wallet is already linked to another identity. Select a different wallet.",
     });
+  });
+
+  it("finds the identity that owns a pubkey within the tenant scope", async () => {
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+
+    expect(await repo.findByInstanceAndPubkey(scope, instanceA, PUBKEY_A)).toMatchObject({
+      user_id: PCU_ID,
+      instance_id: instanceA,
+      pubkey: PUBKEY_A,
+    });
+    expect(
+      await repo.findByInstanceAndPubkey(
+        { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID },
+        instanceA,
+        PUBKEY_A
+      )
+    ).toBeNull();
+  });
+
+  it("does not persist a wallet for a disabled identity", async () => {
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE private_channel_users SET disabled_at = sdp_iso_now() WHERE id = ?")
+      .bind(PCU_ID)
+      .run();
+
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await repo.listByUserAndInstance(PCU_ID, instanceA)).toEqual([]);
   });
 
   it("listByUserAndInstance is scoped to the instance (no cross-instance leak)", async () => {

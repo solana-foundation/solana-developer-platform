@@ -11,7 +11,11 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { mapPrivateChannelError, provisionPrincipal } from "@/services/private-channels";
+import {
+  mapPrivateChannelError,
+  provisionPrincipal,
+  revokePrivateChannelPrincipalWallets,
+} from "@/services/private-channels";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelInstanceRepository,
@@ -115,7 +119,7 @@ export const createPrivateChannelPrincipal = async (
 };
 
 export const disablePrivateChannelPrincipal = async (c: AppContext) => {
-  const { scope, instance } = await activeInstance(c);
+  const { auth, scope, instance } = await activeInstance(c);
   const id = c.req.param("principalId");
   if (!id) throw badRequest("principalId is required");
 
@@ -127,11 +131,20 @@ export const disablePrivateChannelPrincipal = async (c: AppContext) => {
   if (principal.is_default) {
     throw conflict("The default Private Channels principal cannot be disabled.");
   }
-  if (principal.disabled_at) return success(c, { disabled: true });
-
   const memberships = await repo.listMembershipsForUser(principal.id);
-  const disabled = await repo.disablePrincipal(scope, principal.id);
-  if (!disabled) throw notFound("Private Channels principal");
+  try {
+    // First pass removes existing bindings while the identity is active. The
+    // second pass runs after disabling to catch a verification that raced with
+    // the first list and also makes a retried disable repair partial cleanup.
+    if (!principal.disabled_at) {
+      await revokePrivateChannelPrincipalWallets(c.env, auth, scope.projectId, principal.id);
+      const disabled = await repo.disablePrincipal(scope, principal.id);
+      if (!disabled) throw notFound("Private Channels principal");
+    }
+    await revokePrivateChannelPrincipalWallets(c.env, auth, scope.projectId, principal.id);
+  } catch (error) {
+    throw mapPrivateChannelError(error);
+  }
 
   for (const membership of memberships) {
     await repo.removeMembership(membership.channel_id, principal.id);

@@ -2,15 +2,18 @@
 // password, register with SPC, encrypt the password, then persist the principal.
 
 import { PrivateChannelError, spcRegister } from "@sdp/private-channels";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PrivateChannelUserRepository,
   PrivateChannelUserRow,
   ProjectScope,
 } from "@/db/repositories";
+import { conflict } from "@/lib/errors";
 import {
   createSpcCredentialCipher,
   type SpcCredentialCipherEnv,
 } from "@/lib/spc-credential-crypto";
+import { getLogger } from "@/runtime/logger";
 
 const SPC_USERNAME_MIN = 5;
 const SPC_USERNAME_MAX = 32;
@@ -81,33 +84,62 @@ export async function provisionPrincipal(
     if (existing) return { principal: existing, created: false };
   }
 
-  const password = generatePassword();
-  const cipher = createSpcCredentialCipher(env);
-  const ciphertext = await cipher.encrypt(input.organizationId, password);
-
-  let username = deriveUsername(input.name);
-  let registered: Awaited<ReturnType<typeof spcRegister>>;
+  // Claim the tenant-scoped name/default slot before creating an upstream SPC
+  // user. Concurrent requests now fail locally without leaking an SPC identity.
+  let reservation: PrivateChannelUserRow;
   try {
-    registered = await spcRegister(input.authUrl, { username, password });
+    reservation = await repo.reservePrincipal({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      instanceId: input.instanceId,
+      name: input.name,
+      isDefault: input.isDefault,
+      createdBy: input.createdBy,
+    });
   } catch (error) {
-    if (error instanceof PrivateChannelError && error.code === "CONFLICT") {
-      username = deriveUsername(input.name);
-      registered = await spcRegister(input.authUrl, { username, password });
-    } else {
-      throw error;
+    if (isPostgresUniqueViolation(error)) {
+      throw conflict("An active Private Channels identity already uses this name.");
     }
+    throw error;
   }
+  try {
+    const password = generatePassword();
+    const cipher = createSpcCredentialCipher(env);
+    const ciphertext = await cipher.encrypt(input.organizationId, password);
 
-  const principal = await repo.createPrincipal({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    instanceId: input.instanceId,
-    name: input.name,
-    isDefault: input.isDefault,
-    spcUserId: registered.id,
-    spcUsername: registered.username,
-    spcCredentialCiphertext: ciphertext,
-    createdBy: input.createdBy,
-  });
-  return { principal, created: true };
+    let username = deriveUsername(input.name);
+    let registered: Awaited<ReturnType<typeof spcRegister>>;
+    try {
+      registered = await spcRegister(input.authUrl, { username, password });
+    } catch (error) {
+      if (error instanceof PrivateChannelError && error.code === "CONFLICT") {
+        username = deriveUsername(input.name);
+        registered = await spcRegister(input.authUrl, { username, password });
+      } else {
+        throw error;
+      }
+    }
+
+    const principal = await repo.completePrincipal({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      id: reservation.id,
+      spcUserId: registered.id,
+      spcUsername: registered.username,
+      spcCredentialCiphertext: ciphertext,
+    });
+    return { principal, created: true };
+  } catch (error) {
+    // A reservation has no usable SPC credential. Remove it so a failed remote
+    // call does not leave a broken identity or permanently consume its name.
+    try {
+      await repo.deletePrincipalReservation(input, reservation.id);
+    } catch (cleanupError) {
+      getLogger().warn(
+        { reservationId: reservation.id, cleanupError },
+        "private-channel identity: failed to remove an incomplete reservation"
+      );
+    }
+    throw error;
+  }
 }

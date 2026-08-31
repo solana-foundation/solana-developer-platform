@@ -29,6 +29,7 @@ export {
 export {
   deletePrivateChannelWallet,
   listPrivateChannelWallets,
+  revokePrivateChannelPrincipalWallets,
   verifyPrivateChannelWallet,
 } from "./wallets";
 export {

@@ -17,7 +17,14 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           `INSERT INTO private_channel_verified_wallets (
                id, organization_id, project_id, user_id, instance_id,
                wallet_id, pubkey
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+             )
+             SELECT ?, ?, ?, ?, ?, ?, ?
+               FROM private_channel_users
+              WHERE id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                AND instance_id = ?
+                AND disabled_at IS NULL
              ON CONFLICT (instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
                    verified_at = sdp_iso_now(),
@@ -32,7 +39,11 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           input.userId,
           input.instanceId,
           input.walletId,
-          input.pubkey
+          input.pubkey,
+          input.userId,
+          input.organizationId,
+          input.projectId,
+          input.instanceId
         )
         .first<Record<string, unknown>>();
       if (!row) {
@@ -55,6 +66,21 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         .bind(userId, instanceId, pubkey)
         .first<Record<string, unknown>>();
       return row !== null;
+    },
+
+    async findByInstanceAndPubkey(scope, instanceId, pubkey) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_verified_wallets
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND instance_id = ?
+               AND pubkey = ?
+             LIMIT 1`
+        )
+        .bind(scope.organizationId, scope.projectId, instanceId, pubkey)
+        .first<Record<string, unknown>>();
+      return row ? mapPrivateChannelVerifiedWalletRow(row) : null;
     },
 
     async listByUserAndInstance(userId: string, instanceId: string) {

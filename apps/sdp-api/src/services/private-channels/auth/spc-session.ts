@@ -153,10 +153,10 @@ async function cacheFreshToken(
 }
 
 /**
- * Obtain an SPC JWT for a member's SPC user. With `opts.cache` + `opts.instanceId`
- * this reads through a per-(instance, user) KV cache, refreshing before expiry;
- * without them it logs in fresh every call. Throws `FORBIDDEN` if the member has no
- * SPC credential (not fully provisioned).
+ * Obtain an SPC JWT for a project identity's SPC user. With `opts.cache` +
+ * `opts.instanceId` this reads through a per-(instance, identity) KV cache,
+ * refreshing before expiry; without them it logs in fresh every call. Throws
+ * `FORBIDDEN` if the identity has no SPC credential (not fully provisioned).
  */
 export async function getSpcSession(
   env: Env,
@@ -168,7 +168,7 @@ export async function getSpcSession(
   if (!pcUser.spc_username || !pcUser.spc_credential_ciphertext) {
     throw new PrivateChannelError(
       "FORBIDDEN",
-      "Your Private Channels membership has no SPC credential; ask an admin to re-invite you."
+      "This Private Channels identity has no SPC credential. Contact support."
     );
   }
   const username = pcUser.spc_username;
