@@ -183,7 +183,7 @@ function PrincipalActionsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuItem onSelect={onDisable}>
+        <DropdownMenuItem className="justify-center" onSelect={onDisable}>
           <PowerIcon className="h-4 w-4" />
           {t("DashboardPrivateChannels.members.disable")}
         </DropdownMenuItem>
