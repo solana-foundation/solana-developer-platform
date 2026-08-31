@@ -2306,17 +2306,19 @@ describe("MoonPay ramp webhook", () => {
   it("records a completed sell deposit on the correlated SDP transfer", async () => {
     const sourceAddress = "WebhookSourceSolanaWallet111111111111111111111";
     const destinationAddress = "WebhookMoonPayDepositWallet1111111111111111111";
-    const signature =
+    const providerSignature =
       "4gYf6JwRXvV9LhJqR6CjvhgpqpNrp41cYwHC1PJNBJdk6FHaaBxTkZQHUnwNi1trGf31FyHg6pQJfUmK4D3kVQnG";
+    const submittedSignature =
+      "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
     const moonpayTransactionId = "cca8ef45-4aac-4a91-851a-02ff991eeef9";
     await getDb(env)
       .prepare(
         `UPDATE payment_transfers
          SET type = 'offramp', direction = 'outbound', source_address = ?,
-             destination_address = NULL, amount = '0.2', fiat_amount = NULL
+             destination_address = NULL, amount = '0.2', fiat_amount = NULL, signature = ?
          WHERE id = ?`
       )
-      .bind(sourceAddress, TRANSFER_ID)
+      .bind(sourceAddress, submittedSignature, TRANSFER_ID)
       .run();
 
     const res = await sendMoonpayWebhook({
@@ -2329,7 +2331,7 @@ describe("MoonPay ramp webhook", () => {
         baseCurrencyAmount: 0.2,
         quoteCurrencyAmount: 16.31,
         refundWalletAddress: sourceAddress,
-        depositHash: signature,
+        depositHash: providerSignature,
         depositWallet: { walletAddress: destinationAddress },
       },
     });
@@ -2357,7 +2359,7 @@ describe("MoonPay ramp webhook", () => {
       fiat_amount: "16.31",
       source_address: sourceAddress,
       destination_address: destinationAddress,
-      signature,
+      signature: submittedSignature,
       provider_reference: moonpayTransactionId,
     });
   });

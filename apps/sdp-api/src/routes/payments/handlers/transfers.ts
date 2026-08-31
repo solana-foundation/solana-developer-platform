@@ -27,7 +27,7 @@ import {
   partiallySignTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
-import type { z } from "zod";
+import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   generatePaymentTransferId,
@@ -366,16 +366,14 @@ function rampTransferHasOnchainValues(transfer: TransferRow): boolean {
   );
 }
 
-function getRampCryptoDeposit(transfer: TransferRow): {
-  destinationAddress: string;
-  amount: string;
-} | null {
-  const deposit = transfer.provider_data.cryptoDeposit;
-  if (typeof deposit !== "object" || deposit === null) return null;
-  const { destinationAddress, amount } = deposit as Record<string, unknown>;
-  return typeof destinationAddress === "string" && typeof amount === "string"
-    ? { destinationAddress, amount }
-    : null;
+const rampCryptoDepositSchema = z.object({
+  destinationAddress: z.string(),
+  amount: z.string(),
+});
+
+function getRampCryptoDeposit(transfer: TransferRow) {
+  const result = rampCryptoDepositSchema.safeParse(transfer.provider_data.cryptoDeposit);
+  return result.success ? result.data : null;
 }
 
 async function updateOnchainTransferForRamp(

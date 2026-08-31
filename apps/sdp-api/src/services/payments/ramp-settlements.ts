@@ -94,7 +94,9 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
     updatedAt: new Date().toISOString(),
   };
   if (event.onchain) {
-    update.signature = event.onchain.signature;
+    if (transfer.signature === null) {
+      update.signature = event.onchain.signature;
+    }
     update.sourceAddress = event.onchain.sourceAddress;
     update.destinationAddress = event.onchain.destinationAddress;
     update.amount = event.onchain.amount;

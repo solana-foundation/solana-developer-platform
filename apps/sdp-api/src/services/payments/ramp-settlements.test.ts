@@ -33,6 +33,8 @@ async function seedTransfer(input: {
   status: string;
   type?: "onramp" | "offramp" | "transfer";
   counterpartyId?: string;
+  provider?: "coinbase" | "moonpay";
+  signature?: string;
 }) {
   const type = input.type ?? "onramp";
   await getDb(env)
@@ -58,13 +60,13 @@ async function seedTransfer(input: {
       type,
       type === "onramp" ? "inbound" : "outbound",
       input.status,
-      "coinbase",
+      input.provider === undefined ? "coinbase" : input.provider,
       input.reference,
       "hosted",
       "USD",
       "10",
       {},
-      null,
+      input.signature === undefined ? null : input.signature,
       null,
       null,
       "2026-08-04T00:00:00.000Z",
@@ -120,19 +122,19 @@ describe("applyRampSettlementEvent", () => {
     ]);
   });
 
-  it("persists provider-reported on-chain transfer details with the settlement", async () => {
+  it("persists the provider signature for an on-ramp deposit", async () => {
     await seedTransfer({
       id: "xfr_onchain_settlement",
       reference: "order_onchain_settlement",
       status: "settling",
-      type: "offramp",
+      type: "onramp",
+      provider: "moonpay",
     });
 
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "settled",
       reference: "order_onchain_settlement",
-      receivedAmount: "19.50",
       onchain: {
         signature: "provider-reported-signature",
         sourceAddress: "provider-reported-source",
@@ -144,10 +146,42 @@ describe("applyRampSettlementEvent", () => {
     expect(await readTransfer("xfr_onchain_settlement")).toMatchObject({
       status: "completed",
       amount: "9.75",
-      fiat_amount: "19.50",
       source_address: "provider-reported-source",
       destination_address: "provider-reported-destination",
       signature: "provider-reported-signature",
+    });
+  });
+
+  it("preserves the submitted signature for an off-ramp payment", async () => {
+    await seedTransfer({
+      id: "xfr_onchain_payment",
+      reference: "order_onchain_payment",
+      status: "settling",
+      type: "offramp",
+      provider: "moonpay",
+      signature: "sdp-submitted-signature",
+    });
+
+    await applyRampSettlementEvent(env, {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "order_onchain_payment",
+      receivedAmount: "19.50",
+      onchain: {
+        signature: "provider-reported-signature",
+        sourceAddress: "provider-reported-source",
+        destinationAddress: "provider-reported-destination",
+        amount: "9.75",
+      },
+    });
+
+    expect(await readTransfer("xfr_onchain_payment")).toMatchObject({
+      status: "completed",
+      amount: "9.75",
+      fiat_amount: "19.50",
+      source_address: "provider-reported-source",
+      destination_address: "provider-reported-destination",
+      signature: "sdp-submitted-signature",
     });
   });
 
