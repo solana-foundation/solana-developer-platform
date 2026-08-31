@@ -453,6 +453,8 @@ export interface EarnVaultAcceptedAmounts {
   amount?: string;
   minSharesOut?: string;
   shares?: string;
+  /** Withdrawal slippage floor, in the deposit token's own units. */
+  minAmountOut?: string;
 }
 
 export interface EarnVaultDepositInput {
@@ -508,6 +510,73 @@ export interface EarnVaultWithdrawInput {
    * both roles. See docs/decisions/0002-earn-provider-pluggability.md.
    */
   rentPayer?: string;
+  /**
+   * Minimum deposit-token amount to accept for those shares — the exit's
+   * slippage floor, in the deposit token's own units. Optional on the
+   * contract; a provider whose builder refuses an implicit tolerance (Veda)
+   * refuses its absence with a typed error rather than inventing one.
+   */
+  minAmountOut?: string;
+}
+
+export interface EarnVaultWithdrawQuoteInput {
+  /** Vault address — the position's `providerReference`. */
+  providerReference: string;
+  /** Shares to redeem, as a decimal string. */
+  shares: string;
+}
+
+/**
+ * One provider's answer to "what would redeeming these shares pay right now".
+ * The exit twin of `EarnVaultDepositQuote`, and used the same way: a caller
+ * derives a truthful `minAmountOut` floor from `assetsOut` minus a chosen
+ * tolerance, so the floor tracks the LIVE rate instead of assuming one.
+ */
+export interface EarnVaultWithdrawQuote {
+  /** Deposit-token amount at the live rate, decimal string at token scale. */
+  assetsOut: string;
+  /** The deposit token's decimals — the scale a floor must be quantized to. */
+  assetDecimals: number;
+  /** Conditions the provider reports would block this exit, empty when none. */
+  blockingIssues: readonly EarnVaultDepositQuoteIssue[];
+}
+
+export interface EarnVaultDepositQuoteInput {
+  /** Vault address — the strategy's `providerReference`. */
+  providerReference: string;
+  /** Deposit amount in the vault token's own units, as a decimal string. */
+  amount: string;
+}
+
+/** A provider-reported condition that would block the quoted deposit. */
+export interface EarnVaultDepositQuoteIssue {
+  /** The provider's own stable code (e.g. `TELLER_PAUSED`), passed through. */
+  code: string;
+  /** The provider's own sentence for it. */
+  message: string;
+}
+
+/**
+ * One provider's answer to "what would this deposit mint right now".
+ *
+ * A quote is a READ: it applies the vault's live exchange rate, fees and caps
+ * to an amount and commits to nothing. Its purpose is to let a caller derive a
+ * truthful `minSharesOut` floor — `sharesOut` minus a chosen tolerance — so
+ * the floor tracks the LIVE rate instead of assuming one. The tolerance then
+ * covers only what it honestly can: the state moving between this quote and
+ * the transaction landing.
+ */
+export interface EarnVaultDepositQuote {
+  /** Shares the vault would mint right now, decimal string at share scale. */
+  sharesOut: string;
+  /** The share mint's decimals — the scale a floor must be quantized to. */
+  shareDecimals: number;
+  /**
+   * Conditions the provider reports would block this deposit, empty when none.
+   * Reported rather than thrown: "the vault is paused" is an answer about the
+   * vault, not a failure to answer.
+   */
+  blockingIssues: readonly EarnVaultDepositQuoteIssue[];
 }
 
 export interface EarnVaultPositionInput {
@@ -603,6 +672,35 @@ export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan>;
+}
+
+/**
+ * Optional capability: a live deposit quote (see `EarnVaultDepositQuote`).
+ *
+ * Separate from `EarnVaultDirectProvider` because a quote is a promise about
+ * the provider's READ surface, not implied by being able to build a deposit —
+ * and separate from the floor REQUIREMENT, which the deposit builder itself
+ * enforces. A provider that requires a floor should implement this so callers
+ * can derive one from the live rate rather than guessing.
+ */
+export interface EarnVaultDepositQuoteProvider extends EarnVaultDirectProvider {
+  quoteVaultDeposit(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultDepositQuoteInput
+  ): Promise<EarnVaultDepositQuote>;
+}
+
+/**
+ * Optional capability: a live withdrawal quote (see `EarnVaultWithdrawQuote`).
+ * Extends the WITHDRAW capability, not the deposit-quote one: an exit quote
+ * exists to derive an exit floor, and it means nothing on a provider whose
+ * exit SDP cannot carry.
+ */
+export interface EarnVaultWithdrawQuoteProvider extends EarnVaultWithdrawProvider {
+  quoteVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawQuoteInput
+  ): Promise<EarnVaultWithdrawQuote>;
 }
 
 /**

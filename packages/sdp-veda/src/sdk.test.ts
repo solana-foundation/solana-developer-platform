@@ -24,7 +24,9 @@ const mocks = vi.hoisted(() => ({
     listAssets: vi.fn(),
     getUserPosition: vi.fn(),
     previewWithdraw: vi.fn(),
+    previewDeposit: vi.fn(),
     buildDeposit: vi.fn(),
+    buildWithdraw: vi.fn(),
   },
   validateDeployment: vi.fn(),
   readMintDecimals: vi.fn(),
@@ -49,7 +51,14 @@ vi.mock("./mint", () => ({ readMintDecimals: mocks.readMintDecimals }));
 // The RPC client is only handed to the (mocked) SDK; keep it inert.
 vi.mock("./rpc", () => ({ createVedaRpc: vi.fn(() => ({})) }));
 
-import { buildVedaDepositPlan, readVedaPosition, resetVedaCompatibilityCache } from "./sdk";
+import {
+  buildVedaDepositPlan,
+  buildVedaWithdrawPlan,
+  previewVedaDeposit,
+  previewVedaWithdraw,
+  readVedaPosition,
+  resetVedaCompatibilityCache,
+} from "./sdk";
 
 const USDC_DEVNET = wellKnownMint("USDC", "devnet") as string;
 const USDC_MAINNET = wellKnownMint("USDC", "mainnet-beta") as string;
@@ -215,5 +224,111 @@ describe("buildVedaDepositPlan owns the deposit gate", () => {
     await expect(buildVedaDepositPlan(runtime, config, input)).rejects.toMatchObject({
       code: "VAULT_UNREADABLE",
     });
+  });
+});
+
+describe("previewVedaDeposit is an ungated read", () => {
+  it("returns the vault's own numbers and reports issues instead of throwing", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.previewDeposit.mockResolvedValue({
+      sharesOut: 999_990n,
+      shareDecimals: 6,
+      issues: [{ code: "DEPOSIT_CAP_EXCEEDED", message: "The vault deposit cap is exceeded" }],
+    });
+
+    const quote = await previewVedaDeposit(runtime, config, { vault: VAULT, amount: "1" });
+
+    expect(quote.sharesOut).toBe("0.99999");
+    expect(quote.shareDecimals).toBe(6);
+    expect(quote.issues).toEqual([
+      { code: "DEPOSIT_CAP_EXCEEDED", message: "The vault deposit cap is exceeded" },
+    ]);
+    expect(mocks.vault.previewDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1_000_000n })
+    );
+    // A quote is a READ: no deployment or compatibility gate, no queue demand —
+    // gating it would be a read consuming a money-in gate (ADR 0002).
+    expect(mocks.validateDeployment).not.toHaveBeenCalled();
+    expect(mocks.vault.validateCompatibility).not.toHaveBeenCalled();
+  });
+
+  it("refuses an over-precise amount as the caller's INVALID_AMOUNT", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+
+    await expect(
+      previewVedaDeposit(runtime, config, { vault: VAULT, amount: "1.0000001" })
+    ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+    expect(mocks.vault.previewDeposit).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildVedaWithdrawPlan is the ungated instant exit", () => {
+  const input = { vault: VAULT, owner: OWNER, shares: "2.5", minAmountOut: "2.49" };
+
+  it("builds without any deployment or queue gate — exits never inherit money-in checks", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: false }]);
+    mocks.vault.buildWithdraw.mockResolvedValue({
+      instructions: [
+        { programAddress: config.vaultProgramAddress, accounts: [], data: new Uint8Array([2]) },
+      ],
+    });
+
+    const plan = await buildVedaWithdrawPlan(runtime, config, input);
+
+    expect(plan.accepted).toEqual({ shares: "2.5", minAmountOut: "2.49" });
+    expect(String(plan.assetIdentity.depositTokenMint)).toBe(USDC_DEVNET);
+    expect(mocks.vault.buildWithdraw).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shares: 2_500_000n,
+        protection: { minAmountOut: 2_490_000n },
+      })
+    );
+    // No money-in gate on the way out: deposits are DISABLED above and the
+    // exit still built, and neither validation gate was consulted.
+    expect(mocks.validateDeployment).not.toHaveBeenCalled();
+    expect(mocks.vault.validateCompatibility).not.toHaveBeenCalled();
+  });
+
+  it("maps a vault exit refusal to WITHDRAW_REFUSED with the SDK's own sentence", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    const { VedaSdkError } = await import("@vedatech/svm-sdk");
+    mocks.vault.buildWithdraw.mockRejectedValue(
+      new VedaSdkError("SHARE_LOCKED", "Shares are locked until the unlock timestamp")
+    );
+
+    await expect(buildVedaWithdrawPlan(runtime, config, input)).rejects.toMatchObject({
+      code: "WITHDRAW_REFUSED",
+      message: expect.stringContaining("Shares are locked"),
+    });
+  });
+
+  it("refuses over-precise shares as the caller's INVALID_AMOUNT", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+
+    await expect(
+      buildVedaWithdrawPlan(runtime, config, { ...input, shares: "2.5000001" })
+    ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+    expect(mocks.vault.buildWithdraw).not.toHaveBeenCalled();
+  });
+});
+
+describe("previewVedaWithdraw is an ungated read", () => {
+  it("returns the vault's own numbers and reports issues instead of throwing", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: false }]);
+    mocks.vault.previewWithdraw.mockResolvedValue({
+      assetsOut: 2_497_000n,
+      assetDecimals: 6,
+      issues: [{ code: "SHARE_LOCKED", message: "Shares are locked" }],
+    });
+
+    const quote = await previewVedaWithdraw(runtime, config, { vault: VAULT, shares: "2.5" });
+
+    expect(quote.assetsOut).toBe("2.497");
+    expect(quote.assetDecimals).toBe(6);
+    expect(quote.issues).toEqual([{ code: "SHARE_LOCKED", message: "Shares are locked" }]);
+    expect(mocks.vault.previewWithdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ shares: 2_500_000n })
+    );
+    expect(mocks.validateDeployment).not.toHaveBeenCalled();
   });
 });

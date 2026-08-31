@@ -357,6 +357,13 @@ export interface EarnVaultWithdrawalRequest {
   positionId: string;
   /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
   shares: string;
+  /**
+   * Optional exit slippage floor: the minimum deposit-token amount to accept,
+   * decimal string in the token's own units. Required in practice by providers
+   * whose builder refuses an implicit tolerance (Veda); the dashboard derives
+   * it from the live withdrawal quote.
+   */
+  minAmountOut?: string;
 }
 
 /** One signed vault withdrawal movement. */

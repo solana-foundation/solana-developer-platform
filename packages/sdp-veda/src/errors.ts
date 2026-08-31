@@ -23,6 +23,8 @@ export type SdpVedaErrorCode =
   | "INCOMPATIBLE_DEPLOYMENT"
   /** The vault refuses this deposit right now (paused, capped, asset off). */
   | "DEPOSIT_REFUSED"
+  /** The vault refuses this exit right now (paused, locked, restricted). */
+  | "WITHDRAW_REFUSED"
   /** The vault requires an external compliance approval SDP does not implement. */
   | "COMPLIANCE_APPROVAL_REQUIRED"
   /** The vault's configuration cannot be expressed by SDP's deposit contract. */
