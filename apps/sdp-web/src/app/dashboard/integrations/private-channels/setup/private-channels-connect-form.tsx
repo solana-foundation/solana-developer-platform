@@ -25,6 +25,7 @@ import {
   type FieldErrors,
   testConnectionAction,
 } from "./actions";
+import { isProjectRpcProbeFailure } from "./probe-error";
 
 type FormValues = Omit<PrivateChannelInstanceInput, "chainRpcUrl">;
 
@@ -151,7 +152,7 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       updateState({
         gatewayResult: result.probe.gateway,
         authResult: result.probe.auth,
-        formError: t("DashboardPrivateChannels.instance.connectionTestFailed"),
+        formError: probeFailureMessage(t, result.probe),
       });
       return;
     }
@@ -178,6 +179,8 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       const result = await testConnectionAction({
         gatewayUrl: values.gatewayUrl,
         authUrl: values.authUrl,
+        escrowProgramId: values.escrowProgramId,
+        escrowInstanceAddr: values.escrowInstanceAddr,
       });
       if (result.kind === "validation") {
         updateState((current) => ({
@@ -199,9 +202,7 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         errors: {},
         gatewayResult: result.probe.gateway,
         authResult: result.probe.auth,
-        formError: result.probe.ok
-          ? null
-          : t("DashboardPrivateChannels.instance.connectionTestFailed"),
+        formError: result.probe.ok ? null : probeFailureMessage(t, result.probe),
       });
     });
   };
@@ -365,6 +366,12 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
 }
 
 type Translate = ReturnType<typeof useTranslations>;
+
+function probeFailureMessage(t: Translate, probe: ConnectionProbeResult): string {
+  return isProjectRpcProbeFailure(probe)
+    ? t("DashboardPrivateChannels.instance.projectRpcTestFailed")
+    : t("DashboardPrivateChannels.instance.connectionTestFailed");
+}
 
 function gatewayStatus(
   t: Translate,

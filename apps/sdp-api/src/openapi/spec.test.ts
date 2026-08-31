@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
+  anyOf?: TestJsonSchema[];
   example?: unknown;
   items?: TestJsonSchema;
-  not?: { required?: string[] };
+  not?: TestJsonSchema;
   oneOf?: TestJsonSchema[];
   properties?: Record<string, TestJsonSchema>;
   required?: string[];
@@ -46,6 +47,20 @@ describe("OpenAPI spec", () => {
     const refreshPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/supply/refresh"]?.post;
     expect(refreshPath).toBeDefined();
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
+  });
+
+  it("documents private-channel probe deployment addresses as a pair", () => {
+    const doc = createOpenApiDocument();
+    const probeSchema = getJsonSchema(doc.paths?.["/v1/private-channels/probe"]?.post?.requestBody);
+
+    expect(probeSchema.oneOf).toEqual([
+      { required: ["escrowProgramId", "escrowInstanceAddr"] },
+      {
+        not: {
+          anyOf: [{ required: ["escrowProgramId"] }, { required: ["escrowInstanceAddr"] }],
+        },
+      },
+    ]);
   });
 
   it("keeps Earn button configuration internal while publishing caller-signed money routes", () => {
