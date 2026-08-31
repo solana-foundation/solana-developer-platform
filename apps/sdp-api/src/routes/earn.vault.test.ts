@@ -46,6 +46,27 @@ vi.mock("@/services/earn/vault-deposit.service", async (importOriginal) => ({
 }));
 
 /**
+ * Per-test override for the executing vault-direct client, delegating to the
+ * REAL registry when unset. The preview route reaches the client directly (no
+ * service seam to mock), and the real Veda client would quote against a live
+ * RPC. Kamino cases stay on the real registry, which is itself the fixture:
+ * its client genuinely lacks `quoteVaultDeposit`, so the 501 is measured, not
+ * staged.
+ */
+const vaultDirectClientOverride = vi.hoisted(() => ({ current: null as unknown }));
+
+vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/earn/execution-registry")>();
+  return {
+    ...actual,
+    resolveVaultDirectClient: (...args: Parameters<typeof actual.resolveVaultDirectClient>) =>
+      (vaultDirectClientOverride.current as ReturnType<
+        typeof actual.resolveVaultDirectClient
+      > | null) ?? actual.resolveVaultDirectClient(...args),
+  };
+});
+
+/**
  * `POST /v1/earn/vault-deposits` — the gates and the idempotency contract.
  *
  * Two of these titles are load-bearing beyond this file:
@@ -302,6 +323,7 @@ afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
   surfacing.forceOn = false;
+  vaultDirectClientOverride.current = null;
   vi.restoreAllMocks();
 });
 
@@ -882,5 +904,96 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
 
     expect(res.status).toBe(503);
     expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `POST /v1/earn/vault-deposit-previews` — the quote the dashboard derives its
+ * `minSharesOut` floor from. A read carrying the deposit's own money-in gates
+ * and the quote capability's fail-closed answers.
+ */
+describe("POST /v1/earn/vault-deposit-previews", () => {
+  function postVaultDepositPreview(body: Record<string, unknown>) {
+    return app.request(
+      "/v1/earn/vault-deposit-previews",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      env
+    );
+  }
+
+  function quoteCapableClient(quote: unknown) {
+    return {
+      buildVaultDeposit: vi.fn(),
+      readVaultPositions: vi.fn(),
+      // Required for the vault-direct capability (PRO-1736); the quote guard
+      // narrows through supportsVaultDirect first.
+      sponsoredPrograms: vi.fn(() => []),
+      quoteVaultDeposit: vi.fn().mockResolvedValue(quote),
+    };
+  }
+
+  it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
+    surfacing.forceOn = true;
+    await seedAuth();
+    const strategy = await seedStrategy({ provider: "veda" });
+    const client = quoteCapableClient({
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [{ code: "DEPOSIT_CAP_EXCEEDED", message: "Cap exceeded" }],
+    });
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({
+      strategyId: strategy.id,
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [{ code: "DEPOSIT_CAP_EXCEEDED", message: "Cap exceeded" }],
+    });
+    expect(client.quoteVaultDeposit).toHaveBeenCalledWith(expect.anything(), {
+      providerReference: strategy.provider_reference,
+      amount: "10",
+    });
+  });
+
+  it("refuses an un-surfaced provider before quoting anything", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ provider: "veda" });
+    const client = quoteCapableClient({ sharesOut: "1", shareDecimals: 6, blockingIssues: [] });
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(403);
+    expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
+  });
+
+  it("answers 501 for a provider that cannot quote, measured against the real client", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(501);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  it("answers 404 for a strategy this workspace cannot see", async () => {
+    await seedAuth();
+
+    const res = await postVaultDepositPreview({ strategyId: "earn_strategy_missing", amount: "1" });
+
+    expect(res.status).toBe(404);
   });
 });
