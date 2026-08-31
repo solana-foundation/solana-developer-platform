@@ -1,7 +1,7 @@
 "use client";
 
 import type { PrivateChannelDto, PrivateChannelPrincipalDto } from "@sdp/types";
-import { Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
+import { IdCardIcon, Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import {
   Table,
@@ -272,7 +274,13 @@ function CreatePrincipalDialog({ isOpen, onClose }: { isOpen: boolean; onClose: 
       onClose={pending ? undefined : onClose}
       size="sm"
     >
-      <div className="space-y-5 p-6">
+      <form
+        className="space-y-6 p-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
         <div className="space-y-1">
           <h2 className="text-lg font-medium tracking-tight text-primary">
             {t("DashboardPrivateChannels.members.createTitle")}
@@ -281,30 +289,27 @@ function CreatePrincipalDialog({ isOpen, onClose }: { isOpen: boolean; onClose: 
             {t("DashboardPrivateChannels.members.createDescription")}
           </p>
         </div>
-        <div className="grid gap-2">
-          <label htmlFor="principal-name" className="text-sm font-medium text-primary">
+        <div className="space-y-2">
+          <Label htmlFor="principal-name">
             {t("DashboardPrivateChannels.members.principalName")}
-          </label>
-          <input
+          </Label>
+          <Input
+            size="xl"
             id="principal-name"
+            iconLeft={<IdCardIcon />}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
             disabled={pending}
             maxLength={64}
             placeholder={t("DashboardPrivateChannels.members.principalNamePlaceholder")}
-            className="w-full rounded-md border border-border-default bg-surface px-3 py-2 text-sm text-primary outline-none focus:border-border-strong"
           />
         </div>
-        <div className="flex items-center justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
+        <div className="flex items-center justify-between gap-3">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
             {t("DashboardPrivateChannels.common.cancel")}
           </Button>
           <Button
-            type="button"
-            onClick={submit}
+            type="submit"
             disabled={name.trim().length < 2 || pending}
             iconLeft={pending ? <Loader2Icon className="animate-spin" /> : undefined}
           >
@@ -313,7 +318,7 @@ function CreatePrincipalDialog({ isOpen, onClose }: { isOpen: boolean; onClose: 
               : t("DashboardPrivateChannels.members.create")}
           </Button>
         </div>
-      </div>
+      </form>
     </Modal>
   );
 }
