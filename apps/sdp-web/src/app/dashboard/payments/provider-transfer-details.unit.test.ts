@@ -1,18 +1,26 @@
+import type { PaymentTransferSummary } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { providerTransferDetailRows } from "./provider-transfer-details";
+
+function transferFixture(overrides: Partial<PaymentTransferSummary>): PaymentTransferSummary {
+  return {
+    id: "xfr_test",
+    status: "completed",
+    signature: null,
+    rampsMemo: {},
+    type: "offramp",
+    provider: "moonpay",
+    ...overrides,
+  };
+}
 
 describe("providerTransferDetailRows", () => {
   it("builds a MoonPay sell receipt from the bound provider transaction id", () => {
     const rows = providerTransferDetailRows(
-      {
+      transferFixture({
         id: "xfr_123",
-        status: "completed",
-        signature: null,
-        rampsMemo: {},
-        type: "offramp",
-        provider: "moonpay",
         providerReference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
-      },
+      }),
       { cluster: "devnet" },
       (key) => key
     );
@@ -29,13 +37,9 @@ describe("providerTransferDetailRows", () => {
     const signature =
       "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
     const rows = providerTransferDetailRows(
-      {
+      transferFixture({
         id: "xfr_settled",
-        status: "completed",
         signature,
-        rampsMemo: {},
-        type: "offramp",
-        provider: "moonpay",
         providerReference: "moonpay_transaction",
         settlement: {
           provider: "moonpay",
@@ -52,53 +56,37 @@ describe("providerTransferDetailRows", () => {
           usdRate: 1,
           cryptoTransactionId: signature,
         },
-      },
+      }),
       { cluster: "devnet" },
       (key) => key
     );
 
-    expect(rows).toEqual([
-      {
-        key: "DashboardPayments.transferDetails.receipt",
-        label: "DashboardPayments.transferDetails.receipt",
-        value: "DashboardPayments.transferDetails.viewReceipt",
-        href: "https://buy.moonpay.com/v2/transaction-tracker?transactionId=moonpay_transaction",
-      },
-      {
-        key: "DashboardPayments.transferDetails.providerFee",
-        label: "DashboardPayments.transferDetails.providerFee",
-        value: "2.00 SOL",
-      },
-      {
-        key: "DashboardPayments.transferDetails.networkFee",
-        label: "DashboardPayments.transferDetails.networkFee",
-        value: "0.27 SOL",
-      },
-      {
-        key: "DashboardPayments.transferDetails.exchangeRate",
-        label: "DashboardPayments.transferDetails.exchangeRate",
-        value: "1 USD = 125 SOL",
-      },
-      {
-        key: "DashboardPayments.transferDetails.solanaSignature",
-        label: "DashboardPayments.transferDetails.solanaSignature",
-        value: "5XGAib…iwcM",
-        href: `https://explorer.solana.com/tx/${signature}?cluster=devnet`,
-        copyValue: signature,
-        mono: true,
-      },
+    expect(rows.map(({ key, value }) => [key, value])).toEqual([
+      [
+        "DashboardPayments.transferDetails.receipt",
+        "DashboardPayments.transferDetails.viewReceipt",
+      ],
+      ["DashboardPayments.transferDetails.providerFee", "2.00 SOL"],
+      ["DashboardPayments.transferDetails.networkFee", "0.27 SOL"],
+      ["DashboardPayments.transferDetails.exchangeRate", "1 USD = 125 SOL"],
+      ["DashboardPayments.transferDetails.solanaSignature", "5XGAib…iwcM"],
     ]);
+    expect(rows[0]).toMatchObject({
+      href: "https://buy.moonpay.com/v2/transaction-tracker?transactionId=moonpay_transaction",
+    });
+    expect(rows[4]).toMatchObject({
+      href: `https://explorer.solana.com/tx/${signature}?cluster=devnet`,
+      copyValue: signature,
+      mono: true,
+    });
   });
 
   it("omits unavailable MoonPay receipt and optional settlement rows", () => {
     const rows = providerTransferDetailRows(
-      {
+      transferFixture({
         id: "xfr_partial",
         status: "failed",
-        signature: null,
-        rampsMemo: {},
         type: "onramp",
-        provider: "moonpay",
         providerReference: undefined,
         settlement: {
           provider: "moonpay",
@@ -114,7 +102,7 @@ describe("providerTransferDetailRows", () => {
           areFeesIncluded: true,
           usdRate: 1,
         },
-      },
+      }),
       { cluster: "devnet" },
       (key) => key
     );
@@ -135,15 +123,12 @@ describe("providerTransferDetailRows", () => {
   ] as const)("omits unsupported transfer details", ({ type, provider }) => {
     expect(
       providerTransferDetailRows(
-        {
+        transferFixture({
           id: "xfr_unsupported",
-          status: "completed",
-          signature: null,
-          rampsMemo: {},
           type,
           provider,
           providerReference: undefined,
-        },
+        }),
         { cluster: "devnet" },
         (key) => key
       )

@@ -201,7 +201,7 @@ export interface MoneygramTransferDetails {
 export interface PaymentTransferSummary {
   id: string;
   walletId?: string;
-  status: string;
+  status: PaymentTransferStatus;
   signature: string | null;
   error?: string | null;
   type?: string;

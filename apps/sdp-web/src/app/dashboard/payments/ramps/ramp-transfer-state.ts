@@ -1,14 +1,8 @@
 import type { PaymentTransferStatus } from "@sdp/types";
 
-interface RampTransferState {
-  cancelable: boolean;
-  terminal: boolean;
-}
-
-const UNKNOWN_RAMP_TRANSFER_STATE: RampTransferState = {
-  cancelable: false,
-  terminal: false,
-};
+type RampTransferState =
+  | { cancelable: true; terminal: false }
+  | { cancelable: false; terminal: boolean };
 
 const RAMP_TRANSFER_STATE = {
   pending: { cancelable: true, terminal: false },
@@ -23,9 +17,9 @@ const RAMP_TRANSFER_STATE = {
   expired: { cancelable: false, terminal: true },
 } as const satisfies Record<PaymentTransferStatus, RampTransferState>;
 
-export function getRampTransferState(status: string | undefined): RampTransferState {
-  if (!status || !Object.hasOwn(RAMP_TRANSFER_STATE, status)) {
-    return UNKNOWN_RAMP_TRANSFER_STATE;
+export function getRampTransferState(status: PaymentTransferStatus | undefined) {
+  if (status === undefined) {
+    return { cancelable: false, terminal: false };
   }
-  return RAMP_TRANSFER_STATE[status as PaymentTransferStatus];
+  return RAMP_TRANSFER_STATE[status];
 }

@@ -4,7 +4,6 @@ import type { Counterparty } from "@sdp/types";
 import { motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
@@ -69,11 +68,6 @@ export function RampWizardShell({
         steps={steps}
         currentStep={stepIndex}
         currentStepTitle={completionTitle}
-        titleBadge={
-          completionTitle ? (
-            <Badge variant="success">{t("DashboardPayments.ramps.success")}</Badge>
-          ) : undefined
-        }
         progressLabel={t("DashboardPayments.counterparty.stepProgress", {
           current: stepIndex + 1,
           total: steps.length,

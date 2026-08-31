@@ -28,159 +28,121 @@ interface CompletionDetailRow {
   copyValue?: string;
 }
 
-function isDetailRow(row: CompletionDetailRow | null): row is CompletionDetailRow {
-  return row !== null;
-}
-
-function rampExchangeRate(
-  transfer: PaymentTransferSummary,
-  tokenLabel: string | null | undefined
-): string | null {
-  const cryptoValue = Number(transfer.amount);
-  const fiatValue = Number(transfer.fiatAmount);
-  if (
-    !tokenLabel ||
-    !transfer.fiatCurrency ||
-    !Number.isFinite(cryptoValue) ||
-    cryptoValue <= 0 ||
-    !Number.isFinite(fiatValue)
-  ) {
-    return null;
-  }
-  return `1 ${tokenLabel} = ${formatDisplayAmount(
-    String(fiatValue / cryptoValue),
-    transfer.fiatCurrency.toUpperCase()
-  )}`;
-}
-
-function lightsparkCompletionRows(
+function completionDetailRows(
   quote: PaymentRampQuote,
-  onramp: boolean,
-  t: Translate
-): CompletionDetailRow[] {
-  if (quote.provider !== "lightspark") {
-    return [];
-  }
-  const sendingAmount = formatMinorCurrencyAmount(
-    quote.totalSendingAmount,
-    quote.sendingCurrency.code,
-    quote.sendingCurrency.decimals
-  );
-  const receivingAmount = formatMinorCurrencyAmount(
-    quote.totalReceivingAmount,
-    quote.receivingCurrency.code,
-    quote.receivingCurrency.decimals
-  );
-  return [
-    sendingAmount
-      ? {
-          label: onramp
-            ? t("DashboardPayments.ramps.finalFundedAmount")
-            : t("DashboardPayments.ramps.finalSentAmount"),
-          value: sendingAmount,
-        }
-      : null,
-    receivingAmount
-      ? {
-          label: onramp
-            ? t("DashboardPayments.ramps.finalReceivedAmount")
-            : t("DashboardPayments.ramps.finalPayoutAmount"),
-          value: receivingAmount,
-        }
-      : null,
-  ].filter(isDetailRow);
-}
-
-function offrampDepositRows(
   transfer: PaymentTransferSummary,
   cluster: SolanaCluster,
+  onramp: boolean,
+  tokenLabel: string | null | undefined,
   t: Translate
 ): CompletionDetailRow[] {
-  const rows: (CompletionDetailRow | null)[] = [
-    transfer.signature
-      ? {
-          label: t("DashboardPayments.ramps.depositTransaction"),
-          value: shortenAddress(transfer.signature),
-          href: explorerTxUrl(transfer.signature, cluster),
-          copyValue: transfer.signature,
-        }
-      : null,
-    transfer.destination
-      ? {
-          label: t("DashboardPayments.manualInstructions.depositAddress"),
-          value: shortenAddress(transfer.destination),
-          copyValue: transfer.destination,
-        }
-      : null,
-  ];
-  return rows.filter(isDetailRow);
-}
-
-function completionDetailRows({
-  quote,
-  transfer,
-  cluster,
-  onramp,
-  tokenLabel,
-  t,
-}: {
-  quote: PaymentRampQuote;
-  transfer: PaymentTransferSummary;
-  cluster: SolanaCluster;
-  onramp: boolean;
-  tokenLabel: string | null | undefined;
-  t: Translate;
-}): CompletionDetailRow[] {
-  const exchangeRate = rampExchangeRate(transfer, tokenLabel);
-  const providerRows = providerTransferDetailRows(transfer, { cluster }, t).filter(
-    (row) => !exchangeRate || row.key !== "DashboardPayments.transferDetails.exchangeRate"
-  );
-  const receiptRow = providerRows.find(
-    (row) => row.key === "DashboardPayments.transferDetails.receipt"
-  );
-  const economicsRows = providerRows.filter(
-    (row) => row.key !== "DashboardPayments.transferDetails.receipt"
-  );
-  return [
+  const rows: CompletionDetailRow[] = [
     {
       label: t("DashboardPayments.ramps.provider"),
       value: getRampProviderLabel(quote.provider),
     },
-    transfer.providerReference
-      ? {
-          label: t("DashboardPayments.transferDetails.providerReference"),
-          value: transfer.providerReference,
-          copyValue: transfer.providerReference,
-        }
-      : null,
-    {
-      label: t("DashboardPayments.ramps.transferId"),
-      value: transfer.id,
-      copyValue: transfer.id,
-    },
-    exchangeRate
-      ? {
-          label: t("DashboardPayments.transferDetails.exchangeRate"),
-          value: exchangeRate,
-        }
-      : null,
-    ...economicsRows,
-    ...(onramp ? [] : offrampDepositRows(transfer, cluster, t)),
-    ...lightsparkCompletionRows(quote, onramp, t),
-    transfer.createdAt
-      ? {
-          label: t("DashboardPayments.createdLabel"),
-          value: formatTimestamp(transfer.createdAt, t),
-        }
-      : null,
-    transfer.updatedAt
-      ? {
-          label: t("DashboardPayments.ramps.completed"),
-          value: formatTimestamp(transfer.updatedAt, t),
-        }
-      : null,
-    receiptRow ?? null,
-  ].filter(isDetailRow);
+  ];
+  if (transfer.providerReference) {
+    rows.push({
+      label: t("DashboardPayments.transferDetails.providerReference"),
+      value: transfer.providerReference,
+      copyValue: transfer.providerReference,
+    });
+  }
+  rows.push({
+    label: t("DashboardPayments.ramps.transferId"),
+    value: transfer.id,
+    copyValue: transfer.id,
+  });
+
+  const cryptoValue = Number(transfer.amount);
+  const fiatValue = Number(transfer.fiatAmount);
+  const fiatCurrency = transfer.fiatCurrency;
+  let exchangeRate: string | undefined;
+  if (
+    tokenLabel &&
+    fiatCurrency &&
+    Number.isFinite(cryptoValue) &&
+    cryptoValue > 0 &&
+    Number.isFinite(fiatValue)
+  ) {
+    exchangeRate = `1 ${tokenLabel} = ${formatDisplayAmount(
+      String(fiatValue / cryptoValue),
+      fiatCurrency.toUpperCase()
+    )}`;
+    rows.push({
+      label: t("DashboardPayments.transferDetails.exchangeRate"),
+      value: exchangeRate,
+    });
+  }
+
+  let receiptRow: CompletionDetailRow | undefined;
+  for (const row of providerTransferDetailRows(transfer, { cluster }, t)) {
+    if (row.key === "DashboardPayments.transferDetails.receipt") {
+      receiptRow = row;
+    } else if (!exchangeRate || row.key !== "DashboardPayments.transferDetails.exchangeRate") {
+      rows.push(row);
+    }
+  }
+  if (!onramp && transfer.signature) {
+    rows.push({
+      label: t("DashboardPayments.ramps.depositTransaction"),
+      value: shortenAddress(transfer.signature),
+      href: explorerTxUrl(transfer.signature, cluster),
+      copyValue: transfer.signature,
+    });
+  }
+  if (!onramp && transfer.destination) {
+    rows.push({
+      label: t("DashboardPayments.manualInstructions.depositAddress"),
+      value: shortenAddress(transfer.destination),
+      copyValue: transfer.destination,
+    });
+  }
+  if (quote.provider === "lightspark") {
+    const sendingAmount = formatMinorCurrencyAmount(
+      quote.totalSendingAmount,
+      quote.sendingCurrency.code,
+      quote.sendingCurrency.decimals
+    );
+    const receivingAmount = formatMinorCurrencyAmount(
+      quote.totalReceivingAmount,
+      quote.receivingCurrency.code,
+      quote.receivingCurrency.decimals
+    );
+    if (sendingAmount) {
+      rows.push({
+        label: onramp
+          ? t("DashboardPayments.ramps.finalFundedAmount")
+          : t("DashboardPayments.ramps.finalSentAmount"),
+        value: sendingAmount,
+      });
+    }
+    if (receivingAmount) {
+      rows.push({
+        label: onramp
+          ? t("DashboardPayments.ramps.finalReceivedAmount")
+          : t("DashboardPayments.ramps.finalPayoutAmount"),
+        value: receivingAmount,
+      });
+    }
+  }
+  if (transfer.createdAt) {
+    rows.push({
+      label: t("DashboardPayments.createdLabel"),
+      value: formatTimestamp(transfer.createdAt, t),
+    });
+  }
+  if (transfer.updatedAt) {
+    rows.push({
+      label: t("DashboardPayments.ramps.completed"),
+      value: formatTimestamp(transfer.updatedAt, t),
+    });
+  }
+  if (receiptRow) {
+    rows.push(receiptRow);
+  }
+  return rows;
 }
 
 function TransferDetailRow({
@@ -197,10 +159,10 @@ function TransferDetailRow({
   const t = useTranslations();
   const { copy, copied } = useCopy(1200);
   return (
-    <div className="flex min-h-12 items-center justify-between gap-4 py-2.5">
+    <div className="flex items-center justify-between gap-4">
       <span className="shrink-0 text-sm text-tertiary">{label}</span>
-      {href ? (
-        <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        {href ? (
           <a
             href={href}
             target="_blank"
@@ -210,36 +172,23 @@ function TransferDetailRow({
             {value}
             <ExternalLinkIcon className="size-3.5 shrink-0" />
           </a>
-          {copyValue ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("DashboardPayments.transferDetails.copy", { label })}
-              onClick={() => void copy(copyValue)}
-            >
-              {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-            </Button>
-          ) : null}
-        </span>
-      ) : (
-        <span className="inline-flex min-w-0 items-center gap-1.5">
+        ) : (
           <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
             {value}
           </span>
-          {copyValue ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("DashboardPayments.transferDetails.copy", { label })}
-              onClick={() => void copy(copyValue)}
-            >
-              {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-            </Button>
-          ) : null}
-        </span>
-      )}
+        )}
+        {copyValue ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("DashboardPayments.transferDetails.copy", { label })}
+            onClick={() => void copy(copyValue)}
+          >
+            {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
+          </Button>
+        ) : null}
+      </span>
     </div>
   );
 }
@@ -263,17 +212,9 @@ export function RampCompleteScreen({
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
       : null;
 
-  // onramp: received crypto, funded with fiat. offramp: paid out fiat, sent crypto.
   const primaryAmount = onramp ? cryptoAmount : fiatAmount;
   const secondaryAmount = onramp ? fiatAmount : cryptoAmount;
-  const detailRows = completionDetailRows({
-    quote,
-    transfer,
-    cluster,
-    onramp,
-    tokenLabel,
-    t,
-  });
+  const detailRows = completionDetailRows(quote, transfer, cluster, onramp, tokenLabel, t);
 
   return (
     <section className="w-full overflow-hidden rounded-2xl bg-fill-subtle">
@@ -288,7 +229,7 @@ export function RampCompleteScreen({
           ) : null}
         </div>
       ) : null}
-      <div className="px-5">
+      <div className="space-y-5 p-5">
         {detailRows.map((detail) => (
           <TransferDetailRow
             key={detail.label}

@@ -17,15 +17,13 @@ describe("getRampTransferState", () => {
   ] satisfies [PaymentTransferStatus, boolean, boolean][])(
     "%s maps to cancelable=%s and terminal=%s",
     (status, cancelable, terminal) => {
-      expect(getRampTransferState(status)).toEqual({ cancelable, terminal });
+      const state = getRampTransferState(status);
+      expect(state).toEqual({ cancelable, terminal });
+      expect(state.cancelable && state.terminal).toBe(false);
     }
   );
 
-  it("defaults unknown states to non-cancelable and non-terminal", () => {
+  it("defaults a missing status to non-cancelable and non-terminal", () => {
     expect(getRampTransferState(undefined)).toEqual({ cancelable: false, terminal: false });
-    expect(getRampTransferState("provider_added_a_status")).toEqual({
-      cancelable: false,
-      terminal: false,
-    });
   });
 });
