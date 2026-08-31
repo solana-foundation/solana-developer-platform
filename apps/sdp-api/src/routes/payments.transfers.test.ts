@@ -23,6 +23,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
+import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
 import { buildPaymentTransferFingerprint } from "@/lib/idempotency";
@@ -952,6 +953,7 @@ describe("Payments routes — transfers", () => {
     await policyRepository.claimWalletOperationExecution(walletOperationId, "interrupted-attempt");
 
     const stranded = await createPostgresPaymentsRepository(getDb(env), scope).createTransfer({
+      id: generatePaymentTransferId(),
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
       walletId: TEST_WALLET_ID,
@@ -2169,6 +2171,119 @@ describe("Payments routes — transfers", () => {
         .first<{ status: string; signature: string | null }>();
       expect(row?.status).toBe("confirmed");
       expect(row?.signature).toBeTruthy();
+    });
+
+    it("uses the existing off-ramp row for its on-chain deposit", async () => {
+      const transferId = generatePaymentTransferId();
+      const repository = createPostgresPaymentsRepository(
+        getDb(env),
+        createTenantScope({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+        })
+      );
+      await repository.createTransfer({
+        id: transferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        walletId: TEST_WALLET_ID,
+        counterpartyId: null,
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: null,
+        token: SOL_MINT,
+        amount: "1",
+        memo: null,
+        type: "offramp",
+        direction: "outbound",
+        status: "awaiting_payment",
+        provider: "moonpay",
+        providerReference: "moonpay-ramp-deposit",
+        deliveryMode: "hosted",
+        fiatCurrency: "USD",
+        fiatAmount: "100",
+        providerData: {
+          cryptoDeposit: {
+            destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+            amount: "1.0",
+          },
+        },
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: TEST_API_KEY.id,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      });
+
+      const requestBody = JSON.stringify({
+        transferId,
+        source: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      });
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: requestBody,
+        },
+        env
+      );
+
+      const responseText = await res.text();
+      expect(res.status, responseText).toBe(200);
+      const body = JSON.parse(responseText) as {
+        data: { transfer: { id: string; status: string; signature: string | null } };
+      };
+      expect(body.data.transfer).toMatchObject({
+        id: transferId,
+        status: "settling",
+      });
+      expect(body.data.transfer.signature).toBeTruthy();
+
+      const rows = await getDb(env)
+        .prepare(
+          `SELECT id, status, destination_address, signature, signed_transaction
+           FROM payment_transfers`
+        )
+        .all<{
+          id: string;
+          status: string;
+          destination_address: string | null;
+          signature: string | null;
+          signed_transaction: string | null;
+        }>();
+      expect(rows.results).toHaveLength(1);
+      expect(rows.results[0]).toMatchObject({
+        id: transferId,
+        status: "settling",
+        destination_address: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      expect(rows.results[0]?.signature).toBeTruthy();
+      expect(rows.results[0]?.signed_transaction).toBeTruthy();
+
+      const duplicate = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: requestBody,
+        },
+        env
+      );
+      expect(duplicate.status).toBe(409);
+      const count = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+        .first<{ count: number | string }>();
+      expect(Number(count?.count ?? 0)).toBe(1);
     });
 
     it("persists a signed outbox for an SPL transfer", async () => {

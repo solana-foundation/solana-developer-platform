@@ -31,6 +31,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  packages: read
 
 concurrency:
   group: sdp-api-gcp-deploy-prod
@@ -97,7 +98,7 @@ jobs:
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
        (inputs.image_sha != ''))
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     environment: production
     env:
       PROJECT_ID: solana-developer-platform
@@ -146,28 +147,108 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       - name: Configure Docker for Artifact Registry
-        if: ${{ env.BUILD_IMAGE == 'true' }}
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-      - name: Build and push image
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@31b88efe9de28ae0ffa220711af4b60be9435f6e # v0.4
+
+      - name: Log in to GHCR
         if: ${{ env.BUILD_IMAGE == 'true' }}
-        timeout-minutes: 20
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+
+      # The release image was scanned, built with SLSA provenance + SBOM
+      # attestations, and keyless-signed by release-images.yml. Verify that
+      # signature against the exact release commit and promote the SAME digest
+      # to Artifact Registry (cosign copy carries signatures and attestations),
+      # so prod runs the artifact that was scanned and signed — never a rebuild.
+      - name: Verify and promote release image
+        if: ${{ inputs.release_sha != '' }}
+        timeout-minutes: 75
         run: |
           set -euo pipefail
-          SHA_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${DEPLOY_IMAGE_SHA}"
-          tags=(-t "${SHA_IMAGE}")
-          if [ -n "${RELEASE_TAG}" ]; then
-            VERSION="$(node -p "require('./package.json').version")"
-            VERSION_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${VERSION}"
-            tags+=(-t "${VERSION_IMAGE}")
+          SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
+          # release-images.yml is triggered by the tag push and runs in
+          # parallel with this deploy: wait out the build-and-sign window
+          # before treating a missing tag or signature as a failure.
+          SRC_DIGEST=""
+          for attempt in $(seq 1 130); do
+            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${{ inputs.release_tag }}" 2>/dev/null)"; then
+              break
+            fi
+            echo "release image tag not in GHCR yet (attempt ${attempt}/130); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${SRC_DIGEST}" ]]; then
+            echo "release image ${SRC_BASE}:${{ inputs.release_tag }} never appeared in GHCR." >&2
+            exit 1
           fi
-          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${DEPLOY_IMAGE_SHA}" "${tags[@]}" .
-          docker push "${SHA_IMAGE}"
-          if [ -n "${RELEASE_TAG}" ]; then
-            docker push "${VERSION_IMAGE}"
+          verified=""
+          for attempt in $(seq 1 10); do
+            if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/tags/${{ inputs.release_tag }}" \
+              --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
+              verified=true
+              break
+            fi
+            echo "signature not verifiable yet (attempt ${attempt}/10); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${verified}" ]]; then
+            echo "cosign verification failed for ${SRC_BASE}@${SRC_DIGEST}." >&2
+            exit 1
           fi
+          VERSION="$(node -p "require('./package.json').version")"
+          DEST_BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
+          cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
+          crane tag "${DEST_BASE}@${SRC_DIGEST}" "${VERSION}"
+          echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
+
+      # The merge image was built, scanned, attested, and keyless-signed by
+      # release-images.yml on the push to main. Verify that signature against
+      # this exact commit and promote the SAME digest — merge deploys ship the
+      # identical trust chain as releases, never a rebuild.
+      - name: Verify and promote merge image
+        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
+        timeout-minutes: 45
+        run: |
+          set -euo pipefail
+          SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
+          SRC_DIGEST=""
+          for attempt in $(seq 1 60); do
+            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${DEPLOY_IMAGE_SHA}" 2>/dev/null)"; then
+              break
+            fi
+            echo "merge image not in GHCR yet (attempt ${attempt}/60); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${SRC_DIGEST}" ]]; then
+            echo "merge image ${SRC_BASE}:${DEPLOY_IMAGE_SHA} never appeared in GHCR." >&2
+            exit 1
+          fi
+          verified=""
+          for attempt in $(seq 1 10); do
+            if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/heads/main" \
+              --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
+              verified=true
+              break
+            fi
+            echo "signature not verifiable yet (attempt ${attempt}/10); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${verified}" ]]; then
+            echo "cosign verification failed for ${SRC_BASE}@${SRC_DIGEST}." >&2
+            exit 1
+          fi
+          DEST_BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
+          cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
+          echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
+
 
       - name: Resolve immutable deploy image
         run: |
@@ -189,11 +270,15 @@ jobs:
             echo "Artifact Registry returned an invalid digest for ${tagged_image}." >&2
             exit 1
           fi
+          if [[ -n "${SRC_DIGEST:-}" && "${digest}" != "${SRC_DIGEST}" ]]; then
+            echo "Artifact Registry digest ${digest} does not match the verified release digest ${SRC_DIGEST}." >&2
+            exit 1
+          fi
           echo "IMAGE=${resolved_image}" >> "${GITHUB_ENV}"
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Gate merge deploys on pending migrations
-        if: ${{ env.BUILD_IMAGE == 'true' && inputs.release_sha == '' }}
+        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
         run: |
           set -euo pipefail
           last_release="$(git describe --tags --abbrev=0 --match 'v*')"
@@ -201,6 +286,20 @@ jobs:
             echo "::error::Migrations changed since ${last_release}. Schema changes deploy through a release (migrations stay human-reviewed and human-run); cut the release to ship them, after which merge deploys resume."
             exit 1
           fi
+
+      # Rollback path (workflow_dispatch by git sha): the AR image must carry
+      # the signature copied at its original promotion — release-tag or
+      # merge-to-main identity both satisfy the policy. An image that predates
+      # signed promotion fails here by design; break-glass is documented in the
+      # HOO-991 design note.
+      - name: Verify rollback image signature
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          cosign verify "${IMAGE}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@(refs/tags/v.+|refs/heads/main)$" \
+            --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"
 
       - name: Run database migrations
         if: ${{ inputs.release_sha != '' }}

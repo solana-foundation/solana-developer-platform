@@ -63,6 +63,7 @@ import {
 export async function createPendingBvnkOfframpTransfer(
   c: AppContext,
   input: {
+    transferId: string;
     organizationId: string;
     projectId: string;
     counterpartyId: string;
@@ -76,6 +77,7 @@ export async function createPendingBvnkOfframpTransfer(
 ): Promise<PaymentTransferRow> {
   const apiKey = c.get("apiKey");
   const created = await getPaymentsRepository(c).createTransfer({
+    id: input.transferId,
     organizationId: input.organizationId,
     projectId: input.projectId,
     walletId: input.walletId,

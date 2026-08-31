@@ -544,6 +544,11 @@ export const createTransferRequestSchema = createTransferSchemaBase
       description: "Project identifier for the transfer context.",
       example: "prj_example",
     }),
+    transferId: withOpenApi(createTransferSchemaBase.shape.transferId, {
+      description:
+        "Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data.",
+      example: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+    }),
     source: withOpenApi(createTransferSchemaBase.shape.source, {
       description: `Source wallet — ${WALLET_ID_INPUT_NOTE}`,
       example: "privy_wallet_123",
@@ -1627,10 +1632,6 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       description: "Fiat amount to on-ramp.",
       example: "100.00",
     }),
-    redirectUrl: withOpenApi(createOnrampQuoteSchemaBase.shape.redirectUrl, {
-      description: "Optional return URL after hosted provider flow completes.",
-      example: "https://example.com/onramp/complete",
-    }),
     rampsMemo: withOpenApi(createOnrampQuoteSchemaBase.shape.rampsMemo, {
       description: "Optional key-value memo stored on the resulting transfer.",
       example: { invoice: "INV-123", po: "PO-9" },
@@ -1646,7 +1647,6 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
-      redirectUrl: "https://example.com/onramp/complete",
     },
   });
 

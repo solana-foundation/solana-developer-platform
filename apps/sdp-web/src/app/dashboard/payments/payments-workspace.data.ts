@@ -32,6 +32,7 @@ import type {
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
+import type { Address } from "@solana/kit";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
@@ -519,14 +520,17 @@ export async function updateWalletPolicy(
   return body.data.policy;
 }
 
+export interface CreateTransferInput {
+  transferId?: string;
+  source: string;
+  destination: string;
+  token: Address;
+  amount: string;
+  memo?: string;
+}
+
 export async function createTransfer(
-  input: {
-    source: string;
-    destination: string;
-    token: string;
-    amount: string;
-    memo?: string;
-  },
+  input: CreateTransferInput,
   t: Translate
 ): Promise<TransferRecord> {
   const response = await fetch("/api/dashboard/payments/transfers", {
@@ -535,6 +539,7 @@ export async function createTransfer(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
+      ...(input.transferId ? { transferId: input.transferId } : {}),
       source: input.source,
       destination: input.destination,
       token: input.token,
@@ -542,8 +547,8 @@ export async function createTransfer(
       ...(input.memo ? { memo: input.memo } : {}),
     }),
   });
-  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
     throw new Error(
       getApiError(
         body,
@@ -552,6 +557,7 @@ export async function createTransfer(
     );
   }
 
+  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!body.data?.transfer) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }

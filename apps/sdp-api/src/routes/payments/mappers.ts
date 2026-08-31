@@ -1,4 +1,4 @@
-import type { RampTransferSettlement } from "@sdp/types";
+import type { RampCryptoDeposit, RampTransferSettlement } from "@sdp/types";
 import {
   isRampTransferType,
   type PaymentTransferRow as TransferRow,
@@ -52,6 +52,7 @@ export function mapTransferRow(row: TransferRow) {
   }
 
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
+  const cryptoDeposit = row.provider_data.cryptoDeposit as RampCryptoDeposit | null | undefined;
   const moneygram = mapMoneygramTransferDetails(row);
   return {
     ...base,
@@ -61,6 +62,7 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
+    ...(cryptoDeposit ? { cryptoDeposit } : {}),
     ...(moneygram ? { moneygram } : {}),
   };
 }

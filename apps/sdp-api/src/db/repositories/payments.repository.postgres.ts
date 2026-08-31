@@ -10,7 +10,7 @@ import type {
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { generatePaymentTransferId, WALLET_TRANSFER_TYPES } from "./payments.repository";
+import { WALLET_TRANSFER_TYPES } from "./payments.repository";
 
 function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
@@ -253,7 +253,7 @@ export function createPostgresPaymentsRepository(
            RETURNING *`
         )
         .bind(
-          generatePaymentTransferId(),
+          input.id,
           input.organizationId,
           input.projectId,
           input.walletId,
@@ -427,6 +427,60 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async updateOnchainTransferForRamp(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "type = 'offramp'",
+          "direction = 'outbound'",
+          "status = 'awaiting_payment'",
+          "wallet_id = ?",
+          "source_address = ?",
+          "token = ?",
+          "amount::numeric = ?::numeric",
+          "provider_data #>> '{cryptoDeposit,destinationAddress}' = ?",
+          "(provider_data #>> '{cryptoDeposit,amount}')::numeric = ?::numeric",
+          "destination_address IS NULL",
+          "signature IS NULL",
+          "serialized_tx IS NULL",
+          "signed_transaction IS NULL",
+          "last_valid_block_height IS NULL",
+          "submission_started_at IS NULL",
+          "slot IS NULL",
+          "block_time IS NULL",
+          "fee IS NULL",
+        ],
+        extraValues: [
+          input.transferId,
+          input.walletId,
+          input.sourceAddress,
+          input.token,
+          input.amount,
+          input.destinationAddress,
+          input.amount,
+        ],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET destination_address = ?,
+               initiated_by_key_id = ?,
+               status = 'processing',
+               error = NULL,
+               updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *`
+        )
+        .bind(input.destinationAddress, input.initiatedByKeyId, input.updatedAt, ...scope.values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async markTransferSubmissionStarted(input) {
       assertScope(input);
       const scope = buildTransferScopeWhere({
@@ -468,6 +522,18 @@ export function createPostgresPaymentsRepository(
 
       const assignments = ["status = ?", "updated_at = ?"];
       const assignmentValues: unknown[] = [input.toStatus, input.updatedAt];
+      if (input.sourceAddress !== undefined) {
+        assignments.push("source_address = ?");
+        assignmentValues.push(input.sourceAddress);
+      }
+      if (input.destinationAddress !== undefined) {
+        assignments.push("destination_address = ?");
+        assignmentValues.push(input.destinationAddress);
+      }
+      if (input.signature !== undefined) {
+        assignments.push("signature = ?");
+        assignmentValues.push(input.signature);
+      }
       if (input.amount !== undefined) {
         assignments.push("amount = ?");
         assignmentValues.push(input.amount);
@@ -580,6 +646,27 @@ export function createPostgresPaymentsRepository(
       const row = await db
         .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
         .bind(...scope.values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async setProviderReferenceIfEmpty(input) {
+      const clauses = ["id = ?", "provider = ?"];
+      const values: unknown[] = [input.transferId, input.provider];
+      if (tenantScope) {
+        clauses.push("organization_id = ?", "project_id IS NOT DISTINCT FROM ?");
+        values.push(tenantScope.organizationId, tenantScope.projectId);
+      }
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET provider_reference = ?, updated_at = ?
+           WHERE ${clauses.join(" AND ")}
+             AND (provider_reference IS NULL OR provider_reference = ?)
+           RETURNING *`
+        )
+        .bind(input.providerReference, input.updatedAt, ...values, input.providerReference)
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;

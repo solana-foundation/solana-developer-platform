@@ -162,7 +162,7 @@ export const TEST_MOONPAY_SECRET_KEY = "moonpay_secret_key";
 
 export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
-const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
 const TEST_LIGHTSPARK_GRID_CLIENT_ID = "lightspark_token_id";
 

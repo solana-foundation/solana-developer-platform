@@ -37,12 +37,6 @@ import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export function isTerminalRampTransferStatus(status: string) {
-  return (
-    status === "completed" || status === "failed" || status === "expired" || status === "canceled"
-  );
-}
-
 export type RampWizardStep<TId extends string = string> = {
   id: TId;
   label: string;

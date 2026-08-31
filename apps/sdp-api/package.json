@@ -101,7 +101,7 @@
     "@types/node": "26.1.2",
     "@types/pg": "8.21.0",
     "@types/react": "19.2.18",
-    "@vitest/coverage-istanbul": "4.1.10",
+    "@vitest/coverage-v8": "4.1.10",
     "esbuild": "0.28.1",
     "openapi3-ts": "4.6.1",
     "pino-pretty": "13.1.3",

@@ -40,9 +40,10 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import type {
-  PaymentTransferRow,
-  PaymentTransferStatus,
+import {
+  generatePaymentTransferId,
+  type PaymentTransferRow,
+  type PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
@@ -58,7 +59,6 @@ import {
   redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
-import { assertApprovedRampRedirectUrl } from "@/lib/ramps/redirect-destinations";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -223,6 +223,7 @@ interface RampQuotePolicyResolved {
 }
 
 interface PersistRampQuoteTransferInput {
+  transferId: string;
   scope: ResolvedScope;
   projectId: string;
   counterparty: CounterpartyRow;
@@ -273,7 +274,6 @@ async function resolveRampQuoteRequest(
   walletIdOrAddress: string
 ): Promise<RampQuotePolicyResolved> {
   assertRampCorridorSupported(direction, input);
-  assertApprovedRampRedirectUrl(c.env, input.redirectUrl);
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
 
@@ -448,6 +448,7 @@ async function persistRampQuoteTransfer(
   let created: PaymentTransferRow | null;
   try {
     created = await repository.createTransfer({
+      id: input.transferId,
       organizationId: binding.organizationId,
       projectId: binding.projectId,
       walletId: binding.walletId,
@@ -682,18 +683,76 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
 
   await beginApprovedWalletOperationEffect(c);
 
+  // Requirements/policy have succeeded. Reserve the ID now so the provider
+  // quote and the eventual ledger row share the same internal transfer ID.
+  const reservedTransferId = generatePaymentTransferId();
   let quote: PaymentRampQuote;
+  let precreatedTransferId: string | undefined;
   let transferProviderData: Record<string, unknown> | undefined;
   switch (input.provider) {
     case "moonpay": {
-      quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
+      const apiKey = c.get("apiKey");
+      const pendingTransfer = await getPaymentsRepository(c).createTransfer({
+        id: reservedTransferId,
+        organizationId: scope.auth.organizationId,
+        projectId,
+        walletId: destinationWallet.walletId,
+        counterpartyId: counterparty.id,
+        sourceAddress: null,
+        destinationAddress: destinationWalletAddress,
+        token: rampTransferTokenMint(input.cryptoToken, c.env),
+        amount: null,
+        memo: null,
+        type: "onramp",
+        direction: "inbound",
+        status: "pending",
+        provider: "moonpay",
+        providerReference: null,
+        deliveryMode: null,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
-        destinationWalletAddress,
-        externalCustomerId: counterparty.id,
-        redirectUrl: input.redirectUrl,
+        rampsMemo: input.rampsMemo,
+        providerData: {},
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: apiKey ? apiKey.id : null,
       });
+      if (!pendingTransfer) {
+        throw internalError("Failed to create MoonPay on-ramp transfer record");
+      }
+      precreatedTransferId = pendingTransfer.id;
+      try {
+        quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(rampRuntime(c), {
+          cryptoToken: input.cryptoToken,
+          fiatCurrency: input.fiatCurrency,
+          fiatAmount: input.fiatAmount,
+          destinationWalletAddress,
+          externalCustomerId: counterparty.id,
+          paymentTransferId: pendingTransfer.id,
+        });
+        const updated = await getPaymentsRepository(c).updateTransfer({
+          transferId: pendingTransfer.id,
+          organizationId: scope.auth.organizationId,
+          projectId,
+          status: rampQuoteTransferStatus(quote),
+          deliveryMode: quote.deliveryMode,
+          updatedAt: new Date().toISOString(),
+        });
+        if (!updated) {
+          throw internalError("Failed to complete MoonPay on-ramp transfer record");
+        }
+      } catch (error) {
+        await getPaymentsRepository(c).updateTransfer({
+          transferId: pendingTransfer.id,
+          organizationId: scope.auth.organizationId,
+          projectId,
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
       break;
     }
     case "lightspark": {
@@ -708,7 +767,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
         customerId,
-        redirectUrl: input.redirectUrl,
       });
       break;
     }
@@ -780,25 +838,29 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
   }
 
-  const transferId = await persistRampQuoteTransfer(c, {
-    scope,
-    projectId,
-    counterparty,
-    quote,
-    direction: "onramp",
-    wallet: destinationWallet,
-    walletAddress: destinationWalletAddress,
-    cryptoToken: input.cryptoToken,
-    cryptoAmount: null,
-    fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
-    fiatAmount: input.fiatAmount,
-    rampsMemo: input.rampsMemo,
-    providerData: transferProviderData,
-  });
+  const transferId = precreatedTransferId
+    ? precreatedTransferId
+    : await persistRampQuoteTransfer(c, {
+        transferId: reservedTransferId,
+        scope,
+        projectId,
+        counterparty,
+        quote,
+        direction: "onramp",
+        wallet: destinationWallet,
+        walletAddress: destinationWalletAddress,
+        cryptoToken: input.cryptoToken,
+        cryptoAmount: null,
+        fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
+        fiatAmount: input.fiatAmount,
+        rampsMemo: input.rampsMemo,
+        providerData: transferProviderData,
+      });
 
   return success(c, { quote, transferId });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: provider dispatch keeps each off-ramp integration explicit, including its persistence and failure semantics.
 export async function createOfframpQuote(c: AppContext): Promise<Response> {
   const {
     body: input,
@@ -813,18 +875,76 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
 
   await beginApprovedWalletOperationEffect(c);
 
+  // Requirements/policy have succeeded. Reserve the ID now so the provider
+  // quote and the eventual ledger row share the same internal transfer ID.
+  const reservedTransferId = generatePaymentTransferId();
   let quote: PaymentRampQuote;
+  let precreatedTransferId: string | undefined;
   let pendingTransfer: PaymentTransferRow | undefined;
   switch (input.provider) {
     case "moonpay": {
-      quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOfframpQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        cryptoAmount: input.cryptoAmount,
-        sourceWalletAddress,
-        externalCustomerId: counterparty.id,
-        redirectUrl: input.redirectUrl,
+      const apiKey = c.get("apiKey");
+      const pendingMoonpayTransfer = await getPaymentsRepository(c).createTransfer({
+        id: reservedTransferId,
+        organizationId: scope.auth.organizationId,
+        projectId,
+        walletId: sourceWallet.walletId,
+        counterpartyId: counterparty.id,
+        sourceAddress: sourceWalletAddress,
+        destinationAddress: null,
+        token: rampTransferTokenMint(input.cryptoToken, c.env),
+        amount: input.cryptoAmount,
+        memo: null,
+        type: "offramp",
+        direction: "outbound",
+        status: "pending",
+        provider: "moonpay",
+        providerReference: null,
+        deliveryMode: null,
+        fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
+        fiatAmount: null,
+        rampsMemo: input.rampsMemo,
+        providerData: {},
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: apiKey ? apiKey.id : null,
       });
+      if (!pendingMoonpayTransfer) {
+        throw internalError("Failed to create MoonPay off-ramp transfer record");
+      }
+      precreatedTransferId = pendingMoonpayTransfer.id;
+      try {
+        quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOfframpQuote(rampRuntime(c), {
+          cryptoToken: input.cryptoToken,
+          fiatCurrency: input.fiatCurrency,
+          cryptoAmount: input.cryptoAmount,
+          sourceWalletAddress,
+          externalCustomerId: counterparty.id,
+          paymentTransferId: pendingMoonpayTransfer.id,
+        });
+        const updated = await getPaymentsRepository(c).updateTransfer({
+          transferId: pendingMoonpayTransfer.id,
+          organizationId: scope.auth.organizationId,
+          projectId,
+          status: rampQuoteTransferStatus(quote),
+          deliveryMode: quote.deliveryMode,
+          updatedAt: new Date().toISOString(),
+        });
+        if (!updated) {
+          throw internalError("Failed to complete MoonPay off-ramp transfer record");
+        }
+      } catch (error) {
+        await getPaymentsRepository(c).updateTransfer({
+          transferId: pendingMoonpayTransfer.id,
+          organizationId: scope.auth.organizationId,
+          projectId,
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
       break;
     }
     case "lightspark": {
@@ -867,6 +987,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         throw counterpartyNotProvisioned("bvnk", "offramp");
       }
       pendingTransfer = await createPendingBvnkOfframpTransfer(c, {
+        transferId: reservedTransferId,
         organizationId: scope.auth.organizationId,
         projectId,
         counterpartyId: counterparty.id,
@@ -936,8 +1057,11 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       status: rampQuoteTransferStatus(quote),
     });
     transferId = pendingTransfer.id;
+  } else if (precreatedTransferId) {
+    transferId = precreatedTransferId;
   } else {
     transferId = await persistRampQuoteTransfer(c, {
+      transferId: reservedTransferId,
       scope,
       projectId,
       counterparty,
