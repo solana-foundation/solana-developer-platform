@@ -38,7 +38,7 @@ function withoutPsqlCommands(sql: string): string {
     .join("\n");
 }
 
-it("catches up exactly-one pins and audits unresolved or mismatched identity", async () => {
+it("catches up exact recurring wallet pins and audits identity plus rollback blockers", async () => {
   const client = new Client({ connectionString: env.DATABASE_URL });
   await client.connect();
 
@@ -67,6 +67,25 @@ it("catches up exactly-one pins and audits unresolved or mismatched identity", a
       after_values JSONB NOT NULL DEFAULT '{}'::jsonb,
       status TEXT NOT NULL, stage TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
+    )`);
+    await client.query(`CREATE TEMP TABLE payment_recurring_payment_activation_attempts (
+      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL,
+      recurring_payment_id TEXT NOT NULL, status TEXT NOT NULL, stage TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
+    )`);
+    await client.query(`CREATE TEMP TABLE payment_recurring_payment_lifecycle_attempts (
+      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL,
+      recurring_payment_id TEXT NOT NULL, operation TEXT NOT NULL,
+      status TEXT NOT NULL, stage TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
+    )`);
+    await client.query(`CREATE TEMP TABLE wallet_operations (
+      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT,
+      operation_type TEXT NOT NULL, status TEXT NOT NULL, custody_wallet_id TEXT
+    )`);
+    await client.query(`CREATE TEMP TABLE approval_requests (
+      id TEXT PRIMARY KEY, wallet_operation_id TEXT NOT NULL,
+      status TEXT NOT NULL
     )`);
 
     await client.query(`INSERT INTO custody_configs (id, organization_id, project_id) VALUES
@@ -123,6 +142,48 @@ it("catches up exactly-one pins and audits unresolved or mismatched identity", a
        ARRAY['sourceWalletId'], '{"sourceWalletId":"provider_project"}'::jsonb,
        'failed', 'claim')`);
 
+    await client.query(`INSERT INTO payment_recurring_payments
+      (id, organization_id, project_id, source_custody_wallet_id,
+       source_wallet_id, source_address, status) VALUES
+      ('rp_updating', 'org_a', 'prj_a', 'cw_project',
+       'provider_project', 'addr_project', 'updating'),
+      ('rp_canceling', 'org_a', 'prj_a', 'cw_project',
+       'provider_project', 'addr_project', 'canceling'),
+      ('rp_resuming', 'org_a', 'prj_a', 'cw_project',
+       'provider_project', 'addr_project', 'resuming')`);
+    await client.query(`INSERT INTO payment_recurring_payment_activation_attempts
+      (id, organization_id, project_id, recurring_payment_id, status, stage) VALUES
+      ('activation_processing', 'org_a', 'prj_a', 'rp_project', 'processing', 'create_plan'),
+      ('activation_confirmed', 'org_a', 'prj_a', 'rp_project', 'confirmed', 'finalize')`);
+    await client.query(`INSERT INTO payment_recurring_payment_update_attempts
+      (id, organization_id, project_id, recurring_payment_id,
+       new_source_custody_wallet_id, status, stage) VALUES
+      ('update_processing', 'org_a', 'prj_a', 'rp_updating',
+       'cw_project', 'processing', 'update_plan')`);
+    await client.query(`INSERT INTO payment_recurring_payment_lifecycle_attempts
+      (id, organization_id, project_id, recurring_payment_id,
+       operation, status, stage) VALUES
+      ('lifecycle_processing', 'org_a', 'prj_a', 'rp_canceling',
+       'cancel', 'processing', 'submit'),
+      ('lifecycle_failed', 'org_a', 'prj_a', 'rp_resuming',
+       'resume', 'failed', 'submit')`);
+    await client.query(`INSERT INTO wallet_operations
+      (id, organization_id, project_id, operation_type, status) VALUES
+      ('operation_pending', 'org_a', 'prj_a', 'recurring_payment_create', 'pending_approval'),
+      ('operation_executing', 'org_a', 'prj_a', 'recurring_payment_update', 'executing'),
+      ('operation_collection', 'org_a', 'prj_a', 'recurring_payment_collection', 'executing'),
+      ('operation_terminal', 'org_a', 'prj_a', 'recurring_payment_collection', 'completed'),
+      ('operation_rejected', 'org_a', 'prj_a', 'recurring_payment_create', 'pending_approval'),
+      ('operation_other', 'org_a', 'prj_a', 'payment_transfer_execute', 'pending_approval')`);
+    await client.query(`INSERT INTO approval_requests
+      (id, wallet_operation_id, status) VALUES
+      ('approval_pending', 'operation_pending', 'pending'),
+      ('approval_approved', 'operation_executing', 'approved'),
+      ('approval_collection', 'operation_collection', 'approved'),
+      ('approval_terminal', 'operation_terminal', 'approved'),
+      ('approval_rejected', 'operation_rejected', 'rejected'),
+      ('approval_other', 'operation_other', 'pending')`);
+
     const auditSql = readFileSync(auditPath, "utf8");
     await client.query(withoutPsqlCommands(auditSql));
     const mismatchRows = await client.query<{ id: string; resource: string }>(
@@ -134,7 +195,7 @@ it("catches up exactly-one pins and audits unresolved or mismatched identity", a
         { custody_wallet_id: "cw_foreign", id: "update_foreign", resource: "update_attempt" },
       ])
     );
-    expect((await client.query(auditSection(auditSql, "2a."))).rows).toEqual([
+    expect((await client.query(auditSection(auditSql, "2a.", "3."))).rows).toEqual([
       {
         id: "update_legacy_missing",
         organization_id: "org_a",
@@ -150,6 +211,100 @@ it("catches up exactly-one pins and audits unresolved or mismatched identity", a
         recurring_payment_id: "rp_project",
         stage: "claim",
         status: "failed",
+      },
+    ]);
+    expect((await client.query(auditSection(auditSql, "3.", "4."))).rows).toEqual([
+      {
+        id: "rp_canceling",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        status: "canceling",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "rp_project",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        status: "activating",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "rp_resuming",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        status: "resuming",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "rp_updating",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        status: "updating",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+    expect((await client.query(auditSection(auditSql, "4.", "5."))).rows).toEqual([
+      {
+        attempt_kind: "activation",
+        id: "activation_processing",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        recurring_payment_id: "rp_project",
+        stage: "create_plan",
+        status: "processing",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        attempt_kind: "lifecycle",
+        id: "lifecycle_processing",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        recurring_payment_id: "rp_canceling",
+        stage: "submit",
+        status: "processing",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        attempt_kind: "update",
+        id: "update_processing",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        recurring_payment_id: "rp_updating",
+        stage: "update_plan",
+        status: "processing",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+    expect((await client.query(auditSection(auditSql, "5."))).rows).toEqual([
+      {
+        approval_request_id: "approval_collection",
+        approval_status: "approved",
+        custody_wallet_id: null,
+        operation_status: "executing",
+        operation_type: "recurring_payment_collection",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        wallet_operation_id: "operation_collection",
+      },
+      {
+        approval_request_id: "approval_approved",
+        approval_status: "approved",
+        custody_wallet_id: null,
+        operation_status: "executing",
+        operation_type: "recurring_payment_update",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        wallet_operation_id: "operation_executing",
+      },
+      {
+        approval_request_id: "approval_pending",
+        approval_status: "pending",
+        custody_wallet_id: null,
+        operation_status: "pending_approval",
+        operation_type: "recurring_payment_create",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        wallet_operation_id: "operation_pending",
       },
     ]);
   } finally {

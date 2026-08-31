@@ -1,6 +1,6 @@
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { WalletOperationActor, WalletOperationType } from "@sdp/types";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
@@ -37,13 +37,14 @@ interface PendingCollectionApprovalRow {
  */
 async function findPendingCollectionApproval(input: {
   env: Env;
+  db?: DatabaseExecutor;
   organizationId: string;
   projectId: string;
   custodyWalletId: string;
   recurringPaymentId: string;
   collectionDueAt: string;
 }): Promise<PendingCollectionApprovalRow | null> {
-  return getDb(input.env)
+  return (input.db ?? getDb(input.env))
     .prepare(
       `SELECT wo.id AS wallet_operation_id,
               pe.id AS policy_evaluation_id,
@@ -80,6 +81,7 @@ async function findPendingCollectionApproval(input: {
 
 export async function assertNoPendingRecurringCollectionApproval(input: {
   env: Env;
+  db?: DatabaseExecutor;
   organizationId: string;
   projectId: string;
   custodyWalletId: string;

@@ -1434,6 +1434,80 @@ async function recordRecurringPaymentUpdateFailure(input: {
   }
 }
 
+async function claimSourceChangingRecurringPaymentUpdate(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  sourceWallet: CustodyWallet;
+  updatedAt: string;
+  staleBefore: string;
+}): Promise<PaymentRecurringPaymentRow | null> {
+  return getDb(input.env).transaction(async (tx) => {
+    const locked = await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+            AND status = ?
+            AND updated_at = ?
+            AND source_custody_wallet_id = ?
+            AND source_wallet_id = ?
+            AND source_address = ?
+            AND subscription_id IS NOT DISTINCT FROM ?
+            AND next_collection_due_at IS NOT DISTINCT FROM ?
+          FOR UPDATE`
+      )
+      .bind(
+        input.recurringPayment.id,
+        input.organizationId,
+        input.projectId,
+        input.recurringPayment.status,
+        input.recurringPayment.updated_at,
+        input.sourceWallet.id,
+        input.sourceWallet.walletId,
+        input.sourceWallet.publicKey,
+        input.recurringPayment.subscription_id,
+        input.recurringPayment.next_collection_due_at
+      )
+      .first<{ id: string }>();
+    if (!locked) return null;
+
+    if (input.recurringPayment.subscription_id && input.recurringPayment.next_collection_due_at) {
+      const activeAttempt = await createPostgresPaymentSubscriptionsRepository(
+        tx
+      ).getCollectionAttemptByDue({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        subscriptionId: input.recurringPayment.subscription_id,
+        dueAt: input.recurringPayment.next_collection_due_at,
+        statuses: ["pending", "processing", "confirmed"],
+      });
+      if (activeAttempt) return null;
+    }
+
+    await assertNoPendingRecurringCollectionApproval({
+      env: input.env,
+      db: tx,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      custodyWalletId: input.sourceWallet.id,
+      recurringPaymentId: input.recurringPayment.id,
+      collectionDueAt: input.recurringPayment.next_collection_due_at,
+    });
+
+    return createPostgresPaymentRecurringPaymentsRepository(tx).claimRecurringPaymentUpdate({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      updatedAt: input.updatedAt,
+      staleBefore: input.staleBefore,
+    });
+  });
+}
+
 export async function updateRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -1535,13 +1609,25 @@ export async function updateRecurringPayment(input: {
   }
 
   const recoveringStaleUpdate = settled.recurringPayment.status === "updating";
-  const claimed = await recurringRepo.claimRecurringPaymentUpdate({
-    recurringPaymentId: settled.recurringPayment.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    updatedAt: new Date().toISOString(),
-    staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
-  });
+  const claimUpdatedAt = new Date().toISOString();
+  const staleBefore = getRecurringPaymentOperationStaleBefore(nowIso);
+  const claimed = sourceChanged
+    ? await claimSourceChangingRecurringPaymentUpdate({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment: settled.recurringPayment,
+        sourceWallet: input.sourceWallet,
+        updatedAt: claimUpdatedAt,
+        staleBefore,
+      })
+    : await recurringRepo.claimRecurringPaymentUpdate({
+        recurringPaymentId: settled.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        updatedAt: claimUpdatedAt,
+        staleBefore,
+      });
   if (!claimed) {
     throw new AppError("CONFLICT", "Recurring payment update is already processing");
   }

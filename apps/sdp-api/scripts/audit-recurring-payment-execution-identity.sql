@@ -120,3 +120,47 @@ WHERE changed_fields && ARRAY['sourceCustodyWalletId', 'sourceWalletId']::TEXT[]
   AND new_source_custody_wallet_id IS NULL
 ORDER BY organization_id, id
 LIMIT 100;
+
+\echo '=== 3. Transitional Recurring Payment parents (must be zero before rollback) ==='
+SELECT id, organization_id, project_id, status, updated_at
+FROM payment_recurring_payments
+WHERE status IN ('activating', 'updating', 'canceling', 'resuming')
+ORDER BY organization_id, project_id, id;
+
+\echo '=== 4. Processing Recurring Payment attempts (must be zero before rollback) ==='
+SELECT 'activation'::TEXT AS attempt_kind,
+       id, organization_id, project_id, recurring_payment_id, status, stage, updated_at
+FROM payment_recurring_payment_activation_attempts
+WHERE status = 'processing'
+UNION ALL
+SELECT 'update'::TEXT,
+       id, organization_id, project_id, recurring_payment_id, status, stage, updated_at
+FROM payment_recurring_payment_update_attempts
+WHERE status = 'processing'
+UNION ALL
+SELECT 'lifecycle'::TEXT,
+       id, organization_id, project_id, recurring_payment_id, status, stage, updated_at
+FROM payment_recurring_payment_lifecycle_attempts
+WHERE status = 'processing'
+ORDER BY attempt_kind, organization_id, project_id, id;
+
+\echo '=== 5. Incompatible unfinished Recurring Payment Approvals (must be zero before rollback) ==='
+SELECT operation.id AS wallet_operation_id,
+       operation.organization_id,
+       operation.project_id,
+       operation.operation_type,
+       operation.status AS operation_status,
+       operation.custody_wallet_id,
+       approval.id AS approval_request_id,
+       approval.status AS approval_status
+FROM wallet_operations operation
+JOIN approval_requests approval
+  ON approval.wallet_operation_id = operation.id
+WHERE operation.operation_type IN (
+        'recurring_payment_create',
+        'recurring_payment_update',
+        'recurring_payment_collection'
+      )
+  AND operation.status IN ('pending_approval', 'executing')
+  AND approval.status IN ('pending', 'approved')
+ORDER BY operation.organization_id, operation.id, approval.id;
