@@ -131,6 +131,7 @@
       "columnVerifiedWallets": "Wallets đã xác minh",
       "columnChannels": "Kênh",
       "columnActions": "Thao tác",
+      "principalActionsFor": "Thao tác cho {principal}",
       "verifiedCount": "{count} đã xác minh",
       "defaultPrincipal": "Mặc định",
       "additionalPrincipal": "Bổ sung",

@@ -119,6 +119,7 @@
       "columnVerifiedWallets": "Wallets verificadas",
       "columnChannels": "Canales",
       "columnActions": "Acciones",
+      "principalActionsFor": "Acciones para {principal}",
       "verifiedCount": "Verificadas: {count}",
       "defaultPrincipal": "Predeterminada",
       "additionalPrincipal": "Adicional",

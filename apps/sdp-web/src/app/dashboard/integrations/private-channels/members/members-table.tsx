@@ -1,7 +1,7 @@
 "use client";
 
 import type { PrivateChannelDto, PrivateChannelPrincipalDto } from "@sdp/types";
-import { Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
+import { EllipsisIcon, Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -62,7 +62,6 @@ export function MembersTable({ principals, channels }: Props) {
           <TableHeader>
             <TableRow>
               <TableHead>{t("DashboardPrivateChannels.members.columnPrincipal")}</TableHead>
-              <TableHead>{t("DashboardPrivateChannels.members.columnType")}</TableHead>
               <TableHead>{t("DashboardPrivateChannels.members.columnVerifiedWallets")}</TableHead>
               <TableHead>{t("DashboardPrivateChannels.members.columnChannels")}</TableHead>
               <TableHead className="text-right">
@@ -121,15 +120,6 @@ function PrincipalRow({
     <TableRow className={cn(disabled && "opacity-55")}>
       <TableCell className="text-sm">{principal.name}</TableCell>
       <TableCell>
-        <span className="inline-flex rounded-full bg-fill-subtle px-2.5 py-1 text-xs text-secondary">
-          {principal.isDefault
-            ? t("DashboardPrivateChannels.members.defaultPrincipal")
-            : disabled
-              ? t("DashboardPrivateChannels.members.disabledPrincipal")
-              : t("DashboardPrivateChannels.members.additionalPrincipal")}
-        </span>
-      </TableCell>
-      <TableCell>
         <WalletCountBadge count={principal.verifiedWalletCount} />
       </TableCell>
       <TableCell>
@@ -155,20 +145,50 @@ function PrincipalRow({
       </TableCell>
       <TableCell className="text-right">
         {!principal.isDefault && !disabled ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onDisable}
+          <PrincipalActionsMenu
+            principalName={principal.name}
             disabled={pending}
-            aria-label={t("DashboardPrivateChannels.members.disable")}
-            title={t("DashboardPrivateChannels.members.disable")}
-          >
-            <PowerIcon />
-          </Button>
+            onDisable={onDisable}
+          />
         ) : null}
       </TableCell>
     </TableRow>
+  );
+}
+
+function PrincipalActionsMenu({
+  principalName,
+  disabled,
+  onDisable,
+}: {
+  principalName: string;
+  disabled: boolean;
+  onDisable: () => void;
+}) {
+  const t = useTranslations();
+
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          aria-label={t("DashboardPrivateChannels.members.principalActionsFor", {
+            principal: principalName,
+          })}
+          disabled={disabled}
+        >
+          <EllipsisIcon className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem onSelect={onDisable}>
+          <PowerIcon className="h-4 w-4" />
+          {t("DashboardPrivateChannels.members.disable")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

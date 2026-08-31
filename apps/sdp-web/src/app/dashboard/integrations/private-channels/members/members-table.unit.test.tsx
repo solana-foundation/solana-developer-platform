@@ -2,6 +2,7 @@
 
 import type { PrivateChannelPrincipalDto } from "@sdp/types";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -44,13 +45,17 @@ afterEach(cleanup);
 describe("Private Channels principals table", () => {
   it("shows the automatic default principal", () => {
     renderTable(principalFixture());
-    expect(screen.getAllByText("Default")).toHaveLength(2);
+    expect(screen.getByText("Default")).toBeDefined();
     expect(screen.getByText("1 principal for this project.")).toBeDefined();
+    expect(screen.queryByRole("columnheader", { name: "Type" })).toBeNull();
   });
 
-  it("shows an additional named principal", () => {
+  it("shows a named principal with an action menu", async () => {
+    const user = userEvent.setup();
     renderTable(principalFixture({ name: "EU treasury", isDefault: false }));
+
     expect(screen.getByText("EU treasury")).toBeDefined();
-    expect(screen.getByText("Additional")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Actions for EU treasury" }));
+    expect(screen.getByRole("menuitem", { name: "Disable" })).toBeDefined();
   });
 });

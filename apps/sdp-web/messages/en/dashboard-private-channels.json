@@ -131,6 +131,7 @@
       "columnVerifiedWallets": "Verified wallets",
       "columnChannels": "Channels",
       "columnActions": "Actions",
+      "principalActionsFor": "Actions for {principal}",
       "verifiedCount": "{count} verified",
       "defaultPrincipal": "Default",
       "additionalPrincipal": "Additional",
