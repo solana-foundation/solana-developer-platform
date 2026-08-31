@@ -45,14 +45,17 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
   try {
     await client.query("BEGIN");
     await client.query(`CREATE TEMP TABLE custody_configs (
-      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT
+      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active'
     )`);
     await client.query(`CREATE TEMP TABLE custody_connections (
-      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL
+      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active'
     )`);
     await client.query(`CREATE TEMP TABLE custody_wallets (
       id TEXT PRIMARY KEY, custody_config_id TEXT, custody_connection_id TEXT,
-      wallet_id TEXT NOT NULL, public_key TEXT NOT NULL
+      wallet_id TEXT NOT NULL, public_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active'
     )`);
     await client.query(`CREATE TEMP TABLE payment_recurring_payments (
       id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL,
@@ -101,6 +104,10 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
       ('cw_duplicate_a', 'cfg_project', NULL, 'provider_duplicate', 'addr_duplicate'),
       ('cw_duplicate_b', 'cfg_duplicate', NULL, 'provider_duplicate', 'addr_duplicate'),
       ('cw_foreign', 'cfg_foreign', NULL, 'provider_foreign', 'addr_foreign')`);
+    await client.query(`INSERT INTO custody_wallets
+      (id, custody_config_id, wallet_id, public_key, status) VALUES
+      ('cw_rebound_old', 'cfg_project', 'provider_rebound', 'addr_rebound', 'inactive'),
+      ('cw_rebound_new', 'cfg_duplicate', 'provider_rebound', 'addr_rebound', 'active')`);
     await client.query(`INSERT INTO payment_recurring_payments
       (id, organization_id, project_id, source_custody_wallet_id,
        source_wallet_id, source_address, status) VALUES
@@ -109,6 +116,10 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
        'provider_connection', 'addr_connection', 'active'),
       ('rp_ambiguous', 'org_a', 'prj_a', NULL,
        'provider_duplicate', 'addr_duplicate', 'active'),
+      ('rp_pinned_ambiguous', 'org_a', 'prj_a', 'cw_duplicate_a',
+       'provider_duplicate', 'addr_duplicate', 'active'),
+      ('rp_pinned_rebound', 'org_a', 'prj_a', 'cw_rebound_old',
+       'provider_rebound', 'addr_rebound', 'active'),
       ('rp_mismatched', 'org_a', 'prj_a', 'cw_foreign',
        'provider_project', 'addr_project', 'active')`);
 
@@ -126,6 +137,8 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
       { id: "rp_ambiguous", source_custody_wallet_id: null },
       { id: "rp_connection", source_custody_wallet_id: "cw_connection" },
       { id: "rp_mismatched", source_custody_wallet_id: "cw_foreign" },
+      { id: "rp_pinned_ambiguous", source_custody_wallet_id: "cw_duplicate_a" },
+      { id: "rp_pinned_rebound", source_custody_wallet_id: "cw_rebound_old" },
       { id: "rp_project", source_custody_wallet_id: "cw_project" },
     ]);
 
@@ -186,6 +199,48 @@ it("catches up exact recurring wallet pins and audits identity plus rollback blo
 
     const auditSql = readFileSync(auditPath, "utf8");
     await client.query(withoutPsqlCommands(auditSql));
+    expect((await client.query(auditSection(auditSql, "1b.", "2."))).rows).toEqual([
+      {
+        evidence_match_count: 2,
+        id: "rp_ambiguous",
+        legacy_custody_wallet_id: null,
+        organization_id: "org_a",
+        project_id: "prj_a",
+        provider_match_count: 2,
+        source_custody_wallet_id: null,
+        status: "active",
+      },
+      {
+        evidence_match_count: 1,
+        id: "rp_mismatched",
+        legacy_custody_wallet_id: "cw_project",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        provider_match_count: 1,
+        source_custody_wallet_id: "cw_foreign",
+        status: "active",
+      },
+      {
+        evidence_match_count: 2,
+        id: "rp_pinned_ambiguous",
+        legacy_custody_wallet_id: null,
+        organization_id: "org_a",
+        project_id: "prj_a",
+        provider_match_count: 2,
+        source_custody_wallet_id: "cw_duplicate_a",
+        status: "active",
+      },
+      {
+        evidence_match_count: 1,
+        id: "rp_pinned_rebound",
+        legacy_custody_wallet_id: "cw_rebound_new",
+        organization_id: "org_a",
+        project_id: "prj_a",
+        provider_match_count: 1,
+        source_custody_wallet_id: "cw_rebound_old",
+        status: "active",
+      },
+    ]);
     const mismatchRows = await client.query<{ id: string; resource: string }>(
       auditSection(auditSql, "2.", "2a.")
     );

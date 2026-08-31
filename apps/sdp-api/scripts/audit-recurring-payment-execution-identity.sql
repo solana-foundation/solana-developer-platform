@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
--- Read-only cutover and rollback audit. Retained wallet history participates
--- in identity matching; wallet status is intentionally not filtered.
+-- Read-only cutover and rollback audit. Cutover identity matching retains wallet
+-- history; rollback checks mirror the legacy resolver's active-record filters.
 
 \echo '=== 1. Null Recurring Payment identities by exactly-one resolution ==='
 WITH wallet_scope AS (
@@ -62,6 +62,50 @@ WITH wallet_scope AS (
 SELECT id, organization_id, project_id, status, match_count
 FROM resolutions
 WHERE match_count <> 1
+ORDER BY organization_id, id
+LIMIT 100;
+
+\echo '=== 1b. Rollback-incompatible recurring wallet resolution (must be zero before rollback) ==='
+WITH legacy_wallet_scope AS (
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_configs config ON config.id = wallet.custody_config_id
+  WHERE wallet.status = 'active' AND config.status = 'active'
+  UNION ALL
+  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
+         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+  FROM custody_wallets wallet
+  JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
+  WHERE wallet.status = 'active' AND connection.status = 'active'
+), resolutions AS (
+  SELECT recurring.id, recurring.organization_id, recurring.project_id,
+         recurring.source_custody_wallet_id, recurring.status,
+         CASE WHEN COUNT(wallet.id) = 1 THEN MIN(wallet.id) END
+           AS legacy_custody_wallet_id,
+         COUNT(wallet.id)::INTEGER AS provider_match_count,
+         COUNT(wallet.id) FILTER (
+           WHERE wallet.public_key = recurring.source_address
+         )::INTEGER AS evidence_match_count
+  FROM payment_recurring_payments recurring
+  LEFT JOIN legacy_wallet_scope wallet
+    ON wallet.organization_id = recurring.organization_id
+   AND ((wallet.owner_kind = 'config'
+         AND (wallet.project_id = recurring.project_id OR wallet.project_id IS NULL))
+     OR (wallet.owner_kind = 'connection'
+         AND wallet.project_id = recurring.project_id))
+   AND wallet.wallet_id = recurring.source_wallet_id
+  GROUP BY recurring.id, recurring.organization_id, recurring.project_id,
+           recurring.source_custody_wallet_id, recurring.status
+)
+SELECT id, organization_id, project_id, source_custody_wallet_id,
+       legacy_custody_wallet_id, status,
+       provider_match_count, evidence_match_count
+FROM resolutions
+WHERE provider_match_count <> 1
+   OR evidence_match_count <> 1
+   OR (source_custody_wallet_id IS NOT NULL
+       AND legacy_custody_wallet_id IS DISTINCT FROM source_custody_wallet_id)
 ORDER BY organization_id, id
 LIMIT 100;
 

@@ -1066,7 +1066,8 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
     sourceCustodyWalletId: withOpenApi(
       createRecurringPaymentSchemaBase.shape.sourceCustodyWalletId,
       {
-        description: "Exact SDP Wallet ID that will fund the recurring payment.",
+        description:
+          "Exact SDP Wallet ID (`id` from `GET /v1/wallets`) that will fund the recurring payment. Provider `walletId`, wallet addresses, and the legacy `sourceWalletId` selector are not accepted.",
         example: "cwlt_example",
       }
     ),
@@ -1114,7 +1115,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
       updateRecurringPaymentSchemaBase.shape.sourceCustodyWalletId,
       {
         description:
-          "Optional exact replacement SDP Wallet ID. Active replacements require write access to both the old and new source wallets.",
+          "Optional exact replacement SDP Wallet ID (`id` from `GET /v1/wallets`). Provider `walletId`, wallet addresses, and the legacy `sourceWalletId` selector are not accepted. Active replacements require write access to both the old and new source wallets.",
         example: "cwlt_example",
       }
     ),
