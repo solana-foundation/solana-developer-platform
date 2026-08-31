@@ -555,9 +555,15 @@ export interface EarnExternalWalletMovementResponse {
  * - `live_value_unavailable`: the provider could not hydrate current value.
  * - `movements_pending`: a movement is still settling, so live value and the
  *   ledger describe different moments.
- * - `withdrawals_not_valued`: the wallet has a finalized withdrawal, and the
- *   ledger records exits in shares, not in the deposit token, so no exact
- *   token-denominated earned figure exists (ADR 0002).
+ * - `withdrawals_not_valued`: a currently held position has a finalized
+ *   withdrawal, and the ledger records exits in shares, not in the deposit
+ *   token, so no exact token-denominated earned figure exists (ADR 0002).
+ *
+ * Every earnings figure covers the wallet's CURRENTLY HELD positions: a fully
+ * exited position drops out entirely (its deposits leave `totalDeposited`
+ * along with its unvalued withdrawal), so one full exit does not withhold the
+ * open positions' earned forever. The exited history stays on the movements
+ * list.
  */
 export type EarnExternalWalletEarnedUnavailableReason =
   | "live_value_unavailable"

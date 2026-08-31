@@ -733,9 +733,16 @@ three).
   token payout at settlement is the follow-up that would close this).
   Token-level `earned` is computed as Σlive − Σdeposited, which equals the
   per-position sum, and is withheld whenever ANY contributing position cannot
-  state it — never partial. The ADR 0002 hydration caveat applies at full
-  strength: live value reads the owner's WHOLE vault balance, so shares
-  acquired outside SDP inflate `earned`; documented property, not a bug.
+  state it — never partial. **Figures cover CURRENTLY HELD positions only**: a
+  fully exited position drops out entirely — its deposits leave
+  `totalDeposited` along with its unvalued withdrawal — because consuming its
+  history would report `withdrawals_not_valued` forever after any full exit,
+  while the open positions' earned is perfectly exact. The exited history
+  stays on the movements list; pinned by the closed-vault test in
+  `../earn.external-wallet-activity.test.ts`. The ADR 0002 hydration caveat
+  applies at full strength: live value reads the owner's WHOLE vault balance,
+  so shares acquired outside SDP inflate `earned`; documented property, not a
+  bug.
   This read does not blend sources for one figure: `totalDeposited` is ledger,
   `currentValue` is live, and `earned` is openly their difference — that is
   its definition, not a violation of the one-source rule.

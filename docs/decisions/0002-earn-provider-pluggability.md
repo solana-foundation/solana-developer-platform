@@ -1099,6 +1099,17 @@ named `earnedUnavailableReason`, never a zero:
   the rent-funder residual above) and is deliberately follow-up work, not
   part of this change.
 
+Scope: every figure covers the wallet's **currently held positions**. A fully
+exited position drops out entirely — its deposits leave `totalDeposited`
+along with its unvalued withdrawal, so the token stays internally consistent —
+because consuming closed positions' history would answer
+`withdrawals_not_valued` forever after any full exit, permanently withholding
+an earned figure that is exact for what the wallet still holds. The exited
+history remains fully visible on the movements list, and the
+`withdrawals_not_valued` reason therefore describes a withdrawal on a HELD
+position (a partial exit, or a closed-and-re-entered vault, whose claim row is
+reused).
+
 The token-level figure is Σlive − Σdeposited (identical to the per-position
 sum) and is withheld when ANY contributing position cannot state it — the
 never-partial rule the position summary already follows. The live-hydration

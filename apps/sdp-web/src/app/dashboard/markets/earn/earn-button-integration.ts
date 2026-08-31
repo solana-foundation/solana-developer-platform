@@ -37,9 +37,13 @@ function sdpHeaders(extra: Record<string, string> = {}) {
 
 async function sdpFetch(path: string, init?: RequestInit) {
   const response = await fetch(\`\${SDP_API_URL}\${path}\`, init);
-  const result = await response.json();
+  // An error body is not always JSON (a gateway 502, an empty 503), so parse
+  // defensively and keep the status in the thrown message either way.
+  const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(result?.error?.message ?? \`SDP request failed: \${path}\`);
+    throw new Error(
+      result?.error?.message ?? \`SDP request failed: \${path} (\${response.status})\`
+    );
   }
   return result.data;
 }

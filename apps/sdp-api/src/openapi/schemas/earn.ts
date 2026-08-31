@@ -377,8 +377,8 @@ const earnExternalWalletTokenEarningsSchema = z
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "or a finalized withdrawal exists (the ledger records exits in shares, so no exact " +
-          "token-denominated earned figure exists once money has gone out).",
+          "or a currently held position has a finalized withdrawal (the ledger records exits in " +
+          "shares, so no exact token-denominated earned figure exists once money has gone out).",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

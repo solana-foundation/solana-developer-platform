@@ -101,14 +101,16 @@ async function seedPosition(input: {
   label: string;
   organizationId?: string;
   projectId?: string;
+  /** A fully exited holding; the position lists exclude it absent a re-entry. */
+  closedAt?: string;
 }): Promise<string> {
   const positionId = generateEarnPositionId();
   await getDb(env)
     .prepare(
       `INSERT INTO earn_positions (
          id, organization_id, project_id, environment, provider, kind,
-         owner_address, vault_address, share_mint, token_mint, label, activated_at
-       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, ?, sdp_iso_now())`
+         owner_address, vault_address, share_mint, token_mint, label, activated_at, closed_at
+       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, ?, sdp_iso_now(), ?)`
     )
     .bind(
       positionId,
@@ -118,7 +120,8 @@ async function seedPosition(input: {
       input.vaultAddress,
       SHARE,
       input.tokenMint,
-      input.label
+      input.label,
+      input.closedAt ?? null
     )
     .run();
   return positionId;
@@ -293,15 +296,18 @@ describe("external-wallet activity", () => {
     expect(finalized.data.movements).toHaveLength(2);
   });
 
-  it("pages with a keyset cursor and never overlaps", async () => {
+  it("pages with a keyset cursor and never overlaps, including same-instant rows", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
       tokenMint: USDC,
       label: "USDC vault",
     });
+    // Two rows share one created_at on purpose: a same-instant batch is where
+    // a cursor without the id tie-break would skip or repeat a row.
     for (const [index, createdAt] of [
       "2026-08-27T00:00:00.000Z",
+      "2026-08-28T00:00:00.000Z",
       "2026-08-28T00:00:00.000Z",
       "2026-08-29T00:00:00.000Z",
     ].entries()) {
@@ -330,8 +336,8 @@ describe("external-wallet activity", () => {
       cursor = page.data.nextCursor;
     } while (cursor);
 
-    expect(seen).toHaveLength(3);
-    expect(new Set(seen).size).toBe(3);
+    expect(seen).toHaveLength(4);
+    expect(new Set(seen).size).toBe(4);
   });
 
   it.each([
@@ -699,6 +705,81 @@ describe("external-wallet earnings", () => {
       earnedUnavailableReason: "withdrawals_not_valued",
     });
     expect(token).not.toHaveProperty("earned");
+  });
+
+  it("scopes earned to current holdings: a fully exited vault's history drops out", async () => {
+    // Owner fully exited vault A (finalized deposit + withdrawal, position
+    // closed) and holds open vault B in the SAME token. Earned is stated
+    // exactly from B alone: A's deposits leave totalDeposited along with its
+    // unvalued withdrawal, so the figure stays internally consistent over
+    // what the wallet currently holds. Consuming A's history instead would
+    // report withdrawals_not_valued forever after any full exit. Pinned so a
+    // refactor cannot change the semantic silently (ADR 0002, 2026-08-31).
+    const exited = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-exited",
+      tokenMint: USDC,
+      label: "Exited",
+      closedAt: "2026-08-28T00:00:00.000Z",
+    });
+    await seedMovement({
+      positionId: exited,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-exited",
+      direction: "deposit",
+      status: "finalized",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    });
+    await seedMovement({
+      positionId: exited,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-exited",
+      direction: "withdrawal",
+      status: "finalized",
+      amount: "60",
+      denomination: SHARE,
+      createdAt: "2026-08-28T00:00:00.000Z",
+    });
+    const open = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-open",
+      tokenMint: USDC,
+      label: "Open",
+    });
+    await seedMovement({
+      positionId: open,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-open",
+      direction: "deposit",
+      status: "finalized",
+      amount: "40",
+      denomination: USDC,
+      createdAt: "2026-08-29T00:00:00.000Z",
+    });
+    liveValue({ "vault-usdc-open": "44" });
+
+    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+      data: { earnings: Record<string, unknown> };
+    };
+    expect(body.data.earnings).toMatchObject({
+      positionCount: 1,
+      totalsByToken: [
+        {
+          tokenMint: USDC,
+          positionCount: 1,
+          totalDeposited: "40",
+          currentValue: "44",
+          earned: "4",
+        },
+      ],
+    });
+    // The exited vault's movements stay fully visible on the activity feed.
+    const activity = (await (
+      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
+    ).json()) as { data: { movements: Array<Record<string, unknown>> } };
+    expect(activity.data.movements).toHaveLength(3);
   });
 
   it("ignores failed movements entirely", async () => {

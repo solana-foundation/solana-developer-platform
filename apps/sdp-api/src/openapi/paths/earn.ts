@@ -232,9 +232,11 @@ function registerEarnExternalWalletPaths(
     description:
       "Returns live balance and total earned per deposit token: `earned` is live value minus " +
       "finalized SDP deposits, stated only when exact. When it cannot be stated — live value " +
-      "unavailable, movements still settling, or a finalized withdrawal exists — the figure is " +
-      "absent with a named reason, never zero. Live value reads the owner's whole vault " +
-      "balance, so shares acquired outside SDP inflate it.",
+      "unavailable, movements still settling, or a finalized withdrawal on a held position — " +
+      "the figure is absent with a named reason, never zero. Figures cover currently held " +
+      "positions: a fully exited position's history drops out (it stays on the movements " +
+      "list). Live value reads the owner's whole vault balance, so shares acquired outside " +
+      "SDP inflate it.",
     security,
     request: {
       headers: projectScopeHeaders,

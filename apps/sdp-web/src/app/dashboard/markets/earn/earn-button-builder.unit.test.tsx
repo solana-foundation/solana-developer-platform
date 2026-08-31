@@ -203,6 +203,9 @@ describe("EarnButtonBuilder", () => {
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawals");
     expect(code).toContain("earnedUnavailableReason");
+    // A non-JSON error body (gateway 502 HTML) must still throw with the
+    // status, not a bare SyntaxError, in the code partners copy-paste.
+    expect(code).toContain("response.status");
 
     // The customer preview carries the Deel-shape savings card: balance,
     // total earned, deposit + withdraw, activity.
