@@ -243,11 +243,15 @@ page it links is fetchable as raw markdown):
   sandbox rows render no rate. Computing one would mean blending devnet Klend
   reserve rates (an SDK-sized job) for a number that is ≈0 anyway.
 - **The registry is permissionless**, so `GET /kvaults/vaults` is a census of
-  everything ever created — 170 vaults, of which ~90 stablecoin ones are dust or
+  everything ever created — 173 vaults, of which ~90 stablecoin ones are dust or
   literal test vaults (`testfail4`, `vkjm_test`). `KAMINO_MIN_TVL_USD` ($100k)
-  is the admission floor; 21 vaults clear it. Review a change to that number
+  is the admission floor; 25 vaults clear it (2026-08-31, after PYUSD joined the
+  deposit set). Review a change to that number
   against `pnpm --filter @sdp/api earn:inventory:kamino`, which regenerates
   docs/earn/kamino-catalogue-inventory.md including the largest near-misses.
+  Note admission is only what the SYNC stores: the strategy routes additionally
+  apply the PRO-1727 curated allowlists (`routes/earn/handlers/curation.ts` in
+  apps/sdp-api), so the browsable shelf is six vaults on mainnet, not 25.
 
   Permissionless also means **the vault NAME is attacker-controlled** — free
   text chosen by whoever called `createVaultIxs`. SDP may quote it (it is the

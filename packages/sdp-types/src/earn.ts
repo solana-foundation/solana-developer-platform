@@ -17,11 +17,17 @@ import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
  * new kind is a code change, never a migration.
  */
 
-/** Day-one deposit stablecoins for Earn V1 (confirmed: USDC, USDG, USDT). */
+/**
+ * Deposit stablecoins for Earn V1. The PRD set is USDC, USDG, PYUSD
+ * (PYUSD admitted for the curated Kamino shelf's two Sentora vaults,
+ * PRO-1727); USDT remains from the day-one set and still has catalogued
+ * vaults behind it.
+ */
 export const EARN_DEPOSIT_TOKEN_SYMBOLS = [
   "USDC",
   "USDG",
   "USDT",
+  "PYUSD",
 ] as const satisfies readonly WellKnownTokenSymbol[];
 export type EarnDepositTokenSymbol = (typeof EARN_DEPOSIT_TOKEN_SYMBOLS)[number];
 
