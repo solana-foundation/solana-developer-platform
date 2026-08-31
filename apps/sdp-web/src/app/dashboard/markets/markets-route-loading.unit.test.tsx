@@ -12,8 +12,9 @@ describe("Markets route loading states", () => {
     const markup = renderToStaticMarkup(<Loading />);
 
     expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain("max-w-7xl");
-    expect(markup.match(/animate-pulse/g)).toHaveLength(14);
+    expect(markup).toContain("max-w-[63rem]");
+    expect(markup).toContain("h-[121px]");
+    expect(markup.match(/animate-pulse/g)).toHaveLength(6);
   });
 
   it("preserves the Earn workspace skeleton while configuration loads", () => {
