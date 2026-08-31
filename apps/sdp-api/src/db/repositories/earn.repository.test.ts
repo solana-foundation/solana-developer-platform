@@ -567,6 +567,86 @@ describe("EarnRepository (postgres)", () => {
   });
 
   /**
+   * The PRD ranks the shelf by deposit size (PRO-1732): TVL descending, read
+   * out of the riskMetadata JSON, with no-TVL rows last — never first, and
+   * never fabricated as zero. The order must also be TOTAL, or OFFSET paging
+   * repeats and skips rows across equal-TVL and no-TVL runs.
+   */
+  describe("listStrategies deposit-size ranking", () => {
+    it("orders TVL descending with no-TVL rows last", async () => {
+      const mid = await seedStrategy({
+        providerReference: "vault-mid",
+        riskMetadata: { tvlUsd: 40_000_000 },
+      });
+      const unsized = await seedStrategy({
+        providerReference: "vault-unsized",
+        riskMetadata: {},
+      });
+      const big = await seedStrategy({
+        providerReference: "vault-big",
+        riskMetadata: { tvlUsd: 251_000_000 },
+      });
+      const small = await seedStrategy({
+        providerReference: "vault-small",
+        riskMetadata: { tvlUsd: 3_000_000 },
+      });
+      await freezeCreatedAt("earn_strategies", [mid.id, unsized.id, big.id, small.id]);
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        limit: 10,
+        offset: 0,
+      });
+      expect(total).toBe(4);
+      expect(rows.map((row) => row.id)).toEqual([big.id, mid.id, small.id, unsized.id]);
+    });
+
+    it("pages the ordered set exactly once across equal-TVL and no-TVL runs", async () => {
+      // Three rows tied at one TVL, one above, and two with none — every shape
+      // the tiebreaker has to keep total. created_at is frozen shared, so only
+      // the id tiebreaker separates the ties.
+      const tied: string[] = [];
+      for (let i = 0; i < 3; i += 1) {
+        tied.push(
+          (
+            await seedStrategy({
+              providerReference: `vault-tied-${i}`,
+              riskMetadata: { tvlUsd: 10_000_000 },
+            })
+          ).id
+        );
+      }
+      const top = await seedStrategy({
+        providerReference: "vault-top",
+        riskMetadata: { tvlUsd: 90_000_000 },
+      });
+      const unsized: string[] = [];
+      for (let i = 0; i < 2; i += 1) {
+        unsized.push(
+          (await seedStrategy({ providerReference: `vault-none-${i}`, riskMetadata: {} })).id
+        );
+      }
+      const all = [...tied, top.id, ...unsized];
+      await freezeCreatedAt("earn_strategies", all);
+
+      const expected = [top.id, ...[...tied].sort().reverse(), ...[...unsized].sort().reverse()];
+
+      const seen: string[] = [];
+      for (let offset = 0; offset < expected.length; offset += 2) {
+        const { rows, total } = await repo.listStrategies({
+          environment: "sandbox",
+          limit: 2,
+          offset,
+        });
+        expect(total).toBe(expected.length);
+        seen.push(...rows.map((row) => row.id));
+      }
+      // Windows tile the TVL-DESC order exactly: no duplicates, no gaps.
+      expect(seen).toEqual(expected);
+    });
+  });
+
+  /**
    * The PRO-1742 read scope: a non-production environment stores two cluster
    * sub-shelves, and the strategies route lists exactly one per request —
    * the environment's own by default, the mirrored one on explicit opt-in.

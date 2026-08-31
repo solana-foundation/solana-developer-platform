@@ -80,17 +80,19 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
 
 /**
  * Shared count+page read for the earn list methods (same shape as the
- * payments-family where-builder idiom). Ordering is fixed at newest-first with
- * id as the deterministic tiebreaker — bulk catalogue syncs write many rows in
- * the same instant, so created_at alone would make pages unstable.
+ * payments-family where-builder idiom).
+ *
+ * `ordering` is a literal ORDER BY body (never caller input) and every value
+ * passed must be TOTAL: end it with an `id` tiebreaker, because bulk catalogue
+ * syncs write many rows in the same sdp_iso_now() instant and any prefix of the
+ * sort can tie — a non-total order makes OFFSET pages repeat and skip rows.
+ * Newest-first is the default every history list wants. Programs pass ASC
+ * deliberately: the head of that list must not move when a new program is
+ * created (migration 0056's header explains what breaks if it does).
+ * Strategies pass a TVL-first order — see `listStrategies`.
  */
-/**
- * `order` picks the direction of the (created_at, id) sort — id is always the
- * tiebreaker because bulk rows share sdp_iso_now(). DESC (newest first) is the
- * default every history list wants. Programs pass ASC deliberately: the head of
- * that list must not move when a new program is created (migration 0056's
- * header explains what breaks if it does).
- */
+const NEWEST_FIRST = "created_at DESC, id DESC";
+
 async function selectPage<Row>(
   db: AppDb,
   table: "earn_strategies" | "earn_provider_wallets",
@@ -98,7 +100,7 @@ async function selectPage<Row>(
   bindings: unknown[],
   window: { limit: number; offset: number },
   mapRow: (row: Record<string, unknown>) => Row,
-  order: "ASC" | "DESC" = "DESC"
+  ordering: string = NEWEST_FIRST
 ): Promise<{ rows: Row[]; total: number }> {
   const where = conditions.join(" AND ");
 
@@ -107,7 +109,7 @@ async function selectPage<Row>(
       .prepare(
         `SELECT * FROM ${table}
            WHERE ${where}
-           ORDER BY created_at ${order}, id ${order}
+           ORDER BY ${ordering}
            LIMIT ? OFFSET ?`
       )
       .bind(...bindings, window.limit, window.offset)
@@ -346,7 +348,24 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(pattern, pattern, pattern);
       }
 
-      return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);
+      // The PRD ranks the shelf by deposit size (PRO-1732): TVL descending,
+      // rows with no TVL last — devnet rows carry none by design (the metrics
+      // endpoint is mainnet's), so the sandbox default view falls through to
+      // newest-first. TVL lives in the `riskMetadata` JSON (`tvlUsd`, written
+      // by the sync as a JSON number or absent, never any other type); at a
+      // ~20-row shelf per cluster the cast costs nothing, so it does not earn
+      // its own column. The trailing (created_at, id) keeps the order TOTAL —
+      // equal-TVL and no-TVL rows would otherwise make OFFSET pages repeat and
+      // skip rows.
+      return selectPage(
+        db,
+        "earn_strategies",
+        conditions,
+        bindings,
+        input,
+        mapStrategyRow,
+        `(risk_metadata->>'tvlUsd')::numeric DESC NULLS LAST, ${NEWEST_FIRST}`
+      );
     },
 
     async getProviderWalletById(params) {
@@ -371,7 +390,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(input.provider);
       }
 
-      // ASC: oldest first, so the head of the list is stable for a program's
+      // Oldest first, so the head of the list is stable for a program's
       // whole life (migration 0056).
       return selectPage(
         db,
@@ -380,7 +399,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings,
         input,
         mapProviderWalletRow,
-        "ASC"
+        "created_at ASC, id ASC"
       );
     },
 

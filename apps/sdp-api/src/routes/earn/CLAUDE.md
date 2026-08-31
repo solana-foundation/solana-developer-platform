@@ -101,10 +101,20 @@ balance with a live one.
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
-  - **FOUR visibility filters, all server-side, all in `handlers/strategies.ts`.**
+  - **The list is ranked by deposit size** (PRO-1732): TVL descending, read from
+    `riskMetadata.tvlUsd` in SQL, no-TVL rows last (devnet rows carry none by
+    design), with (created_at, id) keeping the order total so paging cannot
+    repeat or skip a row. Lives in the repository's `listStrategies`, beside the
+    filters, so `total` and the window describe the same ordered set.
+  - **FOUR visibility filters, all server-side, enforced in
+    `handlers/strategies.ts`** (the curation DATA lives in
+    `handlers/curation.ts` so route tests can mock today's picks away — the
+    same rule the surfacing mock in `earn-program.test.ts` follows).
     `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
     not currently OFFER — Ground today, so the shipped catalogue is Kamino only;
-    `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho-related rows. The list
+    `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho/Jupiter-related rows
+    ("jupiter" is the Jupiter Lend exclusion, PRO-1727 — a name term only
+    because no such row exists on any registry to key an address on). The list
     pushes both into SQL (`providers: SURFACED_EARN_PROVIDERS` +
     `excludeRelatedTerms`) so `total` and the page window describe the rows the
     caller can see; `isHiddenStrategy` applies the same two rules to the detail
@@ -114,7 +124,12 @@ balance with a live one.
     shelf: `HIDDEN_VAULTS` (subtractive — drop one vault, the rest keeps flowing
     in) and `CURATED_VAULTS` (a hand-picked allowlist — a provider listed there
     shows ONLY those vaults, so a newly created one does not appear until someone
-    adds it). Both push into SQL so `total` moves with the rows.
+    adds it). Both push into SQL so `total` moves with the rows. Since PRO-1727
+    the allowlists are POPULATED — the six-vault V1 Kamino shelf on
+    mainnet-beta, its devnet equivalents for sandbox — so a new Kamino vault
+    does not surface until someone adds it to `handlers/curation.ts`, and
+    every route test seeding an uncurated reference relies on the
+    `earn.test.ts` bypass mock.
   - **Curation keys on the vault ADDRESS, never the name.** Kamino's registry is
     permissionless and the name is free text chosen by whoever created the vault,
     so a name-keyed rule can be dodged by renaming and tripped by impersonating a
