@@ -511,10 +511,10 @@ export const listOfframpCurrenciesQuerySchema = z.object({
   provider: rampProviderSchema.optional(),
 });
 
-export const createTransferSchema = z.object({
+export const createTransferSchema = z.strictObject({
   projectId: z.string().min(1).optional(),
   transferId: z.string().min(1).optional(),
-  source: z.string().min(1),
+  sourceCustodyWalletId: z.string().min(1),
   destination: solanaAddressSchema("destination"),
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
@@ -542,9 +542,8 @@ const transferFilterTimestampSchema = z
   .datetime({ offset: true })
   .transform((value) => new Date(value).toISOString());
 
-export const listTransfersQuerySchema = z.object({
-  wallet: z.string().optional(),
-  walletAddress: z.string().optional(),
+export const listTransfersQuerySchema = z.strictObject({
+  custodyWalletId: z.string().min(1).optional(),
   search: z
     .string()
     .trim()
@@ -578,7 +577,7 @@ export const listTransfersQuerySchema = z.object({
   includeObserved: z
     .enum(["true", "false"])
     .transform((value) => value === "true")
-    .default(true),
+    .default(false),
   sortBy: z.enum(["createdAt", "updatedAt", "amount", "status"]).default("createdAt"),
   sortDirection: z.enum(["asc", "desc"]).default("desc"),
   page: z.coerce.number().int().positive().default(1),
@@ -621,10 +620,10 @@ export const transferBatchOptionsSchema = z.object({
   preflight: z.boolean().optional(),
 });
 
-export const createTransferBatchSchema = z.object({
+export const createTransferBatchSchema = z.strictObject({
   projectId: z.string().min(1).optional(),
   externalId: z.string().min(1).max(256).optional(),
-  source: z.string().min(1),
+  sourceCustodyWalletId: z.string().min(1),
   token: paymentTokenSchema,
   recipients: z.array(transferBatchRecipientSchema).min(1).max(500),
   options: transferBatchOptionsSchema.optional(),
@@ -632,8 +631,8 @@ export const createTransferBatchSchema = z.object({
 
 export const estimateTransferBatchSchema = createTransferBatchSchema;
 
-export const listTransferBatchesQuerySchema = z.object({
-  wallet: z.string().optional(),
+export const listTransferBatchesQuerySchema = z.strictObject({
+  sourceCustodyWalletId: z.string().min(1).optional(),
   token: z.string().optional(),
   status: transferBatchStatusSchema.optional(),
   externalId: z.string().min(1).max(256).optional(),

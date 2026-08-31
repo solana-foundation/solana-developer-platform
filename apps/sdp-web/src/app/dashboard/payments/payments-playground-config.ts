@@ -7,6 +7,7 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 
 export interface PaymentsPlaygroundWalletView {
+  id: string;
   label: string | null;
   publicKey: string;
   walletId: string;
@@ -40,10 +41,21 @@ const examplePolicyRules = [
   },
 ];
 
-function buildWalletOptions(wallets: PaymentsPlaygroundWalletView[]): ApiPlaygroundFieldOption[] {
+function buildProviderWalletOptions(
+  wallets: PaymentsPlaygroundWalletView[]
+): ApiPlaygroundFieldOption[] {
   return wallets.map((wallet) => ({
     value: wallet.walletId,
     label: wallet.label?.trim() ? `${wallet.label} (${wallet.walletId})` : wallet.walletId,
+  }));
+}
+
+function buildCustodyWalletOptions(
+  wallets: PaymentsPlaygroundWalletView[]
+): ApiPlaygroundFieldOption[] {
+  return wallets.map((wallet) => ({
+    value: wallet.id,
+    label: wallet.label?.trim() ? `${wallet.label} (${wallet.id})` : wallet.id,
   }));
 }
 
@@ -98,13 +110,14 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
   const rampProviderOptions = buildRampProviderOptions(t);
-  const walletOptions = buildWalletOptions(wallets);
+  const providerWalletOptions = buildProviderWalletOptions(wallets);
+  const custodyWalletOptions = buildCustodyWalletOptions(wallets);
   const transferOptions = buildTransferOptions(transfers);
   const walletIdField = buildSelectBackedField(
     "walletId",
     "{walletId}",
     t("DashboardPayments.playground.walletIdPlaceholder"),
-    walletOptions
+    providerWalletOptions
   );
   const transferIdField = buildSelectBackedField(
     "transferId",
@@ -112,23 +125,23 @@ export function buildPaymentsPlaygroundEndpointConfigs(
     t("DashboardPayments.playground.transferIdPlaceholder"),
     transferOptions
   );
-  const sourceField = buildSelectBackedField(
-    "source",
-    "source",
+  const sourceCustodyWalletIdField = buildSelectBackedField(
+    "sourceCustodyWalletId",
+    "sourceCustodyWalletId",
     t("DashboardPayments.playground.custodyWalletIdPlaceholder"),
-    walletOptions
+    custodyWalletOptions
   );
   const destinationWalletField = buildSelectBackedField(
     "destinationWallet",
     "destinationWallet",
     t("DashboardPayments.playground.destinationWalletIdPlaceholder"),
-    walletOptions
+    providerWalletOptions
   );
   const sourceWalletField = buildSelectBackedField(
     "sourceWallet",
     "sourceWallet",
     t("DashboardPayments.playground.sourceWalletIdPlaceholder"),
-    walletOptions
+    providerWalletOptions
   );
   const firstWallet = wallets[0];
   const firstTransfer = transfers[0];
@@ -229,7 +242,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       path: "/v1/payments/transfers",
       pathFields: [],
       bodyFields: [
-        sourceField,
+        sourceCustodyWalletIdField,
         {
           key: "destination",
           label: "destination",

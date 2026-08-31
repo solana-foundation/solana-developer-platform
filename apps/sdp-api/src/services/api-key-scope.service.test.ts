@@ -3,9 +3,11 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import {
   assertApiKeyWalletAccess,
+  assertFreshApiKeyCustodyWalletAccess,
   assertGrantableApiKeyPermissions,
   filterApiKeyWallets,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
+  getAllowedApiKeyWalletAuthorizationForPermissions,
   getAllowedApiKeyWalletIds,
   getAllowedApiKeyWalletIdsForPermissions,
   parseWalletBindingPatch,
@@ -132,6 +134,17 @@ describe("api key scope service", () => {
     expect(resolveApiKeyCustodyWalletId(auth, "wal_shared", ["wallets:read"])).toBe("cwal_exact");
   });
 
+  it("fails loudly when paired wallet authorization lacks an exact custody wallet ID", () => {
+    const auth = createApiKeyAuth({
+      walletScope: "selected",
+      walletBindings: [{ walletId: "wal_legacy", permissions: ["payments:read"] }],
+    });
+
+    expect(() =>
+      getAllowedApiKeyWalletAuthorizationForPermissions(auth, ["payments:read"])
+    ).toThrowError(AppError);
+  });
+
   it("fails closed when selected scope has no usable exact binding", () => {
     const auth = createApiKeyAuth({
       walletScope: "selected",
@@ -142,6 +155,117 @@ describe("api key scope service", () => {
     expect(getAllowedApiKeyCustodyWalletIdsForPermissions(auth)).toEqual([]);
     expect(() => resolveApiKeyCustodyWalletId(auth, "wal_unresolved")).toThrowError(AppError);
     expect(() => resolveApiKeySigningWalletId(auth, undefined)).toThrowError(AppError);
+  });
+
+  it("revalidates a cached exact binding before selected-wallet work", async () => {
+    const auth = createApiKeyAuth({
+      projectId: "prj_scope_test",
+      walletScope: "selected",
+      signingWalletId: "wal_shared",
+      signingWalletIds: ["wal_shared"],
+      walletBindings: [
+        {
+          walletId: "wal_shared",
+          custodyWalletId: "cwlt_exact",
+          permissions: ["payments:write"],
+        },
+      ],
+    });
+    const allResponses = [
+      { results: [{ wallet_id: "wal_shared", permissions: '["payments:write"]' }] },
+      {
+        results: [
+          { custody_wallet_id: "cwlt_exact", wallet_id: "wal_shared" },
+          { custody_wallet_id: "cwlt_duplicate", wallet_id: "wal_shared" },
+        ],
+      },
+    ];
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({ signing_wallet_id: "wal_shared" }),
+          all: async () => allResponses.shift(),
+        }),
+      }),
+    } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
+
+    await expect(
+      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("does not authorize an exact row through a colliding Provider wallet ID", async () => {
+    const auth = createApiKeyAuth({
+      projectId: "prj_scope_test",
+      walletScope: "selected",
+      signingWalletId: "cwlt_exact",
+      signingWalletIds: ["cwlt_exact"],
+      walletBindings: [
+        {
+          walletId: "cwlt_exact",
+          custodyWalletId: "cwlt_other",
+          permissions: ["payments:write"],
+        },
+      ],
+    });
+    const allResponses = [
+      { results: [{ wallet_id: "cwlt_exact", permissions: '["payments:write"]' }] },
+      { results: [{ custody_wallet_id: "cwlt_other", wallet_id: "cwlt_exact" }] },
+    ];
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({ signing_wallet_id: "cwlt_exact" }),
+          all: async () => allResponses.shift(),
+        }),
+      }),
+    } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
+
+    await expect(
+      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("authorizes an exact row regardless of a preceding Provider wallet ID collision", async () => {
+    const auth = createApiKeyAuth({
+      projectId: "prj_scope_test",
+      walletScope: "selected",
+      signingWalletId: "wal_exact",
+      signingWalletIds: ["wal_exact"],
+      walletBindings: [
+        {
+          walletId: "wal_exact",
+          custodyWalletId: "cwlt_exact",
+          permissions: ["payments:write"],
+        },
+      ],
+    });
+    const allResponses = [
+      {
+        results: [
+          { wallet_id: "cwlt_exact", permissions: '["payments:write"]' },
+          { wallet_id: "wal_exact", permissions: '["payments:write"]' },
+        ],
+      },
+      {
+        results: [
+          { custody_wallet_id: "cwlt_other", wallet_id: "cwlt_exact" },
+          { custody_wallet_id: "cwlt_exact", wallet_id: "wal_exact" },
+        ],
+      },
+    ];
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({ signing_wallet_id: "wal_exact" }),
+          all: async () => allResponses.shift(),
+        }),
+      }),
+    } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
+
+    await expect(
+      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
+    ).resolves.toBeUndefined();
   });
 
   it("requires an explicit wallet when the preferred binding is unresolved", () => {

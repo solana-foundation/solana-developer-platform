@@ -155,7 +155,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        source: sourceWallet.walletId,
+        sourceCustodyWalletId: sourceWallet.id,
         token: "SOL",
         recipients: accountIds.map((counterpartyAccountId, index) => ({
           externalId: `batch-integration-recipient-${index}`,

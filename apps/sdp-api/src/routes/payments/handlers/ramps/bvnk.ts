@@ -67,6 +67,7 @@ export async function createPendingBvnkOfframpTransfer(
     organizationId: string;
     projectId: string;
     counterpartyId: string;
+    custodyWalletId: string;
     walletId: string;
     walletAddress: string;
     cryptoToken: string;
@@ -80,6 +81,7 @@ export async function createPendingBvnkOfframpTransfer(
     id: input.transferId,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    custodyWalletId: input.custodyWalletId,
     walletId: input.walletId,
     counterpartyId: input.counterpartyId,
     sourceAddress: input.walletAddress,

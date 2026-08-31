@@ -202,7 +202,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -H "Content-Type: application/json" \
   -d '{
     "externalId": "payroll_2026_06_30",
-    "source": "privy_wallet_123",
+    "sourceCustodyWalletId": "cwlt_example",
     "token": "USDC",
     "recipients": [
       {
@@ -2524,7 +2524,9 @@ SDP payments move value between Solana accounts: a custody wallet sends tokens t
 
 Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp quote endpoints use the same shape for every provider: `destinationWallet` (onramp) or `sourceWallet` (offramp) is a custody wallet you control, passed as its wallet ID or its Solana address. Provider-specific identifiers (customer id, payout account) are resolved server-side from the **Counterparty**'s Provider Requirements, not passed on the request — see [Ramps](/docs/payments/ramps).
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
+
+Ramp quote endpoints use the same public shape for every provider: `destinationWallet` (onramp) or `sourceWallet` (offramp) identifies a custody wallet you control by its provider wallet ID or Solana address. Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements — see [Ramps](/docs/payments/ramps).
 
 ## Tokens and token accounts
 
@@ -2563,7 +2565,7 @@ Outbound wallet transfers start at `processing` and move to `confirmed` → `fin
 
 ## What SDP does and does not give you
 
-SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: status polling, filtered lists, wallet-level balances, and a UNIQUE `signature` on the transfer record for client-side dedup (see [Basic payment → Deduplication](/docs/payments/send-basic-payment#deduplication)). It does **not** ship higher-level commerce primitives — there is no checkout session, payment intent, or invoice object in the API today, no webhooks for settlement events, and payment endpoints do not honor an `Idempotency-Key` header (unlike issuance endpoints). The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
+SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: status polling, filtered lists, wallet-level balances, exact-wallet `Idempotency-Key` replay, and a unique on-chain `signature` once populated (see [Basic payment → Deduplication](/docs/payments/send-basic-payment#deduplication)). It does **not** ship higher-level commerce primitives such as a checkout session or invoice object. The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
 
 ## Related
 
@@ -2581,14 +2583,14 @@ Source: https://platform.solana.com/docs/payments/send-basic-payment
 
 SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**.
 
-The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
+The `sourceCustodyWalletId` field is the exact SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`), resolved server-side from the caller's custody-wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
 
 Transfers are available through the Payments dashboard and the API.
 
 ## Prerequisites
 
 - A deployed token with minted supply
-- A custody wallet to use as the `source`, with a custody signer configured so SDP can sign and submit.
+- A custody wallet to use as `sourceCustodyWalletId`, with a custody signer configured so SDP can sign and submit.
 - An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — `POST /v1/payments/transfers` is gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
 
 ## How it works
@@ -2632,7 +2634,7 @@ Build the request body:
 
 ```typescript title="transfer-request.ts"
 const body = {
-  source: "privy_wallet_123",              // `walletId` from GET /v1/wallets
+  sourceCustodyWalletId: "cwlt_123",    // `id` from GET /v1/wallets
   destination: "7xKXz...9fGh",         // recipient wallet (owner) address
   token: "9aBCd...4eEf",               // onchain mint address
   amount: "100.00",                    // human-readable units
@@ -2669,8 +2671,9 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: payment-invoice-1234" \
   -d '{
-    "source": "privy_wallet_123",
+    "sourceCustodyWalletId": "cwlt_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -2687,9 +2690,10 @@ const response = await fetch(
     headers: {
       "Authorization": "Bearer sk_test_...",
       "Content-Type": "application/json",
+      "Idempotency-Key": "payment-invoice-1234",
     },
     body: JSON.stringify({
-      source: "privy_wallet_123",
+      sourceCustodyWalletId: "cwlt_123",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -2707,9 +2711,10 @@ HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "payment-invoice-1234")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "privy_wallet_123",
+          "sourceCustodyWalletId": "cwlt_123",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -2765,10 +2770,9 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 ## Deduplication
 
-Unlike the issuance endpoints, payments transfer endpoints do not currently honor an `Idempotency-Key` header — retrying a failed transfer request will produce a new `Transfer` record. To guarantee at-most-once execution from the client side:
+Send one stable `Idempotency-Key` per logical payment and reuse it for network retries. An identical request for the same exact `sourceCustodyWalletId` returns the original transfer; reusing the key with a different payload or wallet returns `409`. A request without a key creates a new transfer intent.
 
-1. Persist the SDP `Transfer.id` returned by the first successful response **before** retrying. On retry, skip submission if you already have a transfer ID for that logical payment.
-2. Rely on the on-chain `signature` (UNIQUE across SDP's transfers table) as the cross-source dedup key **once it is populated** on the record. `signature` is filled in when the transaction is submitted to the network, which can lag behind the initial `processing` status — treat its presence (not the `status` value) as the trigger for signature-based dedup.
+Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
 See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
 
@@ -2808,7 +2812,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "privy_wallet_123",
+    "sourceCustodyWalletId": "cwlt_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -2827,7 +2831,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: "privy_wallet_123",
+      sourceCustodyWalletId: "cwlt_123",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -2846,7 +2850,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "privy_wallet_123",
+          "sourceCustodyWalletId": "cwlt_123",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -2896,9 +2900,35 @@ Source: https://platform.solana.com/docs/payments/send-payouts
 
 > Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
 
-A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. SDP does not expose a "batch" object; you call `POST /v1/payments/transfers` once per recipient, tag each transfer with a shared batch identifier, and use `GET /v1/payments/transfers?direction=outbound` to reconcile the run.
+A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the returned transfer IDs.
 
-This page covers the recommended pattern: how to structure the loop, how to deduplicate on retries, and how to confirm every recipient was paid.
+## Native transfer batches
+
+One request creates a durable batch, chunks its recipients into Solana transactions, and returns the batch, recipient, and transfer records:
+
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: payroll-2026-05-14" \
+  -d '{
+    "externalId": "payroll_2026-05-14",
+    "sourceCustodyWalletId": "cwlt_123",
+    "token": "9aBCd...4eEf",
+    "recipients": [
+      {
+        "externalId": "row_4837",
+        "counterpartyId": "cp_4837",
+        "counterpartyAccountId": "cpa_4837",
+        "amount": "150.00"
+      }
+    ]
+  }'
+```
+
+Reuse the same `Idempotency-Key` for retries of that exact request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
+
+The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 
 ## Designing a payout run
 
@@ -2916,10 +2946,12 @@ Send transfers sequentially or in modest concurrency (4–8 in flight); high con
 
 Two layers protect you against double-spends if a worker dies mid-run:
 
-1. **Application-level keys** — persist the SDP transfer ID for each recipient row *before* moving to the next row. On retry, skip rows that already have an associated `Transfer.id`. This is the dedup mechanism you should rely on most.
-2. **Transfer-record uniqueness** — the on-chain `signature` column is `UNIQUE` across the SDP `payment_transfers` table. Each transfer request inserts its own row first and the signature is recorded once the transaction is built/submitted, so a duplicate signature is blocked at the DB layer (the second write errors out) rather than silently merged. Use this as a backstop integrity check, not as your primary dedup — the application-level keys above are what you actually rely on.
+1. **Idempotency keys** — generate one stable `Idempotency-Key` per recipient row and reuse it for retries. An identical request for the same exact source wallet returns the original transfer; reusing the key for a different request returns `409`.
+2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
 
-If your retry path replays a transfer with identical inputs but a fresh request, SDP builds a new transaction with a new recent blockhash, which means a new signature. The application-level key — persisted recipient → transfer ID mapping — is what prevents the recipient from being paid twice in that case.
+The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.
+
+Using a fresh idempotency key creates a new transfer intent, even if the payload is otherwise identical.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -2927,8 +2959,9 @@ If your retry path replays a transfer with identical inputs but a fresh request,
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: payout-row-4837" \
   -d '{
-    "source": "privy_wallet_123",
+    "sourceCustodyWalletId": "cwlt_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "150.00",
@@ -2948,9 +2981,10 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
       headers: {
         "Authorization": "Bearer sk_test_...",
         "Content-Type": "application/json",
+        "Idempotency-Key": row.idempotencyKey,
       },
       body: JSON.stringify({
-        source: row.sourceWallet,
+        sourceCustodyWalletId: row.sourceCustodyWalletId,
         destination: row.destination,
         token: row.token,
         amount: row.amount,
@@ -2972,14 +3006,15 @@ HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
+    .header("Idempotency-Key", idempotencyKey)
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "%s",
+          "sourceCustodyWalletId": "%s",
           "destination": "%s",
           "token": "%s",
           "amount": "%s",
           "memo": "%s/row_%s"
-        }""".formatted(sourceWallet, destination, token, amount, batchId, rowId)))
+        }""".formatted(sourceCustodyWalletId, destination, token, amount, batchId, rowId)))
     .build();
 ```
 </Tab>
@@ -3029,7 +3064,7 @@ Per-transfer outcomes you should expect to handle:
 
 - **`failed`** — the transaction was built and submitted but the network rejected it (insufficient funds, frozen account, expired blockhash). The `error` field on the transfer record explains what reached the chain. The recipient was not paid; you can retry by submitting a new transfer.
 - **`pending` past the expected confirmation window** — usually a backend or RPC hiccup. Re-poll with `GET /v1/payments/transfers/{id}` rather than re-submitting; you only want a new transfer if `status` settles to `failed`.
-- **Mid-run worker crash** — application-level keys (persisted recipient → transfer ID) are how you resume safely. Skip rows that already have a `Transfer.id` and resume the loop.
+- **Mid-run worker crash** — resume with each row's original `Idempotency-Key`; persist the returned `Transfer.id` before advancing.
 - **Source wallet runs out of SOL for fees** — submissions start failing with fee-related errors. If SDP is configured to sponsor fees this won't happen; otherwise top up the source wallet's SOL balance before continuing.
 
 ## Related
@@ -3070,7 +3105,7 @@ There are two ways customers can land a payment on the address you control:
 
 ## What SDP gives you today
 
-- **Indexed inbound transfers** — `GET /v1/payments/transfers?direction=inbound` returns all received transfers across your custody wallets, with filters for token, status, wallet, and date range. See [Indexing and reconciliation](/docs/payments/accept-indexing).
+- **Indexed inbound transfers** — `GET /v1/payments/transfers?direction=inbound` returns persisted transfers across your custody wallets. Filter by exact `custodyWalletId`; add `includeObserved=true` to include recent chain observations for that wallet. See [Indexing and reconciliation](/docs/payments/accept-indexing).
 - **Per-transfer status reads** — `GET /v1/payments/transfers/{id}` for a single payment's lifecycle. See [Verifying a payment](/docs/payments/accept-verification).
 - **Wallet balances** — `GET /v1/payments/wallets/{walletId}/balances` for the current per-token balance on a receiving wallet. See [Wallet balances](/docs/wallet-operations/balances).
 - **Address-based correlation** — the inbound transfer's `destination` is the on-record correlation key for accept flows. Pair with per-order receiving addresses (see above) to map inbound transfers to orders without depending on memo. `Transfer.memo` is populated only for SDP-initiated transfers (outbound or internal); for customer-initiated inbound transfers the field is **omitted** from the response (it's optional in the schema, not nullable). Read the on-chain transaction via Solana RPC if you need memo or Solana Pay reference correlation.
@@ -3088,7 +3123,7 @@ A minimum-viable accept flow built on the per-order-address pattern:
 1. At checkout, provision (or claim from a warm pool) a **fresh custody wallet** for the order and stage an `orders` row with that wallet's on-chain address, the expected amount, and the token.
 2. Display the per-order custody-wallet address, the token, and the amount to the customer. Build a Solana Pay URL from those fields if you want a QR code; no SDP-specific endpoint required.
 3. The customer's wallet submits the transfer.
-4. Your reconciliation worker (see [Indexing and reconciliation](/docs/payments/accept-indexing)) periodically lists recent inbound transfers — **without** a `wallet`/`walletAddress` filter (the wallet-scoped path's signature-history branch ignores the `from`/`to` window; see [Indexing → Query parameters](/docs/payments/accept-indexing#query-parameters)) — and matches each transfer's `destination` to an open order in your `orders` table.
+4. Your reconciliation worker periodically lists recent persisted inbound transfers. If it must discover chain activity not yet persisted, poll each receiving wallet with its exact `custodyWalletId` and `includeObserved=true`. Match each transfer's `destination` to an open order in your `orders` table.
 5. When a match lands, mark the order paid and ship the goods. Use the transfer's `signature` (UNIQUE on the transfer record once present) to dedup if the worker is re-run.
 
 This is intentionally low-level — there is no SDP-provided session object. Treat the `orders` table as your checkout state machine and SDP as the settlement and status backend.
@@ -3195,7 +3230,7 @@ Source: https://platform.solana.com/docs/payments/accept-indexing
 
 > List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
 
-`GET /v1/payments/transfers` is the workhorse for reconciliation: transfers across your organization's custody wallets, paginated, with filters for direction, status, token, wallet, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker.
+`GET /v1/payments/transfers` is the workhorse for reconciliation. By default, it returns paginated persisted transfer records across your organization's custody wallets, with filters for direction, status, token, exact `custodyWalletId`, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker. To include recent on-chain observations for one exact wallet, set `custodyWalletId` and `includeObserved=true`.
 
 ## Listing inbound transfers
 
@@ -3230,10 +3265,10 @@ const { data, meta } = await res.json();
 | --- | --- | --- |
 | `direction` | `inbound` \| `outbound` | Common filter. Inbound = payments to wallets you control. |
 | `status` | `pending` \| `processing` \| `confirmed` \| `finalized` \| `failed` | Scope to a single state. |
-| `wallet` | string | SDP custody wallet ID. |
-| `walletAddress` | string | Solana address (alternative to `wallet`). |
+| `custodyWalletId` | string | Exact SDP Wallet ID (`id` from `GET /v1/wallets`). |
+| `includeObserved` | boolean | Default `false`. When `true`, adds recent on-chain activity for the exact `custodyWalletId`; it cannot be used without that filter. Synthetic observed rows have `custodyWalletId: null`. |
 | `token` | string | Filter by token symbol or on-chain mint (exact match against the stored transfer's `token` value). |
-| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. **Fully honored only on the org-scoped path (no `wallet`/`walletAddress` filter).** On the wallet-scoped path the window is honored for the DB-side branch (`pending`/`processing`/`failed`), but the signature-history branch — which fetches recent on-chain signatures and returns the matching DB rows (which can be `confirmed` or `finalized` once the tracker has updated them) plus synthesized rows for signatures with no DB record (always `confirmed`, or `failed` if the on-chain transaction errored — never `finalized`) — replays the last ~200 signatures and ignores the window. For time-windowed reconciliation, prefer org-scoped. Use with offset (`2026-05-14T00:00:00Z`). |
+| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. Use with offset (`2026-05-14T00:00:00Z`). |
 | `page` | integer | Default `1`. |
 | `pageSize` | integer | Default `20`, max `100`. |
 
@@ -3252,7 +3287,7 @@ Customer-initiated inbound transfers do **not** populate `Transfer.memo` (memo-p
 
 The typical inbound match cycle:
 
-1. **Read** the recent inbound transfers for the relevant token, using the **org-scoped path** (no `wallet`/`walletAddress` filter) so `from`/`to` are honored:
+1. **Read** recent persisted inbound transfers for the relevant token:
    ```text title="Request"
    GET /v1/payments/transfers
      ?direction=inbound
@@ -3290,8 +3325,8 @@ async function reconcileTick(state: WorkerState) {
   const from = new Date(fromMs).toISOString();
   const to = new Date().toISOString();
 
-  // Use the org-scoped listing (no wallet filter) so `from`/`to` are honored;
-  // see the Query parameters table above.
+  // This lists persisted records. To discover additional recent chain activity,
+  // run the same window per exact wallet with custodyWalletId + includeObserved.
   for await (const tr of listInbound({ from, to })) {
     if (await alreadySeen(tr.id)) continue;
 
@@ -4277,7 +4312,7 @@ Transfers run on the `/v1/payments/transfers` endpoint family, separate from the
 
 ```javascript title="transfer-tokens.js"
 const { data } = await sdp.get("/v1/wallets");
-const sourceWalletId = data.wallets[0].walletId;
+const sourceCustodyWalletId = data.wallets[0].id;
 
 const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
@@ -4291,18 +4326,22 @@ for (const provider of screening.data.screening.providers) {
   }
 }
 
-const transfer = await sdp.post("/v1/payments/transfers", {
-  source: sourceWalletId,
-  destination: destinationAddress,
-  token: mintAddress,
-  amount: "100",
-  memo: "Treasury Pilot internal transfer #042",
-});
+const transfer = await sdp.post(
+  "/v1/payments/transfers",
+  {
+    sourceCustodyWalletId,
+    destination: destinationAddress,
+    token: mintAddress,
+    amount: "100",
+    memo: "Treasury Pilot internal transfer #042",
+  },
+  { idempotencyKey: idempotencyKey("transfer") }
+);
 ```
 
 Three field rules to keep clear:
 
-- **`source`** is the wallet's provider-specific `walletId` (for example `privy_jfxdbsq4bg6dxzsd7imgon3j`). It is not the wallet's public key, and not the SDP custody-wallet identifier (`cwlt_*`). The handler does exact-match on `walletId`; passing the public key returns `404 NOT_FOUND`.
+- **`sourceCustodyWalletId`** is the exact SDP Wallet `id` (`cwlt_*`) returned by `GET /v1/wallets`. It is not the wallet's public key or provider-specific `walletId`.
 - **`token`** is the on-chain mint address you got from Section 4's deploy response. It is not the SDP token ID (`tok_*`).
 - **`destination`** is any valid Solana base58 address. It does not have to be a wallet SDP knows about.
 
@@ -4316,6 +4355,8 @@ A successful response includes the on-chain signature once the transaction confi
       "type": "transfer",
       "direction": "outbound",
       "status": "confirmed",
+      "custodyWalletId": "cwlt_123",
+      "providerWalletId": "privy_jfxdbsq4bg6dxzsd7imgon3j",
       "signature": "ekNe4HK67AXptsx6krYATZd5xYeq8wYQShmN9oHUdAipVJVFELGwiLhdJNCAbyN2TPv9SwzBTNz6igoAfWTdCYP",
       "source": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "destination": "2H2w3hSxAPTybuTL7LkhPbyk6bWYi94x2J4aqBhhyJL2",
@@ -4353,13 +4394,17 @@ Run the same transfer call. This time it fails:
 
 ```javascript title="transfer-blocked.js"
 try {
-  await sdp.post("/v1/payments/transfers", {
-    source: sourceWalletId,
-    destination: destinationAddress,
-    token: mintAddress,
-    amount: "100",
-    memo: "Compliance test, expecting block",
-  });
+  await sdp.post(
+    "/v1/payments/transfers",
+    {
+      sourceCustodyWalletId,
+      destination: destinationAddress,
+      token: mintAddress,
+      amount: "100",
+      memo: "Compliance test, expecting block",
+    },
+    { idempotencyKey: idempotencyKey("blocked-transfer") }
+  );
 } catch (error) {
   // handle the on-chain block (see step 4)
 }

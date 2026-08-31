@@ -20,8 +20,18 @@ describe("transaction filter options", () => {
         return jsonResponse({
           data: {
             wallets: [
-              { walletId: "wallet-1", publicKey: "public-key-1", label: "Treasury" },
-              { walletId: "wallet-2", publicKey: "public-key-2", label: null },
+              {
+                id: "cwlt-1",
+                walletId: "shared-provider-wallet",
+                publicKey: "public-key-1",
+                label: "Treasury",
+              },
+              {
+                id: "cwlt-2",
+                walletId: "shared-provider-wallet",
+                publicKey: "public-key-2",
+                label: null,
+              },
             ],
           },
         });
@@ -43,8 +53,8 @@ describe("transaction filter options", () => {
     const options = await fetchTransactionFilterOptions(request);
 
     expect(options.wallets).toEqual([
-      { id: "wallet-1", label: "Treasury" },
-      { id: "wallet-2", label: "public-key-2" },
+      { id: "cwlt-1", publicKey: "public-key-1", label: "Treasury" },
+      { id: "cwlt-2", publicKey: "public-key-2", label: "public-key-2" },
     ]);
     expect(options.counterparties).toHaveLength(125);
     expect(options.counterparties.at(-1)).toEqual({
@@ -171,7 +181,9 @@ describe("asset options", () => {
       }
       if (url.pathname.endsWith("/wallets")) {
         return jsonResponse({
-          data: { wallets: [{ walletId: "wallet-1", publicKey: "pk-1", label: "Treasury" }] },
+          data: {
+            wallets: [{ id: "cwlt-1", walletId: "wallet-1", publicKey: "pk-1", label: "Treasury" }],
+          },
         });
       }
       return jsonResponse({
@@ -185,7 +197,7 @@ describe("asset options", () => {
     const options = await fetchTransactionFilterOptions(rejecting);
 
     expect(options.assets).toEqual([]);
-    expect(options.wallets).toEqual([{ id: "wallet-1", label: "Treasury" }]);
+    expect(options.wallets).toEqual([{ id: "cwlt-1", publicKey: "pk-1", label: "Treasury" }]);
     expect(options.counterparties).toEqual([{ id: "cp-1", label: "Acme" }]);
   });
 });
