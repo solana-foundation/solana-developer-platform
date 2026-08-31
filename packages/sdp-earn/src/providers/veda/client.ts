@@ -4,10 +4,10 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import {
+  isVedaDepositMint,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
   type VedaDeployment,
   vedaDeployment,
-  vedaDepositMints,
 } from "@sdp/types/veda-programs";
 import { providerNotConfigured } from "../../errors";
 import type {
@@ -42,19 +42,18 @@ const SECONDS_PER_DAY = 86_400;
  * configured for assets SDP never claimed to front is not provider drift worth
  * a warning every hour.
  *
- * The screen is CLUSTER-AWARE — membership in `vedaDepositMints(cluster)`,
- * never a symbol comparison. A symbol-level check would admit the OTHER
+ * The screen is CLUSTER-AWARE — `isVedaDepositMint(mint, cluster)`, exact
+ * mint membership, never a symbol comparison. A symbol-level check would admit the OTHER
  * cluster's mint of the same token: a devnet vault whose asset config names
  * mainnet USDC would produce a `hostCluster: "devnet"` row listing a mint that
  * does not exist on devnet, and the failure would surface only at deposit
  * build time as "account not found".
  */
 function depositMints(entry: VedaVault, cluster: SolanaCluster): string[] {
-  const clusterMints = new Set(vedaDepositMints(cluster));
   return entry.assets
     .filter((asset) => asset.allowDeposits)
     .map((asset) => asset.assetMint)
-    .filter((mint) => clusterMints.has(mint))
+    .filter((mint) => isVedaDepositMint(mint, cluster))
     .sort();
 }
 

@@ -6,6 +6,10 @@ import {
 import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import type { EarnProviderId, SolanaCluster } from "@sdp/types";
+import {
+  assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
+  VedaVaultDirectClient,
+} from "@sdp/veda";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
 import { createVaultDeadline } from "./earn/vault-deadline";
@@ -15,7 +19,7 @@ import { createVaultDeadline } from "./earn/vault-deadline";
  * singleton provider performs any chain work. The runtime context is
  * request-scoped, so one API process can safely serve both SDP environments.
  */
-async function resolveKaminoRpcUrl(
+async function resolveProvenRpcUrl(
   ctx: EarnRuntimeContext,
   cluster: SolanaCluster
 ): Promise<string> {
@@ -27,23 +31,34 @@ async function resolveKaminoRpcUrl(
   return rpcUrl;
 }
 
-const kamino = new KaminoVaultDirectClient(resolveKaminoRpcUrl, (label, operation) => {
+/** One fresh deadline per operation, since these clients are process singletons. */
+function runVaultOperation<T>(
+  label: string,
+  operation: (assertActive: () => void) => Promise<T>
+): Promise<T> {
   const deadline = createVaultDeadline();
   return deadline.run(label, () => operation(() => deadline.assertActive(label)));
-});
+}
+
+const kamino = new KaminoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertNotPortfolioProvider(kamino);
+
+const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+assertVedaNotPortfolioProvider(veda);
 
 /**
  * API composition root for Earn providers.
  *
- * `@sdp/earn` intentionally owns the lightweight catalogue registry so its
- * cron can list Kamino without loading klend-sdk. The API owns execution, so it
- * replaces only Kamino with the vault-direct superset. Routes must resolve
- * through this registry when they need provider capabilities.
+ * `@sdp/earn` intentionally owns the lightweight catalogue registry so its cron
+ * can list every provider without loading a chain SDK. The API owns execution,
+ * so it replaces the entries that can move money with their vault-direct
+ * supersets and leaves the rest alone. Routes must resolve through this registry
+ * when they need provider capabilities.
  */
 export const EARN_PROVIDER_CLIENTS = {
   ...CATALOGUE_PROVIDER_CLIENTS,
   kamino,
+  veda,
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function resolveEarnProviderClient(provider: string): EarnVaultProvider {

@@ -29,6 +29,11 @@
       "import": "./src/support.ts",
       "default": "./src/support.ts"
     },
+    "./providers/veda/vault-state": {
+      "types": "./src/providers/veda/vault-state.ts",
+      "import": "./src/providers/veda/vault-state.ts",
+      "default": "./src/providers/veda/vault-state.ts"
+    },
     "./types": {
       "types": "./src/types.ts",
       "import": "./src/types.ts",
