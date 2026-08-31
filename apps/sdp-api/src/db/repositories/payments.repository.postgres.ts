@@ -522,6 +522,18 @@ export function createPostgresPaymentsRepository(
 
       const assignments = ["status = ?", "updated_at = ?"];
       const assignmentValues: unknown[] = [input.toStatus, input.updatedAt];
+      if (input.sourceAddress !== undefined) {
+        assignments.push("source_address = ?");
+        assignmentValues.push(input.sourceAddress);
+      }
+      if (input.destinationAddress !== undefined) {
+        assignments.push("destination_address = ?");
+        assignmentValues.push(input.destinationAddress);
+      }
+      if (input.signature !== undefined) {
+        assignments.push("signature = ?");
+        assignmentValues.push(input.signature);
+      }
       if (input.amount !== undefined) {
         assignments.push("amount = ?");
         assignmentValues.push(input.amount);

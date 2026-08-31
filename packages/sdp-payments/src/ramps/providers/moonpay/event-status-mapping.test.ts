@@ -22,9 +22,36 @@ describe("moonpayTransactionSettlementEvent", () => {
       transferId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
     });
   });
+
+  it("maps the completed buy transaction onto SDP's on-chain transfer fields", () => {
+    const data = moonpayBuyTransactionSchema.parse({
+      id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+      externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+      status: "completed",
+      quoteCurrencyAmount: 0.206,
+      walletAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
+      cryptoTransactionId:
+        "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM",
+    });
+
+    assert.deepEqual(moonpayTransactionSettlementEvent(data), {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+      transferId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+      receivedAmount: "0.206",
+      onchain: {
+        signature:
+          "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM",
+        destinationAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
+        amount: "0.206",
+      },
+    });
+  });
 });
 
 // Trimmed from a real sandbox `sell_transaction_created` webhook (2026-08-28).
+const SDP_TRANSFER_ID = "xfr_c79c556a-0e06-4d77-9b50-6e2e765099ac";
 const waitingForDepositPayload = {
   externalCustomerId: "MOONPAY-ONRAMP-0001",
   id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
@@ -36,7 +63,7 @@ const waitingForDepositPayload = {
   status: "waitingForDeposit",
   customerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
   refundWalletAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
-  externalTransactionId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+  externalTransactionId: SDP_TRANSFER_ID,
   failureReason: null,
   depositHash: null,
   depositWallet: {
@@ -59,7 +86,7 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       provider: "moonpay",
       kind: "awaiting_payment",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
-      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      transferId: SDP_TRANSFER_ID,
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       cryptoDeposit: {
         destinationAddress: "NEQhyijWMWBYq1khA2YaeG6FyxMBVMbnFsasxa9DZvU",
@@ -76,9 +103,36 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       provider: "moonpay",
       kind: "awaiting_payment",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
-      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      transferId: SDP_TRANSFER_ID,
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       cryptoDeposit: null,
+    });
+  });
+
+  it("maps a completed sell deposit onto SDP's on-chain transfer fields", () => {
+    const event = moonpaySellTransactionSettlementEvent(
+      parseSell({
+        ...waitingForDepositPayload,
+        status: "completed",
+        depositHash:
+          "4gYf6JwRXvV9LhJqR6CjvhgpqpNrp41cYwHC1PJNBJdk6FHaaBxTkZQHUnwNi1trGf31FyHg6pQJfUmK4D3kVQnG",
+      })
+    );
+
+    assert.deepEqual(event, {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+      transferId: SDP_TRANSFER_ID,
+      providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
+      receivedAmount: "16.31",
+      onchain: {
+        signature:
+          "4gYf6JwRXvV9LhJqR6CjvhgpqpNrp41cYwHC1PJNBJdk6FHaaBxTkZQHUnwNi1trGf31FyHg6pQJfUmK4D3kVQnG",
+        sourceAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
+        destinationAddress: "NEQhyijWMWBYq1khA2YaeG6FyxMBVMbnFsasxa9DZvU",
+        amount: "0.2",
+      },
     });
   });
 
@@ -90,7 +144,7 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       provider: "moonpay",
       kind: "settled",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
-      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      transferId: SDP_TRANSFER_ID,
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       receivedAmount: "16.31",
     });
@@ -104,7 +158,7 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       provider: "moonpay",
       kind: "failed",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
-      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      transferId: SDP_TRANSFER_ID,
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       error: "Deposit timeout",
     });

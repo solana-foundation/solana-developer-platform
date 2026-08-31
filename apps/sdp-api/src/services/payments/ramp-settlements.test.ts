@@ -76,13 +76,18 @@ async function seedTransfer(input: {
 async function readTransfer(id: string) {
   return getDb(env)
     .prepare(
-      "SELECT status, amount, fiat_amount, error, provider_data FROM payment_transfers WHERE id = ?"
+      `SELECT status, amount, fiat_amount, source_address, destination_address, signature,
+              error, provider_data
+       FROM payment_transfers WHERE id = ?`
     )
     .bind(id)
     .first<{
       status: string;
       amount: string | null;
       fiat_amount: string | null;
+      source_address: string | null;
+      destination_address: string | null;
+      signature: string | null;
       error: string | null;
       provider_data: Record<string, unknown>;
     }>();
@@ -113,6 +118,37 @@ describe("applyRampSettlementEvent", () => {
           USER_ID
         ),
     ]);
+  });
+
+  it("persists provider-reported on-chain transfer details with the settlement", async () => {
+    await seedTransfer({
+      id: "xfr_onchain_settlement",
+      reference: "order_onchain_settlement",
+      status: "settling",
+      type: "offramp",
+    });
+
+    await applyRampSettlementEvent(env, {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_onchain_settlement",
+      receivedAmount: "19.50",
+      onchain: {
+        signature: "provider-reported-signature",
+        sourceAddress: "provider-reported-source",
+        destinationAddress: "provider-reported-destination",
+        amount: "9.75",
+      },
+    });
+
+    expect(await readTransfer("xfr_onchain_settlement")).toMatchObject({
+      status: "completed",
+      amount: "9.75",
+      fiat_amount: "19.50",
+      source_address: "provider-reported-source",
+      destination_address: "provider-reported-destination",
+      signature: "provider-reported-signature",
+    });
   });
 
   it("never reopens a canceled transfer", async () => {

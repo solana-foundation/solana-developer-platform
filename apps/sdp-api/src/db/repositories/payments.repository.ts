@@ -231,6 +231,9 @@ export interface PaymentsRepository {
     fromStatuses: readonly PaymentTransferStatus[];
     toStatus: PaymentTransferStatus;
     updatedAt: string;
+    sourceAddress?: string | null;
+    destinationAddress?: string | null;
+    signature?: string | null;
     amount?: string | null;
     fiatAmount?: string | null;
     providerData?: Record<string, unknown>;

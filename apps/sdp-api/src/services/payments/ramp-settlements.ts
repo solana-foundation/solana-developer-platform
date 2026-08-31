@@ -93,6 +93,12 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
     toStatus: RAMP_SETTLEMENT_STATUS[event.kind],
     updatedAt: new Date().toISOString(),
   };
+  if (event.onchain) {
+    update.signature = event.onchain.signature;
+    update.sourceAddress = event.onchain.sourceAddress;
+    update.destinationAddress = event.onchain.destinationAddress;
+    update.amount = event.onchain.amount;
+  }
   // Record the actual settled amount the provider reports: the fiat payout for
   // off-ramp, the delivered crypto for on-ramp.
   if (event.kind === "settled" && event.receivedAmount) {

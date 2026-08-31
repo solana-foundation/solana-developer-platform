@@ -62,8 +62,8 @@ export function WizardFrame({
             : "flex flex-col items-start sm:flex-row sm:items-center sm:justify-between"
         )}
       >
-        <div className={cn("min-w-0 space-y-1", hasTitleBadge && "sm:col-start-2")}>
-          <div className={cn("flex items-center gap-2", hasTitleBadge && "justify-center")}>
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
             <h2 className="text-2xl font-medium tracking-tight text-primary">
               {currentStepTitle ?? activeStep.title}
             </h2>

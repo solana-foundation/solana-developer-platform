@@ -1,6 +1,7 @@
 import type { MoonpayRampSettlement } from "@sdp/types";
 import { z } from "zod";
-import type { RampSettlementEvent } from "../../types";
+import { decimalStringFromNumber } from "../../../decimal";
+import type { RampOnchainTransfer, RampSettlementEvent } from "../../types";
 
 export type MoonpaySettlementEvent =
   | ({ provider: "moonpay" } & Extract<RampSettlementEvent, { kind: "ignore" }>)
@@ -37,11 +38,28 @@ export const moonpayBuyTransactionSchema = z.object({
   networkFeeAmount: z.number().optional(),
   areFeesIncluded: z.boolean().optional(),
   usdRate: z.number().optional(),
+  walletAddress: z.string().nullish(),
   cryptoTransactionId: z.string().nullish(),
   baseCurrency: z.object({ code: z.string() }).optional(),
   currency: z.object({ code: z.string() }).optional(),
 });
 export type MoonpayBuyTransactionData = z.infer<typeof moonpayBuyTransactionSchema>;
+
+function moonpayBuyOnchainTransfer(
+  data: MoonpayBuyTransactionData
+): RampOnchainTransfer | undefined {
+  if (!data.cryptoTransactionId) {
+    return undefined;
+  }
+  const onchain: RampOnchainTransfer = { signature: data.cryptoTransactionId };
+  if (data.walletAddress) {
+    onchain.destinationAddress = data.walletAddress;
+  }
+  if (data.quoteCurrencyAmount !== undefined) {
+    onchain.amount = decimalStringFromNumber(data.quoteCurrencyAmount);
+  }
+  return onchain;
+}
 
 /** The economics fields a terminal MoonPay transaction must carry to record a settlement. */
 const moonpaySettlementEconomicsSchema = z.object({
@@ -108,7 +126,15 @@ export function moonpayTransactionSettlementEvent(
   if (!transferId) {
     return { provider: "moonpay", kind: "ignore", reason: "missing_external_transaction_id" };
   }
-  const identity = { reference: data.id, transferId };
+  const onchain = moonpayBuyOnchainTransfer(data);
+  const identity: {
+    reference: string;
+    transferId: string;
+    onchain?: RampOnchainTransfer;
+  } = { reference: data.id, transferId };
+  if (onchain !== undefined) {
+    identity.onchain = onchain;
+  }
 
   if (!Object.hasOwn(MOONPAY_TRANSACTION_STATUS, data.status)) {
     return {
@@ -138,12 +164,17 @@ export function moonpayTransactionSettlementEvent(
       ...identity,
       ...providerCustomer,
       ...(data.quoteCurrencyAmount !== undefined
-        ? { receivedAmount: String(data.quoteCurrencyAmount) }
+        ? { receivedAmount: decimalStringFromNumber(data.quoteCurrencyAmount) }
         : {}),
       ...(settlement ? { settlement } : {}),
     };
   }
-  return { provider: "moonpay", kind, ...identity, ...providerCustomer };
+  return {
+    provider: "moonpay",
+    kind,
+    ...identity,
+    ...providerCustomer,
+  };
 }
 
 const MOONPAY_SELL_TRANSACTION_STATUS = {
@@ -167,9 +198,30 @@ export const moonpaySellTransactionSchema = z.object({
   failureReason: z.string().nullish(),
   baseCurrencyAmount: z.number().optional(),
   quoteCurrencyAmount: z.number().optional(),
+  refundWalletAddress: z.string().nullish(),
+  depositHash: z.string().nullish(),
   depositWallet: z.object({ walletAddress: z.string() }).nullish(),
 });
 export type MoonpaySellTransactionData = z.infer<typeof moonpaySellTransactionSchema>;
+
+function moonpaySellOnchainTransfer(
+  data: MoonpaySellTransactionData
+): RampOnchainTransfer | undefined {
+  if (!data.depositHash) {
+    return undefined;
+  }
+  const onchain: RampOnchainTransfer = { signature: data.depositHash };
+  if (data.refundWalletAddress) {
+    onchain.sourceAddress = data.refundWalletAddress;
+  }
+  if (data.depositWallet) {
+    onchain.destinationAddress = data.depositWallet.walletAddress;
+  }
+  if (data.baseCurrencyAmount !== undefined) {
+    onchain.amount = decimalStringFromNumber(data.baseCurrencyAmount);
+  }
+  return onchain;
+}
 
 /**
  * Maps one MoonPay Sell transaction to the provider-agnostic settlement
@@ -191,7 +243,15 @@ export function moonpaySellTransactionSettlementEvent(
   if (!transferId) {
     return { provider: "moonpay", kind: "ignore", reason: "missing_external_transaction_id" };
   }
-  const identity = { reference: data.id, transferId };
+  const onchain = moonpaySellOnchainTransfer(data);
+  const identity: {
+    reference: string;
+    transferId: string;
+    onchain?: RampOnchainTransfer;
+  } = { reference: data.id, transferId };
+  if (onchain !== undefined) {
+    identity.onchain = onchain;
+  }
 
   if (!Object.hasOwn(MOONPAY_SELL_TRANSACTION_STATUS, data.status)) {
     return {
@@ -223,7 +283,7 @@ export function moonpaySellTransactionSettlementEvent(
           ? {
               cryptoDeposit: {
                 destinationAddress: data.depositWallet.walletAddress,
-                amount: String(data.baseCurrencyAmount),
+                amount: decimalStringFromNumber(data.baseCurrencyAmount),
               },
             }
           : {}),
@@ -236,7 +296,7 @@ export function moonpaySellTransactionSettlementEvent(
         ...identity,
         ...providerCustomer,
         ...(data.quoteCurrencyAmount !== undefined
-          ? { receivedAmount: String(data.quoteCurrencyAmount) }
+          ? { receivedAmount: decimalStringFromNumber(data.quoteCurrencyAmount) }
           : {}),
       };
     case "failed":
@@ -248,7 +308,12 @@ export function moonpaySellTransactionSettlementEvent(
         ...(data.failureReason ? { error: data.failureReason } : {}),
       };
     case "settling":
-      return { provider: "moonpay", kind, ...identity, ...providerCustomer };
+      return {
+        provider: "moonpay",
+        kind,
+        ...identity,
+        ...providerCustomer,
+      };
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unhandled MoonPay sell settlement kind: ${exhaustive}`);

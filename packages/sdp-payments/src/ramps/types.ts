@@ -121,12 +121,21 @@ export interface RampWebhookValidationContext {
   requestUrl?: string;
 }
 
+export interface RampOnchainTransfer {
+  signature: string;
+  sourceAddress?: string;
+  destinationAddress?: string;
+  amount?: string;
+}
+
 interface BaseRampSettlementEvent {
   provider: RampProviderId;
   /** Provider-owned transaction/session identifier. */
   reference: string;
   /** Provider-side customer identifier observed on the event, when the provider reports one. */
   providerCustomerId?: string;
+  /** Canonical on-chain movement reported by the provider for this ramp transfer. */
+  onchain?: RampOnchainTransfer;
 }
 
 export type RampSettlementEvent =
