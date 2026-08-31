@@ -479,6 +479,22 @@ organization's own custody wallets.
     customer's lamports. The single exception is an exit that CREATES the account
     itself while consolidating, where its own rent payer funded it seconds
     earlier and the recorded value describes an older instance.
+- `POST /vault-deposit-previews` — the deposit QUOTE: what the vault's own
+  live accounting would mint for `{strategyId, amount}`, from which the
+  dashboard derives its `minSharesOut` floor. A live read SHAPED LIKE MONEY-IN:
+  no wallet, no policy gate, no idempotency key — it moves nothing — but it
+  exists only to open a NEW position, so it takes the deposit's own gate order
+  deliberately: registered as `requirePermissions("earn:read")` → handler,
+  which applies the environment fail-close (`isVaultDirectDepositEnabled`,
+  403), catalogue row (404), deposit style (400), `assertEarnProviderSurfaced`,
+  `assertProviderAvailable`, admission (`assertStrategyDepositable`), then
+  capability (`supportsVaultDepositQuote`, 501 for a provider that cannot
+  quote). A vault that will not take the deposit answers 200 with
+  `blockingIssues` in the provider's own words; an unusable amount maps through
+  the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
+  POST because the parameters are a body, like the custodial
+  withdrawal-preview. See "Gate asymmetry" for why this preview alone carries
+  money-in gates.
 - `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
   newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
   re-derive which of its deposits are still in flight after losing local state,
@@ -580,6 +596,21 @@ organization's own custody wallets.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
 
+- `POST /vault-withdrawal-previews` — the exit QUOTE the dashboard derives its
+  `minAmountOut` floor from (`supportsVaultWithdrawQuote`; 501 for a provider
+  without the capability), the deposit preview's mirror with deliberately
+  DIFFERENT gates: EXIT gates only (ADR 0002) — position scoping and the
+  read-side wallet binding, both 404 — no surfacing, no entitlement, no
+  admission, no environment capability. Registered as
+  `requirePermissions("earn:read", "wallets:read")`: `wallets:read` is not a
+  money-in gate, and for a key with NO wallet bindings the binding check is a
+  documented no-op, so dropping it would let an earn:read-only key read any
+  org position's live payout while `GET /vault-positions` answers it 403.
+  The dashboard fingerprints each flow's idempotency key on the USER'S
+  tolerance (reproducible after a reload) and remembers the floor a held key
+  was minted with separately, because the API's own fingerprint includes the
+  floor and refuses a replay that changed it.
+
 Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolved
 through `services/earn/execution-registry.ts` — the one place a provider id maps
 to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
@@ -595,7 +626,7 @@ movement failed. Never rebuild a transaction during recovery.
 ### Vault withdrawals — the exit half (PRO-1702)
 
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
-  legs + broadcast in order**. Body `{positionId, shares}` and a required
+  legs + broadcast in order**. Body `{positionId, shares, minAmountOut?}` and a required
   `Idempotency-Key` header (body `requestId` rejected, same as deposits).
   Registered `requirePermissions("earn:write", "wallets:read")` → `policyGate`
   (extractor `extractEarnVaultWithdrawalPolicyCandidate`; family `program`,
@@ -784,6 +815,13 @@ kvault program id also resolves on devnet with no accounts under it.
   only provider-shaped refusal, and wallet policy is the org's own custody
   control, not a provider gate. It also ignores `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`:
   the environment fail-close guards the way IN only.
+- **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
+  deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
+  because a deposit quote exists only to open a new position. It takes the
+  deposit's own gates — environment fail-close, surfacing, entitlement,
+  admission — rather than the `assertEarnProviderConfigured`-only rule above,
+  and that does not violate the asymmetry: nothing about an EXISTING position
+  is ever answered through it, so refusing it can never trap funds.
 - **The ledger list**: no provider gate at all (see route map).
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled
