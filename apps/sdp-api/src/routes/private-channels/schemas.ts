@@ -143,6 +143,11 @@ export const addPrincipalMembershipBodySchema = z.object({
   principalId: z.string().min(1),
 });
 
+/** Selects which project principal owns a verified custody wallet. */
+export const verifyWalletBodySchema = z.object({
+  principalId: z.string().min(1).optional(),
+});
+
 /** Body for `POST /channels/:channelId/memberships`. */
 export const addMembershipBodySchema = z.object({
   privateChannelUserId: z.string().min(1),

@@ -379,6 +379,11 @@ export interface PrivateChannelVerifiedWalletDto {
   verifiedAt: string;
 }
 
+/** Optional target principal for a custody-wallet verification. Defaults to the project principal. */
+export interface VerifyPrivateChannelWalletRequest {
+  principalId?: string;
+}
+
 export interface PrivateChannelMembershipChannelDto {
   id: string;
   name: string;

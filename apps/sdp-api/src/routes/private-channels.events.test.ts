@@ -377,6 +377,7 @@ describe("Private Channels — event routes", () => {
     const verifyMock = vi.spyOn(pcServices, "verifyPrivateChannelWallet").mockResolvedValueOnce({
       row: {
         id: "pcvw_event_test",
+        user_id: "pcu_event_test",
         wallet_id: "wallet_event_test",
         pubkey,
         verified_at: "2026-07-30T12:00:00.000Z",
@@ -403,8 +404,12 @@ describe("Private Channels — event routes", () => {
     const event = await getDb(env)
       .prepare("SELECT payload FROM private_channel_events WHERE type = ?")
       .bind(PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED)
-      .first<{ payload: { walletId: string; pubkey: string } }>();
-    expect(event?.payload).toEqual({ walletId: "wallet_event_test", pubkey });
+      .first<{ payload: { walletId: string; pubkey: string; principalId: string } }>();
+    expect(event?.payload).toEqual({
+      walletId: "wallet_event_test",
+      pubkey,
+      principalId: "pcu_event_test",
+    });
   });
 
   it("wallet revocation events keep the revoked pubkey in the payload", async () => {

@@ -29,7 +29,7 @@ import {
   type PrivateChannelVerifiedWalletRow,
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, forbidden, providerNotConfigured } from "@/lib/errors";
+import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
 import { createOrgSigner } from "@/services/solana";
 import type { Env } from "@/types/env";
 import { openSpcAuthContext, type SpcAuthContext, withSpcAuth } from "./auth/gateway-auth";
@@ -59,24 +59,32 @@ interface WalletSession {
 
 /**
  * Shared preamble for the verify/delete write paths: resolve the connected
- * instance and its default project principal, then open a cached SPC JWT handle.
+ * instance and the requested project principal (default when omitted), then
+ * open a cached SPC JWT handle.
  */
 async function resolveWalletSession(
   env: Env,
   auth: ApiKeyContext,
-  projectId: string
+  projectId: string,
+  principalId?: string
 ): Promise<WalletSession> {
   const scope = { organizationId: auth.organizationId, projectId };
 
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   requireActiveInstance(instance);
 
-  const pcUser = await createPrivateChannelUserRepository(env).findDefaultPrincipal(
-    scope,
-    instance.id
-  );
+  const principalRepo = createPrivateChannelUserRepository(env);
+  const pcUser = principalId
+    ? await principalRepo.getById(scope, principalId)
+    : await principalRepo.findDefaultPrincipal(scope, instance.id);
   if (!pcUser) {
+    if (principalId) {
+      throw notFound("Active Private Channels principal");
+    }
     throw forbidden("This project has no active Private Channels principal.");
+  }
+  if (pcUser.instance_id !== instance.id || pcUser.disabled_at) {
+    throw notFound("Active Private Channels principal");
   }
 
   const client = createAuthClient(instance.auth_url, { timeoutMs: SPC_AUTH_TIMEOUT_MS });
@@ -122,12 +130,14 @@ export async function verifyPrivateChannelWallet(
   env: Env,
   auth: ApiKeyContext,
   projectId: string,
-  walletId: string
+  walletId: string,
+  principalId?: string
 ): Promise<{ row: PrivateChannelVerifiedWalletRow; instance: PrivateChannelInstanceRow }> {
   const { scope, instance, pcUser, client, spcAuth } = await resolveWalletSession(
     env,
     auth,
-    projectId
+    projectId,
+    principalId
   );
 
   // Resolve the wallet to a signer BEFORE the SPC challenge, so an

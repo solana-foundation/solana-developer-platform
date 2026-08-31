@@ -337,6 +337,14 @@ export const privateChannelVerifyWalletParamSchema = z.object({
     }),
 });
 
+export const privateChannelVerifyWalletBodySchema = z.object({
+  principalId: z.string().min(1).optional().openapi({
+    description:
+      "Project principal that will own the verified wallet. Defaults to the default principal.",
+    example: "pcu_9f1c...",
+  }),
+});
+
 export const privateChannelDeleteWalletParamSchema = z.object({
   pubkey: z
     .string()

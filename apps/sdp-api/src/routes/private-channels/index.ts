@@ -49,6 +49,7 @@ import {
   createTransferBodySchema,
   createWithdrawalBodySchema,
   probeConnectionSchema,
+  verifyWalletBodySchema,
 } from "./schemas";
 
 const privateChannels = new Hono<{ Bindings: Env }>();
@@ -191,6 +192,7 @@ privateChannels.get("/wallets", requirePermissions("payments:read"), listVerifie
 privateChannels.post(
   "/wallets/:walletId/verify",
   requirePermissions("payments:write"),
+  validateBody(verifyWalletBodySchema),
   verifyWallet
 );
 privateChannels.delete(

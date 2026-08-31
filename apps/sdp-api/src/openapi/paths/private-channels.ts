@@ -33,6 +33,7 @@ import {
   privateChannelTransferSchema,
   privateChannelVerifiedWalletListSchema,
   privateChannelVerifiedWalletSchema,
+  privateChannelVerifyWalletBodySchema,
   privateChannelVerifyWalletParamSchema,
   privateChannelWithdrawalIdParamSchema,
   privateChannelWithdrawalListSchema,
@@ -585,9 +586,13 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Verify a custody wallet with the SPC auth service",
     operationId: "verifyPrivateChannelWallet",
     description:
-      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification for the project's default principal. A principal may verify many wallets; idempotent per (principal, instance, wallet).",
+      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification for the selected project principal (or the default principal when omitted). A principal may verify many wallets; idempotent per (principal, instance, wallet).",
     security: [{ sessionCookie: [] }],
-    request: { headers: projectScopeHeaders, params: privateChannelVerifyWalletParamSchema },
+    request: {
+      headers: projectScopeHeaders,
+      params: privateChannelVerifyWalletParamSchema,
+      body: { content: jsonContent(privateChannelVerifyWalletBodySchema) },
+    },
     responses: {
       200: {
         description: "The verified wallet.",

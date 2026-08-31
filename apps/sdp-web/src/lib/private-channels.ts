@@ -18,6 +18,7 @@ import type {
   PrivateChannelTransferRecipientDto,
   PrivateChannelVerifiedWalletDto,
   PrivateChannelWithdrawal,
+  VerifyPrivateChannelWalletRequest,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
@@ -340,11 +341,12 @@ export async function fetchVerifiedWallets(
  */
 export async function verifyPrivateChannelWallet(
   client: SdpApiClient,
-  walletId: string
+  walletId: string,
+  body: VerifyPrivateChannelWalletRequest = {}
 ): Promise<PrivateChannelVerifiedWalletDto> {
   const { wallet } = await client.fetch<{ wallet: PrivateChannelVerifiedWalletDto }>(
     `/v1/private-channels/wallets/${encodeURIComponent(walletId)}/verify`,
-    { method: "POST" }
+    { method: "POST", body: JSON.stringify(body) }
   );
   return wallet;
 }

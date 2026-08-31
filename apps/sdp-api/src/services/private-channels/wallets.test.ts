@@ -30,7 +30,11 @@ const instance = {
   auth_url: "http://auth.local:8903",
 } as unknown as repositories.PrivateChannelInstanceRow;
 
-const pcUser = { id: "pcu_1" } as unknown as repositories.PrivateChannelUserRow;
+const pcUser = {
+  id: "pcu_1",
+  instance_id: "pci_1",
+  disabled_at: null,
+} as unknown as repositories.PrivateChannelUserRow;
 
 const env = {} as Env;
 
@@ -45,6 +49,10 @@ let verifiedRepo: {
   deleteByUserInstanceAndPubkey: ReturnType<typeof vi.fn>;
   listByUserAndInstance: ReturnType<typeof vi.fn>;
 };
+let principalRepo: {
+  findDefaultPrincipal: ReturnType<typeof vi.fn>;
+  getById: ReturnType<typeof vi.fn>;
+};
 let signMessages: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -57,6 +65,10 @@ beforeEach(() => {
     }),
     deleteByUserInstanceAndPubkey: vi.fn().mockResolvedValue(true),
     listByUserAndInstance: vi.fn().mockResolvedValue([]),
+  };
+  principalRepo = {
+    findDefaultPrincipal: vi.fn().mockResolvedValue(pcUser),
+    getById: vi.fn().mockResolvedValue(null),
   };
   client = {
     challengeWallet: vi
@@ -72,7 +84,7 @@ beforeEach(() => {
     getActiveByProject: vi.fn().mockResolvedValue(instance),
   } as never);
   vi.spyOn(repositories, "createPrivateChannelUserRepository").mockReturnValue({
-    findByProjectAndUser: vi.fn().mockResolvedValue(pcUser),
+    ...principalRepo,
   } as never);
   vi.spyOn(repositories, "createPrivateChannelVerifiedWalletRepository").mockReturnValue(
     verifiedRepo as never
@@ -163,6 +175,25 @@ describe("verifyPrivateChannelWallet", () => {
         walletId: WALLET_ID,
         pubkey: PUBKEY,
       })
+    );
+  });
+
+  it("verifies a wallet under an explicitly selected project principal", async () => {
+    const selectedPrincipal = {
+      ...pcUser,
+      id: "pcu_treasury",
+      is_default: false,
+    } as repositories.PrivateChannelUserWithIdentityRow;
+    principalRepo.getById.mockResolvedValue(selectedPrincipal);
+
+    await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID, selectedPrincipal.id);
+
+    expect(principalRepo.getById).toHaveBeenCalledWith(
+      { organizationId: "org_1", projectId: "prj_1" },
+      selectedPrincipal.id
+    );
+    expect(verifiedRepo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: selectedPrincipal.id })
     );
   });
 

@@ -1,7 +1,8 @@
 "use client";
 
 import type { PrivateChannelDto, PrivateChannelPrincipalDto } from "@sdp/types";
-import { IdCardIcon, Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
+import { Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,8 +12,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import {
   Table,
@@ -26,7 +25,6 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
   addPrincipalToChannelAction,
-  createPrincipalAction,
   disablePrincipalAction,
   removePrincipalFromChannelAction,
 } from "./actions";
@@ -37,7 +35,6 @@ interface Props {
 }
 
 export function MembersTable({ principals, channels }: Props) {
-  const [createOpen, setCreateOpen] = useState(false);
   const [disableTarget, setDisableTarget] = useState<PrivateChannelPrincipalDto | null>(null);
   const t = useTranslations();
 
@@ -49,8 +46,10 @@ export function MembersTable({ principals, channels }: Props) {
             ? t("DashboardPrivateChannels.members.countOne", { count: principals.length })
             : t("DashboardPrivateChannels.members.countOther", { count: principals.length })}
         </p>
-        <Button onClick={() => setCreateOpen(true)}>
-          {t("DashboardPrivateChannels.members.addPrincipal")}
+        <Button asChild>
+          <Link href="/dashboard/integrations/private-channels/members/create">
+            {t("DashboardPrivateChannels.members.addPrincipal")}
+          </Link>
         </Button>
       </div>
 
@@ -84,7 +83,6 @@ export function MembersTable({ principals, channels }: Props) {
         </Table>
       )}
 
-      <CreatePrincipalDialog isOpen={createOpen} onClose={() => setCreateOpen(false)} />
       <DisablePrincipalDialog target={disableTarget} onClose={() => setDisableTarget(null)} />
     </div>
   );
@@ -244,82 +242,6 @@ function AddToChannelMenu({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function CreatePrincipalDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const [name, setName] = useState("");
-  const [pending, startTransition] = useTransition();
-  const t = useTranslations();
-
-  const submit = () => {
-    const trimmed = name.trim();
-    if (trimmed.length < 2) return;
-    startTransition(async () => {
-      const result = await createPrincipalAction(trimmed);
-      if (result.ok) {
-        toast.success(t("DashboardPrivateChannels.members.createSuccess", { name: trimmed }));
-        setName("");
-        onClose();
-      } else {
-        toast.error(result.message);
-      }
-    });
-  };
-
-  return (
-    <Modal
-      isOpen={isOpen}
-      ariaLabel={t("DashboardPrivateChannels.members.createAria")}
-      onClose={pending ? undefined : onClose}
-      size="sm"
-    >
-      <form
-        className="space-y-6 p-6"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
-        <div className="space-y-1">
-          <h2 className="text-lg font-medium tracking-tight text-primary">
-            {t("DashboardPrivateChannels.members.createTitle")}
-          </h2>
-          <p className="text-sm text-secondary">
-            {t("DashboardPrivateChannels.members.createDescription")}
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="principal-name">
-            {t("DashboardPrivateChannels.members.principalName")}
-          </Label>
-          <Input
-            size="xl"
-            id="principal-name"
-            iconLeft={<IdCardIcon />}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            disabled={pending}
-            maxLength={64}
-            placeholder={t("DashboardPrivateChannels.members.principalNamePlaceholder")}
-          />
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
-            {t("DashboardPrivateChannels.common.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            disabled={name.trim().length < 2 || pending}
-            iconLeft={pending ? <Loader2Icon className="animate-spin" /> : undefined}
-          >
-            {pending
-              ? t("DashboardPrivateChannels.members.creating")
-              : t("DashboardPrivateChannels.members.create")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 
