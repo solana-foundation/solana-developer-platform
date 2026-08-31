@@ -203,6 +203,7 @@ export interface PaymentTransferSummary {
   walletId?: string;
   status: string;
   signature: string | null;
+  error?: string | null;
   type?: string;
   direction?: string;
   source?: string;

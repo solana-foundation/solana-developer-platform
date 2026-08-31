@@ -6,12 +6,15 @@ import type {
   PaymentTransferSummary,
   RampCryptoDeposit,
 } from "@sdp/types";
+import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import useSWRMutation from "swr/mutation";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
+  type CreateTransferInput,
   createTransfer,
   fetchTransferById,
 } from "@/app/dashboard/payments/payments-workspace.data";
@@ -80,9 +83,16 @@ function getOfframpRequirementsStep(t: Translate): RampWizardStep<OfframpStepId>
 export function useOfframpWizard(props: UseRampWizardProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const [onchainSendLoading, setOnchainSendLoading] = useState(false);
-  const [onchainSendResult, setOnchainSendResult] = useState<PaymentTransferSummary | null>(null);
   const [quoteExpired, setQuoteExpired] = useState(false);
+  const {
+    trigger: triggerCreateTransfer,
+    data: onchainSendResult,
+    isMutating: onchainSendLoading,
+    reset: resetCreateTransfer,
+  } = useSWRMutation(
+    paymentsQueryKeys.createTransfer(),
+    (_key, { arg }: { arg: CreateTransferInput }) => createTransfer(arg, t)
+  );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
     pairs: OFFRAMP_PAIRS,
@@ -108,8 +118,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
         rampsMemo,
       }) satisfies PaymentOfframpQuoteRequest,
     onQuoteCreated: () => {
-      setOnchainSendLoading(false);
-      setOnchainSendResult(null);
+      resetCreateTransfer();
       setQuoteExpired(false);
     },
   });
@@ -205,10 +214,14 @@ export function useOfframpWizard(props: UseRampWizardProps) {
 
   const hasCryptoDepositInstruction = depositTarget !== null;
   const canSendOnchain =
-    hasCryptoDepositInstruction && sourceTokenMint !== null && wizard.fields.walletId.length > 0;
+    hasCryptoDepositInstruction &&
+    sourceTokenMint !== null &&
+    wizard.fields.walletId.length > 0 &&
+    wizard.quoteTransferId !== null;
 
   const sendCryptoToDeposit = async () => {
-    if (!depositTarget || !sourceTokenMint || !wizard.fields.walletId) {
+    const transferId = wizard.quoteTransferId;
+    if (!depositTarget || !sourceTokenMint || !wizard.fields.walletId || !transferId) {
       return;
     }
     if (onchainSendLoading || onchainSendResult) {
@@ -224,22 +237,21 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       return;
     }
 
-    setOnchainSendLoading(true);
     const toastId = toast.loading(t("DashboardPayments.ramps.submittingOnchainTransfer"), {
       position: "bottom-right",
     });
 
     try {
-      const transfer = await createTransfer(
-        {
-          source: wizard.fields.walletId,
-          destination: depositTarget.destinationAddress,
-          token: sourceTokenMint,
-          amount: depositTarget.amount,
-        },
-        t
-      );
-      setOnchainSendResult(transfer);
+      const transfer = await triggerCreateTransfer({
+        transferId,
+        source: wizard.fields.walletId,
+        destination: depositTarget.destinationAddress,
+        token: address(sourceTokenMint),
+        amount: depositTarget.amount,
+      });
+      if (transfer.id !== transferId) {
+        throw new Error(t("DashboardPayments.ramps.transferFailed"));
+      }
       toast.success(t("DashboardPayments.ramps.transferSubmitted"), {
         id: toastId,
         description: transfer.signature
@@ -254,8 +266,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
           error instanceof Error ? error.message : t("DashboardPayments.ramps.transferFailed"),
         position: "bottom-right",
       });
-    } finally {
-      setOnchainSendLoading(false);
     }
   };
 
@@ -269,7 +279,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     hasCryptoDepositInstruction,
     canSendOnchain,
     onchainSendLoading,
-    onchainSendResult,
+    onchainSendResult: onchainSendResult ?? null,
     sendCryptoToDeposit,
     quoteExpired,
   };

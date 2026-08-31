@@ -630,6 +630,12 @@ function TransferDetailModal({
                 copyValue={transfer.providerReference}
               />
             ) : null}
+            {transfer.status === "failed" && transfer.error ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.failureReason")}
+                value={transfer.error}
+              />
+            ) : null}
             {transfer.memo ? (
               <DetailRow
                 label={t("DashboardPayments.transferDetails.memo")}

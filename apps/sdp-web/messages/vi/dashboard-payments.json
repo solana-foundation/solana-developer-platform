@@ -719,6 +719,7 @@
       "cryptoTransferId": "ID chuyển crypto",
       "solanaSignature": "Chữ ký Solana",
       "moneygramError": "Lỗi MoneyGram",
+      "failureReason": "Lý do thất bại",
       "lastUpdated": "Cập nhật lần cuối",
       "copy": "Sao chép {label}"
     },

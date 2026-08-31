@@ -4,6 +4,7 @@ import { toNumberAmount } from "@sdp/solana/amount";
 import type { MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
+import { address } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -252,7 +253,7 @@ export function MoneygramRampWidget({
               {
                 source: sourceWalletId,
                 destination: tx.to,
-                token: sourceTokenMint,
+                token: address(sourceTokenMint),
                 amount: tx.amount,
                 ...(tx.memo ? { memo: tx.memo } : {}),
               },

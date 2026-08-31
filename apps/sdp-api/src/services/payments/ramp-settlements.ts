@@ -34,9 +34,25 @@ const TERMINAL_RAMP_TRANSFER_STATUSES = [
 // re-confirmation), and the refreshed cryptoDeposit must land.
 const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
   awaiting_payment: ["pending", "awaiting_payment", "expired"],
-  settling: ["pending", "awaiting_payment", "expired"],
-  settled: ["pending", "awaiting_payment", "settling", "expired"],
-  failed: ["pending", "awaiting_payment", "settling", "expired"],
+  settling: ["pending", "awaiting_payment", "processing", "confirmed", "finalized", "expired"],
+  settled: [
+    "pending",
+    "awaiting_payment",
+    "processing",
+    "confirmed",
+    "finalized",
+    "settling",
+    "expired",
+  ],
+  failed: [
+    "pending",
+    "awaiting_payment",
+    "processing",
+    "confirmed",
+    "finalized",
+    "settling",
+    "expired",
+  ],
   expired: ["pending", "awaiting_payment", "settling"],
 } as const satisfies Record<
   Exclude<RampSettlementEvent["kind"], "ignore">,

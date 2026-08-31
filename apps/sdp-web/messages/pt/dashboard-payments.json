@@ -722,6 +722,7 @@
       "cryptoTransferId": "ID da transferência cripto",
       "solanaSignature": "Assinatura Solana",
       "moneygramError": "Erro do MoneyGram",
+      "failureReason": "Motivo da falha",
       "lastUpdated": "Última atualização",
       "copy": "Copiar {label}"
     },

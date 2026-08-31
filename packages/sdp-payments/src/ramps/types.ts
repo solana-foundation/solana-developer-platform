@@ -123,6 +123,7 @@ export interface RampWebhookValidationContext {
 
 interface BaseRampSettlementEvent {
   provider: RampProviderId;
+  /** Provider-owned transaction/session identifier. */
   reference: string;
   /** Provider-side customer identifier observed on the event, when the provider reports one. */
   providerCustomerId?: string;
@@ -182,6 +183,8 @@ export interface RampOnrampQuoteInput {
   destinationWalletAddress: string;
   /** Handler-resolved id for the provider's external customer reference (MoonPay). */
   externalCustomerId: string;
+  /** Handler-reserved SDP payment transfer id for provider correlation. */
+  paymentTransferId?: string;
   /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
   customerId?: string;
   bvnkCompliance?: BvnkComplianceInput;

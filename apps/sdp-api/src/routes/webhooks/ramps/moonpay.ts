@@ -1,12 +1,14 @@
 import { readRecord, readString } from "@sdp/payments/json";
 import {
+  type MoonpaySettlementEvent,
   moonpayBuyTransactionSchema,
   moonpaySellTransactionSchema,
   moonpaySellTransactionSettlementEvent,
   moonpayTransactionSettlementEvent,
 } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
-import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
+import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
+import { createSystemPaymentsRepository } from "@/db/repositories";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
@@ -54,7 +56,7 @@ function parseMoonpaySignatureV2Header(
   return timestamp && signature ? { timestamp, signature } : null;
 }
 
-export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSettlementEvent> {
+export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, MoonpaySettlementEvent> {
   readonly provider = "moonpay";
 
   async verify({
@@ -95,7 +97,7 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
     }
   }
 
-  parse(payload: unknown): RampSettlementEvent {
+  parse(payload: unknown): MoonpaySettlementEvent {
     const root = readRecord(payload);
     if (!root) {
       throw badRequest("MoonPay webhook body must be an object", { provider: this.provider });
@@ -135,9 +137,21 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
     return moonpayTransactionSettlementEvent(transactionData.data);
   }
 
-  async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlementEvent) {
+  async process(c: AppContext, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {
     if (event.kind === "ignore") {
       getLogger().info(`[moonpay webhook] ignored event: ${event.reason}`);
+      return;
+    }
+    const transfer = await createSystemPaymentsRepository(c.env).setProviderReferenceIfEmpty({
+      provider: event.provider,
+      transferId: event.transferId,
+      providerReference: event.reference,
+      updatedAt: new Date().toISOString(),
+    });
+    if (!transfer) {
+      getLogger().warn(
+        `[moonpay webhook] refused provider reference for transfer ${event.transferId}`
+      );
       return;
     }
     await applyRampSettlementEvent(c.env, event);

@@ -53,6 +53,10 @@ export function OfframpRail({
     ? isTerminalRampTransferStatus(wizard.transferStatus.status)
     : false;
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
+  const showInlineStatus =
+    wizard.onTransactionStage &&
+    wizard.transferStatus?.status !== "completed" &&
+    (hostedStage || Boolean(wizard.depositTarget));
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
@@ -78,8 +82,12 @@ export function OfframpRail({
         />
       }
       header={
-        hostedStage && wizard.transferStatus?.status !== "completed" ? (
-          <RampStatusInline direction="offramp" hosted transfer={wizard.transferStatus} />
+        showInlineStatus ? (
+          <RampStatusInline
+            direction="offramp"
+            hosted={hostedStage}
+            transfer={wizard.transferStatus}
+          />
         ) : undefined
       }
       secondaryLabel={
@@ -96,16 +104,20 @@ export function OfframpRail({
           </Button>
         ) : wizard.depositTarget ? (
           <InstructionActionButton
+            variant="default"
+            size="default"
             action={{
               loading: wizard.onchainSendLoading,
               succeeded: wizard.onchainSendResult !== null,
-              disabled: !wizard.canSendOnchain,
+              disabled: !wizard.canSendOnchain || wizard.quoteExpired,
               onClick: () => void wizard.sendCryptoToDeposit(),
               icon: <SendIcon />,
-              idleLabel: t("DashboardPayments.ramps.sendCrypto", {
-                amount: wizard.depositTarget.amount,
-                token: toRampCryptoToken(wizard.selectedRampPair.assetRail).toUpperCase(),
-              }),
+              idleLabel: wizard.quoteExpired
+                ? t("DashboardPayments.ramps.quoteExpired")
+                : t("DashboardPayments.ramps.sendCrypto", {
+                    amount: wizard.depositTarget.amount,
+                    token: toRampCryptoToken(wizard.selectedRampPair.assetRail).toUpperCase(),
+                  }),
               busyLabel: t("DashboardPayments.ramps.sending"),
               doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
             }}

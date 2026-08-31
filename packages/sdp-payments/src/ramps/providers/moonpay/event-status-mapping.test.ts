@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  moonpayBuyTransactionSchema,
   moonpaySellTransactionSchema,
   moonpaySellTransactionSettlementEvent,
+  moonpayTransactionSettlementEvent,
 } from "./event-status-mapping";
+
+describe("moonpayTransactionSettlementEvent", () => {
+  it("keeps MoonPay's transaction id separate from SDP's correlation id", () => {
+    const data = moonpayBuyTransactionSchema.parse({
+      id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+      externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+      status: "pending",
+    });
+
+    assert.deepEqual(moonpayTransactionSettlementEvent(data), {
+      provider: "moonpay",
+      kind: "settling",
+      reference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+      transferId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+    });
+  });
+});
 
 // Trimmed from a real sandbox `sell_transaction_created` webhook (2026-08-28).
 const waitingForDepositPayload = {
@@ -39,7 +58,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
     assert.deepEqual(event, {
       provider: "moonpay",
       kind: "awaiting_payment",
-      reference: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       cryptoDeposit: {
         destinationAddress: "NEQhyijWMWBYq1khA2YaeG6FyxMBVMbnFsasxa9DZvU",
@@ -55,7 +75,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
     assert.deepEqual(event, {
       provider: "moonpay",
       kind: "awaiting_payment",
-      reference: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       cryptoDeposit: null,
     });
@@ -68,7 +89,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
     assert.deepEqual(event, {
       provider: "moonpay",
       kind: "settled",
-      reference: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       receivedAmount: "16.31",
     });
@@ -81,7 +103,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
     assert.deepEqual(event, {
       provider: "moonpay",
       kind: "failed",
-      reference: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
+      reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+      transferId: "ramp_quote_c79c556a-0e06-4d77-9b50-6e2e765099ac",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       error: "Deposit timeout",
     });

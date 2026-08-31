@@ -5,6 +5,7 @@ import type {
   PaymentsDashboardWallet,
   PaymentTransferSummary,
 } from "@sdp/types";
+import { address } from "@solana/kit";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -193,7 +194,7 @@ export function useOnchainSendWizard({
         {
           source: fields.walletId,
           destination: destinationAddress,
-          token: selectedAssetBalance.mint,
+          token: address(selectedAssetBalance.mint),
           amount: fields.amount,
           ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
         },

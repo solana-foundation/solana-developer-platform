@@ -661,6 +661,7 @@
       "cryptoTransferId": "Crypto transfer ID",
       "solanaSignature": "Onchain signature",
       "moneygramError": "MoneyGram error",
+      "failureReason": "Failure reason",
       "lastUpdated": "Last updated",
       "copy": "Copy {label}",
       "viewReceipt": "View receipt",

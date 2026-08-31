@@ -2,6 +2,13 @@ import type { MoonpayRampSettlement } from "@sdp/types";
 import { z } from "zod";
 import type { RampSettlementEvent } from "../../types";
 
+export type MoonpaySettlementEvent =
+  | ({ provider: "moonpay" } & Extract<RampSettlementEvent, { kind: "ignore" }>)
+  | ({ provider: "moonpay"; transferId: string } & Exclude<
+      RampSettlementEvent,
+      { kind: "ignore" }
+    >);
+
 const MOONPAY_TRANSACTION_STATUS = {
   waitingPayment: "awaiting_payment",
   pending: "settling",
@@ -96,11 +103,12 @@ function buildMoonpaySettlement(
  */
 export function moonpayTransactionSettlementEvent(
   data: MoonpayBuyTransactionData
-): RampSettlementEvent {
-  const reference = data.externalTransactionId;
-  if (!reference) {
+): MoonpaySettlementEvent {
+  const transferId = data.externalTransactionId;
+  if (!transferId) {
     return { provider: "moonpay", kind: "ignore", reason: "missing_external_transaction_id" };
   }
+  const identity = { reference: data.id, transferId };
 
   if (!Object.hasOwn(MOONPAY_TRANSACTION_STATUS, data.status)) {
     return {
@@ -116,7 +124,7 @@ export function moonpayTransactionSettlementEvent(
     return {
       provider: "moonpay",
       kind,
-      reference,
+      ...identity,
       ...providerCustomer,
       ...(data.failureReason ? { error: data.failureReason } : {}),
       ...(settlement ? { settlement } : {}),
@@ -127,7 +135,7 @@ export function moonpayTransactionSettlementEvent(
     return {
       provider: "moonpay",
       kind,
-      reference,
+      ...identity,
       ...providerCustomer,
       ...(data.quoteCurrencyAmount !== undefined
         ? { receivedAmount: String(data.quoteCurrencyAmount) }
@@ -135,7 +143,7 @@ export function moonpayTransactionSettlementEvent(
       ...(settlement ? { settlement } : {}),
     };
   }
-  return { provider: "moonpay", kind, reference, ...providerCustomer };
+  return { provider: "moonpay", kind, ...identity, ...providerCustomer };
 }
 
 const MOONPAY_SELL_TRANSACTION_STATUS = {
@@ -178,11 +186,12 @@ export type MoonpaySellTransactionData = z.infer<typeof moonpaySellTransactionSc
  */
 export function moonpaySellTransactionSettlementEvent(
   data: MoonpaySellTransactionData
-): RampSettlementEvent {
-  const reference = data.externalTransactionId;
-  if (!reference) {
+): MoonpaySettlementEvent {
+  const transferId = data.externalTransactionId;
+  if (!transferId) {
     return { provider: "moonpay", kind: "ignore", reason: "missing_external_transaction_id" };
   }
+  const identity = { reference: data.id, transferId };
 
   if (!Object.hasOwn(MOONPAY_SELL_TRANSACTION_STATUS, data.status)) {
     return {
@@ -200,7 +209,7 @@ export function moonpaySellTransactionSettlementEvent(
         return {
           provider: "moonpay",
           kind,
-          reference,
+          ...identity,
           ...providerCustomer,
           cryptoDeposit: null,
         };
@@ -208,7 +217,7 @@ export function moonpaySellTransactionSettlementEvent(
       return {
         provider: "moonpay",
         kind,
-        reference,
+        ...identity,
         ...providerCustomer,
         ...(data.depositWallet && data.baseCurrencyAmount !== undefined
           ? {
@@ -224,7 +233,7 @@ export function moonpaySellTransactionSettlementEvent(
       return {
         provider: "moonpay",
         kind,
-        reference,
+        ...identity,
         ...providerCustomer,
         ...(data.quoteCurrencyAmount !== undefined
           ? { receivedAmount: String(data.quoteCurrencyAmount) }
@@ -234,12 +243,12 @@ export function moonpaySellTransactionSettlementEvent(
       return {
         provider: "moonpay",
         kind,
-        reference,
+        ...identity,
         ...providerCustomer,
         ...(data.failureReason ? { error: data.failureReason } : {}),
       };
     case "settling":
-      return { provider: "moonpay", kind, reference, ...providerCustomer };
+      return { provider: "moonpay", kind, ...identity, ...providerCustomer };
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unhandled MoonPay sell settlement kind: ${exhaustive}`);

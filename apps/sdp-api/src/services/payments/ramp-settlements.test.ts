@@ -147,6 +147,28 @@ describe("applyRampSettlementEvent", () => {
     });
   });
 
+  it("settles an off-ramp while its on-chain deposit is processing", async () => {
+    await seedTransfer({
+      id: "xfr_processing_deposit",
+      reference: "order_processing_deposit",
+      status: "processing",
+      type: "offramp",
+    });
+
+    await applyRampSettlementEvent(env, {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_processing_deposit",
+      receivedAmount: "42",
+    });
+
+    expect(await readTransfer("xfr_processing_deposit")).toMatchObject({
+      status: "completed",
+      amount: "10",
+      fiat_amount: "42",
+    });
+  });
+
   it("does not regress a settling transfer on an out-of-order event", async () => {
     await seedTransfer({ id: "xfr_settling", reference: "order_settling", status: "settling" });
 

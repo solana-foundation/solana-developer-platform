@@ -78,8 +78,7 @@ function transferStatusCopy(
         title: t("DashboardPayments.ramps.status.quoteExpired"),
         description: onramp
           ? t("DashboardPayments.ramps.status.quoteExpiredFundingDescription")
-          : // biome-ignore lint/security/noSecrets: Translation catalog key, not a credential.
-            t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
+          : t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
         state: "error",
       };
     default:

@@ -687,6 +687,7 @@
       "cryptoTransferId": "Identifiant cryptographique transfert",
       "solanaSignature": "Solana signature",
       "moneygramError": "Erreur MoneyGram",
+      "failureReason": "Motif de l’échec",
       "lastUpdated": "Dernière mise à jour",
       "copy": "Copier {label}"
     },
