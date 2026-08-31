@@ -71,7 +71,7 @@ export function RampWizardShell({
         currentStepTitle={completionTitle}
         titleBadge={
           completionTitle ? (
-            <Badge variant="success">{t("DashboardPayments.ramps.completed")}</Badge>
+            <Badge variant="success">{t("DashboardPayments.ramps.success")}</Badge>
           ) : undefined
         }
         progressLabel={t("DashboardPayments.counterparty.stepProgress", {

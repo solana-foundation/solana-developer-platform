@@ -2,7 +2,7 @@
 
 import type { PaymentRampQuote, PaymentTransferSummary, SolanaCluster } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
-import { ArrowRightIcon, CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import {
   formatDisplayAmount,
   formatMinorCurrencyAmount,
@@ -183,27 +183,6 @@ function completionDetailRows({
   ].filter(isDetailRow);
 }
 
-function CompletionAmountFlow({
-  sourceAmount,
-  destinationAmount,
-}: {
-  sourceAmount: string | null;
-  destinationAmount: string | null;
-}) {
-  if (!sourceAmount && !destinationAmount) {
-    return null;
-  }
-  return (
-    <div className="flex flex-wrap items-center justify-center gap-1.5 border-b border-border-default pb-4 text-base font-medium text-primary">
-      {sourceAmount ? <span>{sourceAmount}</span> : null}
-      {sourceAmount && destinationAmount ? (
-        <ArrowRightIcon aria-hidden className="size-4 shrink-0 text-tertiary" />
-      ) : null}
-      {destinationAmount ? <span>{destinationAmount}</span> : null}
-    </div>
-  );
-}
-
 function TransferDetailRow({
   label,
   value,
@@ -297,9 +276,19 @@ export function RampCompleteScreen({
   });
 
   return (
-    <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
-      <CompletionAmountFlow sourceAmount={secondaryAmount} destinationAmount={primaryAmount} />
-      <div>
+    <section className="w-full overflow-hidden rounded-2xl bg-fill-subtle">
+      {primaryAmount ? (
+        <div className="flex flex-col items-center gap-0.5 border-b border-border-default px-5 py-5">
+          <p className="text-3xl font-semibold tracking-tight text-primary">{primaryAmount}</p>
+          {secondaryAmount ? (
+            <p className="text-sm text-tertiary">
+              {onramp ? t("DashboardPayments.ramps.fundedWith") : t("DashboardPayments.ramps.from")}{" "}
+              {secondaryAmount}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="px-5">
         {detailRows.map((detail) => (
           <TransferDetailRow
             key={detail.label}

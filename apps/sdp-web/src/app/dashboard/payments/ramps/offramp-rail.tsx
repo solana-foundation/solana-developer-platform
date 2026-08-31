@@ -61,7 +61,7 @@ export function OfframpRail({
       stepIndex={preSteps.length + wizard.stepIndex}
       completionTitle={
         wizard.transferStatus?.status === "completed"
-          ? t("DashboardPayments.ramps.payout")
+          ? t("DashboardPayments.ramps.payoutComplete")
           : undefined
       }
       primaryDisabled={
