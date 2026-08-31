@@ -132,7 +132,8 @@
     "invalidJsonField": "{field} deve conter um JSON válido.",
     "invalidApiKeyFormat": "Formato de chave de API inválido. Use um valor de chave bruto como sk_test_... ou sk_live_... com um sufixo válido.",
     "playgroundExecutionFailed": "Falha na execução do Playground.",
-    "requestExecutionFailed": "Falha na execução da requisição."
+    "requestExecutionFailed": "Falha na execução da requisição.",
+    "sdpMintedToken": "Mint pela SDP"
   },
   "dashboardShell": {
     "workspace": "Espaço de trabalho",
@@ -200,7 +201,20 @@
     "backToPayments": "Voltar para Pagamentos",
     "backToApprovals": "Voltar para Aprovações",
     "members": "Membros",
-    "allowlist": "Allowlist"
+    "allowlist": "Allowlist",
+    "markets": "Mercados",
+    "treasurySolutions": "Tesouraria",
+    "earnProgram": "Embedded Yield",
+    "configureEarnButton": "Integração com Embedded Yield",
+    "heliusRings": "Helius Rings",
+    "expandSectionMenu": "Expandir o menu de {section}",
+    "collapseSectionMenu": "Recolher o menu de {section}",
+    "backToPolicyHistory": "Voltar para o histórico de políticas",
+    "connections": "Conexões",
+    "backToPrivateChannels": "Voltar para canais privados",
+    "integrations": "Integrações",
+    "holdings": "Ativos",
+    "backToHome": "Voltar para o início"
   },
   "validation": {
     "allowlistValueRequired": "O valor da allowlist é obrigatório",
@@ -280,7 +294,18 @@
     "holdingsSharePercent": "{percent}%",
     "holdingsUnavailable": "Os ativos estão indisponíveis no momento.",
     "holdingsCount": "{count} Tokens",
-    "holdingsCountSingle": "1 Token"
+    "holdingsCountSingle": "1 Token",
+    "categoryPayments": "Pagamentos",
+    "categoryIssuance": "Emissão",
+    "quickActionsTitle": "Comece por aqui",
+    "quickActionsBody": "Esta organização já está configurada. Escolha por onde começar.",
+    "quickActionWallets": "Criar Wallet",
+    "quickActionWalletsBody": "Mantenha seus ativos sob custódia com o provedor escolhido.",
+    "quickActionApiKeys": "Emitir uma chave de API",
+    "quickActionApiKeysBody": "Autentique sua primeira requisição.",
+    "quickActionPayments": "Enviar um pagamento",
+    "quickActionPaymentsBody": "Transfira fundos para uma contraparte.",
+    "quickActionPolicies": "Definir uma política de Wallet"
   },
   "integrations": {
     "pageDescription": "Todos os provedores que a SDP pode executar para esta organização, com o que está conectado e o que fazer em seguida. A Custody é instalada pelas Wallets; as outras famílias são provisionadas por deployment.",
