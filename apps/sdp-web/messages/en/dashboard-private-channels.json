@@ -148,7 +148,7 @@
       "principalNamePlaceholder": "For example, EU treasury",
       "wallet": "Wallet",
       "walletPlaceholder": "Select a custody wallet",
-      "walletDescription": "SDP signs an SPC challenge with this wallet and links the verified wallet to the new identity.",
+      "walletDescription": "Select a wallet that is not linked to another identity. SDP signs an SPC challenge to verify the wallet.",
       "noWalletsBefore": "No custody wallets are available.",
       "noWalletsLink": "Create a wallet",
       "noWalletsAfter": " first, then return to add this identity.",

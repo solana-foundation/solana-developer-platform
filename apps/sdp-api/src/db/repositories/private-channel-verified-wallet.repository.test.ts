@@ -11,6 +11,7 @@ import { createPostgresPrivateChannelVerifiedWalletRepository } from "./private-
 const TEST_PROJECT_ID = "prj_pcvw_repo_test";
 const OTHER_PROJECT_ID = "prj_pcvw_repo_test_other";
 const PCU_ID = "pcu_pcvw_repo_test";
+const SECOND_PCU_ID = "pcu_pcvw_repo_test_second";
 
 const PUBKEY_A = "So11111111111111111111111111111111111111112";
 const PUBKEY_B = "So11111111111111111111111111111111111111113";
@@ -119,6 +120,39 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.pubkey).sort()).toEqual([PUBKEY_A, PUBKEY_B].sort());
     expect(rows.find((r) => r.pubkey === PUBKEY_A)?.wallet_id).toBe("wal_1b");
+  });
+
+  it("returns a clear conflict when a wallet already identifies another principal", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_users (
+           id, organization_id, project_id, instance_id, name, is_default
+         ) VALUES (?, ?, ?, ?, 'Treasury', FALSE)`
+      )
+      .bind(SECOND_PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, instanceA)
+      .run();
+
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: SECOND_PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "This wallet is already linked to another identity. Select a different wallet.",
+    });
   });
 
   it("listByUserAndInstance is scoped to the instance (no cross-instance leak)", async () => {

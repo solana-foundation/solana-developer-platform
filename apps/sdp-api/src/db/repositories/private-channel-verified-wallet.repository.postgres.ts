@@ -1,4 +1,5 @@
 import type { AppDb } from "@/db";
+import { conflict } from "@/lib/errors";
 import {
   generatePrivateChannelVerifiedWalletId,
   mapPrivateChannelVerifiedWalletRow,
@@ -35,7 +36,9 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         )
         .first<Record<string, unknown>>();
       if (!row) {
-        throw new Error("Failed to persist verified wallet");
+        throw conflict(
+          "This wallet is already linked to another identity. Select a different wallet."
+        );
       }
       return mapPrivateChannelVerifiedWalletRow(row);
     },
