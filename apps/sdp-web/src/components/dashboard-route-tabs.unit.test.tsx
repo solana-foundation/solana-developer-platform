@@ -19,9 +19,7 @@ describe("DashboardRouteTabs", () => {
 
     expect(markup).toContain('href="/dashboard/markets/embedded-yield"');
     expect(markup).toContain('href="/dashboard/markets/treasury-solutions"');
-    expect(markup.indexOf('>Treasury</a>')).toBeLessThan(
-      markup.indexOf('>Embedded Yield</a>')
-    );
+    expect(markup.indexOf(">Treasury</a>")).toBeLessThan(markup.indexOf(">Embedded Yield</a>"));
     expect(markup).toContain('aria-current="page"');
     expect(markup).not.toContain("?tab=");
   });
