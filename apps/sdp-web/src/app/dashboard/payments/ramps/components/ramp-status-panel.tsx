@@ -81,6 +81,12 @@ function transferStatusCopy(
           : t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
         state: "error",
       };
+    case "canceled":
+      return {
+        title: t("DashboardPayments.ramps.status.updated"),
+        description: t("DashboardPayments.ramps.status.currentProviderStatus", { status }),
+        state: "error",
+      };
     default:
       return {
         title: t("DashboardPayments.ramps.status.updated"),

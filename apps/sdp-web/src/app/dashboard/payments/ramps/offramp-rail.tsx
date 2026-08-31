@@ -52,9 +52,7 @@ export function OfframpRail({
   const transferState = getRampTransferState(wizard.transferStatus?.status);
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const showInlineStatus =
-    wizard.onTransactionStage &&
-    wizard.transferStatus?.status !== "completed" &&
-    (hostedStage || Boolean(wizard.depositTarget));
+    wizard.onTransactionStage && (hostedStage || Boolean(wizard.depositTarget));
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}

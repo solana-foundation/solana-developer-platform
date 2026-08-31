@@ -109,7 +109,7 @@ export function OnrampRail({
       onCounterpartyCreated={() => {}}
       summary={<WizardSummaryList details={summaryDetails} />}
       header={
-        hostedStage && wizard.transferStatus?.status !== "completed" ? (
+        hostedStage ? (
           <RampStatusInline direction="onramp" hosted transfer={wizard.transferStatus} />
         ) : undefined
       }
