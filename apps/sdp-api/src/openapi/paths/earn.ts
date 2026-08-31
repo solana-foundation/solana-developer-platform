@@ -3,6 +3,9 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import {
   earnButtonConfigurationPublicParamsSchema,
   earnButtonConfigurationSchema,
+  earnExternalWalletEarningsParamsSchema,
+  earnExternalWalletMovementParamsSchema,
+  earnExternalWalletMovementsQuerySchema,
   earnExternalWalletPositionParamsSchema,
   earnExternalWalletPositionsQuerySchema,
 } from "@/routes/earn/schemas";
@@ -12,6 +15,9 @@ import {
   earnExternalWalletDepositResponse,
   earnExternalWalletDepositTransactionRequest,
   earnExternalWalletDepositTransactionResponse,
+  earnExternalWalletEarningsResponse,
+  earnExternalWalletMovementDetailResponse,
+  earnExternalWalletMovementsResponse,
   earnExternalWalletPositionSummaryResponse,
   earnExternalWalletPositionsResponse,
   earnExternalWalletSubmitRequest,
@@ -162,6 +168,82 @@ function registerEarnExternalWalletPaths(
       200: {
         description: "External-wallet position page",
         content: jsonContent(earnExternalWalletPositionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/movements",
+    tags: ["Earn"],
+    summary: "List one external wallet's activity",
+    operationId: "listEarnExternalWalletMovements",
+    description:
+      "Returns one keyset page of the wallet's recorded deposits and withdrawals, newest " +
+      "first, in ledger vocabulary (`requested`, `submitted`, `confirmed`, `finalized`, " +
+      "`failed`; only `finalized` and `failed` are terminal). `ownerAddress` is required; a " +
+      "wallet outside the active partner project answers 404. Reports on money that already " +
+      "moved, so no provider gate applies.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      query: earnExternalWalletMovementsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "External-wallet movement page",
+        content: jsonContent(earnExternalWalletMovementsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/movements/{movementId}",
+    tags: ["Earn"],
+    summary: "Get one external-wallet movement",
+    operationId: "getEarnExternalWalletMovement",
+    description:
+      "Polls one recorded movement to a terminal state — the read that settles a submit whose " +
+      "outcome the caller never learned. The reconciliation sweep drives every movement " +
+      "terminal within about ninety seconds; keep polling until `finalized` or `failed`.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      params: earnExternalWalletMovementParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recorded movement",
+        content: jsonContent(earnExternalWalletMovementDetailResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/earnings/{ownerAddress}",
+    tags: ["Earn"],
+    summary: "Get one external wallet's balance and earnings",
+    operationId: "getEarnExternalWalletEarnings",
+    description:
+      "Returns live balance and total earned per deposit token: `earned` is live value minus " +
+      "finalized SDP deposits, stated only when exact. When it cannot be stated — live value " +
+      "unavailable, movements still settling, or a finalized withdrawal exists — the figure is " +
+      "absent with a named reason, never zero. Live value reads the owner's whole vault " +
+      "balance, so shares acquired outside SDP inflate it.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      params: earnExternalWalletEarningsParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "External-wallet earnings",
+        content: jsonContent(earnExternalWalletEarningsResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
     },

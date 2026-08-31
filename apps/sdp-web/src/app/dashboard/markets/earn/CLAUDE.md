@@ -75,13 +75,21 @@ program create still sends the body `requestId` form.
   page and loading files live in `../embedded-yield/`; this directory keeps
   shared internal Earn modules and legacy route shims only.
 - `/dashboard/markets/embedded-yield/button-builder` → `EarnButtonBuilder`: the
-  customer-facing button preview plus a generated **server-side** integration snippet for the
-  EXTERNAL-WALLET flow (PRO-1722): build via
+  customer-facing savings preview plus a generated **server-side** integration
+  snippet for the EXTERNAL-WALLET flow — since PRO-1772 the WHOLE loop, not
+  just the deposit (PRO-1722): build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
-  signs, submit via `POST /v1/earn/external-wallet/deposits`. The treasury
+  signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
+  `GET …/movements/:movementId`, read `GET …/earnings/:ownerAddress`
+  (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
+  render a dash, never $0), list `GET …/movements?ownerAddress=`, and exit via
+  `…/withdrawal-transactions` + `…/withdrawals`. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
   snippet — a B2B2C partner cannot name a custody wallet. It also loads the
-  saved project configuration.
+  saved project configuration. The device previews and the handoff page render
+  the shared `EarnSavingsCardPreview` (`earn-savings-preview.tsx`): balance,
+  total earned, deposit + withdraw, recent activity — static mock figures on
+  purpose, showing partners the shape their end users get.
 - `/embedded-yield/integrate/[token]` is the public, no-index engineering
   handoff. It is intentionally outside the dashboard route and does not require
   Clerk auth. Legacy `/earn/integrate/[token]` links permanently redirect there.

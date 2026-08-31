@@ -1,8 +1,8 @@
 import type { EarnButtonStyle, EarnStrategy } from "@sdp/types";
 import { LockKeyholeIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
-import { EarnDepositButtonPreview } from "./earn-button-preview";
 import { EarnButtonPreviewDetails } from "./earn-button-preview-details";
+import { EarnSavingsCardPreview } from "./earn-savings-preview";
 
 export function EarnButtonWebPreview({
   accentColor,
@@ -40,17 +40,11 @@ export function EarnButtonWebPreview({
           </div>
           <div className="grid flex-1 place-items-center bg-fill-subtle p-6 sm:p-8">
             <div className="w-full max-w-md rounded-2xl border border-border-default bg-surface-raised p-6 shadow-sm">
-              <EarnButtonPreviewDetails strategy={strategy} />
-              <div className="mt-8">
-                <EarnDepositButtonPreview
-                  accentColor={accentColor}
-                  className="w-full"
-                  style={style}
-                />
-                <p className="mt-2 text-center text-[11px] text-tertiary">
-                  {t("DashboardMarkets.earnProgram.poweredBy")}
-                </p>
-              </div>
+              <EarnSavingsCardPreview
+                accentColor={accentColor}
+                header={<EarnButtonPreviewDetails strategy={strategy} />}
+                style={style}
+              />
             </div>
           </div>
         </div>

@@ -453,6 +453,33 @@ export const earnExternalWalletPositionsQuerySchema = z
 export const earnExternalWalletPositionSummaryQuerySchema = z.object({}).strict();
 
 /**
+ * One external wallet's activity, newest first (PRO-1772). The owner is a
+ * REQUIRED query filter rather than a path segment so the collection keeps its
+ * `:movementId` detail route unambiguous; direction/status are the same
+ * equality filters the cross-provider feed takes, and `status` stays an open
+ * string for the same reason — an unknown value matches nothing, which is the
+ * honest answer.
+ */
+export const earnExternalWalletMovementsQuerySchema = z
+  .object({
+    ownerAddress: solanaOwnerAddressSchema,
+    direction: z.enum(EARN_MOVEMENT_DIRECTIONS).optional(),
+    status: z.string().min(1).max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z.string().min(1).optional(),
+  })
+  .strict();
+
+/** The recorded external-wallet movement a partner polls to a terminal state. */
+export const earnExternalWalletMovementParamsSchema = z
+  .object({ movementId: z.string().min(1).max(128) })
+  .strict();
+
+/** Balance + earned for one external wallet (PRO-1772); no knobs on purpose. */
+export const earnExternalWalletEarningsParamsSchema = earnExternalWalletPositionParamsSchema;
+export const earnExternalWalletEarningsQuerySchema = z.object({}).strict();
+
+/**
  * The cross-provider movement feed.
  *
  * Filters are narrow on purpose — each one answers a question a dashboard

@@ -325,3 +325,71 @@ export const earnExternalWalletPositionSummaryResponse = successResponseSchema(
     }),
   })
 );
+
+export const earnExternalWalletMovementsResponse = successResponseSchema(
+  z.object({
+    ownerAddress: earnOwnerAddressSchema,
+    movements: z.array(earnExternalWalletMovementSchema).openapi({
+      description: "The wallet's recorded movements, newest first, in ledger vocabulary.",
+    }),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  })
+);
+
+export const earnExternalWalletMovementDetailResponse = successResponseSchema(
+  z.object({ movement: earnExternalWalletMovementSchema })
+);
+
+const earnSignedDecimalAmountSchema = z
+  .string()
+  .max(129)
+  .regex(/^-?\d+(\.\d+)?$/)
+  .openapi({
+    description: "Exact decimal figure; a leading '-' marks a genuinely negative value.",
+    example: "5.2",
+  });
+
+const earnExternalWalletTokenEarningsSchema = z
+  .object({
+    tokenMint: z.string().openapi({ example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }),
+    positionCount: z.number().int().nonnegative(),
+    unavailablePositionCount: z.number().int().nonnegative().openapi({
+      description: "Positions whose live value could not hydrate.",
+    }),
+    currentValue: earnLiveDecimalAmountSchema.optional().openapi({
+      description:
+        "Live value across the token's positions. Absent when any contributing position is " +
+        "unavailable, so partial money is never presented as complete.",
+    }),
+    totalDeposited: earnLiveDecimalAmountSchema.openapi({
+      description: "Sum of finalized SDP deposits — a ledger fact, always present.",
+    }),
+    earned: earnSignedDecimalAmountSchema.optional().openapi({
+      description:
+        "`currentValue − totalDeposited`, stated only when exact and never coerced to zero. " +
+        "Live hydration reads the owner's whole vault balance, so shares acquired outside SDP " +
+        "inflate this figure — a documented property of non-custodial reads.",
+    }),
+    earnedUnavailableReason: z
+      .enum(["live_value_unavailable", "movements_pending", "withdrawals_not_valued"])
+      .optional()
+      .openapi({
+        description:
+          "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
+          "or a finalized withdrawal exists (the ledger records exits in shares, so no exact " +
+          "token-denominated earned figure exists once money has gone out).",
+      }),
+  })
+  .openapi({ description: "Earnings for one deposit token across the wallet's positions." });
+
+export const earnExternalWalletEarningsResponse = successResponseSchema(
+  z.object({
+    earnings: z.object({
+      ownerAddress: earnOwnerAddressSchema,
+      positionCount: z.number().int().nonnegative(),
+      unavailablePositionCount: z.number().int().nonnegative(),
+      totalsByToken: z.array(earnExternalWalletTokenEarningsSchema),
+    }),
+  })
+);

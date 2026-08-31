@@ -1,8 +1,8 @@
 import type { EarnButtonStyle, EarnStrategy } from "@sdp/types";
 import { BatteryFullIcon, SignalHighIcon, WifiHighIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
-import { EarnDepositButtonPreview } from "./earn-button-preview";
 import { EarnButtonPreviewDetails } from "./earn-button-preview-details";
+import { EarnSavingsCardPreview } from "./earn-savings-preview";
 
 export function EarnButtonIosPreview({
   accentColor,
@@ -40,23 +40,14 @@ export function EarnButtonIosPreview({
               <span aria-hidden="true" className="size-7 rounded-full bg-fill-strong" />
             </div>
 
-            <div className="flex flex-1 flex-col pt-5 pb-4">
+            <div className="flex flex-1 flex-col pt-4 pb-4">
               <div className="rounded-2xl border border-border-default bg-fill-subtle p-4 shadow-sm">
-                <EarnButtonPreviewDetails strategy={strategy} />
-                <div className="mt-6">
-                  <EarnDepositButtonPreview
-                    accentColor={accentColor}
-                    className="w-full"
-                    style={style}
-                  />
-                  <p className="mt-2 text-center text-[10px] text-tertiary">
-                    {t("DashboardMarkets.earnProgram.poweredBy")}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 space-y-2" aria-hidden="true">
-                <div className="h-3 w-3/4 rounded-full bg-fill-subtle" />
-                <div className="h-3 w-1/2 rounded-full bg-fill-subtle" />
+                <EarnSavingsCardPreview
+                  accentColor={accentColor}
+                  compact
+                  header={<EarnButtonPreviewDetails strategy={strategy} />}
+                  style={style}
+                />
               </div>
             </div>
 

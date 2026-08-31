@@ -3,7 +3,7 @@ import { Code2Icon, InfoIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-reac
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { buildEarnServerIntegration } from "@/app/dashboard/markets/earn/earn-button-integration";
-import { EarnDepositButtonPreview } from "@/app/dashboard/markets/earn/earn-button-preview";
+import { EarnSavingsCardPreview } from "@/app/dashboard/markets/earn/earn-savings-preview";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/playground-api-data";
 import { loadPublicEarnButtonConfiguration } from "@/app/earn/integrate/[token]/earn-integration-handoff-data";
 import { Badge } from "@/components/ui/badge";
@@ -123,15 +123,12 @@ async function HandoffContent({
             </CardDescription>
           </CardHeader>
           <CardContent className="min-w-0 space-y-5">
-            <div className="rounded-xl border border-border-default bg-fill-subtle px-5 py-8">
-              <EarnDepositButtonPreview
+            <div className="rounded-xl border border-border-default bg-fill-subtle px-5 py-5">
+              <EarnSavingsCardPreview
                 accentColor={configuration.accentColor}
-                className="w-full"
+                compact
                 style={configuration.style}
               />
-              <p className="mt-2 text-center text-[11px] text-tertiary">
-                {t("DashboardMarkets.earnProgram.poweredBy")}
-              </p>
             </div>
             <dl className="space-y-3 text-sm">
               <div className="flex items-start justify-between gap-4 border-b border-border-subtle pb-3">

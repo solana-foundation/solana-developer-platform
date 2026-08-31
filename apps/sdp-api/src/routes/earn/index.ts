@@ -16,7 +16,10 @@ import {
   createEarnExternalWalletDepositTransaction,
   createEarnExternalWalletWithdrawal,
   createEarnExternalWalletWithdrawalTransaction,
+  getEarnExternalWalletEarnings,
+  getEarnExternalWalletMovement,
   getEarnExternalWalletPositionSummary,
+  listEarnExternalWalletMovements,
   listEarnExternalWalletPositions,
 } from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
@@ -109,6 +112,29 @@ earn.get(
   "/external-wallet/positions/:ownerAddress",
   requirePermissions("earn:read"),
   listEarnExternalWalletPositions
+);
+
+// B2B2C activity and earnings (PRO-1772): the reads that close the loop the
+// money routes below open. Same posture as the position reads — `earn:read`
+// only, no `wallets:read` (end-user wallets carry no custody bindings), and NO
+// provider gate: these report on money that already moved (ADR 0002). The
+// movements collection is declared before its `:movementId` detail so a
+// literal segment can never be captured as an id; the owner rides the
+// collection as a REQUIRED query filter for the same reason.
+earn.get(
+  "/external-wallet/movements",
+  requirePermissions("earn:read"),
+  listEarnExternalWalletMovements
+);
+earn.get(
+  "/external-wallet/movements/:movementId",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletMovement
+);
+earn.get(
+  "/external-wallet/earnings/:ownerAddress",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletEarnings
 );
 
 // Non-custodial ("vault_direct") positions: SDP builds and signs the deposit

@@ -537,6 +537,66 @@ export interface EarnExternalWalletWithdrawalResponse {
   withdrawal: EarnExternalWalletMovement;
 }
 
+/** Keyset activity page for exactly one external wallet, newest first. */
+export interface EarnExternalWalletMovementsPage {
+  ownerAddress: string;
+  movements: EarnExternalWalletMovement[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** Response body of GET /v1/earn/external-wallet/movements/:movementId. */
+export interface EarnExternalWalletMovementResponse {
+  movement: EarnExternalWalletMovement;
+}
+
+/**
+ * Why an earned figure is absent. Unavailable is never encoded as zero:
+ * - `live_value_unavailable`: the provider could not hydrate current value.
+ * - `movements_pending`: a movement is still settling, so live value and the
+ *   ledger describe different moments.
+ * - `withdrawals_not_valued`: the wallet has a finalized withdrawal, and the
+ *   ledger records exits in shares, not in the deposit token, so no exact
+ *   token-denominated earned figure exists (ADR 0002).
+ */
+export type EarnExternalWalletEarnedUnavailableReason =
+  | "live_value_unavailable"
+  | "movements_pending"
+  | "withdrawals_not_valued";
+
+/** Earnings for one deposit token across an external wallet's positions. */
+export interface EarnExternalWalletTokenEarnings {
+  tokenMint: string;
+  positionCount: number;
+  /** Positions whose live value could not hydrate. */
+  unavailablePositionCount: number;
+  /** Live value across the token's positions; absent when any position is unavailable. */
+  currentValue?: string;
+  /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
+  totalDeposited: string;
+  /**
+   * `currentValue − totalDeposited`, signed. Absent (with the reason below)
+   * whenever it cannot be stated exactly. Live value reads the owner's WHOLE
+   * vault balance, so shares acquired outside SDP inflate this figure — a
+   * documented property of non-custodial hydration, not a bug (ADR 0002).
+   */
+  earned?: string;
+  earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
+}
+
+/** Balance and earnings for one external wallet, grouped by deposit token. */
+export interface EarnExternalWalletEarnings {
+  ownerAddress: string;
+  positionCount: number;
+  unavailablePositionCount: number;
+  totalsByToken: EarnExternalWalletTokenEarnings[];
+}
+
+/** Response body of GET /v1/earn/external-wallet/earnings/:ownerAddress. */
+export interface EarnExternalWalletEarningsResponse {
+  earnings: EarnExternalWalletEarnings;
+}
+
 /**
  * Portfolio wallets — provider-neutral wire contracts.
  *

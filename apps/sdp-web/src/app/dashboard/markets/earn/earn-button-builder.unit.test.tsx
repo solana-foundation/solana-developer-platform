@@ -193,6 +193,24 @@ describe("EarnButtonBuilder", () => {
     expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");
     expect(code).not.toContain("developers.solana.com/earn/buttons");
+    // ... and since PRO-1772 the snippet is the WHOLE loop, not just the
+    // deposit: poll the movement, read balance + earned, list activity,
+    // withdraw the same two-call way money came in.
+    expect(code).toContain("/v1/earn/external-wallet/movements/");
+    expect(code).toContain("/v1/earn/external-wallet/movements?");
+    expect(code).toContain("/v1/earn/external-wallet/earnings/");
+    expect(code).toContain("/v1/earn/external-wallet/positions/");
+    expect(code).toContain("/v1/earn/external-wallet/withdrawal-transactions");
+    expect(code).toContain("/v1/earn/external-wallet/withdrawals");
+    expect(code).toContain("earnedUnavailableReason");
+
+    // The customer preview carries the Deel-shape savings card: balance,
+    // total earned, deposit + withdraw, activity.
+    expect(screen.getByText("Savings balance")).toBeTruthy();
+    expect(screen.getByText("+$14.18 total earned")).toBeTruthy();
+    expect(screen.getByText("Withdraw")).toBeTruthy();
+    expect(screen.getByText("Recent activity")).toBeTruthy();
+    expect(screen.getByText("Withdrawal")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Done" }).getAttribute("href")).toBe(
       "/dashboard/markets/embedded-yield"
     );

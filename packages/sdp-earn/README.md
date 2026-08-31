@@ -269,6 +269,8 @@ the flow:
 | Who holds the funds | an org custody wallet | the end user's own wallet; SDP holds no key |
 | Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (build), then `/external-wallet/deposits` (submit) |
 | Exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-transactions`, then `/external-wallet/withdrawals` |
+| Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
+| Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions/:ownerAddress`, `/positions/summary`, `/earnings/:ownerAddress` |
 | Authorization | wallet policy, then `createOrgSigner` | the owner's own ed25519 signature |
 | Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
 

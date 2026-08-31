@@ -5,10 +5,12 @@ export function earnButtonIntegrationPath(publicToken: string): string {
 }
 
 /**
- * The B2B2C money path, exactly as shipped (PRO-1722): the partner's backend
- * BUILDS an unsigned transaction for the customer's own wallet, the wallet
- * signs it in the browser, and the backend SUBMITS the signed bytes — SDP
- * verifies the signature, records the deposit, then broadcasts.
+ * The complete B2B2C loop, exactly as shipped (PRO-1722 + PRO-1772): the
+ * partner's backend BUILDS an unsigned transaction for the customer's own
+ * wallet, the wallet signs it in the browser, the backend SUBMITS the signed
+ * bytes — SDP verifies the signature, records the movement, then broadcasts —
+ * and the reads close the loop: poll the movement to a terminal state, show
+ * balance + earned, list activity, and withdraw the same way money came in.
  *
  * A server-only example by construction: the API key comes from process.env
  * and the browser/mobile button is expected to call this partner-owned
@@ -31,6 +33,15 @@ function sdpHeaders(extra: Record<string, string> = {}) {
     "Content-Type": "application/json",
     ...extra,
   };
+}
+
+async function sdpFetch(path: string, init?: RequestInit) {
+  const response = await fetch(\`\${SDP_API_URL}\${path}\`, init);
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result?.error?.message ?? \`SDP request failed: \${path}\`);
+  }
+  return result.data;
 }
 
 /**
@@ -57,7 +68,7 @@ export async function buildEarnDepositTransaction({
   /** Minimum acceptable shares, derived from your quote and slippage tolerance. */
   minSharesOut: string;
 }) {
-  const response = await fetch(\`\${SDP_API_URL}/v1/earn/external-wallet/deposit-transactions\`, {
+  const data = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -67,12 +78,8 @@ export async function buildEarnDepositTransaction({
       minSharesOut,
     }),
   });
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result?.error?.message ?? "Building the deposit transaction failed");
-  }
   // { transactionId, transaction, lastValidBlockHeight, ... }
-  return result.data.transaction;
+  return data.transaction;
 }
 
 /**
@@ -92,16 +99,101 @@ export async function submitEarnDeposit({
   signedTransaction: string;
   idempotencyKey: string;
 }) {
-  const response = await fetch(\`\${SDP_API_URL}/v1/earn/external-wallet/deposits\`, {
+  const data = await sdpFetch("/v1/earn/external-wallet/deposits", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
     body: JSON.stringify({ transactionId, signedTransaction }),
   });
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result?.error?.message ?? "Submitting the deposit failed");
-  }
   // { movementId, positionId, status, signature, replayed, ... }
-  return result.data.deposit;
+  return data.deposit;
+}
+
+/**
+ * Step 3 — poll the movement to a terminal state. \`confirmed\` is optimistic;
+ * only \`finalized\` and \`failed\` are terminal, and SDP settles every movement
+ * within about ninety seconds.
+ */
+export async function getEarnMovement(movementId: string) {
+  const data = await sdpFetch(
+    \`/v1/earn/external-wallet/movements/\${encodeURIComponent(movementId)}\`,
+    { headers: sdpHeaders() }
+  );
+  // { movementId, direction, status, amount, denomination, signature, ... }
+  return data.movement;
+}
+
+/**
+ * Balance + total earned, grouped by deposit token. \`earned\` is stated only
+ * when exact — otherwise it is ABSENT with \`earnedUnavailableReason\`, never
+ * zero. Render an em dash or a spinner for an absent figure, never $0.
+ */
+export async function getEarnEarnings(ownerAddress: string) {
+  const data = await sdpFetch(
+    \`/v1/earn/external-wallet/earnings/\${encodeURIComponent(ownerAddress)}\`,
+    { headers: sdpHeaders() }
+  );
+  // { ownerAddress, totalsByToken: [{ currentValue?, totalDeposited, earned?, ... }] }
+  return data.earnings;
+}
+
+/** Activity feed: the customer's deposits and withdrawals, newest first. */
+export async function listEarnActivity(ownerAddress: string, cursor?: string) {
+  const query = new URLSearchParams({ ownerAddress });
+  if (cursor) query.set("before", cursor);
+  // { movements, hasMore, nextCursor }
+  return sdpFetch(\`/v1/earn/external-wallet/movements?\${query}\`, { headers: sdpHeaders() });
+}
+
+/**
+ * The customer's live positions. A withdrawal names a POSITION and a share
+ * amount: read \`id\` and \`withdrawableShares\` here to drive the withdraw flow.
+ */
+export async function listEarnPositions(ownerAddress: string) {
+  const data = await sdpFetch(
+    \`/v1/earn/external-wallet/positions/\${encodeURIComponent(ownerAddress)}\`,
+    { headers: sdpHeaders() }
+  );
+  // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }] }
+  return data.positions;
+}
+
+/**
+ * Withdraw, step 1 — build the unsigned exit for the customer's wallet to
+ * sign. Exits keep working even when deposits are paused: money out is never
+ * gated by money-in rules.
+ */
+export async function buildEarnWithdrawalTransaction({
+  positionId,
+  shares,
+}: {
+  /** The position \`id\` from listEarnPositions. */
+  positionId: string;
+  /** Shares to redeem, at most \`withdrawableShares\`, as a decimal string. */
+  shares: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId, shares }),
+  });
+  return data.transaction;
+}
+
+/** Withdraw, step 2 — submit the signed exit; same idempotency contract as the deposit. */
+export async function submitEarnWithdrawal({
+  transactionId,
+  signedTransaction,
+  idempotencyKey,
+}: {
+  transactionId: string;
+  signedTransaction: string;
+  idempotencyKey: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
+    method: "POST",
+    headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
+    body: JSON.stringify({ transactionId, signedTransaction }),
+  });
+  return data.withdrawal;
 }`;
 }
