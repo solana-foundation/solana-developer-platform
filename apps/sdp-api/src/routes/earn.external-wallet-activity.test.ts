@@ -49,7 +49,7 @@ function cachedKey(): CachedApiKey {
     id: KEY.id,
     organizationId: ORG,
     projectId: PROJECT,
-    role: "developer",
+    role: "api_developer",
     permissions: ["earn:read"],
     environment: "sandbox",
     rateLimitTier: "standard",
@@ -88,7 +88,7 @@ async function seedScope() {
       .prepare(
         `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'External activity', 'sk_test_act', ?, 'developer', '["earn:read"]', 'active')`
+         VALUES (?, ?, ?, ?, 'External activity', 'sk_test_act', ?, 'api_developer', '["earn:read"]', 'active')`
       )
       .bind(KEY.id, ORG, PROJECT, USER, keyHash),
   ]);

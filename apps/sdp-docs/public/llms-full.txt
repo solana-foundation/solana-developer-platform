@@ -5706,6 +5706,9 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | --- | --- | --- |
 | `POST` | `/v1/earn/external-wallet/deposit-transactions` | Build an unsigned external-wallet deposit transaction |
 | `POST` | `/v1/earn/external-wallet/deposits` | Submit a signed external-wallet deposit |
+| `GET` | `/v1/earn/external-wallet/earnings/{ownerAddress}` | Get one external wallet's balance and earnings |
+| `GET` | `/v1/earn/external-wallet/movements` | List one external wallet's activity |
+| `GET` | `/v1/earn/external-wallet/movements/{movementId}` | Get one external-wallet movement |
 | `GET` | `/v1/earn/external-wallet/positions/{ownerAddress}` | List one external wallet's positions |
 | `GET` | `/v1/earn/external-wallet/positions/summary` | Get external-wallet position totals |
 | `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
