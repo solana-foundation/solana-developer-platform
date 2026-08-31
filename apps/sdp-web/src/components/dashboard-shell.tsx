@@ -24,6 +24,7 @@ import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
 } from "@/app/dashboard/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
 import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
@@ -137,6 +138,8 @@ function resolvePageLoadingComponent(
       return IntegrationsSkeleton;
     case "integration-detail":
       return IntegrationDetailSkeleton;
+    case "private-channels-setup":
+      return PrivateChannelsSetupSkeleton;
     case "token-holdings":
       return TokenHoldingsLoading;
     case "wallets-overview":
