@@ -3,6 +3,7 @@
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnVaultPosition,
+  earnWithdrawSlippageFloor,
   type SdpEnvironment,
 } from "@sdp/types";
 import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
@@ -28,10 +29,25 @@ import {
 import {
   createEarnVaultWithdrawal,
   type EarnVaultWithdrawal,
+  type EarnVaultWithdrawalPreview,
+  fetchEarnVaultWithdrawalPreview,
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcomeToast,
 } from "./earn-program-data";
 import {
+  floorForTolerance,
+  isSlippageExceededRefusal,
+  isZeroQuote,
+  parseSlippageToleranceBps,
+  quoteForKey,
+  useDebouncedVaultQuote,
+  type VaultQuoteState,
+} from "./earn-vault-slippage";
+import { VaultSlippageSection } from "./earn-vault-slippage-section";
+import {
+  forgetVaultWithdrawalFloor,
+  recallVaultWithdrawalFloor,
+  rememberVaultWithdrawalFloor,
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
@@ -56,6 +72,84 @@ function validateVaultWithdrawalShares(value: string): VaultWithdrawalSharesVali
   return { kind: "valid", canonicalShares: shares.canonical };
 }
 
+/** The floor the current quote and tolerance imply, or `undefined` while they cannot. */
+function derivedMinAmountOut(
+  toleranceBps: number | null,
+  quote: VaultQuoteState<EarnVaultWithdrawalPreview>
+): string | undefined {
+  if (toleranceBps === null || quote.kind !== "quoted") return undefined;
+  if (quote.preview.blockingIssues.length > 0) return undefined;
+  // `null` — a zero-asset quote — has no satisfiable floor; blocking the
+  // submission is the only honest answer (see `floorForTolerance`).
+  return (
+    floorForTolerance(quote.preview.assetsOut, quote.preview.assetDecimals, toleranceBps) ??
+    undefined
+  );
+}
+
+/** Quote-state notices under the summary: loading, unavailable, or blocked. */
+function WithdrawalQuoteNotices({ quote }: { quote: VaultQuoteState<EarnVaultWithdrawalPreview> }) {
+  const t = useTranslations();
+  if (quote.kind === "loading") {
+    return (
+      <p className="mt-2 text-xs text-tertiary" role="status">
+        {t("DashboardEarn.vaultWithdraw.quoteLoading")}
+      </p>
+    );
+  }
+  if (quote.kind === "unavailable") {
+    return (
+      <p className="mt-2 text-xs text-error" role="alert">
+        {t("DashboardEarn.vaultWithdraw.quoteUnavailable")}
+      </p>
+    );
+  }
+  const blockingIssue = quote.kind === "quoted" ? quote.preview.blockingIssues[0] : undefined;
+  if (blockingIssue) {
+    return (
+      <p className="mt-2 text-xs text-error" role="alert">
+        {t("DashboardEarn.vaultWithdraw.quoteBlocked", { message: blockingIssue.message })}
+      </p>
+    );
+  }
+  if (
+    quote.kind === "quoted" &&
+    isZeroQuote(quote.preview.assetsOut, quote.preview.assetDecimals)
+  ) {
+    return (
+      <p className="mt-2 text-xs text-error" role="alert">
+        {t("DashboardEarn.vaultWithdraw.quoteZeroAssets")}
+      </p>
+    );
+  }
+  return null;
+}
+
+function sharesBalanceHint(
+  t: ReturnType<typeof useTranslations>,
+  locale: string,
+  totalShares: string | undefined,
+  withdrawableShares: string | undefined,
+  hasStakedShares: boolean
+): string {
+  if (withdrawableShares === undefined) {
+    return totalShares === undefined
+      ? t("DashboardEarn.vaultWithdraw.sharesUnknown")
+      : t("DashboardEarn.vaultWithdraw.withdrawableUnknown", {
+          shares: formatProviderAmount(totalShares, locale),
+        });
+  }
+  if (hasStakedShares && totalShares !== undefined) {
+    return t("DashboardEarn.vaultWithdraw.sharesAvailable", {
+      available: formatProviderAmount(withdrawableShares, locale),
+      total: formatProviderAmount(totalShares, locale),
+    });
+  }
+  return t("DashboardEarn.vaultWithdraw.sharesHeld", {
+    shares: formatProviderAmount(withdrawableShares, locale),
+  });
+}
+
 type WithdrawalOutcome =
   | {
       kind: "approval_pending";
@@ -74,15 +168,19 @@ type WithdrawalOutcome =
     };
 
 type WithdrawalSubmissionResolution =
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: WithdrawalOutcome; withdrawn?: EarnVaultWithdrawal };
 
 function resolveWithdrawalSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>,
   fallbackError: string,
-  keyWasHeld: boolean
+  keyWasHeld: boolean,
+  slippageExceededMessage: string
 ): WithdrawalSubmissionResolution {
   if (!result.ok) {
+    if (isSlippageExceededRefusal(result.body)) {
+      return { kind: "error", message: slippageExceededMessage, slippageExceeded: true };
+    }
     return { kind: "error", message: result.error || fallbackError };
   }
   if (result.data.kind === "approval_pending") {
@@ -283,6 +381,15 @@ export function EarnVaultWithdrawModal({
   const t = useTranslations();
   const locale = useLocale();
   const [sharesInput, setSharesInput] = useState("");
+  // Declared per provider in @sdp/types: non-null means this provider REQUIRES
+  // an explicit exit floor derived from a live quote. Null renders no slippage
+  // control and sends no floor — Kamino's contract is unchanged.
+  const slippagePolicy = earnWithdrawSlippageFloor(position.provider);
+  const [slippageInput, setSlippageInput] = useState(() =>
+    slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : ""
+  );
+  const [slippageOpen, setSlippageOpen] = useState(false);
+  const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<WithdrawalOutcome | null>(null);
@@ -324,16 +431,100 @@ export function EarnVaultWithdrawModal({
     sharesInput.trim() === "" || sharesValidation.kind === "valid"
       ? null
       : t("DashboardEarn.vaultWithdraw.sharesInvalid");
+  const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
+  const slippageInvalid = slippagePolicy !== null && slippageBps === null;
+  const quoteShares =
+    slippagePolicy !== null && sharesValidation.kind === "valid"
+      ? sharesValidation.canonicalShares
+      : null;
+  // The key serializes EVERY quote input, per the hook's contract: shares
+  // alone would keep serving the previous position's quote across a swap.
+  const quoteKey = quoteShares === null ? null : JSON.stringify([position.id, quoteShares]);
+  const rawQuote = useDebouncedVaultQuote<EarnVaultWithdrawalPreview>(
+    quoteKey,
+    (signal) =>
+      fetchEarnVaultWithdrawalPreview(
+        { positionId: position.id, shares: quoteShares ?? "" },
+        signal
+      ),
+    quoteRefreshKey
+  );
+  const quote = quoteForKey(rawQuote, quoteKey);
+  const minAmountOut = derivedMinAmountOut(slippageBps, quote);
+  const submitBlocked =
+    sharesValidation.kind !== "valid" || (slippagePolicy !== null && minAmountOut === undefined);
 
-  async function submit() {
-    if (submittingRef.current || sharesValidation.kind !== "valid") return;
-
-    const shares = sharesValidation.canonicalShares;
+  async function submitResolvedIntent(controller: AbortController, shares: string) {
     const fingerprint = vaultWithdrawalRequestFingerprint({
       projectId,
       positionId: position.id,
       shares,
+      toleranceBps: slippagePolicy === null ? null : slippageBps,
     });
+    const resolvedKey = await resolveHeldIdempotencyKey(
+      vaultWithdrawalIdempotencyKeyStore,
+      fingerprint,
+      controller.signal,
+      fetchEarnVaultWithdrawalsByRequestId
+    );
+    if (resolvedKey.kind === "aborted") return;
+    if (resolvedKey.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.vaultWithdraw.heldKeyUnavailable"));
+      return;
+    }
+
+    // A HELD key must replay the floor it was MINTED with, verbatim — the
+    // deposit modal documents why. A fresh key takes the freshly derived
+    // floor, and records it for exactly that future replay.
+    const heldFloor = resolvedKey.wasHeld ? recallVaultWithdrawalFloor(fingerprint) : undefined;
+    const floorForRequest = heldFloor !== undefined ? heldFloor : (minAmountOut ?? null);
+    rememberVaultWithdrawalFloor(fingerprint, floorForRequest);
+
+    // No abort signal on the value-moving POST — see the deposit modal.
+    const result = await createEarnVaultWithdrawal(
+      {
+        positionId: position.id,
+        shares,
+        ...(floorForRequest === null ? {} : { minAmountOut: floorForRequest }),
+      },
+      resolvedKey.key
+    );
+    // Key bookkeeping FIRST and unconditionally: the store outlives the
+    // component, so an unmount mid-flight must not skip recording the answer.
+    const disposition = applyIdempotencyKeyOutcome(
+      vaultWithdrawalIdempotencyKeyStore,
+      fingerprint,
+      result
+    );
+    // A retired key can never be replayed, so its remembered floor is dead
+    // weight the next fresh derivation must not inherit.
+    if (disposition === "retired") forgetVaultWithdrawalFloor(fingerprint);
+    if (controller.signal.aborted) return;
+    const resolution = resolveWithdrawalSubmission(
+      result,
+      t("DashboardEarn.vaultWithdraw.submitError"),
+      resolvedKey.wasHeld,
+      // A blown floor gets THIS surface's own words and the control that
+      // fixes it, not a relayed simulation log.
+      t("DashboardEarn.vaultWithdraw.slippageExceeded")
+    );
+    if (resolution.kind === "error") {
+      if (resolution.slippageExceeded) {
+        // Open the control that fixes it, and re-quote: the retry's floor
+        // must come from the rate that refused.
+        setSlippageOpen(true);
+        setQuoteRefreshKey((key) => key + 1);
+      }
+      setSubmitError(resolution.message);
+      return;
+    }
+    setOutcome(resolution.outcome);
+    if (resolution.withdrawn) onWithdrawn?.(resolution.withdrawn);
+  }
+
+  async function submit() {
+    if (submittingRef.current || submitBlocked || sharesValidation.kind !== "valid") return;
+
     const controller = new AbortController();
     requestControllerRef.current?.abort();
     requestControllerRef.current = controller;
@@ -342,38 +533,7 @@ export function EarnVaultWithdrawModal({
     setSubmitError(null);
 
     try {
-      const resolvedKey = await resolveHeldIdempotencyKey(
-        vaultWithdrawalIdempotencyKeyStore,
-        fingerprint,
-        controller.signal,
-        fetchEarnVaultWithdrawalsByRequestId
-      );
-      if (resolvedKey.kind === "aborted") return;
-      if (resolvedKey.kind === "unavailable") {
-        setSubmitError(t("DashboardEarn.vaultWithdraw.heldKeyUnavailable"));
-        return;
-      }
-
-      // No abort signal on the value-moving POST — see the deposit modal.
-      const result = await createEarnVaultWithdrawal(
-        { positionId: position.id, shares },
-        resolvedKey.key
-      );
-      // Key bookkeeping FIRST and unconditionally: the store outlives the
-      // component, so an unmount mid-flight must not skip recording the answer.
-      applyIdempotencyKeyOutcome(vaultWithdrawalIdempotencyKeyStore, fingerprint, result);
-      if (controller.signal.aborted) return;
-      const resolution = resolveWithdrawalSubmission(
-        result,
-        t("DashboardEarn.vaultWithdraw.submitError"),
-        resolvedKey.wasHeld
-      );
-      if (resolution.kind === "error") {
-        setSubmitError(resolution.message);
-        return;
-      }
-      setOutcome(resolution.outcome);
-      if (resolution.withdrawn) onWithdrawn?.(resolution.withdrawn);
+      await submitResolvedIntent(controller, sharesValidation.canonicalShares);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(
@@ -451,20 +611,7 @@ export function EarnVaultWithdrawModal({
             value={sharesInput}
           />
           <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
-            {withdrawableShares === undefined
-              ? totalShares === undefined
-                ? t("DashboardEarn.vaultWithdraw.sharesUnknown")
-                : t("DashboardEarn.vaultWithdraw.withdrawableUnknown", {
-                    shares: formatProviderAmount(totalShares, locale),
-                  })
-              : hasStakedShares && totalShares !== undefined
-                ? t("DashboardEarn.vaultWithdraw.sharesAvailable", {
-                    available: formatProviderAmount(withdrawableShares, locale),
-                    total: formatProviderAmount(totalShares, locale),
-                  })
-                : t("DashboardEarn.vaultWithdraw.sharesHeld", {
-                    shares: formatProviderAmount(withdrawableShares, locale),
-                  })}
+            {sharesBalanceHint(t, locale, totalShares, withdrawableShares, hasStakedShares)}
           </div>
           {sharesError ? (
             <p className="text-xs text-error" role="alert">
@@ -497,7 +644,42 @@ export function EarnVaultWithdrawModal({
               </dd>
             </div>
           ) : null}
+          {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
+            <div className="flex items-baseline justify-between gap-5 py-1">
+              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
+              <dd className="text-right tabular-nums text-primary">
+                {formatTokenQuantity(quote.preview.assetsOut, locale, asset.symbol)}
+              </dd>
+            </div>
+          ) : null}
+          {minAmountOut !== undefined ? (
+            <div className="flex items-baseline justify-between gap-5 py-1">
+              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
+              <dd className="text-right tabular-nums text-primary">
+                {formatTokenQuantity(minAmountOut, locale, asset.symbol)}
+              </dd>
+            </div>
+          ) : null}
         </dl>
+
+        <WithdrawalQuoteNotices quote={quote} />
+
+        {slippagePolicy ? (
+          <VaultSlippageSection
+            help={t("DashboardEarn.vaultWithdraw.slippageHelp")}
+            idPrefix="earn-vault-withdraw"
+            input={slippageInput}
+            invalid={slippageInvalid}
+            onChange={(value) => {
+              setSlippageInput(value);
+              setSubmitError(null);
+            }}
+            onToggle={() => setSlippageOpen((open) => !open)}
+            open={slippageOpen}
+            submitting={submitting}
+            toleranceBps={slippageBps}
+          />
+        ) : null}
 
         <p className="mt-4 text-sm leading-6 text-secondary" id="earn-vault-withdraw-note">
           {t("DashboardEarn.vaultWithdraw.confirmNote", { symbol: shareSymbol })}
@@ -515,10 +697,7 @@ export function EarnVaultWithdrawModal({
           <Button disabled={submitting} onClick={onClose} variant="outline">
             {t("DashboardEarn.deposit.cancel")}
           </Button>
-          <Button
-            disabled={submitting || sharesValidation.kind !== "valid"}
-            onClick={() => void submit()}
-          >
+          <Button disabled={submitting || submitBlocked} onClick={() => void submit()}>
             {submitting ? (
               <span className="inline-flex items-center gap-2">
                 <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />

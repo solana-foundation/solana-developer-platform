@@ -32,6 +32,7 @@ packages/*
 !packages/sdp-spc-withdraw
 !packages/sdp-kamino
 !packages/bigint-buffer
+!packages/sdp-veda
 docs
 infra
 scripts
