@@ -180,7 +180,7 @@ function completionDetailRows({
       : null,
     {
       label: t("DashboardPayments.ramps.transferId"),
-      value: shortenAddress(transfer.id),
+      value: transfer.id,
       copyValue: transfer.id,
     },
   ].filter(isDetailRow);

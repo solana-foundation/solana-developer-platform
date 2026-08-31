@@ -188,7 +188,7 @@
       "finalReceivedAmount": "Montant final reçu",
       "finalPayoutAmount": "Montant du paiement final",
       "completed": "Terminé",
-      "transferId": "ID du transfert",
+      "transferId": "ID de transfert SDP",
       "depositTransaction": "Transaction de dépôt",
       "quoteId": "ID du devis",
       "depositComplete": "Dépôt terminé",

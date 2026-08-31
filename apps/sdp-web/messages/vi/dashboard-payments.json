@@ -187,7 +187,7 @@
       "finalReceivedAmount": "Số tiền nhận cuối",
       "finalPayoutAmount": "Số tiền chi trả cuối",
       "completed": "Hoàn tất",
-      "transferId": "ID chuyển",
+      "transferId": "ID chuyển tiền SDP",
       "depositTransaction": "Giao dịch nạp tiền",
       "quoteId": "ID Báo giá",
       "depositComplete": "Nạp hoàn tất",
