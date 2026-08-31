@@ -26,6 +26,7 @@ import {
   isValidTokenSymbol,
 } from "./create-token-modal.utils";
 import { TemplateSelectionStep } from "./create-token-template-selection-step";
+import { issuanceQueryKeys } from "./issuance-query-key";
 
 interface CreateIssuanceTokenModalProps {
   signerWallets?: PaymentsDashboardWallet[];
@@ -73,7 +74,7 @@ export function CreateIssuanceTokenModal({
   const shouldLoadSignerWallets = isOpen && isFeaturesStep;
   const hasServerWalletSnapshot = signerWallets.length > 0 || signerWalletsError !== null;
   const { data: liveSignerWalletsData, error: liveSignerWalletsError } = useSWR(
-    shouldLoadSignerWallets ? "issuance-create-token-signer-wallets" : null,
+    shouldLoadSignerWallets ? issuanceQueryKeys.createTokenSignerWallets() : null,
     () => fetchWallets({}, t),
     {
       fallbackData: hasServerWalletSnapshot ? signerWallets : undefined,

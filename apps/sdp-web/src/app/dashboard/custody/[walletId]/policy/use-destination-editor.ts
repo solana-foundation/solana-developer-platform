@@ -12,6 +12,7 @@ import {
 import type { ComplianceSnapshot } from "@/app/dashboard/payments/payments-workspace.types";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
+import { custodyQueryKeys } from "../../custody-query-key";
 import {
   type DestinationMode,
   isValidSolanaAddress,
@@ -111,7 +112,7 @@ export function useDestinationEditor(
   const [screenUnavailable, setScreenUnavailable] = useState(false);
   const [flagged, setFlagged] = useState<FlaggedDestination[]>([]);
   const { data: accountsResult } = useSWR(
-    "policy-destination-accounts",
+    custodyQueryKeys.policyDestinationAccounts(),
     () => fetchBatchRecipients({ pageSize: 100 }, t),
     { revalidateOnFocus: false }
   );
