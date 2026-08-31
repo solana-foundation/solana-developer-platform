@@ -184,6 +184,7 @@
       "finalPayoutAmount": "Final payout amount",
       "completed": "Completed",
       "transferId": "Transfer ID",
+      "depositTransaction": "Deposit transaction",
       "quoteId": "Quote ID",
       "depositComplete": "Deposit complete",
       "payoutComplete": "Payout complete",

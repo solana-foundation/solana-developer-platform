@@ -188,6 +188,7 @@
       "finalPayoutAmount": "Số tiền chi trả cuối",
       "completed": "Hoàn tất",
       "transferId": "ID chuyển",
+      "depositTransaction": "Giao dịch nạp tiền",
       "quoteId": "ID Báo giá",
       "depositComplete": "Nạp hoàn tất",
       "payoutComplete": "Chi trả hoàn tất",

@@ -12,7 +12,7 @@ interface WizardFrameProps {
   children: ReactNode;
   currentStep: number;
   description?: ReactNode;
-  footer: ReactNode;
+  footer?: ReactNode;
   header?: ReactNode;
   maxWidthClassName?: string;
   progressLabel: string;
@@ -107,12 +107,14 @@ export function WizardFrame({
         </div>
       </div>
 
-      <footer
-        className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
-        data-wizard-actions
-      >
-        <div className={cn("mx-auto w-full", maxWidthClassName)}>{footer}</div>
-      </footer>
+      {footer ? (
+        <footer
+          className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+          data-wizard-actions
+        >
+          <div className={cn("mx-auto w-full", maxWidthClassName)}>{footer}</div>
+        </footer>
+      ) : null}
 
       {summary === undefined ? null : (
         <Modal

@@ -11,8 +11,8 @@ import { OfframpStepContent } from "./components/offramp-step-content";
 import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
-import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 import type { RailProps } from "./ramp-action-page";
+import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";
 
 function offrampPrimaryLabel(wizard: OfframpWizard, t: ReturnType<typeof useTranslations>): string {
@@ -49,9 +49,7 @@ export function OfframpRail({
     onExit,
   });
 
-  const transferTerminal = wizard.transferStatus
-    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
-    : false;
+  const transferState = getRampTransferState(wizard.transferStatus?.status);
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const showInlineStatus =
     wizard.onTransactionStage &&
@@ -91,12 +89,15 @@ export function OfframpRail({
         ) : undefined
       }
       secondaryLabel={
-        wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined
+        wizard.onTransactionStage && transferState.cancelable
+          ? t("DashboardPayments.counterparty.cancel")
+          : undefined
       }
-      confirmSecondary={wizard.onTransactionStage}
+      confirmSecondary={wizard.onTransactionStage && transferState.cancelable}
       secondaryDisabled={wizard.isCanceling}
+      hideSecondary={wizard.onTransactionStage && !transferState.cancelable}
       footerActions={
-        transferTerminal ? (
+        transferState.terminal ? (
           <Button asChild type="button">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               {t("DashboardPayments.goToTransaction")}

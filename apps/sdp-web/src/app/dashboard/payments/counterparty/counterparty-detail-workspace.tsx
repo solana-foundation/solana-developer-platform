@@ -654,7 +654,7 @@ function TransferDetailModal({
             ) : null}
             {providerTransferDetailRows(transfer, { cluster }, t).map((row) => (
               <DetailRow
-                key={row.label}
+                key={row.key}
                 label={row.label}
                 value={
                   row.href ? (

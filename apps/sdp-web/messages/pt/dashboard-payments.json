@@ -189,6 +189,7 @@
       "finalPayoutAmount": "Valor final do pagamento de saída",
       "completed": "Concluído",
       "transferId": "ID da transferência",
+      "depositTransaction": "Transação de depósito",
       "quoteId": "ID da cotação",
       "depositComplete": "Depósito concluído",
       "payoutComplete": "Pagamento de saída concluído",

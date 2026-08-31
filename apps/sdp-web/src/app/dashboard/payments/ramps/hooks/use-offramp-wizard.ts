@@ -22,6 +22,7 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
+import { getRampTransferState } from "../ramp-transfer-state";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
 import {
   memoSummaryDetails,
@@ -29,12 +30,7 @@ import {
   providerSummaryDetail,
   summaryAmount,
 } from "../wizard-summary";
-import {
-  isTerminalRampTransferStatus,
-  type RampWizardStep,
-  type UseRampWizardProps,
-  useRampWizard,
-} from "./use-ramp-wizard";
+import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type CryptoDepositInstruction = Extract<PaymentRampInstruction, { kind: "crypto_deposit" }>;
 
@@ -152,7 +148,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
       refreshInterval: (transfer) =>
-        transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,
+        transfer && getRampTransferState(transfer.status).terminal ? 0 : 3000,
       revalidateOnFocus: true,
       dedupingInterval: 0,
     }
