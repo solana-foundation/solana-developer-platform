@@ -207,7 +207,7 @@ export function notFound(resource?: string): AppError {
 export function walletNotFound(): AppError {
   return new AppError(
     "NOT_FOUND",
-    "Wallet not found. Pass the `walletId` field returned by GET /v1/wallets — the wallet record `id` and the public key are not accepted."
+    "Wallet not found. Verify the wallet identifier supplied to this endpoint."
   );
 }
 

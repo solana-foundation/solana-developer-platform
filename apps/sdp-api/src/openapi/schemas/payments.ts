@@ -547,11 +547,10 @@ export const createTransferRequestSchema = createTransferSchemaBase
     transferId: withOpenApi(createTransferSchemaBase.shape.transferId, {
       description:
         "Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data.",
-      example: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
     }),
-    source: withOpenApi(createTransferSchemaBase.shape.source, {
-      description: `Source wallet — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+    sourceCustodyWalletId: withOpenApi(createTransferSchemaBase.shape.sourceCustodyWalletId, {
+      description: "Exact SDP Wallet ID (`id` from `GET /v1/wallets`).",
+      example: "cwlt_example",
     }),
     destination: withOpenApi(createTransferSchemaBase.shape.destination, {
       description: "Destination wallet address.",
@@ -571,12 +570,19 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     privateTransfer: privateTransferRequestSchema.optional().openapi({
       description:
-        "Private-transfer routing. SDP asks the provider to build a base-balance private transfer, signs it with the custody wallet when required, and submits it on the configured Solana cluster.",
+        "Private-transfer routing. SDP asks the provider to build a base-balance private transfer, signs it with the custody wallet when required, and submits it on the configured Solana cluster. Any additional required signer must be synchronously allowed by policy; approval-required additional signers return 409 until durable signer-set replay is supported.",
     }),
   })
   .openapi({
     description:
       "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
+    example: {
+      projectId: "prj_example",
+      sourceCustodyWalletId: "cwlt_example",
+      destination: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      amount: "100.00",
+    },
   });
 
 export const priorityFeeSchema = withOpenApi(priorityFeeSchemaBase, {
@@ -664,8 +670,13 @@ export const transferSchema = z
   .object({
     id: transferIdParamSchema,
     organizationId: orgIdParamSchema,
-    walletId: walletIdParamSchema.openapi({
-      description: "Source or receiving SDP wallet associated with the transfer.",
+    custodyWalletId: z.string().nullable().openapi({
+      description:
+        "Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.",
+      example: "cwlt_example",
+    }),
+    providerWalletId: walletIdParamSchema.openapi({
+      description: "Provider wallet ID retained as evidence; not an execution selector.",
     }),
     projectId: projectIdParamSchema
       .optional()
@@ -819,9 +830,9 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       description: "Caller-provided batch correlation ID. Not used as an idempotency key.",
       example: "payroll_2026_06_30",
     }),
-    source: withOpenApi(createTransferBatchSchemaBase.shape.source, {
-      description: `Source wallet — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+    sourceCustodyWalletId: withOpenApi(createTransferBatchSchemaBase.shape.sourceCustodyWalletId, {
+      description: "Exact SDP Wallet ID (`id` from `GET /v1/wallets`).",
+      example: "cwlt_example",
     }),
     token: withOpenApi(createTransferBatchSchemaBase.shape.token, {
       description:
@@ -850,23 +861,24 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
     }),
   })
   .openapi({
-    description:
-      "Create a custody-executed outbound transfer batch. Initial scaffold only; execution is not implemented yet.",
+    description: "Create a custody-executed outbound transfer batch.",
   });
 
 export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
   .extend(createTransferBatchRequestSchema.shape)
   .openapi({
-    description:
-      "Estimate transaction chunking and fees for a transfer batch. Initial scaffold only; estimation is not implemented yet.",
+    description: "Estimate transaction chunking and fees for a transfer batch.",
   });
 
 export const paymentListTransferBatchesQuerySchema = listTransferBatchesQuerySchemaBase
   .extend({
-    wallet: withOpenApi(listTransferBatchesQuerySchemaBase.shape.wallet, {
-      description: "Filter by source wallet `walletId`.",
-      example: "privy_wallet_123",
-    }),
+    sourceCustodyWalletId: withOpenApi(
+      listTransferBatchesQuerySchemaBase.shape.sourceCustodyWalletId,
+      {
+        description: "Filter by exact source SDP Wallet ID.",
+        example: "cwlt_example",
+      }
+    ),
     token: withOpenApi(listTransferBatchesQuerySchemaBase.shape.token, {
       description: "Filter by token symbol or mint.",
       example: "SOL",
@@ -935,8 +947,12 @@ export const transferBatchSchema = z
       description: "Caller-provided batch correlation ID.",
       example: "payroll_2026_06_30",
     }),
-    sourceWalletId: walletIdParamSchema.openapi({
-      description: "Source wallet provider ID (`walletId`).",
+    sourceCustodyWalletId: z.string().nullable().openapi({
+      description: "Exact source SDP Wallet ID, or null for unresolved legacy batches.",
+      example: "cwlt_example",
+    }),
+    sourceProviderWalletId: walletIdParamSchema.openapi({
+      description: "Source Provider wallet ID retained as evidence.",
     }),
     sourceAddress: solanaAddressSchema.openapi({
       description: "Source custody wallet address.",
@@ -1657,13 +1673,9 @@ export const simulateSandboxTransferRequestSchema = withOpenApi(simulateSandboxT
 
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   .extend({
-    wallet: withOpenApi(listTransfersQuerySchemaBase.shape.wallet, {
-      description: "Filter by wallet `walletId`.",
-      example: "privy_wallet_123",
-    }),
-    walletAddress: withOpenApi(listTransfersQuerySchemaBase.shape.walletAddress, {
-      description: "Filter by wallet address.",
-      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    custodyWalletId: withOpenApi(listTransfersQuerySchemaBase.shape.custodyWalletId, {
+      description: "Filter persisted transfers by exact SDP Wallet ID.",
+      example: "cwlt_example",
     }),
     search: withOpenApi(listTransfersQuerySchemaBase.shape.search, {
       description:
@@ -1713,7 +1725,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     includeObserved: withOpenApi(listTransfersQuerySchemaBase.shape.includeObserved, {
       description:
-        "When filtering a wallet, include RPC-observed on-chain activity that has not been recorded by SDP. Disable for stable database-backed pagination.",
+        "When custodyWalletId is supplied, also include RPC-observed activity for that exact wallet row's address. Observed rows have custodyWalletId null.",
       example: false,
     }),
     sortBy: withOpenApi(listTransfersQuerySchemaBase.shape.sortBy, {

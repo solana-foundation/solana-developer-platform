@@ -68,7 +68,7 @@ export type CustodyRuntimeWalletProjection = {
   walletId: string;
   publicKey: string;
   label: string | null;
-  purpose: string | null;
+  purpose: CustodyWalletPurpose | null;
   status: "active";
   createdAt: string;
 } & (
@@ -1243,7 +1243,7 @@ export class CustodyRuntimeTargets {
       walletId: row.wallet_id,
       publicKey: row.wallet_public_key,
       label: row.wallet_label,
-      purpose: row.wallet_purpose,
+      purpose: parseWalletPurpose(row.wallet_purpose),
       status: "active",
       createdAt: row.wallet_created_at,
     };
@@ -1263,7 +1263,7 @@ export class CustodyRuntimeTargets {
       walletId: row.wallet_id,
       publicKey: row.wallet_public_key,
       label: row.wallet_label,
-      purpose: row.wallet_purpose,
+      purpose: parseWalletPurpose(row.wallet_purpose),
       status: "active",
       createdAt: row.wallet_created_at,
     };
@@ -1343,6 +1343,20 @@ export class CustodyRuntimeTargets {
       },
       "custody_runtime_target_unavailable"
     );
+  }
+}
+
+function parseWalletPurpose(purpose: string | null): CustodyWalletPurpose | null {
+  switch (purpose) {
+    case null:
+    case "root":
+    case "mint_authority":
+    case "freeze_authority":
+    case "fee_payer":
+    case "transfer":
+      return purpose;
+    default:
+      throw internalError("Unknown custody wallet purpose");
   }
 }
 

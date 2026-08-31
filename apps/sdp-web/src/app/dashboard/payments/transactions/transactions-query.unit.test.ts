@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   countActiveTransactionFilters,
+  hasRemovedTransactionWalletFilter,
   normalizeTransactionSearch,
   parseTransactionFilters,
   serializeTransactionFilters,
@@ -8,6 +9,13 @@ import {
 } from "./transactions-query";
 
 describe("transaction filter query", () => {
+  it.each([{ wallet: "wal_legacy" }, { walletAddress: "" }])(
+    "detects removed wallet filters before they can broaden results: %j",
+    (searchParams) => {
+      expect(hasRemovedTransactionWalletFilter(searchParams)).toBe(true);
+    }
+  );
+
   it("parses supported values and rejects malformed input", () => {
     expect(
       parseTransactionFilters({
@@ -55,7 +63,7 @@ describe("transaction filter query", () => {
   it("serializes only non-default URL filters and resets cleanly", () => {
     const filters = parseTransactionFilters({
       search: "alice",
-      wallet: "wallet_1",
+      custodyWalletId: "cwlt_1",
       status: "failed",
       sortDirection: "asc",
       page: "2",
@@ -63,7 +71,7 @@ describe("transaction filter query", () => {
     });
 
     expect(serializeTransactionFilters(filters).toString()).toBe(
-      "search=alice&status=failed&wallet=wallet_1&sortDirection=asc&snapshot=2026-07-18T12%3A00%3A00.000Z&page=2"
+      "search=alice&status=failed&custodyWalletId=cwlt_1&sortDirection=asc&snapshot=2026-07-18T12%3A00%3A00.000Z&page=2"
     );
     expect(countActiveTransactionFilters(filters)).toBe(2);
   });
@@ -79,37 +87,67 @@ describe("transaction filter query", () => {
     );
     const query = toTransactionsApiQuery(filters);
 
-    expect(query.get("includeObserved")).toBe("true");
+    expect(query.get("includeObserved")).toBe("false");
     expect(query.get("counterpartyId")).toBe("cpty_1");
     expect(query.get("from")).toBe("2026-07-01T00:00:00.000Z");
     expect(query.get("to")).toBe("2026-07-18T12:00:00.000Z");
   });
 
-  it("includes observed deposits unless they are explicitly excluded", () => {
-    // Home shows observed rows, so this table defaults to matching it.
-    expect(parseTransactionFilters({}).includeObserved).toBe(true);
+  it("excludes observed deposits unless they are explicitly included", () => {
+    expect(parseTransactionFilters({}).includeObserved).toBe(false);
+    expect(parseTransactionFilters({ includeObserved: "true" }).includeObserved).toBe(false);
+    expect(
+      parseTransactionFilters({ custodyWalletId: "cwlt_1", includeObserved: "true" })
+        .includeObserved
+    ).toBe(true);
     expect(parseTransactionFilters({ includeObserved: "false" }).includeObserved).toBe(false);
-    // Anything that is not exactly "false" leaves them on.
-    expect(parseTransactionFilters({ includeObserved: "no" }).includeObserved).toBe(true);
+    expect(parseTransactionFilters({ includeObserved: "no" }).includeObserved).toBe(false);
   });
 
-  it("keeps the default out of the URL and round-trips the exclusion", () => {
+  it("keeps the default out of the URL and round-trips the opt-in", () => {
     const base = parseTransactionFilters({});
     expect(serializeTransactionFilters(base).has("includeObserved")).toBe(false);
 
-    const excluded = serializeTransactionFilters({ ...base, includeObserved: false });
-    expect(excluded.get("includeObserved")).toBe("false");
-    expect(parseTransactionFilters(Object.fromEntries(excluded)).includeObserved).toBe(false);
+    expect(
+      serializeTransactionFilters({ ...base, includeObserved: true }).has("includeObserved")
+    ).toBe(false);
+
+    const included = serializeTransactionFilters({
+      ...base,
+      custodyWalletId: "cwlt_1",
+      includeObserved: true,
+    });
+    expect(included.get("includeObserved")).toBe("true");
+    expect(parseTransactionFilters(Object.fromEntries(included)).includeObserved).toBe(true);
   });
 
-  it("counts the exclusion as an active filter only when switched off", () => {
+  it("counts the observed opt-in as an active filter", () => {
     const base = parseTransactionFilters({});
     expect(countActiveTransactionFilters(base)).toBe(0);
-    expect(countActiveTransactionFilters({ ...base, includeObserved: false })).toBe(1);
+    expect(countActiveTransactionFilters({ ...base, includeObserved: true })).toBe(0);
+    expect(
+      countActiveTransactionFilters({
+        ...base,
+        custodyWalletId: "cwlt_1",
+        includeObserved: true,
+      })
+    ).toBe(2);
   });
 
-  it("sends the exclusion through to the API query", () => {
-    const filters = parseTransactionFilters({ includeObserved: "false" });
+  it("never sends observed history without an exact wallet", () => {
+    const filters = { ...parseTransactionFilters({}), includeObserved: true };
+
     expect(toTransactionsApiQuery(filters).get("includeObserved")).toBe("false");
+  });
+
+  it("sends the exact wallet filter and observed opt-in through to the API query", () => {
+    const filters = parseTransactionFilters({
+      custodyWalletId: "cwlt_1",
+      includeObserved: "true",
+    });
+    const query = toTransactionsApiQuery(filters);
+    expect(query.get("custodyWalletId")).toBe("cwlt_1");
+    expect(query.has("wallet")).toBe(false);
+    expect(query.get("includeObserved")).toBe("true");
   });
 });

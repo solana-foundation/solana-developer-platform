@@ -251,7 +251,7 @@ export function MoneygramRampWidget({
             }
             const transfer = await createTransfer(
               {
-                source: sourceWalletId,
+                sourceCustodyWalletId: sourceWalletId,
                 destination: tx.to,
                 token: address(sourceTokenMint),
                 amount: tx.amount,

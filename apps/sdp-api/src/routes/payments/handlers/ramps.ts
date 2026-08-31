@@ -87,7 +87,12 @@ import {
   type simulateSandboxTransferSchema,
   type submitCounterpartyRequirementsSchema,
 } from "../schemas";
-import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
+import {
+  assertFreshPaymentWalletAccess,
+  type ResolvedScope,
+  resolveScope,
+  resolveWalletAddress,
+} from "../wallets";
 import {
   bvnkOnrampQuote,
   completePendingBvnkOfframpTransfer,
@@ -245,9 +250,13 @@ function requireRampTransferWallet(
   walletAddress: string,
   fieldName: string
 ): ScopedRampWallet {
-  const wallet = scope.wallets.find(
+  const matches = scope.wallets.filter(
     (entry) => entry.walletId === walletIdOrAddress || entry.publicKey === walletAddress
   );
+  if (matches.length > 1) {
+    throw conflict("Custody wallet ownership is ambiguous");
+  }
+  const wallet = matches[0];
   if (!wallet) {
     throw badRequest(`${fieldName} must reference an SDP wallet.`);
   }
@@ -300,6 +309,7 @@ async function resolveRampQuoteRequest(
     walletAddress,
     walletFieldName
   );
+  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
   return { scope, projectId, counterparty, wallet, walletAddress };
 }
 
@@ -417,6 +427,7 @@ async function persistRampQuoteTransfer(
   const binding: RampQuoteBinding = {
     organizationId: input.scope.auth.organizationId,
     projectId: input.projectId,
+    custodyWalletId: input.wallet.id,
     walletId: input.wallet.walletId,
     counterpartyId: input.counterparty.id,
     direction: input.direction,
@@ -451,6 +462,7 @@ async function persistRampQuoteTransfer(
       id: input.transferId,
       organizationId: binding.organizationId,
       projectId: binding.projectId,
+      custodyWalletId: binding.custodyWalletId,
       walletId: binding.walletId,
       counterpartyId: binding.counterpartyId,
       sourceAddress: binding.sourceAddress,
@@ -696,6 +708,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         id: reservedTransferId,
         organizationId: scope.auth.organizationId,
         projectId,
+        custodyWalletId: destinationWallet.id,
         walletId: destinationWallet.walletId,
         counterpartyId: counterparty.id,
         sourceAddress: null,
@@ -888,6 +901,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         id: reservedTransferId,
         organizationId: scope.auth.organizationId,
         projectId,
+        custodyWalletId: sourceWallet.id,
         walletId: sourceWallet.walletId,
         counterpartyId: counterparty.id,
         sourceAddress: sourceWalletAddress,
@@ -991,6 +1005,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         organizationId: scope.auth.organizationId,
         projectId,
         counterpartyId: counterparty.id,
+        custodyWalletId: sourceWallet.id,
         walletId: sourceWallet.walletId,
         walletAddress: sourceWalletAddress,
         cryptoToken: input.cryptoToken,

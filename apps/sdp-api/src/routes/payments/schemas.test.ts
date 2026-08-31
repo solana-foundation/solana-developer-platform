@@ -3,7 +3,9 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
   createRecurringPaymentSchema,
+  createTransferBatchSchema,
   createTransferSchema,
+  listTransferBatchesQuerySchema,
   listTransfersQuerySchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateRecurringPaymentSchema,
@@ -17,6 +19,56 @@ const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 const tokenSchema = createTransferSchema.shape.token;
 const destinationSchema = createTransferSchema.shape.destination;
 const recurringPaymentTokenSchema = createRecurringPaymentSchema.shape.token;
+
+describe("payments exact wallet contract", () => {
+  const transfer = {
+    sourceCustodyWalletId: "cwlt_source",
+    destination: VALID_DESTINATION,
+    token: USDC_MINT,
+    amount: "1",
+  };
+  const batch = {
+    sourceCustodyWalletId: "cwlt_source",
+    token: USDC_MINT,
+    recipients: [{ counterpartyAccountId: "cpa_test", amount: "1" }],
+  };
+
+  it("accepts exact SDP Wallet IDs and rejects the removed source selector", () => {
+    expect(createTransferSchema.safeParse(transfer).success).toBe(true);
+    expect(
+      createTransferSchema.safeParse({
+        ...transfer,
+        sourceCustodyWalletId: undefined,
+        source: "provider_wallet_id",
+      }).success
+    ).toBe(false);
+
+    expect(createTransferBatchSchema.safeParse(batch).success).toBe(true);
+    expect(
+      createTransferBatchSchema.safeParse({
+        ...batch,
+        sourceCustodyWalletId: undefined,
+        source: "provider_wallet_id",
+      }).success
+    ).toBe(false);
+  });
+
+  it("uses exact list filters and keeps observed history opt-in", () => {
+    expect(listTransfersQuerySchema.parse({ custodyWalletId: "cwlt_source" })).toMatchObject({
+      custodyWalletId: "cwlt_source",
+      includeObserved: false,
+    });
+    expect(
+      listTransferBatchesQuerySchema.parse({ sourceCustodyWalletId: "cwlt_source" })
+    ).toMatchObject({ sourceCustodyWalletId: "cwlt_source" });
+    expect(listTransfersQuerySchema.safeParse({ wallet: "provider_wallet_id" }).success).toBe(
+      false
+    );
+    expect(listTransferBatchesQuerySchema.safeParse({ wallet: "provider_wallet_id" }).success).toBe(
+      false
+    );
+  });
+});
 
 describe("payments schema inferred types", () => {
   it("destination infers as string and policy rules as PolicyRule[]", () => {

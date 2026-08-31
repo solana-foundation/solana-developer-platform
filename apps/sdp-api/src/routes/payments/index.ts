@@ -7,6 +7,8 @@ import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   activateRecurringPayment,
+  admitTransferBatchRuntimeExecution,
+  admitTransferRuntimeExecution,
   cancelRampTransfer,
   cancelRecurringPayment,
   collectRecurringPayment,
@@ -234,6 +236,7 @@ payments.post(
   policyGate({
     extract: extractTransferPolicyCandidate,
     findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
+    beforeEnforce: admitTransferRuntimeExecution,
   }),
   createTransfer
 );
@@ -251,6 +254,7 @@ payments.post(
   policyGate({
     extract: extractTransferBatchPolicyCandidate,
     findIdempotentKeyReplay: findTransferBatchIdempotentKeyReplay,
+    beforeEnforce: admitTransferBatchRuntimeExecution,
   }),
   createTransferBatch
 );

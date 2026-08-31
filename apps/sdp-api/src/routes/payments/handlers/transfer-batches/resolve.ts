@@ -16,7 +16,7 @@ import {
 } from "@/services/payment-operation.service";
 import { type AppContext, getCounterpartyAccountsRepository } from "../../context";
 import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../../token-accounts";
-import { resolveScope, resolveWallet } from "../../wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "../../wallets";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
@@ -164,13 +164,14 @@ async function resolveRecipients(params: {
 export async function resolveBatchRequest(
   c: AppContext,
   input: CreateTransferBatchInput,
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2]
+  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2],
+  retainedCustodyWalletId?: string
 ): Promise<ResolvedBatchRequest> {
   const projectId = requireProjectId(c);
-  const scope = await resolveScope(c);
+  const scope = await resolveScope(c, retainedCustodyWalletId);
   assertPaymentProjectScope(input.projectId, scope.auth.projectId);
 
-  const sourceWallet = resolveWallet(scope.wallets, input.source);
+  const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
   assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
