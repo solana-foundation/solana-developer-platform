@@ -10,52 +10,38 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const CONNECTIONS_PAGE_SIZE = 20;
 
-const connectionLastCheckSchema = z
-  .object({
-    status: z.enum(CUSTODY_CONNECTION_CHECK_STATUSES),
-    at: z.string().nullable(),
-    failureCode: z.enum(CUSTODY_CONNECTION_FAILURE_CODES).nullable(),
-  })
-  .strict();
+const connectionLastCheckSchema = z.object({
+  status: z.enum(CUSTODY_CONNECTION_CHECK_STATUSES),
+  at: z.string().nullable(),
+  failureCode: z.enum(CUSTODY_CONNECTION_FAILURE_CODES).nullable(),
+});
 
-const custodyConnectionListItemSchema = z
-  .object({
-    id: z.string(),
-    provider: z.enum(CUSTODY_PROVIDERS),
-    label: z.string(),
-    status: z.enum(CUSTODY_CONNECTION_LIFECYCLES),
-    isDefault: z.boolean(),
-    isRuntimeExecutionAllowed: z.boolean(),
-    defaultCustodyWalletId: z.string().nullable(),
-    createdAt: z.string(),
-    activatedAt: z.string().nullable(),
-    lastCheck: connectionLastCheckSchema.nullable(),
-    pendingWalletLabel: z.string().nullable(),
-  })
-  .strict();
+const custodyConnectionListItemSchema = z.object({
+  id: z.string(),
+  provider: z.enum(CUSTODY_PROVIDERS),
+  label: z.string(),
+  status: z.enum(CUSTODY_CONNECTION_LIFECYCLES),
+  isDefault: z.boolean(),
+  isRuntimeExecutionAllowed: z.boolean(),
+  defaultCustodyWalletId: z.string().nullable(),
+  createdAt: z.string(),
+  activatedAt: z.string().nullable(),
+  lastCheck: connectionLastCheckSchema.nullable(),
+  pendingWalletLabel: z.string().nullable(),
+});
 
-const connectionsPageResultSchema = z
-  .object({
-    connections: z.array(custodyConnectionListItemSchema),
-    pagination: z
-      .object({
-        limit: z.number().int().nonnegative(),
-        offset: z.number().int().nonnegative(),
-        total: z.number().int().nonnegative(),
-      })
-      .strict(),
-  })
-  .strict();
+const connectionsPageResultSchema = z.object({
+  connections: z.array(custodyConnectionListItemSchema),
+  pagination: z.object({
+    limit: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+  }),
+});
 
-const connectionsPageEnvelopeSchema = z
-  .object({
-    data: connectionsPageResultSchema,
-    meta: z
-      .object({ requestId: z.string().optional(), timestamp: z.string().optional() })
-      .strict()
-      .optional(),
-  })
-  .strict();
+const connectionsPageEnvelopeSchema = z.object({
+  data: connectionsPageResultSchema,
+});
 
 export type ConnectionLastCheck = z.infer<typeof connectionLastCheckSchema>;
 export type CustodyConnectionListItem = z.infer<typeof custodyConnectionListItemSchema>;

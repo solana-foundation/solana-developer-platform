@@ -188,14 +188,15 @@ export class ProviderCredentialStore {
     projectId: string,
     options: { limit: number; offset: number }
   ): Promise<{ connections: ProjectConnectionListRow[]; total: number }> {
-    const totalRow = await this.db.queryOne<{ total: number | string }>(
-      `SELECT COUNT(*) AS total
-         FROM custody_connections
-        WHERE organization_id = ? AND project_id = ?`,
-      [organizationId, projectId]
-    );
-    const connections = await this.db.queryMany<ProjectConnectionListRow>(
-      `SELECT c.id,
+    const [totalRow, connections] = await Promise.all([
+      this.db.queryOne<{ total: number | string }>(
+        `SELECT COUNT(*) AS total
+           FROM custody_connections
+          WHERE organization_id = ? AND project_id = ?`,
+        [organizationId, projectId]
+      ),
+      this.db.queryMany<ProjectConnectionListRow>(
+        `SELECT c.id,
               c.provider,
               c.status AS connection_status,
               c.setup_metadata,
@@ -226,8 +227,9 @@ export class ProviderCredentialStore {
         WHERE c.organization_id = ? AND c.project_id = ?
         ORDER BY c.created_at DESC, c.id DESC
         LIMIT ? OFFSET ?`,
-      [organizationId, projectId, options.limit, options.offset]
-    );
+        [organizationId, projectId, options.limit, options.offset]
+      ),
+    ]);
     return { connections, total: Number(totalRow?.total ?? 0) };
   }
 

@@ -68,6 +68,32 @@ describe("fetchConnectionsPage", () => {
     );
   });
 
+  it("accepts additive fields from a newer API response", async () => {
+    const expectedConnection = connection("conn-1");
+    const request = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          connections: [
+            {
+              ...expectedConnection,
+              lastCheck: { ...expectedConnection.lastCheck, futureField: true },
+              futureField: true,
+            },
+          ],
+          pagination: { limit: 20, offset: 0, total: 1, futureField: true },
+          futureField: true,
+        },
+        meta: { requestId: "req-connections", futureField: true },
+        futureField: true,
+      })
+    );
+
+    await expect(fetchConnectionsPage(request, { page: 1 })).resolves.toEqual({
+      connections: [expectedConnection],
+      pagination: { limit: 20, offset: 0, total: 1 },
+    });
+  });
+
   it("throws a typed error carrying the response status", async () => {
     const request = vi.fn(async () => new Response(null, { status: 403 }));
 
