@@ -18,8 +18,6 @@ import {
 import type { ValidateCounterpartyOptions } from "../../types";
 import { latestLightsparkPayoutAccount, readLightsparkCustomerId } from "./provider-data";
 
-const _SWIFT_BIC_PATTERN = "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$";
-const _INTERNATIONAL_PHONE_PATTERN = "^\\+[0-9]{6,14}$";
 const ISO_DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
 
 const LIGHTSPARK_RAIL_LABELS = {
