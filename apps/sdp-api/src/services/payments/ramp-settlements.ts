@@ -133,22 +133,114 @@ function buildRampSettlementUpdate(
   return update;
 }
 
+/**
+ * Correlates one settlement event to the single transfer every supplied
+ * identifier agrees on. Identifiers are never ignored: a supplied transfer id
+ * that resolves to nothing refuses the event, identifiers resolving to
+ * different transfers refuse the event, and the survivor's provider_reference
+ * must equal the event's quote or transaction reference. The transaction
+ * reference is allowed to resolve to nothing only because it cannot exist
+ * before its own first event promotes it onto the row — there the
+ * provider-signed quote reference is the binding authority.
+ *
+ * @param env - Worker environment for database access.
+ * @param event - The provider settlement event.
+ * @returns The uniquely correlated transfer, or null when the event must not settle anything.
+ */
+async function correlateRampSettlementTransfer(
+  env: Env,
+  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
+): Promise<PaymentTransferRow | null> {
+  const repo = createSystemPaymentsRepository(env);
+  const transferIdMatch = event.transferId
+    ? await repo.getTransferById({ transferId: event.transferId })
+    : null;
+  if (event.transferId !== undefined && transferIdMatch === null) {
+    logEvent("warn", {
+      event: "sdp_api_ramp_settlement_unresolved_transfer_id",
+      flow: "ramp-settlement",
+      provider: event.provider,
+      event_transfer_id: event.transferId,
+      event_quote_id: event.reference,
+      event_transaction_id: event.transactionReference,
+    });
+    return null;
+  }
+  const transactionMatch = event.transactionReference
+    ? await repo.getTransferByProviderReference({
+        provider: event.provider,
+        providerReference: event.transactionReference,
+      })
+    : null;
+  const referenceMatch = await repo.getTransferByProviderReference({
+    provider: event.provider,
+    providerReference: event.reference,
+  });
+  const matches = [transferIdMatch, transactionMatch, referenceMatch].filter(
+    (candidate) => candidate !== null
+  );
+  const matchedIds = new Set(matches.map((candidate) => candidate.id));
+  if (matchedIds.size > 1) {
+    logEvent("warn", {
+      event: "sdp_api_ramp_settlement_conflicting_identifiers",
+      flow: "ramp-settlement",
+      provider: event.provider,
+      matched_transfer_ids: [...matchedIds],
+      event_transfer_id: event.transferId,
+      event_quote_id: event.reference,
+      event_transaction_id: event.transactionReference,
+    });
+    return null;
+  }
+  if (matches.length === 0) {
+    logEvent("info", {
+      event: "sdp_api_ramp_settlement_unmatched",
+      flow: "ramp-settlement",
+      provider: event.provider,
+      event_transfer_id: event.transferId,
+      event_quote_id: event.reference,
+      event_transaction_id: event.transactionReference,
+    });
+    return null;
+  }
+  const transfer = matches[0];
+  if (
+    transfer.provider_reference !== event.reference &&
+    transfer.provider_reference !== event.transactionReference
+  ) {
+    logEvent("warn", {
+      event: "sdp_api_ramp_settlement_reference_mismatch",
+      flow: "ramp-settlement",
+      organization_id: transfer.organization_id,
+      project_id: transfer.project_id,
+      transfer_id: transfer.id,
+      provider: event.provider,
+      transfer_provider_reference: transfer.provider_reference,
+      event_quote_id: event.reference,
+      event_transaction_id: event.transactionReference,
+    });
+    return null;
+  }
+  if (transfer.provider !== event.provider) {
+    logEvent("warn", {
+      event: "sdp_api_ramp_settlement_provider_mismatch",
+      flow: "ramp-settlement",
+      transfer_id: transfer.id,
+      transfer_provider: transfer.provider,
+      provider: event.provider,
+    });
+    return null;
+  }
+  return transfer;
+}
+
 export async function applyRampSettlementEvent(env: Env, event: RampSettlementEvent) {
   if (event.kind === "ignore") {
     return;
   }
 
-  const repo = createSystemPaymentsRepository(env);
-  const transfer = event.transferId
-    ? await repo.getTransferById({ transferId: event.transferId })
-    : await repo.getTransferByProviderReference({
-        provider: event.provider,
-        providerReference: event.reference,
-      });
+  const transfer = await correlateRampSettlementTransfer(env, event);
   if (!transfer) {
-    return;
-  }
-  if (transfer.provider !== event.provider) {
     return;
   }
   if (!isRampTransferType(transfer.type)) {
