@@ -194,12 +194,12 @@ describe("LightsparkWebhookProcessor", () => {
     });
   });
 
-  it("matches by the reserved transfer id and ignores a quote reference mismatch after logging it", async () => {
+  it("matches by the reserved transfer id when the quote reference corroborates it", async () => {
     await seedTransfer();
     const payload = REAL_COMPLETED_PAYLOAD.replace(
       '"description": "SDP onramp"',
       `"description": "${TRANSFER_ID}"`
-    ).replace(`"quoteId": "${QUOTE_ID}"`, '"quoteId": "Quote:other"');
+    );
     await processor.process(appContext, "sandbox", processor.parse(payload));
 
     const transfer = await getDb(env)
@@ -210,6 +210,30 @@ describe("LightsparkWebhookProcessor", () => {
       status: "completed",
       signature:
         "43T5oN1GC2xH4LkpsxwtFE7HqWBRjcejKYGbAgaDLJUZriCWTis8NBDG8D2WQBpXYpbXgvYP6d7syisQRxBVwdDH",
+    });
+  });
+
+  it("refuses to settle a description-named transfer whose references belong to another transaction", async () => {
+    await seedTransfer();
+    const payload = REAL_COMPLETED_PAYLOAD.replace(
+      '"description": "SDP onramp"',
+      `"description": "${TRANSFER_ID}"`
+    )
+      .replace(`"quoteId": "${QUOTE_ID}"`, '"quoteId": "Quote:other"')
+      .replace(
+        '"id": "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690"',
+        '"id": "Transaction:other"'
+      );
+    await processor.process(appContext, "sandbox", processor.parse(payload));
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status, signature, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; signature: string | null; provider_reference: string | null }>();
+    expect(transfer).toEqual({
+      status: "awaiting_payment",
+      signature: null,
+      provider_reference: QUOTE_ID,
     });
   });
 });

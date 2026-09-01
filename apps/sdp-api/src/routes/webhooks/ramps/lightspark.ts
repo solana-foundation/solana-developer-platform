@@ -378,9 +378,13 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<string, Ramp
       return;
     }
 
+    // The description is operator-writable text on the Grid transaction, so a
+    // description match is only a hint: it must be corroborated by the event's
+    // quote or transaction reference before it may settle the transfer.
+    // Uncorroborated matches are discarded and matching falls back to the
+    // references, which can only select the transfer that owns them.
     if (
       transfer !== null &&
-      transfer.provider_reference !== null &&
       transfer.provider_reference !== event.reference &&
       transfer.provider_reference !== event.transactionReference
     ) {
@@ -393,7 +397,9 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<string, Ramp
         provider: this.provider,
         transfer_provider_reference: transfer.provider_reference,
         event_quote_id: event.reference,
+        event_transaction_id: event.transactionReference,
       });
+      transfer = null;
     }
 
     if (transfer === null && event.transactionReference !== undefined) {
