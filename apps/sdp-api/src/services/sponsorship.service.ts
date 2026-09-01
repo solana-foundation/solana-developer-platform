@@ -2,6 +2,7 @@ import {
   createFeePaymentAdapter,
   FeePaymentError,
   type FeePaymentPort,
+  resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
@@ -113,7 +114,7 @@ export function createSponsorshipFeePayment(
   scope: SponsorshipScope
 ): SponsorshipFeePayment {
   const provider = instrumentVendorPort(
-    "fee-payment",
+    resolveFeePaymentProvider(env),
     createFeePaymentAdapter(env, buildKoraUserId(scope))
   );
   return isSelfHostedDeployment(env)
@@ -126,7 +127,7 @@ export async function getManagedSponsorshipProviderConfiguration(
   env: Env
 ): Promise<SponsorshipProviderConfiguration> {
   const provider = instrumentVendorPort(
-    "fee-payment",
+    resolveFeePaymentProvider(env),
     createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation")
   );
   if (!provider.getSponsorshipConfiguration) {
@@ -146,7 +147,7 @@ export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
       "Managed sponsorship requires a trusted organization or project scope"
     );
   }
-  return instrumentVendorPort("fee-payment", createFeePaymentAdapter(env));
+  return instrumentVendorPort(resolveFeePaymentProvider(env), createFeePaymentAdapter(env));
 }
 
 /** Resolve a scope exclusively from trusted request middleware state. */
