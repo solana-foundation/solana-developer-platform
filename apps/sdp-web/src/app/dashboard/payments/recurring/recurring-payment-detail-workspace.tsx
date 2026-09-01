@@ -48,6 +48,7 @@ import {
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
+import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
 import {
   type RecurringPaymentAction,
   runRecurringPaymentAction,
@@ -352,10 +353,6 @@ function RecurringPaymentLifecycleBand({
   return null;
 }
 
-function canEditRecurringPayment(status: PaymentRecurringPaymentStatus): boolean {
-  return status === "pending_activation" || status === "active";
-}
-
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
   wallet,
@@ -402,11 +399,14 @@ export function RecurringPaymentDetailWorkspace({
     recurringPayment.counterpartyAccountId
   );
   const receivingAccountAddress = accountAddress(receivingAccount);
-  const sourceWalletUnresolved = recurringPayment.sourceCustodyWalletId === null;
+  const { sourceWalletUnresolved, isEditable, controlsDisabled } = getRecurringPaymentDetailState({
+    sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId,
+    status: recurringPayment.status,
+    hasPendingAction: pendingAction !== null,
+    savingPayment,
+  });
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
-  const isEditable = !sourceWalletUnresolved && canEditRecurringPayment(recurringPayment.status);
-  const controlsDisabled = sourceWalletUnresolved || Boolean(pendingAction) || savingPayment;
 
   const submitAction = async (action: RecurringPaymentAction) => {
     if (pendingAction) {
