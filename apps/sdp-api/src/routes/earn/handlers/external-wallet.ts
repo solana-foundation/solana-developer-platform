@@ -1,7 +1,9 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { subtractDecimalAmounts, sumDecimalAmounts } from "@sdp/payments/decimal";
 import type {
+  EarnDepositSwap,
   EarnExternalWalletDepositResponse,
+  EarnExternalWalletDepositSwapSplitResponse,
   EarnExternalWalletDepositTransactionResponse,
   EarnExternalWalletEarnedUnavailableReason,
   EarnExternalWalletEarnings,
@@ -35,6 +37,7 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
 import {
   buildExternalWalletDepositTransaction,
   buildExternalWalletWithdrawalTransaction,
@@ -61,7 +64,7 @@ import {
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
 import { decodeMovementCursor } from "./movements";
-import { parseParams, parseQuery } from "./shared";
+import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import {
   decodeVaultPositionCursor,
   encodeVaultPositionCursor,
@@ -560,7 +563,16 @@ export async function createEarnExternalWalletDepositTransaction(
   );
   assertStrategyDepositable(strategy, environment);
 
-  const built = await buildExternalWalletDepositTransaction(c.env, {
+  const swap = resolveDepositSwapRequest(
+    {
+      sourceTokenMint: body.sourceTokenMint,
+      swapSlippageBps: body.swapSlippageBps,
+    },
+    environment,
+    tokenMint
+  );
+
+  const result = await buildExternalWalletDepositTransaction(c.env, {
     organizationId: auth.organizationId,
     projectId,
     environment,
@@ -572,15 +584,47 @@ export async function createEarnExternalWalletDepositTransaction(
     label: strategy.name,
     amount: body.amount,
     minSharesOut: body.minSharesOut,
+    ...(swap === null ? {} : { swap }),
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   });
 
+  if (result.kind === "swap_required") {
+    // The composed swap + deposit exceeds one Solana packet even on a compact
+    // route. Answer the split contract: an unsigned swap for the owner to
+    // execute itself, plus the exact follow-up build to request afterwards.
+    if (swap === null) {
+      throw internalError("Earn deposit build reported a swap split without a swap request");
+    }
+    const response: EarnExternalWalletDepositSwapSplitResponse = {
+      requiresSeparateSwap: true,
+      swap: {
+        ...toDepositSwapWire(swap.sourceTokenMint, result.swap),
+        transaction: Buffer.from(result.swapTransaction.bytes).toString("base64"),
+        lastValidBlockHeight: result.swapTransaction.lastValidBlockHeight,
+      },
+      followUp: {
+        strategyId: strategy.id,
+        amount: result.swap.minOutAmount,
+        // The original floor survives the split: dropping it would hand a
+        // production caller a follow-up contract its own build refuses (the
+        // floor is required there), and elsewhere a floor-less rebuild on
+        // Kamino's pinned SDK selects the legacy unprotected instruction.
+        ...(body.minSharesOut === undefined ? {} : { minSharesOut: body.minSharesOut }),
+      },
+    };
+    return success(c, response);
+  }
+
+  const built = result.built;
   const response: EarnExternalWalletDepositTransactionResponse = {
     transaction: {
       ...toExternalWalletTransactionWire(built),
       amount: built.amount_requested,
       minSharesOut: built.min_shares_out,
+      ...(swap !== null && result.swap !== undefined
+        ? { swap: toDepositSwapWire(swap.sourceTokenMint, result.swap) }
+        : {}),
       strategy: {
         id: strategy.id,
         name: strategy.name,
@@ -591,6 +635,19 @@ export async function createEarnExternalWalletDepositTransaction(
     },
   };
   return success(c, response);
+}
+
+/** The swap leg restated in wire vocabulary, shared by both deposit answers. */
+function toDepositSwapWire(sourceTokenMint: string, leg: JupiterSwapLeg): EarnDepositSwap {
+  return {
+    sourceTokenMint,
+    sourceAmount: leg.sourceAmount,
+    depositAmount: leg.minOutAmount,
+    quotedAmount: leg.quotedAmount,
+    slippageBps: leg.slippageBps,
+    priceImpactPct: leg.priceImpactPct,
+    routeLabels: leg.routeLabels,
+  };
 }
 
 /**

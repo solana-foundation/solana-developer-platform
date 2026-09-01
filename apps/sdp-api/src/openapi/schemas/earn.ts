@@ -35,12 +35,25 @@ const earnDecimalAmountSchema = z
     example: "25",
   });
 
+const earnSolanaMintSchema = z
+  .string()
+  .min(32)
+  .max(44)
+  .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
+  .openapi({
+    description: "Base58 Solana mint address.",
+    example: "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+  });
+
 export const earnExternalWalletDepositTransactionRequest = z
   .object({
     strategyId: z.string().min(1).openapi({ example: "earn_strategy_example" }),
     ownerAddress: earnOwnerAddressSchema,
     amount: earnDecimalAmountSchema.openapi({
-      description: "Deposit amount in the vault token's units, as a decimal string.",
+      description:
+        "Deposit amount as a decimal string — the vault token's units, or the SOURCE token's " +
+        "units when `sourceTokenMint` requests a swap-funded build (the swap consumes it " +
+        "whole and the vault deposit is sized to the swap's guaranteed output).",
       example: "25",
     }),
     minSharesOut: earnDecimalAmountSchema.optional().openapi({
@@ -48,8 +61,60 @@ export const earnExternalWalletDepositTransactionRequest = z
         "Slippage floor in share units. Optional in sandbox; required for production deposits.",
       example: "24.9",
     }),
+    sourceTokenMint: earnSolanaMintSchema.optional().openapi({
+      description:
+        "Fund the deposit in a different supported stablecoin (USDC, USDG, PYUSD or USDT on " +
+        "the environment's cluster): a Jupiter swap to the vault's own token is prepended " +
+        "inside the same transaction, so both legs land atomically or not at all. Equal to " +
+        "the strategy's deposit mint it is a no-op, so pickers may always send their " +
+        "selection.",
+    }),
+    swapSlippageBps: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .openapi({
+        description:
+          "Swap slippage tolerance in basis points (default 2, accepted 1-500). Only valid together with " +
+          "sourceTokenMint. The deposit is sized to the swap's worst-case output, so a wider " +
+          "tolerance leaves a larger possible remainder of the vault token in the owner's " +
+          "account rather than risking the transaction.",
+        example: 2,
+      }),
   })
   .openapi({ description: "Build one unsigned deposit transaction for an external wallet." });
+
+const earnDepositSwapSchema = z
+  .object({
+    sourceTokenMint: earnSolanaMintSchema.openapi({
+      description: "Mint the owner pays with.",
+    }),
+    sourceAmount: earnDecimalAmountSchema.openapi({
+      description: "What the swap consumes, source-token units.",
+    }),
+    depositAmount: earnDecimalAmountSchema.openapi({
+      description:
+        "The deposit amount the transaction encodes, vault-token units — the swap's " +
+        "guaranteed worst-case output. Output above it stays in the owner's token account.",
+    }),
+    quotedAmount: earnDecimalAmountSchema.openapi({
+      description: "The swap's quoted output at the live rate, vault-token units.",
+    }),
+    slippageBps: z.number().int().openapi({ example: 2 }),
+    priceImpactPct: z.string().openapi({
+      description: "Quoted price impact as a decimal ratio string.",
+      example: "0.0001",
+    }),
+    routeLabels: z.array(z.string()).openapi({
+      description: "Venue labels along the quoted route.",
+      example: ["Whirlpool"],
+    }),
+  })
+  .openapi({
+    description: "The Jupiter swap leg attached to (or split out of) a swap-funded deposit.",
+  });
 
 export const earnExternalWalletWithdrawalTransactionRequest = z
   .object({
@@ -116,6 +181,11 @@ const earnExternalWalletDepositTransactionSchema = earnExternalWalletTransaction
   .extend({
     amount: earnDecimalAmountSchema,
     minSharesOut: earnDecimalAmountSchema.nullable(),
+    swap: earnDepositSwapSchema.optional().openapi({
+      description:
+        "Present when the build was swap-funded: the swap is prepended inside this same " +
+        "transaction and `amount` equals `swap.depositAmount`.",
+    }),
     strategy: z.object({
       id: z.string().openapi({ example: "earn_strategy_example" }),
       name: z.string().openapi({ example: "Allez USDC" }),
@@ -169,8 +239,47 @@ const earnExternalWalletMovementSchema = z
   })
   .openapi({ description: "One recorded external-wallet vault movement." });
 
+const earnExternalWalletDepositSwapSplitSchema = z
+  .object({
+    requiresSeparateSwap: z.literal(true).openapi({
+      description: "Discriminates from the atomic answer, which carries `transaction`.",
+    }),
+    swap: earnDepositSwapSchema.extend({
+      transaction: z.string().openapi({
+        description:
+          "Base64 wire bytes of the UNSIGNED swap-only transaction (fee payer is the owner). " +
+          "The owner signs and broadcasts it itself — it moves only the owner's own funds, so " +
+          "SDP records nothing for it.",
+      }),
+      lastValidBlockHeight: z.string().openapi({ example: "361186610" }),
+    }),
+    followUp: z
+      .object({
+        strategyId: z.string().openapi({ example: "earn_strategy_example" }),
+        amount: earnDecimalAmountSchema,
+        minSharesOut: earnDecimalAmountSchema.optional().openapi({
+          description:
+            "The original request's share floor, carried through so the follow-up build " +
+            "keeps the protection the caller asked for. Absent only when the original " +
+            "request carried none.",
+        }),
+      })
+      .openapi({
+        description:
+          "The ordinary (unswapped) deposit build to request once the swap is confirmed.",
+      }),
+  })
+  .openapi({
+    description:
+      "Answered instead of a built transaction when the composed swap + deposit cannot fit " +
+      "one Solana packet (1,232 bytes) even on a compact route. Nothing was persisted.",
+  });
+
 export const earnExternalWalletDepositTransactionResponse = successResponseSchema(
-  z.object({ transaction: earnExternalWalletDepositTransactionSchema })
+  z.union([
+    z.object({ transaction: earnExternalWalletDepositTransactionSchema }),
+    earnExternalWalletDepositSwapSplitSchema,
+  ])
 );
 
 export const earnExternalWalletWithdrawalTransactionResponse = successResponseSchema(

@@ -1,7 +1,14 @@
 "use client";
 
 import { decimalScale } from "@sdp/solana/amount";
-import { type EarnStrategy, earnDepositSlippageFloor, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
+  type EarnStrategy,
+  type EarnSwapSourceToken,
+  earnDepositSlippageFloor,
+  earnSwapSourceTokens,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -581,6 +588,119 @@ export interface EarnVaultDepositModalProps {
   onDeposited?: (deposit: EarnVaultDeposit) => void;
 }
 
+function useVaultFundingToken(input: {
+  strategy: EarnStrategy;
+  depositMint: string | undefined;
+  decimals: number | undefined;
+  symbol: string;
+}) {
+  const { strategy, depositMint, decimals, symbol } = input;
+  const fundingTokens = useMemo<EarnSwapSourceToken[]>(() => {
+    const own: EarnSwapSourceToken[] =
+      depositMint && decimals !== undefined
+        ? [{ symbol: symbol as EarnSwapSourceToken["symbol"], mint: depositMint, decimals }]
+        : [];
+    return [
+      ...own,
+      ...earnSwapSourceTokens(strategy.hostCluster).filter((token) => token.mint !== depositMint),
+    ];
+  }, [decimals, depositMint, strategy.hostCluster, symbol]);
+  const [fundingMint, setFundingMint] = useState<string | null>(null);
+  const fundingToken =
+    fundingTokens.find((token) => token.mint === fundingMint) ?? fundingTokens[0];
+  const swapActive = fundingToken !== undefined && fundingToken.mint !== depositMint;
+
+  return {
+    fundingDecimals: swapActive ? fundingToken.decimals : decimals,
+    fundingSymbol: swapActive ? fundingToken.symbol : symbol,
+    fundingToken,
+    fundingTokens,
+    setFundingMint,
+    swapActive,
+  };
+}
+
+function walletFundingBalance(
+  wallet: EarnFundingWallet | undefined,
+  token: EarnSwapSourceToken | undefined,
+  decimals: number | undefined
+): string | undefined {
+  if (!wallet || !token || decimals === undefined) return undefined;
+  return walletBalanceForMint(wallet, token.mint, decimals);
+}
+
+function DepositFundingTokenPicker({
+  disabled,
+  onSelect,
+  selectedMint,
+  swapNotice,
+  tokens,
+  title,
+}: {
+  disabled: boolean;
+  onSelect: (mint: string) => void;
+  selectedMint: string | undefined;
+  swapNotice: string | null;
+  tokens: EarnSwapSourceToken[];
+  title: string;
+}) {
+  if (tokens.length <= 1) return null;
+  return (
+    <fieldset className="mt-5" disabled={disabled}>
+      <legend className="text-sm font-medium text-primary">{title}</legend>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {tokens.map((token) => {
+          const checked = token.mint === selectedMint;
+          return (
+            <label
+              className={cn(
+                "cursor-pointer rounded-lg border px-3 py-1.5 text-sm transition-colors",
+                checked
+                  ? "border-primary bg-fill-subtle text-primary"
+                  : "border-border-default text-secondary hover:border-border-strong"
+              )}
+              key={token.mint}
+            >
+              <input
+                checked={checked}
+                className="sr-only"
+                name="earn-vault-deposit-funding-token"
+                onChange={() => onSelect(token.mint)}
+                type="radio"
+                value={token.mint}
+              />
+              {token.symbol}
+            </label>
+          );
+        })}
+      </div>
+      {swapNotice ? (
+        <p className="mt-2 text-xs leading-5 text-secondary" role="note">
+          {swapNotice}
+        </p>
+      ) : null}
+    </fieldset>
+  );
+}
+
+function DepositSwapSummaryRow({
+  active,
+  label,
+  value,
+}: {
+  active: boolean;
+  label: string;
+  value: string;
+}) {
+  if (!active) return null;
+  return (
+    <div className="flex items-baseline justify-between gap-5 py-1">
+      <dt className="text-tertiary">{label}</dt>
+      <dd className="text-right text-primary">{value}</dd>
+    </div>
+  );
+}
+
 /**
  * Deposit from one SDP custody wallet into one non-custodial strategy. The
  * chosen wallet signs and holds the shares; no vault address is ever presented
@@ -637,15 +757,24 @@ export function EarnVaultDepositModal({
     routedToken?.toUpperCase() ??
     (depositMint ? tokenSymbol(depositMint) : "—");
   const decimals = mintMetadata?.decimals;
-  const amountValidation = validateVaultDepositAmount(amountInput, decimals);
+  // What the deposit may be PAID in: the vault's own token first, then every
+  // other swap-source stablecoin deployed on the strategy's cluster. Paying in
+  // one of the others sends `sourceTokenMint`, and the API prepends a Jupiter
+  // swap inside the same transaction.
+  const {
+    fundingDecimals,
+    fundingSymbol,
+    fundingToken,
+    fundingTokens,
+    setFundingMint,
+    swapActive,
+  } = useVaultFundingToken({ strategy, depositMint, decimals, symbol });
+  const amountValidation = validateVaultDepositAmount(amountInput, fundingDecimals);
   const selectedWallet = useMemo(
     () => wallets?.find((wallet) => wallet.id === walletId && wallet.isRuntimeExecutionAllowed),
     [walletId, wallets]
   );
-  const selectedWalletBalance =
-    selectedWallet && depositMint && decimals !== undefined
-      ? walletBalanceForMint(selectedWallet, depositMint, decimals)
-      : undefined;
+  const selectedWalletBalance = walletFundingBalance(selectedWallet, fundingToken, fundingDecimals);
   const overKnownBalance =
     amountValidation.kind === "valid" && selectedWalletBalance !== undefined
       ? compareUnsignedDecimals(amountValidation.canonicalAmount, selectedWalletBalance) === 1
@@ -682,13 +811,16 @@ export function EarnVaultDepositModal({
   ) {
     // Keyed by the request itself and persisted per tab, so re-pressing submit
     // after a timeout — or after a reload that lost this component entirely —
-    // replays the same key instead of signing a second transfer.
+    // replays the same key instead of signing a second transfer. A swap-funded
+    // deposit keys on the funding mint too: paying in a different token is a
+    // different request.
     const fingerprint = vaultDepositRequestFingerprint({
       projectId,
       strategyId: strategy.id,
       custodyWalletId: wallet.id,
       amount,
       toleranceBps: slippagePolicy === null ? null : slippageBps,
+      ...(swapActive ? { sourceTokenMint: fundingToken.mint } : {}),
     });
     const resolvedKey = await resolveHeldIdempotencyKey(
       vaultDepositIdempotencyKeyStore,
@@ -725,6 +857,12 @@ export function EarnVaultDepositModal({
         custodyWalletId: wallet.id,
         amount,
         ...(floorForRequest === null ? {} : { minSharesOut: floorForRequest }),
+        ...(swapActive
+          ? {
+              sourceTokenMint: fundingToken.mint,
+              swapSlippageBps: EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
+            }
+          : {}),
       },
       resolvedKey.key
     );
@@ -808,7 +946,7 @@ export function EarnVaultDepositModal({
     return (
       <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
         <div className="p-6" ref={contentRef}>
-          <DepositResult outcome={outcome} symbol={symbol} onClose={onClose} />
+          <DepositResult outcome={outcome} symbol={fundingSymbol} onClose={onClose} />
         </div>
       </Modal>
     );
@@ -829,23 +967,43 @@ export function EarnVaultDepositModal({
         </p>
 
         <DepositWalletPicker
-          decimals={decimals}
-          depositMint={depositMint}
+          decimals={fundingDecimals}
+          depositMint={fundingToken?.mint ?? depositMint}
           onSelect={(selectedWalletId) => {
             setWalletId(selectedWalletId);
             setSubmitError(null);
           }}
           selectedWalletId={walletId}
           submitting={submitting}
-          symbol={symbol}
+          symbol={fundingSymbol}
           wallets={wallets}
           walletsError={walletsError}
           walletsLoading={walletsLoading}
         />
 
+        <DepositFundingTokenPicker
+          disabled={submitting}
+          onSelect={(mint) => {
+            setFundingMint(mint);
+            setSubmitError(null);
+          }}
+          selectedMint={fundingToken?.mint ?? depositMint}
+          swapNotice={
+            swapActive
+              ? t("DashboardEarn.deposit.vaultSwapNotice", {
+                  source: fundingSymbol,
+                  target: symbol,
+                  pct: String(EARN_SWAP_DEFAULT_SLIPPAGE_BPS / 100),
+                })
+              : null
+          }
+          title={t("DashboardEarn.deposit.vaultPayWith")}
+          tokens={fundingTokens}
+        />
+
         <div className="mt-5 space-y-2">
           <Label htmlFor="earn-vault-deposit-amount">
-            {t("DashboardEarn.deposit.vaultAmount", { token: symbol })}
+            {t("DashboardEarn.deposit.vaultAmount", { token: fundingSymbol })}
           </Label>
           <Input
             aria-describedby="earn-vault-deposit-balance earn-vault-deposit-note"
@@ -866,7 +1024,7 @@ export function EarnVaultDepositModal({
               ? selectedWalletBalance === undefined
                 ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                 : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                    amount: formatTokenQuantity(selectedWalletBalance, locale, symbol),
+                    amount: formatTokenQuantity(selectedWalletBalance, locale, fundingSymbol),
                   })
               : null}
           </div>
@@ -901,6 +1059,14 @@ export function EarnVaultDepositModal({
               </dd>
             </div>
           ) : null}
+          <DepositSwapSummaryRow
+            active={swapActive}
+            label={t("DashboardEarn.deposit.vaultSwapRow")}
+            value={t("DashboardEarn.deposit.vaultSwapVia", {
+              source: fundingSymbol,
+              target: symbol,
+            })}
+          />
           <DepositQuoteSummaryRows minSharesOut={minSharesOut} quote={quote} />
         </dl>
 
