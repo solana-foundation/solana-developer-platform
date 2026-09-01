@@ -64,12 +64,7 @@ function routeData(
     slippageBps?: number;
     platformFeeBps?: number;
     positiveSlippageBps?: number;
-    routeTag?: number;
-    routeBps?: number;
-    routeInputIndex?: number;
-    routeOutputIndex?: number;
-    routeDirection?: number;
-    trailingBytes?: number[];
+    opaqueRoutePlan?: number[];
   } = {}
 ): string {
   const data = Buffer.alloc(8 + 1 + 8 + 8 + 2 + 2 + 2);
@@ -83,34 +78,20 @@ function routeData(
   data.writeUInt16LE(overrides.slippageBps ?? 50, 25);
   data.writeUInt16LE(overrides.platformFeeBps ?? 0, 27);
   data.writeUInt16LE(overrides.positiveSlippageBps ?? 0, 29);
-  const routePlan = Buffer.alloc(10);
-  routePlan.writeUInt32LE(1, 0);
-  routePlan.writeUInt8(overrides.routeTag ?? 17, 4); // Whirlpool
-  routePlan.writeUInt8(overrides.routeDirection ?? 1, 5); // a_to_b
-  routePlan.writeUInt16LE(overrides.routeBps ?? 10_000, 6);
-  routePlan.writeUInt8(overrides.routeInputIndex ?? 0, 8);
-  routePlan.writeUInt8(overrides.routeOutputIndex ?? 1, 9);
-  return Buffer.concat([data, routePlan, Buffer.from(overrides.trailingBytes ?? [])]).toString(
+  return Buffer.concat([data, Buffer.from(overrides.opaqueRoutePlan ?? [0, 0, 0, 0])]).toString(
     "base64"
   );
 }
 
 function directRouteData(): string {
-  const data = Buffer.alloc(8 + 8 + 8 + 2 + 2 + 2);
+  const data = Buffer.alloc(8 + 8 + 8 + 2 + 2 + 2 + 4);
   Buffer.from(ROUTE_V2_DISCRIMINATOR, "hex").copy(data, 0);
   data.writeBigUInt64LE(25_000_000n, 8);
   data.writeBigUInt64LE(24_990_000n, 16);
   data.writeUInt16LE(50, 24);
   data.writeUInt16LE(0, 26);
   data.writeUInt16LE(0, 28);
-  const routePlan = Buffer.alloc(10);
-  routePlan.writeUInt32LE(1, 0);
-  routePlan.writeUInt8(17, 4); // Whirlpool
-  routePlan.writeUInt8(1, 5); // a_to_b
-  routePlan.writeUInt16LE(10_000, 6);
-  routePlan.writeUInt8(0, 8);
-  routePlan.writeUInt8(1, 9);
-  return Buffer.concat([data, routePlan]).toString("base64");
+  return data.toString("base64");
 }
 
 function sharedRouteAccounts(
@@ -184,35 +165,6 @@ function ataCreateInstruction(mint: string, tokenAccount: string, tokenProgram: 
   };
 }
 
-function directRouteStep(
-  overrides: {
-    swapInfo?: Partial<{
-      ammKey: string;
-      label: string;
-      inputMint: string;
-      outputMint: string;
-      inAmount: string;
-      outAmount: string;
-    }>;
-    percent?: number;
-    bps?: number;
-  } = {}
-) {
-  return {
-    swapInfo: {
-      ammKey: AMM_KEY,
-      label: "Whirlpool",
-      inputMint: USDC,
-      outputMint: PYUSD,
-      inAmount: "25000000",
-      outAmount: "24990000",
-      ...overrides.swapInfo,
-    },
-    percent: overrides.percent ?? 100,
-    bps: overrides.bps ?? 10_000,
-  };
-}
-
 function buildResponse(overrides: Record<string, unknown> = {}) {
   return {
     inputMint: USDC,
@@ -222,7 +174,7 @@ function buildResponse(overrides: Record<string, unknown> = {}) {
     otherAmountThreshold: "24865050",
     slippageBps: 50,
     priceImpactPct: "0.0001",
-    routePlan: [directRouteStep()],
+    routePlan: [{ swapInfo: { label: "Whirlpool" } }],
     computeBudgetInstructions: [],
     setupInstructions: [
       ataCreateInstruction(PYUSD, DESTINATION_TOKEN_ACCOUNT, SPL_TOKEN_PROGRAMS["token-2022"]),
@@ -481,81 +433,31 @@ describe("fetchJupiterSwapLeg", () => {
     ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
   });
 
-  it("refuses a response-selected route variant even when every fixed field matches", async () => {
-    fetchMock.mockResolvedValue(
-      okResponse(
-        buildResponse({
-          // JupiterLendDeposit is tag 101 in the current V2 enum. Labelling it
-          // Whirlpool must not admit it as a direct spot route.
-          swapInstruction: swapInstruction({ data: routeData({ routeTag: 101 }) }),
-        })
-      )
-    );
-
-    await expect(
-      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
-    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
-  });
-
-  it.each([
-    ["allocation", routeData({ routeBps: 9_999 })],
-    ["input index", routeData({ routeInputIndex: 1 })],
-    ["output index", routeData({ routeOutputIndex: 2 })],
-    ["trailing bytes", routeData({ trailingBytes: [0] })],
-  ] as const)("refuses an executable route with mismatched %s", async (_field, data) => {
-    fetchMock.mockResolvedValue(
-      okResponse(buildResponse({ swapInstruction: swapInstruction({ data }) }))
-    );
-
-    await expect(
-      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
-    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
-  });
-
-  it.each([
-    ["intermediate mint", directRouteStep({ swapInfo: { outputMint: USDC } })],
-    ["unbound AMM", directRouteStep({ swapInfo: { ammKey: SYSTEM_PROGRAM } })],
-    ["input atoms", directRouteStep({ swapInfo: { inAmount: "24999999" } })],
-    ["output atoms", directRouteStep({ swapInfo: { outAmount: "24989999" } })],
-    ["unreviewed venue", directRouteStep({ swapInfo: { label: "Jupiter Lend Deposit" } })],
-  ] as const)("refuses route metadata with a mismatched %s", async (_field, step) => {
-    fetchMock.mockResolvedValue(okResponse(buildResponse({ routePlan: [step] })));
-
-    await expect(
-      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
-    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
-  });
-
-  it("refuses a multi-step route so the sole remaining-account slice is unambiguous", async () => {
-    fetchMock.mockResolvedValue(
-      okResponse(
-        buildResponse({
-          routePlan: [
-            directRouteStep({ percent: 50, bps: 5_000 }),
-            directRouteStep({ percent: 50, bps: 5_000 }),
-          ],
-        })
-      )
-    );
-
-    await expect(
-      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
-    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
-  });
-
-  it("refuses an AMM key duplicated inside the sole route's account slice", async () => {
+  it("keeps Jupiter route internals opaque behind the pinned aggregator boundary", async () => {
     const accounts = sharedRouteAccounts();
     accounts.push({ pubkey: AMM_KEY, isSigner: false, isWritable: true });
     fetchMock.mockResolvedValue(
-      okResponse(buildResponse({ swapInstruction: swapInstruction({ accounts }) }))
+      okResponse(
+        buildResponse({
+          routePlan: [{ swapInfo: { label: "AlphaQ" } }, { swapInfo: { label: "Whirlpool" } }],
+          swapInstruction: swapInstruction({
+            accounts,
+            // The route bytes and remaining venue accounts belong to the
+            // allowlisted Jupiter program. SDP validates the stable outer
+            // economic envelope without coupling to Jupiter's private enum.
+            data: routeData({ opaqueRoutePlan: [2, 0, 0, 0, 101, 17, 16, 39] }),
+          }),
+        })
+      )
     );
 
-    await expect(
-      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
-    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    const leg = await fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request());
+
+    expect(leg.routeLabels).toEqual(["AlphaQ", "Whirlpool"]);
+    expect(leg.instructions[1]?.accounts.at(-1)).toEqual({ address: AMM_KEY, role: 1 });
   });
 
-  it("accepts Jupiter's non-shared ExactIn V2 route with the same pinned semantics", async () => {
+  it("accepts Jupiter's non-shared ExactIn V2 route with the same fixed semantics", async () => {
     fetchMock.mockResolvedValue(
       okResponse(
         buildResponse({
