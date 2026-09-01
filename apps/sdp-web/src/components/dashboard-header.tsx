@@ -1,6 +1,5 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -9,8 +8,6 @@ import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NotificationBell } from "@/components/notification-bell";
-import { Badge } from "@/components/ui/badge";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
@@ -181,23 +178,12 @@ export function DashboardTopBar({
   alignTitleWithTabs = hasHeaderTabs,
   showNotifications = false,
 }: DashboardTopBarProps) {
-  const t = useTranslations();
-  const { sdpEnvironment } = useDashboardWorkspace();
-  const isSandbox = sdpEnvironment === "sandbox";
-  const sandboxBadge = isSandbox ? (
-    <>
-      <span aria-hidden="true" className="hidden h-4 w-px bg-fill-strong sm:block" />
-      <Badge className="hidden sm:inline-flex">{t("Shared.dashboardShell.sandbox")}</Badge>
-    </>
-  ) : null;
   const centersPageTitle =
     !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
       {showNotifications ? <NotificationBell /> : null}
-      <UserButton />
-      {sandboxBadge}
     </>
   );
 
