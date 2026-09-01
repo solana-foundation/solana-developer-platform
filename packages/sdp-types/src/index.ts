@@ -24,7 +24,6 @@ export * from "./private-channels";
 export * from "./private-transfers";
 export * from "./projects";
 export * from "./provider-access";
-export * from "./ramp-resolution";
 export * from "./rpc-connections";
 export * from "./sessions";
 export * from "./site";

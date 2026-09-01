@@ -1,5 +1,6 @@
 {
   "$comment": "Manually compiled from https://docs.lightspark.com/platform-overview/core-concepts/currencies-and-rails",
+  "swiftExcluded": ["HR", "SI"],
   "countries": {
     "AE": ["AED"],
     "AT": ["EUR"],

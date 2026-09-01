@@ -10,7 +10,7 @@ import {
   type RampDiscoveryResponseDump,
 } from "@sdp/payments/ramps";
 import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
-import { COUNTRY_CODES } from "@sdp/types";
+import { COUNTRY_CODES } from "@sdp/types/countries";
 import {
   type CryptoRailId,
   OFFRAMP_CRYPTO_RAILS,
@@ -77,7 +77,11 @@ interface ProviderGenerationSupport {
 
 type CurrencySupportSnapshots = ReadonlyMap<RampProviderId, ProviderRailSupportSnapshot>;
 type ProviderGenerationSupports = ReadonlyMap<RampProviderId, ProviderGenerationSupport>;
-type OfframpCountriesByProvider = ReadonlyMap<RampProviderId, ProviderOfframpCountries>;
+interface ProviderOfframpCoverage {
+  countries: ProviderOfframpCountries;
+  swiftExcluded: readonly string[];
+}
+type OfframpCountriesByProvider = ReadonlyMap<RampProviderId, ProviderOfframpCoverage>;
 type PayoutAccountsByProvider = ReadonlyMap<
   RampProviderId,
   Readonly<Record<string, RampPayoutAccountSpec>>
@@ -213,6 +217,9 @@ function sortDirectionSnapshot(
   if (direction.accounts !== undefined) {
     base.accounts = sortPayoutAccounts(direction.accounts);
   }
+  if (direction.swiftAccount !== undefined) {
+    base.swiftAccount = sortPayoutAccounts({ SWIFT: direction.swiftAccount }).SWIFT;
+  }
   return base;
 }
 
@@ -279,7 +286,7 @@ async function readCurrencySupportSnapshots(): Promise<CurrencySupportSnapshots>
  */
 async function readOfframpCountriesByProvider(): Promise<OfframpCountriesByProvider> {
   const entries = await readdir(RAMP_SUPPORT_ROOT_DIR, { withFileTypes: true });
-  const byProvider = new Map<RampProviderId, ProviderOfframpCountries>();
+  const byProvider = new Map<RampProviderId, ProviderOfframpCoverage>();
   const sortedEntries = entries.sort((left, right) => left.name.localeCompare(right.name));
   for (const entry of sortedEntries) {
     if (!entry.isFile() || !entry.name.endsWith(".countries.json")) {
@@ -289,9 +296,16 @@ async function readOfframpCountriesByProvider(): Promise<OfframpCountriesByProvi
     const provider = rampProviderIdSchema.parse(providerName);
     const text = await readFile(path.join(RAMP_SUPPORT_ROOT_DIR, entry.name), "utf8");
     const parsed = z
-      .object({ $comment: z.string(), countries: providerOfframpCountriesSchema })
+      .object({
+        $comment: z.string(),
+        swiftExcluded: z.array(z.enum(COUNTRY_CODES)),
+        countries: providerOfframpCountriesSchema,
+      })
       .parse(JSON.parse(text));
-    byProvider.set(provider, parsed.countries);
+    byProvider.set(provider, {
+      countries: parsed.countries,
+      swiftExcluded: parsed.swiftExcluded,
+    });
   }
   return byProvider;
 }
@@ -366,11 +380,13 @@ function mergeDirectionSupport(
 function mergeProviderSupport(
   provider: RampProviderId,
   snapshot: ProviderRailSupportSnapshot,
-  offrampCountries?: ProviderOfframpCountries
+  offrampCoverage?: ProviderOfframpCoverage
 ): ProviderGenerationSupport {
   const declared = RAMP_PROVIDER_CLIENTS[provider].declaredRailSupport;
   const compiledCountrySupport =
-    offrampCountries === undefined ? undefined : compiledOfframpCountrySupport(offrampCountries);
+    offrampCoverage === undefined
+      ? undefined
+      : compiledOfframpCountrySupport(offrampCoverage.countries);
   return {
     onramp: mergeDirectionSupport(provider, "onramp", snapshot.onramp, declared.onramp),
     offramp: mergeDirectionSupport(
@@ -426,8 +442,8 @@ function buildProviderSupport(
   const support = new Map<RampProviderId, ProviderGenerationSupport>();
   for (const provider of RAMP_PROVIDERS) {
     const snapshot = requireProviderSnapshot(snapshots, provider);
-    const offrampCountries = offrampCountriesByProvider.get(provider);
-    support.set(provider, mergeProviderSupport(provider, snapshot, offrampCountries));
+    const offrampCoverage = offrampCountriesByProvider.get(provider);
+    support.set(provider, mergeProviderSupport(provider, snapshot, offrampCoverage));
   }
   return support;
 }
@@ -660,12 +676,44 @@ function renderPayoutAccounts(payoutAccountsByProvider: PayoutAccountsByProvider
   return `{\n${rows.join("\n")}\n}`;
 }
 
+function renderSwiftSupport(
+  snapshots: CurrencySupportSnapshots,
+  offrampCountriesByProvider: OfframpCountriesByProvider
+): string {
+  const rows: string[] = [];
+  for (const provider of RAMP_PROVIDERS) {
+    const swiftAccount = snapshots.get(provider)?.offramp.swiftAccount;
+    if (swiftAccount === undefined) {
+      continue;
+    }
+    const coverage = offrampCountriesByProvider.get(provider);
+    if (coverage === undefined) {
+      throw new Error(
+        `${provider} snapshot has a SWIFT account but no hand-compiled country coverage to scope it.`
+      );
+    }
+    const entry = {
+      account: swiftAccount,
+      excludedCountries: [...coverage.swiftExcluded].sort(),
+    };
+    const rendered = JSON.stringify(entry, null, 2)
+      .split("\n")
+      .map((line, index) => (index === 0 ? line : `  ${line}`))
+      .join("\n");
+    rows.push(`  ${provider}: ${rendered},`);
+  }
+  if (rows.length === 0) {
+    return "{}";
+  }
+  return `{\n${rows.join("\n")}\n}`;
+}
+
 function renderGeneratedFile(input: {
   support: ProviderGenerationSupports;
   onrampRows: readonly OnrampRow[];
   offrampRows: readonly OfframpRow[];
-  offrampCountriesByProvider: OfframpCountriesByProvider;
   payoutAccountsByProvider: PayoutAccountsByProvider;
+  swiftSupport: string;
 }): string {
   const allFiats = new Set<string>();
   for (const row of input.onrampRows) {
@@ -728,6 +776,10 @@ export const OFFRAMP_PAYOUT_ACCOUNTS = ${renderPayoutAccounts(input.payoutAccoun
   Record<RampProviderId, Record<string, RampPayoutAccountSpec>>
 >;
 
+export const OFFRAMP_SWIFT_SUPPORT = ${input.swiftSupport} as const satisfies Partial<
+  Record<RampProviderId, { account: RampPayoutAccountSpec; excludedCountries: readonly string[] }>
+>;
+
 export const RAMP_PROVIDER_SUPPORT_DETAILS = ${renderProviderSupportDetails(input.support)} as const satisfies Record<
   RampProviderId,
   {
@@ -763,11 +815,11 @@ function buildPayoutAccounts(
       continue;
     }
     byProvider.set(provider, accounts);
-    const offrampCountries = offrampCountriesByProvider.get(provider);
-    if (offrampCountries === undefined) {
+    const offrampCoverage = offrampCountriesByProvider.get(provider);
+    if (offrampCoverage === undefined) {
       continue;
     }
-    for (const [countryCode, currencies] of Object.entries(offrampCountries)) {
+    for (const [countryCode, currencies] of Object.entries(offrampCoverage.countries)) {
       for (const currency of currencies) {
         if (accounts[currency] === undefined) {
           throw new Error(
@@ -791,6 +843,7 @@ async function renderGeneratedFromSnapshots(): Promise<string> {
     onrampRows: buildOnrampMatrix(support),
     offrampRows: buildOfframpMatrix(support),
     payoutAccountsByProvider: buildPayoutAccounts(snapshots, offrampCountriesByProvider),
+    swiftSupport: renderSwiftSupport(snapshots, offrampCountriesByProvider),
   });
 }
 

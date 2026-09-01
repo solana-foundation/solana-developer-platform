@@ -19,6 +19,11 @@
       "import": "./src/counterparties.ts",
       "default": "./src/counterparties.ts"
     },
+    "./countries": {
+      "types": "./src/countries.ts",
+      "import": "./src/countries.ts",
+      "default": "./src/countries.ts"
+    },
     "./custody": {
       "types": "./src/custody.ts",
       "import": "./src/custody.ts",

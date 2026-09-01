@@ -62,6 +62,8 @@ export interface ProviderDirectionSupportSnapshot {
   cryptos: readonly CryptoRailId[];
   countrySupport?: RampCountrySupport;
   accounts?: Readonly<Record<string, RampPayoutAccountSpec>>;
+  /** Country-agnostic SWIFT payout account, deliverable to any covered country. */
+  swiftAccount?: RampPayoutAccountSpec;
 }
 
 export interface ProviderRailSupportSnapshot {
@@ -91,6 +93,7 @@ const providerDirectionSupportSnapshotSchema = z.object({
   cryptos: z.array(z.enum(SOLANA_CRYPTO_RAILS)),
   countrySupport: rampCountrySupportSchema.optional(),
   accounts: z.record(z.string(), rampPayoutAccountSchema).optional(),
+  swiftAccount: rampPayoutAccountSchema.optional(),
 }) satisfies z.ZodType<ProviderDirectionSupportSnapshot>;
 
 export const providerRailSupportSnapshotSchema = z.object({

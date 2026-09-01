@@ -1624,6 +1624,49 @@ export const OFFRAMP_PAYOUT_ACCOUNTS = {
   },
 } as const satisfies Partial<Record<RampProviderId, Record<string, RampPayoutAccountSpec>>>;
 
+export const OFFRAMP_SWIFT_SUPPORT = {
+  lightspark: {
+    account: {
+      accountType: "SWIFT_ACCOUNT",
+      rails: {
+        SWIFT: {
+          accountNumber: {
+            required: false,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          country: {
+            required: true,
+            pattern: "^[A-Z]{2}$",
+            minLength: 2,
+            maxLength: 2,
+          },
+          iban: {
+            required: false,
+            pattern: "^[A-Z]{2}[0-9]{2}[A-Za-z0-9]{11,30}$",
+            minLength: 15,
+            maxLength: 34,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    excludedCountries: ["HR", "SI"],
+  },
+} as const satisfies Partial<
+  Record<RampProviderId, { account: RampPayoutAccountSpec; excludedCountries: readonly string[] }>
+>;
+
 export const RAMP_PROVIDER_SUPPORT_DETAILS = {
   moonpay: {
     onramp: {

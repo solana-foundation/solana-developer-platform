@@ -118,8 +118,9 @@ export function distillLightsparkRailSupport(
     openapiRaw,
     Object.keys(offramp.currencies).sort()
   );
+  const swiftAccount = distillLightsparkPayoutAccounts(openapiRaw, ["SWIFT"]).SWIFT;
   return {
-    snapshot: { onramp, offramp: { ...offramp, accounts } },
+    snapshot: { onramp, offramp: { ...offramp, accounts, swiftAccount } },
     droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
     droppedCountryCodes: [],
   };

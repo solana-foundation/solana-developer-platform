@@ -67,6 +67,48 @@ components:
                 enum:
                   - SEPA
                   - SEPA_INSTANT
+    SwiftAccountInfoBase:
+      type: object
+      required:
+        - accountType
+        - swiftCode
+        - bankName
+        - country
+      properties:
+        accountType:
+          type: string
+          enum:
+            - SWIFT_ACCOUNT
+        country:
+          type: string
+          pattern: ^[A-Z]{2}$
+        swiftCode:
+          type: string
+          minLength: 8
+          maxLength: 11
+        bankName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        accountNumber:
+          type: string
+          minLength: 1
+          maxLength: 34
+        iban:
+          type: string
+          minLength: 15
+          maxLength: 34
+    SwiftAccountInfo:
+      allOf:
+        - $ref: '#/components/schemas/SwiftAccountInfoBase'
+        - type: object
+          properties:
+            paymentRails:
+              type: array
+              items:
+                type: string
+                enum:
+                  - SWIFT
 `;
 
 describe("ramp rail distillation", () => {
@@ -191,6 +233,18 @@ describe("ramp rail distillation", () => {
     });
     expect(lightspark.snapshot.onramp.cryptos).toEqual(["usdc.solana"]);
     expect(lightspark.droppedCurrencyCodes).toEqual(["SLL", "USDB"]);
+    expect(lightspark.snapshot.offramp.swiftAccount).toEqual({
+      accountType: "SWIFT_ACCOUNT",
+      rails: {
+        SWIFT: {
+          country: { required: true, pattern: "^[A-Z]{2}$" },
+          swiftCode: { required: true, minLength: 8, maxLength: 11 },
+          bankName: { required: true, minLength: 1, maxLength: 255 },
+          accountNumber: { required: false, minLength: 1, maxLength: 34 },
+          iban: { required: false, minLength: 15, maxLength: 34 },
+        },
+      },
+    });
     expect(lightspark.snapshot.offramp.accounts).toEqual({
       USD: {
         accountType: "USD_ACCOUNT",
@@ -250,9 +304,10 @@ describe("ramp rail distillation", () => {
     if (malaysia === null) {
       throw new Error("expected a MYR/MY resolution");
     }
-    expect(malaysia.accountType).toBe("MYR_ACCOUNT");
-    expect(Object.keys(malaysia.rails)).toEqual(["BANK_TRANSFER"]);
-    expect(malaysia.rails.BANK_TRANSFER.swiftCode.required).toBe(true);
+    expect(Object.keys(malaysia.rails).sort()).toEqual(["BANK_TRANSFER", "SWIFT"]);
+    expect(malaysia.rails.BANK_TRANSFER.accountType).toBe("MYR_ACCOUNT");
+    expect(malaysia.rails.BANK_TRANSFER.fields.swiftCode.required).toBe(true);
+    expect(malaysia.rails.SWIFT.accountType).toBe("SWIFT_ACCOUNT");
 
     const usdIntoMalaysia = resolveOfframpDestination({
       provider: "lightspark",
@@ -260,7 +315,20 @@ describe("ramp rail distillation", () => {
       fiatCurrency: "USD",
       countryCode: "MY",
     });
-    expect(usdIntoMalaysia).toBeNull();
+    if (usdIntoMalaysia === null) {
+      throw new Error("expected USD/MY to resolve over SWIFT");
+    }
+    expect(Object.keys(usdIntoMalaysia.rails)).toEqual(["SWIFT"]);
+    expect(usdIntoMalaysia.rails.SWIFT.accountType).toBe("SWIFT_ACCOUNT");
+    expect(usdIntoMalaysia.rails.SWIFT.fields.country.required).toBe(true);
+
+    const croatia = resolveOfframpDestination({
+      provider: "lightspark",
+      cryptoRail: "usdc.solana",
+      fiatCurrency: "USD",
+      countryCode: "HR",
+    });
+    expect(croatia).toBeNull();
 
     const germany = resolveOfframpDestination({
       provider: "lightspark",
@@ -271,7 +339,7 @@ describe("ramp rail distillation", () => {
     if (germany === null) {
       throw new Error("expected an EUR/DE resolution");
     }
-    expect(Object.keys(germany.rails).sort()).toEqual(["SEPA", "SEPA_INSTANT"]);
-    expect(germany.rails.SEPA.iban.required).toBe(true);
+    expect(Object.keys(germany.rails).sort()).toEqual(["SEPA", "SEPA_INSTANT", "SWIFT"]);
+    expect(germany.rails.SEPA.fields.iban.required).toBe(true);
   });
 });
