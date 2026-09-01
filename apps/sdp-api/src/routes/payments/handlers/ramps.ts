@@ -14,10 +14,12 @@ import {
 import {
   lightsparkPayoutCollectedData,
   lightsparkPayoutFields,
+  lightsparkPurposeOfPaymentRequirement,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
   latestLightsparkPayoutAccount,
+  readLightsparkPurposeOfPayment,
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
@@ -108,6 +110,7 @@ import {
 import {
   ensureLightsparkCustomer,
   ensureLightsparkPayoutAccount,
+  ensureLightsparkPurposeOfPayment,
   lightsparkProviderCustomerId,
 } from "./ramps/lightspark";
 import {
@@ -522,11 +525,21 @@ export async function advanceCounterpartyRequirements(
     case "moneygram":
       return readyCounterparty("moneygram", input.direction);
     case "lightspark": {
-      const customer = await ensureLightsparkCustomer(c, {
-        counterparty: input.counterparty,
-        projectId: input.projectId,
-        collectedData: input.collectedData,
-      });
+      const [customer, purposeOfPayment] = await Promise.all([
+        ensureLightsparkCustomer(c, {
+          counterparty: input.counterparty,
+          projectId: input.projectId,
+          collectedData: input.collectedData,
+        }),
+        ensureLightsparkPurposeOfPayment(c, {
+          counterparty: input.counterparty,
+          projectId: input.projectId,
+          collectedData: input.collectedData,
+        }),
+      ]);
+      if (purposeOfPayment === null) {
+        return lightsparkPurposeOfPaymentRequirement(input.direction);
+      }
       if (input.direction === "offramp") {
         const payoutData =
           input.collectedData === undefined
@@ -797,7 +810,8 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     case "lightspark": {
       const customerId = await lightsparkProviderCustomerId(c, counterparty, projectId);
-      if (customerId === null) {
+      const purposeOfPayment = readLightsparkPurposeOfPayment(counterparty.provider_data);
+      if (customerId === null || purposeOfPayment === null) {
         throw counterpartyNotProvisioned("lightspark", "onramp");
       }
       quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOnrampQuote(rampRuntime(c), {
@@ -807,6 +821,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
         customerId,
+        purposeOfPayment,
       });
       break;
     }
@@ -993,12 +1008,14 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
       }
       const customerId = await lightsparkProviderCustomerId(c, counterparty, projectId);
+      const purposeOfPayment = readLightsparkPurposeOfPayment(counterparty.provider_data);
       const payoutAccount = latestLightsparkPayoutAccount(
         counterparty.provider_data,
         input.fiatCurrency
       );
       if (
         customerId === null ||
+        purposeOfPayment === null ||
         !payoutAccount ||
         !isLightsparkExternalAccountActive(payoutAccount.status)
       ) {
@@ -1011,6 +1028,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         sourceWalletAddress,
         externalCustomerId: counterparty.id,
         customerId,
+        purposeOfPayment,
         payoutAccountId: payoutAccount.accountId,
       });
       break;

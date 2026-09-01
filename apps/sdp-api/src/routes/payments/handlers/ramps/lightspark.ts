@@ -7,13 +7,17 @@ import {
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
+  isLightsparkPurposeOfPayment,
+  LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
   type LightsparkPayoutAccount,
   type LightsparkPayoutAccountEntry,
+  type LightsparkPurposeOfPayment,
   latestLightsparkPayoutAccount,
   lightsparkPayoutAccountKey,
   readLightsparkData,
   readLightsparkPayoutAccountByKey,
   readLightsparkPayoutAccounts,
+  readLightsparkPurposeOfPayment,
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import type { LightsparkCustomerResolution } from "@sdp/payments/ramps/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
@@ -145,6 +149,34 @@ export async function ensureLightsparkCustomer(
     provider_customer_reference: customer.id,
   });
   return { customerId: customer.id };
+}
+
+/**
+ * Returns the counterparty's purpose-of-payment, persisting a newly collected
+ * value into provider_data first. The stored code is required on every Grid
+ * quote because some payout corridors mandate it.
+ *
+ * @param c - Request context for database access.
+ * @param input - Parent counterparty, project scope, and transient collected fields.
+ * @returns The stored purpose-of-payment, or null when none has been collected.
+ */
+export async function ensureLightsparkPurposeOfPayment(
+  c: AppContext,
+  input: { counterparty: CounterpartyRow; projectId: string; collectedData?: CollectedFieldData }
+): Promise<LightsparkPurposeOfPayment | null> {
+  const supplied = input.collectedData?.purposeOfPayment;
+  if (supplied === undefined) {
+    return readLightsparkPurposeOfPayment(input.counterparty.provider_data);
+  }
+  if (!isLightsparkPurposeOfPayment(supplied)) {
+    throw badRequest(
+      `purposeOfPayment must be one of: ${Object.keys(LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS).join(", ")}`
+    );
+  }
+  await persistLightsparkData(c, input.counterparty, input.projectId, {
+    purposeOfPayment: supplied,
+  });
+  return supplied;
 }
 
 async function persistLightsparkPayoutAccount(
