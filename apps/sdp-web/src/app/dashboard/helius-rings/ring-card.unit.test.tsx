@@ -58,6 +58,10 @@ async function fillForm(name: string, ringProgramId: string) {
   await user.click(screen.getByRole("button", { name: "Record and bring up" }));
 }
 
+async function openList() {
+  await userEvent.setup().click(screen.getByRole("button", { name: /View custom rings/ }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -74,28 +78,32 @@ describe("RingCard", () => {
     expect(mocks.createProjectRing).not.toHaveBeenCalled();
   });
 
-  it("lists every recorded ring by name and keeps the add form for more", () => {
+  it("lists every recorded ring by name in the dialog and keeps the add form on the card", async () => {
     renderCard([ACTIVE, FAILED]);
 
-    expect(screen.getByText("treasury")).toBeTruthy();
+    // The add form stays on the card; only the list moves into the dialog.
+    expect(screen.getByLabelText("Ring name")).toBeTruthy();
+
+    await openList();
+
+    // treasury is both a list row and (as the default selection) the detail header.
+    expect(screen.getAllByText("treasury").length).toBeGreaterThan(0);
     expect(screen.getByText("payroll")).toBeTruthy();
+    // The first ring is selected by default, so its detail is shown.
     expect(screen.getByText("04ff00")).toBeTruthy();
     expect(screen.getByText(LOOKUP_TABLE)).toBeTruthy();
-    // Two rings do not exhaust the cap, so more can be added.
-    expect(screen.getByLabelText("Ring name")).toBeTruthy();
   });
 
-  it("hides the add form at the eight-ring cap", () => {
-    renderCard(
-      Array.from({ length: 8 }, (_, index) => ({
-        ...ACTIVE,
-        id: `hrr_${index}`,
-        name: `ring-${index}`,
-      }))
-    );
+  it("shows a ring's detail when its row in the dialog is selected", async () => {
+    renderCard([ACTIVE, FAILED]);
+    await openList();
 
-    expect(screen.getByText(/8-ring limit/)).toBeTruthy();
-    expect(screen.queryByLabelText("Ring name")).toBeNull();
+    // treasury (active) is selected first; payroll's failure is not shown yet.
+    expect(screen.queryByText(/upstream service is unavailable/)).toBeNull();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: /payroll/ }));
+
+    expect(screen.getByText(/upstream service is unavailable/)).toBeTruthy();
   });
 
   it("submits the trimmed name and id and tells its host", async () => {
@@ -131,6 +139,7 @@ describe("RingCard", () => {
     const onChanged = vi.fn();
     renderCard([FAILED], onChanged);
 
+    await openList();
     expect(screen.getByText(/upstream service is unavailable/)).toBeTruthy();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry bring-up" }));

@@ -28,8 +28,10 @@
     },
     "ring": {
       "title": "Custom rings",
-      "description": "Up to 8 named custom rings per project. Ops deploys each ring program and hands over its id; recording a name and id here completes bring-up (auditor key, ring config, pool registration, lookup table) through custody. Once active, any operation can target the ring by name — default-pool operations are never blocked by it.",
+      "description": "Named custom rings for this project. Ops deploys each ring program and hands over its id; recording a name and id here completes bring-up (auditor key, ring config, pool registration, lookup table) through custody. Once active, any operation can target the ring by name — default-pool operations are never blocked by it.",
       "none": "No custom rings recorded. All operations use the default public pool.",
+      "openList": "View custom rings",
+      "dialogDescription": "Select a ring to see its program, auditor key, and lookup table.",
       "nameLabel": "Ring name",
       "namePlaceholder": "treasury",
       "programIdLabel": "Ring program id",
@@ -41,13 +43,11 @@
       "submitting": "Bringing up…",
       "retry": "Retry bring-up",
       "repointHint": "Re-submitting a recorded name resumes its bring-up. Entering a different id under that name replaces its program, which is possible only while the ring has never been active.",
-      "capReached": "This project has reached its 8-ring limit.",
       "submitFailed": "Ring bring-up failed.",
       "status_pending": "Pending",
       "status_active": "Active",
       "status_failed": "Failed",
       "explain_pending": "Bring-up has not completed. Operations cannot target this ring yet; default-pool operations are unaffected.",
-      "explain_active": "Operations can target this ring by name. Its notes show under their own group in the balance read.",
       "explain_failed": "Bring-up failed; operations cannot target this ring until a retry succeeds. Default-pool operations are unaffected."
     },
     "wallets": {

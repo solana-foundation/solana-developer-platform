@@ -1502,17 +1502,17 @@ describe("HeliusRingsService", () => {
       ).rejects.toMatchObject({ code: "conflict" });
     });
 
-    it("caps the project at eight rings but lets an existing name resume", async () => {
+    it("registers rings without a cap and lets an existing name resume", async () => {
       const svc = service({ gateway: gatewayStub({ provisionRing: provisioned() }) });
       const programId = (index: number) => `RingProgram${index}11111111111111111111111111111`;
-      for (let index = 1; index <= 8; index += 1) {
-        await svc.createProjectRing({ name: `ring-${index}`, ringProgramId: programId(index) });
+      // No MAX_PROJECT_RINGS ceiling: a project registers as many as ops deploys.
+      for (let index = 1; index <= 12; index += 1) {
+        expect(
+          await svc.createProjectRing({ name: `ring-${index}`, ringProgramId: programId(index) })
+        ).toMatchObject({ status: "active" });
       }
 
-      await expect(
-        svc.createProjectRing({ name: "ring-9", ringProgramId: programId(9) })
-      ).rejects.toMatchObject({ code: "conflict" });
-      // Re-submitting an existing name is a resume, not a ninth ring.
+      // Re-submitting an existing name is a resume, not a new ring.
       expect(
         await svc.createProjectRing({ name: "ring-1", ringProgramId: programId(1) })
       ).toMatchObject({ status: "active" });

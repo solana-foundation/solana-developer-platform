@@ -18,7 +18,6 @@ import {
   DEFAULT_RING_NAME,
   HeliusRingsError,
   type HeliusRingsErrorCode,
-  MAX_PROJECT_RINGS,
   nextState,
   RING_NAME_PATTERN,
   type RingsGatewayPort,
@@ -324,19 +323,6 @@ export class HeliusRingsService {
       throw new HeliusRingsError(
         "invalid_input",
         'a ring name is a 1-32 character lowercase slug, and "default" names the default pool'
-      );
-    }
-
-    // Counted here rather than in SQL: a concurrent race can briefly exceed
-    // the cap by one, which wastes rent but breaks nothing.
-    const existing = await this.projectRings.listByProject({ ...this.tenant });
-    if (
-      existing.length >= MAX_PROJECT_RINGS &&
-      !existing.some((ring) => ring.name === input.name)
-    ) {
-      throw new HeliusRingsError(
-        "conflict",
-        `this project already has ${MAX_PROJECT_RINGS} custom rings; re-submit an existing name to resume its bring-up`
       );
     }
 

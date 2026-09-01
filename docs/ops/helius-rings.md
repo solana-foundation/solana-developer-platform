@@ -171,7 +171,8 @@ Enabled when `HELIUS_RINGS_ENABLED=true`.
 
 ## Custom rings
 
-Up to eight named custom rings per project (`MAX_PROJECT_RINGS`). A custom
+Named custom rings, no fixed cap per project — a project holds as many as ops
+deploys. A custom
 ring is its own on-chain program; deposits into it are ring-bound, so only
 that ring's own instructions can ever spend the notes, and every ring transfer
 carries a message the ring's auditor key can decrypt. Ring membership is a
