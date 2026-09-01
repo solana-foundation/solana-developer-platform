@@ -320,8 +320,6 @@ export interface Env {
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
 
   // Earn vault-infra provider configuration
-  VEDA_API_KEY?: string;
-  VEDA_SANDBOX_API_KEY?: string;
   UPSHIFT_API_KEY?: string;
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;
