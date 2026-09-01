@@ -5,7 +5,7 @@ import { formatCurrencyAmount } from "@/app/dashboard/payments/payments-overview
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import type { RingsWallet, RingsWalletSync } from "./helius-rings.data";
+import type { ProjectRing, RingsWallet, RingsWalletSync } from "./helius-rings.data";
 import { formatAssetAmount, shortenShieldedAddress } from "./helius-rings.utils";
 import { useRingsBalance } from "./use-rings-balance";
 
@@ -17,9 +17,12 @@ import { useRingsBalance } from "./use-rings-balance";
 export function WalletOverview({
   wallet,
   refreshTick,
+  projectRings,
 }: {
   wallet: RingsWallet;
   refreshTick?: number;
+  /** Names the per-ring balance groups; unknown ids fall back to the truncated program id. */
+  projectRings?: ProjectRing[];
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -66,14 +69,22 @@ export function WalletOverview({
         ) : state.name === "failed" ? (
           <p className="text-error">{t("DashboardHeliusRings.overview.failed")}</p>
         ) : (
-          <Summary sync={state.sync} locale={locale} />
+          <Summary sync={state.sync} locale={locale} projectRings={projectRings ?? []} />
         )}
       </CardContent>
     </Card>
   );
 }
 
-function Summary({ sync, locale }: { sync: RingsWalletSync; locale: string }) {
+function Summary({
+  sync,
+  locale,
+  projectRings,
+}: {
+  sync: RingsWalletSync;
+  locale: string;
+  projectRings: readonly ProjectRing[];
+}) {
   const t = useTranslations();
 
   if (sync.balances.length === 0) {
@@ -83,6 +94,8 @@ function Summary({ sync, locale }: { sync: RingsWalletSync; locale: string }) {
       </p>
     );
   }
+
+  const nameByProgramId = new Map(projectRings.map((ring) => [ring.ringProgramId, ring.name]));
 
   // Adjacent-run grouping over the API's deterministic order (default bucket
   // first, then rings ascending) — value never merges across rings, so each
@@ -110,9 +123,10 @@ function Summary({ sync, locale }: { sync: RingsWalletSync; locale: string }) {
             <p className="text-xs text-tertiary">
               {group.ring === null
                 ? t("DashboardHeliusRings.overview.defaultRing")
-                : t("DashboardHeliusRings.overview.customRing", {
+                : (nameByProgramId.get(group.ring) ??
+                  t("DashboardHeliusRings.overview.customRing", {
                     id: shortenShieldedAddress(group.ring),
-                  })}
+                  }))}
             </p>
           ) : null}
           <ul className="flex flex-col gap-0.5">

@@ -17,35 +17,41 @@ const STATUS_BADGE: Record<ProjectRingStatus, BadgeVariant> = {
   failed: "danger",
 };
 
+/** Mirrors MAX_PROJECT_RINGS and RING_NAME_PATTERN in @sdp/helius-rings (no server imports here). */
+const MAX_PROJECT_RINGS = 8;
+const RING_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
+
 /**
- * The project's one custom ring. Ops pre-deploys the ring program; submitting
- * its id here runs bring-up server-side (auditor key, config, pool
- * registration). Once active, shield operations can target the ring per
- * operation; default-ring operations are never blocked by it. A failed
- * bring-up's retry lives here too.
+ * The project's named custom rings. Ops pre-deploys each ring program;
+ * recording a name and program id here runs bring-up server-side (auditor
+ * key, config, pool registration, lookup table). Once active, any operation
+ * can target the ring by name; default-pool operations are never blocked by
+ * it. A failed bring-up's retry lives on its row, and re-submitting a
+ * never-active name with a corrected id re-points it.
  *
  * Prop-driven like the other cards: the workspace owns the fetch, this card
  * owns only its form state.
  */
 export function RingCard({
-  ring,
+  rings,
   onChanged,
 }: {
-  ring: ProjectRing | null;
+  rings: ProjectRing[];
   onChanged: () => Promise<void> | void;
 }) {
   const t = useTranslations();
 
+  const [name, setName] = useState("");
   const [ringProgramId, setRingProgramId] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingName, setSubmittingName] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const handleSubmit = useCallback(
-    async (submittedRingProgramId: string) => {
-      setSubmitting(true);
+    async (submitted: { name: string; ringProgramId: string }) => {
+      setSubmittingName(submitted.name);
       setSubmitError(null);
       try {
-        const result = await createProjectRing({ ringProgramId: submittedRingProgramId });
+        const result = await createProjectRing(submitted);
         if (!result.ring) {
           // The server's reason verbatim: it is the only text naming what refused.
           setSubmitError(result.error ?? t("DashboardHeliusRings.ring.submitFailed"));
@@ -53,7 +59,7 @@ export function RingCard({
       } catch {
         setSubmitError(t("DashboardHeliusRings.ring.submitFailed"));
       } finally {
-        setSubmitting(false);
+        setSubmittingName(null);
       }
       // The row is reserved before bring-up, so a failure still leaves a ring
       // (and its recorded failure) to show.
@@ -62,9 +68,12 @@ export function RingCard({
     [onChanged, t]
   );
 
-  // A never-active ring binds no notes, so its id is correctable in place;
-  // once active, the server refuses re-pointing and the input disappears.
-  const canSubmitNewId = ring === null || ring.status !== "active";
+  const atCap = rings.length >= MAX_PROJECT_RINGS;
+  const trimmedName = name.trim();
+  const formComplete =
+    RING_NAME_PATTERN.test(trimmedName) &&
+    trimmedName !== "default" &&
+    ringProgramId.trim().length > 0;
 
   return (
     <Card>
@@ -73,10 +82,39 @@ export function RingCard({
         <CardDescription>{t("DashboardHeliusRings.ring.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {ring === null ? (
+        {rings.length === 0 ? (
           <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.none")}</p>
         ) : (
-          <RingDetails ring={ring} />
+          <ul className="flex flex-col gap-4">
+            {rings.map((ring) => (
+              <li
+                key={ring.id}
+                className="flex flex-col gap-3 border-b border-border-default pb-4 last:border-b-0 last:pb-0"
+              >
+                <RingDetails ring={ring} />
+                {/* Retry resumes bring-up with the recorded name and id; the
+                    form below re-points a never-active ring at a corrected id
+                    by re-using its name. */}
+                {ring.status !== "active" ? (
+                  <div>
+                    <Button
+                      variant="secondary"
+                      disabled={submittingName !== null}
+                      onClick={() =>
+                        void handleSubmit({ name: ring.name, ringProgramId: ring.ringProgramId })
+                      }
+                    >
+                      {t(
+                        submittingName === ring.name
+                          ? "DashboardHeliusRings.ring.submitting"
+                          : "DashboardHeliusRings.ring.retry"
+                      )}
+                    </Button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         )}
 
         {submitError ? (
@@ -85,12 +123,23 @@ export function RingCard({
           </Callout>
         ) : null}
 
-        {canSubmitNewId ? (
+        {atCap ? (
+          <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.capReached")}</p>
+        ) : (
           <div className="flex flex-col gap-2">
-            {ring !== null ? (
+            {rings.length > 0 ? (
               <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.repointHint")}</p>
             ) : null}
             <div className="flex flex-wrap items-end gap-3">
+              <div className="flex min-w-48 flex-col gap-1.5">
+                <Label htmlFor="rings-ring-name">{t("DashboardHeliusRings.ring.nameLabel")}</Label>
+                <Input
+                  id="rings-ring-name"
+                  value={name}
+                  placeholder={t("DashboardHeliusRings.ring.namePlaceholder")}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
               <div className="flex min-w-96 flex-col gap-1.5">
                 <Label htmlFor="rings-ring-program-id">
                   {t("DashboardHeliusRings.ring.programIdLabel")}
@@ -103,36 +152,20 @@ export function RingCard({
                 />
               </div>
               <Button
-                disabled={submitting || !ringProgramId.trim()}
-                onClick={() => void handleSubmit(ringProgramId.trim())}
+                disabled={submittingName !== null || !formComplete}
+                onClick={() =>
+                  void handleSubmit({ name: trimmedName, ringProgramId: ringProgramId.trim() })
+                }
               >
                 {t(
-                  submitting
+                  submittingName !== null
                     ? "DashboardHeliusRings.ring.submitting"
                     : "DashboardHeliusRings.ring.submit"
                 )}
               </Button>
             </div>
           </div>
-        ) : null}
-
-        {/* Retry resumes bring-up with the recorded id; the input above is the
-            way to re-point a never-active ring at a corrected one. */}
-        {ring !== null && ring.status !== "active" ? (
-          <div>
-            <Button
-              variant="secondary"
-              disabled={submitting}
-              onClick={() => void handleSubmit(ring.ringProgramId)}
-            >
-              {t(
-                submitting
-                  ? "DashboardHeliusRings.ring.submitting"
-                  : "DashboardHeliusRings.ring.retry"
-              )}
-            </Button>
-          </div>
-        ) : null}
+        )}
       </CardContent>
     </Card>
   );
@@ -144,6 +177,7 @@ function RingDetails({ ring }: { ring: ProjectRing }) {
   return (
     <div className="flex flex-col gap-3 text-sm" role="status">
       <div className="flex items-center gap-2">
+        <span className="font-medium text-primary">{ring.name}</span>
         <Badge variant={STATUS_BADGE[ring.status]}>
           {t(`DashboardHeliusRings.ring.status_${ring.status}`)}
         </Badge>
@@ -164,6 +198,12 @@ function RingDetails({ ring }: { ring: ProjectRing }) {
           <Field
             label={t("DashboardHeliusRings.ring.auditorKey")}
             value={ring.auditorPublicKeyHex}
+          />
+        )}
+        {ring.lookupTableAddress === null ? null : (
+          <Field
+            label={t("DashboardHeliusRings.ring.lookupTable")}
+            value={ring.lookupTableAddress}
           />
         )}
       </dl>

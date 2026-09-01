@@ -27,9 +27,12 @@ const WALLET: RingsWallet = {
 };
 
 const ACTIVE_RING: ProjectRing = {
+  id: "hrr_1",
+  name: "treasury",
   ringProgramId: RING_PROGRAM,
   status: "active",
   auditorPublicKeyHex: "04ff",
+  lookupTableAddress: "LookupTab1e11111111111111111111111111111111",
   failure: null,
   createdAt: "2026-08-26T12:00:00.000Z",
   updatedAt: "2026-08-26T12:00:00.000Z",
@@ -50,14 +53,14 @@ const PREPARED = {
   },
 };
 
-function renderComposer(projectRing: ProjectRing | null) {
+function renderComposer(projectRings: ProjectRing[]) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <OperationComposer
         wallet={WALLET}
         recipientOptions={[]}
         custodyPublicKey="9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
-        projectRing={projectRing}
+        projectRings={projectRings}
         gatewayRed={false}
         onPrepared={async () => {}}
       />
@@ -78,8 +81,8 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("OperationComposer ring selection", () => {
-  it("offers no ring selector while the project has no custom ring", async () => {
-    renderComposer(null);
+  it("offers no ring selector while the project has no custom rings", async () => {
+    renderComposer([]);
 
     expect(screen.queryByRole("combobox", { name: "Ring" })).toBeNull();
 
@@ -88,59 +91,79 @@ describe("OperationComposer ring selection", () => {
     await user.click(screen.getByRole("button", { name: "Review" }));
     await user.click(screen.getByRole("button", { name: "Confirm" }));
 
-    // Omitted, not "default": the field only exists to name the custom ring.
+    // Omitted, not "default": the field only exists to name a custom ring.
     expect(mocks.prepareRingsOperation).toHaveBeenCalledTimes(1);
     expect("ring" in (mocks.prepareRingsOperation.mock.calls[0]?.[0] ?? {})).toBe(false);
   });
 
-  it("offers the ring only on the shield tab", async () => {
-    renderComposer(ACTIVE_RING);
+  it("offers the ring on every operation tab", async () => {
+    renderComposer([ACTIVE_RING]);
 
     expect(screen.getByRole("combobox", { name: "Ring" })).toBeTruthy();
 
     const user = userEvent.setup();
+    // A ring spend consumes the ring's own notes, so the selector names the
+    // source of funds on the spend tabs.
     await user.click(screen.getByRole("tab", { name: "Withdraw" }));
-    // A withdraw spends default-pool notes; a ring choice would misstate it.
-    expect(screen.queryByRole("combobox", { name: "Ring" })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Ring" })).toBeTruthy();
+    expect(screen.getByText(/source of funds/)).toBeTruthy();
 
     await user.click(screen.getByRole("tab", { name: "Shield" }));
     expect(screen.getByRole("combobox", { name: "Ring" })).toBeTruthy();
   });
 
-  it("disables the custom option, with the reason, while bring-up is unfinished", async () => {
-    renderComposer({ ...ACTIVE_RING, status: "pending", auditorPublicKeyHex: null });
+  it("disables a non-active ring's option, with the reason", async () => {
+    renderComposer([{ ...ACTIVE_RING, status: "pending", auditorPublicKeyHex: null }]);
 
-    expect(screen.getByText(/not active yet; complete bring-up/)).toBeTruthy();
+    expect(screen.getByText(/No ring is active yet; complete bring-up/)).toBeTruthy();
 
     await userEvent.setup().click(screen.getByRole("combobox", { name: "Ring" }));
-    const custom = await screen.findByRole("option", { name: "Custom ring" });
-    expect(custom.getAttribute("aria-disabled")).toBe("true");
+    const option = await screen.findByRole("option", { name: "treasury" });
+    expect(option.getAttribute("aria-disabled")).toBe("true");
   });
 
-  it("sends ring:custom and shows the ring on review when active", async () => {
-    renderComposer(ACTIVE_RING);
+  it("sends the ring's name and shows it on review when active", async () => {
+    renderComposer([ACTIVE_RING]);
 
     const user = userEvent.setup();
     await fillShield(user);
     await user.click(screen.getByRole("combobox", { name: "Ring" }));
-    await user.click(await screen.findByRole("option", { name: "Custom ring" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
     await user.click(screen.getByRole("button", { name: "Review" }));
 
-    expect(screen.getByText("Custom ring (RingPr…1111)")).toBeTruthy();
+    expect(screen.getByText("treasury")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ ring: "custom" })
+      expect.objectContaining({ ring: "treasury" })
     );
   });
 
-  it("forgets a custom choice when the operation leaves the shield tab", async () => {
-    renderComposer(ACTIVE_RING);
+  it("sends the ring's name on a withdraw", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Withdraw" }));
+    await fillShield(user);
+    await user.click(screen.getByRole("combobox", { name: "Ring" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ opType: "withdraw", ring: "treasury" })
+    );
+  });
+
+  it("forgets a ring choice when the operation changes tab", async () => {
+    renderComposer([ACTIVE_RING]);
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox", { name: "Ring" }));
-    await user.click(await screen.findByRole("option", { name: "Custom ring" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+    // The ring's meaning flips with the op type (destination vs source), so a
+    // carried-over choice would silently redirect value.
     await user.click(screen.getByRole("tab", { name: "Withdraw" }));
     await user.click(screen.getByRole("tab", { name: "Shield" }));
 

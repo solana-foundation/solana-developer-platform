@@ -17,6 +17,7 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   executeRingsOperation,
+  type ProjectRing,
   type RingsOperationState,
   type RingsOperationSummary,
   retryRingsOperation,
@@ -27,6 +28,7 @@ import {
   formatWhen,
   isSettling,
   shortenOperationId,
+  shortenShieldedAddress,
 } from "./helius-rings.utils";
 
 const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
@@ -109,10 +111,13 @@ const ACTION_LABELS = {
  */
 export function ActivityCard({
   operations,
+  projectRings,
   onChanged,
   onSelect,
 }: {
   operations: RingsOperationSummary[];
+  /** Names the ring pinned on each row; unknown ids fall back to the truncated program id. */
+  projectRings?: ProjectRing[];
   onChanged: () => Promise<void>;
   onSelect: (operationId: string) => void;
 }) {
@@ -120,6 +125,11 @@ export function ActivityCard({
   const locale = useLocale();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const ringNameByProgramId = useMemo(
+    () => new Map((projectRings ?? []).map((ring) => [ring.ringProgramId, ring.name])),
+    [projectRings]
+  );
 
   const retriedBy = useMemo(() => {
     const successors = new Map<string, string>();
@@ -179,6 +189,7 @@ export function ActivityCard({
                 <TableHead>{t("DashboardHeliusRings.activity.operation")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.state")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.amount")}</TableHead>
+                <TableHead>{t("DashboardHeliusRings.activity.ring")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.created")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.action")}</TableHead>
               </TableRow>
@@ -232,6 +243,12 @@ export function ActivityCard({
                     </TableCell>
                     <TableCell>
                       {formatAssetAmount(operation.amountRaw, operation.assetMint)}
+                    </TableCell>
+                    <TableCell>
+                      {operation.ringProgramId === null
+                        ? t("DashboardHeliusRings.activity.ringDefault")
+                        : (ringNameByProgramId.get(operation.ringProgramId) ??
+                          shortenShieldedAddress(operation.ringProgramId))}
                     </TableCell>
                     <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>
                     <TableCell>

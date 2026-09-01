@@ -23,37 +23,40 @@ export type RingsWalletStatus = "pending" | "ready" | "paused";
 export type ProjectRingStatus = "pending" | "active" | "failed";
 
 export interface ProjectRing {
-  /** Base58 program id of the project's custom ring program. */
+  id: string;
+  /** Operator-chosen slug operations select the ring by; "default" is reserved. */
+  name: string;
+  /** Base58 program id of the ring's custom program. */
   ringProgramId: string;
   status: ProjectRingStatus;
   /** Uncompressed SEC1 P-256 hex, as the chain publishes it; null until active. */
   auditorPublicKeyHex: string | null;
+  /** The ring's address lookup table; every ring spend rides through it. Null until bring-up lands it. */
+  lookupTableAddress: string | null;
   failure: { code: string; message: string } | null;
   createdAt: string;
   updatedAt: string;
 }
 
-/** Null means the project uses the default public ring; the API answers 404. */
-export async function fetchProjectRing(fallbackError: string): Promise<ProjectRing | null> {
-  const response = await fetch("/api/dashboard/helius-rings/ring", { cache: "no-store" });
-  if (response.status === 404) {
-    return null;
-  }
-  const result = await readEnvelope<{ ring: ProjectRing }>(response);
+/** The project's custom rings, oldest first; empty while it only uses the default pool. */
+export async function fetchProjectRings(fallbackError: string): Promise<ProjectRing[]> {
+  const response = await fetch("/api/dashboard/helius-rings/rings", { cache: "no-store" });
+  const result = await readEnvelope<{ rings: ProjectRing[] }>(response);
   if (!result.ok) {
     throw new Error(result.error ?? fallbackError);
   }
-  return result.data.ring;
+  return result.data.rings;
 }
 
 /**
- * Records the pre-deployed ring's program id and runs bring-up server-side.
- * Re-submitting the same id resumes a failed bring-up.
+ * Records a named ring's pre-deployed program id and runs bring-up server-side.
+ * Re-submitting the same name and id resumes a failed bring-up.
  */
 export async function createProjectRing(input: {
+  name: string;
   ringProgramId: string;
 }): Promise<{ ring?: ProjectRing; error?: string }> {
-  const response = await fetch("/api/dashboard/helius-rings/ring", {
+  const response = await fetch("/api/dashboard/helius-rings/rings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -305,8 +308,12 @@ export interface PrepareRingsOperationInput {
   asset: { mint: string; amountRaw: string };
   /** Withdrawals only: the public address the funds leave the pool for. */
   to?: string;
-  /** Shields only; symbolic — the server resolves and pins the program id at prepare. */
-  ring?: "default" | "custom";
+  /**
+   * Ring NAME the operation targets; the server resolves and pins the program
+   * id at prepare. Omitted = the default pool. For spends the named ring is
+   * the source of funds.
+   */
+  ring?: string;
 }
 
 type OperationResult = { operation?: RingsOperationDetail; error?: string };

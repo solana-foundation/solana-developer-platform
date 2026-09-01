@@ -18,11 +18,15 @@ vi.mock("./helius-rings.data", async (importOriginal) => ({
 }));
 
 const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
 
 const ACTIVE: ProjectRing = {
+  id: "hrr_1",
+  name: "treasury",
   ringProgramId: RING_PROGRAM,
   status: "active",
   auditorPublicKeyHex: "04ff00",
+  lookupTableAddress: LOOKUP_TABLE,
   failure: null,
   createdAt: "2026-08-26T12:00:00.000Z",
   updatedAt: "2026-08-26T12:00:00.000Z",
@@ -30,18 +34,28 @@ const ACTIVE: ProjectRing = {
 
 const FAILED: ProjectRing = {
   ...ACTIVE,
+  id: "hrr_2",
+  name: "payroll",
   status: "failed",
   auditorPublicKeyHex: null,
+  lookupTableAddress: null,
   failure: { code: "gateway_unavailable", message: "a Rings upstream service is unavailable" },
 };
 
-function renderCard(ring: ProjectRing | null, onChanged: () => void = vi.fn()) {
+function renderCard(rings: ProjectRing[], onChanged: () => void = vi.fn()) {
   const view = render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <RingCard ring={ring} onChanged={onChanged} />
+      <RingCard rings={rings} onChanged={onChanged} />
     </I18nProvider>
   );
   return { view, onChanged };
+}
+
+async function fillForm(name: string, ringProgramId: string) {
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText("Ring name"), name);
+  await user.type(screen.getByLabelText("Ring program id"), ringProgramId);
+  await user.click(screen.getByRole("button", { name: "Record and bring up" }));
 }
 
 beforeEach(() => {
@@ -51,69 +65,96 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("RingCard", () => {
-  it("offers the parameter only while no ring is recorded", () => {
-    renderCard(null);
+  it("offers the add form while no ring is recorded", () => {
+    renderCard([]);
 
-    expect(screen.getByText(/default public ring/)).toBeTruthy();
+    expect(screen.getByText(/default public pool/)).toBeTruthy();
+    expect(screen.getByLabelText("Ring name")).toBeTruthy();
     expect(screen.getByLabelText("Ring program id")).toBeTruthy();
     expect(mocks.createProjectRing).not.toHaveBeenCalled();
   });
 
-  it("shows the recorded ring and hides the input once it is active", () => {
-    renderCard(ACTIVE);
+  it("lists every recorded ring by name and keeps the add form for more", () => {
+    renderCard([ACTIVE, FAILED]);
 
-    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("treasury")).toBeTruthy();
+    expect(screen.getByText("payroll")).toBeTruthy();
     expect(screen.getByText("04ff00")).toBeTruthy();
-    // Once active, there is nothing to type: re-pointing a live ring is refused.
-    expect(screen.queryByLabelText("Ring program id")).toBeNull();
+    expect(screen.getByText(LOOKUP_TABLE)).toBeTruthy();
+    // Two rings do not exhaust the cap, so more can be added.
+    expect(screen.getByLabelText("Ring name")).toBeTruthy();
   });
 
-  it("submits the trimmed id and tells its host, so a stale ring never gates the composer", async () => {
+  it("hides the add form at the eight-ring cap", () => {
+    renderCard(
+      Array.from({ length: 8 }, (_, index) => ({
+        ...ACTIVE,
+        id: `hrr_${index}`,
+        name: `ring-${index}`,
+      }))
+    );
+
+    expect(screen.getByText(/8-ring limit/)).toBeTruthy();
+    expect(screen.queryByLabelText("Ring name")).toBeNull();
+  });
+
+  it("submits the trimmed name and id and tells its host", async () => {
     mocks.createProjectRing.mockResolvedValue({ ring: ACTIVE });
     const onChanged = vi.fn();
-    renderCard(null, onChanged);
+    renderCard([], onChanged);
 
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Ring program id"), `  ${RING_PROGRAM}  `);
-    expect(onChanged).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Record and bring up" }));
+    await fillForm("  treasury  ", `  ${RING_PROGRAM}  `);
 
     expect(mocks.createProjectRing).toHaveBeenCalledExactlyOnceWith({
+      name: "treasury",
       ringProgramId: RING_PROGRAM,
     });
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the recorded failure and retries with the recorded id, not a typed one", async () => {
-    mocks.createProjectRing.mockResolvedValue({ ring: ACTIVE });
+  it("refuses the reserved name before any request leaves the page", async () => {
+    renderCard([]);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Ring name"), "default");
+    await user.type(screen.getByLabelText("Ring program id"), RING_PROGRAM);
+
+    // "default" names the default pool; the button never arms.
+    expect(
+      (screen.getByRole("button", { name: "Record and bring up" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    expect(mocks.createProjectRing).not.toHaveBeenCalled();
+  });
+
+  it("shows the recorded failure and retries with the recorded name and id", async () => {
+    mocks.createProjectRing.mockResolvedValue({ ring: { ...FAILED, status: "active" } });
     const onChanged = vi.fn();
-    renderCard(FAILED, onChanged);
+    renderCard([FAILED], onChanged);
 
     expect(screen.getByText(/upstream service is unavailable/)).toBeTruthy();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry bring-up" }));
 
-    // The reservation is the resume point; retry must not re-point the project.
+    // The reservation is the resume point; retry must not re-point the ring.
     expect(mocks.createProjectRing).toHaveBeenCalledExactlyOnceWith({
+      name: "payroll",
       ringProgramId: RING_PROGRAM,
     });
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("re-points a never-active ring with a newly typed id", async () => {
+  it("re-points a never-active ring by re-using its name with a new id", async () => {
     const OTHER_RING = "RingProgram2111111111111111111111111111111";
     mocks.createProjectRing.mockResolvedValue({
-      ring: { ...ACTIVE, ringProgramId: OTHER_RING },
+      ring: { ...FAILED, ringProgramId: OTHER_RING },
     });
-    renderCard(FAILED);
+    renderCard([FAILED]);
 
-    const user = userEvent.setup();
-    const input = screen.getByLabelText("Ring program id");
     expect(screen.getByText(/never been active/)).toBeTruthy();
-    await user.type(input, OTHER_RING);
-    await user.click(screen.getByRole("button", { name: "Record and bring up" }));
+    await fillForm("payroll", OTHER_RING);
 
     expect(mocks.createProjectRing).toHaveBeenCalledExactlyOnceWith({
+      name: "payroll",
       ringProgramId: OTHER_RING,
     });
   });
@@ -122,22 +163,18 @@ describe("RingCard", () => {
     mocks.createProjectRing.mockResolvedValue({
       error: "ring bring-up needs a ring RPC URL and a custody message signer",
     });
-    renderCard(null);
+    renderCard([]);
 
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Ring program id"), RING_PROGRAM);
-    await user.click(screen.getByRole("button", { name: "Record and bring up" }));
+    await fillForm("treasury", RING_PROGRAM);
 
     expect(await screen.findByText(/custody message signer/)).toBeTruthy();
   });
 
   it("answers, and re-enables the control, when the request never returns a reply", async () => {
     mocks.createProjectRing.mockRejectedValue(new TypeError("Failed to fetch"));
-    renderCard(null);
+    renderCard([]);
 
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Ring program id"), RING_PROGRAM);
-    await user.click(screen.getByRole("button", { name: "Record and bring up" }));
+    await fillForm("treasury", RING_PROGRAM);
 
     expect(await screen.findByText("Ring bring-up failed.")).toBeTruthy();
     expect(

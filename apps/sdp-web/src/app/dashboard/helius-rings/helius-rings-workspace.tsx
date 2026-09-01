@@ -8,7 +8,7 @@ import { ActivityCard } from "./activity-card";
 import { HealthStrip } from "./health-strip";
 import {
   executeRingsOperation,
-  fetchProjectRing,
+  fetchProjectRings,
   fetchRingsHealth,
   fetchRingsOperations,
   fetchRingsWallets,
@@ -38,7 +38,7 @@ export function HeliusRingsWorkspace({
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
   const [operations, setOperations] = useState<RingsOperationSummary[]>([]);
-  const [projectRing, setProjectRing] = useState<ProjectRing | null>(null);
+  const [projectRings, setProjectRings] = useState<ProjectRing[]>([]);
   const [detailOperationId, setDetailOperationId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -48,16 +48,16 @@ export function HeliusRingsWorkspace({
 
   const refresh = useCallback(async () => {
     try {
-      const [healthResult, walletsResult, operationsResult, ringResult] = await Promise.all([
+      const [healthResult, walletsResult, operationsResult, ringsResult] = await Promise.all([
         fetchRingsHealth(loadFailedCopy),
         fetchRingsWallets(loadFailedCopy),
         fetchRingsOperations(loadFailedCopy),
-        fetchProjectRing(loadFailedCopy),
+        fetchProjectRings(loadFailedCopy),
       ]);
       setHealth(healthResult.health);
       setWallets(walletsResult.wallets);
       setOperations(operationsResult.operations);
-      setProjectRing(ringResult);
+      setProjectRings(ringsResult);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : loadFailedCopy);
@@ -171,7 +171,7 @@ export function HeliusRingsWorkspace({
 
       <HealthStrip health={health} alerts={alerts} />
 
-      <RingCard ring={projectRing} onChanged={refresh} />
+      <RingCard rings={projectRings} onChanged={refresh} />
 
       <PrivateWalletsCard
         wallets={wallets}
@@ -192,7 +192,11 @@ export function HeliusRingsWorkspace({
       ) : (
         <>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <WalletOverview wallet={selectedWallet} refreshTick={balancesTick} />
+            <WalletOverview
+              wallet={selectedWallet}
+              refreshTick={balancesTick}
+              projectRings={projectRings}
+            />
             <OperationComposer
               key={selectedWallet.id}
               wallet={selectedWallet}
@@ -202,7 +206,7 @@ export function HeliusRingsWorkspace({
               custodyPublicKey={
                 custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
               }
-              projectRing={projectRing}
+              projectRings={projectRings}
               gatewayRed={upstreamsRed}
               onPrepared={refresh}
             />
@@ -210,6 +214,7 @@ export function HeliusRingsWorkspace({
 
           <ActivityCard
             operations={filteredOperations}
+            projectRings={projectRings}
             onChanged={refresh}
             onSelect={setDetailOperationId}
           />

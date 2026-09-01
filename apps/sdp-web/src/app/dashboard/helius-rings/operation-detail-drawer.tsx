@@ -105,6 +105,14 @@ export function OperationDetailDrawer({
                 />
               ) : null}
               <DetailRow
+                label={t("DashboardHeliusRings.activity.ring")}
+                value={
+                  detail.ringProgramId === null
+                    ? t("DashboardHeliusRings.activity.ringDefault")
+                    : detail.ringProgramId
+                }
+              />
+              <DetailRow
                 label={t("DashboardHeliusRings.activity.created")}
                 value={formatWhen(detail.createdAt, locale)}
               />

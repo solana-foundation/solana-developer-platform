@@ -14,11 +14,7 @@ import {
   type RingsOpType,
   type RingsWallet,
 } from "./helius-rings.data";
-import {
-  formatAssetAmount,
-  parseDecimalToBaseUnits,
-  shortenShieldedAddress,
-} from "./helius-rings.utils";
+import { formatAssetAmount, parseDecimalToBaseUnits } from "./helius-rings.utils";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -35,8 +31,8 @@ interface ComposerDraft {
   /** User-typed decimal amount, e.g. "1.01". Converted to base units at submit. */
   amountDecimal: string;
   recipient: string;
-  /** Shields only; symbolic — the server resolves and pins the program id. */
-  ring: "default" | "custom";
+  /** Ring NAME the operation targets; "default" = the default public pool. */
+  ring: string;
 }
 
 function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDraft {
@@ -73,7 +69,7 @@ function buildSummaryRows(
   t: Translate,
   draft: ComposerDraft,
   recipientOptions: readonly RingsWallet[],
-  projectRing: ProjectRing | null
+  projectRings: readonly ProjectRing[]
 ): Array<[string, string]> {
   const amountRaw = draftAmountRaw(draft);
   const rows: Array<[string, string]> = [
@@ -86,14 +82,10 @@ function buildSummaryRows(
       formatAssetAmount(amountRaw, draft.assetMint),
     ],
   ];
-  if (draft.opType === "shield" && projectRing !== null) {
+  if (projectRings.length > 0) {
     rows.push([
       t("DashboardHeliusRings.composer.summaryRing"),
-      draft.ring === "custom"
-        ? t("DashboardHeliusRings.composer.ringCustomNamed", {
-            id: shortenShieldedAddress(projectRing.ringProgramId),
-          })
-        : t("DashboardHeliusRings.composer.ringDefault"),
+      draft.ring === "default" ? t("DashboardHeliusRings.composer.ringDefault") : draft.ring,
     ]);
   }
   if (draft.opType === "transfer_registered") {
@@ -111,7 +103,7 @@ export function OperationComposer({
   wallet,
   recipientOptions,
   custodyPublicKey,
-  projectRing,
+  projectRings,
   gatewayRed,
   onPrepared,
 }: {
@@ -120,8 +112,8 @@ export function OperationComposer({
   recipientOptions: RingsWallet[];
   /** Solana pubkey of the custody wallet backing this private wallet. */
   custodyPublicKey: string | null;
-  /** The project's custom ring, or null while none is recorded. */
-  projectRing: ProjectRing | null;
+  /** The project's custom rings; empty while none are recorded. */
+  projectRings: ProjectRing[];
   gatewayRed: boolean;
   onPrepared: () => Promise<void>;
 }) {
@@ -160,10 +152,8 @@ export function OperationComposer({
         opType: draft.opType,
         asset: { mint: draft.assetMint, amountRaw },
         to,
-        // Omitted when default: the field exists only to name the custom ring.
-        ...(draft.opType === "shield" && draft.ring === "custom"
-          ? { ring: "custom" as const }
-          : {}),
+        // Omitted when default: the field exists only to name a custom ring.
+        ...(draft.ring !== "default" ? { ring: draft.ring } : {}),
       });
     } finally {
       setSubmitting(false);
@@ -182,8 +172,8 @@ export function OperationComposer({
   }, [draft, custodyPublicKey, onPrepared, t]);
 
   const summaryRows = useMemo(
-    () => buildSummaryRows(t, draft, recipientOptions, projectRing),
-    [t, draft, recipientOptions, projectRing]
+    () => buildSummaryRows(t, draft, recipientOptions, projectRings),
+    [t, draft, recipientOptions, projectRings]
   );
 
   return (
@@ -207,15 +197,17 @@ export function OperationComposer({
               value={draft.opType}
               onSelect={(opType) => {
                 setPhase({ name: "compose" });
-                // The ring names where a shield's notes land; carrying it to
-                // another op type would misstate what that operation can do.
+                // The ring's meaning flips with the op type — a shield's
+                // destination, a spend's source of funds — so a carried-over
+                // choice would silently redirect value. Every switch starts
+                // from the default pool.
                 patchDraft({ opType, ring: "default" });
               }}
             />
             <ComposeStep
               draft={draft}
               recipientOptions={recipientOptions}
-              projectRing={projectRing}
+              projectRings={projectRings}
               onPatch={patchDraft}
               onReview={() => setPhase({ name: "review", error: null })}
             />
@@ -281,13 +273,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function ComposeStep({
   draft,
   recipientOptions,
-  projectRing,
+  projectRings,
   onPatch,
   onReview,
 }: {
   draft: ComposerDraft;
   recipientOptions: readonly RingsWallet[];
-  projectRing: ProjectRing | null;
+  projectRings: readonly ProjectRing[];
   onPatch: (patch: Partial<ComposerDraft>) => void;
   onReview: () => void;
 }) {
@@ -301,7 +293,8 @@ function ComposeStep({
     );
   }
 
-  const showRingSelect = draft.opType === "shield" && projectRing !== null;
+  const showRingSelect = projectRings.length > 0;
+  const anyRingActive = projectRings.some((ring) => ring.status === "active");
 
   return (
     <>
@@ -339,26 +332,33 @@ function ComposeStep({
               ariaLabel={t("DashboardHeliusRings.composer.ring")}
               value={draft.ring}
               onValueChange={(value) => {
-                if (value === "default" || value === "custom") onPatch({ ring: value });
+                if (value) onPatch({ ring: value });
               }}
             >
               <SelectItem value="default">
                 {t("DashboardHeliusRings.composer.ringDefault")}
               </SelectItem>
-              {/* Disabled rather than hidden while bring-up is unfinished: the
-                  option exists, the server would refuse it, and the hint below
-                  says why. */}
-              <SelectItem value="custom" disabled={projectRing.status !== "active"}>
-                {t("DashboardHeliusRings.composer.ringCustom")}
-              </SelectItem>
+              {/* Non-active rings are disabled rather than hidden: the option
+                  exists, the server would refuse it, and the hint below says
+                  why. */}
+              {projectRings.map((ring) => (
+                <SelectItem key={ring.id} value={ring.name} disabled={ring.status !== "active"}>
+                  {ring.name}
+                </SelectItem>
+              ))}
             </Select>
           </Field>
         ) : null}
       </div>
 
-      {showRingSelect && projectRing.status !== "active" ? (
+      {showRingSelect ? (
         <p className="text-sm text-secondary">
-          {t("DashboardHeliusRings.composer.ringCustomUnavailable")}
+          {t(
+            draft.opType === "shield"
+              ? "DashboardHeliusRings.composer.ringShieldHint"
+              : "DashboardHeliusRings.composer.ringSpendHint"
+          )}
+          {anyRingActive ? "" : ` ${t("DashboardHeliusRings.composer.ringNoneActive")}`}
         </p>
       ) : null}
 
