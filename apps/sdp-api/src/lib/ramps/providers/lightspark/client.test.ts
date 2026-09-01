@@ -1,5 +1,4 @@
 import { LightsparkRampClient } from "@sdp/payments/ramps/providers/lightspark/client";
-import { lightsparkPayoutAccountKey } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13";
@@ -513,27 +512,5 @@ describe("LightsparkRampClient", () => {
         purposeOfPayment: "GOODS_OR_SERVICES",
       })
     ).rejects.toThrow(/does not match the requested/);
-  });
-
-  it("derives content-addressed payout account keys", async () => {
-    const key = await lightsparkPayoutAccountKey("USD", {
-      paymentRails: "ACH",
-      routingNumber: "021000021",
-      accountNumber: "12345678901",
-    });
-    const reordered = await lightsparkPayoutAccountKey("USD", {
-      accountNumber: " 12345678901 ",
-      routingNumber: "021000021",
-      paymentRails: "ACH",
-    });
-    const differentDetails = await lightsparkPayoutAccountKey("USD", {
-      paymentRails: "ACH",
-      routingNumber: "021000021",
-      accountNumber: "99999999999",
-    });
-
-    expect(key.startsWith("USD:")).toBe(true);
-    expect(reordered).toBe(key);
-    expect(differentDetails).not.toBe(key);
   });
 });

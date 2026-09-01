@@ -1,4 +1,4 @@
-import { COUNTERPARTY_ENTITY_TYPES, RAMP_PROVIDERS } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES, RAMP_PROVIDERS } from "@sdp/types";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
@@ -127,6 +127,20 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+const payoutRequirementTreeSchema = z.object({
+  countryRails: z.record(
+    z.string().regex(/^[A-Z]{2}$/),
+    z.array(z.object({ value: z.string(), label: z.string() }))
+  ),
+  railFields: z.record(z.string(), z.array(requirementFieldSchema)),
+  accounts: z.array(
+    z.object({
+      destinationCountry: z.enum(COUNTRY_CODES),
+      status: z.string(),
+    })
+  ),
+});
+
 const requirementBase = {
   direction: withOpenApi(rampDirectionSchemaBase, {
     description: "Ramp direction evaluated for this counterparty.",
@@ -162,7 +176,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       ...requirementBase,
       provider: z.literal("lightspark"),
       status: z.literal("collect_account"),
-      fields: z.array(requirementFieldSchema),
+      payout: payoutRequirementTreeSchema,
     }),
     z.object({
       ...requirementBase,

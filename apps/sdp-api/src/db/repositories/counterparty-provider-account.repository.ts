@@ -1,3 +1,4 @@
+import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 
@@ -12,7 +13,11 @@ export const counterpartyProviderAccountRowSchema = z.object({
   counterparty_id: z.string(),
   provider: z.enum(RAMP_PROVIDERS),
   provider_customer_reference: z.string(),
-  status: z.string(),
+  external_account_reference: z.string().nullable(),
+  fiat_currency: z.string().nullable(),
+  destination_country: z.enum(COUNTRY_CODES).nullable(),
+  provider_status: z.string().nullable(),
+  status: z.enum(["active", "archived"]),
   metadata: z.record(z.string(), z.unknown()),
   created_at: z.string(),
   updated_at: z.string(),
@@ -32,6 +37,34 @@ export interface GetCounterpartyProviderAccountInput {
   projectId: string;
   counterpartyId: string;
   provider: RampProviderId;
+}
+
+export interface GetActiveExternalAccountInput extends GetCounterpartyProviderAccountInput {
+  fiatCurrency: string;
+  destinationCountry: CountryCode;
+}
+
+export interface ListExternalAccountsInput extends GetCounterpartyProviderAccountInput {
+  fiatCurrency: string;
+}
+
+export interface InsertPendingExternalAccountInput extends GetActiveExternalAccountInput {
+  providerCustomerReference: string;
+}
+
+export interface CompleteExternalAccountInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  externalAccountReference: string;
+  providerStatus: string;
+}
+
+export interface UpdateExternalAccountStatusInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  providerStatus: string;
+}
+
+export interface ArchiveExternalAccountInput extends GetCounterpartyProviderAccountInput {
+  id: string;
 }
 
 export interface CounterpartyProviderAccountsRepository {
@@ -57,4 +90,62 @@ export interface CounterpartyProviderAccountsRepository {
   upsertProviderAccount(
     input: UpsertCounterpartyProviderAccountInput
   ): Promise<CounterpartyProviderAccountRow>;
+
+  /**
+   * Reads the active external account for one payout corridor.
+   *
+   * @param input - Tenant scope, counterparty, provider, currency, and country.
+   * @returns The active corridor row, or null when none exists.
+   */
+  getActiveExternalAccount(
+    input: GetActiveExternalAccountInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Lists active external accounts for one counterparty and fiat currency.
+   *
+   * @param input - Tenant scope, counterparty, provider, and currency.
+   * @returns Active corridor rows with provider statuses.
+   */
+  listExternalAccounts(input: ListExternalAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
+
+  /**
+   * Reserves the active corridor row before provider account creation.
+   *
+   * @param input - Tenant scope, corridor, and provider customer reference.
+   * @returns The inserted row or the concurrent reservation.
+   */
+  insertPendingExternalAccount(
+    input: InsertPendingExternalAccountInput
+  ): Promise<CounterpartyProviderAccountRow>;
+
+  /**
+   * Stores the provider reference and status on a reserved corridor row.
+   *
+   * @param input - Tenant scope, row id, provider reference, and status.
+   * @returns The completed row or null when it is outside the scope.
+   */
+  completeExternalAccount(
+    input: CompleteExternalAccountInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Mirrors the current provider status for an active corridor row.
+   *
+   * @param input - Tenant scope, row id, and provider status.
+   * @returns The updated row or null when it is outside the scope.
+   */
+  updateExternalAccountStatus(
+    input: UpdateExternalAccountStatusInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Archives an active corridor row.
+   *
+   * @param input - Tenant scope and row id.
+   * @returns The archived row or null when it is outside the scope.
+   */
+  archiveExternalAccount(
+    input: ArchiveExternalAccountInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
 }

@@ -19,7 +19,10 @@ import {
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import type {
+  CounterpartyRequirements,
+  PayoutRequirementAccount,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
 import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
@@ -280,6 +283,8 @@ export type ValidateCounterpartyOptions =
       cryptoToken?: string;
       fiatCurrency?: RampFiatCurrency;
       destinationCountry?: CountryCode;
+      cryptoRail?: CryptoRailId;
+      payoutAccounts?: readonly PayoutRequirementAccount[];
       providerCustomerReference?: string;
     };
 

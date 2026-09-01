@@ -3,7 +3,6 @@ import {
   buildLightsparkAccountInfo,
   buildLightsparkBusinessInfo,
   lightsparkCounterpartyRequirements,
-  lightsparkPayoutCollectedData,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import { isLightsparkPurposeOfPayment } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import type { Counterparty } from "@sdp/types";
@@ -137,11 +136,12 @@ describe("lightsparkCounterpartyRequirements", () => {
     ).toThrowError(SdpPaymentsError);
   });
 
-  it("collects USD payout bank fields including the rail select", () => {
+  it("builds the USD destination-first payout tree", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
       providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "USD",
+      cryptoRail: "usdc.solana",
       providerCustomerReference: "Customer:cus_123",
     });
 
@@ -149,30 +149,16 @@ describe("lightsparkCounterpartyRequirements", () => {
     if (requirements.status !== "collect_account") {
       throw new Error("Expected collect_account requirements");
     }
-    expect(requirements.fields.map((field) => field.key)).toEqual([
-      "paymentRails",
-      "accountNumber",
-      "bankAccountType",
-      "bankName",
-      "fiToFiInformation",
-      "intermediaryBankName",
-      "intermediaryRoutingNumber",
-      "routingNumber",
-      "country",
-      "iban",
-      "swiftCode",
+    expect(requirements.payout.countryRails.US).toEqual([
+      { value: "ACH", label: "ACH" },
+      { value: "FEDNOW", label: "FedNow" },
+      { value: "RTP", label: "RTP" },
+      { value: "WIRE", label: "Wire" },
+      { value: "SWIFT", label: "SWIFT" },
     ]);
-    const railField = requirements.fields[0];
-    if (railField?.kind !== "select") {
-      throw new Error("Expected paymentRails select field");
-    }
-    expect(railField.options.map((option) => option.value)).toEqual([
-      "ACH",
-      "FEDNOW",
-      "RTP",
-      "WIRE",
-      "SWIFT",
-    ]);
+    expect(requirements.payout.railFields.ACH).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: "routingNumber", required: true })])
+    );
   });
 
   it("offers SWIFT alongside the local rails for every currency", () => {
@@ -180,49 +166,38 @@ describe("lightsparkCounterpartyRequirements", () => {
       direction: "offramp",
       providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "GBP",
+      cryptoRail: "usdc.solana",
       providerCustomerReference: "Customer:cus_123",
     });
 
     if (requirements.status !== "collect_account") {
       throw new Error("Expected collect_account requirements");
     }
-    expect(requirements.fields.map((field) => field.key)).toEqual([
-      "paymentRails",
-      "accountNumber",
-      "sortCode",
-      "bankName",
-      "country",
-      "iban",
-      "swiftCode",
+    expect(requirements.payout.countryRails.GB).toEqual([
+      { value: "FASTER_PAYMENTS", label: "Faster Payments" },
+      { value: "SWIFT", label: "SWIFT" },
     ]);
-    const railField = requirements.fields[0];
-    if (railField?.kind !== "select") {
-      throw new Error("Expected paymentRails select field");
-    }
-    expect(railField.options.map((option) => option.value)).toEqual(["FASTER_PAYMENTS", "SWIFT"]);
   });
 
-  it("returns ready once a payout account is stored for the currency", () => {
+  it("reports existing payout accounts in the payout tree", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
       providerData: {
         lightspark: {
-          customerId: "Customer:cus_123",
           purposeOfPayment: "GOODS_OR_SERVICES",
-          payoutAccounts: {
-            "USD:ab12cd34ef56ab12": {
-              accountId: "ExternalAccount:acc_payout_123",
-              status: "ACTIVE",
-              createdAt: "2026-06-11T00:00:00.000Z",
-            },
-          },
         },
       },
       fiatCurrency: "USD",
+      cryptoRail: "usdc.solana",
+      payoutAccounts: [{ destinationCountry: "US", status: "ACTIVE" }],
       providerCustomerReference: "Customer:cus_123",
     });
 
-    expect(requirements).toEqual({ provider: "lightspark", direction: "offramp", status: "ready" });
+    expect(requirements.status).toBe("collect_account");
+    if (requirements.status !== "collect_account") {
+      throw new Error("Expected collect_account requirements");
+    }
+    expect(requirements.payout.accounts).toEqual([{ destinationCountry: "US", status: "ACTIVE" }]);
   });
 
   it("returns unsupported for currencies without a Grid payout account type", () => {
@@ -230,6 +205,7 @@ describe("lightsparkCounterpartyRequirements", () => {
       direction: "offramp",
       providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "TRY",
+      cryptoRail: "usdc.solana",
       providerCustomerReference: "Customer:cus_123",
     });
 
@@ -263,30 +239,19 @@ describe("lightsparkCounterpartyRequirements", () => {
     expect(requirements).toEqual({ provider: "lightspark", direction: "onramp", status: "ready" });
   });
 
-  it("collects only payout fields once the business has a provider customer", () => {
+  it("builds the payout tree for a business counterparty", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "offramp",
       providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "USD",
+      cryptoRail: "usdc.solana",
       providerCustomerReference: "Customer:cus_123",
     });
 
     if (requirements.status !== "collect_account") {
       throw new Error("Expected collect_account requirements");
     }
-    expect(requirements.fields.map((field) => field.key)).toEqual([
-      "paymentRails",
-      "accountNumber",
-      "bankAccountType",
-      "bankName",
-      "fiToFiInformation",
-      "intermediaryBankName",
-      "intermediaryRoutingNumber",
-      "routingNumber",
-      "country",
-      "iban",
-      "swiftCode",
-    ]);
+    expect(requirements.payout.railFields).toHaveProperty("ACH");
   });
 });
 
@@ -322,39 +287,10 @@ describe("buildLightsparkBusinessInfo", () => {
   });
 });
 
-describe("lightsparkPayoutCollectedData", () => {
-  it("drops business onboarding fields from the payout subset", () => {
-    expect(
-      lightsparkPayoutCollectedData("USD", {
-        businessLegalName: "Acme Corporation, Inc.",
-        businessTaxId: "47-1234567",
-        businessIncorporatedOn: "2018-03-14",
-        purposeOfPayment: "GOODS_OR_SERVICES",
-        paymentRails: "ACH",
-        routingNumber: "021000021",
-        accountNumber: "12345678901",
-      })
-    ).toEqual({
-      paymentRails: "ACH",
-      routingNumber: "021000021",
-      accountNumber: "12345678901",
-    });
-  });
-
-  it("returns undefined when no payout fields were collected", () => {
-    expect(
-      lightsparkPayoutCollectedData("USD", {
-        businessLegalName: "Acme Corporation, Inc.",
-        businessTaxId: "47-1234567",
-        businessIncorporatedOn: "2018-03-14",
-      })
-    ).toBeUndefined();
-  });
-});
-
 describe("buildLightsparkAccountInfo", () => {
   it("builds USD accountInfo with the selected rail and beneficiary", () => {
-    const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "USD", {
+    const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
+      destinationCountry: "US",
       paymentRails: "ACH",
       routingNumber: "021000021",
       accountNumber: "12345678901",
@@ -373,7 +309,8 @@ describe("buildLightsparkAccountInfo", () => {
   });
 
   it("builds XOF mobile money accountInfo with the region select", () => {
-    const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "XOF", {
+    const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "XOF", {
+      destinationCountry: "SN",
       paymentRails: "MOBILE_MONEY",
       phoneNumber: "+221770000000",
       provider: "Orange Money",
@@ -400,7 +337,8 @@ describe("buildLightsparkAccountInfo", () => {
       entity_type: "business",
       display_name: "Acme Corp",
     };
-    const accountInfo = buildLightsparkAccountInfo(businessRow, "GBP", {
+    const accountInfo = buildLightsparkAccountInfo(businessRow, "usdc.solana", "GBP", {
+      destinationCountry: "GB",
       paymentRails: "FASTER_PAYMENTS",
       sortCode: "123456",
       accountNumber: "12345678",
@@ -413,16 +351,39 @@ describe("buildLightsparkAccountInfo", () => {
   });
 
   it("throws when collectedData is missing", () => {
-    expect(() => buildLightsparkAccountInfo(counterpartyRow(), "USD", undefined)).toThrowError(
-      SdpPaymentsError
-    );
+    expect(() =>
+      buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", undefined)
+    ).toThrowError(SdpPaymentsError);
   });
 
   it("throws when collected fields fail validation", () => {
     expect(() =>
-      buildLightsparkAccountInfo(counterpartyRow(), "USD", {
+      buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
+        destinationCountry: "US",
         paymentRails: "ACH",
         routingNumber: "not-a-routing-number",
+        accountNumber: "12345678901",
+      })
+    ).toThrowError(SdpPaymentsError);
+  });
+
+  it("rejects a country with no resolved payout rails", () => {
+    expect(() =>
+      buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
+        destinationCountry: "ZZ",
+        paymentRails: "ACH",
+        routingNumber: "021000021",
+        accountNumber: "12345678901",
+      })
+    ).toThrowError(SdpPaymentsError);
+  });
+
+  it("rejects a rail that is not available for the destination", () => {
+    expect(() =>
+      buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
+        destinationCountry: "US",
+        paymentRails: "SEPA",
+        routingNumber: "021000021",
         accountNumber: "12345678901",
       })
     ).toThrowError(SdpPaymentsError);

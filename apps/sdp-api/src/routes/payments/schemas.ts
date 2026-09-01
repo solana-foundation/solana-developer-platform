@@ -1,6 +1,7 @@
 import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
+  COUNTRY_CODES,
   type CoinbaseRampEvent,
   isWellKnownTokenSymbol,
   type MoneygramRampEvent,
@@ -704,6 +705,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     z.object({
       provider: z.literal("lightspark"),
       direction: z.literal("offramp"),
+      cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
     }),
@@ -727,15 +729,27 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
   z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
 ]);
 
-export const createOfframpQuoteSchema = z.object({
-  provider: rampProviderSchema,
+const offrampQuoteBaseShape = {
   counterpartyId: z.string().min(1),
   sourceWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
-  fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   rampsMemo: rampsMemoSchema.optional(),
-});
+};
+
+export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
+  z.object({
+    provider: z.literal("lightspark"),
+    ...offrampQuoteBaseShape,
+    fiatCurrency: rampFiatCurrencySchema,
+    destinationCountry: z.enum(COUNTRY_CODES),
+  }),
+  z.object({
+    provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "coinbase", "stripe"]),
+    ...offrampQuoteBaseShape,
+    fiatCurrency: rampFiatCurrencySchema.optional(),
+  }),
+]);
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
   z.object({

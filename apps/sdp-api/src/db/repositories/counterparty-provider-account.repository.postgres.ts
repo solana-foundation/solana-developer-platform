@@ -1,7 +1,14 @@
 import type { AppDb } from "@/db";
+import { internalError } from "@/lib/errors";
 import type {
+  ArchiveExternalAccountInput,
+  CompleteExternalAccountInput,
   CounterpartyProviderAccountsRepository,
+  GetActiveExternalAccountInput,
   GetCounterpartyProviderAccountInput,
+  InsertPendingExternalAccountInput,
+  ListExternalAccountsInput,
+  UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
@@ -20,12 +27,14 @@ export function createPostgresCounterpartyProviderAccountsRepository(
            WHERE organization_id = ?
              AND project_id = ?
              AND counterparty_id = ?
-             AND provider = ?`
+             AND provider = ?
+             AND fiat_currency IS NULL
+             AND status = 'active'`
         )
         .bind(input.organizationId, input.projectId, input.counterpartyId, input.provider)
         .first<Record<string, unknown>>();
 
-      return row ? counterpartyProviderAccountRowSchema.parse(row) : null;
+      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
     },
     async upsertProviderAccount(input: UpsertCounterpartyProviderAccountInput) {
       const row = await db
@@ -33,7 +42,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           `INSERT INTO counterparty_provider_accounts (
              id, organization_id, project_id, counterparty_id, provider, provider_customer_reference
            ) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (counterparty_id, provider)
+           ON CONFLICT (counterparty_id, provider) WHERE fiat_currency IS NULL
            DO UPDATE SET
              status = 'active',
              updated_at = sdp_iso_now(),
@@ -65,10 +74,179 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .first<Record<string, unknown>>();
 
-      if (!row) {
-        throw new Error("Counterparty provider account upsert conflicted outside the tenant scope");
+      if (row === null) {
+        throw internalError("Counterparty provider-account upsert escaped its tenant scope.");
       }
       return counterpartyProviderAccountRowSchema.parse(row);
+    },
+
+    async getActiveExternalAccount(input: GetActiveExternalAccountInput) {
+      const row = await db
+        .prepare(
+          `SELECT *
+           FROM counterparty_provider_accounts
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND fiat_currency = ?
+             AND destination_country = ?
+             AND status = 'active'`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.fiatCurrency,
+          input.destinationCountry
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+    },
+
+    async listExternalAccounts(input: ListExternalAccountsInput) {
+      const result = await db
+        .prepare(
+          `SELECT *
+           FROM counterparty_provider_accounts
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND fiat_currency = ?
+             AND status = 'active'
+             AND provider_status IS NOT NULL
+           ORDER BY created_at ASC`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.fiatCurrency
+        )
+        .all<Record<string, unknown>>();
+
+      return result.results.map((row) => counterpartyProviderAccountRowSchema.parse(row));
+    },
+
+    async insertPendingExternalAccount(input: InsertPendingExternalAccountInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id,
+             organization_id,
+             project_id,
+             counterparty_id,
+             provider,
+             provider_customer_reference,
+             fiat_currency,
+             destination_country
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (counterparty_id, provider, fiat_currency, destination_country)
+             WHERE status = 'active' AND fiat_currency IS NOT NULL
+           DO UPDATE SET updated_at = counterparty_provider_accounts.updated_at
+           WHERE counterparty_provider_accounts.organization_id = EXCLUDED.organization_id
+             AND counterparty_provider_accounts.project_id = EXCLUDED.project_id
+           RETURNING *`
+        )
+        .bind(
+          generateCounterpartyProviderAccountId(),
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.providerCustomerReference,
+          input.fiatCurrency,
+          input.destinationCountry
+        )
+        .first<Record<string, unknown>>();
+
+      if (row === null) {
+        throw internalError("External provider-account reservation escaped its tenant scope.");
+      }
+      return counterpartyProviderAccountRowSchema.parse(row);
+    },
+
+    async completeExternalAccount(input: CompleteExternalAccountInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET external_account_reference = ?,
+               provider_status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND fiat_currency IS NOT NULL
+             AND status = 'active'
+           RETURNING *`
+        )
+        .bind(
+          input.externalAccountReference,
+          input.providerStatus,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+    },
+
+    async updateExternalAccountStatus(input: UpdateExternalAccountStatusInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND fiat_currency IS NOT NULL
+             AND status = 'active'
+           RETURNING *`
+        )
+        .bind(
+          input.providerStatus,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+    },
+
+    async archiveExternalAccount(input: ArchiveExternalAccountInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET status = 'archived',
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND fiat_currency IS NOT NULL
+             AND status = 'active'
+           RETURNING *`
+        )
+        .bind(input.id, input.organizationId, input.projectId, input.counterpartyId, input.provider)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
     },
   };
 }

@@ -6,10 +6,12 @@ import {
   type Counterparty,
   type CounterpartyFieldOptionsResponse,
   type CounterpartyResponse,
+  isCountryCode,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
   US_STATES,
 } from "@sdp/types";
+import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
@@ -29,6 +31,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
+  requireCryptoRail,
 } from "@/routes/payments/handlers/ramps";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
@@ -61,6 +64,51 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
+
+/**
+ * Checks whether a Lightspark payout submission still needs account data.
+ *
+ * @param c - Request context for database access.
+ * @param input - Submitted provider requirements.
+ * @param counterparty - Counterparty receiving the payout.
+ * @param organizationId - Authenticated organization scope.
+ * @param projectId - Project that owns the counterparty.
+ * @returns True when the caller should return the payout tree unchanged.
+ */
+async function lightsparkPayoutSubmissionNeedsRequirements(
+  c: AppContext,
+  input: SubmitCounterpartyRequirementsInput,
+  counterparty: CounterpartyRow,
+  organizationId: string,
+  projectId: string
+): Promise<boolean> {
+  if (input.provider !== "lightspark" || input.direction !== "offramp") {
+    throw internalError("Only Lightspark off-ramps can collect payout account requirements.");
+  }
+  const collectedData = input.collectedData;
+  if (collectedData === undefined || collectedData.destinationCountry === undefined) {
+    return true;
+  }
+  if (!isCountryCode(collectedData.destinationCountry)) {
+    throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
+  }
+  if (collectedData.paymentRails !== undefined) {
+    return false;
+  }
+  const existing = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getActiveExternalAccount({
+    organizationId,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "lightspark",
+    fiatCurrency: input.fiatCurrency,
+    destinationCountry: collectedData.destinationCountry,
+  });
+  return existing === null || existing.external_account_reference === null;
 }
 
 export const getCounterpartyFieldOptions = async (c: AppContext) => {
@@ -216,6 +264,25 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     provider: query.data.provider,
   });
 
+  let payoutAccounts: PayoutRequirementAccount[] | undefined;
+  if (query.data.provider === "lightspark" && query.data.direction === "offramp") {
+    const rows = await createPostgresCounterpartyProviderAccountsRepository(
+      getDb(c.env)
+    ).listExternalAccounts({
+      organizationId: auth.organizationId,
+      projectId,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: query.data.fiatCurrency,
+    });
+    payoutAccounts = rows.map((row) => {
+      if (row.destination_country === null || row.provider_status === null) {
+        throw internalError("Lightspark external-account row is missing corridor data.");
+      }
+      return { destinationCountry: row.destination_country, status: row.provider_status };
+    });
+  }
+
   if (query.data.direction === "onramp") {
     const scope = await resolveScope(c);
     const destinationWalletAddress = resolveWalletAddress(
@@ -246,6 +313,9 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       providerData: counterparty.provider_data,
       cryptoToken: query.data.cryptoToken,
       fiatCurrency: query.data.fiatCurrency,
+      ...(query.data.provider === "lightspark"
+        ? { cryptoRail: requireCryptoRail(query.data.cryptoToken), payoutAccounts }
+        : {}),
       ...(providerAccount === null
         ? {}
         : { providerCustomerReference: providerAccount.provider_customer_reference }),
@@ -306,6 +376,9 @@ export const submitCounterpartyRequirements = async (
       providerData: counterparty.provider_data,
       ...("cryptoToken" in input ? { cryptoToken: input.cryptoToken } : {}),
       ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
+      ...(input.provider === "lightspark" && input.direction === "offramp"
+        ? { cryptoRail: requireCryptoRail(input.cryptoToken) }
+        : {}),
       ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
       ...(providerAccount === null
         ? {}
@@ -317,16 +390,27 @@ export const submitCounterpartyRequirements = async (
     return success(c, requirements);
   }
 
-  if (
-    requirements.status === "collect" ||
-    requirements.status === "collect_counterparty" ||
-    requirements.status === "collect_account"
-  ) {
+  if (requirements.status === "collect_account") {
+    if (
+      await lightsparkPayoutSubmissionNeedsRequirements(
+        c,
+        input,
+        counterparty,
+        auth.organizationId,
+        projectId
+      )
+    ) {
+      return success(c, requirements);
+    }
+  }
+
+  if (requirements.status === "collect" || requirements.status === "collect_counterparty") {
     const collectedData = "collectedData" in input ? input.collectedData : undefined;
     const missing = requirements.fields
       .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
       .filter(
-        (field) => field.required && (!collectedData || collectedData[field.key] === undefined)
+        (field) =>
+          field.required && (collectedData === undefined || collectedData[field.key] === undefined)
       );
     if (missing.length > 0) {
       return success(c, { ...requirements, fields: missing });
