@@ -2,7 +2,7 @@ import type { RampProviderId } from "@sdp/types";
 import { CreditCardIcon, FileTextIcon, type LucideIcon, UserRoundIcon } from "lucide-react";
 import { formatTokenAmount } from "@/app/dashboard/payments/payments-overview.utils";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../wizard-summary-list";
 import { isEmptyMemoRow, type MemoRow, memoRowsToRecord } from "./memo";
 
@@ -84,6 +84,7 @@ export function providerSummaryDetail(
       icon: RAMP_PROVIDER_LOGOS[provider],
       label: t("DashboardPayments.ramps.provider"),
       value: getRampProviderLabel(provider),
+      href: RAMP_PROVIDER_WEBSITES[provider],
     },
   ];
 }

@@ -31,6 +31,16 @@ export const RAMP_PROVIDER_LOGOS = {
   stripe: "/provider-logos/stripe.svg",
 } as const satisfies Record<RampProviderId, string>;
 
+export const RAMP_PROVIDER_WEBSITES = {
+  moonpay: "https://www.moonpay.com",
+  lightspark: "https://www.lightspark.com",
+  bvnk: "https://www.bvnk.com",
+  moneygram: "https://www.moneygram.com",
+  coinbase: "https://www.coinbase.com/developer-platform",
+  mural: "https://www.muralpay.com",
+  stripe: "https://stripe.com",
+} as const satisfies Record<RampProviderId, string>;
+
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "moonpay", title: "MoonPay" },
   { id: "lightspark", title: "Lightspark" },
