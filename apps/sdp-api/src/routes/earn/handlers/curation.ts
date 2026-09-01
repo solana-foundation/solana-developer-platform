@@ -87,16 +87,19 @@ export const HIDDEN_VAULTS: Partial<
  * The V1 Kamino shelf (BD, 2026-08-25 — PRO-1727). Deliberately short so a
  * payments company is not wading through options: each pick is a recognizable
  * counterparty, weighted by payments-BD relationships and deposit size. Names,
- * tokens and AUM below were verified against `GET /kvaults/vaults` on
- * 2026-08-31; the addresses are authoritative, the figures are the shelf as
- * picked. Curator attribution is kamino.com branding — the registry publishes
+ * tokens and AUM below are the 2026-08-31 census in
+ * `docs/earn/kamino-catalogue-inventory.md`, regenerated from
+ * `GET /kvaults/vaults`. Only the ADDRESSES are authoritative here: AUM moves
+ * continuously (the 5-minute metrics refresh tracks it), so treat the figures
+ * as the order-of-magnitude reason a vault was picked, not as state to reconcile
+ * against. Curator attribution is kamino.com branding — the registry publishes
  * no curator field, which is also why these reasons live here and not in
  * `riskMetadata`.
  *
  * Near-name traps, so un-curating stays a decision rather than a guess: the
  * commodity vault has a same-named USDG twin at
- * `DM5ECR3UY28yFhnqvGu7RTducR9k9oVgYXJ7foB3PydK` ($1 AUM), and "Ethena Prime"
- * (USDG) is NOT the Ethena pick.
+ * `DM5ECR3UY28yFhnqvGu7RTducR9k9oVgYXJ7foB3PydK` (under $1 of AUM, dropped by
+ * the TVL floor), and "Ethena Prime" (USDG) is NOT the Ethena pick.
  */
 export const CURATED_VAULTS: Partial<
   Record<SolanaCluster, Partial<Record<EarnProviderId, readonly string[]>>>
@@ -107,23 +110,23 @@ export const CURATED_VAULTS: Partial<
       // vault on the shelf and the anchor of the PYUSD lane.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "4TwKA9JXEGeLEpAPLoarhSQoQwoiu12dkDCjSuVvHQUf",
-      // Sentora PYUSD — Sentora-curated, PYUSD, $112M: second PYUSD pick from
+      // Sentora PYUSD — Sentora-curated, PYUSD, $109M: second PYUSD pick from
       // the same house, so the lane does not hang off one vault.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
-      // Steakhouse High Yield USDG — Steakhouse-curated, USDG, $40M: the USDG
+      // Steakhouse High Yield USDG — Steakhouse-curated, USDG, $45M: the USDG
       // lane's pick from a house payments BD has a relationship with.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5",
-      // Steakhouse USDC — Steakhouse-curated, USDC, $18M: the conservative
+      // Steakhouse USDC — Steakhouse-curated, USDC, $19M: the conservative
       // USDC pick from the same house.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E",
-      // Steakhouse High Yield USDC — Steakhouse-curated, USDC, $3M: the
+      // Steakhouse High Yield USDC — Steakhouse-curated, USDC, $3.6M: the
       // higher-yield USDC companion to the row above.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "BEEfo7xwgK2ZP13Pxo7qqTPzAteKJmXjVWtMWcXSvbn2",
-      // Kamino Institutional Commodity Yield — Kamino-curated, USDC, $30M:
+      // Kamino Institutional Commodity Yield — Kamino-curated, USDC, $32M:
       // first-party Kamino pick. The USDC vault, NOT its $1-AUM USDG twin of
       // the same name (see the near-name traps above).
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret

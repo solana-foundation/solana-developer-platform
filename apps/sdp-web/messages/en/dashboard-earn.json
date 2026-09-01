@@ -219,10 +219,6 @@
       "variable": "Variable",
       "fixed": "Fixed"
     },
-    "liquidity": {
-      "instant": "Instant",
-      "delayed": "T+{days}"
-    },
     "withdraw": {
       "title": "Withdraw",
       "description": "Funds leave the shared portfolio and settle to a Solana address you control.",
@@ -480,7 +476,6 @@
       "quoteLoading": "Fetching the live payout quote…",
       "quoteUnavailable": "The live payout quote is unavailable right now, so this withdrawal cannot be sized safely. Try again in a moment.",
       "quoteBlocked": "The vault is not paying out this withdrawal right now: {message}",
-
       "quoteZeroAssets": "These shares are too few to redeem any of the deposit token at the current rate, so there is no slippage floor that could protect the exit.",
       "slippageHelp": "The withdrawal refuses to execute if the vault would pay less than this tolerance allows. 10 basis points is 0.1%.",
       "slippageExceeded": "The vault would pay less than your slippage tolerance allows for these shares. Increase the tolerance below and try again.",

@@ -601,6 +601,46 @@ describe("EarnRepository (postgres)", () => {
       expect(rows.map((row) => row.id)).toEqual([big.id, mid.id, small.id, unsized.id]);
     });
 
+    /**
+     * `risk_metadata` is an open bag and the schema only CHECKs that the whole
+     * value is an object, so "tvlUsd is a JSON number or absent" is a provider
+     * convention rather than a constraint. A bare `::numeric` cast would turn
+     * one bad row into a 500 on every read for that environment; the ordering's
+     * `jsonb_typeof` guard demotes it to unsized instead.
+     */
+    it("treats a non-numeric tvlUsd as unsized rather than failing the whole read", async () => {
+      const sized = await seedStrategy({
+        providerReference: "vault-sized",
+        riskMetadata: { tvlUsd: 5_000_000 },
+      });
+      const malformed = await seedStrategy({
+        providerReference: "vault-malformed",
+        riskMetadata: { tvlUsd: "12M" },
+      });
+      const bool = await seedStrategy({
+        providerReference: "vault-bool",
+        riskMetadata: { tvlUsd: true },
+      });
+      await freezeCreatedAt("earn_strategies", [sized.id, malformed.id, bool.id]);
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(3);
+      // The sized row still leads; the two unparseable ones sort last among
+      // themselves by the id tiebreaker.
+      expect(rows[0]?.id).toBe(sized.id);
+      expect(
+        rows
+          .slice(1)
+          .map((row) => row.id)
+          .sort()
+      ).toEqual([bool.id, malformed.id].sort());
+    });
+
     it("pages the ordered set exactly once across equal-TVL and no-TVL runs", async () => {
       // Three rows tied at one TVL, one above, and two with none — every shape
       // the tiebreaker has to keep total. created_at is frozen shared, so only
