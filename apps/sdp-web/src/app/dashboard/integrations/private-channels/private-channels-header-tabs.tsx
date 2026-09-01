@@ -10,7 +10,7 @@ import {
   PRIVATE_CHANNELS_SETUP_PATH,
 } from "./private-channels-routes";
 
-// Adding a new sub-page (transfers, channels, members, …):
+// Adding a new sub-page (transfers, channels, identities, …):
 //   1. Create app/dashboard/integrations/private-channels/<slug>/page.tsx
 //   2. Append { id, labelKey, href, requiresActive: true } to the list.
 //
@@ -75,7 +75,7 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const pathname = usePathname();
   // Router state, not `useDashboardTab`: its window snapshot is only re-read
   // after the commit, so a cross-route push landing here with `?tab=` preset
-  // (e.g. Members → API Playground) would paint one frame with Overview
+  // (e.g. Identities → API Playground) would paint one frame with Overview
   // highlighted. Router-provided search params are correct at render time and
   // stay in sync with the shallow history writes below, which Next patches.
   const urlTab = useSearchParams().get("tab");

@@ -6,7 +6,7 @@ import { MoneygramRampClient } from "./providers/moneygram/client";
 import { MoonpayRampClient } from "./providers/moonpay/client";
 import { MuralRampClient } from "./providers/mural/client";
 import { StripeRampClient } from "./providers/stripe/client";
-import type { RampDiscoveryContext, RampProvider } from "./types";
+import type { RampProvider } from "./types";
 
 export { BvnkRampClient } from "./providers/bvnk/client";
 export { CoinbaseRampClient } from "./providers/coinbase/client";
@@ -38,21 +38,3 @@ export const RAMP_PROVIDER_CLIENTS = {
   mural: new MuralRampClient(),
   stripe: new StripeRampClient(),
 } as const satisfies Record<RampProviderId, RampProvider>;
-
-export class RampClient {
-  /**
-   * @internal Rail discovery is only intended for the support generation script.
-   */
-  async _discoverProviderRails(provider: RampProviderId, context: RampDiscoveryContext) {
-    await RAMP_PROVIDER_CLIENTS[provider]._discoverRails(context);
-  }
-
-  /**
-   * @internal Rail discovery is only intended for the support generation script.
-   */
-  async _discoverRails(providers: readonly RampProviderId[], context: RampDiscoveryContext) {
-    for (const provider of providers) {
-      await this._discoverProviderRails(provider, context);
-    }
-  }
-}

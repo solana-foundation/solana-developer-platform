@@ -13,7 +13,7 @@ import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
-import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
+import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
@@ -127,7 +127,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     currentStepId === "PROVIDER" &&
     onboarding &&
     !quote &&
-    hasOnboardingLifecycle(onboarding.provider)
+    hasOnboardingLifecycle(onboarding.provider) &&
+    isOnboardingPanelStatus(onboarding.status)
   ) {
     return (
       <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />

@@ -1,14 +1,7 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
-import {
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  LibraryIcon,
-  LockIcon,
-  PanelLeftIcon,
-  Settings2Icon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -76,7 +69,6 @@ import {
   type DashboardSubnavKey,
   dashboardSubnavId,
   dashboardSubnavStorageKey,
-  docsHref,
   getNavSections,
   type NavItem,
   type NavSection,
@@ -85,16 +77,15 @@ import {
 } from "@/components/dashboard-nav";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
-import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
+import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
-import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
+import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
 import {
-  DASHBOARD_SIDE_NAV_HREFS,
   type DashboardLoadingRoute,
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
@@ -393,7 +384,7 @@ function SidebarGroup({
 }
 
 function DashboardSidebarContent({
-  bottomNavItems,
+  canManageOrgSettings,
   navSections,
   pathname,
   onNavigate,
@@ -405,7 +396,7 @@ function DashboardSidebarContent({
   onSubnavToggle,
   onSubnavOpen,
 }: {
-  bottomNavItems: NavItem[];
+  canManageOrgSettings: boolean;
   navSections: NavSection[];
   pathname: string;
   onNavigate?: () => void;
@@ -461,30 +452,14 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="shrink-0 space-y-0.5 px-3 pb-1">
-        <SentryFeedbackWidget collapsed={isCollapsed} />
-        {bottomNavItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href}
-              target={item.external ? "_blank" : undefined}
-              rel={item.external ? "noopener noreferrer" : undefined}
-              onClick={onNavigate}
-              title={isCollapsed ? item.label : undefined}
-              aria-label={isCollapsed ? item.label : undefined}
-              className={cn(
-                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
-                isCollapsed && "justify-center"
-              )}
-            >
-              <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-              {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
-            </Link>
-          );
-        })}
-        {variant === "desktop" ? <NetworkDebugToggle collapsed={isCollapsed} /> : null}
+      <div className="shrink-0 px-3 pb-3">
+        <SidebarUserMenu
+          collapsed={isCollapsed}
+          canManageOrgSettings={canManageOrgSettings}
+          // The mobile slide-over is a 288px column, so the popover only has
+          // room above the trigger there.
+          menuSide={variant === "desktop" ? "right" : "top"}
+        />
       </div>
     </>
   );
@@ -547,23 +522,6 @@ export function DashboardShell({
     pendingApprovalCount,
     privateChannelsEnabled,
   });
-  const bottomNavItems: NavItem[] = [
-    {
-      label: t("Shared.dashboardShell.apiDocs"),
-      href: docsHref,
-      icon: LibraryIcon,
-      external: true,
-    },
-    ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [
-          {
-            label: t("Shared.dashboardShell.settings"),
-            href: DASHBOARD_SIDE_NAV_HREFS.settings,
-            icon: Settings2Icon,
-          },
-        ]
-      : []),
-  ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction
@@ -792,7 +750,7 @@ export function DashboardShell({
           className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
         >
           <DashboardSidebarContent
-            bottomNavItems={bottomNavItems}
+            canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
             navSections={navSections}
             pathname={pathname}
             onNavigate={undefined}
@@ -855,7 +813,7 @@ export function DashboardShell({
             />
             <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
-                bottomNavItems={bottomNavItems}
+                canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                 navSections={navSections}
                 pathname={pathname}
                 onNavigate={() => setMobileSidebarOpen(false)}

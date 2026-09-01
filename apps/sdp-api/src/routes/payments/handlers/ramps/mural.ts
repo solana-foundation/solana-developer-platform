@@ -12,7 +12,7 @@ import {
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { MuralPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, counterpartyNotProvisioned } from "@/lib/errors";

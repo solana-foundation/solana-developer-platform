@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
@@ -34,6 +34,10 @@ describe("Counterparties Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
+    await db
+      .prepare("DELETE FROM counterparty_provider_accounts")
+      .run()
+      .catch(() => {});
     await db
       .prepare("DELETE FROM counterparties")
       .run()
@@ -335,7 +339,7 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
     });
 
-    it("fails loudly at the Lightspark identity collection seam", async () => {
+    it("returns the missing identity fields when Lightspark has no provider customer", async () => {
       const created = await createCounterparty({ externalId: "requirements_lightspark" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
@@ -350,12 +354,83 @@ describe("Counterparties Routes", () => {
         env
       );
 
-      expect(res.status).toBe(400);
-      expect((await res.json()).error).toEqual({
-        code: "BAD_REQUEST",
-        message:
-          "Lightspark customer creation requires identity fields that are no longer stored; JIT collection is not wired yet",
-      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.status).toBe("collect_counterparty");
+      expect(body.data.fields.map((field: { key: string }) => field.key)).toEqual([
+        "customer.fullName",
+        "customer.birthDate",
+        "customer.nationality",
+        "customer.region",
+        "customer.email",
+        "customer.address.line1",
+        "customer.address.city",
+        "customer.address.postalCode",
+        "customer.address.countryCode",
+      ]);
+    });
+
+    it("creates the Grid customer from collected PII and links the provider account", async () => {
+      const created = await createCounterparty({ externalId: "requirements_lightspark_pii" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "Customer:cus_new_123" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const advanceBody = {
+          provider: "lightspark",
+          direction: "onramp",
+          collectedData: {
+            "customer.fullName": "Ada Lovelace",
+            "customer.birthDate": "1990-01-01",
+            "customer.nationality": "US",
+            "customer.region": "US",
+            "customer.email": "ada@example.com",
+            "customer.address.line1": "1 Main St",
+            "customer.address.city": "San Francisco",
+            "customer.address.postalCode": "94105",
+            "customer.address.countryCode": "US",
+          },
+        };
+        const res = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify(advanceBody),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data).toEqual({
+          provider: "lightspark",
+          direction: "onramp",
+          status: "ready",
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+        const again = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ provider: "lightspark", direction: "onramp" }),
+          },
+          env
+        );
+
+        expect(again.status).toBe(200);
+        expect((await again.json()).data.status).toBe("ready");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        fetchSpy.mockRestore();
+      }
     });
 
     it("fails loudly at the BVNK identity collection seam", async () => {

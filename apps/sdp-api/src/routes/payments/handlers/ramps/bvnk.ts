@@ -37,7 +37,7 @@ import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type {

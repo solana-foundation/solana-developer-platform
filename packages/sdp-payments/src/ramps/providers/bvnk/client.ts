@@ -14,7 +14,7 @@ import type {
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,
@@ -45,11 +45,11 @@ import {
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -699,49 +699,47 @@ export class BvnkRampClient implements RampProvider {
     return validateBvnkCounterparty(counterparty, options);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const railsBaseOverride = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim();
-    const base = railsBaseOverride || "https://api.sandbox.bvnk.com/";
-    const proxyAuthSecret = railsBaseOverride ? env.PROXY_SHARED_SECRET?.trim() : undefined;
-    // biome-ignore lint/security/noSecrets: BVNK pagination query string, not a secret.
-    const pageQuery = "?offset=0&max=1000";
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    if (!context.offline) {
+      const { env, fetchJson, writeDump } = context;
+      const railsBaseOverride = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim();
+      const base = railsBaseOverride || "https://api.sandbox.bvnk.com/";
+      const proxyAuthSecret = railsBaseOverride ? env.PROXY_SHARED_SECRET?.trim() : undefined;
+      // biome-ignore lint/security/noSecrets: BVNK pagination query string, not a secret.
+      const pageQuery = "?offset=0&max=1000";
 
-    for (const request of [
-      {
-        path: `/api/currency/crypto${pageQuery}`,
-        dumpName: RAMP_RAIL_DUMPS.bvnk.cryptoAnon.name,
-      },
-      {
-        path: `/api/currency/fiat${pageQuery}`,
-        dumpName: RAMP_RAIL_DUMPS.bvnk.fiatAnon.name,
-      },
-      {
-        path: `/api/currency/deposit${pageQuery}`,
-        dumpName: RAMP_RAIL_DUMPS.bvnk.depositAnon.name,
-      },
-    ]) {
-      const url = new URL(request.path.replace(/^\//, ""), base);
-      await writeDump(
-        request.dumpName,
-        await fetchJson(this.id, `anon ${request.path}`, url.toString(), {
-          headers: {
-            Accept: "application/json",
-            ...(proxyAuthSecret ? { "X-Proxy-Auth": proxyAuthSecret } : {}),
-          },
-        })
-      );
+      for (const request of [
+        {
+          path: `/api/currency/crypto${pageQuery}`,
+          dumpName: RAMP_RAIL_DUMPS.bvnk.cryptoAnon.name,
+        },
+        {
+          path: `/api/currency/fiat${pageQuery}`,
+          dumpName: RAMP_RAIL_DUMPS.bvnk.fiatAnon.name,
+        },
+        {
+          path: `/api/currency/deposit${pageQuery}`,
+          dumpName: RAMP_RAIL_DUMPS.bvnk.depositAnon.name,
+        },
+      ]) {
+        const url = new URL(request.path.replace(/^\//, ""), base);
+        await writeDump(
+          request.dumpName,
+          await fetchJson(this.id, `anon ${request.path}`, url.toString(), {
+            headers: {
+              Accept: "application/json",
+              ...(proxyAuthSecret ? { "X-Proxy-Auth": proxyAuthSecret } : {}),
+            },
+          })
+        );
+      }
     }
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
     const [deposit, fiat, crypto] = await Promise.all([
-      readDump(RAMP_RAIL_DUMPS.bvnk.depositAnon.file),
-      readDump(RAMP_RAIL_DUMPS.bvnk.fiatAnon.file),
-      readDump(RAMP_RAIL_DUMPS.bvnk.cryptoAnon.file),
+      context.readDump(RAMP_RAIL_DUMPS.bvnk.depositAnon.file),
+      context.readDump(RAMP_RAIL_DUMPS.bvnk.fiatAnon.file),
+      context.readDump(RAMP_RAIL_DUMPS.bvnk.cryptoAnon.file),
     ]);
     return distillBvnkRailSupport(deposit, fiat, crypto);
   }

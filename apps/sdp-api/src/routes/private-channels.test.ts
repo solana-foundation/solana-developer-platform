@@ -10,6 +10,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
+const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
 
 const TEST_ORG = {
   id: "org_pc_test",
@@ -123,6 +124,13 @@ describe("Private Channels routes", () => {
     originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";
     probeConnectionMock.mockReset();
+    spcRegisterMock.mockReset();
+    spcRegisterMock.mockResolvedValue({
+      id: "spc_default_principal",
+      username: "default-test",
+      role: "user",
+      createdAt: "2026-08-31T12:00:00.000Z",
+    });
     await seedTestDatabase(env);
     await seedAuth();
   });
