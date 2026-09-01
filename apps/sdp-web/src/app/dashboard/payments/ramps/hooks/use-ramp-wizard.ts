@@ -159,7 +159,7 @@ export function useRampWizard<TId extends string>(
   useEffect(() => {
     if (selectedProviderField === null) return;
     const pair = findRampPair(config.pairs, selectedRampPair);
-    if (!pair || !pair.providers.includes(selectedProviderField)) {
+    if (!pair?.providers.includes(selectedProviderField)) {
       setField("provider", null);
     }
   }, [config.pairs, selectedRampPair, selectedProviderField, setField]);
