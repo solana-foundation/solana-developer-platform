@@ -5,6 +5,7 @@ import {
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
   EARN_STRATEGY_SOURCE_KINDS,
+  EARN_SWAP_MAX_SLIPPAGE_BPS,
   SOLANA_CLUSTERS,
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
@@ -222,6 +223,32 @@ export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend(
 export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);
 
 /**
+ * The swap-funding fields both deposit surfaces share (custody and
+ * external-wallet): pay in one supported stablecoin, let a Jupiter swap close
+ * the gap to the vault's own token inside the same transaction. Which mints
+ * are supported is a per-cluster fact the HANDLER checks against
+ * `earnSwapSourceTokens` — the schema only pins the address shape, the same
+ * split the owner address follows.
+ */
+export const earnDepositSwapShape = {
+  /**
+   * Fund the deposit in this stablecoin instead of the vault's own token.
+   * Equal to the strategy's deposit mint, it is a no-op (no swap is built),
+   * so pickers may always send their selection.
+   */
+  sourceTokenMint: z
+    .preprocess(
+      (value) => (typeof value === "string" ? value.trim() : value),
+      z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
+        message: "sourceTokenMint must be a base58 Solana address",
+      })
+    )
+    .optional(),
+  /** Swap slippage tolerance in basis points; the service default applies when omitted. */
+  swapSlippageBps: z.number().int().min(1).max(EARN_SWAP_MAX_SLIPPAGE_BPS).optional(),
+} as const;
+
+/**
  * Open a position in a NON-CUSTODIAL vault, or add to one, from an SDP custody
  * wallet.
  *
@@ -235,7 +262,10 @@ export const earnVaultDepositSchema = z.object({
   strategyId: z.string().min(1),
   /** SDP custody-wallet row that signs and holds the shares (`id`, not provider `walletId`). */
   custodyWalletId: z.string().min(1),
-  /** Deposit amount in the vault token's units, as a decimal string. */
+  /**
+   * Deposit amount as a decimal string — the vault token's units, or the
+   * SOURCE token's units when `sourceTokenMint` requests a swap-funded build.
+   */
   amount: z
     .string()
     .max(128)
@@ -248,6 +278,7 @@ export const earnVaultDepositSchema = z.object({
     .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
     .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
     .optional(),
+  ...earnDepositSwapShape,
   /**
    * Retired on this route: the chain has no request dedupe to anchor a body
    * key to, so the `Idempotency-Key` header is the only accepted source.
@@ -408,7 +439,10 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
   strategyId: z.string().min(1),
   /** The external wallet that will sign, own the shares, and pay the fee. */
   ownerAddress: solanaOwnerAddressSchema,
-  /** Deposit amount in the vault token's units, as a decimal string. */
+  /**
+   * Deposit amount as a decimal string — the vault token's units, or the
+   * SOURCE token's units when `sourceTokenMint` requests a swap-funded build.
+   */
   amount: z
     .string()
     .max(128)
@@ -421,6 +455,7 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
     .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
     .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
     .optional(),
+  ...earnDepositSwapShape,
 });
 
 /**
