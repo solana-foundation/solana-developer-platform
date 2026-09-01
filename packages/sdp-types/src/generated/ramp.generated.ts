@@ -3,7 +3,7 @@
 // Regenerate support: pnpm --filter @sdp/api ramp-support:generate
 // Raw dumps live in apps/sdp-api/.ramp-support/raw/ (gitignored).
 // Currency-support snapshots live in apps/sdp-api/.ramp-support/*.currency.json (committed).
-// Country rails live in apps/sdp-api/.ramp-support/*.rails.json (hand-compiled).
+// Offramp country coverage lives in apps/sdp-api/.ramp-support/*.countries.json (hand-compiled).
 
 import type {
   OfframpPairSupport,
@@ -567,71 +567,6 @@ export const OFFRAMP_DESTINATION_CURRENCIES = [
   "ZMW",
 ] as const satisfies readonly RampFiatCurrency[];
 export type OfframpDestinationCurrency = (typeof OFFRAMP_DESTINATION_CURRENCIES)[number];
-
-export const OFFRAMP_COUNTRY_RAILS = {
-  lightspark: {
-    AE: ["BANK_TRANSFER"],
-    AT: ["SEPA", "SEPA_INSTANT"],
-    BE: ["SEPA", "SEPA_INSTANT"],
-    BG: ["SEPA", "SEPA_INSTANT"],
-    BJ: ["MOBILE_MONEY"],
-    BR: ["PIX"],
-    BW: ["MOBILE_MONEY"],
-    CA: ["BANK_TRANSFER"],
-    CG: ["MOBILE_MONEY"],
-    CH: ["SEPA", "SEPA_INSTANT"],
-    CI: ["MOBILE_MONEY"],
-    CM: ["MOBILE_MONEY"],
-    CY: ["SEPA", "SEPA_INSTANT"],
-    CZ: ["SEPA", "SEPA_INSTANT"],
-    DE: ["SEPA", "SEPA_INSTANT"],
-    DK: ["SEPA", "SEPA_INSTANT"],
-    EE: ["SEPA", "SEPA_INSTANT"],
-    ES: ["SEPA", "SEPA_INSTANT"],
-    FI: ["SEPA", "SEPA_INSTANT"],
-    FR: ["SEPA", "SEPA_INSTANT"],
-    GB: ["FASTER_PAYMENTS"],
-    GR: ["SEPA", "SEPA_INSTANT"],
-    HK: ["BANK_TRANSFER"],
-    HR: ["SEPA", "SEPA_INSTANT"],
-    HU: ["SEPA", "SEPA_INSTANT"],
-    ID: ["BANK_TRANSFER"],
-    IE: ["SEPA", "SEPA_INSTANT"],
-    IN: ["UPI"],
-    IS: ["SEPA", "SEPA_INSTANT"],
-    IT: ["SEPA", "SEPA_INSTANT"],
-    KE: ["MOBILE_MONEY"],
-    LI: ["SEPA", "SEPA_INSTANT"],
-    LT: ["SEPA", "SEPA_INSTANT"],
-    LU: ["SEPA", "SEPA_INSTANT"],
-    LV: ["SEPA", "SEPA_INSTANT"],
-    MT: ["SEPA", "SEPA_INSTANT"],
-    MW: ["MOBILE_MONEY"],
-    MX: ["SPEI"],
-    MY: ["BANK_TRANSFER"],
-    NG: ["BANK_TRANSFER"],
-    NL: ["SEPA", "SEPA_INSTANT"],
-    NO: ["SEPA", "SEPA_INSTANT"],
-    PH: ["BANK_TRANSFER"],
-    PL: ["SEPA", "SEPA_INSTANT"],
-    PT: ["SEPA", "SEPA_INSTANT"],
-    RO: ["SEPA", "SEPA_INSTANT"],
-    RW: ["MOBILE_MONEY"],
-    SE: ["SEPA", "SEPA_INSTANT"],
-    SG: ["PAYNOW", "FAST", "BANK_TRANSFER"],
-    SI: ["SEPA", "SEPA_INSTANT"],
-    SK: ["SEPA", "SEPA_INSTANT"],
-    SN: ["MOBILE_MONEY"],
-    TH: ["BANK_TRANSFER"],
-    TZ: ["MOBILE_MONEY"],
-    UG: ["MOBILE_MONEY"],
-    US: ["ACH", "WIRE", "RTP", "FEDNOW"],
-    VN: ["BANK_TRANSFER"],
-    ZA: ["BANK_TRANSFER"],
-  },
-} as const satisfies Partial<
-  Record<RampProviderId, Partial<Record<RampCountryCode, readonly string[]>>>
->;
 
 export const OFFRAMP_PAYOUT_ACCOUNTS = {
   lightspark: {

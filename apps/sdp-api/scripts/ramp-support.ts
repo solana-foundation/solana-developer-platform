@@ -35,27 +35,24 @@ const rawDumpSchema = z.object({
   body: z.unknown(),
 });
 
-const countryRailEntrySchema = z
-  .object({
-    currencies: z
+const providerOfframpCountriesSchema = z
+  .partialRecord(
+    z.enum(COUNTRY_CODES),
+    z
       .array(
         z
           .string()
           .regex(/^[A-Z]{3}$/)
           .refine(isActiveIso4217CurrencyCode, "Currency must be an active ISO 4217 code.")
       )
-      .nonempty(),
-    rails: z.array(z.string().regex(/^[A-Z_]+$/)).nonempty(),
-  })
-  .strict();
-const providerCountryRailsSchema = z
-  .partialRecord(z.enum(COUNTRY_CODES), countryRailEntrySchema)
-  .refine((countryRails) => Object.keys(countryRails).length > 0, {
-    message: "Provider country rails must contain at least one country.",
+      .nonempty()
+  )
+  .refine((countries) => Object.keys(countries).length > 0, {
+    message: "Provider offramp countries must contain at least one country.",
   });
 const rampProviderIdSchema = z.enum(RAMP_PROVIDERS);
 
-type ProviderCountryRails = z.infer<typeof providerCountryRailsSchema>;
+type ProviderOfframpCountries = z.infer<typeof providerOfframpCountriesSchema>;
 
 interface OnrampRow {
   source: string;
@@ -80,7 +77,7 @@ interface ProviderGenerationSupport {
 
 type CurrencySupportSnapshots = ReadonlyMap<RampProviderId, ProviderRailSupportSnapshot>;
 type ProviderGenerationSupports = ReadonlyMap<RampProviderId, ProviderGenerationSupport>;
-type CountryRailsByProvider = ReadonlyMap<RampProviderId, ProviderCountryRails>;
+type OfframpCountriesByProvider = ReadonlyMap<RampProviderId, ProviderOfframpCountries>;
 type PayoutAccountsByProvider = ReadonlyMap<
   RampProviderId,
   Readonly<Record<string, RampPayoutAccountSpec>>
@@ -280,39 +277,41 @@ async function readCurrencySupportSnapshots(): Promise<CurrencySupportSnapshots>
  *
  * @returns Validated country, currency, and rail mappings keyed by provider.
  */
-async function readCountryRailsByProvider(): Promise<CountryRailsByProvider> {
+async function readOfframpCountriesByProvider(): Promise<OfframpCountriesByProvider> {
   const entries = await readdir(RAMP_SUPPORT_ROOT_DIR, { withFileTypes: true });
-  const countryRails = new Map<RampProviderId, ProviderCountryRails>();
+  const byProvider = new Map<RampProviderId, ProviderOfframpCountries>();
   const sortedEntries = entries.sort((left, right) => left.name.localeCompare(right.name));
   for (const entry of sortedEntries) {
-    if (!entry.isFile() || !entry.name.endsWith(".rails.json")) {
+    if (!entry.isFile() || !entry.name.endsWith(".countries.json")) {
       continue;
     }
-    const providerName = entry.name.slice(0, -".rails.json".length);
+    const providerName = entry.name.slice(0, -".countries.json".length);
     const provider = rampProviderIdSchema.parse(providerName);
     const text = await readFile(path.join(RAMP_SUPPORT_ROOT_DIR, entry.name), "utf8");
-    const { $comment: _sourceNote, ...parsed } = z
-      .looseObject({ $comment: z.string() })
+    const parsed = z
+      .object({ $comment: z.string(), countries: providerOfframpCountriesSchema })
       .parse(JSON.parse(text));
-    countryRails.set(provider, providerCountryRailsSchema.parse(parsed));
+    byProvider.set(provider, parsed.countries);
   }
-  return countryRails;
+  return byProvider;
 }
 
 /**
- * Derives generic offramp country support from a provider's compiled rails table.
+ * Derives generic offramp country support from a provider's hand-compiled country table.
  *
- * @param countryRails - Validated provider destination support.
+ * @param offrampCountries - Validated country-to-currencies coverage.
  * @returns Country support for the generic generated provider metadata.
  */
-function compiledOfframpCountrySupport(countryRails: ProviderCountryRails): RampCountrySupport {
+function compiledOfframpCountrySupport(
+  offrampCountries: ProviderOfframpCountries
+): RampCountrySupport {
   const countries: Record<string, readonly string[]> = {};
   for (const countryCode of [...COUNTRY_CODES].sort()) {
-    const countrySupport = countryRails[countryCode];
-    if (countrySupport === undefined) {
+    const currencies = offrampCountries[countryCode];
+    if (currencies === undefined) {
       continue;
     }
-    countries[countryCode] = [...countrySupport.currencies].sort();
+    countries[countryCode] = [...currencies].sort();
   }
   return { coverage: "by-country", countries };
 }
@@ -367,11 +366,11 @@ function mergeDirectionSupport(
 function mergeProviderSupport(
   provider: RampProviderId,
   snapshot: ProviderRailSupportSnapshot,
-  countryRails?: ProviderCountryRails
+  offrampCountries?: ProviderOfframpCountries
 ): ProviderGenerationSupport {
   const declared = RAMP_PROVIDER_CLIENTS[provider].declaredRailSupport;
   const compiledCountrySupport =
-    countryRails === undefined ? undefined : compiledOfframpCountrySupport(countryRails);
+    offrampCountries === undefined ? undefined : compiledOfframpCountrySupport(offrampCountries);
   return {
     onramp: mergeDirectionSupport(provider, "onramp", snapshot.onramp, declared.onramp),
     offramp: mergeDirectionSupport(
@@ -422,13 +421,13 @@ function requireProviderSupport(
 
 function buildProviderSupport(
   snapshots: CurrencySupportSnapshots,
-  countryRailsByProvider: CountryRailsByProvider
+  offrampCountriesByProvider: OfframpCountriesByProvider
 ): ProviderGenerationSupports {
   const support = new Map<RampProviderId, ProviderGenerationSupport>();
   for (const provider of RAMP_PROVIDERS) {
     const snapshot = requireProviderSnapshot(snapshots, provider);
-    const countryRails = countryRailsByProvider.get(provider);
-    support.set(provider, mergeProviderSupport(provider, snapshot, countryRails));
+    const offrampCountries = offrampCountriesByProvider.get(provider);
+    support.set(provider, mergeProviderSupport(provider, snapshot, offrampCountries));
   }
   return support;
 }
@@ -579,43 +578,6 @@ function renderInlineStringArray(values: readonly string[]): string {
   return `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
 }
 
-/**
- * Renders one provider's literal country-to-rails object.
- *
- * @param countryRails - Validated provider destination support.
- * @returns A TypeScript object literal with sorted country keys.
- */
-function renderProviderCountryRails(countryRails: ProviderCountryRails, level: number): string {
-  const rows: string[] = [];
-  const pad = indent(level);
-  for (const countryCode of [...COUNTRY_CODES].sort()) {
-    const countrySupport = countryRails[countryCode];
-    if (countrySupport === undefined) {
-      continue;
-    }
-    rows.push(`${pad}  ${countryCode}: ${renderInlineStringArray(countrySupport.rails)},`);
-  }
-  return `{\n${rows.join("\n")}\n${pad}}`;
-}
-
-/**
- * Renders the provider-agnostic offramp country-to-rails export.
- *
- * @param countryRailsByProvider - Validated country rails keyed by provider.
- * @returns A TypeScript object literal with stable provider and country ordering.
- */
-function renderOfframpCountryRails(countryRailsByProvider: CountryRailsByProvider): string {
-  const rows: string[] = [];
-  for (const provider of RAMP_PROVIDERS) {
-    const countryRails = countryRailsByProvider.get(provider);
-    if (countryRails === undefined) {
-      continue;
-    }
-    rows.push(`  ${provider}: ${renderProviderCountryRails(countryRails, 2)},`);
-  }
-  return `{\n${rows.join("\n")}\n}`;
-}
-
 function renderCurrencyLimits(
   currencies: Readonly<Record<string, RampCurrencyLimit>>,
   level: number
@@ -702,7 +664,7 @@ function renderGeneratedFile(input: {
   support: ProviderGenerationSupports;
   onrampRows: readonly OnrampRow[];
   offrampRows: readonly OfframpRow[];
-  countryRailsByProvider: CountryRailsByProvider;
+  offrampCountriesByProvider: OfframpCountriesByProvider;
   payoutAccountsByProvider: PayoutAccountsByProvider;
 }): string {
   const allFiats = new Set<string>();
@@ -732,7 +694,7 @@ function renderGeneratedFile(input: {
 // Regenerate support: pnpm --filter @sdp/api ramp-support:generate
 // Raw dumps live in apps/sdp-api/.ramp-support/raw/ (gitignored).
 // Currency-support snapshots live in apps/sdp-api/.ramp-support/*.currency.json (committed).
-// Country rails live in apps/sdp-api/.ramp-support/*.rails.json (hand-compiled).
+// Offramp country coverage lives in apps/sdp-api/.ramp-support/*.countries.json (hand-compiled).
 
 import type {
   OfframpPairSupport,
@@ -761,10 +723,6 @@ export type OnrampSourceCurrency = (typeof ONRAMP_SOURCE_CURRENCIES)[number];
 
 export const OFFRAMP_DESTINATION_CURRENCIES = ${renderIndentedStringArray(offrampDestinationCurrencies, 0)} as const satisfies readonly RampFiatCurrency[];
 export type OfframpDestinationCurrency = (typeof OFFRAMP_DESTINATION_CURRENCIES)[number];
-
-export const OFFRAMP_COUNTRY_RAILS = ${renderOfframpCountryRails(input.countryRailsByProvider)} as const satisfies Partial<
-  Record<RampProviderId, Partial<Record<RampCountryCode, readonly string[]>>>
->;
 
 export const OFFRAMP_PAYOUT_ACCOUNTS = ${renderPayoutAccounts(input.payoutAccountsByProvider)} as const satisfies Partial<
   Record<RampProviderId, Record<string, RampPayoutAccountSpec>>
@@ -796,7 +754,7 @@ ${renderRows(input.offrampRows)}
  */
 function buildPayoutAccounts(
   snapshots: CurrencySupportSnapshots,
-  countryRailsByProvider: CountryRailsByProvider
+  offrampCountriesByProvider: OfframpCountriesByProvider
 ): PayoutAccountsByProvider {
   const byProvider = new Map<RampProviderId, Readonly<Record<string, RampPayoutAccountSpec>>>();
   for (const provider of RAMP_PROVIDERS) {
@@ -805,15 +763,15 @@ function buildPayoutAccounts(
       continue;
     }
     byProvider.set(provider, accounts);
-    const providerCountryRails = countryRailsByProvider.get(provider);
-    if (providerCountryRails === undefined) {
+    const offrampCountries = offrampCountriesByProvider.get(provider);
+    if (offrampCountries === undefined) {
       continue;
     }
-    for (const [countryCode, entry] of Object.entries(providerCountryRails)) {
-      for (const currency of entry.currencies) {
+    for (const [countryCode, currencies] of Object.entries(offrampCountries)) {
+      for (const currency of currencies) {
         if (accounts[currency] === undefined) {
           throw new Error(
-            `${provider} country rails list ${currency} for ${countryCode}, but the snapshot has no payout account spec for it.`
+            `${provider} offramp countries list ${currency} for ${countryCode}, but the snapshot has no payout account spec for it.`
           );
         }
       }
@@ -823,17 +781,16 @@ function buildPayoutAccounts(
 }
 
 async function renderGeneratedFromSnapshots(): Promise<string> {
-  const [snapshots, countryRailsByProvider] = await Promise.all([
+  const [snapshots, offrampCountriesByProvider] = await Promise.all([
     currencySupport.readSnapshots(),
-    countryRails.readByProvider(),
+    offrampCountries.readByProvider(),
   ]);
-  const support = buildProviderSupport(snapshots, countryRailsByProvider);
+  const support = buildProviderSupport(snapshots, offrampCountriesByProvider);
   return renderGeneratedFile({
     support,
     onrampRows: buildOnrampMatrix(support),
     offrampRows: buildOfframpMatrix(support),
-    countryRailsByProvider,
-    payoutAccountsByProvider: buildPayoutAccounts(snapshots, countryRailsByProvider),
+    payoutAccountsByProvider: buildPayoutAccounts(snapshots, offrampCountriesByProvider),
   });
 }
 
@@ -982,10 +939,10 @@ const currencySupport = {
   readSnapshots: () => Promise<CurrencySupportSnapshots>;
 };
 
-const countryRails = {
-  readByProvider: readCountryRailsByProvider,
+const offrampCountries = {
+  readByProvider: readOfframpCountriesByProvider,
 } as const satisfies {
-  readByProvider: () => Promise<CountryRailsByProvider>;
+  readByProvider: () => Promise<OfframpCountriesByProvider>;
 };
 
 async function runGenerate(): Promise<void> {

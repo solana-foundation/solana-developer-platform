@@ -1,5 +1,4 @@
 import {
-  OFFRAMP_COUNTRY_RAILS,
   OFFRAMP_PAYOUT_ACCOUNTS,
   OFFRAMP_SUPPORT,
   RAMP_PROVIDER_SUPPORT_DETAILS,
@@ -17,9 +16,6 @@ const OFFRAMP_PAIRS: readonly OfframpPairSupport[] = OFFRAMP_SUPPORT;
 const PAYOUT_ACCOUNTS: Partial<
   Record<RampProviderId, Readonly<Record<string, RampPayoutAccountSpec>>>
 > = OFFRAMP_PAYOUT_ACCOUNTS;
-const COUNTRY_RAILS: Partial<
-  Record<RampProviderId, Readonly<Partial<Record<string, readonly string[]>>>>
-> = OFFRAMP_COUNTRY_RAILS;
 
 export interface OfframpDestinationResolution {
   /** Provider account type the payout external account must be created as. */
@@ -36,8 +32,8 @@ export interface OfframpDestinationResolution {
  * Resolution order: the corridor must exist in the generated pair matrix for
  * the provider; the destination country must accept the fiat currency per the
  * provider's country support (providers with unreported coverage are not
- * gated on country); the rails are the country's rails intersected with the
- * provider's payout-account rails for the currency.
+ * gated on country); the rails and fields come from the provider's
+ * payout-account spec for the currency.
  *
  * @param input - Provider, corridor, and destination to resolve.
  * @returns Rails and per-rail field requirements, or null when the corridor
@@ -80,16 +76,5 @@ export function resolveOfframpDestination(input: {
   if (account === undefined) {
     return null;
   }
-
-  const countryRails = COUNTRY_RAILS[input.provider]?.[input.countryCode];
-  const rails: OfframpDestinationResolution["rails"] = {};
-  for (const [rail, fields] of Object.entries(account.rails)) {
-    if (countryRails === undefined || countryRails.includes(rail)) {
-      rails[rail] = fields;
-    }
-  }
-  if (Object.keys(rails).length === 0) {
-    return null;
-  }
-  return { accountType: account.accountType, rails };
+  return { accountType: account.accountType, rails: { ...account.rails } };
 }
