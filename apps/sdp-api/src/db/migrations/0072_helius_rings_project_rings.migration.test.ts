@@ -1,9 +1,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_RING_NAME, RING_NAME_PATTERN } from "@sdp/helius-rings";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
+import {
+  CHECK_VIOLATION,
+  expectSqlstate as expectSqlstateOn,
+  seedOrgProject,
+  UNIQUE_VIOLATION,
+} from "@/test/helpers/migration-db";
 
 // The test database is already fully migrated by src/test/node-global-setup.ts,
 // so the table exists before this file runs; every test opens a transaction,
@@ -17,35 +24,9 @@ const migrationSql = readFileSync(migrationPath, "utf8");
 
 let client: Client;
 
-const UNIQUE_VIOLATION = "23505";
-const CHECK_VIOLATION = "23514";
-
-/** See 0057's test for why the savepoint wraps only the violating statement. */
-async function expectSqlstate(work: () => Promise<unknown>, sqlstate: string): Promise<void> {
-  await client.query("SAVEPOINT probe");
-  await expect(work()).rejects.toMatchObject({ code: sqlstate });
-  await client.query("ROLLBACK TO SAVEPOINT probe");
-}
-
-async function seedProject(tag: string): Promise<{ organizationId: string; projectId: string }> {
-  const organizationId = `org_${tag}`;
-  const projectId = `proj_${tag}`;
-  const userId = `user_${tag}`;
-
-  await client.query("INSERT INTO organizations (id, name, slug) VALUES ($1, $1, $1)", [
-    organizationId,
-  ]);
-  await client.query("INSERT INTO users (id, email) VALUES ($1, $2)", [
-    userId,
-    `${tag}@example.test`,
-  ]);
-  await client.query(
-    "INSERT INTO projects (id, organization_id, name, slug, created_by) VALUES ($1, $2, $1, $1, $3)",
-    [projectId, organizationId, userId]
-  );
-
-  return { organizationId, projectId };
-}
+const expectSqlstate = (work: () => Promise<unknown>, sqlstate: string) =>
+  expectSqlstateOn(client, work, sqlstate);
+const seedProject = (tag: string) => seedOrgProject(client, tag);
 
 function insertRing(input: {
   id: string;
@@ -147,24 +128,51 @@ describe("0072_helius_rings_project_rings schema", () => {
     await expect(insertRing({ id: "hrr_2", ...b, name: "treasury" })).resolves.toBeDefined();
   });
 
-  it("refuses names outside the slug shape and the reserved word", async () => {
+  it("agrees with RING_NAME_PATTERN on the slug shape, and refuses the reserved word", async () => {
     const { organizationId, projectId } = await seedProject("ring_name_shape");
-    const bad = [
+    // The SQL CHECK is a hand copy of the TS pattern, so the candidates are
+    // judged by the exported constant: drift between the two fails this test
+    // instead of shipping.
+    const candidates = [
       "Treasury", // uppercase
       "-treasury", // leading hyphen
       "treasury-", // trailing hyphen
       "a".repeat(33), // over 32 chars
-      "default", // reserved: names the default pool
+      "a".repeat(32), // at the limit
+      "a", // single char
+      "0ring", // leading digit
+      "usdc-payroll-2",
     ];
-    for (const name of bad) {
-      await expectSqlstate(
-        () => insertRing({ id: `hrr_${name.length}`, organizationId, projectId, name }),
-        CHECK_VIOLATION
-      );
+    for (const [index, name] of candidates.entries()) {
+      // A distinct program id per candidate, or the accepted names would trip
+      // UNIQUE(project_id, ring_program_id) instead of exercising the CHECK.
+      const insert = () =>
+        insertRing({
+          id: `hrr_shape_${index}`,
+          organizationId,
+          projectId,
+          name,
+          ringProgramId: `RingProgram${index + 1}11111111111111111111111111111`,
+        });
+      if (RING_NAME_PATTERN.test(name)) {
+        await expect(insert()).resolves.toBeDefined();
+      } else {
+        await expectSqlstate(insert, CHECK_VIOLATION);
+      }
     }
-    await expect(
-      insertRing({ id: "hrr_ok", organizationId, projectId, name: "usdc-payroll-2" })
-    ).resolves.toBeDefined();
+    // Reserved independently of shape: "default" names the default pool.
+    expect(RING_NAME_PATTERN.test(DEFAULT_RING_NAME)).toBe(true);
+    await expectSqlstate(
+      () =>
+        insertRing({
+          id: "hrr_default",
+          organizationId,
+          projectId,
+          name: DEFAULT_RING_NAME,
+          ringProgramId: "RingProgram911111111111111111111111111111111",
+        }),
+      CHECK_VIOLATION
+    );
   });
 
   it("refuses a status outside the closed set", async () => {

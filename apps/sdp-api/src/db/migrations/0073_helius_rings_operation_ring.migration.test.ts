@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
+import {
+  CHECK_VIOLATION,
+  expectSqlstate as expectSqlstateOn,
+  seedOrgProject,
+} from "@/test/helpers/migration-db";
 
 // The test database is already fully migrated by src/test/node-global-setup.ts,
 // so the column exists before this file runs; every test opens a transaction,
@@ -17,36 +22,16 @@ const migrationSql = readFileSync(migrationPath, "utf8");
 
 let client: Client;
 
-const CHECK_VIOLATION = "23514";
-
-/** See 0057's test for why the savepoint wraps only the violating statement. */
-async function expectSqlstate(work: () => Promise<unknown>, sqlstate: string): Promise<void> {
-  await client.query("SAVEPOINT probe");
-  await expect(work()).rejects.toMatchObject({ code: sqlstate });
-  await client.query("ROLLBACK TO SAVEPOINT probe");
-}
+const expectSqlstate = (work: () => Promise<unknown>, sqlstate: string) =>
+  expectSqlstateOn(client, work, sqlstate);
 
 async function seedWallet(tag: string): Promise<{
   organizationId: string;
   projectId: string;
   walletId: string;
 }> {
-  const organizationId = `org_${tag}`;
-  const projectId = `proj_${tag}`;
-  const userId = `user_${tag}`;
+  const { organizationId, projectId } = await seedOrgProject(client, tag);
   const walletId = `hrw_${tag}`;
-
-  await client.query("INSERT INTO organizations (id, name, slug) VALUES ($1, $1, $1)", [
-    organizationId,
-  ]);
-  await client.query("INSERT INTO users (id, email) VALUES ($1, $2)", [
-    userId,
-    `${tag}@example.test`,
-  ]);
-  await client.query(
-    "INSERT INTO projects (id, organization_id, name, slug, created_by) VALUES ($1, $2, $1, $1, $3)",
-    [projectId, organizationId, userId]
-  );
   await client.query(
     `INSERT INTO helius_rings_wallets (id, organization_id, project_id, sdp_wallet_id, name)
      VALUES ($1, $2, $3, $4, 'Treasury')`,
