@@ -14,9 +14,10 @@ import {
   fetchTransferById,
   simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { onrampPairs, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
@@ -60,13 +61,14 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: ONRAMP_PAIRS,
+    pairs: onrampPairs(sdpEnvironment),
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositAmountSchema },
     quoteStepId: "MEMO",

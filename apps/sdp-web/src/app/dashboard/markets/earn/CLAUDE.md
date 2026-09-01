@@ -95,10 +95,14 @@ program create still sends the body `requestId` form.
   layout suspends on a flag read (which would paint the parent's loading
   boundary on hard navigations). Pages hold no flag checks: add new Earn routes
   under this segment and they inherit both gates.
-- Loading states come from `../markets-route-skeletons` (`EarnProgramSkeleton`),
-  shared with the shell's navigation-loading resolver
-  (`lib/dashboard-navigation-loading.ts` → the single `earn-program` route id
-  covering both pathnames).
+- Loading states come from `../markets-route-skeletons`, with distinct portfolio,
+  configuration and integration-guide shapes. The shell's navigation-loading
+  resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
+  same route-specific skeleton used by its `loading.tsx` boundary.
+- The portfolio's zero-position state is the onboarding card. The removed UI
+  builder persisted the only former configuration state, so there is no honest
+  "configured but awaiting a deposit" distinction to infer from the live
+  position summary.
 
 ## Module map
 

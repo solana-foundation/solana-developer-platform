@@ -1,6 +1,11 @@
 "use client";
 
-import type { Counterparty, CounterpartyEntityType, PaymentsDashboardWallet } from "@sdp/types";
+import type {
+  Counterparty,
+  CounterpartyEntityType,
+  PaymentsDashboardWallet,
+  SdpEnvironment,
+} from "@sdp/types";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
@@ -12,19 +17,20 @@ import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/modal";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
-  OFFRAMP_PAIRS,
-  ONRAMP_PAIRS,
+  offrampPairs,
+  onrampPairs,
   RAMP_PROVIDER_LOGOS,
-  RAMP_PROVIDER_OPTIONS,
   type RampDirection,
   type RampPair,
   type RampProviderOption,
   rampPairKey,
   type SelectedRampPair,
+  surfacedRampProviderOptions,
 } from "@/lib/ramps";
 import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
@@ -66,12 +72,15 @@ function getDirectionSupport(
   return RAMP_PROVIDER_SUPPORT_DETAILS[provider][direction];
 }
 
-function pairsForDirection(direction: RampDirection): readonly RampPair[] {
+function pairsForDirection(
+  direction: RampDirection,
+  environment: SdpEnvironment
+): readonly RampPair[] {
   switch (direction) {
     case "onramp":
-      return ONRAMP_PAIRS;
+      return onrampPairs(environment);
     case "offramp":
-      return OFFRAMP_PAIRS;
+      return offrampPairs(environment);
     default: {
       const exhaustive: never = direction;
       return exhaustive;
@@ -214,19 +223,20 @@ export function RampPairProviderSelector({
   onPairChange,
   onProviderSelect,
 }: RampPairProviderSelectorProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
-  const pairs = pairsForDirection(direction);
+  const pairs = pairsForDirection(direction, sdpEnvironment);
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]
   );
   const directionProviderOptions = useMemo(
     () =>
-      RAMP_PROVIDER_OPTIONS.filter(
+      surfacedRampProviderOptions(sdpEnvironment).filter(
         (option) => Object.keys(getDirectionSupport(option.id, direction).currencies).length > 0
       ),
-    [direction]
+    [direction, sdpEnvironment]
   );
   const providerExclusions = useMemo(
     () =>

@@ -73,16 +73,21 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Notify Slack — deploy started
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           SERVICES: api
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          SLACK=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain --project solana-developer-platform --config dev_ci 2>/dev/null || true)
+          SLACK=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain --scope=. --project solana-developer-platform --config dev_ci 2>/dev/null || true)
           [ -z "$SLACK" ] && exit 0
           echo "::add-mask::$SLACK"
           SHA=$(git rev-parse HEAD)
@@ -122,9 +127,14 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Notify Slack — deploy result
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           SERVICES: api
           OUTCOME: >-
             ${{ (needs.deploy-api-dev.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
@@ -135,7 +145,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          SLACK=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain --project solana-developer-platform --config dev_ci 2>/dev/null || true)
+          SLACK=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain --scope=. --project solana-developer-platform --config dev_ci 2>/dev/null || true)
           [ -z "$SLACK" ] && exit 0
           echo "::add-mask::$SLACK"
           MARKER="[${OUTCOME}] SDP Deploy"
@@ -172,8 +182,6 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/deploy-sdp-api-gcp.yml
-    secrets:
-      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
 
   deploy-api-prod:
     name: sdp-api + worker + cron — prod
@@ -187,7 +195,5 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
-    secrets:
-      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
     with:
       image_sha: ${{ github.sha }}

@@ -1,6 +1,7 @@
+import type { SdpEnvironment } from "@sdp/types";
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
-import type { RampProviderId } from "@sdp/types/provider-access";
+import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -40,19 +41,27 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "stripe", title: "Stripe" },
 ];
 
-export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.map(({ source, dest, providers }) => ({
-  fiatCurrency: source,
-  assetRail: dest,
-  providers,
-}));
+export function surfacedRampProviderOptions(environment: SdpEnvironment): RampProviderOption[] {
+  return RAMP_PROVIDER_OPTIONS.filter((option) => isRampProviderSurfaced(option.id, environment));
+}
+
+export function onrampPairs(environment: SdpEnvironment): RampPair[] {
+  return ONRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
+    const surfaced = providers.filter((p) => isRampProviderSurfaced(p, environment));
+    if (surfaced.length === 0) return [];
+    return [{ fiatCurrency: source, assetRail: dest, providers: surfaced }];
+  });
+}
 
 // Offramp support is keyed crypto -> fiat (source is the asset rail, dest is the fiat
 // currency), the reverse of onramp. Normalize into the same RampPair shape.
-export const OFFRAMP_PAIRS: RampPair[] = OFFRAMP_SUPPORT.map(({ source, dest, providers }) => ({
-  fiatCurrency: dest,
-  assetRail: source,
-  providers,
-}));
+export function offrampPairs(environment: SdpEnvironment): RampPair[] {
+  return OFFRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
+    const surfaced = providers.filter((p) => isRampProviderSurfaced(p, environment));
+    if (surfaced.length === 0) return [];
+    return [{ fiatCurrency: dest, assetRail: source, providers: surfaced }];
+  });
+}
 
 export const DEFAULT_RAMP_PAIR: SelectedRampPair = {
   fiatCurrency: "USD",

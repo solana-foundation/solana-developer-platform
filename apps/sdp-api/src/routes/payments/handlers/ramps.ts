@@ -30,6 +30,7 @@ import {
   type PaymentRampInstruction,
   type PaymentRampQuote,
   type RampProviderEstimateResult,
+  type SdpEnvironment,
 } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
@@ -44,7 +45,7 @@ import type {
   OnrampPairSupport,
   RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { RampProviderId } from "@sdp/types/provider-access";
+import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -82,7 +83,10 @@ import { isSentryEnabled } from "@/runtime/observability";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
+import {
+  assertProviderAvailable,
+  assertRampProviderSurfaced,
+} from "@/services/provider-availability.service";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -161,12 +165,14 @@ type ScopedLightsparkRequirementsInput = Extract<
 
 function filterProviders(
   providers: readonly RampProviderId[],
+  environment: SdpEnvironment,
   provider?: RampProviderId
 ): RampProviderId[] {
+  const surfaced = providers.filter((p) => isRampProviderSurfaced(p, environment));
   if (provider) {
-    return providers.includes(provider) ? [provider] : [];
+    return surfaced.includes(provider) ? [provider] : [];
   }
-  return [...providers];
+  return surfaced;
 }
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
@@ -232,7 +238,8 @@ export function requireCryptoRail(cryptoToken: string): CryptoRailId {
  */
 function assertRampCorridorSupported(
   direction: RampQuoteDirection,
-  input: { provider: RampProviderId; cryptoToken: string; fiatCurrency?: RampFiatCurrency }
+  input: { provider: RampProviderId; cryptoToken: string; fiatCurrency?: RampFiatCurrency },
+  environment: SdpEnvironment
 ): void {
   const rail = requireCryptoRail(input.cryptoToken);
   const pairs: readonly (OnrampPairSupport | OfframpPairSupport)[] =
@@ -243,7 +250,9 @@ function assertRampCorridorSupported(
     const fiatSide = direction === "onramp" ? pair.source : pair.dest;
     return railSide === rail && (fiat === undefined || fiatSide === fiat);
   });
-  const supportedProviders = providersFromPairs(matched);
+  const supportedProviders = providersFromPairs(matched).filter((p) =>
+    isRampProviderSurfaced(p, environment)
+  );
   if (!supportedProviders.includes(input.provider)) {
     throw unsupportedRampCorridor(input.provider, direction, {
       assetRail: rail,
@@ -321,7 +330,8 @@ async function resolveRampQuoteRequest(
   walletFieldName: "destinationWallet" | "sourceWallet",
   walletIdOrAddress: string
 ): Promise<RampQuotePolicyResolved> {
-  assertRampCorridorSupported(direction, input);
+  assertRampProviderSurfaced(input.provider, resolveSdpEnvironment(c));
+  assertRampCorridorSupported(direction, input, resolveSdpEnvironment(c));
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
 
@@ -823,7 +833,7 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   const row = ONRAMP_SUPPORT.find(
     (pair) => pair.source === input.fiatCurrency && pair.dest === input.assetRail
   );
-  const providers = row ? row.providers : [];
+  const providers = row ? filterProviders(row.providers, resolveSdpEnvironment(c)) : [];
 
   const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOnramp(ctx, {
@@ -841,7 +851,7 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
   const row = OFFRAMP_SUPPORT.find(
     (pair) => pair.source === input.assetRail && pair.dest === input.fiatCurrency
   );
-  const providers = row ? row.providers : [];
+  const providers = row ? filterProviders(row.providers, resolveSdpEnvironment(c)) : [];
 
   const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOfframp(ctx, {
@@ -1332,7 +1342,7 @@ export async function listOnrampCurrencies(c: AppContext) {
   const pairs: OnrampCurrencyPair[] = ONRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
-    const providers = filterProviders(row.providers, provider);
+    const providers = filterProviders(row.providers, resolveSdpEnvironment(c), provider);
     if (providers.length === 0) return [];
     return [{ source: row.source, dest: row.dest, providers }];
   });
@@ -1361,7 +1371,7 @@ export async function listOfframpCurrencies(c: AppContext) {
   const pairs: OfframpCurrencyPair[] = OFFRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
-    const providers = filterProviders(row.providers, provider);
+    const providers = filterProviders(row.providers, resolveSdpEnvironment(c), provider);
     if (providers.length === 0) return [];
     return [{ source: row.source, dest: row.dest, providers }];
   });

@@ -45,6 +45,7 @@ function buildTransaction(): Uint8Array {
 
 vi.mock("@sdp/payments/fee-payment", () => ({
   createFeePaymentAdapter: vi.fn(() => ({ providerId: "kora" })),
+  resolveFeePaymentProvider: vi.fn(() => "kora"),
 }));
 
 vi.mock("@/db", () => ({

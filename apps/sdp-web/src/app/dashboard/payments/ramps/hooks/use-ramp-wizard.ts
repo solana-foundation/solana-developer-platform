@@ -8,7 +8,7 @@ import type {
 } from "@sdp/types";
 import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import type { z } from "zod";
@@ -154,6 +154,15 @@ export function useRampWizard<TId extends string>(
     provider: null,
     counterpartyId: initialCounterpartyId,
   });
+
+  const selectedProviderField = fields.provider;
+  useEffect(() => {
+    if (selectedProviderField === null) return;
+    const pair = findRampPair(config.pairs, selectedRampPair);
+    if (!pair?.providers.includes(selectedProviderField)) {
+      setField("provider", null);
+    }
+  }, [config.pairs, selectedRampPair, selectedProviderField, setField]);
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,

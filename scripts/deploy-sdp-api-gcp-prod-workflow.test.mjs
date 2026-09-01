@@ -197,3 +197,8 @@ test("rollback verification accepts release-tag and merge-to-main identities", (
   );
   assert.match(workflow, /refs\/tags\/v\.\+\|refs\/heads\/main/);
 });
+
+test("no static Doppler token remains in the deploy pipeline", () => {
+  assert.doesNotMatch(workflow, /DOPPLER_TOKEN_CI/);
+  assert.match(workflow, /- name: Doppler OIDC login/);
+});

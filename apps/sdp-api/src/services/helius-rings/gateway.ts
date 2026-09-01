@@ -5,6 +5,7 @@ import {
   validateOuterTransaction as validateSdkOuterTransaction,
 } from "@sdp/helius-rings-sdk";
 import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
@@ -82,7 +83,7 @@ export function resolveRingsGateway(
   const submitOuterTransaction = dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
   const create = dependencies.createGateway ?? createRingsGateway;
 
-  return create({
+  const gateway = create({
     ...configured.upstreams,
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
@@ -100,6 +101,7 @@ export function resolveRingsGateway(
     submitTransaction: (signedTxBase64) =>
       asDomainFailure(() => submitOuterTransaction({ env, signedTxBase64 })),
   });
+  return instrumentVendorPort("helius-rings", gateway);
 }
 
 const ADAPTER_FAILURE_MESSAGES = {

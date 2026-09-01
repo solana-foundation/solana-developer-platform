@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 concurrency:
   group: ramp-rails-refresh
@@ -41,21 +42,23 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate Doppler token
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+      - name: Validate Doppler OIDC configuration
         run: |
-          if [ -z "${DOPPLER_TOKEN}" ]; then
-            echo "DOPPLER_TOKEN_CI must be configured for live ramp rail discovery." >&2
+          if [ -z "${{ vars.DOPPLER_CI_IDENTITY_ID }}" ]; then
+            echo "DOPPLER_CI_IDENTITY_ID must be configured as a repository variable for live ramp rail discovery." >&2
             exit 1
           fi
 
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Discover rails live
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: pnpm --filter @sdp/api currencies:discover
 
       - name: Regenerate matrix from snapshots
