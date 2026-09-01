@@ -130,6 +130,8 @@
     },
     "header": {
       "notDeployed": "Not deployed",
+      "mint": "Mint",
+      "deployedOn": "Deployed {date}",
       "copyTokenAddress": "Copy token address",
       "onchainAddress": "Onchain address",
       "tokenId": "Token ID",
