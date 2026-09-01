@@ -1,8 +1,8 @@
 /**
- * SPC wallet-verification orchestration (the write path) + the per-member read.
+ * SPC wallet-verification orchestration (the write path) + the default-identity read.
  *
  * Drives the SPC auth handshake for one SDP custody wallet:
- *   1. resolve the connected instance + the acting member's SPC user
+ *   1. resolve the connected instance + the selected project identity's SPC user
  *   2. open an SPC JWT handle (KV-cached via ./auth/gateway-auth)
  *   3. `challenge-wallet` → sign the challenge with THAT wallet → `verify-wallet`
  *   4. persist the verification (idempotent per (user, instance, pubkey))
@@ -29,7 +29,8 @@ import {
   type PrivateChannelVerifiedWalletRow,
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, forbidden, providerNotConfigured } from "@/lib/errors";
+import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { createOrgSigner } from "@/services/solana";
 import type { Env } from "@/types/env";
 import { openSpcAuthContext, type SpcAuthContext, withSpcAuth } from "./auth/gateway-auth";
@@ -58,31 +59,34 @@ interface WalletSession {
 }
 
 /**
- * Shared preamble for the verify/delete write paths: require a user identity,
- * resolve the connected instance and the acting member's SPC user, and open a
- * cached SPC JWT handle.
+ * Shared preamble for the verify/delete write paths: resolve the connected
+ * instance and the requested project principal (default when omitted), then
+ * open a cached SPC JWT handle.
  */
 async function resolveWalletSession(
   env: Env,
   auth: ApiKeyContext,
-  projectId: string
+  projectId: string,
+  principalId?: string,
+  allowDisabled = false
 ): Promise<WalletSession> {
-  if (!auth.userId) {
-    throw forbidden(
-      "Managing verified wallets requires a user identity and is not available for API-key auth."
-    );
-  }
   const scope = { organizationId: auth.organizationId, projectId };
 
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   requireActiveInstance(instance);
 
-  const pcUser = await createPrivateChannelUserRepository(env).findByProjectAndUser(
-    scope,
-    auth.userId
-  );
+  const principalRepo = createPrivateChannelUserRepository(env);
+  const pcUser = principalId
+    ? await principalRepo.getById(scope, principalId)
+    : await principalRepo.findDefaultPrincipal(scope, instance.id);
   if (!pcUser) {
-    throw forbidden("You must be an invited Private Channels member to manage verified wallets.");
+    if (principalId) {
+      throw notFound("Active Private Channels principal");
+    }
+    throw forbidden("This project has no active Private Channels principal.");
+  }
+  if (pcUser.instance_id !== instance.id || (pcUser.disabled_at && !allowDisabled)) {
+    throw notFound("Active Private Channels principal");
   }
 
   const client = createAuthClient(instance.auth_url, { timeoutMs: SPC_AUTH_TIMEOUT_MS });
@@ -91,9 +95,35 @@ async function resolveWalletSession(
   return { scope, instance, pcUser, client, spcAuth };
 }
 
+async function revokeWalletWithSession(
+  env: Env,
+  session: WalletSession,
+  pubkey: string
+): Promise<boolean> {
+  const { instance, pcUser, client, spcAuth } = session;
+  // SPC returns 400 when the wallet is already unlinked. Treat that response as
+  // convergence and still remove the local mirror; all other failures abort.
+  await withSpcAuth(spcAuth, async (token) => {
+    try {
+      await client.deleteWallet(token, pubkey);
+    } catch (error) {
+      if (!(error instanceof PrivateChannelError) || error.code !== "BAD_REQUEST") {
+        throw error;
+      }
+    }
+  });
+
+  const repo = createPrivateChannelVerifiedWalletRepository(env);
+  const [mirrorDeleted, markerDeleted] = await Promise.all([
+    repo.deleteByUserInstanceAndPubkey(pcUser.id, instance.id, pubkey),
+    repo.deletePendingRevocation(pcUser.id, instance.id, pubkey),
+  ]);
+  return mirrorDeleted || markerDeleted;
+}
+
 /**
- * The acting member's verified wallets for the project's active instance (empty
- * for non-members or when no instance is connected). Scoped to the active
+ * The default identity's verified wallets for the project's active instance
+ * (empty when no instance is connected). Scoped to the active
  * instance so a verification never leaks across instances.
  */
 export async function listPrivateChannelWallets(
@@ -101,21 +131,16 @@ export async function listPrivateChannelWallets(
   auth: ApiKeyContext,
   projectId: string
 ): Promise<PrivateChannelVerifiedWalletRow[]> {
-  if (!auth.userId) {
-    return [];
-  }
   const scope = { organizationId: auth.organizationId, projectId };
-  const pcUser = await createPrivateChannelUserRepository(env).findByProjectAndUser(
-    scope,
-    auth.userId
-  );
-  if (!pcUser) {
-    return [];
-  }
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   if (!instance) {
     return [];
   }
+  const pcUser = await createPrivateChannelUserRepository(env).findDefaultPrincipal(
+    scope,
+    instance.id
+  );
+  if (!pcUser) return [];
   return createPrivateChannelVerifiedWalletRepository(env).listByUserAndInstance(
     pcUser.id,
     instance.id
@@ -124,7 +149,7 @@ export async function listPrivateChannelWallets(
 
 /**
  * Verify one custody wallet with the connected SPC instance's auth service, as
- * the acting member's SPC user. Returns the persisted row + the instance (the
+ * the selected project identity's SPC user. Returns the persisted row + the instance (the
  * handler emits events). A member may verify many wallets per instance; the
  * upsert refreshes an existing (user, instance, pubkey) row so re-verify is
  * idempotent.
@@ -133,12 +158,14 @@ export async function verifyPrivateChannelWallet(
   env: Env,
   auth: ApiKeyContext,
   projectId: string,
-  walletId: string
+  walletId: string,
+  principalId?: string
 ): Promise<{ row: PrivateChannelVerifiedWalletRow; instance: PrivateChannelInstanceRow }> {
   const { scope, instance, pcUser, client, spcAuth } = await resolveWalletSession(
     env,
     auth,
-    projectId
+    projectId,
+    principalId
   );
 
   // Resolve the wallet to a signer BEFORE the SPC challenge, so an
@@ -192,13 +219,52 @@ export async function verifyPrivateChannelWallet(
     }
   });
 
-  const row = await createPrivateChannelVerifiedWalletRepository(env).upsert({
-    ...scope,
-    userId: pcUser.id,
-    instanceId: instance.id,
-    walletId,
-    pubkey,
-  });
+  let row: PrivateChannelVerifiedWalletRow;
+  const verifiedWalletRepo = createPrivateChannelVerifiedWalletRepository(env);
+  try {
+    row = await verifiedWalletRepo.upsert({
+      ...scope,
+      userId: pcUser.id,
+      instanceId: instance.id,
+      walletId,
+      pubkey,
+    });
+  } catch (error) {
+    // A disable can win while the remote verification is in flight. Only undo
+    // the SPC binding after a fresh read confirms that exact identity is now
+    // disabled; ordinary persistence failures must not remove a valid binding.
+    let disabled = false;
+    try {
+      const current = await createPrivateChannelUserRepository(env).getById(scope, pcUser.id);
+      disabled = Boolean(current?.disabled_at);
+    } catch (statusError) {
+      getLogger().warn(
+        { principalId: pcUser.id, instanceId: instance.id, statusError },
+        "private-channel wallet: could not check identity state after a rejected mirror"
+      );
+    }
+    if (disabled) {
+      try {
+        // Persist a durable cleanup marker before the compensating network
+        // call. If SPC is unavailable, the next disable retry can enumerate
+        // this row and try the revocation again.
+        await verifiedWalletRepo.recordPendingRevocation({
+          ...scope,
+          userId: pcUser.id,
+          instanceId: instance.id,
+          walletId,
+          pubkey,
+        });
+        await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
+      } catch (cleanupError) {
+        getLogger().warn(
+          { principalId: pcUser.id, instanceId: instance.id, cleanupError },
+          "private-channel wallet: could not revoke a late binding for a disabled identity"
+        );
+      }
+    }
+    throw error;
+  }
 
   return { row, instance };
 }
@@ -213,26 +279,48 @@ export async function deletePrivateChannelWallet(
   projectId: string,
   pubkey: string
 ): Promise<{ instance: PrivateChannelInstanceRow; deleted: boolean }> {
-  const { instance, pcUser, client, spcAuth } = await resolveWalletSession(env, auth, projectId);
+  const scope = { organizationId: auth.organizationId, projectId };
+  const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
+  requireActiveInstance(instance);
+  const mirror = await createPrivateChannelVerifiedWalletRepository(env).findByInstanceAndPubkey(
+    scope,
+    instance.id,
+    pubkey
+  );
+  if (!mirror) return { instance, deleted: false };
 
-  // SPC's delete returns 400 ("wallet not associated with this user") when the
-  // pubkey is already unlinked or never existed — the only non-401/500 status that
-  // endpoint emits, so it's unambiguous (SPC never 404s here). Treat that 400 as
-  // already-revoked and still drop the SDP mirror row so the two systems converge;
-  // rethrow other failures (auth, unavailable, …).
-  await withSpcAuth(spcAuth, async (token) => {
-    try {
-      await client.deleteWallet(token, pubkey);
-    } catch (error) {
-      if (!(error instanceof PrivateChannelError) || error.code !== "BAD_REQUEST") {
-        throw error;
-      }
-    }
-  });
-
-  const deleted = await createPrivateChannelVerifiedWalletRepository(
-    env
-  ).deleteByUserInstanceAndPubkey(pcUser.id, instance.id, pubkey);
+  const session = await resolveWalletSession(env, auth, projectId, mirror.user_id, true);
+  const deleted = await revokeWalletWithSession(env, session, pubkey);
 
   return { instance, deleted };
+}
+
+/** Revoke every wallet owned by one identity before removing its channel access. */
+export async function revokePrivateChannelPrincipalWallets(
+  env: Env,
+  auth: ApiKeyContext,
+  projectId: string,
+  principalId: string
+): Promise<string[]> {
+  const scope = { organizationId: auth.organizationId, projectId };
+  const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
+  requireActiveInstance(instance);
+  const repo = createPrivateChannelVerifiedWalletRepository(env);
+  const [wallets, pendingRevocations] = await Promise.all([
+    repo.listByUserAndInstance(principalId, instance.id),
+    repo.listPendingRevocations(principalId, instance.id),
+  ]);
+  const pubkeys = [
+    ...new Set([
+      ...wallets.map((wallet) => wallet.pubkey),
+      ...pendingRevocations.map((marker) => marker.pubkey),
+    ]),
+  ];
+  if (pubkeys.length === 0) return [];
+
+  const session = await resolveWalletSession(env, auth, projectId, principalId, true);
+  for (const pubkey of pubkeys) {
+    await revokeWalletWithSession(env, session, pubkey);
+  }
+  return pubkeys;
 }

@@ -15,8 +15,8 @@ export default async function EmbeddedYieldConfigurePage({
     typeof cluster === "string" ? SOLANA_CLUSTERS.find((value) => value === cluster) : undefined;
   return (
     <EarnProgramWorkspace
-      builderHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`}
       initialCluster={initialCluster}
+      integrateHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`}
       providerAccess={providerAccess}
     />
   );

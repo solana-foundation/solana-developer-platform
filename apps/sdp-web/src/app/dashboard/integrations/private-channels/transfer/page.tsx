@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import {
-  fetchAuthenticatedPrivateChannelUser,
+  fetchPrivateChannelPrincipals,
   fetchPrivateChannels,
   fetchSignableCustodyWallets,
   fetchVerifiedWallets,
@@ -38,13 +38,14 @@ export default async function PrivateChannelsTransferPage() {
   let channels = intersectEligibleTransferChannels([], []);
   let sourceWallets = intersectVerifiedSourceWallets([], []);
   try {
-    const [member, activeChannels, signableWallets, verifiedWallets] = await Promise.all([
-      fetchAuthenticatedPrivateChannelUser(client),
+    const [principals, activeChannels, signableWallets, verifiedWallets] = await Promise.all([
+      fetchPrivateChannelPrincipals(client),
       fetchPrivateChannels(client),
       fetchSignableCustodyWallets(client),
       fetchVerifiedWallets(client),
     ]);
-    channels = intersectEligibleTransferChannels(member?.channels ?? [], activeChannels);
+    const defaultPrincipal = principals.find((principal) => principal.isDefault);
+    channels = intersectEligibleTransferChannels(defaultPrincipal?.channels ?? [], activeChannels);
     sourceWallets = intersectVerifiedSourceWallets(signableWallets, verifiedWallets);
   } catch (error) {
     loadError = extractSdpApiErrorMessage(error);

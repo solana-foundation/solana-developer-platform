@@ -33,7 +33,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/markets", "markets-landing"],
     ["/dashboard/markets/treasury-solutions", "treasury-solutions"],
     ["/dashboard/markets/embedded-yield", "earn-program"],
-    ["/dashboard/markets/embedded-yield/button-builder", "earn-program"],
+    ["/dashboard/markets/embedded-yield/integrate", "earn-program"],
     ["/dashboard/tokens", "token-holdings"],
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
@@ -77,7 +77,7 @@ describe("dashboard navigation active state", () => {
   it.each([
     "/dashboard/markets/treasury-solutions",
     "/dashboard/markets/embedded-yield",
-    "/dashboard/markets/embedded-yield/button-builder",
+    "/dashboard/markets/embedded-yield/integrate",
   ])("keeps Markets active at %s", (pathname) => {
     expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
   });

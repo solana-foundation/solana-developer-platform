@@ -59,13 +59,15 @@ jobs:
         continue-on-error: true
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_PROJECT: solana-developer-platform
-          DOPPLER_CONFIG: dev_ci
-          SERVICE: vendor-assets
-          ENV: all
-          STATUS: failure
-          VERSION: ${{ steps.check.outputs.drifted }}
-          ACTOR: ${{ github.actor }}
+          DRIFTED: ${{ steps.check.outputs.drifted }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_ID: ${{ github.run_id }}
-        run: ./scripts/notify-slack.sh
+        run: |
+          set -euo pipefail
+          SLACK=$(doppler secrets get SLACK_ALERT_WEBHOOK_URL --plain --project solana-developer-platform --config dev_ci 2>/dev/null || true)
+          if [ -z "$SLACK" ]; then echo "::warning::SLACK_ALERT_WEBHOOK_URL missing — skipping notification"; exit 0; fi
+          echo "::add-mask::$SLACK"
+          PAYLOAD=$(jq -n --arg drifted "$DRIFTED" --arg run "$RUN_URL" \
+            '{ text: "*[FIRING] vendor-asset-drift [sdp-web]*",
+               attachments: [ { color: "#cc0000", blocks: [
+                 {type: "section", text: {type: "mrkdwn", text: "*A pinned vendor asset no longer matches upstream.*\nThe web app refuses to serve the drifted asset until the pin is reviewed and bumped.\n```\($drifted)```\n<\($run)|drift run>"}} ] } ] }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"

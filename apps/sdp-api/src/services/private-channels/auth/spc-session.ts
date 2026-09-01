@@ -1,8 +1,8 @@
-// SPC session: mint and cache a JWT for an invited member's SPC user.
+// SPC session: mint and cache a JWT for a project principal's SPC user.
 //
-// The SDP user never types SPC credentials. When the member was invited,
-// SDP generated an SPC password and stored it encrypted on the
-// private_channel_users row. Here we decrypt it and log in on the member's
+// An SDP actor never types SPC credentials. When SDP provisions a principal, it
+// generates an SPC password and stores it encrypted on the compatibility
+// private_channel_users row. Here we decrypt it and log in on the principal's
 // behalf to obtain the SPC-issued JWT that gates the wallet APIs.
 //
 // The token is a 24h JWT with no refresh token, so "refresh" = re-login. When a
@@ -153,10 +153,10 @@ async function cacheFreshToken(
 }
 
 /**
- * Obtain an SPC JWT for a member's SPC user. With `opts.cache` + `opts.instanceId`
- * this reads through a per-(instance, user) KV cache, refreshing before expiry;
- * without them it logs in fresh every call. Throws `FORBIDDEN` if the member has no
- * SPC credential (not fully provisioned).
+ * Obtain an SPC JWT for a project identity's SPC user. With `opts.cache` +
+ * `opts.instanceId` this reads through a per-(instance, identity) KV cache,
+ * refreshing before expiry; without them it logs in fresh every call. Throws
+ * `FORBIDDEN` if the identity has no SPC credential (not fully provisioned).
  */
 export async function getSpcSession(
   env: Env,
@@ -168,7 +168,7 @@ export async function getSpcSession(
   if (!pcUser.spc_username || !pcUser.spc_credential_ciphertext) {
     throw new PrivateChannelError(
       "FORBIDDEN",
-      "Your Private Channels membership has no SPC credential; ask an admin to re-invite you."
+      "This Private Channels identity has no SPC credential. Contact support."
     );
   }
   const username = pcUser.spc_username;

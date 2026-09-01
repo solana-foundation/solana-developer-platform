@@ -48,7 +48,7 @@ test("release deploys verify and promote the signed image; manual redeploys skip
 test("manual redeploys verify the promoted image signature before rollout", () => {
   assert.match(
     workflow,
-    /- name: Verify rollback image signature\n\s+if: \$\{\{ inputs\.release_sha == '' \}\}/
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
   );
 });
 
@@ -152,4 +152,48 @@ test("service and cron use the resolved digest", () => {
   );
   assert.match(workflow, /timeout-minutes: 150/);
   assert.match(workflow, /- name: Promote service and cron with rollback\n\s+timeout-minutes: 10/);
+});
+
+test("merge deploys promote signed per-merge images and never migrate", () => {
+  assert.match(
+    workflow,
+    /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch'\)\) && 'true' \|\| 'false' \}\}/
+  );
+  assert.match(
+    workflow,
+    /- name: Verify and promote merge image\n\s+if: \$\{\{ inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' \}\}/
+  );
+  assert.match(
+    workflow,
+    /certificate-identity "https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/release-images\.yml@refs\/heads\/main"/
+  );
+  assert.doesNotMatch(workflow, /- name: Build and push image/);
+  assert.match(
+    workflow,
+    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+  );
+  assert.match(workflow, /- name: Gate merge deploys on pending migrations/);
+  assert.match(
+    workflow,
+    /git diff --quiet "\$\{last_release\}"\.\.HEAD -- apps\/sdp-api\/src\/db\/migrations/
+  );
+});
+
+test("merge mode skips the internal smoke gate but requires the caller's", () => {
+  assert.match(
+    workflow,
+    /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-dev-smoke\.yml/
+  );
+  assert.match(
+    workflow,
+    /\(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' && needs\.smoke\.result == 'skipped'\)/
+  );
+});
+
+test("rollback verification accepts release-tag and merge-to-main identities", () => {
+  assert.match(
+    workflow,
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
+  );
+  assert.match(workflow, /refs\/tags\/v\.\+\|refs\/heads\/main/);
 });

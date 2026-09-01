@@ -49,7 +49,6 @@ export type {
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 export type {
   DeleteUnlistedEarnStrategiesInput,
-  EarnButtonConfigurationRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -57,14 +56,9 @@ export type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnStrategyMetricsInput,
-  UpsertEarnButtonConfigurationInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-export {
-  generateEarnButtonConfigurationId,
-  generateEarnButtonConfigurationPublicToken,
-  generateEarnStrategyId,
-} from "./earn.repository";
+export { generateEarnStrategyId } from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
 export type {
   HeliusRingsAssetAllowlistRow,
@@ -397,6 +391,7 @@ export {
 export { createPostgresPrivateChannelTransferRepository } from "./private-channel-transfer.repository.postgres";
 export type {
   AddMembershipInput,
+  CompletePrivateChannelPrincipalInput,
   CreatePrivateChannelUserInput,
   PrivateChannelMembershipRow,
   PrivateChannelMembershipWithChannelRow,
@@ -404,6 +399,7 @@ export type {
   PrivateChannelUserRepositoryContext,
   PrivateChannelUserRow,
   PrivateChannelUserWithIdentityRow,
+  ReservePrivateChannelPrincipalInput,
 } from "./private-channel-user.repository";
 export {
   generatePrivateChannelMembershipId,

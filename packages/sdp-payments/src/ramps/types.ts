@@ -1,6 +1,7 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
+  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
@@ -8,17 +9,20 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import type { CounterpartyEntityType } from "@sdp/types/counterparties";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
   type RampCountrySupport,
   type RampCurrencyLimit,
+  type RampPayoutAccountSpec,
+  type RampPayoutFieldSpec,
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
+import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export type {
@@ -37,10 +41,31 @@ export type {
 } from "./providers/mural/provider-data";
 export type { StripeCustomerInfo } from "./providers/stripe/client";
 
+export const rampPayoutFieldSchema = z
+  .object({
+    required: z.boolean(),
+    pattern: z.string().optional(),
+    minLength: z.number().int().optional(),
+    maxLength: z.number().int().optional(),
+    values: z.array(z.string()).optional(),
+    mask: z.string().optional(),
+  })
+  .strict() satisfies z.ZodType<RampPayoutFieldSpec>;
+
+export const rampPayoutAccountSchema = z
+  .object({
+    accountType: z.string(),
+    rails: z.record(z.string(), z.record(z.string(), rampPayoutFieldSchema)),
+  })
+  .strict() satisfies z.ZodType<RampPayoutAccountSpec>;
+
 export interface ProviderDirectionSupportSnapshot {
   currencies: Readonly<Record<string, RampCurrencyLimit>>;
   cryptos: readonly CryptoRailId[];
   countrySupport?: RampCountrySupport;
+  accounts?: Readonly<Record<string, RampPayoutAccountSpec>>;
+  /** Country-agnostic SWIFT payout account, deliverable to any covered country. */
+  swiftAccount?: RampPayoutAccountSpec;
 }
 
 export interface ProviderRailSupportSnapshot {
@@ -69,6 +94,8 @@ const providerDirectionSupportSnapshotSchema = z.object({
   currencies: z.record(z.string(), rampCurrencyLimitSchema),
   cryptos: z.array(z.enum(SOLANA_CRYPTO_RAILS)),
   countrySupport: rampCountrySupportSchema.optional(),
+  accounts: z.record(z.string(), rampPayoutAccountSchema).optional(),
+  swiftAccount: rampPayoutAccountSchema.optional(),
 }) satisfies z.ZodType<ProviderDirectionSupportSnapshot>;
 
 export const providerRailSupportSnapshotSchema = z.object({
@@ -104,13 +131,23 @@ export type RampFetchJson = (
   init?: RequestInit
 ) => Promise<RampDiscoveryResponseDump>;
 
+export type RampFetchText = (
+  provider: RampProviderId,
+  label: string,
+  url: string
+) => Promise<RampDiscoveryResponseDump>;
+
 export type RampDumpWriter = (name: string, payload: RampDiscoveryResponseDump) => Promise<void>;
 export type RampRawDumpReader = (relativePath: string) => Promise<unknown>;
 
 export interface RampDiscoveryContext {
   env: Record<string, string | undefined>;
   fetchJson: RampFetchJson;
+  fetchText: RampFetchText;
   writeDump: RampDumpWriter;
+  readDump: RampRawDumpReader;
+  /** Skip the network fetch and distill from the raw dumps already on disk. */
+  offline: boolean;
 }
 
 export interface RampWebhookValidationContext {
@@ -196,6 +233,8 @@ export interface RampOnrampQuoteInput {
   paymentTransferId?: string;
   /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
   customerId?: string;
+  /** Handler-resolved purpose-of-payment code stored during counterparty onboarding (Lightspark). */
+  purposeOfPayment?: LightsparkPurposeOfPayment;
   bvnkCompliance?: BvnkComplianceInput;
   /** Buyer contact required by Coinbase headless create-order; sourced from the counterparty. */
   email?: string;
@@ -217,6 +256,8 @@ export interface RampOfframpQuoteInput {
   paymentTransferId?: string;
   externalCustomerId: string;
   customerId?: string;
+  /** Handler-resolved purpose-of-payment code stored during counterparty onboarding (Lightspark). */
+  purposeOfPayment?: LightsparkPurposeOfPayment;
   /** Handler-resolved Grid external payout account id (Lightspark). */
   payoutAccountId?: string;
   /** Handler-provisioned merchant-owned BVNK off-ramp fiat wallet id. */
@@ -224,13 +265,23 @@ export interface RampOfframpQuoteInput {
   bvnkCompliance?: BvnkComplianceInput;
 }
 
-export interface ValidateCounterpartyOptions {
-  direction: RampDirection;
-  providerData: CounterpartyProviderData;
-  cryptoToken?: string;
-  fiatCurrency?: RampFiatCurrency;
-  destinationWalletAddress?: string;
-}
+export type ValidateCounterpartyOptions =
+  | {
+      direction: "onramp";
+      providerData: CounterpartyProviderData;
+      cryptoToken?: string;
+      fiatCurrency?: RampFiatCurrency;
+      destinationWalletAddress?: string;
+      providerCustomerReference?: string;
+    }
+  | {
+      direction: "offramp";
+      providerData: CounterpartyProviderData;
+      cryptoToken?: string;
+      fiatCurrency?: RampFiatCurrency;
+      destinationCountry?: CountryCode;
+      providerCustomerReference?: string;
+    };
 
 /**
  * Full provider contract: rail discovery plus the runtime quote/execute flow.
@@ -240,8 +291,13 @@ export interface ValidateCounterpartyOptions {
 export interface RampProvider {
   id: RampProviderId;
   declaredRailSupport: ProviderDeclaredRailSupport;
-  _discoverRails(context: RampDiscoveryContext): Promise<void>;
-  distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation>;
+  /**
+   * Support-matrix generation hook (ramp-support script only, never runtime):
+   * fetches the provider's raw support dumps via `context.fetchJson` and
+   * persists them with `context.writeDump` (skipped when `context.offline`),
+   * then re-reads the dumps and distills them into the currency/rail snapshot.
+   */
+  discoverCurrencyAndRails(context: RampDiscoveryContext): Promise<ProviderRailSupportDistillation>;
   estimateOnramp(
     ctx: RampRuntimeContext,
     input: RampEstimateOnrampInput
