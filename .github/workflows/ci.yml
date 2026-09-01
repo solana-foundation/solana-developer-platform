@@ -259,6 +259,9 @@ jobs:
       - name: Check SecretRef serialization
         run: pnpm check:secretref-serialization
 
+      - name: Check UI flow matrix
+        run: pnpm check:ui-flow-coverage
+
   build_api:
     name: Build API
     runs-on: ubuntu-latest

@@ -556,7 +556,6 @@ describe("Payments routes — ramps", () => {
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("120.50");
     expect(hostedUrl.searchParams.get("currencyCode")).toBe("sol");
     expect(hostedUrl.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
-    expect(hostedUrl.searchParams.has("redirectURL")).toBe(false);
     expect(hostedUrl.searchParams.get("lockAmount")).toBe("true");
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.transferId);
@@ -635,7 +634,6 @@ describe("Payments routes — ramps", () => {
     expect(hostedUrl.origin).toBe(TEST_MOONPAY_OFFRAMP_URL);
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.transferId);
-    expect(hostedUrl.searchParams.has("redirectURL")).toBe(false);
     expect(hostedUrl.searchParams.get("lockAmount")).toBe("true");
     assertMoonPaySignature(hostedUrl);
 

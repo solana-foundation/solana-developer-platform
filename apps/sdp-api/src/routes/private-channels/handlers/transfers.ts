@@ -59,7 +59,7 @@ export async function createPrivateChannelTransfer(
       organizationId: context.auth.organizationId,
       projectId: context.projectId,
       channelId,
-      sdpUserId: context.actor.user_id,
+      sdpUserId: context.auth.id,
       wallet: context.wallet,
       signer: context.signer,
       recipient: context.recipient,
