@@ -213,7 +213,7 @@ apply only to providers SDP executes for.
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
 | 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
-| 9. Kora allowlist (executing providers only) | `infra/kora/kora.toml` + sdp-infra `kora/cloud-run/kora.{devnet,mainnet}.toml` | A vault-direct client must implement `sponsoredPrograms(cluster)`, a REQUIRED member of `EarnVaultDirectProvider`, and every id it returns has to be in all three allowlists or Kora rejects the whole sponsored transaction. `vault-sponsorship-allowlist.test.ts` fails CI on the local file; the deployed pair is covered by the live Kora smoke suite, which is opt-in until sdp-infra#64 deploys. Catalogue-only providers skip this step. |
+| 9. Kora allowlist (executing providers only) | `infra/kora/kora.toml` + sdp-infra `kora/cloud-run/kora.{devnet,mainnet}.toml` | A vault-direct client must implement `sponsoredPrograms(cluster)`, a REQUIRED member of `EarnVaultDirectProvider`, and every id it returns has to be in all three allowlists or Kora rejects the whole sponsored transaction. `vault-sponsorship-allowlist.test.ts` fails CI on the local file; the deployed pair is asserted on every `Kora / Live Smoke` run by `kora-earn-sponsorship.test.ts`, which reads the running service's `getConfig`: an allowlist merged in sdp-infra but not yet rolled out as a new Cloud Run revision still fails there, which is exactly the gap it exists to catch. Catalogue-only providers skip this step. |
 | 10. Execution wiring (executing providers only) | `packages/sdp-<id>` + `apps/sdp-api/src/services/earn-provider-registry.ts` + `apps/sdp-api/src/services/earn/execution-registry.ts` | The executing client lives in its own workspace package and registers TWICE in the API: the composition-root overlay in `earn-provider-registry.ts` (capability resolution for routes) and a branch in `resolveEarnExecutionClient` (the one place a provider id maps to an executing client; everything downstream narrows by capability, so no route edits). Plus workspace plumbing: `apps/sdp-api/package.json` and the Dockerfile's explicit package COPY list. Full walk in §4d. |
 
 ### The keyless variant (public API — Kamino)
@@ -316,7 +316,7 @@ missed):
 - `apps/sdp-api/src/services/earn/vault-sponsorship-allowlist.test.ts`: every
   program an executing provider's `sponsoredPrograms` declares must be in the
   local Kora harness allowlist (step 9's local half; the deployed pair is
-  asserted by the opt-in live smoke suite). It iterates the execution
+  asserted by the `Kora / Live Smoke` shard). It iterates the execution
   registry, so a new executing provider enrolls with no test edit.
 
 Verify with `pnpm --filter @sdp/earn typecheck && pnpm --filter @sdp/earn test`
@@ -496,8 +496,10 @@ machinery is provider-specific. What a new executing provider adds:
    `vault-sponsorship-allowlist.test.ts`, which iterates the execution
    registry and enrolls a new provider with no test edit) and sdp-infra's
    `kora/cloud-run/kora.devnet.toml` + `kora.mainnet.toml` (the deployed
-   services, asserted by the opt-in live Kora smoke suite). Miss one and Kora
-   rejects the whole sponsored transaction at request time.
+   services, asserted on every `Kora / Live Smoke` run against the live
+   `getConfig`, which catches an allowlist merged in sdp-infra but not yet
+   rolled out as a new revision). Miss one and Kora rejects the whole
+   sponsored transaction at request time.
 
 Wiring done, three gates still stand between the provider and moving money,
 in order:
