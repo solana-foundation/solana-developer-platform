@@ -11,6 +11,7 @@ import {
 } from "@sdp/types";
 import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,9 +36,10 @@ import {
   createEarnVaultDeposit,
   type EarnVaultDeposit,
   type EarnVaultDepositPreview,
+  type EarnVaultDepositRecord,
   fetchEarnVaultDepositByRequestId,
   fetchEarnVaultDepositPreview,
-  useEarnVaultDepositOutcomeToast,
+  useEarnVaultDepositOutcome,
 } from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 import {
@@ -367,7 +369,7 @@ function DepositWalletPicker({
         <label
           aria-disabled={!executable}
           className={cn(
-            "flex items-start gap-3 rounded-lg border p-4 transition-colors",
+            "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
             executable ? "cursor-pointer" : "cursor-not-allowed opacity-60",
             checked
               ? "border-primary bg-fill-subtle"
@@ -379,7 +381,7 @@ function DepositWalletPicker({
         >
           <input
             checked={checked}
-            className="mt-1"
+            className="size-4 shrink-0 accent-primary"
             disabled={!executable}
             name="earn-vault-deposit-wallet"
             onChange={() => onSelect(wallet.id)}
@@ -394,7 +396,7 @@ function DepositWalletPicker({
               {shortenMarketAddress(wallet.publicKey)}
             </span>
           </span>
-          <span className="shrink-0 text-right text-xs text-secondary">
+          <span className="shrink-0 text-right text-xs tabular-nums text-secondary">
             {!executable
               ? t("DashboardEarn.deposit.vaultWalletUnavailable")
               : balance === undefined
@@ -413,7 +415,7 @@ function DepositWalletPicker({
       <legend className="text-sm font-medium text-primary">
         {t("DashboardEarn.deposit.vaultWalletTitle")}
       </legend>
-      <div className="mt-2 max-h-64 space-y-2 overflow-y-auto">{walletContent}</div>
+      <div className="mt-2 flex max-h-52 flex-col gap-1.5 overflow-y-auto">{walletContent}</div>
     </fieldset>
   );
 }
@@ -473,61 +475,78 @@ function DepositResult({
   const { deposit } = outcome;
   // The absorbed case overrides the status copy: whatever state the movement is
   // in, the headline is that THIS submission moved nothing.
-  const copy = outcome.absorbedByApproval
+  const copy: {
+    body: string;
+    note: string;
+    status: string;
+    statusVariant: BadgeVariant;
+    title: string;
+  } = outcome.absorbedByApproval
     ? {
         title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
         body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
         note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
+        status: t("DashboardEarn.deposit.vaultAbsorbedStatus"),
+        statusVariant: "info",
       }
     : deposit.status === "confirmed"
       ? {
           title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
           body: t("DashboardEarn.deposit.vaultConfirmedBody"),
           note: t("DashboardEarn.deposit.vaultConfirmedNote"),
+          status: t("DashboardEarn.deposit.vaultConfirmedStatus"),
+          statusVariant: "success",
         }
       : deposit.status === "pending"
         ? {
             title: t("DashboardEarn.deposit.vaultPendingTitle"),
             body: t("DashboardEarn.deposit.vaultPendingBody"),
             note: t("DashboardEarn.deposit.vaultSettlingNote"),
+            status: t("DashboardEarn.deposit.vaultPendingStatus"),
+            statusVariant: "warning",
           }
         : {
             title: t("DashboardEarn.deposit.vaultDoneTitle"),
             body: t("DashboardEarn.deposit.vaultDoneBody"),
             note: t("DashboardEarn.deposit.vaultSettlingNote"),
+            status: t("DashboardEarn.deposit.vaultDoneStatus"),
+            statusVariant: "default",
           };
 
   return (
     <>
-      <h2
-        className="text-base font-medium text-primary outline-none"
-        data-modal-focus-target
-        tabIndex={-1}
-      >
-        {copy.title}
-      </h2>
-      <p className="mt-1 text-sm leading-6 text-secondary">{copy.body}</p>
+      <div className="flex items-center gap-2 pr-8">
+        <h2
+          className="text-base font-medium text-primary outline-none"
+          data-modal-focus-target
+          tabIndex={-1}
+        >
+          {copy.title}
+        </h2>
+        <Badge variant={copy.statusVariant}>{copy.status}</Badge>
+      </div>
+      <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
 
-      <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
-        <div className="flex items-baseline justify-between gap-5 py-1">
+      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+        <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-          <dd className="text-right text-primary">{deposit.strategy.name}</dd>
+          <dd className="max-w-64 text-right text-primary">{deposit.strategy.name}</dd>
         </div>
-        <div className="flex items-baseline justify-between gap-5 py-1">
+        <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
           <dd className="text-right tabular-nums text-primary">
             {formatTokenQuantity(outcome.amount, locale, symbol)}
           </dd>
         </div>
-        <div className="flex items-baseline justify-between gap-5 py-1">
+        <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
-          <dd className="text-right text-primary">{outcome.walletName}</dd>
+          <dd className="max-w-64 text-right text-primary">{outcome.walletName}</dd>
         </div>
-        <div className="flex items-baseline justify-between gap-5 py-1">
+        <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultTransaction")}</dt>
           <dd className="text-right">
             <a
-              className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
+              className="inline-flex items-center gap-1 text-secondary underline decoration-border-strong underline-offset-4 transition-colors hover:text-primary"
               href={explorerTxUrl(deposit.signature, deposit.strategy.hostCluster)}
               rel="noreferrer"
               target="_blank"
@@ -538,8 +557,8 @@ function DepositResult({
           </dd>
         </div>
       </dl>
-      <p className="mt-4 text-sm leading-6 text-secondary">{copy.note}</p>
-      <div className="mt-6 flex justify-end">
+      <p className="mt-4 text-xs leading-5 text-tertiary">{copy.note}</p>
+      <div className="mt-5 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
       </div>
     </>
@@ -548,8 +567,10 @@ function DepositResult({
 
 interface EarnVaultDepositOutcomeTrackerProps {
   movementId: string;
+  /** Keep the table's status badge current while the movement advances. */
+  onUpdated?: (deposit: EarnVaultDepositRecord) => void;
   /** Refresh the balances the deposit changed, then retire the tracker. */
-  onSettled?: () => void;
+  onSettled?: (deposit: EarnVaultDepositRecord) => void;
 }
 
 /**
@@ -557,8 +578,9 @@ interface EarnVaultDepositOutcomeTrackerProps {
  * modal, which is the whole point: the modal's success screen is a receipt for
  * a SIGNATURE, and the customer will close it long before the chain has
  * decided. Treasury mounts one of these per in-flight deposit; the canonical
- * hook polls until the movement is `confirmed` or `failed`, announces exactly
- * once, and then asks the caller to retire it.
+ * hook polls until the movement is `confirmed` or `failed`, reports the result
+ * exactly once, and then asks the caller to retire it. Treasury owns the
+ * visible status so a long-running chain operation never depends on a toast.
  *
  * Deliberately NOT mounted for an approval-gated deposit: that path throws
  * `SIGNING_PENDING` with an approval id and NO movement id, because no movement
@@ -570,8 +592,9 @@ interface EarnVaultDepositOutcomeTrackerProps {
 export function EarnVaultDepositOutcomeTracker({
   movementId,
   onSettled,
+  onUpdated,
 }: EarnVaultDepositOutcomeTrackerProps) {
-  useEarnVaultDepositOutcomeToast(movementId, onSettled);
+  useEarnVaultDepositOutcome(movementId, onSettled, onUpdated);
   return null;
 }
 
@@ -646,7 +669,7 @@ function DepositFundingTokenPicker({
 }) {
   if (tokens.length <= 1) return null;
   return (
-    <fieldset className="mt-5" disabled={disabled}>
+    <fieldset className="mt-4" disabled={disabled}>
       <legend className="text-sm font-medium text-primary">{title}</legend>
       <div className="mt-2 flex flex-wrap gap-2">
         {tokens.map((token) => {
@@ -654,7 +677,7 @@ function DepositFundingTokenPicker({
           return (
             <label
               className={cn(
-                "cursor-pointer rounded-lg border px-3 py-1.5 text-sm transition-colors",
+                "cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors",
                 checked
                   ? "border-primary bg-fill-subtle text-primary"
                   : "border-border-default text-secondary hover:border-border-strong"
@@ -698,6 +721,64 @@ function DepositSwapSummaryRow({
       <dt className="text-tertiary">{label}</dt>
       <dd className="text-right text-primary">{value}</dd>
     </div>
+  );
+}
+
+function DepositReviewDetails({
+  backing,
+  fundingSymbol,
+  minSharesOut,
+  quote,
+  selectedWallet,
+  swapActive,
+  symbol,
+}: {
+  backing: string | undefined;
+  fundingSymbol: string;
+  minSharesOut: string | undefined;
+  quote: VaultQuoteState<EarnVaultDepositPreview>;
+  selectedWallet: EarnFundingWallet | undefined;
+  swapActive: boolean;
+  symbol: string;
+}) {
+  const t = useTranslations();
+  const hasQuotedShares = quote.kind === "quoted" && quote.preview.blockingIssues.length === 0;
+  if (
+    !backing &&
+    !selectedWallet &&
+    !swapActive &&
+    minSharesOut === undefined &&
+    !hasQuotedShares
+  ) {
+    return null;
+  }
+
+  return (
+    <dl className="mt-5 flex flex-col gap-1 border-y border-border-default py-3 text-sm">
+      {backing ? (
+        <div className="flex items-baseline justify-between gap-5 py-0.5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultBacking")}</dt>
+          <dd className="text-right text-primary">{backing}</dd>
+        </div>
+      ) : null}
+      {selectedWallet ? (
+        <div className="flex items-baseline justify-between gap-5 py-0.5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
+          <dd className="text-right text-primary">
+            {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
+          </dd>
+        </div>
+      ) : null}
+      <DepositSwapSummaryRow
+        active={swapActive}
+        label={t("DashboardEarn.deposit.vaultSwapRow")}
+        value={t("DashboardEarn.deposit.vaultSwapVia", {
+          source: fundingSymbol,
+          target: symbol,
+        })}
+      />
+      <DepositQuoteSummaryRows minSharesOut={minSharesOut} quote={quote} />
+    </dl>
   );
 }
 
@@ -944,8 +1025,8 @@ export function EarnVaultDepositModal({
 
   if (outcome) {
     return (
-      <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
-        <div className="p-6" ref={contentRef}>
+      <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="sm">
+        <div className="p-5" ref={contentRef}>
           <DepositResult outcome={outcome} symbol={fundingSymbol} onClose={onClose} />
         </div>
       </Modal>
@@ -953,16 +1034,16 @@ export function EarnVaultDepositModal({
   }
 
   return (
-    <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
+    <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="sm">
       <div aria-busy={submitting} className="p-6" ref={contentRef}>
         <h2
-          className="text-base font-medium text-primary outline-none"
+          className="pr-8 text-lg font-medium leading-6 text-primary outline-none"
           data-modal-focus-target
           tabIndex={-1}
         >
           {modalLabel}
         </h2>
-        <p className="mt-1 text-sm leading-6 text-secondary">
+        <p className="mt-1 max-w-sm text-sm leading-5 text-secondary">
           {t("DashboardEarn.deposit.vaultWalletBody")}
         </p>
 
@@ -1001,7 +1082,7 @@ export function EarnVaultDepositModal({
           tokens={fundingTokens}
         />
 
-        <div className="mt-5 space-y-2">
+        <div className="mt-4 flex flex-col gap-2">
           <Label htmlFor="earn-vault-deposit-amount">
             {t("DashboardEarn.deposit.vaultAmount", { token: fundingSymbol })}
           </Label>
@@ -1019,7 +1100,7 @@ export function EarnVaultDepositModal({
             placeholder="0.00"
             value={amountInput}
           />
-          <div id="earn-vault-deposit-balance" className="min-h-5 text-xs text-tertiary">
+          <div id="earn-vault-deposit-balance" className="sr-only">
             {selectedWallet
               ? selectedWalletBalance === undefined
                 ? t("DashboardEarn.deposit.vaultBalanceUnknown")
@@ -1040,35 +1121,15 @@ export function EarnVaultDepositModal({
           ) : null}
         </div>
 
-        <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
-          <div className="flex items-baseline justify-between gap-5 py-1">
-            <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-            <dd className="text-right text-primary">{strategy.name}</dd>
-          </div>
-          {backing ? (
-            <div className="flex items-baseline justify-between gap-5 py-1">
-              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultBacking")}</dt>
-              <dd className="text-right text-primary">{backing}</dd>
-            </div>
-          ) : null}
-          {selectedWallet ? (
-            <div className="flex items-baseline justify-between gap-5 py-1">
-              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
-              <dd className="text-right text-primary">
-                {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
-              </dd>
-            </div>
-          ) : null}
-          <DepositSwapSummaryRow
-            active={swapActive}
-            label={t("DashboardEarn.deposit.vaultSwapRow")}
-            value={t("DashboardEarn.deposit.vaultSwapVia", {
-              source: fundingSymbol,
-              target: symbol,
-            })}
-          />
-          <DepositQuoteSummaryRows minSharesOut={minSharesOut} quote={quote} />
-        </dl>
+        <DepositReviewDetails
+          backing={backing}
+          fundingSymbol={fundingSymbol}
+          minSharesOut={minSharesOut}
+          quote={quote}
+          selectedWallet={selectedWallet}
+          swapActive={swapActive}
+          symbol={symbol}
+        />
 
         <DepositQuoteNotices quote={quote} />
 
@@ -1089,7 +1150,7 @@ export function EarnVaultDepositModal({
           />
         ) : null}
 
-        <p id="earn-vault-deposit-note" className="mt-4 text-sm leading-6 text-secondary">
+        <p id="earn-vault-deposit-note" className="mt-3 text-xs leading-5 text-tertiary">
           {t("DashboardEarn.deposit.vaultConfirmNote")}
         </p>
         {submitError ? (
@@ -1101,11 +1162,12 @@ export function EarnVaultDepositModal({
           </p>
         ) : null}
 
-        <div className="mt-6 flex justify-end gap-2">
-          <Button disabled={submitting} onClick={onClose} variant="outline">
-            {t("DashboardEarn.deposit.cancel")}
-          </Button>
-          <Button disabled={submitting || submitBlocked} onClick={() => void submit()}>
+        <div className="mt-5">
+          <Button
+            className="!w-full"
+            disabled={submitting || submitBlocked}
+            onClick={() => void submit()}
+          >
             {submitting ? (
               <span className="inline-flex items-center gap-2">
                 <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />

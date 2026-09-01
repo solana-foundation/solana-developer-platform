@@ -8,6 +8,7 @@ import {
 } from "@sdp/types";
 import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
-import { formatTokenQuantity, tokenSymbol } from "./earn-format";
+import { formatTokenQuantity } from "./earn-format";
 import {
   applyIdempotencyKeyOutcome,
   resolveHeldIdempotencyKey,
@@ -32,7 +33,7 @@ import {
   type EarnVaultWithdrawalPreview,
   fetchEarnVaultWithdrawalPreview,
   fetchEarnVaultWithdrawalsByRequestId,
-  useEarnVaultWithdrawalOutcomeToast,
+  useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
 import {
   floorForTolerance,
@@ -222,26 +223,18 @@ function TransactionLink({
   signature: string;
   environment: SdpEnvironment;
 }) {
-  const t = useTranslations();
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
 
   return (
-    <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
-      <div className="flex items-baseline justify-between gap-5 py-1">
-        <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-        <dd className="text-right">
-          <a
-            className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
-            href={explorerTxUrl(signature, cluster)}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {shortenMarketAddress(signature)}
-            <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-          </a>
-        </dd>
-      </div>
-    </dl>
+    <a
+      className="inline-flex items-center gap-1 text-secondary underline decoration-border-strong underline-offset-4 transition-colors hover:text-primary"
+      href={explorerTxUrl(signature, cluster)}
+      rel="noreferrer"
+      target="_blank"
+    >
+      {shortenMarketAddress(signature)}
+      <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+    </a>
   );
 }
 
@@ -249,30 +242,38 @@ function WithdrawalResult({
   outcome,
   environment,
   onClose,
+  position,
 }: {
   outcome: WithdrawalOutcome;
   environment: SdpEnvironment;
   onClose: () => void;
+  position: EarnVaultPosition;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const asset = earnMintAsset(position.tokenMint);
+  const positionName = position.label || shortenMarketAddress(position.providerReference);
 
   if (outcome.kind === "approval_pending") {
     return (
       <>
-        <h2
-          className="text-base font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {t("DashboardEarn.vaultWithdraw.approvalTitle")}
-        </h2>
-        <p className="mt-1 text-sm leading-6 text-secondary">
+        <div className="flex items-center gap-2 pr-8">
+          <h2
+            className="text-base font-medium text-primary outline-none"
+            data-modal-focus-target
+            tabIndex={-1}
+          >
+            {t("DashboardEarn.vaultWithdraw.approvalTitle")}
+          </h2>
+          <Badge variant="warning">{t("DashboardEarn.vaultWithdraw.approvalStatus")}</Badge>
+        </div>
+        <p className="mt-2 text-sm leading-5 text-secondary">
           {t("DashboardEarn.vaultWithdraw.approvalBody")}
         </p>
         {outcome.approvalRequestId || outcome.walletOperationId ? (
-          <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
+          <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
             {outcome.approvalRequestId ? (
-              <div className="flex items-start justify-between gap-5 py-1">
+              <div className="flex items-start justify-between gap-5">
                 <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
                 <dd className="max-w-64 break-all text-right text-primary">
                   {outcome.approvalRequestId}
@@ -280,7 +281,7 @@ function WithdrawalResult({
               </div>
             ) : null}
             {outcome.walletOperationId ? (
-              <div className="flex items-start justify-between gap-5 py-1">
+              <div className="flex items-start justify-between gap-5">
                 <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
                 <dd className="max-w-64 break-all text-right text-primary">
                   {outcome.walletOperationId}
@@ -289,7 +290,7 @@ function WithdrawalResult({
             ) : null}
           </dl>
         ) : null}
-        <div className="mt-6 flex justify-end">
+        <div className="mt-5 flex justify-end">
           <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
         </div>
       </>
@@ -297,39 +298,92 @@ function WithdrawalResult({
   }
 
   const { withdrawal } = outcome;
-  const copy = outcome.absorbedByApproval
+  const copy: {
+    body: string;
+    note: string;
+    status: string;
+    statusVariant: BadgeVariant;
+    title: string;
+  } = outcome.absorbedByApproval
     ? {
         title: t("DashboardEarn.vaultWithdraw.absorbedTitle"),
         body: t("DashboardEarn.vaultWithdraw.absorbedBody"),
         note: t("DashboardEarn.vaultWithdraw.absorbedNote"),
+        status: t("DashboardEarn.vaultWithdraw.absorbedStatus"),
+        statusVariant: "info",
       }
     : withdrawal.status === "requested"
       ? {
           title: t("DashboardEarn.vaultWithdraw.recordedTitle"),
           body: t("DashboardEarn.vaultWithdraw.recordedBody"),
           note: t("DashboardEarn.vaultWithdraw.recordedNote"),
+          status: t("DashboardEarn.vaultWithdraw.recordedStatus"),
+          statusVariant: "warning",
         }
-      : {
-          title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
-          body: t("DashboardEarn.vaultWithdraw.submittedBody"),
-          note: t("DashboardEarn.vaultWithdraw.settlingNote"),
-        };
+      : withdrawal.status === "confirmed"
+        ? {
+            title: t("DashboardEarn.vaultWithdraw.confirmedTitle"),
+            body: t("DashboardEarn.vaultWithdraw.confirmedBody"),
+            note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+            status: t("DashboardEarn.vaultWithdraw.confirmedStatus"),
+            statusVariant: "warning",
+          }
+        : withdrawal.status === "finalized"
+          ? {
+              title: t("DashboardEarn.vaultWithdraw.finalizedTitle"),
+              body: t("DashboardEarn.vaultWithdraw.finalizedBody"),
+              note: t("DashboardEarn.vaultWithdraw.finalizedNote"),
+              status: t("DashboardEarn.vaultWithdraw.finalizedStatus"),
+              statusVariant: "success",
+            }
+          : {
+              title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
+              body: t("DashboardEarn.vaultWithdraw.submittedBody"),
+              note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+              status: t("DashboardEarn.vaultWithdraw.submittedStatus"),
+              statusVariant: "default",
+            };
 
   return (
     <>
-      <h2
-        className="text-base font-medium text-primary outline-none"
-        data-modal-focus-target
-        tabIndex={-1}
-      >
-        {copy.title}
-      </h2>
-      <p className="mt-1 text-sm leading-6 text-secondary">{copy.body}</p>
-      {withdrawal.status === "requested" ? null : (
-        <TransactionLink environment={environment} signature={withdrawal.signature} />
-      )}
-      <p className="mt-4 text-sm leading-6 text-secondary">{copy.note}</p>
-      <div className="mt-6 flex justify-end">
+      <div className="flex items-center gap-2 pr-8">
+        <h2
+          className="text-base font-medium text-primary outline-none"
+          data-modal-focus-target
+          tabIndex={-1}
+        >
+          {copy.title}
+        </h2>
+        <Badge variant={copy.statusVariant}>{copy.status}</Badge>
+      </div>
+      <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
+
+      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
+          <dd className="max-w-64 text-right text-primary">{positionName}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.sharesLabel")}</dt>
+          <dd className="text-right tabular-nums text-primary">
+            {formatProviderAmount(withdrawal.shares, locale)}
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
+          <dd className="text-right text-primary">{asset.symbol}</dd>
+        </div>
+        {withdrawal.status === "requested" ? null : (
+          <div className="flex items-baseline justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
+            <dd className="text-right">
+              <TransactionLink environment={environment} signature={withdrawal.signature} />
+            </dd>
+          </div>
+        )}
+      </dl>
+      <p className="mt-4 text-xs leading-5 text-tertiary">{copy.note}</p>
+      <div className="mt-5 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
       </div>
     </>
@@ -338,8 +392,10 @@ function WithdrawalResult({
 
 interface EarnVaultWithdrawalOutcomeTrackerProps {
   movementId: string;
+  /** Keep the table's status badge current while the movement advances. */
+  onUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
   /** Refresh the balances the exit changed, then retire the tracker. */
-  onSettled?: () => void;
+  onSettled?: (withdrawal: EarnVaultWithdrawal) => void;
 }
 
 /**
@@ -350,8 +406,9 @@ interface EarnVaultWithdrawalOutcomeTrackerProps {
 export function EarnVaultWithdrawalOutcomeTracker({
   movementId,
   onSettled,
+  onUpdated,
 }: EarnVaultWithdrawalOutcomeTrackerProps) {
-  useEarnVaultWithdrawalOutcomeToast(movementId, onSettled);
+  useEarnVaultWithdrawalOutcome(movementId, onSettled, onUpdated);
   return null;
 }
 
@@ -415,7 +472,6 @@ export function EarnVaultWithdrawModal({
   );
 
   const asset = earnMintAsset(position.tokenMint);
-  const shareSymbol = tokenSymbol(position.shareMint);
   const sharesValidation = validateVaultWithdrawalShares(sharesInput);
   const totalShares = position.shares;
   const withdrawableShares = position.withdrawableShares;
@@ -557,7 +613,12 @@ export function EarnVaultWithdrawModal({
     return (
       <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
         <div className="p-6" ref={contentRef}>
-          <WithdrawalResult environment={environment} onClose={onClose} outcome={outcome} />
+          <WithdrawalResult
+            environment={environment}
+            onClose={onClose}
+            outcome={outcome}
+            position={position}
+          />
         </div>
       </Modal>
     );
@@ -573,11 +634,11 @@ export function EarnVaultWithdrawModal({
         >
           {modalLabel}
         </h2>
-        <p className="mt-1 text-sm leading-6 text-secondary">
+        <p className="mt-2 max-w-md text-sm leading-5 text-secondary">
           {t("DashboardEarn.vaultWithdraw.body", { token: asset.symbol })}
         </p>
 
-        <div className="mt-5 space-y-2">
+        <div className="mt-5 flex flex-col gap-2">
           <div className="flex items-end justify-between gap-3">
             <Label htmlFor="earn-vault-withdraw-shares">
               {t("DashboardEarn.vaultWithdraw.sharesLabel")}
@@ -625,19 +686,13 @@ export function EarnVaultWithdrawModal({
           ) : null}
         </div>
 
-        <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
-          <div className="flex items-baseline justify-between gap-5 py-1">
-            <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-            <dd className="text-right text-primary">
-              {position.label || shortenMarketAddress(position.providerReference)}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-5 py-1">
+        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+          <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
             <dd className="text-right text-primary">{asset.symbol}</dd>
           </div>
           {position.tokenValue !== undefined ? (
-            <div className="flex items-baseline justify-between gap-5 py-1">
+            <div className="flex items-baseline justify-between gap-5">
               <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.positionValue")}</dt>
               <dd className="text-right tabular-nums text-primary">
                 {formatTokenQuantity(position.tokenValue, locale, asset.symbol)}
@@ -645,7 +700,7 @@ export function EarnVaultWithdrawModal({
             </div>
           ) : null}
           {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-            <div className="flex items-baseline justify-between gap-5 py-1">
+            <div className="flex items-baseline justify-between gap-5">
               <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
               <dd className="text-right tabular-nums text-primary">
                 {formatTokenQuantity(quote.preview.assetsOut, locale, asset.symbol)}
@@ -653,7 +708,7 @@ export function EarnVaultWithdrawModal({
             </div>
           ) : null}
           {minAmountOut !== undefined ? (
-            <div className="flex items-baseline justify-between gap-5 py-1">
+            <div className="flex items-baseline justify-between gap-5">
               <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
               <dd className="text-right tabular-nums text-primary">
                 {formatTokenQuantity(minAmountOut, locale, asset.symbol)}
@@ -681,8 +736,8 @@ export function EarnVaultWithdrawModal({
           />
         ) : null}
 
-        <p className="mt-4 text-sm leading-6 text-secondary" id="earn-vault-withdraw-note">
-          {t("DashboardEarn.vaultWithdraw.confirmNote", { symbol: shareSymbol })}
+        <p className="mt-4 text-xs leading-5 text-tertiary" id="earn-vault-withdraw-note">
+          {t("DashboardEarn.vaultWithdraw.confirmNote")}
         </p>
         {submitError ? (
           <p
@@ -697,15 +752,16 @@ export function EarnVaultWithdrawModal({
           <Button disabled={submitting} onClick={onClose} variant="outline">
             {t("DashboardEarn.deposit.cancel")}
           </Button>
-          <Button disabled={submitting || submitBlocked} onClick={() => void submit()}>
-            {submitting ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
-                {t("DashboardEarn.vaultWithdraw.submitting")}
-              </span>
-            ) : (
-              t("DashboardEarn.vaultWithdraw.submit")
-            )}
+          <Button
+            disabled={submitting || submitBlocked}
+            iconLeft={
+              submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null
+            }
+            onClick={() => void submit()}
+          >
+            {submitting
+              ? t("DashboardEarn.vaultWithdraw.submitting")
+              : t("DashboardEarn.vaultWithdraw.submit")}
           </Button>
         </div>
       </div>

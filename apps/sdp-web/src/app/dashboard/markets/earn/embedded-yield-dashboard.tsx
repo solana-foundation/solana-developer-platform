@@ -6,7 +6,6 @@ import {
   ArrowRightIcon,
   CircleDollarSignIcon,
   Code2Icon,
-  ImageIcon,
   InfoIcon,
   Layers3Icon,
 } from "lucide-react";
@@ -35,7 +34,6 @@ import { useEarnExternalWalletPositionSummary } from "./earn-program-data";
 
 const ONBOARDING_STEPS = [
   { icon: CircleDollarSignIcon, key: "DashboardMarkets.earnProgram.flowSelect" },
-  { icon: ImageIcon, key: "DashboardMarkets.earnProgram.flowPreview" },
   { icon: Code2Icon, key: "DashboardMarkets.earnProgram.flowIntegrate" },
 ] as const satisfies ReadonlyArray<{ icon: typeof Layers3Icon; key: MessageKey }>;
 
@@ -87,7 +85,10 @@ function PortfolioOnboarding({ configureHref }: { configureHref: string }) {
           {t("DashboardMarkets.earnProgram.introDescription")}
         </p>
 
-        <ol className="mt-8 grid w-full items-center gap-3 text-left md:grid-cols-[minmax(0,1fr)_1.5rem_minmax(0,1fr)_1.5rem_minmax(0,1fr)] md:gap-0">
+        <ol
+          aria-label={t("DashboardMarkets.earnProgram.setupProgress")}
+          className="mt-8 grid w-full items-center gap-3 text-left md:grid-cols-[minmax(0,1fr)_1.5rem_minmax(0,1fr)] md:gap-0"
+        >
           {ONBOARDING_STEPS.map(({ icon: Icon, key }, index) => (
             <Fragment key={key}>
               <li className="flex h-20 min-w-0 items-center gap-4 rounded-xl border-2 border-border-default px-4">

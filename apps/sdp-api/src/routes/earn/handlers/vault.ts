@@ -57,6 +57,7 @@ import {
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
+import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { refusedBuildMessage } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import {
@@ -816,7 +817,13 @@ export async function getEarnVaultDeposit(c: AppContext) {
     throw notFound("Earn vault deposit");
   }
 
-  const response: EarnVaultDepositResponse = { deposit: toEarnVaultDepositRecord(movement) };
+  // The scope checks happen before the chain read so a guessed movement id
+  // cannot use RPC timing to learn that another workspace's transaction exists.
+  // The scheduled sweep remains the recovery path if this best-effort read fails.
+  const currentMovement = await reconcileEarnVaultMovementReadThrough(c.env, movement);
+  const response: EarnVaultDepositResponse = {
+    deposit: toEarnVaultDepositRecord(currentMovement),
+  };
   return success(c, response);
 }
 
@@ -1518,8 +1525,9 @@ export async function getEarnVaultWithdrawal(c: AppContext) {
     throw notFound("Earn vault withdrawal");
   }
 
+  const currentMovement = await reconcileEarnVaultMovementReadThrough(c.env, movement);
   const response: EarnVaultWithdrawalResponse = {
-    withdrawal: toEarnVaultWithdrawal(movement),
+    withdrawal: toEarnVaultWithdrawal(currentMovement),
   };
   return success(c, response);
 }

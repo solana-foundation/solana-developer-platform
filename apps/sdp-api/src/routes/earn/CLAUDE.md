@@ -600,12 +600,12 @@ organization's own custody wallets.
     environment, direction, created_at DESC, id DESC)`) is what orders this
     page; the sweep, replay, chain and per-position lookups each have their own
     index — none of them can.
-- `GET /vault-deposits/:movementId` — one recorded movement, **DB only**, no
-  catalogue join and no chain read. This is what makes `POST`'s
-  record-before-broadcast answerable: a caller can hold a movement id for a
-  transaction whose fate it never learned, and the every-minute reconciliation
-  sweep is the only thing that settles it. `pending` here means "SDP could not
-  establish that this reached the network", never "failed".
+- `GET /vault-deposits/:movementId`: one recorded movement with a scoped,
+  fail-soft read-through of its exact Solana signature. Chain truth advances the
+  same guarded ledger row immediately; an RPC failure returns the last durable
+  row and leaves recovery to the scheduled reconciler. The read never
+  rebroadcasts or expires an unknown signature. `pending` here means "SDP could
+  not establish that this reached the network", never "failed".
   - **No provider gate**, same ADR 0002 reason as `/vault-positions`: it reports
     on money that has already left the customer's wallet, so un-offering the
     provider must not take away the answer to "did my deposit land". Deliberately
@@ -662,11 +662,11 @@ to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
 the hourly sync keeps its small dependency surface.
 
 The every-minute vault reconciliation worker consumes
-`idx_earn_movements_unsettled` in bounded pages. Both the embedded cron
-and the dedicated Cloud Run job call the same reconciler: it queries the exact
-recorded signature, confirms landed transactions, rebroadcasts the recorded
-signed bytes while the blockhash remains valid, and marks an expired, unlanded
-movement failed. Never rebuild a transaction during recovery.
+`idx_earn_movements_unsettled` in bounded pages. Both the embedded cron and the
+dedicated Cloud Run job use the same transition service as the interactive
+detail reads. The job additionally rebroadcasts the recorded signed bytes while
+the blockhash remains valid and marks an expired, unlanded movement failed.
+Never rebuild a transaction during recovery.
 
 ### Vault withdrawals — the exit half (PRO-1702)
 
@@ -700,10 +700,11 @@ movement failed. Never rebuild a transaction during recovery.
   - The wire exposes the movement signature directly for explorer links.
     `confirmed` remains non-terminal; only `finalized` and `failed` stop polling.
 - `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
-  reads mirrored: DB only, NO provider gate (ADR 0002), same four 404 scoping
-  rules with `direction = 'withdrawal'`, same wallet-binding scope through
-  `listReadableEarnVaultWallets`. `?requestId=` serves the one logical
-  withdrawal, and `?settled=` uses the ledger terminal set
+  reads mirrored: the list is DB discovery and the scoped detail is a fail-soft
+  signature read-through. Both have NO provider gate (ADR 0002), the same four
+  404 scoping rules with `direction = 'withdrawal'`, and the same wallet-binding
+  scope through `listReadableEarnVaultWallets`. `?requestId=` serves the one
+  logical withdrawal, and `?settled=` uses the ledger terminal set
   (`finalized|failed`), not the deposits' legacy one.
 
 ### External-wallet (caller-signed) routes — the B2B2C money path (PRO-1722)
