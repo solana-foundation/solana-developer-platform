@@ -6,11 +6,18 @@ on:
       release_sha:
         description: "Exact release commit to build and deploy"
         type: string
-        required: true
+        required: false
+        default: ""
       release_tag:
         description: "Version tag that must resolve to release_sha"
         type: string
-        required: true
+        required: false
+        default: ""
+      image_sha:
+        description: "Merge commit to build and deploy continuously (caller has already gated on the dev smoke)"
+        type: string
+        required: false
+        default: ""
     secrets:
       DOPPLER_TOKEN_CI:
         required: true
@@ -36,7 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      (inputs.release_sha != '' || github.event_name == 'workflow_dispatch')
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -68,7 +77,8 @@ jobs:
     name: Gate on dev smoke
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
-      github.event_name != 'workflow_dispatch'
+      github.event_name != 'workflow_dispatch' &&
+      inputs.image_sha == ''
     uses: ./.github/workflows/sdp-dev-smoke.yml
     secrets:
       DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
@@ -81,11 +91,12 @@ jobs:
     if: >-
       always() &&
       (needs.smoke.result == 'success' ||
-       (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
+       (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped') ||
+       (inputs.image_sha != '' && github.event_name != 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
-       (github.event_name == 'workflow_dispatch' && inputs.image_sha != ''))
+       (inputs.image_sha != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 150
     environment: production
@@ -97,6 +108,7 @@ jobs:
       JOB: sdp-prod-api-public-cron
       WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
+      BUILD_IMAGE: ${{ (inputs.release_sha != '' || (inputs.image_sha != '' && github.event_name != 'workflow_dispatch')) && 'true' || 'false' }}
     steps:
       - name: Validate deploy image SHA
         env:
@@ -144,7 +156,7 @@ jobs:
         uses: imjasonh/setup-crane@31b88efe9de28ae0ffa220711af4b60be9435f6e # v0.4
 
       - name: Log in to GHCR
-        if: ${{ inputs.release_sha != '' }}
+        if: ${{ env.BUILD_IMAGE == 'true' }}
         run: crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
 
       # The release image was scanned, built with SLSA provenance + SBOM
@@ -195,6 +207,49 @@ jobs:
           crane tag "${DEST_BASE}@${SRC_DIGEST}" "${VERSION}"
           echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
 
+      # The merge image was built, scanned, attested, and keyless-signed by
+      # release-images.yml on the push to main. Verify that signature against
+      # this exact commit and promote the SAME digest — merge deploys ship the
+      # identical trust chain as releases, never a rebuild.
+      - name: Verify and promote merge image
+        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
+        timeout-minutes: 45
+        run: |
+          set -euo pipefail
+          SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
+          SRC_DIGEST=""
+          for attempt in $(seq 1 60); do
+            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${DEPLOY_IMAGE_SHA}" 2>/dev/null)"; then
+              break
+            fi
+            echo "merge image not in GHCR yet (attempt ${attempt}/60); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${SRC_DIGEST}" ]]; then
+            echo "merge image ${SRC_BASE}:${DEPLOY_IMAGE_SHA} never appeared in GHCR." >&2
+            exit 1
+          fi
+          verified=""
+          for attempt in $(seq 1 10); do
+            if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/heads/main" \
+              --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
+              verified=true
+              break
+            fi
+            echo "signature not verifiable yet (attempt ${attempt}/10); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${verified}" ]]; then
+            echo "cosign verification failed for ${SRC_BASE}@${SRC_DIGEST}." >&2
+            exit 1
+          fi
+          DEST_BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
+          cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
+          echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
+
+
       - name: Resolve immutable deploy image
         run: |
           set -euo pipefail
@@ -222,17 +277,28 @@ jobs:
           echo "IMAGE=${resolved_image}" >> "${GITHUB_ENV}"
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Gate merge deploys on pending migrations
+        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          last_release="$(git describe --tags --abbrev=0 --match 'v*')"
+          if ! git diff --quiet "${last_release}"..HEAD -- apps/sdp-api/src/db/migrations; then
+            echo "::error::Migrations changed since ${last_release}. Schema changes deploy through a release (migrations stay human-reviewed and human-run); cut the release to ship them, after which merge deploys resume."
+            exit 1
+          fi
+
       # Rollback path (workflow_dispatch by git sha): the AR image must carry
-      # the signature copied at its original promotion. An image that predates
+      # the signature copied at its original promotion — release-tag or
+      # merge-to-main identity both satisfy the policy. An image that predates
       # signed promotion fails here by design; break-glass is documented in the
       # HOO-991 design note.
       - name: Verify rollback image signature
-        if: ${{ inputs.release_sha == '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
           cosign verify "${IMAGE}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@refs/tags/v.+$" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@(refs/tags/v.+|refs/heads/main)$" \
             --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"
 
       - name: Run database migrations
@@ -458,7 +524,8 @@ jobs:
     needs: [smoke, deploy]
     if: >-
       always() &&
-      github.repository == 'solana-foundation/solana-developer-platform'
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      (inputs.release_sha != '' || github.event_name == 'workflow_dispatch')
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
