@@ -259,12 +259,20 @@ export function useCounterpartyRequirements(
   );
 
   const fields = useMemo<RequirementField[]>(
-    () => (data?.status === "collect" ? data.fields : []),
+    () =>
+      data?.status === "collect" ||
+      data?.status === "collect_counterparty" ||
+      data?.status === "collect_account"
+        ? data.fields
+        : [],
     [data]
   );
 
   const isComplete = useMemo(
-    () => fields.every((field) => requirementFieldError(field, collectedData[field.key]) === null),
+    () =>
+      fields
+        .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
+        .every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
 
@@ -281,7 +289,10 @@ export function useCounterpartyRequirements(
     fields,
     collectedData,
     setField,
-    needsCollection: data?.status === "collect",
+    needsCollection:
+      data?.status === "collect" ||
+      data?.status === "collect_counterparty" ||
+      data?.status === "collect_account",
     isComplete,
     isResolved: data !== undefined,
     blockReason,

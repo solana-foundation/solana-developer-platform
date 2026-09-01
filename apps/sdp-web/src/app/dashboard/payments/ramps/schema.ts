@@ -143,6 +143,9 @@ export function requirementFieldError(
   field: RequirementField,
   raw: string | undefined
 ): string | null {
+  if (field.kind === "address") {
+    throw new Error(`Address field "${field.key}" is validated through its nested fields.`);
+  }
   const value = raw === undefined ? "" : raw.trim();
   if (value.length === 0) {
     return field.required ? `${field.label} is required.` : null;
@@ -151,6 +154,15 @@ export function requirementFieldError(
     return field.options.some((option) => option.value === value)
       ? null
       : `Select a valid ${field.label.toLowerCase()}.`;
+  }
+  if (field.kind === "date") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {
+      return `${field.label} must be a valid date.`;
+    }
+    if (field.before !== undefined && value >= field.before) {
+      return `${field.label} must be before ${field.before}.`;
+    }
+    return null;
   }
   if (field.minLength !== undefined && value.length < field.minLength) {
     return `${field.label} must be at least ${field.minLength} characters.`;

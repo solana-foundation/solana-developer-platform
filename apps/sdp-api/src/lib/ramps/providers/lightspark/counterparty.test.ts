@@ -51,11 +51,52 @@ function businessCounterparty(): Counterparty {
 }
 
 describe("lightsparkCounterpartyRequirements", () => {
-  it("returns ready for onramp", () => {
+  it("collects individual PII when the counterparty has no provider customer", () => {
+    const requirements = lightsparkCounterpartyRequirements(counterparty(), {
+      direction: "onramp",
+      providerData: {},
+    });
+
+    if (requirements.status !== "collect_counterparty") {
+      throw new Error("Expected collect_counterparty requirements");
+    }
+    expect(requirements.fields.map((field) => field.key)).toEqual([
+      "customer.fullName",
+      "customer.birthDate",
+      "customer.nationality",
+      "customer.region",
+      "customer.email",
+      "customer.address",
+    ]);
+    const addressField = requirements.fields.at(-1);
+    if (addressField?.kind !== "address") {
+      throw new Error("Expected an address field");
+    }
+    expect(addressField.fields.map((field) => field.key)).toEqual([
+      "customer.address.line1",
+      "customer.address.city",
+      "customer.address.subdivisionCode",
+      "customer.address.postalCode",
+      "customer.address.countryCode",
+    ]);
+  });
+
+  it("collects individual PII for offramp too when no provider customer exists", () => {
+    const requirements = lightsparkCounterpartyRequirements(counterparty(), {
+      direction: "offramp",
+      providerData: {},
+      fiatCurrency: "USD",
+    });
+
+    expect(requirements.status).toBe("collect_counterparty");
+  });
+
+  it("returns ready for onramp once the provider customer is linked", () => {
     expect(
       lightsparkCounterpartyRequirements(counterparty(), {
         direction: "onramp",
         providerData: {},
+        providerCustomerReference: "Customer:cus_123",
       })
     ).toEqual({ provider: "lightspark", direction: "onramp", status: "ready" });
   });
@@ -65,6 +106,7 @@ describe("lightsparkCounterpartyRequirements", () => {
       lightsparkCounterpartyRequirements(counterparty(), {
         direction: "offramp",
         providerData: {},
+        providerCustomerReference: "Customer:cus_123",
       })
     ).toThrowError(SdpPaymentsError);
   });
@@ -74,11 +116,12 @@ describe("lightsparkCounterpartyRequirements", () => {
       direction: "offramp",
       providerData: {},
       fiatCurrency: "USD",
+      providerCustomerReference: "Customer:cus_123",
     });
 
-    expect(requirements.status).toBe("collect");
-    if (requirements.status !== "collect") {
-      throw new Error("Expected collect requirements");
+    expect(requirements.status).toBe("collect_account");
+    if (requirements.status !== "collect_account") {
+      throw new Error("Expected collect_account requirements");
     }
     expect(requirements.fields.map((field) => field.key)).toEqual([
       "paymentRails",
@@ -111,10 +154,11 @@ describe("lightsparkCounterpartyRequirements", () => {
       direction: "offramp",
       providerData: {},
       fiatCurrency: "GBP",
+      providerCustomerReference: "Customer:cus_123",
     });
 
-    if (requirements.status !== "collect") {
-      throw new Error("Expected collect requirements");
+    if (requirements.status !== "collect_account") {
+      throw new Error("Expected collect_account requirements");
     }
     expect(requirements.fields.map((field) => field.key)).toEqual([
       "paymentRails",
@@ -148,6 +192,7 @@ describe("lightsparkCounterpartyRequirements", () => {
         },
       },
       fiatCurrency: "USD",
+      providerCustomerReference: "Customer:cus_123",
     });
 
     expect(requirements).toEqual({ provider: "lightspark", direction: "offramp", status: "ready" });
@@ -158,19 +203,20 @@ describe("lightsparkCounterpartyRequirements", () => {
       direction: "offramp",
       providerData: {},
       fiatCurrency: "TRY",
+      providerCustomerReference: "Customer:cus_123",
     });
 
     expect(requirements.status).toBe("unsupported");
   });
 
-  it("collects businessInfo fields for a business on-ramp without a Grid customer", () => {
+  it("collects businessInfo fields for a business without a provider customer", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "onramp",
       providerData: {},
     });
 
-    if (requirements.status !== "collect") {
-      throw new Error("Expected collect requirements");
+    if (requirements.status !== "collect_counterparty") {
+      throw new Error("Expected collect_counterparty requirements");
     }
     expect(requirements.fields.map((field) => field.key)).toEqual([
       "businessLegalName",
@@ -179,54 +225,26 @@ describe("lightsparkCounterpartyRequirements", () => {
     ]);
   });
 
-  it("returns ready for a business on-ramp once the Grid customer exists", () => {
+  it("returns ready for a business on-ramp once the provider customer is linked", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "onramp",
-      providerData: { lightspark: { customerId: "Customer:cus_123" } },
+      providerData: {},
+      providerCustomerReference: "Customer:cus_123",
     });
 
     expect(requirements).toEqual({ provider: "lightspark", direction: "onramp", status: "ready" });
   });
 
-  it("collects businessInfo fields before the payout fields for a business without a Grid customer", () => {
+  it("collects only payout fields once the business has a provider customer", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "offramp",
       providerData: {},
       fiatCurrency: "USD",
+      providerCustomerReference: "Customer:cus_123",
     });
 
-    if (requirements.status !== "collect") {
-      throw new Error("Expected collect requirements");
-    }
-    expect(requirements.fields.map((field) => field.key)).toEqual([
-      "businessLegalName",
-      "businessTaxId",
-      "businessIncorporatedOn",
-      ...[
-        "paymentRails",
-        "accountNumber",
-        "bankAccountType",
-        "bankName",
-        "fiToFiInformation",
-        "intermediaryBankName",
-        "intermediaryRoutingNumber",
-        "routingNumber",
-        "country",
-        "iban",
-        "swiftCode",
-      ],
-    ]);
-  });
-
-  it("collects only payout fields once the business has a Grid customer", () => {
-    const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
-      direction: "offramp",
-      providerData: { lightspark: { customerId: "Customer:cus_123" } },
-      fiatCurrency: "USD",
-    });
-
-    if (requirements.status !== "collect") {
-      throw new Error("Expected collect requirements");
+    if (requirements.status !== "collect_account") {
+      throw new Error("Expected collect_account requirements");
     }
     expect(requirements.fields.map((field) => field.key)).toEqual([
       "paymentRails",
