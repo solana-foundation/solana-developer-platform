@@ -267,68 +267,44 @@ function ClassificationCellSkeleton() {
 export function IssuanceDetailSkeleton() {
   return (
     <div className="space-y-4 pb-8" data-loading-layout="issuance-detail" aria-busy="true">
-      {/* Mirrors the settled asset-management header (AssetProfileHeaderCard at the
-          default appearance): a 208px mark bleeding 40px off the card's left edge
-          with the ticker just inside it above lg, the same mark as a 56px avatar in
-          flow below it, centred type either way, and the actions floated into the
-          far corner above lg / under a divider below it. Built from the header's own
-          spacing classes rather than measured heights, so the two can't drift. */}
-      <header className="relative isolate overflow-hidden rounded-2xl border border-border-default bg-surface-raised p-5">
-        <SkeletonBlock className="pointer-events-none absolute top-1/2 -left-10 -z-10 hidden size-52 -translate-y-1/2 rounded-full lg:block" />
-        <div className="absolute top-1/2 left-[172px] hidden -translate-y-1/2 lg:block">
-          <SkeletonBlock className="h-8 w-20 rounded-full" />
-        </div>
-
-        <SkeletonBlock className="mx-auto mb-4 size-14 rounded-full lg:hidden" />
-
-        <div className="flex flex-col items-center text-center">
-          {/* Category · subtype as 10px uppercase metadata behind a 14px glyph. */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <SkeletonBlock className="size-3.5 shrink-0 rounded-[3px]" />
-              <SkeletonBlock className="h-2.5 w-20" />
-            </div>
-            <div className="h-3.5 w-px bg-border-subtle" />
-            <div className="flex items-center gap-1.5">
-              <SkeletonBlock className="size-3.5 shrink-0 rounded-[3px]" />
-              <SkeletonBlock className="h-2.5 w-24" />
-            </div>
-          </div>
-
-          <div className="mt-2.5 flex max-w-full flex-col items-center gap-1">
-            {/* The 32px/1.05 asset name, then the ticker where it stacks below lg. */}
-            <SkeletonBlock className="h-[34px] w-64 max-w-full" />
-            <SkeletonBlock className="h-8 w-20 rounded-full lg:hidden" />
-          </div>
-
-          {/* Address and token id, both elided to one line and each with its own
-              copy button: one row from sm up, stacked below it. */}
-          <div
-            className="mt-3 flex min-h-12 flex-col items-center gap-2 sm:min-h-5 sm:flex-row sm:gap-4"
-            data-loading-meta-line="issuance-detail"
-          >
-            <div className="flex items-center gap-1.5" data-loading-address-row>
-              <SkeletonBlock className="size-3 shrink-0 rounded-[2px]" />
-              <SkeletonBlock className="h-3.5 w-24" />
-              <SkeletonBlock className="size-5 shrink-0 rounded-md" />
-            </div>
-            <div className="flex items-center gap-1.5" data-loading-token-id-row>
-              <SkeletonBlock className="size-3 shrink-0 rounded-[2px]" />
-              <SkeletonBlock className="h-3.5 w-36" />
-              <SkeletonBlock className="size-5 shrink-0 rounded-md" />
+      {/* Mirrors the settled asset-management header (AssetProfileHeader): a 44px
+          mark beside the name and ticker chip, the meta and identifier lines under
+          them, and the action buttons in the top-right corner. Built from the
+          header's own spacing classes rather than measured heights, so the two
+          can't drift. */}
+      <header className="rounded-2xl border border-border-default bg-surface-raised p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-start gap-4">
+            <SkeletonBlock className="size-11 shrink-0 rounded-full" />
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <div className="flex items-center gap-2.5">
+                {/* The 24px asset name with the ticker chip beside it. */}
+                <SkeletonBlock className="h-8 w-52 max-w-full" />
+                <SkeletonBlock className="h-5 w-16 rounded-md" />
+              </div>
+              {/* Classification · status · deploy date. */}
+              <div className="flex items-center" data-loading-meta-line="issuance-detail">
+                <SkeletonBlock className="h-5 w-72 max-w-full" />
+              </div>
+              {/* Mint and token id, each elided to one line with its own copy button. */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <div className="flex items-center gap-1.5" data-loading-address-row>
+                  <SkeletonBlock className="h-3.5 w-24" />
+                  <SkeletonBlock className="size-5 shrink-0 rounded-md" />
+                </div>
+                <div className="flex items-center gap-1.5" data-loading-token-id-row>
+                  <SkeletonBlock className="h-3.5 w-36" />
+                  <SkeletonBlock className="size-5 shrink-0 rounded-md" />
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* API Playground + Explorer, as type rather than buttons. */}
-          <div className="mt-4 flex w-full items-center justify-center gap-6 border-t border-border-subtle pt-4 lg:hidden">
-            <SkeletonBlock className="h-5 w-32" />
-            <SkeletonBlock className="h-5 w-20" />
+          {/* API Playground + Explorer as buttons in the corner. */}
+          <div className="flex shrink-0 items-center gap-2">
+            <SkeletonBlock className="h-8 w-32 rounded-lg" />
+            <SkeletonBlock className="h-8 w-24 rounded-lg" />
           </div>
-        </div>
-
-        <div className="absolute right-5 bottom-5 hidden items-center gap-5 lg:flex">
-          <SkeletonBlock className="h-5 w-32" />
-          <SkeletonBlock className="h-5 w-20" />
         </div>
       </header>
 
