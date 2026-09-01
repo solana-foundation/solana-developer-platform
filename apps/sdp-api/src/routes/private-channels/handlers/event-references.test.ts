@@ -130,10 +130,12 @@ describe("Private Channels event references handler", () => {
       .run();
     await db
       .prepare(
-        `INSERT INTO private_channel_users (id, organization_id, project_id, user_id)
-         VALUES (?, ?, ?, ?)`
+        `INSERT INTO private_channel_users
+           (id, organization_id, project_id, user_id, instance_id, name, is_default,
+            spc_user_id, spc_username, spc_credential_ciphertext)
+         VALUES (?, ?, ?, ?, ?, 'Ada Lovelace', true, 'spc_event_refs', 'ada', 'encrypted')`
       )
-      .bind(PRIVATE_CHANNEL_USER_ID, ORGANIZATION_ID, PROJECT_ID, USER_ID)
+      .bind(PRIVATE_CHANNEL_USER_ID, ORGANIZATION_ID, PROJECT_ID, USER_ID, INSTANCE_ID)
       .run();
     await db
       .prepare(
@@ -202,14 +204,14 @@ describe("Private Channels event references handler", () => {
     expect(body.data.references).toEqual({});
   });
 
-  it("returns wallet labels but not channels for a user with no memberships", async () => {
+  it("uses the project's default identity channels for an SDP actor", async () => {
     const app = buildApp(NON_MEMBER_USER_ID);
     const response = await app.request("/events/references", {}, env);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: PrivateChannelEventReferencesEnvelope };
     expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
-    expect(body.data.references[CHANNEL_ID]).toBeUndefined();
-    expect(body.data.references[INSTANCE_ID]).toBeUndefined();
+    expect(body.data.references[CHANNEL_ID]).toBe("Treasury");
+    expect(body.data.references[INSTANCE_ID]).toBe("http://gw");
   });
 
   it("returns channel, wallet, member, token, and instance names for a project member", async () => {

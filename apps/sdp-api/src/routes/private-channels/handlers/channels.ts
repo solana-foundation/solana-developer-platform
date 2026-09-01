@@ -61,41 +61,35 @@ export async function createChannel(c: ValidatedBodyContext<typeof createChannel
     payload: { name: channel.name },
   });
 
-  // Auto-join the creator to the channel they just made when they are a real
-  // user (Clerk/session). The instance-connect flow onboards every human
-  // connector as a workspace member, so this lookup succeeds for anyone who
-  // connected via the UI. Skipped for API-key auth: no user identity to
-  // attribute, and the API key's owner can add themselves via /memberships.
-  if (auth.userId) {
-    const userRepo = getPrivateChannelUserRepository(c);
-    const creator = await userRepo.findByProjectAndUser(
-      { organizationId: instance.organization_id, projectId: instance.project_id },
-      auth.userId
-    );
-    if (creator) {
-      const membership = await userRepo.addMembership({
-        channelId: channel.id,
-        privateChannelUserId: creator.id,
-        addedBy: auth.userId,
-      });
-      await emitMember(
-        c,
-        {
-          organizationId: instance.organization_id,
-          projectId: instance.project_id,
-          instanceId: instance.id,
-        },
-        PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_ADDED,
-        {
-          channelId: channel.id,
-          payload: {
-            privateChannelUserId: creator.id,
-            targetUserId: creator.user_id,
-            membershipId: membership.id,
-          },
-        }
-      );
+  // New channels start on the project's default principal. Additional
+  // principals receive explicit access from the Principals screen.
+  const userRepo = getPrivateChannelUserRepository(c);
+  const principal = await userRepo.findDefaultPrincipal(
+    { organizationId: instance.organization_id, projectId: instance.project_id },
+    instance.id
+  );
+  if (principal) {
+    const membership = await userRepo.addMembership({
+      channelId: channel.id,
+      privateChannelUserId: principal.id,
+      addedBy: auth.userId ?? null,
+    });
+    if (!membership) {
+      throw conflict("The default Private Channels identity is not active");
     }
+    await emitMember(
+      c,
+      {
+        organizationId: instance.organization_id,
+        projectId: instance.project_id,
+        instanceId: instance.id,
+      },
+      PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_ADDED,
+      {
+        channelId: channel.id,
+        payload: { principalId: principal.id, membershipId: membership.id },
+      }
+    );
   }
 
   return created(c, toPrivateChannelDto(channel));

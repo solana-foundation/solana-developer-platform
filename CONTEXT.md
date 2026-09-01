@@ -36,6 +36,14 @@ _Avoid_: Privacy product, private workspace, private payment rail
 The external Private Channels environment connected to an SDP project for its private operations.
 _Avoid_: Private channel, SDP project, provider account
 
+**Private Channels Principal**:
+A project-scoped financial or operational participant used to authenticate with a **Private Channel Instance**. A project has one default principal and may add named principals for real legal, fund, customer, or operational boundaries. A principal is not an SDP user or API key.
+_Avoid_: Invited user, employee account, SDP actor, member invitation
+
+**Enrolled Private Channel Wallet**:
+An SDP custody wallet that has proved control to a **Private Channel Instance** and is bound to one **Private Channels Principal** for that instance.
+_Avoid_: Invited wallet, user identity, external wallet
+
 **Counterparty Account**:
 A payment destination or payout instrument owned by a **Counterparty**. A Solana crypto-wallet **Counterparty Account** stores the recipient wallet owner address; token accounts are derived during payment execution.
 _Avoid_: Custody wallet, token account, provider account data
@@ -100,6 +108,10 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - A **Private Channels Integration** contributes private capabilities to existing SDP product flows instead of creating a separate product surface.
 - A **Private Channels Integration** belongs to the **Privacy Integration** provider family.
 - A **Private Channels Integration** connects an SDP project to a **Private Channel Instance**.
+- A **Private Channels Integration** has one default **Private Channels Principal** and may have additional named principals.
+- An **Enrolled Private Channel Wallet** belongs to exactly one **Private Channels Principal** for a connected instance.
+- SDP users and API keys authorize and initiate operations; they are not **Private Channels Principals**.
+- SPC cannot delete principals. Legacy per-user SPC identities may remain orphaned upstream; SDP stops using them and does not create new per-user credentials.
 - A **Counterparty** may have one or more **Counterparty Accounts**.
 - A **Recurring Payment** pays a **Counterparty Account** from an SDP custody source wallet.
 - A **Wallet Operation Envelope** describes exactly one **Wallet Operation**.

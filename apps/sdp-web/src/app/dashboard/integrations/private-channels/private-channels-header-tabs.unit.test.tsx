@@ -54,13 +54,13 @@ function renderTabs(isConnected: boolean) {
 }
 
 describe("PrivateChannelsHeaderTabs", () => {
-  it("shows Members next to Overview and the transfer flow tabs for connected instances", () => {
+  it("shows Identities next to Overview and the transfer flow tabs for connected instances", () => {
     renderTabs(true);
 
     // Instance, Channels and Events have no tab — they're reached from Overview links.
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Overview",
-      "Members",
+      "Identities",
       "Deposit",
       "Transfer",
       "Withdraw",

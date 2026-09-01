@@ -14,7 +14,7 @@ import {
   WALLET_OPERATION_FAMILIES,
   WALLET_OPERATION_TYPES,
 } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { getI64Encoder, getU64Encoder } from "@solana/kit";
 import { z } from "zod";
 import { SOL_MINT } from "@/services/payment-operation.service";
