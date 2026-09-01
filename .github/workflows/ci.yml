@@ -254,7 +254,8 @@ jobs:
 
   test_packages:
     name: Unit Tests (packages)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJson('["self-hosted", "sdp-dev-vm"]') }}
+    timeout-minutes: 30
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       TEST_WORKSPACE_SPLIT: rest
