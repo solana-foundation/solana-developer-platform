@@ -1,8 +1,4 @@
-import {
-  OFFRAMP_SUPPORT,
-  ONRAMP_SUPPORT,
-  type RampFiatCurrency,
-} from "@sdp/types/generated/ramp-support";
+import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 

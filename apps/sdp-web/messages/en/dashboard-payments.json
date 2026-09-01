@@ -585,9 +585,7 @@
       "selectProvider": "Select provider",
       "counterpartyIdPlaceholder": "Counterparty ID (e.g. cpty_abc123)",
       "selectFiatCurrency": "Select fiat currency",
-      "onrampRedirectUrlPlaceholder": "https://app.example.com/payments/onramp/complete",
-      "createOfframpQuote": "Create Offramp Quote",
-      "offrampRedirectUrlPlaceholder": "https://app.example.com/payments/offramp/complete"
+      "createOfframpQuote": "Create Offramp Quote"
     },
     "commandCenter": {
       "moveMoney": "Move money",

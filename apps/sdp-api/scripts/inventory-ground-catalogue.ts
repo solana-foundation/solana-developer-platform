@@ -13,7 +13,7 @@
  * is deliberately separate: strategy reads hide Aave- and Morpho-related rows
  * after they have been indexed.
  *
- * Layout mirrors discover-ramp-rails.ts:
+ * Layout mirrors ramp-support.ts:
  *   - raw dumps            apps/sdp-api/.earn-catalogue/raw/   (gitignored)
  *   - inventory snapshots  apps/sdp-api/.earn-catalogue/ground.<env>.inventory.json (committed)
  *   - rendered report      docs/earn/ground-catalogue-inventory.md (committed)

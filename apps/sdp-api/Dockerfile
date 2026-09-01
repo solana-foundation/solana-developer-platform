@@ -33,6 +33,7 @@ COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
 COPY packages/sdp-spc-withdraw/package.json ./packages/sdp-spc-withdraw/
 COPY packages/sdp-kamino/package.json ./packages/sdp-kamino/
 COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/
+COPY packages/sdp-veda/package.json ./packages/sdp-veda/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -59,6 +60,7 @@ COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
 COPY packages/sdp-spc-withdraw ./packages/sdp-spc-withdraw
 COPY packages/sdp-kamino ./packages/sdp-kamino
 COPY packages/bigint-buffer ./packages/bigint-buffer
+COPY packages/sdp-veda ./packages/sdp-veda
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs

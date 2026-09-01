@@ -28,7 +28,7 @@ import {
   RAMP_PROVIDER_SUPPORT_DETAILS,
   RAMP_SUPPORT_HASH,
   type RampFiatCurrency,
-} from "@sdp/types/generated/ramp-support";
+} from "@sdp/types/generated/ramp";
 import type {
   OfframpPairSupport,
   OnrampPairSupport,
