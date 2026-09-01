@@ -3,7 +3,7 @@
 import type { Counterparty, CounterpartyResponse, CreateCounterpartyRequest } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -46,7 +46,7 @@ export function CounterpartyCreateProvider({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [createdCounterparty, setCreatedCounterparty] = useState<Counterparty | null>(null);
 
-  async function submit() {
+  const submit = useCallback(async () => {
     const basicsResult = basics.validate();
     if (!basicsResult.ok) return;
 
@@ -83,9 +83,9 @@ export function CounterpartyCreateProvider({
     } finally {
       setSubmitting(false);
     }
-  }
+  }, [basics, t]);
 
-  function finish() {
+  const finish = useCallback(() => {
     if (onCreated && createdCounterparty) {
       onCreated(createdCounterparty);
       return;
@@ -93,19 +93,22 @@ export function CounterpartyCreateProvider({
 
     router.refresh();
     router.push("/dashboard/payments/counterparty");
-  }
+  }, [onCreated, createdCounterparty, router]);
+
+  const value = useMemo(
+    () => ({
+      basics,
+      submit,
+      submitting,
+      submitError,
+      createdCounterparty,
+      finish,
+    }),
+    [basics, submit, submitting, submitError, createdCounterparty, finish]
+  );
 
   return (
-    <CounterpartyCreateContext.Provider
-      value={{
-        basics,
-        submit,
-        submitting,
-        submitError,
-        createdCounterparty,
-        finish,
-      }}
-    >
+    <CounterpartyCreateContext.Provider value={value}>
       {children}
     </CounterpartyCreateContext.Provider>
   );
