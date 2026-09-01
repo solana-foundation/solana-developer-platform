@@ -83,7 +83,7 @@ import {
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
 import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admission";
-import { parseParams, parseQuery } from "./shared";
+import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
 import { hydrateVaultPositions } from "./vault-position-hydration";
 
@@ -211,6 +211,7 @@ export async function createEarnVaultDeposit(
       amount: parsedData.amount,
       requestId,
       minSharesOut: parsedData.minSharesOut,
+      ...(resolved.swap === null ? {} : { swap: resolved.swap }),
       userId: auth.userId ?? null,
       apiKeyId: auth.apiKeyId ?? null,
     },
@@ -276,6 +277,8 @@ interface EarnVaultDepositResolved {
   shareMint: string;
   requestId: string | null;
   idempotencyFingerprint: string;
+  /** Swap-funded deposit: pay in `sourceTokenMint`, swap, then deposit. */
+  swap: { sourceTokenMint: string; slippageBps: number } | null;
 }
 
 /**
@@ -390,6 +393,12 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // the door out.
   const provider = await assertVaultDepositAdmissible(c, strategy);
 
+  // Swap funding, normalized before the gate so policy decides on what
+  // actually leaves the wallet. A source equal to the vault's own token is a
+  // no-op (null), and an unsupported mint is refused here, before any
+  // custody-shaped work.
+  const swap = resolveDepositSwapRequest(body, environment, tokenMint);
+
   // The wallet must be one SDP can sign for, and the binding must carry a WRITE
   // scope. `wallets:read` on a binding only proves the key may LOOK at the
   // wallet — a read-only-bound key was previously able to spend from it. Global
@@ -413,6 +422,7 @@ export async function extractEarnVaultDepositPolicyCandidate(
     tokenMint,
     shareMint,
     requestId,
+    swap,
     idempotencyFingerprint: buildEarnVaultDepositFingerprint({
       environment,
       provider,
@@ -420,6 +430,13 @@ export async function extractEarnVaultDepositPolicyCandidate(
       custodyWalletId: wallet.id,
       amount: body.amount,
       minSharesOut: body.minSharesOut ?? null,
+      // Only when swap-funded, so every pre-existing fingerprint stays valid.
+      ...(swap === null
+        ? {}
+        : {
+            swapSourceTokenMint: swap.sourceTokenMint,
+            swapSlippageBps: swap.slippageBps,
+          }),
     }),
   };
 
@@ -440,9 +457,11 @@ export async function extractEarnVaultDepositPolicyCandidate(
       // families would need `program` added to it.
       operationFamily: "program",
       operationType: "earn_vault_deposit",
-      // The DEPOSIT token, from the catalogue row. Named so an asset-scoped
-      // rule ("never move USDT") can see what is actually moving.
-      asset: tokenMint,
+      // What is actually MOVING OUT of the wallet: the deposit token from the
+      // catalogue row ordinarily, or the swap's source token for a swap-funded
+      // deposit — an asset-scoped rule ("never move USDT") must see the token
+      // the wallet pays with, not the one the vault eventually receives.
+      asset: swap === null ? tokenMint : swap.sourceTokenMint,
       amount: body.amount,
       // The vault account, which is emphatically NOT a payable address —
       // funds sent to it directly are destroyed. It is carried because a
@@ -457,6 +476,16 @@ export async function extractEarnVaultDepositPolicyCandidate(
         environment,
         depositStyle: "vault_direct",
         minSharesOut: body.minSharesOut ?? null,
+        // The swap leg, stated for approvers: a swap-funded deposit spends
+        // `asset` above and deposits `depositTokenMint` into the vault.
+        swap:
+          swap === null
+            ? null
+            : {
+                sourceTokenMint: swap.sourceTokenMint,
+                slippageBps: swap.slippageBps,
+                depositTokenMint: tokenMint,
+              },
       },
       providerExtensions: {},
     },

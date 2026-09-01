@@ -1,4 +1,5 @@
 import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
+import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
@@ -24,6 +25,90 @@ export const EARN_DEPOSIT_TOKEN_SYMBOLS = [
   "USDT",
 ] as const satisfies readonly WellKnownTokenSymbol[];
 export type EarnDepositTokenSymbol = (typeof EARN_DEPOSIT_TOKEN_SYMBOLS)[number];
+
+/**
+ * Stablecoins a deposit may be FUNDED in, whatever the strategy's own deposit
+ * token: when they differ, the deposit transaction gets a Jupiter swap
+ * prepended so the vault still receives its own token (PRO: swap-funded
+ * deposits). A separate registry from `EARN_DEPOSIT_TOKEN_SYMBOLS` on purpose —
+ * that one states what vaults TAKE, this one states what customers may PAY
+ * WITH, and the two move independently (PYUSD funds deposits today while no
+ * catalogued vault is denominated in it).
+ */
+export const EARN_SWAP_SOURCE_TOKEN_SYMBOLS = [
+  "USDC",
+  "USDG",
+  "PYUSD",
+  "USDT",
+] as const satisfies readonly WellKnownTokenSymbol[];
+export type EarnSwapSourceTokenSymbol = (typeof EARN_SWAP_SOURCE_TOKEN_SYMBOLS)[number];
+
+/** One cluster's deployment of a swap-source stablecoin, picker-ready. */
+export interface EarnSwapSourceToken {
+  symbol: EarnSwapSourceTokenSymbol;
+  mint: string;
+  decimals: number;
+}
+
+/**
+ * The swap-source stablecoins deployed on one cluster, mint-resolved.
+ *
+ * Derived from `WELL_KNOWN_TOKENS`, never hand-listed, so a token absent from
+ * a cluster (USDT has no devnet mint) simply does not appear rather than
+ * appearing with another cluster's address. Order follows
+ * `EARN_SWAP_SOURCE_TOKEN_SYMBOLS`, which pickers may rely on.
+ */
+export function earnSwapSourceTokens(cluster: SolanaCluster): EarnSwapSourceToken[] {
+  const tokens: EarnSwapSourceToken[] = [];
+  for (const symbol of EARN_SWAP_SOURCE_TOKEN_SYMBOLS) {
+    const mints: { readonly [K in SolanaCluster]?: { address: string; decimals: number } } =
+      WELL_KNOWN_TOKENS[symbol].mints;
+    const mint = mints[cluster];
+    if (mint) tokens.push({ symbol, mint: mint.address, decimals: mint.decimals });
+  }
+  return tokens;
+}
+
+/**
+ * Default and bounds for the swap leg's slippage tolerance, in basis points.
+ * The default is deliberately tight (2 bps): every supported pair is
+ * USD-stable on both sides, so a healthy route clears well inside it and the
+ * remainder left in the owner's wallet stays negligible. The ceiling is a
+ * hard cap the API enforces (1..500): a stable-stable pair that needs more
+ * than 5% tolerance is depegging, and moving money into a depegging token
+ * silently is not a service.
+ */
+export const EARN_SWAP_DEFAULT_SLIPPAGE_BPS = 2;
+export const EARN_SWAP_MAX_SLIPPAGE_BPS = 500;
+
+/**
+ * The swap leg SDP attached (or, for a split flow, built) for a swap-funded
+ * deposit — what was paid, what the vault deposit was sized to, and what the
+ * route looked like when it was quoted. Reported on build responses only;
+ * the durable movement stays denominated in the vault's own token.
+ */
+export interface EarnDepositSwap {
+  /** Mint the customer pays with. */
+  sourceTokenMint: string;
+  /** What the swap consumes, source-token units, decimal string. */
+  sourceAmount: string;
+  /**
+   * The deposit amount the transaction encodes, vault-token units. Sized to
+   * the swap's WORST-CASE output (the quote minus the slippage tolerance), so
+   * the deposit instruction can never find less than it needs: any output
+   * above this floor stays in the owner's token account rather than failing
+   * the transaction.
+   */
+  depositAmount: string;
+  /** The swap's quoted output at the live rate, vault-token units. */
+  quotedAmount: string;
+  /** Slippage tolerance the swap leg encodes, basis points. */
+  slippageBps: number;
+  /** Quoted price impact as a decimal ratio string, e.g. "0.0001". */
+  priceImpactPct: string;
+  /** Venue labels along the quoted route, for display and diagnostics. */
+  routeLabels: string[];
+}
 
 export const EARN_STRATEGY_SOURCE_KINDS = ["defi", "rwa"] as const;
 export type EarnStrategySourceKind = (typeof EARN_STRATEGY_SOURCE_KINDS)[number];
@@ -253,8 +338,22 @@ export interface EarnExternalWalletPositionSummaryResponse {
 export interface EarnVaultDepositRequest {
   strategyId: string;
   custodyWalletId: string;
+  /**
+   * Decimal string. Vault-token units ordinarily; SOURCE-token units when
+   * `sourceTokenMint` requests a swap-funded deposit (the amount is what
+   * leaves the wallet, and the vault deposit is sized from the swap quote).
+   */
   amount: string;
   minSharesOut?: string;
+  /**
+   * Fund the deposit in a different stablecoin (one of
+   * `earnSwapSourceTokens(cluster)`), atomically swapped to the vault's own
+   * token via Jupiter inside the same transaction. Omitted — or equal to the
+   * strategy's deposit mint — means no swap.
+   */
+  sourceTokenMint?: string;
+  /** Swap slippage tolerance, bps (default EARN_SWAP_DEFAULT_SLIPPAGE_BPS). */
+  swapSlippageBps?: number;
 }
 
 export const EARN_VAULT_MOVEMENT_STATUSES = [
@@ -436,6 +535,12 @@ export interface EarnExternalWalletDepositTransactionResponse {
     amount: string;
     /** Slippage floor encoded in the transaction, share units, or null. */
     minSharesOut: string | null;
+    /**
+     * Present when the build was swap-funded: a Jupiter swap from
+     * `swap.sourceTokenMint` is prepended inside this same transaction, and
+     * `amount` above equals `swap.depositAmount`.
+     */
+    swap?: EarnDepositSwap;
     strategy: {
       id: string;
       name: string;
@@ -443,6 +548,45 @@ export interface EarnExternalWalletDepositTransactionResponse {
       providerReference: string;
       hostCluster: SolanaCluster;
     };
+  };
+}
+
+/**
+ * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
+ * swap-funded deposit could not fit in ONE Solana transaction (the packet
+ * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
+ * instructions). Nothing is persisted for this answer: SDP hands back an
+ * unsigned SWAP-ONLY transaction for the owner to sign and broadcast itself,
+ * plus the exact follow-up deposit to build once the swap lands. The follow-up
+ * build then takes the ordinary single-transaction path.
+ */
+export interface EarnExternalWalletDepositSwapSplitResponse {
+  /** Discriminates from the atomic response, which carries `transaction`. */
+  requiresSeparateSwap: true;
+  swap: EarnDepositSwap & {
+    /**
+     * Base64 wire bytes of the UNSIGNED swap transaction (fee payer is the
+     * owner). The owner signs and broadcasts it itself — it moves only the
+     * owner's own funds between the owner's own token accounts, so SDP
+     * records nothing for it.
+     */
+    transaction: string;
+    /** Block height after which these exact bytes can no longer land. */
+    lastValidBlockHeight: string;
+  };
+  /** The deposit build to request after the swap is confirmed. */
+  followUp: {
+    strategyId: string;
+    /** `swap.depositAmount`, restated as the follow-up build's `amount`. */
+    amount: string;
+    /**
+     * The share floor from the ORIGINAL request, carried through so the
+     * follow-up build keeps the protection the caller asked for (production
+     * requires one, and without it Kamino's pinned SDK builds the legacy
+     * floor-less deposit instruction). Absent only when the original request
+     * carried none.
+     */
+    minSharesOut?: string;
   };
 }
 

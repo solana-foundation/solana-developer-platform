@@ -479,6 +479,36 @@ organization's own custody wallets.
     customer's lamports. The single exception is an exit that CREATES the account
     itself while consolidating, where its own rent payer funded it seconds
     earlier and the recorded value describes an older instance.
+- **Swap-funded deposits (both deposit surfaces).** `sourceTokenMint` (+
+  optional `swapSlippageBps`, default 2, enforced 1..500) lets a caller pay in one of
+  the supported swap-source stablecoins (`EARN_SWAP_SOURCE_TOKEN_SYMBOLS` in
+  `@sdp/types`: USDC/USDG/PYUSD/USDT, mint-resolved per cluster by
+  `earnSwapSourceTokens`) while the vault still receives its own token: the
+  API fetches raw instructions from Jupiter's Router
+  (`services/earn/jupiter-swap.service.ts`, `GET {JUPITER_SWAP_API_URL}/build`,
+  keyed by `JUPITER_SWAP_API_KEY`, fail-closed 503 when unset) and PREPENDS
+  them to the provider plan, so swap and deposit land atomically or not at
+  all. The shared normalization is `resolveDepositSwapRequest`
+  (handlers/shared.ts): unsupported mint 400s, source == deposit mint is a
+  no-op, a tolerance without a source 400s. Rules that follow from ExactIn
+  routing: `amount` becomes the SOURCE amount; the deposit is sized to the
+  swap's `otherAmountThreshold` (the guaranteed floor — output above it stays
+  in the owner's token account, bounded by the tolerance); the ledger row
+  records the DEPOSIT amount in the deposit mint, never the source amount,
+  because `denomination` is the deposit mint. The custody path's policy
+  envelope names the SOURCE mint as `asset` (that is what leaves the wallet)
+  with the swap stated in `context.swap`, its fingerprint gains
+  `swapSourceTokenMint`/`swapSlippageBps` ONLY when swapping (legacy
+  fingerprints stay byte-identical), and it forces `wallet-pays` — Jupiter's
+  programs are not paymaster-allowlisted. Oversize handling after lookup-table
+  compression (`VaultTransactionTooLargeError`): one re-quote at
+  `RETRY_SWAP_MAX_ACCOUNTS`, then the custody path refuses (400) while the
+  external-wallet build answers the SPLIT contract —
+  `{ requiresSeparateSwap: true, swap: { transaction, … }, followUp }`, an
+  unsigned swap-only transaction the owner signs and broadcasts itself
+  (persisting nothing), followed by an ordinary unswapped build for
+  `followUp.amount`. Jupiter routes MAINNET only: on devnet the mints are
+  pinned per cluster but Jupiter answers "not tradable", surfaced as a 400.
 - `POST /vault-deposit-previews` — the deposit QUOTE: what the vault's own
   live accounting would mint for `{strategyId, amount}`, from which the
   dashboard derives its `minSharesOut` floor. A live read SHAPED LIKE MONEY-IN:
