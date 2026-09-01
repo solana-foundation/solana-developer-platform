@@ -11,9 +11,9 @@ import type { VedaRuntime } from "./types";
  * no network.
  *
  * It is also the ONLY thing in this repository that can prove the Veda
- * integration works end to end, because `VEDA_DEPLOYMENTS` is empty: until Veda
- * confirms addresses there is nothing to point the offline tests at, and
- * everything below takes its deployment from the environment instead.
+ * integration works end to end. It takes its deployment from the environment
+ * rather than `VEDA_DEPLOYMENTS`, so it can exercise a candidate deployment
+ * (mainnet, when Veda names a production vault) before it is committed.
  *
  *   VEDA_SMOKE_RPC_URL=https://api.devnet.solana.com \
  *   VEDA_SMOKE_VAULT_PROGRAM=<address> \

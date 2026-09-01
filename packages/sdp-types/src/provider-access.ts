@@ -98,10 +98,20 @@ export function earnProgramSolanaPayoutTokens(provider: string): readonly EarnPo
  * provider and never decided whether it was public" cannot happen quietly.
  */
 export const EARN_PROVIDER_SURFACING = {
+  // Surfaced 2026-08-31: the Veda vault-direct integration is live — the
+  // catalogue half reads vaults on chain (@sdp/earn), the execution half builds
+  // deposits and withdrawals (@sdp/veda).
+  //
+  // The shelf follows `VEDA_DEPLOYMENTS` (@sdp/types/veda-programs): devnet is
+  // confirmed, so the SANDBOX catalogue carries Veda's devnet Test Vault;
+  // mainnet is deliberately null, so every production pass reports
+  // PROVIDER_NOT_CONFIGURED and the production shelf stays empty until Veda
+  // names a production vault. Surfacing decides whether rows REACH customers,
+  // never whether any exist.
+  veda: true,
   // Registered so the sync and the registry-consistency test have an entry, but
   // never implemented — their clients throw NOT_IMPLEMENTED and they catalogue
   // nothing, so there is nothing to offer.
-  veda: false,
   upshift: false,
   perena: false,
   // Un-surfaced 2026-08-14: SDP is leading with the Kamino catalogue. Ground's
@@ -154,12 +164,16 @@ export const EARN_DEPOSIT_STYLES = EARN_EXECUTION_MODELS;
 export type EarnDepositStyle = (typeof EARN_DEPOSIT_STYLES)[number];
 
 export const EARN_PROVIDER_DEPOSIT_STYLE = {
+  // Implemented: a non-custodial BoringVault deposit signed from the
+  // organization's custody wallet, same shape as Kamino. Not a stub's
+  // placeholder — `@sdp/veda` builds the instruction and implements no
+  // portfolio-wallet capability, which is what the drift test asserts.
+  veda: "vault_direct",
   // Stubs. They implement no portfolio-wallet capability, so SDP holds no
   // fundable address for them and must not imply one — `vault_direct` is the
   // answer that promises nothing, not a claim about how they will eventually
   // work. Whoever implements one flips this and the capability together; the
   // drift test fails until they agree.
-  veda: "vault_direct",
   upshift: "vault_direct",
   perena: "vault_direct",
   ground: "custodial",

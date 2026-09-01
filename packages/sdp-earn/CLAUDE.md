@@ -133,9 +133,12 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
 ### 5b. The gate BEFORE that one: is the provider even offered?
 
-**Ground is currently un-surfaced, so locally you will see a Kamino-only
-catalogue and no way to create a program — that is the shipped state, not a
-broken setup.** `EARN_PROVIDER_SURFACING`
+**Kamino and Veda are the offered providers; Ground is un-surfaced. Locally the
+sandbox catalogue shows Kamino's devnet shelf plus Veda's devnet Test Vault,
+and there is no way to create a program — that is the shipped state, not a
+broken setup** (production has no Veda rows: `VEDA_DEPLOYMENTS` is devnet-only
+until Veda names a production vault, and Ground's rows are hidden everywhere).
+`EARN_PROVIDER_SURFACING`
 (`packages/sdp-types/src/provider-access.ts`) declares which registered
 providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
 flip. Ground's client, credentials and catalogue sync all still run — only the
@@ -173,8 +176,8 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
-| No Veda rows in any catalogue, sandbox or production | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is empty until Veda confirms its addresses, so `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips it without touching the other providers' rows |
-| A Veda deposit answers 403 "is not currently offered" | the surfacing gate — `EARN_PROVIDER_SURFACING.veda` stays `false` until deposits are proven end to end in sandbox, and no org override lifts it (§5b) |
+| No Veda rows in the PRODUCTION catalogue | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row |
+| A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino and Veda are both offered). The gate still exists and still answers this for upshift/perena/ground, and no org override lifts it (§5b) |
 
 ## Two provider shapes — read this before assuming Ground's model
 

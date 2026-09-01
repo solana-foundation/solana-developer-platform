@@ -11,30 +11,24 @@ IS) and ADR 0002 for the pluggability invariants. `packages/sdp-kamino` is the
 precedent this package mirrors, and the differences from it are the interesting
 part of this file.
 
-## THE BLOCKER: SDP does not know Veda's addresses
+## Deployment state: devnet confirmed, mainnet deliberately absent
 
-`VEDA_DEPLOYMENTS` in `@sdp/types/veda-programs` is `null` for both clusters, so
-**every chain call in this package fails closed with `DEPLOYMENT_NOT_CONFIGURED`
-and nothing here has ever run against a live vault.** That is deliberate, not an
-oversight:
+`VEDA_DEPLOYMENTS` in `@sdp/types/veda-programs` carries the confirmed DEVNET
+Test Vault deployment (2026-08-31: Veda's integration docs, cross-checked by
+SDP's 2026-08-17 on-chain audit — full provenance in that file's header).
+Devnet chain calls resolve; **mainnet stays `null`, so every mainnet call fails
+closed with `DEPLOYMENT_NOT_CONFIGURED`.** The mainnet gap is an offering
+decision, not missing data: the published mainnet addresses point at the same
+shared Test Vault, and cataloguing it would put a test vault on the production
+shelf. Fill mainnet only when Veda names the production vault(s) SDP should
+offer — a pure data change in `@sdp/types/veda-programs` — and run
+`src/sdk.smoke.test.ts` against it before enabling anything (see "Tests"
+below).
 
-- The `address` baked into each Anchor IDL inside `@vedatech/svm-sdk`
-  (`5J76xGGXn5op…`, `Cchro8d7bN5X…`, `FSZPGBfPWb6f…`) — MEASURED 2026-08-19 with
-  `getAccountInfo` against both public RPCs: **none of the three exists on
-  either cluster.** They are the source repository's `declare_id!` defaults.
-- Veda's integration document names three different addresses, and SDP has only
-  truncated prefixes of them.
-
-The SDK is built for this: `createVedaClient` takes every program address at
-runtime and, per its README, "does not include default addresses or infer one
-program from another". The addresses are deployment CONFIGURATION Veda supplies.
-
-**Filling them in is a pure data change** in `@sdp/types/veda-programs`. Before
-doing it, get Veda to confirm, per cluster: the three program addresses, the
-vault-state address(es) SDP should catalogue, and whether devnet and mainnet
-really share addresses (the document implies they do). Then run
-`src/sdk.smoke.test.ts`, which is the only thing in this repository that can
-prove the integration end to end — see "Tests" below.
+The SDK carries no defaults by design: `createVedaClient` takes every program
+address at runtime and "does not include default addresses or infer one
+program from another" (the `declare_id!` values inside its IDLs exist on
+neither cluster). The addresses are deployment CONFIGURATION Veda supplies.
 
 ## The kit-version firewall
 
@@ -214,7 +208,8 @@ customer's row. If Veda changes the ABI, this fails on the next `pnpm install`.
 
 `sdk.smoke.test.ts` is the exception to the offline rule: env-gated, skipped
 when unset, so CI never runs it. It takes its deployment from the environment
-because `VEDA_DEPLOYMENTS` is empty, and it is the only thing that can prove the
+(rather than `VEDA_DEPLOYMENTS`) so it can exercise a candidate deployment
+before it is committed, and it is the only thing that can prove the
 integration works.
 
 ```bash

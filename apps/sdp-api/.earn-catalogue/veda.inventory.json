@@ -1,14 +1,47 @@
 {
-  "fetchedAt": "2026-08-19T23:13:16.313Z",
+  "fetchedAt": "2026-09-01T00:54:16.428Z",
   "declaredDepositTokens": [
     "USDC"
   ],
   "clusters": [
     {
       "cluster": "devnet",
-      "skipped": "SDP has no confirmed Veda deployment for this cluster",
-      "configuredVaults": 0,
-      "rows": []
+      "skipped": null,
+      "configuredVaults": 1,
+      "rows": [
+        {
+          "address": "3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU",
+          "vaultId": "0",
+          "name": "Veda USDC vault #0",
+          "shareMint": "CdV7pjj6WANsdasKsBvdKAn7qJL7cQ2Q3CJMBEe13WAV",
+          "baseAsset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "baseAssetSymbol": "USDC",
+          "shareDecimals": 6,
+          "accountingPaused": false,
+          "tellerPaused": false,
+          "complianceMode": false,
+          "withdrawAuthority": null,
+          "lockDurationSeconds": "0",
+          "platformFeeBps": 0,
+          "performanceFeeBps": 0,
+          "assets": [
+            {
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "symbol": "USDC",
+              "allowDeposits": true,
+              "allowWithdrawals": true,
+              "admitted": true
+            }
+          ],
+          "outcome": "catalogued",
+          "dropReason": null,
+          "depositMints": [
+            "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+          ],
+          "liquidityTerm": "instant",
+          "redemptionDelayDays": null
+        }
+      ]
     },
     {
       "cluster": "mainnet-beta",

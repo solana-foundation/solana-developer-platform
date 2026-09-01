@@ -260,16 +260,24 @@ describe("VedaEarnClient.declaredSupport", () => {
 
 describe("the Veda deployment registry", () => {
   /**
-   * The load-bearing state of this stack, asserted rather than assumed: SDP has
-   * no confirmed Veda deployment, so every cluster reads as undeployed and the
-   * catalogue fails closed. When Veda confirms addresses this test is the one
-   * that changes — deliberately, and with the confirmation in the pull request
-   * that changes it.
+   * The load-bearing state of this stack, asserted rather than assumed.
+   * DEVNET is confirmed (Veda's integration docs + SDP's on-chain audit, see
+   * the header in @sdp/types/veda-programs) — these are the exact addresses
+   * from that confirmation, restated here so a typo in the table cannot pass.
+   * MAINNET deliberately stays undeployed: the published mainnet vault state
+   * is Veda's shared Test Vault, and cataloguing it would put a test vault on
+   * the production shelf. When Veda names a production vault, this test is the
+   * one that changes — with the confirmation in the pull request that does.
    */
-  it("reports no confirmed deployment on any cluster", () => {
-    assert.equal(vedaDeployment("devnet"), null);
+  it("reports the confirmed devnet Test Vault deployment and no mainnet one", () => {
+    assert.deepEqual(vedaDeployment("devnet"), {
+      vaultProgramAddress: "ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J",
+      queueProgramAddress: "fh8uapqMe4GWhep9rt9qZ56Pxi9SYszkuDKXckYMQTT",
+      hookProgramAddress: "BmTjMtZGcvx5XB7LwRaGq3x9hdHG1SziYikjP9BAgoE2",
+      vaultStateAddresses: ["3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU"],
+    });
+    assert.equal(isVedaDeployed("devnet"), true);
     assert.equal(vedaDeployment("mainnet-beta"), null);
-    assert.equal(isVedaDeployed("devnet"), false);
     assert.equal(isVedaDeployed("mainnet-beta"), false);
   });
 
@@ -362,15 +370,16 @@ describe("decodeAssetData", () => {
 });
 
 describe("VedaEarnClient.listStrategies", () => {
-  it("fails closed when SDP has no confirmed deployment for the cluster", async () => {
-    for (const environment of ["sandbox", "production"] as const) {
-      await assert.rejects(
-        client.listStrategies({ env: { SOLANA_RPC_URL: RPC_URL }, environment }),
-        {
-          code: "PROVIDER_NOT_CONFIGURED",
-        }
-      );
-    }
+  it("fails closed for production, where SDP has no confirmed deployment", async () => {
+    // Sandbox (devnet) is deployed now, so only production still exercises the
+    // no-deployment guard; devnet's read path is covered by the
+    // `_listVaultStrategies` cases below, against stubbed RPC.
+    await assert.rejects(
+      client.listStrategies({ env: { SOLANA_RPC_URL: RPC_URL }, environment: "production" }),
+      {
+        code: "PROVIDER_NOT_CONFIGURED",
+      }
+    );
   });
 
   it("maps a vault to a snapshot", async () => {

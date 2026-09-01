@@ -16,16 +16,17 @@ const DEPLOYMENT: VedaDeployment = {
 
 describe("vedaClusterConfig", () => {
   /**
-   * SDP has no confirmed Veda deployment on either cluster, so every build and
-   * every position read fails closed. This is the state that changes — with
-   * Veda's written confirmation — when `VEDA_DEPLOYMENTS` is filled in.
+   * Devnet is confirmed (@sdp/types/veda-programs header), so its config
+   * resolves; mainnet has no confirmed PRODUCTION deployment, so every build
+   * and position read there fails closed. The mainnet half changes — with
+   * Veda naming a production vault — when `VEDA_DEPLOYMENTS` gains its entry.
    */
-  it("refuses a cluster SDP has no confirmed deployment for", () => {
-    expect(vedaDeployment("devnet")).toBeNull();
+  it("resolves the confirmed devnet deployment and refuses mainnet", () => {
+    const devnet = vedaClusterConfig("devnet");
+    expect(devnet.cluster).toBe("devnet");
+    expect(String(devnet.vaultProgramAddress)).toBe("ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J");
     expect(vedaDeployment("mainnet-beta")).toBeNull();
-    for (const cluster of ["devnet", "mainnet-beta"] as const) {
-      expect(() => vedaClusterConfig(cluster)).toThrow(/no confirmed Veda deployment/);
-    }
+    expect(() => vedaClusterConfig("mainnet-beta")).toThrow(/no confirmed Veda deployment/);
   });
 });
 
