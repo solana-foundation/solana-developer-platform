@@ -43,8 +43,9 @@ interface RequirementGroupCopy {
 /**
  * Section copy for grouped collect forms, discriminated by provider then by
  * the fields' top-level dotted key segment (plus the wizard-synthesized
- * destination selects). Providers whose fields carry dotted keys need an
- * entry here for every group slug they emit.
+ * destination selects). Grouping is opt-in per provider: providers without an
+ * entry render their dotted fields ungrouped, while an opted-in provider must
+ * cover every group slug it emits.
  */
 const REQUIREMENT_GROUP_COPY: Partial<
   Record<RampProviderId, Record<string, RequirementGroupCopy>>
@@ -85,20 +86,20 @@ function requirementFieldGroup(field: RequirementField): string | null {
 }
 
 /**
- * Looks up the translated title/description pair for a provider's requirement section.
+ * Looks up the translated title/description pair for an opted-in provider's
+ * requirement section.
  *
- * @param provider - Selected ramp provider, when one is chosen.
+ * @param providerCopy - The provider's section copy map.
  * @param group - Section slug derived from the field keys.
  * @returns Message keys for the section's card header.
  */
 function requirementGroupCopy(
-  provider: RampProviderId | null,
+  providerCopy: Record<string, RequirementGroupCopy>,
   group: string
 ): RequirementGroupCopy {
-  const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
-  const copy = providerCopy === undefined ? undefined : providerCopy[group];
+  const copy = providerCopy[group];
   if (copy === undefined) {
-    throw new Error(`Requirement group "${group}" has no section copy for provider "${provider}".`);
+    throw new Error(`Requirement group "${group}" has no section copy.`);
   }
   return copy;
 }
@@ -470,6 +471,7 @@ export function RequirementsFields({
   existingPayoutAccount?: PayoutRequirementAccount | null;
 }) {
   const t = useTranslations();
+  const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
   return (
     <div className="space-y-6">
       {requirementFieldRuns(fields).map((run) => {
@@ -495,14 +497,14 @@ export function RequirementsFields({
             />
           );
         });
-        if (run.group === null) {
+        if (run.group === null || providerCopy === undefined) {
           return (
             <div key={first.key} className="space-y-6">
               {inputs}
             </div>
           );
         }
-        const copy = requirementGroupCopy(provider, run.group);
+        const copy = requirementGroupCopy(providerCopy, run.group);
         return (
           <Card key={first.key}>
             <CardHeader>
