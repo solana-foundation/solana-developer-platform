@@ -39,16 +39,17 @@ export function emitLifecycle(
     payload?: Record<string, unknown>;
   }
 ): Promise<void> {
+  const auth = getAuth(c);
   return getPrivateChannelEventService(c).emit({
     organizationId: instance.organization_id,
     projectId: instance.project_id,
     instanceId: instance.id,
     channelId: extra?.channelId ?? null,
-    sdpUserId: getAuth(c).userId ?? null,
+    sdpUserId: auth.userId ?? null,
     family: PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE,
     type,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
-    payload: extra?.payload ?? {},
+    payload: { ...extra?.payload, actorId: auth.id, actorType: auth.authType },
   });
 }
 
@@ -73,16 +74,17 @@ export function emitMember(
     payload?: Record<string, unknown>;
   }
 ): Promise<void> {
+  const auth = getAuth(c);
   return getPrivateChannelEventService(c).emit({
     organizationId: scope.organizationId,
     projectId: scope.projectId,
     instanceId: scope.instanceId,
     channelId: extra?.channelId ?? null,
-    sdpUserId: getAuth(c).userId ?? null,
+    sdpUserId: auth.userId ?? null,
     family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
     type,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
-    payload: extra?.payload ?? {},
+    payload: { ...extra?.payload, actorId: auth.id, actorType: auth.authType },
   });
 }
 
@@ -97,14 +99,15 @@ export function recordInstanceError(
     payload?: Record<string, unknown>;
   }
 ): Promise<void> {
+  const auth = getAuth(c);
   return getPrivateChannelEventService(c).recordError({
     organizationId: instance.organization_id,
     projectId: instance.project_id,
     instanceId: instance.id,
     channelId: extra?.channelId ?? null,
-    sdpUserId: getAuth(c).userId ?? null,
+    sdpUserId: auth.userId ?? null,
     type,
-    payload: extra?.payload ?? {},
+    payload: { ...extra?.payload, actorId: auth.id, actorType: auth.authType },
     error,
   });
 }

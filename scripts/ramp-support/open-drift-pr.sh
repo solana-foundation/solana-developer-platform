@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Open or update the ramp-rails refresh PR with the regenerated matrix + dumps.
+# Open or update the ramp-support refresh PR with the regenerated matrix + dumps.
 # Required env: GH_TOKEN, DRIFT_SUMMARY (path to diff text). Optional: RUN_URL, BASE_BRANCH (default main).
 set -euo pipefail
 
-BRANCH="automation/ramp-rails-refresh"
+BRANCH="automation/ramp-support-refresh"
 BASE="${BASE_BRANCH:-main}"
 DRIFT_SUMMARY="${DRIFT_SUMMARY:?DRIFT_SUMMARY required}"
 RUN_URL="${RUN_URL:-}"
-PATHS=(apps/sdp-api/.ramp-rails packages/sdp-types/src/generated/ramp-support.generated.ts)
+PATHS=(apps/sdp-api/.ramp-support packages/sdp-types/src/generated/ramp.generated.ts)
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -21,7 +21,7 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-TITLE="chore(ramp-rails): refresh supported corridor matrix"
+TITLE="chore(ramp-support): refresh supported corridor matrix"
 BODY_FILE="$(mktemp)"
 trap 'rm -f "$BODY_FILE"' EXIT
 {

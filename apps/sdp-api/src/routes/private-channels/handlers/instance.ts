@@ -4,13 +4,21 @@ import {
   type PrivateChannelInstanceEnvelope,
   type PrivateChannelInstanceResponse,
 } from "@sdp/types";
-import { mapPrivateChannelInstanceRow, type PrivateChannelInstanceRow } from "@/db/repositories";
+import {
+  mapPrivateChannelInstanceRow,
+  type PrivateChannelInstanceRow,
+  type PrivateChannelUserRow,
+} from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import { inviteMember, verifyInstanceConnection } from "@/services/private-channels";
+import {
+  mapPrivateChannelError,
+  provisionPrincipal,
+  verifyInstanceConnection,
+} from "@/services/private-channels";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelDepositRepository,
@@ -18,7 +26,6 @@ import {
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
   getPrivateChannelWithdrawalRepository,
-  getProjectUserRepository,
   loadPrivateChannelProjectRpcClient,
 } from "../context";
 import { emitLifecycle, emitMember } from "../helpers";
@@ -126,10 +133,6 @@ export const connectPrivateChannelInstance = async (
     throw badRequest("Failed to persist the private channel instance.");
   }
 
-  await emitLifecycle(c, row, PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED, {
-    payload: { gatewayUrl: row.gateway_url },
-  });
-
   // The default channel is bootstrapped exclusively here; GET /channels lists
   // what exists and does not lazy-create.
   const { channel: defaultChannel, created } = await getPrivateChannelRepository(
@@ -139,78 +142,59 @@ export const connectPrivateChannelInstance = async (
     organizationId: row.organization_id,
     projectId: row.project_id,
   });
+  // A connected instance is not usable without its project principal. Roll the
+  // active connection back on registration failure so Connect can be retried.
+  let defaultPrincipal: PrivateChannelUserRow | null = null;
+  let defaultMembershipId: string | null = null;
+  try {
+    const userRepo = getPrivateChannelUserRepository(c);
+    const { principal } = await provisionPrincipal(c.env, userRepo, {
+      ...scope,
+      instanceId: row.id,
+      authUrl: row.auth_url,
+      name: "Default",
+      isDefault: true,
+      createdBy: auth.userId ?? null,
+    });
+    defaultPrincipal = principal;
+    const memberships = await userRepo.listMembershipsForUser(principal.id);
+    const alreadyMember = memberships.some(
+      (membership) => membership.channel_id === defaultChannel.id
+    );
+    const membership = await userRepo.addMembership({
+      channelId: defaultChannel.id,
+      privateChannelUserId: principal.id,
+      addedBy: auth.userId ?? null,
+    });
+    if (!membership) {
+      throw new Error("default Private Channels principal became inactive during setup");
+    }
+    if (!alreadyMember) defaultMembershipId = membership.id;
+  } catch (error) {
+    if (existingByGateway) await repo.deactivateActive(scope);
+    else await repo.deleteActive(scope);
+    throw mapPrivateChannelError(error);
+  }
+
+  await emitLifecycle(c, row, PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED, {
+    payload: { gatewayUrl: row.gateway_url },
+  });
   if (created) {
     await emitLifecycle(c, row, PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED, {
       channelId: defaultChannel.id,
       payload: { name: defaultChannel.name, isDefault: true },
     });
   }
-
-  // Auto-onboard the human connector as the workspace's founding SPC member and
-  // add them to the default channel. Skipped for API-key auth (no user identity
-  // to attribute — the API key's owner can still invite themselves via /users).
-  // This is follow-up provisioning after the instance and channel are durable;
-  // it must not turn a successful connection into a false 500 response.
-  if (auth.userId) {
-    try {
-      const projectUser = await getProjectUserRepository(c).getByProjectAndUserId(
-        projectId,
-        auth.userId
-      );
-      if (projectUser) {
-        const userRepo = getPrivateChannelUserRepository(c);
-        const existingOwner = await userRepo.findByProjectAndUser(scope, auth.userId);
-        const owner =
-          existingOwner ??
-          (
-            await inviteMember(c.env, userRepo, {
-              ...scope,
-              authUrl: row.auth_url,
-              targetUserId: auth.userId,
-              targetUserEmail: projectUser.email,
-              invitedBy: auth.userId,
-            })
-          ).member;
-
-        const memberships = await userRepo.listMembershipsForUser(owner.id);
-        const alreadyMember = memberships.some((m) => m.channel_id === defaultChannel.id);
-        const membership = await userRepo.addMembership({
-          channelId: defaultChannel.id,
-          privateChannelUserId: owner.id,
-          addedBy: auth.userId,
-        });
-        if (!alreadyMember) {
-          await emitMember(
-            c,
-            {
-              organizationId: row.organization_id,
-              projectId: row.project_id,
-              instanceId: row.id,
-            },
-            PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_ADDED,
-            {
-              channelId: defaultChannel.id,
-              payload: {
-                privateChannelUserId: owner.id,
-                targetUserId: owner.user_id,
-                membershipId: membership.id,
-              },
-            }
-          );
-        }
+  if (defaultPrincipal && defaultMembershipId) {
+    await emitMember(
+      c,
+      { organizationId: row.organization_id, projectId: row.project_id, instanceId: row.id },
+      PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_ADDED,
+      {
+        channelId: defaultChannel.id,
+        payload: { principalId: defaultPrincipal.id, membershipId: defaultMembershipId },
       }
-    } catch (error) {
-      getLogger().error(
-        {
-          organizationId: row.organization_id,
-          projectId: row.project_id,
-          instanceId: row.id,
-          userId: auth.userId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        "connectPrivateChannelInstance: connected but owner bootstrap failed"
-      );
-    }
+    );
   }
 
   const response: PrivateChannelInstanceResponse = {

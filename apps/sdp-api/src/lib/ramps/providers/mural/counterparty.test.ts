@@ -5,7 +5,7 @@ import {
 } from "@sdp/payments/ramps/providers/mural/counterparty";
 import type { MuralOrganizationResolution } from "@sdp/payments/ramps/providers/mural/provider-data";
 import type { Counterparty, CounterpartyProviderData } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { describe, expect, it } from "vitest";
 
 function counterparty(overrides?: Partial<Counterparty>): Counterparty {
