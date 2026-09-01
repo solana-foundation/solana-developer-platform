@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" role="img" aria-label="Hercle">
-  <rect width="32" height="32" rx="7" fill="#0B1F3A"/>
-  <path d="M9 7h4.4v7.2h5.2V7H23v18h-4.4v-7.2h-5.2V25H9z" fill="#FFFFFF"/>
-  <text x="38" y="22" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="600" fill="#0B1F3A">Hercle</text>
-</svg>

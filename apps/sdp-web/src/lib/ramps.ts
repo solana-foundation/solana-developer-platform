@@ -29,7 +29,7 @@ export const RAMP_PROVIDER_LOGOS = {
   coinbase: "/provider-logos/coinbase-cdp.png",
   mural: "/provider-logos/muralpay.svg",
   stripe: "/provider-logos/stripe.svg",
-  hercle: "/provider-logos/hercle.svg",
+  hercle: "/provider-logos/hercle.png",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
