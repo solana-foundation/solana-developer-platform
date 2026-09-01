@@ -166,17 +166,21 @@ Enabled when `HELIUS_RINGS_ENABLED=true`.
 | Shield | `failed:config_error` or `gateway_unavailable` | Build, sign, broadcast, index |
 | Shield (custom ring) | same; also needs `HELIUS_RINGS_RING_RPC_URL` and an active ring | Ring-bound deposit through the ring program |
 | Withdraw (SOL) | same | Note selection, prove, outbox, sign, broadcast, index |
-| Transfer / merge | not exposed | not exposed |
+| Withdraw / transfer (custom ring, SOL) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed |
+| Merge | not exposed | not exposed |
 
 ## Custom rings
 
-One custom ring per project. A custom ring is its own on-chain program;
-deposits into it are ring-bound, so only that ring's own instructions can ever
-spend the notes, and every ring transfer carries a message the ring's auditor
-key can decrypt. Ring membership is a property of each note, not of a wallet:
-one private wallet holds default-pool notes and ring-bound notes side by side,
-and each operation names the ring it targets. SDP operates a ring but does not
-deploy its program — the TypeScript SDK has no program-deploy capability.
+Up to eight named custom rings per project (`MAX_PROJECT_RINGS`). A custom
+ring is its own on-chain program; deposits into it are ring-bound, so only
+that ring's own instructions can ever spend the notes, and every ring transfer
+carries a message the ring's auditor key can decrypt. Ring membership is a
+property of each note, not of a wallet: one private wallet holds default-pool
+notes and notes of several rings side by side, and each operation names the
+ring it targets — by the operator-chosen name recorded with the ring
+(`"default"` is reserved for the public pool and can never name one). SDP
+operates a ring but does not deploy its program — the TypeScript SDK has no
+program-deploy capability.
 
 ### Ops runbook: deploying a project's ring program
 
@@ -184,7 +188,7 @@ deploy its program — the TypeScript SDK has no program-deploy capability.
    [`helius-labs/zolana`](https://github.com/helius-labs/zolana). (The old
    `zolana-ring` cargo-generate template repo is archived; the CLI replaced
    it.) `zolana-ring new` writes the ring's `ring.toml` and program keypair —
-   each project gets a distinct program id.
+   each ring gets a distinct program id.
 2. Deploy to devnet with `zolana-ring deploy`, with the upgrade authority set
    to one of the project's active custody wallets. The CLI downloads its
    release's ring program binary, checks it against the lockfile built into
@@ -193,56 +197,99 @@ deploy its program — the TypeScript SDK has no program-deploy capability.
    signs as the upgrade authority through custody, so a program whose
    authority custody does not hold cannot be brought up. Fund that custody
    wallet with devnet SOL first: it fee-pays every bring-up transaction and
-   rents the config, ring-auth, and reader-record accounts.
-3. Hand the program id to the project admin. They enter it in the dashboard's
-   *Custom ring* card (or `POST /v1/helius-rings/ring`).
+   rents the config, ring-auth, reader-record, and lookup-table accounts.
+3. Hand the program id to the project admin. They enter it with a name in the
+   dashboard's *Custom rings* card (or `POST /v1/helius-rings/rings`).
 
 SDP then completes bring-up through the SDK: an auditor key from the ring RPC
 (`HELIUS_RINGS_RING_RPC_URL`), the ring's create-config instruction, its
-shielded-pool registration, and a read grant naming the config authority as
-the ring's initial reader, each signed through custody and confirmed on chain.
-The recorded ring row moves `pending → active`, with any failure recorded on
-the row.
+shielded-pool registration, a read grant naming the config authority as the
+ring's initial reader, and the ring's address lookup table — each signed
+through custody and confirmed on chain. The table holds exactly
+`ringLookupTableAddresses(ring, tree)` (custody refuses to sign any other
+extend, and the wire policy re-derives that list locally for every ring
+spend); the chain requires it to be at least one slot old before a spend
+compresses through it, which bring-up and a first spend being human-time apart
+always satisfies. The recorded ring row moves `pending → active`, with any
+failure recorded on the row.
 
 ### Semantics worth knowing
 
-- **Shield-only, per-operation selection.** A shield names its ring
-  (`ring: "default" | "custom"`, default `"default"`); withdraw and private
-  transfer accept no ring and always spend default-pool notes — ring-bound
-  notes are excluded from their note selection outright. Default-ring
-  operations and sync are never blocked by the custom ring's state.
-  `ring: "custom"` is a `400` while no ring row exists and a `503`
-  (`config_error`) until bring-up completes; the resolved program id is pinned
-  on the operation row at prepare time and never re-resolved, so an approval
-  granted days later — and any retry — runs against the ring the reviewer saw.
-  The pinned ring also joins the intent key: the same shield aimed at a
-  different ring is a second operation, not a replay.
+- **Per-operation selection, by name.** Every enabled operation may name a
+  ring (`ring: "<name>"`, omitted or `"default"` = the public pool). On a
+  shield the ring is the destination; on a withdraw or private transfer it is
+  the source of funds — the spend consumes only that ring's notes, through the
+  ring's own transact instruction. Default-pool operations and sync are never
+  blocked by any ring's state. An unknown name is a `400` and a recorded but
+  not-yet-active ring a `503` (`config_error`); the resolved program id is
+  pinned on the operation row at prepare time and never re-resolved, so an
+  approval granted days later — and any retry — runs against the ring the
+  reviewer saw. The pinned ring also joins the intent key: the same operation
+  aimed at a different ring is a second operation, not a replay.
+- **Ring spends have no pinned-input contract.** The SDK's one-call ring
+  builders select same-ring notes internally on every build, so `input_notes`
+  persists empty and a pre-sign rebuild may spend different notes than the
+  failed attempt (default-pool spends keep their deterministic
+  pinned-notes rebuild). Duplicate payment stays gated by the signed-bytes
+  line: once bytes are signed, recovery only ever resends them.
+- **What custody's wire gate can and cannot prove on a ring spend.** It proves
+  the right ring program, the right tree, the ring's pinned lookup table, the
+  exact account universe, a single owner signature, and the public settlement
+  (none on a transfer; exactly the approved recipient and amount on a
+  withdraw). On a ring TRANSFER the recipient and amount live inside encrypted
+  outputs and cannot be re-derived from the wire — the pre-encryption
+  prepared-intent check that binds them on default spends is bypassed because
+  the one-call builders never expose the prepared transfer. Accepted because
+  the transaction is built in-process against the approved persisted intent
+  and the recipient is a same-tenant wallet's shielded address.
 - **Resume, never re-key.** Bring-up is idempotent against on-chain state:
-  re-submitting the same program id resumes from whatever already landed
-  (config present, pool registration missing, and so on). An existing on-chain
-  config is adopted as it stands — re-keying a live ring would orphan its
-  auditor. Adopting a fully-registered ring lands no transaction, so custody
-  first proves it holds the config authority by signing a challenge; a ring
-  administered by someone else's key is refused with a `409`.
-- **No re-pointing once active.** Submitting a different program id replaces a
-  ring that never went active (a mistyped id binds no notes, so correcting it
-  strands nothing) and is a `409` once the ring is active. Moving a project off
-  a live ring would strand every ring-bound note; that is a deliberate
-  migration, not a config flip.
+  re-submitting the same name and program id resumes from whatever already
+  landed (config present, pool registration missing, lookup table missing, and
+  so on). An existing on-chain config is adopted as it stands — re-keying a
+  live ring would orphan its auditor. Adopting a fully-registered ring lands
+  no ring-program transaction, so custody first proves it holds the config
+  authority by signing a challenge; a ring administered by someone else's key
+  is refused with a `409`. A recorded lookup table is adopted when live and
+  complete; one that exists but lacks the ring's addresses was not created by
+  this bring-up and is refused.
+- **No re-pointing once active.** Re-submitting a recorded name with a
+  different program id replaces a ring that never went active (a mistyped id
+  binds no notes, so correcting it strands nothing) and is a `409` once the
+  ring is active. Names and program ids are both unique per project: a name
+  resolving to two programs would pin the wrong ring, and one program under
+  two names would split one pool's audit trail.
 - **Balances are tagged per ring.** Sync returns every unspent note the wallet
   holds, grouped by `ringProgramId` (`null` = the default public pool). The
   groups never merge into one number: value cannot cross a ring boundary
   inside a spend, so a merged figure would overstate what any single operation
   can move.
 - **Auditor key.** Held by the Helius ring RPC, never by SDP; the config's
-  public half is recorded on the ring row and echoed by `GET /ring`.
+  public half is recorded on the ring row and echoed by `GET /rings`.
 
-Ring-bound withdrawals and transfers, audit reads, and grants to further
-readers are follow-up work: spending a ring-bound note needs the ring's own
-transact instruction, which nothing here emits yet. Bring-up's initial grant
-makes the custody-held config authority the ring's only reader, so serving
-decrypted reads (or granting a third-party reader, which only the authority
-can sign) needs a future custody-signed endpoint.
+Follow-up work, deliberately out of scope: ring → default-pool exits (the SDK
+exposes only a low-level `sendDefaultRing`), cross-ring transfers (impossible
+in one transaction at the protocol level — value routes through the default
+pool in two hops), SPL ring spends (the withdrawal builder is SOL-only in
+0.1.2-alpha), audit reads and grants to further readers (bring-up's initial
+grant makes the custody-held config authority the ring's only reader, so
+serving decrypted reads or granting a third-party reader needs a future
+custody-signed endpoint), and `GET /rings/:name` point reads.
+
+### Local dev DB repair (pre-rename schema)
+
+Migration 0072 was rewritten in place while unmerged (named rings, lookup
+table); no deployed environment ever ran the old shape, but a local dev DB
+that did needs a one-time repair:
+
+```sql
+DELETE FROM schema_migrations WHERE version = '0072_helius_rings_project_rings.sql';
+DROP TABLE helius_rings_project_rings;
+```
+
+Restart the API so migrations re-run with the new DDL,
+then re-`POST /v1/helius-rings/rings` with a name and the same program id:
+bring-up resumes from on-chain state, landing only the new lookup-table step,
+and re-activates. Operation rows are untouched — 0073 has no FK.
 
 ## Diagnostics
 
