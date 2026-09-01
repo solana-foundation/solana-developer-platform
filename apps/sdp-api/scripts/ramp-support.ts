@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   type ProviderRailSupportSnapshot,
@@ -227,6 +229,17 @@ function sortSnapshot(snapshot: ProviderRailSupportSnapshot): ProviderRailSuppor
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Formats files with the repo's biome so script output is byte-identical to
+ * what the pre-commit hook enforces; without this, committed snapshots and the
+ * generated file drift purely on formatting.
+ */
+function biomeFormat(filePaths: readonly string[]): void {
+  execFileSync("pnpm", ["exec", "biome", "format", "--write", ...filePaths], {
+    stdio: "ignore",
+  });
 }
 
 async function readCurrencySupportRawDump(relativePath: string): Promise<unknown> {
@@ -905,6 +918,7 @@ async function writeCurrencySnapshot(
 ): Promise<void> {
   const snapshot = sortSnapshot(distillation.snapshot);
   await writeJsonFile(currencySupportSnapshotFile(provider), snapshot);
+  biomeFormat([currencySupportSnapshotFile(provider)]);
   logDroppedCurrencyCodes(provider, distillation.droppedCurrencyCodes);
   logDroppedCountryCodes(provider, distillation.droppedCountryCodes);
   console.log(
@@ -978,6 +992,7 @@ async function runGenerate(): Promise<void> {
   const rendered = await renderGeneratedFromSnapshots();
   await mkdir(path.dirname(GENERATED_TARGET), { recursive: true });
   await writeFile(GENERATED_TARGET, rendered, "utf8");
+  biomeFormat([GENERATED_TARGET]);
   console.log(`Wrote ${path.relative(process.cwd(), GENERATED_TARGET)}.`);
 }
 
@@ -1004,7 +1019,11 @@ function summarizeSourceDiff(expected: string, actual: string): string[] {
 }
 
 async function runDrift(): Promise<void> {
-  const expected = await renderGeneratedFromSnapshots();
+  const rendered = await renderGeneratedFromSnapshots();
+  const renderTarget = path.join(tmpdir(), `ramp-support-drift-${process.pid}.generated.ts`);
+  await writeFile(renderTarget, rendered, "utf8");
+  biomeFormat([renderTarget]);
+  const expected = await readFile(renderTarget, "utf8");
   const actual = await readFile(GENERATED_TARGET, "utf8");
   if (expected === actual) {
     console.log("No ramp support drift detected.");
