@@ -63,6 +63,7 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { isRampQuoteBindingExpired } from "@/routes/payments/handlers/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import {
@@ -420,6 +421,9 @@ async function updateOnchainTransferForRamp(
   }
   if (existing.status !== "awaiting_payment" || rampTransferHasOnchainValues(existing)) {
     throw conflict("Ramp transfer already has an on-chain transaction");
+  }
+  if (isRampQuoteBindingExpired(existing)) {
+    throw conflict("Ramp quote has expired; create a new quote before sending funds.");
   }
 
   const updated = await runApprovedWalletOperationEffectTransaction(c, async (db) =>

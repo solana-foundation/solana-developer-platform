@@ -457,7 +457,7 @@ export interface CreateLightsparkOnrampQuoteInput {
   fiatAmountMinorUnits: number;
   /** Purpose-of-payment code collected during counterparty onboarding. */
   purposeOfPayment: LightsparkPurposeOfPayment;
-  description?: string;
+  description: string;
 }
 
 export interface LightsparkQuote {
@@ -631,7 +631,7 @@ export class LightsparkRampClient implements RampProvider {
         },
         lockedCurrencySide: "SENDING",
         lockedCurrencyAmount: input.fiatAmountMinorUnits,
-        description: input.description ?? "SDP onramp",
+        description: input.description,
         purposeOfPayment: input.purposeOfPayment,
         senderCustomerInfo: { PURPOSE_OF_PAYMENT: input.purposeOfPayment },
       },
@@ -840,7 +840,7 @@ export class LightsparkRampClient implements RampProvider {
 
   async createOnrampQuote(
     { env, mode }: RampRuntimeContext,
-    input: RampOnrampQuoteInput
+    input: RampOnrampQuoteInput & { description: string }
   ): Promise<PaymentRampQuote> {
     if (!input.customerId) {
       throw badRequest("Lightspark on-ramp requires a resolved customerId");
@@ -869,6 +869,7 @@ export class LightsparkRampClient implements RampProvider {
       cryptoCurrency,
       fiatAmountMinorUnits,
       purposeOfPayment: input.purposeOfPayment,
+      description: input.description,
     });
     assertLightsparkQuoteMatchesRequest(quote, {
       sendingCurrencyCode: fiatCurrency,
@@ -978,7 +979,7 @@ export class LightsparkRampClient implements RampProvider {
    */
   async createOfframpQuote(
     { env, mode }: RampRuntimeContext,
-    input: RampOfframpQuoteInput
+    input: RampOfframpQuoteInput & { description: string }
   ): Promise<PaymentRampQuote> {
     if (!input.customerId) {
       throw badRequest("Lightspark off-ramp requires a resolved customerId");
@@ -1020,7 +1021,7 @@ export class LightsparkRampClient implements RampProvider {
         },
         lockedCurrencySide: "SENDING",
         lockedCurrencyAmount: cryptoAmountMinorUnits,
-        description: "SDP offramp",
+        description: input.description,
         purposeOfPayment: input.purposeOfPayment,
         senderCustomerInfo: { PURPOSE_OF_PAYMENT: input.purposeOfPayment },
       },

@@ -1,4 +1,5 @@
 import type { Address } from "@solana/addresses";
+import type { CountryCode } from "./countries";
 import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
@@ -151,6 +152,7 @@ export interface LightsparkRampSettlement {
   receivedAmount: LightsparkGridAmount;
   exchangeRate: number;
   fees: number;
+  settledAt?: string;
   failureReason?: string;
 }
 
@@ -891,15 +893,29 @@ export interface PaymentOnrampQuoteRequest {
   rampsMemo?: Record<string, string>;
 }
 
-export interface PaymentOfframpQuoteRequest {
-  provider: RampProviderId;
+interface PaymentOfframpQuoteRequestBase {
   counterpartyId: string;
   sourceWallet: string;
   cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
   rampsMemo?: Record<string, string>;
 }
+
+/**
+ * Off-ramp quote request. Lightspark payouts are corridor-addressed: the
+ * fiat currency and destination country select the payout external account,
+ * so both are required on that arm.
+ */
+export type PaymentOfframpQuoteRequest =
+  | (PaymentOfframpQuoteRequestBase & {
+      provider: "lightspark";
+      fiatCurrency: RampFiatCurrency;
+      destinationCountry: CountryCode;
+    })
+  | (PaymentOfframpQuoteRequestBase & {
+      provider: Exclude<RampProviderId, "lightspark">;
+      fiatCurrency?: RampFiatCurrency;
+    });
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
 

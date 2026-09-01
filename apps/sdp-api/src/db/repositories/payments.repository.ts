@@ -244,6 +244,8 @@ export interface PaymentsRepository {
     signature?: string | null;
     amount?: string | null;
     fiatAmount?: string | null;
+    /** Provider transaction id replacing the quote/session reference once the provider reports one. */
+    providerReference?: string;
     providerData?: Record<string, unknown>;
     error?: string | null;
   }): Promise<PaymentTransferRow | null>;
@@ -278,11 +280,11 @@ export interface PaymentsRepository {
     polled: readonly ConfirmedTransferPollVerdict[];
     updatedAt: string;
   }): Promise<void>;
-  getTransferById(params: {
-    transferId: string;
-    organizationId: string;
-    projectId: string | null;
-  }): Promise<PaymentTransferRow | null>;
+  getTransferById(
+    params:
+      | { transferId: string }
+      | { transferId: string; organizationId: string; projectId: string | null }
+  ): Promise<PaymentTransferRow | null>;
   getTransferBySignature(params: {
     signature: string;
     organizationId: string;

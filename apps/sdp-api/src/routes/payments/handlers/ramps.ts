@@ -644,8 +644,24 @@ async function advanceLightsparkRequirements(
     if (isLightsparkExternalAccountActive(existing.provider_status)) {
       return readyCounterparty("lightspark", input.direction);
     }
+    const refreshed = await RAMP_PROVIDER_CLIENTS.lightspark.getExternalAccount(rampRuntime(c), {
+      accountId: existing.external_account_reference,
+    });
+    if (refreshed.status !== existing.provider_status) {
+      await repository.updateExternalAccountStatus({
+        organizationId: input.counterparty.organization_id,
+        projectId: input.projectId,
+        counterpartyId: input.counterparty.id,
+        provider: "lightspark",
+        id: existing.id,
+        providerStatus: refreshed.status,
+      });
+    }
+    if (isLightsparkExternalAccountActive(refreshed.status)) {
+      return readyCounterparty("lightspark", input.direction);
+    }
     throw badRequest(
-      `Lightspark payout account is not active yet (status: ${existing.provider_status}). Retry once it is verified.`
+      `Lightspark payout account is not active yet (status: ${refreshed.status}). Retry once it is verified.`
     );
   }
   if (collectedData.paymentRails === undefined) {
@@ -936,6 +952,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         externalCustomerId: counterparty.id,
         customerId,
         purposeOfPayment,
+        description: reservedTransferId,
       });
       break;
     }
@@ -1152,6 +1169,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         customerId,
         purposeOfPayment,
         payoutAccountId: payoutAccount.external_account_reference,
+        description: reservedTransferId,
       });
       break;
     }

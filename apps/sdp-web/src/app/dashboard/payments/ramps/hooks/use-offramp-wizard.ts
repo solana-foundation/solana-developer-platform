@@ -114,16 +114,18 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       rampsMemo,
     }) => {
       const base = {
-        provider,
         counterpartyId: fields.counterpartyId,
         sourceWallet: selectedWallet.walletId,
         cryptoToken,
-        fiatCurrency: selectedRampPair.fiatCurrency,
         cryptoAmount: fields.amount.trim(),
         rampsMemo,
-      } satisfies PaymentOfframpQuoteRequest;
+      };
       if (provider !== "lightspark") {
-        return base;
+        return {
+          ...base,
+          provider,
+          fiatCurrency: selectedRampPair.fiatCurrency,
+        } satisfies PaymentOfframpQuoteRequest;
       }
       const destinationCountry = collectedData.destinationCountry;
       if (destinationCountry === undefined || !isCountryCode(destinationCountry)) {
@@ -131,7 +133,12 @@ export function useOfframpWizard(props: UseRampWizardProps) {
           "Select a payout destination country in the requirements step before requesting a Lightspark quote."
         );
       }
-      return { ...base, destinationCountry };
+      return {
+        ...base,
+        provider,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+        destinationCountry,
+      } satisfies PaymentOfframpQuoteRequest;
     },
     onQuoteCreated: () => {
       resetCreateTransfer();

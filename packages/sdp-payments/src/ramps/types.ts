@@ -1,7 +1,6 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
-  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
@@ -172,6 +171,10 @@ interface BaseRampSettlementEvent {
   provider: RampProviderId;
   /** Provider-owned transaction/session identifier. */
   reference: string;
+  /** SDP transfer identifier when the provider supplied one in its event metadata. */
+  transferId?: string;
+  /** Provider transaction id to persist as the transfer's provider_reference once known. */
+  transactionReference?: string;
   /** Provider-side customer identifier observed on the event, when the provider reports one. */
   providerCustomerId?: string;
   /** Canonical on-chain movement reported by the provider for this ramp transfer. */
@@ -282,7 +285,6 @@ export type ValidateCounterpartyOptions =
       providerData: CounterpartyProviderData;
       cryptoToken?: string;
       fiatCurrency?: RampFiatCurrency;
-      destinationCountry?: CountryCode;
       cryptoRail?: CryptoRailId;
       payoutAccounts?: readonly PayoutRequirementAccount[];
       providerCustomerReference?: string;

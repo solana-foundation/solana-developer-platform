@@ -211,6 +211,7 @@ describe("LightsparkRampClient", () => {
       fiatCurrency: "USD",
       fiatAmount: "25",
       purposeOfPayment: "GOODS_OR_SERVICES",
+      description: "xfr_lightspark_onramp_test",
     });
 
     expect(quote.provider).toBe("lightspark");
@@ -277,6 +278,7 @@ describe("LightsparkRampClient", () => {
       fiatCurrency: "USD",
       cryptoAmount: "25",
       purposeOfPayment: "GOODS_OR_SERVICES",
+      description: "xfr_lightspark_offramp_test",
     });
 
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(`${LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
@@ -295,7 +297,7 @@ describe("LightsparkRampClient", () => {
       },
       lockedCurrencySide: "SENDING",
       lockedCurrencyAmount: 25000000,
-      description: "SDP offramp",
+      description: "xfr_lightspark_offramp_test",
       purposeOfPayment: "GOODS_OR_SERVICES",
       senderCustomerInfo: { PURPOSE_OF_PAYMENT: "GOODS_OR_SERVICES" },
     });
@@ -478,6 +480,7 @@ describe("LightsparkRampClient", () => {
         fiatCurrency: "USD",
         fiatAmount: "25",
         purposeOfPayment: "GOODS_OR_SERVICES",
+        description: "xfr_lightspark_onramp_mismatch_test",
       })
     ).rejects.toThrow(/does not match the requested/);
   });
@@ -510,6 +513,7 @@ describe("LightsparkRampClient", () => {
         fiatCurrency: "USD",
         cryptoAmount: "25",
         purposeOfPayment: "GOODS_OR_SERVICES",
+        description: "xfr_lightspark_offramp_mismatch_test",
       })
     ).rejects.toThrow(/does not match the requested/);
   });
