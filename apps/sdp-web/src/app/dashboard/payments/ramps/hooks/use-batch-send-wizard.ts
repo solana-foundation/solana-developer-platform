@@ -18,6 +18,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   type CreateTransferBatchResult,
   createTransferBatch,
@@ -118,7 +119,7 @@ export function useBatchSendWizard({
 
   const trimmedSearch = search.trim();
   const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
-    ["batch-recipients", page, trimmedSearch],
+    paymentsQueryKeys.batchRecipients({ page, search: trimmedSearch }),
     () =>
       fetchBatchRecipients(
         {
@@ -140,7 +141,7 @@ export function useBatchSendWizard({
   };
 
   const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.walletId === walletId) ?? null,
+    () => liveWallets.find((wallet) => wallet.id === walletId) ?? null,
     [liveWallets, walletId]
   );
   const assetOptions = useMemo(
@@ -165,7 +166,7 @@ export function useBatchSendWizard({
 
   const selectWallet = (nextWalletId: string) => {
     setWalletId(nextWalletId);
-    const nextWallet = liveWallets.find((wallet) => wallet.walletId === nextWalletId) ?? null;
+    const nextWallet = liveWallets.find((wallet) => wallet.id === nextWalletId) ?? null;
     const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
     if (!nextAssets.some((option) => option.value === asset)) {
       const preferred = nextAssets.find((option) => option.label === "USDC") ?? nextAssets[0];
@@ -278,7 +279,7 @@ export function useBatchSendWizard({
   const request = useMemo(
     () => ({
       ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
-      source: walletId,
+      sourceCustodyWalletId: walletId,
       token: asset,
       recipients: recipients.map((r) => ({
         counterpartyId: r.counterpartyId,
@@ -302,7 +303,7 @@ export function useBatchSendWizard({
 
   const { data: estimate, error: estimateError } = useSWR(
     currentStepId === "REVIEW" && canProceed && !batchResult
-      ? ["batch-estimate", JSON.stringify(request)]
+      ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
       : null,
     () => estimateTransferBatch(request, t),
     { revalidateOnFocus: false }

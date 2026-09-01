@@ -1,5 +1,6 @@
 import { isDecimalString } from "@sdp/solana/amount";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
+import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { addDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
 import {
@@ -14,12 +15,12 @@ import { basicAuthHeader, UNREPORTED_COUNTRY_SUPPORT, unreportedCurrencyLimit } 
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -266,9 +267,9 @@ export class StripeRampClient implements RampProvider {
     return readyCounterparty(this.id, options.direction);
   }
 
-  async _discoverRails(_context: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {}
-
-  async distillRailSupport(_readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+  async discoverCurrencyAndRails(
+    _context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
     return {
       snapshot: {
         onramp: {
@@ -386,6 +387,18 @@ export class StripeRampClient implements RampProvider {
     );
 
     const id = assertSessionField(session.id, "id");
+    // The redirect URL is Stripe-account-configured (we never set it), so its
+    // host set cannot be pinned here; it still must be a plain HTTPS URL —
+    // protocol-relative or active-content values fail the whole quote closed.
+    if (session.redirect_url) {
+      const destination = checkRampDestination(session.redirect_url, null);
+      if (!destination.ok) {
+        throw providerUnavailable("Stripe returned an untrusted onramp redirect URL.", {
+          provider: this.id,
+          reason: destination.reason,
+        });
+      }
+    }
     return {
       provider: "stripe",
       id,

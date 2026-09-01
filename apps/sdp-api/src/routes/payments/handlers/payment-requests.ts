@@ -16,7 +16,7 @@ import {
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
 import { paymentAmountSchema } from "../schemas";
-import { resolveScope, resolveWallet } from "../wallets";
+import { assertFreshPaymentWalletAccess, resolveScope, resolveWallet } from "../wallets";
 
 const listPaymentRequestsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -100,6 +100,7 @@ export async function createPaymentRequest(
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
   assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
+  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
 
   const row = await createPaymentRequestsRepository(
     c.env,
@@ -108,6 +109,7 @@ export async function createPaymentRequest(
     organizationId: scope.auth.organizationId,
     projectId,
     counterpartyId: body.counterpartyId,
+    custodyWalletId: wallet.id,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
     token: body.token,

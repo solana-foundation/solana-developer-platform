@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
+  anyOf?: TestJsonSchema[];
   example?: unknown;
   items?: TestJsonSchema;
-  not?: { required?: string[] };
+  not?: TestJsonSchema;
   oneOf?: TestJsonSchema[];
   properties?: Record<string, TestJsonSchema>;
   required?: string[];
@@ -48,27 +49,23 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
-  it("documents Earn button configuration without expanding the public API surface", () => {
+  it("documents private-channel probe deployment addresses as a pair", () => {
+    const doc = createOpenApiDocument();
+    const probeSchema = getJsonSchema(doc.paths?.["/v1/private-channels/probe"]?.post?.requestBody);
+
+    expect(probeSchema.oneOf).toEqual([
+      { required: ["escrowProgramId", "escrowInstanceAddr"] },
+      {
+        not: {
+          anyOf: [{ required: ["escrowProgramId"] }, { required: ["escrowInstanceAddr"] }],
+        },
+      },
+    ]);
+  });
+
+  it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
     const internal = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument();
-
-    const current = internal.paths?.["/v1/earn/button-configurations/current"];
-    expect(current?.get?.operationId).toBe("getEarnButtonConfiguration");
-    expect(current?.get?.security).toEqual([
-      { apiKeyAuth: [] },
-      { clerkBearerAuth: [] },
-      { sessionCookie: [] },
-    ]);
-    expect(current?.get?.responses?.["400"]).toBeDefined();
-    expect(current?.get?.responses?.["429"]).toBeDefined();
-    expect(current?.put?.operationId).toBe("upsertEarnButtonConfiguration");
-    expect(current?.put?.security).toEqual([
-      { apiKeyAuth: [] },
-      { clerkBearerAuth: [] },
-      { sessionCookie: [] },
-    ]);
-    expect(current?.put?.requestBody).toBeDefined();
-    expect(current?.put?.responses?.["429"]).toBeDefined();
 
     expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
       type: "http",
@@ -76,18 +73,40 @@ describe("OpenAPI spec", () => {
       bearerFormat: "JWT",
     });
 
-    const handoff = internal.paths?.["/v1/earn/button-configurations/public/{publicToken}"]?.get;
-    expect(handoff?.operationId).toBe("getPublicEarnButtonConfiguration");
-    expect(handoff?.security).toBeUndefined();
-    expect(handoff?.responses?.["404"]).toBeDefined();
-    expect(handoff?.responses?.["429"]).toBeDefined();
-    expect(handoff?.responses?.["503"]).toBeDefined();
-
-    expect(publicDocument.paths?.["/v1/earn/button-configurations/current"]).toBeUndefined();
-    expect(
-      publicDocument.paths?.["/v1/earn/button-configurations/public/{publicToken}"]
-    ).toBeUndefined();
+    // Removed with the UI builder: neither document may resurrect them.
+    for (const doc of [internal, publicDocument]) {
+      expect(doc.paths?.["/v1/earn/button-configurations/current"]).toBeUndefined();
+      expect(doc.paths?.["/v1/earn/button-configurations/public/{publicToken}"]).toBeUndefined();
+    }
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
+
+    for (const path of [
+      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/external-wallet/deposits",
+      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/external-wallet/withdrawals",
+    ]) {
+      const publicOperation = publicDocument.paths?.[path]?.post;
+      expect(publicOperation?.operationId).toBeDefined();
+      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }]);
+
+      const internalOperation = internal.paths?.[path]?.post;
+      expect(internalOperation?.security).toEqual([
+        { apiKeyAuth: [] },
+        { clerkBearerAuth: [] },
+        { sessionCookie: [] },
+      ]);
+    }
+
+    const submitRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
+    );
+    const signedTransactionExample = submitRequest.properties?.signedTransaction?.example;
+    expect(signedTransactionExample).toEqual(expect.any(String));
+    expect(signedTransactionExample).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+    expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
+      signedTransactionExample
+    );
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {
@@ -311,6 +330,7 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
+      "Earn",
     ]);
 
     expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();

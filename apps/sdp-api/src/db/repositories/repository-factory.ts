@@ -1,5 +1,5 @@
 // biome-ignore-all lint/security/noSecrets: repository and method identifiers are not credentials
-import { getDb } from "@/db";
+import { type AppDb, getDb } from "@/db";
 import { bindRepositoryToTenant, type TenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
@@ -12,6 +12,8 @@ import type { CounterpartyAccountsRepository } from "./counterparty-account.repo
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
+import type { HeliusRingsAssetRepository } from "./helius-rings-asset.repository";
+import { createPostgresHeliusRingsAssetRepository } from "./helius-rings-asset.repository.postgres";
 import type { HeliusRingsEventRepository } from "./helius-rings-event.repository";
 import { createPostgresHeliusRingsEventRepository } from "./helius-rings-event.repository.postgres";
 import type { HeliusRingsHealthRepository } from "./helius-rings-health.repository";
@@ -82,6 +84,18 @@ export function createPaymentsRepository(env: Env, scope: TenantScope): Payments
 
 export function createSystemPaymentsRepository(env: Env): PaymentsRepository {
   return createPostgresPaymentsRepository(getDb(env));
+}
+
+/**
+ * System payments repository bound to a transactional client, for system
+ * paths (webhook settlement, reconciliation jobs) whose writes must share a
+ * transaction with other repositories.
+ *
+ * @param db - The transactional database client.
+ * @returns The unscoped payments repository on that client.
+ */
+export function createSystemTransactionalPaymentsRepository(db: AppDb): PaymentsRepository {
+  return createPostgresPaymentsRepository(db);
 }
 
 export function createPaymentSubscriptionsRepository(
@@ -248,6 +262,10 @@ export function createHeliusRingsEventRepository(env: Env): HeliusRingsEventRepo
 
 export function createHeliusRingsHealthRepository(env: Env): HeliusRingsHealthRepository {
   return createPostgresHeliusRingsHealthRepository(getDb(env));
+}
+
+export function createHeliusRingsAssetRepository(env: Env): HeliusRingsAssetRepository {
+  return createPostgresHeliusRingsAssetRepository(getDb(env));
 }
 
 export function createPrivateChannelInstanceRepository(env: Env): PrivateChannelInstanceRepository {

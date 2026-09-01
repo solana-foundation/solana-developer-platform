@@ -1,12 +1,36 @@
+import type {
+  ReadIdentityInput,
+  ReadIdentityResult,
+  RingsGatewayPort,
+  SyncPhotonInput,
+  SyncPhotonResult,
+} from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
+import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+/**
+ * The one seam these tests reach through; everything else runs for real. Left
+ * unset, the environment picks the gateway as it would in production.
+ */
+const gatewayOverride = vi.hoisted(() => ({ current: null as unknown }));
+
+vi.mock("@/services/helius-rings/gateway", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/helius-rings/gateway")>();
+  return {
+    ...actual,
+    resolveRingsGateway: (...args: Parameters<typeof actual.resolveRingsGateway>) =>
+      (gatewayOverride.current as RingsGatewayPort | null) ?? actual.resolveRingsGateway(...args),
+  };
+});
 
 const TEST_ORG = { id: "org_hr_route", name: "Rings Route Org", slug: "rings-route-org" };
 const TEST_PROJECT = { id: "prj_hr_route", slug: "rings-route-project" };
@@ -98,9 +122,23 @@ async function seedAuth(): Promise<void> {
     sdpWalletId: "wal_hr_route",
     name: "Treasury",
     materialTag: "simulated",
+    custodyWalletId: "cw_hr_route",
   });
   if (!wallet) throw new Error("rings wallet fixture was not created");
   ringsWalletId = wallet.id;
+}
+
+async function provisionRouteWallet(): Promise<void> {
+  const row = await createHeliusRingsWalletRepository(env).markProvisioned({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    id: ringsWalletId,
+    shieldedAddress: "rings1route_test",
+    ownerAddress: "HrRouteTestPublicKey111111111111111111111111",
+    materialTag: "simulated",
+    expectedStatus: "pending",
+  });
+  if (!row) throw new Error("rings wallet fixture was not provisioned");
 }
 
 function authHeaders() {
@@ -128,6 +166,7 @@ describe("Helius Rings routes", () => {
 
   afterEach(async () => {
     env.HELIUS_RINGS_ENABLED = originalFlag;
+    gatewayOverride.current = null;
     await clearKVStores(env);
   });
 
@@ -137,11 +176,13 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("GET /health reports the unimplemented gateway red", async () => {
+  it("GET /health reports every upstream red when the gateway is unconfigured", async () => {
     const res = await app.request("/v1/helius-rings/health", { headers: authHeaders() }, env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { health: Record<string, string> } };
-    expect(body.data.health.gateway).toBe("red");
+    expect(body.data.health.rpc).toBe("red");
+    expect(body.data.health.prover).toBe("red");
+    expect(body.data.health.photon).toBe("red");
   });
 
   it("GET /wallets lists the project's rings wallets", async () => {
@@ -179,105 +220,335 @@ describe("Helius Rings routes", () => {
     expect(body.data.zones[0]?.name).toBe("Payroll");
   });
 
-  it("prepares an operation through real policy and fails honestly at the port", async () => {
-    const res = await post("/v1/helius-rings/operations", {
-      walletId: ringsWalletId,
-      opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
-      clientNonce: "route-nonce-1",
+  describe("operations", () => {
+    beforeEach(async () => {
+      await provisionRouteWallet();
     });
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as {
-      data: {
-        operation: {
-          id: string;
-          state: string;
-          failure: { code: string; message: string } | null;
+
+    it("prepares an operation through real policy and fails honestly at the port", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-1",
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        data: {
+          operation: {
+            id: string;
+            state: string;
+            failure: { code: string; message: string } | null;
+          };
         };
       };
-    };
 
-    // Default policy is implicit allow, so the operation advances until the
-    // port call — which the NotImplemented gateway refuses.
-    expect(body.data.operation.state).toBe("failed");
-    expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
-      code: "gateway_unavailable",
+      // Default policy is implicit allow, so the operation advances to the port
+      // call, which the unconfigured gateway refuses.
+      expect(body.data.operation.state).toBe("failed");
+      expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
+        code: "config_error",
+      });
     });
-  });
 
-  it("replays a prepare idempotently and serves detail with the timeline", async () => {
-    const input = {
-      walletId: ringsWalletId,
-      opType: "shield",
-      clientNonce: "route-nonce-2",
-    };
-    const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
-      data: { operation: { id: string } };
-    };
-    const replay = (await (await post("/v1/helius-rings/operations", input)).json()) as {
-      data: { operation: { id: string } };
-    };
-    expect(replay.data.operation.id).toBe(first.data.operation.id);
-
-    const detail = await app.request(
-      `/v1/helius-rings/operations/${first.data.operation.id}`,
-      { headers: authHeaders() },
-      env
-    );
-    expect(detail.status).toBe(200);
-    const detailBody = (await detail.json()) as {
-      data: { operation: { events: Array<{ kind: string }> } };
-    };
-    const kinds = detailBody.data.operation.events.map((event) => event.kind);
-    expect(kinds).toContain("operation.created");
-    expect(kinds).toContain("operation.failed");
-  });
-
-  it("retries a failed operation with lineage and lists the activity feed", async () => {
-    const failed = (await (
-      await post("/v1/helius-rings/operations", {
+    it("replays a prepare idempotently and serves detail with the timeline", async () => {
+      const input = {
         walletId: ringsWalletId,
         opType: "shield",
-        clientNonce: "route-nonce-3",
-      })
-    ).json()) as { data: { operation: { id: string } } };
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-2",
+      };
+      const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
+        data: { operation: { id: string } };
+      };
+      const replay = (await (await post("/v1/helius-rings/operations", input)).json()) as {
+        data: { operation: { id: string } };
+      };
+      expect(replay.data.operation.id).toBe(first.data.operation.id);
 
-    const retried = await post(`/v1/helius-rings/operations/${failed.data.operation.id}/retry`, {
-      clientNonce: "route-nonce-3-retry",
+      const detail = await app.request(
+        `/v1/helius-rings/operations/${first.data.operation.id}`,
+        { headers: authHeaders() },
+        env
+      );
+      expect(detail.status).toBe(200);
+      const detailBody = (await detail.json()) as {
+        data: { operation: { events: Array<{ kind: string }> } };
+      };
+      const kinds = detailBody.data.operation.events.map((event) => event.kind);
+      expect(kinds).toContain("operation.created");
+      expect(kinds).toContain("operation.failed");
     });
-    expect(retried.status).toBe(201);
-    const retryBody = (await retried.json()) as { data: { operation: { id: string } } };
-    expect(retryBody.data.operation.id).not.toBe(failed.data.operation.id);
 
-    const list = await app.request("/v1/helius-rings/operations", { headers: authHeaders() }, env);
-    const listBody = (await list.json()) as { data: { operations: Array<{ id: string }> } };
-    expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
-  });
+    it("retries a failed operation with lineage and lists the activity feed", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
+      gatewayOverride.current = gateway;
 
-  it("execute is a no-op on a terminal operation", async () => {
-    const failed = (await (
-      await post("/v1/helius-rings/operations", {
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-3",
+        })
+      ).json()) as { data: { operation: { id: string } } };
+
+      const retried = await post(`/v1/helius-rings/operations/${failed.data.operation.id}/retry`, {
+        clientNonce: "route-nonce-3-retry",
+      });
+      expect(retried.status).toBe(201);
+      const retryBody = (await retried.json()) as { data: { operation: { id: string } } };
+      expect(retryBody.data.operation.id).not.toBe(failed.data.operation.id);
+
+      const list = await app.request(
+        "/v1/helius-rings/operations",
+        { headers: authHeaders() },
+        env
+      );
+      const listBody = (await list.json()) as { data: { operations: Array<{ id: string }> } };
+      expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("execute is a no-op on a terminal operation", async () => {
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-4",
+        })
+      ).json()) as { data: { operation: { id: string; state: string } } };
+
+      const executed = await post(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
+        {}
+      );
+      expect(executed.status).toBe(200);
+      const body = (await executed.json()) as { data: { operation: { state: string } } };
+      expect(body.data.operation.state).toBe("failed");
+    });
+
+    it("rejects an invalid operation body", async () => {
+      const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
-        opType: "shield",
-        clientNonce: "route-nonce-4",
-      })
-    ).json()) as { data: { operation: { id: string; state: string } } };
-
-    const executed = await post(
-      `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
-      {}
-    );
-    expect(executed.status).toBe(200);
-    const body = (await executed.json()) as { data: { operation: { state: string } } };
-    expect(body.data.operation.state).toBe("failed");
+        opType: "not-a-real-op",
+        clientNonce: "route-nonce-5",
+      });
+      expect(res.status).toBe(400);
+    });
   });
 
-  it("rejects an invalid operation body", async () => {
-    const res = await post("/v1/helius-rings/operations", {
-      walletId: ringsWalletId,
-      opType: "not-a-real-op",
-      clientNonce: "route-nonce-5",
+  describe("POST /wallets/:walletId/sync", () => {
+    const SHIELDED_ADDRESS = "rings1route_sync";
+
+    async function markProvisioned(): Promise<void> {
+      const row = await createHeliusRingsWalletRepository(env).markProvisioned({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        id: ringsWalletId,
+        shieldedAddress: SHIELDED_ADDRESS,
+        ownerAddress: "HrRouteTestPublicKey111111111111111111111111",
+        materialTag: "live",
+        expectedStatus: "pending",
+      });
+      if (!row) throw new Error("rings wallet fixture was not marked provisioned");
+    }
+
+    function readWallet() {
+      return createHeliusRingsWalletRepository(env).getWalletById({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        id: ringsWalletId,
+      });
+    }
+
+    it("returns balances, the degraded flag and the observation, and records the cursor", async () => {
+      await markProvisioned();
+      const seen: SyncPhotonInput[] = [];
+      const observed: SyncPhotonResult = {
+        observedAt: "2026-08-26T12:00:00.000Z",
+        observedSlot: "42",
+        balances: [
+          {
+            mint: "So11111111111111111111111111111111111111112",
+            // Past 2^53: a JSON number would have rounded it.
+            amountRaw: "18446744073709551615",
+            decimals: 9,
+            symbol: "SOL",
+          },
+        ],
+        history: [],
+        report: {
+          storedNotes: 1,
+          unparsedTransactions: 0,
+          undecryptableCandidates: 0,
+          unknownAssetIds: 0,
+          unknownAssetFields: 0,
+          degraded: true,
+        },
+        indexedOperationSignatures: [],
+      };
+      gatewayOverride.current = {
+        syncPhoton: async (input: SyncPhotonInput) => {
+          seen.push(input);
+          return observed;
+        },
+      } as unknown as RingsGatewayPort;
+
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          balances: Array<{ mint: string; amountRaw: string }>;
+          degraded: boolean;
+          observedAt: string;
+        };
+      };
+
+      expect(body.data).toMatchObject({ degraded: true, observedAt: observed.observedAt });
+      expect(body.data.balances[0]?.amountRaw).toBe("18446744073709551615");
+      // The stored identity is pinned so a derivation mismatch fails rather
+      // than answering with someone else's balances.
+      expect(seen[0]).toMatchObject({
+        walletId: ringsWalletId,
+        owner: "HrRouteTestPublicKey111111111111111111111111",
+        expectedShieldedAddress: SHIELDED_ADDRESS,
+      });
+      expect((await readWallet())?.sync_cursor).toBe(observed.observedAt);
     });
-    expect(res.status).toBe(400);
+
+    it("404s an unknown wallet", async () => {
+      const res = await post("/v1/helius-rings/wallets/hrw_missing/sync", {});
+      expect(res.status).toBe(404);
+    });
+
+    // The test environment configures no Rings upstreams, so a provisioned
+    // wallet reaches the port and is refused there.
+    it("503s through the unconfigured gateway and leaves the cursor alone", async () => {
+      await markProvisioned();
+
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
+      expect(res.status).toBe(503);
+      expect((await readWallet())?.sync_cursor).toBeNull();
+    });
+
+    // 400, not 503: the fix is to provision the wallet, not to wait.
+    it("409s a wallet with no shielded identity yet", async () => {
+      const pending = await createHeliusRingsWalletRepository(env).createWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        sdpWalletId: "wal_hr_route_pending",
+        name: "Pending",
+        materialTag: "simulated",
+      });
+      if (!pending) throw new Error("pending wallet fixture was not created");
+
+      const res = await post(`/v1/helius-rings/wallets/${pending.id}/sync`, {});
+      expect(res.status).toBe(409);
+    });
+
+    it("403s without payments:write", async () => {
+      const readOnlyKey = { id: "key_hr_sync_ro", raw: "sk_test_helius_rings_ro" };
+      const keyHash = await hashString(readOnlyKey.raw, env.API_KEY_PEPPER);
+      await seedCachedApiKey(env, keyHash, {
+        ...TEST_CACHED_API_KEY,
+        id: readOnlyKey.id,
+        role: "api_readonly",
+        permissions: ["payments:read"],
+      });
+
+      const res = await app.request(
+        `/v1/helius-rings/wallets/${ringsWalletId}/sync`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${readOnlyKey.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        },
+        env
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe("GET /wallets/:walletId/identity", () => {
+    const PUBLISHED: ReadIdentityResult = {
+      status: "foreign",
+      derivedShieldedAddress: "rings1route_derived",
+      publishedShieldedAddress: "rings1route_published",
+      mismatch: "nullifier_key",
+    };
+
+    function get(path: string, token = TEST_API_KEY.raw) {
+      return app.request(path, { headers: { Authorization: `Bearer ${token}` } }, env);
+    }
+
+    it("returns the on-chain verdict beside the identity our row records", async () => {
+      const seen: ReadIdentityInput[] = [];
+      gatewayOverride.current = {
+        readIdentity: async (input: ReadIdentityInput) => {
+          seen.push(input);
+          return PUBLISHED;
+        },
+      } as unknown as RingsGatewayPort;
+
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { identity: ReadIdentityResult & { recordedShieldedAddress: string | null } };
+      };
+
+      expect(body.data.identity).toEqual({ ...PUBLISHED, recordedShieldedAddress: null });
+      expect(seen[0]).toEqual({
+        walletId: ringsWalletId,
+        owner: "HrRouteTestPublicKey111111111111111111111111",
+      });
+    });
+
+    it("404s an unknown wallet", async () => {
+      const res = await get("/v1/helius-rings/wallets/hrw_missing/identity");
+      expect(res.status).toBe(404);
+    });
+
+    // The test environment configures no Rings upstreams, so the request reaches
+    // the port and is refused there.
+    it("503s through the unconfigured gateway", async () => {
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`);
+      expect(res.status).toBe(503);
+    });
+
+    // Read permission, unlike /sync's write: this advances no stored observation.
+    it("answers a key holding only payments:read", async () => {
+      const readOnlyKey = { id: "key_hr_identity_ro", raw: "sk_test_helius_rings_id_ro" };
+      await seedCachedApiKey(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: readOnlyKey.id,
+        role: "api_readonly",
+        permissions: ["payments:read"],
+      });
+      gatewayOverride.current = {
+        readIdentity: async () => PUBLISHED,
+      } as unknown as RingsGatewayPort;
+
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`, readOnlyKey.raw);
+      expect(res.status).toBe(200);
+    });
+
+    it("403s a key holding neither payments permission", async () => {
+      const otherKey = { id: "key_hr_identity_none", raw: "sk_test_helius_rings_id_none" };
+      await seedCachedApiKey(env, await hashString(otherKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: otherKey.id,
+        role: "api_readonly",
+        permissions: ["wallets:read"],
+      });
+
+      const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`, otherKey.raw);
+      expect(res.status).toBe(403);
+    });
   });
 });

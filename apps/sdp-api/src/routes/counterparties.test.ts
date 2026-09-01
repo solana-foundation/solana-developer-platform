@@ -1,8 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
-import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
@@ -11,26 +9,6 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
-
-const BASE_IDENTITY = {
-  firstName: "Ada",
-  lastName: "Lovelace",
-  dateOfBirth: "1990-01-15",
-  phone: "+14155551234",
-  address: {
-    line1: "1 Market St",
-    city: "San Francisco",
-    countryCode: "US",
-  },
-} as const;
-
-const BASE_BUSINESS_IDENTITY = {
-  address: {
-    line1: "1 Market St",
-    city: "San Francisco",
-    countryCode: "US",
-  },
-} as const;
 
 describe("Counterparties Routes", () => {
   let apiKeyHash: string;
@@ -56,6 +34,10 @@ describe("Counterparties Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
+    await db
+      .prepare("DELETE FROM counterparty_provider_accounts")
+      .run()
+      .catch(() => {});
     await db
       .prepare("DELETE FROM counterparties")
       .run()
@@ -126,23 +108,6 @@ describe("Counterparties Routes", () => {
 
   const authHeader = `Bearer ${TEST_API_KEY.raw}`;
 
-  const createBusinessCounterparty = (body: Record<string, unknown> = {}) =>
-    app.request(
-      "/v1/counterparties",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: authHeader },
-        body: JSON.stringify({
-          entityType: "business",
-          displayName: "Acme Inc",
-          email: "acme@example.com",
-          identity: BASE_BUSINESS_IDENTITY,
-          ...body,
-        }),
-      },
-      env
-    );
-
   const createCounterparty = (body: Record<string, unknown> = {}) =>
     app.request(
       "/v1/counterparties",
@@ -152,8 +117,6 @@ describe("Counterparties Routes", () => {
         body: JSON.stringify({
           entityType: "individual",
           displayName: "Alice",
-          email: "alice@example.com",
-          identity: BASE_IDENTITY,
           ...body,
         }),
       },
@@ -196,24 +159,17 @@ describe("Counterparties Routes", () => {
       expect(body.data.counterparty.externalId).toBe("ext_001");
       expect(body.data.counterparty.status).toBe("active");
       expect(body.data.counterparty.createdBy).toBe(TEST_USER.id);
-      expect(body.data.counterparty.identity.firstName).toBe(BASE_IDENTITY.firstName);
-      expect(body.data.counterparty.identity.dateOfBirth).toBe(BASE_IDENTITY.dateOfBirth);
 
       const stored = await getDb(env)
-        .prepare(
-          `SELECT email, identity
-             FROM counterparties
-            WHERE id = ?`
-        )
+        .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
         .bind(body.data.counterparty.id)
-        .first<{ email: string; identity: { firstName: string } }>();
-      expect(stored?.email).toBe("alice@example.com");
-      expect(stored?.identity.firstName).toBe(BASE_IDENTITY.firstName);
+        .first<{ provider_data: Record<string, unknown> }>();
+      expect(stored?.provider_data).toEqual({});
     });
 
     it("returns 409 on duplicate externalId", async () => {
       await createCounterparty({ externalId: "dup_001" });
-      const res = await createCounterparty({ externalId: "dup_001", email: "other@example.com" });
+      const res = await createCounterparty({ externalId: "dup_001" });
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.error.code).toBe("CONFLICT");
@@ -240,7 +196,7 @@ describe("Counterparties Routes", () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entityType: "individual", displayName: "X", email: "x@x.com" }),
+          body: JSON.stringify({ entityType: "individual", displayName: "X" }),
         },
         env
       );
@@ -325,8 +281,8 @@ describe("Counterparties Routes", () => {
         .prepare(
           `INSERT INTO counterparties (
              id, organization_id, project_id, external_id, entity_type,
-             display_name, email, identity, provider_data, status, created_by
-           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', 'other@example.com', '{}', '{}', 'active', ?)`
+             display_name, provider_data, status, created_by
+           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', '{}', 'active', ?)`
         )
         .bind(otherCounterpartyId, TEST_ORG.id, otherProjectId, "ext_cross_project", TEST_USER.id)
         .run();
@@ -376,7 +332,6 @@ describe("Counterparties Routes", () => {
     });
 
     afterEach(() => {
-      vi.restoreAllMocks();
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
       env.BVNK_SANDBOX_WALLET_ID = undefined;
@@ -384,13 +339,10 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
     });
 
-    it("persists the Lightspark customer pointer after advancing requirements", async () => {
+    it("returns the missing identity fields when Lightspark has no provider customer", async () => {
       const created = await createCounterparty({ externalId: "requirements_lightspark" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      vi.spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "getOrCreateCustomer").mockResolvedValue({
-        id: "Customer:lightspark_requirements_1",
-      });
 
       const res = await app.request(
         `/v1/counterparties/${counterparty.id}/requirements`,
@@ -403,44 +355,88 @@ describe("Counterparties Routes", () => {
       );
 
       expect(res.status).toBe(200);
-      expect((await res.json()).data).toEqual({
-        provider: "lightspark",
-        direction: "onramp",
-        status: "ready",
-      });
-
-      const stored = await createPostgresCounterpartiesRepository(getDb(env)).getCounterpartyById({
-        counterpartyId: counterparty.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      });
-      if (!stored) {
-        throw new Error("Expected the Lightspark counterparty to remain readable");
-      }
-      expect(stored.provider_data).toMatchObject({
-        lightspark: { customerId: "Customer:lightspark_requirements_1" },
-      });
+      const body = await res.json();
+      expect(body.data.status).toBe("collect_counterparty");
+      expect(body.data.fields.map((field: { key: string }) => field.key)).toEqual([
+        "customer.fullName",
+        "customer.birthDate",
+        "customer.nationality",
+        "customer.region",
+        "customer.email",
+        "customer.address.line1",
+        "customer.address.city",
+        "customer.address.postalCode",
+        "customer.address.countryCode",
+      ]);
     });
 
-    it("persists the BVNK customer reference while verification is pending", async () => {
+    it("creates the Grid customer from collected PII and links the provider account", async () => {
+      const created = await createCounterparty({ externalId: "requirements_lightspark_pii" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "Customer:cus_new_123" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const advanceBody = {
+          provider: "lightspark",
+          direction: "onramp",
+          collectedData: {
+            "customer.fullName": "Ada Lovelace",
+            "customer.birthDate": "1990-01-01",
+            "customer.nationality": "US",
+            "customer.region": "US",
+            "customer.email": "ada@example.com",
+            "customer.address.line1": "1 Main St",
+            "customer.address.city": "San Francisco",
+            "customer.address.postalCode": "94105",
+            "customer.address.countryCode": "US",
+          },
+        };
+        const res = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify(advanceBody),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data).toEqual({
+          provider: "lightspark",
+          direction: "onramp",
+          status: "ready",
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+        const again = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ provider: "lightspark", direction: "onramp" }),
+          },
+          env
+        );
+
+        expect(again.status).toBe(200);
+        expect((await again.json()).data.status).toBe("ready");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("fails loudly at the BVNK identity collection seam", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createAgreementSession").mockResolvedValue({
-        reference: "agreement_requirements_1",
-        agreements: [],
-      });
-      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "signAgreement").mockResolvedValue(undefined);
-      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createBvnkCustomer").mockResolvedValue({
-        reference: "bvnk_customer_requirements_1",
-        status: "PENDING",
-        verificationStatus: "pending",
-      });
-      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getBvnkCustomer").mockResolvedValue({
-        reference: "bvnk_customer_requirements_1",
-        status: "PENDING",
-        verificationStatus: "pending",
-      });
 
       const res = await app.request(
         `/v1/counterparties/${counterparty.id}/requirements`,
@@ -472,29 +468,11 @@ describe("Counterparties Routes", () => {
         env
       );
 
-      expect(res.status).toBe(200);
-      expect((await res.json()).data).toEqual({
-        provider: "bvnk",
-        direction: "onramp",
-        status: "customer_verifying",
-      });
-
-      const stored = await createPostgresCounterpartiesRepository(getDb(env)).getCounterpartyById({
-        counterpartyId: counterparty.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      });
-      if (!stored) {
-        throw new Error("Expected the BVNK counterparty to remain readable");
-      }
-      expect(stored.provider_data).toMatchObject({
-        bvnk: {
-          customer: {
-            customerReference: "bvnk_customer_requirements_1",
-            status: "PENDING",
-            verificationStatus: "pending",
-          },
-        },
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toEqual({
+        code: "BAD_REQUEST",
+        message:
+          "BVNK onramp requires identity fields that are no longer stored; JIT collection is not wired yet",
       });
     });
   });
@@ -655,7 +633,7 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(400);
     });
 
-    it("returns 400 when changing entityType without a matching identity", async () => {
+    it("updates entityType", async () => {
       const created = await createCounterparty({ externalId: "patch_entity_type_only" });
       const cp = (await created.json()).data.counterparty;
 
@@ -668,48 +646,9 @@ describe("Counterparties Routes", () => {
         },
         env
       );
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error.message).toBe(
-        "Changing entityType requires a matching identity in the same request."
-      );
-    });
-
-    it("updates entityType and identity together", async () => {
-      const created = await createCounterparty({ externalId: "patch_entity_type_with_identity" });
-      const cp = (await created.json()).data.counterparty;
-
-      const res = await app.request(
-        `/v1/counterparties/${cp.id}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: authHeader },
-          body: JSON.stringify({ entityType: "business", identity: BASE_BUSINESS_IDENTITY }),
-        },
-        env
-      );
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.data.counterparty.entityType).toBe("business");
-      expect(body.data.counterparty.identity).toEqual(BASE_BUSINESS_IDENTITY);
-    });
-
-    it("returns 400 when identity does not match the counterparty's entityType", async () => {
-      const created = await createBusinessCounterparty({ externalId: "patch_business_identity" });
-      const cp = (await created.json()).data.counterparty;
-
-      const res = await app.request(
-        `/v1/counterparties/${cp.id}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: authHeader },
-          body: JSON.stringify({ identity: BASE_IDENTITY }),
-        },
-        env
-      );
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error.message).toBe("identity does not match the counterparty's entityType.");
     });
   });
 

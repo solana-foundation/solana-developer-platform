@@ -222,7 +222,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+      "Executes a transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -236,7 +236,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer executed",
         content: jsonContent(transferResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -246,7 +246,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "List transfers",
     operationId: "listPaymentTransfers",
-    description: "Lists payment transfers for the authenticated organization or project scope.",
+    description:
+      "Lists persisted payment transfers for the authenticated scope. Set custodyWalletId to select one exact SDP wallet; observed address history is opt-in with includeObserved=true.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -257,7 +258,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer list",
         content: jsonContent(transferListResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -289,7 +290,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -314,7 +315,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -349,7 +350,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch list",
         content: jsonContent(transferBatchListResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

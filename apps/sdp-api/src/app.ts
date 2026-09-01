@@ -56,6 +56,7 @@ import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -382,6 +383,18 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");
 
+    const logVendorError = (vendor: string, code: string, status: number) =>
+      logEvent("error", {
+        event: "sdp_api_vendor_error",
+        vendor,
+        code,
+        status,
+        method: c.req.method,
+        path: c.req.path,
+        request_id: requestId,
+        ...describeError(err),
+      });
+
     // Hono core throws HTTPException(400) for malformed JSON bodies before
     // route-level body validation runs; normalize it into the AppError envelope.
     const normalizedError =
@@ -403,6 +416,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       err instanceof SdpPaymentsError ||
       err instanceof SdpEarnError
     ) {
+      if (err instanceof SdpRpcError) {
+        logVendorError("rpc", err.code, err.statusCode);
+      }
       const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
@@ -420,6 +436,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     if (err instanceof SigningError) {
       const mapped = mapSigningError(err);
+      logVendorError("signing", mapped.code, mapped.status);
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
@@ -435,6 +452,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     if (err instanceof FeePaymentError) {
       const mapped = mapFeePaymentError(err);
+      logVendorError("fee-payment", err.code, mapped.status);
       // The response message is sanitized; without this log entry the actual
       // failure (breaker trip, provider outage, budget denial) is invisible.
       getLogger().warn(
@@ -464,6 +482,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     const fireblocksBlocked = getFireblocksBlockedError(err);
     if (fireblocksBlocked) {
+      logVendorError("fireblocks", fireblocksBlocked.code, fireblocksBlocked.status);
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
@@ -484,6 +503,13 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       context?: Record<string, unknown>;
       cause?: unknown;
     };
+    logEvent("error", {
+      event: "sdp_api_internal_error",
+      method: c.req.method,
+      path: c.req.path,
+      request_id: requestId,
+      ...describeError(err),
+    });
     getLogger().error(
       redactCredentialSecrets({
         requestId,

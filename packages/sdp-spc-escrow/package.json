@@ -17,7 +17,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@sdp/kit-augment": "workspace:*",
     "@solana-program/token": "catalog:",
     "@solana/kit": "catalog:"
   },

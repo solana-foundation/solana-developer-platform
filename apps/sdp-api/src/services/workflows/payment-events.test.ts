@@ -1,5 +1,5 @@
-import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Env } from "@/types/env";
 import { emitRampSettled } from "./payment-events";
 
 // The emit is fire-and-forget, so the assertion is on the dispatch call, not a return
@@ -9,26 +9,7 @@ const dispatchWorkflowEvent = vi.hoisted(() =>
 );
 vi.mock("./event-bus", () => ({ dispatchWorkflowEvent }));
 
-type EmitContext = Parameters<typeof emitRampSettled>[0];
-
-// A context built the way @hono/node-server builds one: no ExecutionContext. Hono's
-// `c.executionCtx` getter THROWS ("This context has no ExecutionContext") rather than
-// returning undefined, so an unguarded `c.executionCtx.waitUntil(...)` blows up the
-// request. `app.request()` omits the execution context exactly like the Node adapter.
-async function withNodeStyleContext(run: (c: EmitContext) => void) {
-  const app = new Hono();
-  let thrown: unknown = null;
-  app.get("/", (c) => {
-    try {
-      run(c as unknown as EmitContext);
-    } catch (error) {
-      thrown = error;
-    }
-    return c.text("ok");
-  });
-  const response = await app.request("/");
-  return { thrown, status: response.status };
-}
+const env = {} as Env;
 
 const input = {
   organizationId: "org_1",
@@ -42,28 +23,15 @@ const input = {
   cryptoToken: "USDC",
 };
 
-describe("emitRampSettled on a runtime without an ExecutionContext (Node / Cloud Run)", () => {
+describe("emitRampSettled", () => {
   beforeEach(() => {
     dispatchWorkflowEvent.mockClear();
   });
 
-  // Regression: the unguarded `c.executionCtx.waitUntil(...)` threw after
-  // applyRampSettlementEvent had already committed the transfer as terminal, so the
-  // webhook 500'd and the provider's retry returned early — losing the event forever.
-  it("does not throw when the runtime has no ExecutionContext", async () => {
-    const { thrown } = await withNodeStyleContext((c) => {
-      emitRampSettled(c, input);
-    });
-    expect(thrown).toBeNull();
-  });
-
-  // The point of the fix is that the event still reaches the bus. A try/catch that
-  // swallowed the failure would satisfy the test above while silently dropping every
-  // onramp_settled/offramp_settled trigger, so assert the dispatch actually happened.
-  it("still dispatches the settlement event", async () => {
-    await withNodeStyleContext((c) => {
-      emitRampSettled(c, input);
-    });
+  // A try/catch that swallowed a dispatch failure would silently drop every
+  // onramp_settled/offramp_settled trigger, so assert the dispatch actually happens.
+  it("dispatches the settlement event", () => {
+    emitRampSettled(env, input);
 
     expect(dispatchWorkflowEvent).toHaveBeenCalledTimes(1);
     const [, event] = dispatchWorkflowEvent.mock.calls[0];
@@ -72,35 +40,18 @@ describe("emitRampSettled on a runtime without an ExecutionContext (Node / Cloud
     expect(event.payload).toMatchObject({ transferId: "ptr_1", provider: "mural" });
   });
 
-  it("maps an offramp direction to offramp_settled", async () => {
-    await withNodeStyleContext((c) => {
-      emitRampSettled(c, { ...input, direction: "offramp" });
-    });
+  it("maps an offramp direction to offramp_settled", () => {
+    emitRampSettled(env, { ...input, direction: "offramp" });
 
     const [, event] = dispatchWorkflowEvent.mock.calls[0];
     expect(event.type).toBe("offramp_settled");
     expect(event.eventKey).toBe("offramp_settled:ptr_1");
   });
-});
 
-describe("emitRampSettled on a runtime with an ExecutionContext (Workers)", () => {
-  beforeEach(() => {
-    dispatchWorkflowEvent.mockClear();
-  });
+  it("does not throw when the dispatch rejects", async () => {
+    dispatchWorkflowEvent.mockRejectedValueOnce(new Error("bus down"));
 
-  // Workers tear the isolate down at response time, so the dispatch must still be
-  // handed to waitUntil to survive past the response.
-  it("keeps the dispatch alive through waitUntil", async () => {
-    const waitUntil = vi.fn();
-    const c = {
-      env: {},
-      executionCtx: { waitUntil },
-    } as unknown as EmitContext;
-
-    emitRampSettled(c, input);
-
-    expect(dispatchWorkflowEvent).toHaveBeenCalledTimes(1);
-    expect(waitUntil).toHaveBeenCalledTimes(1);
-    expect(waitUntil.mock.calls[0][0]).toBeInstanceOf(Promise);
+    expect(() => emitRampSettled(env, input)).not.toThrow();
+    await vi.waitFor(() => expect(dispatchWorkflowEvent).toHaveBeenCalledTimes(1));
   });
 });

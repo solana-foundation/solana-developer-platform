@@ -14,7 +14,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
-  earnProgram: "/dashboard/markets/earn",
+  earnProgram: "/dashboard/markets/embedded-yield",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -62,6 +62,7 @@ export type DashboardLoadingRoute =
   | "settings"
   | "integrations"
   | "integration-detail"
+  | "private-channels-setup"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -99,7 +100,8 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   }
   if (
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`
   ) {
     return "earn-program";
   }
@@ -146,6 +148,9 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === "/dashboard/integrations") return "integrations";
+  if (pathname === "/dashboard/integrations/private-channels/setup") {
+    return "private-channels-setup";
+  }
   if (pathname.startsWith("/dashboard/integrations/private-channels")) {
     return "integration-detail";
   }

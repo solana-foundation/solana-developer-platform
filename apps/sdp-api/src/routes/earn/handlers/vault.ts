@@ -1,4 +1,7 @@
-import { isDecimalString } from "@sdp/solana/amount";
+import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { supportsVaultDepositQuote, supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
+import { notImplemented } from "@sdp/earn/errors";
+import type { EarnVaultDepositQuote, EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import type {
   EarnVaultDepositRecord,
   EarnVaultDepositResponse,
@@ -8,7 +11,11 @@ import type {
   EarnVaultWithdrawalsPage,
   SdpEnvironment,
 } from "@sdp/types";
-import { type EarnProviderId, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
+import {
+  type EarnProviderId,
+  earnDepositStyle,
+  isVaultDirectDepositEnabled,
+} from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
@@ -18,7 +25,6 @@ import {
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
   AppError,
   badRequest,
@@ -37,7 +43,6 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -46,9 +51,13 @@ import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
-import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
+import {
+  resolveVaultDirectClient,
+  resolveVaultWithdrawClient,
+} from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
+import { refusedBuildMessage } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import {
   approvedWalletOperationId,
@@ -56,19 +65,27 @@ import {
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
+import {
+  assertEarnProviderSurfaced,
+  assertProviderAvailable,
+} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   earnVaultDepositParamsSchema,
+  type earnVaultDepositPreviewSchema,
   type earnVaultDepositSchema,
   earnVaultDepositsQuerySchema,
   earnVaultPositionsQuerySchema,
   earnVaultWithdrawalParamsSchema,
+  type earnVaultWithdrawalPreviewSchema,
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import { assertVaultDepositAdmissible } from "./admission";
+import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admission";
 import { parseParams, parseQuery } from "./shared";
+import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
+import { hydrateVaultPositions } from "./vault-position-hydration";
 
 /**
  * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
@@ -81,6 +98,90 @@ import { parseParams, parseQuery } from "./shared";
  * endpoint that meant both would have to explain which half happened when the
  * chain rejected the transfer.
  */
+/**
+ * POST /v1/earn/vault-deposit-previews — what would this deposit mint right
+ * now, from the provider's own live accounting. The dashboard derives its
+ * `minSharesOut` floor from this quote, so the floor tracks the live share
+ * rate instead of assuming one.
+ *
+ * A READ that takes the deposit's own money-in gates: the quote exists only
+ * to open a NEW position, so surfacing, entitlement, admission and the
+ * environment capability all apply exactly as they do on the deposit —
+ * but no wallet, no policy gate and no idempotency key, because it moves
+ * nothing and holds nothing.
+ */
+export async function createEarnVaultDepositPreview(
+  c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
+) {
+  const body = c.req.valid("json");
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+
+  if (!isVaultDirectDepositEnabled(environment)) {
+    throw new AppError(
+      "FORBIDDEN",
+      "Vault deposits are not available in production yet, so there is nothing to quote."
+    );
+  }
+
+  const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
+  if (!strategy || strategy.environment !== environment) {
+    throw notFound("Earn strategy");
+  }
+  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
+    throw badRequest(
+      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
+    );
+  }
+  if (!isEarnProviderId(strategy.provider)) {
+    throw providerNotConfigured(
+      `Earn provider ${strategy.provider} is not available in this deployment`
+    );
+  }
+  const provider = strategy.provider;
+
+  assertEarnProviderSurfaced(provider);
+  await assertProviderAvailable(
+    c.env,
+    getDb(c.env),
+    auth.organizationId,
+    "earn",
+    provider,
+    environment === "sandbox"
+  );
+  assertStrategyDepositable(strategy, environment);
+
+  const deadline = createVaultDeadline();
+  const client = resolveVaultDirectClient(c.env, provider, deadline);
+  if (!client || !supportsVaultDepositQuote(client)) {
+    throw notImplemented(provider, "vault deposit quoting");
+  }
+
+  let quote: EarnVaultDepositQuote;
+  try {
+    quote = await client.quoteVaultDeposit(earnRuntime(c), {
+      providerReference: strategy.provider_reference,
+      amount: body.amount,
+    });
+  } catch (error) {
+    // A refused quote is the CALLER's, in the provider's own words — the SAME
+    // code-shape mapping the deposit build applies (vault-refusals.ts), so the
+    // next quote-capable provider inherits the 400 by using the vocabulary
+    // instead of 500ing here on a caller-fixable amount. Everything else keeps
+    // bubbling.
+    const refusal = refusedBuildMessage(error);
+    if (refusal !== null) throw badRequest(refusal);
+    throw error;
+  }
+
+  return success(c, {
+    strategyId: strategy.id,
+    sharesOut: quote.sharesOut,
+    shareDecimals: quote.shareDecimals,
+    blockingIssues: quote.blockingIssues,
+  });
+}
+
 export async function createEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
 ) {
@@ -232,9 +333,10 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // Kamino's pinned SDK selects the LEGACY deposit instruction when no
   // `minSharesOut` is given — there is no implicit floor, so a vault-state
   // change between signing and inclusion can mint materially fewer shares than
-  // the caller reviewed. The dashboard does not yet quote one (that needs a
-  // live rate with a displayed tolerance and an expiry), so requiring it
-  // unconditionally today would break the only working flow.
+  // the caller reviewed. The dashboard now derives one from a live quote with
+  // a displayed tolerance (`POST /vault-deposit-previews`) — an expiry is the
+  // piece still missing — but API callers predate the floor, so requiring it
+  // unconditionally today would still break working flows.
   //
   // This is scoped to production deliberately, and it is NOT dead code: the
   // environment gate above closes production for a different reason (no exit
@@ -282,11 +384,10 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //                 an operator's deliberate stop during an exploit or depeg —
   //                 stayed fundable by id.
   //
-  // The sequence is SHARED with the button-configuration PUT
-  // (handlers/admission.ts) so the config a builder saves and the deposit this
-  // route accepts cannot drift apart. Money-OUT must never inherit any of
-  // these (ADR 0002): un-offering a provider closes the door in, never the
-  // door out.
+  // The sequence lives in handlers/admission.ts so a future second money-in
+  // caller shares it instead of re-deriving it. Money-OUT must never inherit
+  // any of these (ADR 0002): un-offering a provider closes the door in, never
+  // the door out.
   const provider = await assertVaultDepositAdmissible(c, strategy);
 
   // The wallet must be one SDP can sign for, and the binding must carry a WRITE
@@ -956,104 +1057,34 @@ export async function listEarnVaultPositions(c: AppContext) {
   // them — and a hydration request is never built against a blank vault address.
   const rows = page.rows.map(toVaultHolding);
 
-  // Group by provider so each client reads its whole shelf in one pass, sharing
-  // one slot across the vaults — a per-position read would price a multi-vault
-  // page against drifting slots.
-  const byProvider = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const providerRows = byProvider.get(row.provider);
-    if (providerRows) providerRows.push(row);
-    else byProvider.set(row.provider, [row]);
-  }
-
   const walletAddresses = new Map(
     scopedWallets.map((wallet) => [wallet.id, wallet.publicKey] as const)
   );
-  const live = new Map<
-    string,
-    {
-      shares: string;
-      withdrawableShares: string;
-      tokenValue: string | undefined;
-    }
-  >();
-  const hydrationJobs: Array<() => Promise<void>> = [];
-  const deadline = createVaultDeadline();
-
-  for (const [provider, providerRows] of byProvider) {
-    const client = resolveVaultDirectClient(c.env, provider, deadline);
-    if (!client) continue;
-    const byWallet = new Map<string, typeof rows>();
-    for (const row of providerRows) {
-      const walletRows = byWallet.get(row.custodyWalletId);
-      if (walletRows) walletRows.push(row);
-      else byWallet.set(row.custodyWalletId, [row]);
-    }
-    for (const [walletId, walletRows] of byWallet) {
-      const owner = walletAddresses.get(walletId);
-      if (!owner) continue;
-      const trustedIdentity = new Map(
-        walletRows.map((row) => [
-          row.vaultAddress,
-          { tokenMint: row.tokenMint, shareMint: row.shareMint },
-        ])
-      );
-      const references = walletRows.map((row) => row.vaultAddress);
-      hydrationJobs.push(async () => {
-        const snapshots = await client.readVaultPositions(earnRuntime(c), {
-          owner,
-          providerReferences: references,
-        });
-        for (const snapshot of snapshots) {
-          const trusted = trustedIdentity.get(snapshot.providerReference);
-          if (
-            !trusted ||
-            snapshot.owner !== owner ||
-            snapshot.cluster !== earnClusterFor(environment) ||
-            snapshot.tokenMint !== trusted.tokenMint ||
-            snapshot.shareMint !== trusted.shareMint ||
-            !isBoundedSnapshotAmount(snapshot.shares) ||
-            !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
-            (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
-          ) {
-            getLogger().warn(
-              {
-                provider,
-                walletId,
-                providerReference: snapshot.providerReference,
-                snapshotOwner: snapshot.owner,
-                snapshotCluster: snapshot.cluster,
-                snapshotTokenMint: snapshot.tokenMint,
-                snapshotShareMint: snapshot.shareMint,
-              },
-              "vault position: ignored live snapshot with mismatched identity"
-            );
-            continue;
-          }
-          live.set(vaultPositionLiveKey(provider, walletId, snapshot.providerReference), {
-            shares: snapshot.shares,
-            withdrawableShares: snapshot.withdrawableShares,
-            tokenValue: snapshot.tokenValue,
-          });
-        }
-      });
-    }
-  }
-
-  if (hydrationJobs.length > 0) {
-    // Failed reads intentionally leave only their rows unhydrated; never report
-    // zero when the chain could not be read. In-flight RPC work stays bounded.
-    await mapSettledWithConcurrency(hydrationJobs, 8, (hydrate) => hydrate());
-  }
+  const live = await hydrateVaultPositions(
+    c,
+    environment,
+    rows.map((row) => {
+      const ownerAddress = walletAddresses.get(row.custodyWalletId);
+      if (!ownerAddress) {
+        throw internalError(`Earn vault position ${row.id} has no readable custody owner`);
+      }
+      return {
+        id: row.id,
+        provider: row.provider,
+        providerReference: row.vaultAddress,
+        ownerAddress,
+        tokenMint: row.tokenMint,
+        shareMint: row.shareMint,
+      };
+    })
+  );
 
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.createdAt, last.id) : null;
 
   return success(c, {
     positions: rows.map((row) => {
-      const hydrated = live.get(
-        vaultPositionLiveKey(row.provider, row.custodyWalletId, row.vaultAddress)
-      );
+      const hydrated = live.get(row.id);
       return {
         id: row.id,
         provider: row.provider,
@@ -1073,40 +1104,6 @@ export async function listEarnVaultPositions(c: AppContext) {
     hasMore,
     nextCursor,
   });
-}
-
-function vaultPositionLiveKey(provider: string, walletId: string, reference: string): string {
-  return JSON.stringify([provider, walletId, reference]);
-}
-
-function isBoundedSnapshotAmount(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 128 && isDecimalString(value);
-}
-
-const vaultPositionCursorSchema = z.object({
-  // `created_at` is ordered as canonical UTC text, so accepting offsets or a
-  // different precision would make a syntactically valid cursor sort wrongly.
-  createdAt: z.string().datetime({ precision: 3 }),
-  // Shape and bound only, for the same reason as the movement cursor above:
-  // holdings carry `earn_vault_position_…` ids the unification preserved beside
-  // `earn_position_…` for newer ones. Lowercase is still asserted because
-  // PostgreSQL compares the prefixed id as text in the keyset tuple.
-  id: z
-    .string()
-    .min(1)
-    .max(128)
-    .refine((id) => id === id.toLowerCase()),
-});
-
-function encodeVaultPositionCursor(createdAt: string, id: string): string {
-  return encodeKeysetCursor(createdAt, id);
-}
-
-function decodeVaultPositionCursor(cursor: string): { createdAt: string; id: string } | null {
-  const decoded = decodeKeysetCursor(cursor);
-  if (!decoded) return null;
-  const parsed = vaultPositionCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });
-  return parsed.success ? parsed.data : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1197,6 +1194,7 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
       provider: position.provider,
       positionId: position.id,
       shares: body.shares,
+      minAmountOut: body.minAmountOut ?? null,
     }),
   };
 
@@ -1292,6 +1290,72 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
 }
 
 /**
+ * POST /v1/earn/vault-withdrawal-previews — what redeeming these shares would
+ * pay right now, from the provider's own live accounting. The dashboard derives
+ * its `minAmountOut` floor from this quote, exactly as the deposit preview
+ * feeds the deposit floor.
+ *
+ * EXIT gates only (ADR 0002): position scoping and the read-side wallet
+ * binding, both answering 404 — no surfacing, no entitlement, no admission and
+ * no environment capability, because a quote in service of money-OUT must be
+ * reachable for a paused strategy, an un-surfaced provider and a revoked
+ * override alike. The only provider-shaped refusal is capability (501).
+ */
+export async function createEarnVaultWithdrawalPreview(
+  c: ValidatedBodyContext<typeof earnVaultWithdrawalPreviewSchema>
+) {
+  const body = c.req.valid("json");
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const positionRow = await repo.getPositionById({
+    organizationId: auth.organizationId,
+    environment,
+    positionId: body.positionId,
+  });
+  if (positionRow?.kind !== "vault_direct") {
+    throw notFound("Earn vault position");
+  }
+  const position = toVaultHolding(positionRow);
+
+  // The same binding scope as every vault read: a key bound away from the
+  // holding wallet must not learn anything through its position.
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
+  if (!scopedWallets.some((wallet) => wallet.id === position.custodyWalletId)) {
+    throw notFound("Earn vault position");
+  }
+
+  const deadline = createVaultDeadline();
+  const client = resolveVaultWithdrawClient(c.env, position.provider, deadline);
+  if (!client || !supportsVaultWithdrawQuote(client)) {
+    throw notImplemented(position.provider, "vault withdrawal quoting");
+  }
+
+  let quote: EarnVaultWithdrawQuote;
+  try {
+    quote = await client.quoteVaultWithdrawal(earnRuntime(c), {
+      providerReference: position.vaultAddress,
+      shares: body.shares,
+    });
+  } catch (error) {
+    // An unusable share count is the CALLER's, in the provider's own words —
+    // the same shared refusal vocabulary the deposit quote maps through.
+    const refusal = refusedBuildMessage(error);
+    if (refusal !== null) throw badRequest(refusal);
+    throw error;
+  }
+
+  return success(c, {
+    positionId: position.id,
+    assetsOut: quote.assetsOut,
+    assetDecimals: quote.assetDecimals,
+    blockingIssues: quote.blockingIssues,
+  });
+}
+
+/**
  * POST /v1/earn/vault-withdrawals — exit a vault position, signed by the
  * custody wallet that holds it. Build, simulate, sign, record, then broadcast;
  * the reconciliation sweep finishes an ambiguous send.
@@ -1324,6 +1388,7 @@ export async function createEarnVaultWithdrawal(
       shareMint: position.shareMint,
       wallet,
       shares: parsedData.shares,
+      minAmountOut: parsedData.minAmountOut,
       requestId,
       userId: auth.userId ?? null,
       apiKeyId: auth.apiKeyId ?? null,

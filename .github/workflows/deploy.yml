@@ -1,0 +1,193 @@
+name: SDP Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Services to deploy (auto = detect from changed files vs HEAD^)"
+        required: false
+        type: choice
+        default: auto
+        options: [auto, none, api]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    if: github.repository == 'solana-foundation/solana-developer-platform' && github.ref == 'refs/heads/main'
+    outputs:
+      api: ${{ steps.detect.outputs.api }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        env:
+          MODE: ${{ inputs.services || 'auto' }}
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+            CHANGED_FILES=$(git diff --name-only "$BEFORE" HEAD)
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+          fi
+          match() { echo "$CHANGED_FILES" | grep -qE "$1"; }
+
+          api=false
+          case "$MODE" in
+            none) ;;
+            api) api=true ;;
+            auto|*)
+              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod)?)?\.yml|\.github/workflows/sdp-dev-smoke\.yml)"; then
+                api=true
+              fi
+              ;;
+          esac
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+          echo "Services to deploy: api=$api (api carries the worker, cron, and migrate jobs — one image)" >> "$GITHUB_STEP_SUMMARY"
+
+
+  notify-start:
+    needs: changes
+    if: needs.changes.outputs.api == 'true' && vars.CONTINUOUS_PROD_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Notify Slack — deploy started
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          SERVICES: api
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SLACK=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain --project solana-developer-platform --config dev_ci 2>/dev/null || true)
+          [ -z "$SLACK" ] && exit 0
+          echo "::add-mask::$SLACK"
+          SHA=$(git rev-parse HEAD)
+          COMMIT_MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
+          PAYLOAD=$(jq -n \
+            --arg marker "[STARTED] SDP Deploy" \
+            --arg services "$SERVICES" \
+            --arg short_sha "${SHA:0:7}" --arg commit_msg "$COMMIT_MSG" \
+            --arg actor "$ACTOR" --arg run_url "$RUN_URL" --arg run_id "$RUN_ID" \
+            '{
+              text: ("*" + $marker + "* — services: `" + $services + "`"),
+              attachments: [{
+                color: "#dbab09",
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:[
+                    {type:"mrkdwn",text:("*Services:*\n`"+$services+"`")},
+                    {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$commit_msg)},
+                    {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
+                    {type:"mrkdwn",text:("*Run:*\n<"+$run_url+"|workflow #"+$run_id+">")}
+                  ]}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK" || true
+
+  notify-end:
+    needs: [changes, deploy-api-dev, deploy-api-prod]
+    if: always() && needs.deploy-api-dev.result != 'skipped' && vars.CONTINUOUS_PROD_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Notify Slack — deploy result
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          SERVICES: api
+          OUTCOME: >-
+            ${{ (needs.deploy-api-dev.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
+                (needs.deploy-api-dev.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
+                'SUCCESS' }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SLACK=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain --project solana-developer-platform --config dev_ci 2>/dev/null || true)
+          [ -z "$SLACK" ] && exit 0
+          echo "::add-mask::$SLACK"
+          MARKER="[${OUTCOME}] SDP Deploy"
+          COLOR="#36a64f"; [ "$OUTCOME" = "FAILED" ] && COLOR="#cc0000"; [ "$OUTCOME" = "CANCELLED" ] && COLOR="#808080"
+          SHA=$(git rev-parse HEAD)
+          COMMIT_MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
+          PAYLOAD=$(jq -n \
+            --arg marker "$MARKER" --arg color "$COLOR" \
+            --arg services "$SERVICES" \
+            --arg short_sha "${SHA:0:7}" --arg commit_msg "$COMMIT_MSG" \
+            --arg actor "$ACTOR" --arg run_url "$RUN_URL" --arg run_id "$RUN_ID" \
+            '{
+              text: ("*" + $marker + "* — services: `" + $services + "`"),
+              attachments: [{
+                color: $color,
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:[
+                    {type:"mrkdwn",text:("*Services:*\n`"+$services+"`")},
+                    {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$commit_msg)},
+                    {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
+                    {type:"mrkdwn",text:("*Run:*\n<"+$run_url+"|workflow #"+$run_id+">")}
+                  ]}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK" || true
+
+  deploy-api-dev:
+    name: sdp-api + worker + cron — dev + smoke
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
+
+  deploy-api-prod:
+    name: sdp-api + worker + cron — prod
+    needs: [changes, deploy-api-dev]
+    if: >-
+      needs.changes.outputs.api == 'true' &&
+      github.event_name == 'push' &&
+      vars.CONTINUOUS_PROD_DEPLOY == 'true' &&
+      !startsWith(github.event.head_commit.message, 'chore(main): release')
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
+    with:
+      image_sha: ${{ github.sha }}

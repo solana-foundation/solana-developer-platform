@@ -80,6 +80,9 @@ already moved) and its visibility is the UNION of what the per-family reads gran
 enforced in the repository query: vault rows stay project-and-wallet scoped,
 custodial rows stay program scoped. A new read over a table that holds every
 movement is the obvious place for a scoping rule to go missing — do not widen it.
+External-wallet rows are deliberately NOT in this union — the vault arm's
+custody-wallet match is unsatisfiable for an owner-signed row — and are served
+by their own per-owner reads instead (PRO-1772, external-wallet section below).
 
 Every route reads exactly ONE source for the STATE it reports (DB or live
 provider) and never blends them; that is an ADR 0002 addendum acceptance
@@ -88,21 +91,12 @@ record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
-- `GET|PUT /button-configurations/current`: **DB**, scoped to organization and
-  project. PUT runs the SAME vault money-in gate sequence as
-  `POST /vault-deposits` — shared as `assertVaultDepositAdmissible`
-  (`handlers/admission.ts`), never copied — after resolving the strategy through
-  `requireEarnStrategy` (browse visibility applies to NEW configurations). The
-  stable public token is preserved across updates.
-- `GET /button-configurations/public/:publicToken`: **DB** plus catalogue
-  display metadata, registered before auth for the engineering handoff. Its
-  response is deliberately limited to strategy and style, and it never returns
-  organization, project, actor, or API-key data. The catalogue visibility
-  policy binds this read too: a strategy that is hidden (`isHiddenStrategy`),
-  delisted, or not active is served with `strategyAvailable: false` and
-  `strategyName`/`provider` withheld, so the unauthenticated route cannot leak
-  a hidden row's metadata and the handoff page can render an honest stale state
-  instead of a snippet the deposit route would refuse.
+- The `/button-configurations/*` routes (saved builder styling + the public
+  engineering-handoff token) were removed with the dashboard UI builder;
+  migration 0074 dropped `earn_button_configurations`. The retired-surfaces
+  test in `../earn.test.ts` pins both paths at 404. The dashboard's
+  integration guide is derived from the strategy catalogue and persists
+  nothing.
 
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
@@ -445,7 +439,13 @@ organization's own custody wallets.
     program error instead of a landed, failed transaction the customer paid for.
     Provider build, simulation, custody lookup, signing, and broadcast share one
     absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
-    a later side effect.
+    a later side effect. The verdict surfaces through
+    `describeVaultSimulationError` (services/earn/vault-simulation-error.ts),
+    which turns recognized `TransactionError` variants into fee-mode-aware prose
+    ("the wallet holds no SOL...") with the raw variant kept in parentheses for
+    log searches; unrecognized shapes fall back to the capped raw JSON. A
+    failure the helper attributes to SDP's fee sponsor surfaces as a retryable
+    5xx (with no sponsor detail in the body), never a caller-fault 400.
   - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
     without sending; one transaction stores the signature, base64 wire bytes,
     last-valid block height, movement and activated claim while still `pending`.
@@ -479,6 +479,22 @@ organization's own custody wallets.
     customer's lamports. The single exception is an exit that CREATES the account
     itself while consolidating, where its own rent payer funded it seconds
     earlier and the recorded value describes an older instance.
+- `POST /vault-deposit-previews` — the deposit QUOTE: what the vault's own
+  live accounting would mint for `{strategyId, amount}`, from which the
+  dashboard derives its `minSharesOut` floor. A live read SHAPED LIKE MONEY-IN:
+  no wallet, no policy gate, no idempotency key — it moves nothing — but it
+  exists only to open a NEW position, so it takes the deposit's own gate order
+  deliberately: registered as `requirePermissions("earn:read")` → handler,
+  which applies the environment fail-close (`isVaultDirectDepositEnabled`,
+  403), catalogue row (404), deposit style (400), `assertEarnProviderSurfaced`,
+  `assertProviderAvailable`, admission (`assertStrategyDepositable`), then
+  capability (`supportsVaultDepositQuote`, 501 for a provider that cannot
+  quote). A vault that will not take the deposit answers 200 with
+  `blockingIssues` in the provider's own words; an unusable amount maps through
+  the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
+  POST because the parameters are a body, like the custodial
+  withdrawal-preview. See "Gate asymmetry" for why this preview alone carries
+  money-in gates.
 - `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
   newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
   re-derive which of its deposits are still in flight after losing local state,
@@ -580,6 +596,21 @@ organization's own custody wallets.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
 
+- `POST /vault-withdrawal-previews` — the exit QUOTE the dashboard derives its
+  `minAmountOut` floor from (`supportsVaultWithdrawQuote`; 501 for a provider
+  without the capability), the deposit preview's mirror with deliberately
+  DIFFERENT gates: EXIT gates only (ADR 0002) — position scoping and the
+  read-side wallet binding, both 404 — no surfacing, no entitlement, no
+  admission, no environment capability. Registered as
+  `requirePermissions("earn:read", "wallets:read")`: `wallets:read` is not a
+  money-in gate, and for a key with NO wallet bindings the binding check is a
+  documented no-op, so dropping it would let an earn:read-only key read any
+  org position's live payout while `GET /vault-positions` answers it 403.
+  The dashboard fingerprints each flow's idempotency key on the USER'S
+  tolerance (reproducible after a reload) and remembers the floor a held key
+  was minted with separately, because the API's own fingerprint includes the
+  floor and refuses a replay that changed it.
+
 Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolved
 through `services/earn/execution-registry.ts` — the one place a provider id maps
 to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
@@ -595,7 +626,7 @@ movement failed. Never rebuild a transaction during recovery.
 ### Vault withdrawals — the exit half (PRO-1702)
 
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
-  legs + broadcast in order**. Body `{positionId, shares}` and a required
+  legs + broadcast in order**. Body `{positionId, shares, minAmountOut?}` and a required
   `Idempotency-Key` header (body `requestId` rejected, same as deposits).
   Registered `requirePermissions("earn:write", "wallets:read")` → `policyGate`
   (extractor `extractEarnVaultWithdrawalPolicyCandidate`; family `program`,
@@ -629,6 +660,114 @@ movement failed. Never rebuild a transaction during recovery.
   `listReadableEarnVaultWallets`. `?requestId=` serves the one logical
   withdrawal, and `?settled=` uses the ledger terminal set
   (`finalized|failed`), not the deposits' legacy one.
+
+### External-wallet (caller-signed) routes — the B2B2C money path (PRO-1722)
+
+A third signer, not a third model. An *external wallet* is a NON-CUSTODIAL
+wallet the partner's platform connects — SDP holds no key for it and its owner
+is not an SDP tenant. Its movements are `vault_direct` rows in the same ledger:
+one signed transaction, recorded before broadcast, settled by the same
+reconciler. The
+signer distinction is a column pair — exactly one of `custody_wallet_id` and
+`owner_address` per vault row (migration 0070) — and every treasury read
+scopes by custody wallet, so external-wallet rows are structurally invisible
+to those surfaces. Full contract: ADR 0002 addendum 2026-08-26.
+
+Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
+`services/earn/vault-external-wallet.service.ts`):
+
+- `POST /external-wallet/deposit-transactions` — **build + simulate + compile,
+  never sign.** Body `{strategyId, ownerAddress, amount, minSharesOut?}`. Runs
+  the FULL money-in stack in the custody deposit's order (environment
+  capability, production floor, surfacing, entitlement, admission), builds the
+  provider plan for the OWNER, simulates with the owner as fee payer (which is
+  also the funds check), compiles one unsigned transaction and persists it
+  (`earn_external_wallet_transactions`), returning
+  `{transactionId, transaction}` for the external wallet to sign. The memo
+  binds the TRANSACTION id (the submit's key does not exist yet at build time).
+  No idempotency key: a build moves no money and expires with its blockhash.
+- `POST /external-wallet/deposits` — **verify + record + broadcast.** Body
+  `{transactionId, signedTransaction}` plus a REQUIRED `Idempotency-Key`
+  (body `requestId` rejected). The submit proves the bytes are a transaction
+  SDP built — MESSAGE bytes compared against the stored build, owner's ed25519
+  signature verified — and takes nothing but signatures from the wire. The
+  movement is recorded durably, THEN broadcast: record-before-broadcast
+  unchanged, the signature merely became knowable at submit instead of at
+  SDP's signer. Two composed idempotency protections: the key anchors the
+  movement (a partner retry replays the original), and each build is
+  consumable at most once under a row lock (a second key against the same
+  build is a 409, never a second row for one on-chain transaction). The
+  fingerprint includes the build id, so a key reused against a REBUILT
+  transaction conflicts rather than silently replaying.
+- `POST /external-wallet/withdrawal-transactions` — the exit build, ADR 0002
+  exit safety in its strongest form: 404-scoping (org, environment, EXACT
+  project, owner shape — a custody position 404s here) and capability (501)
+  only. Works while the provider is disabled for new deposits; pinned by the
+  exit-safety describe in `../earn.external-wallet.test.ts`.
+- `POST /external-wallet/withdrawals` — the submit, mirrored.
+- **NO policyGate and no `wallets:read`, deliberately** — this is not the
+  vault-deposit cautionary tale repeating. Wallet policy governs the org's own
+  custody and stands between a request and `createOrgSigner`; these routes
+  never resolve a signer and never touch custody. The owner's own signature
+  IS the authorization, and there is no signing sink here for
+  `value-moving-conformance.node.test.ts` to inventory.
+- **Scoping is org AND project**, stricter than custody vault claims: the
+  external wallet belongs to the partner's project
+  (`idx_earn_positions_external_wallet_claim` includes `project_id`), so a
+  sibling project can neither see nor exit its positions. Position reads for
+  partners are PRO-1724, not here.
+- The owner pays fee and rent (Kora sponsorship for this surface is PRO-1744 —
+  see the ADR addendum for why co-signing a stranger's transaction is its own
+  decision, not a default), and the rent funder is recorded NULL so the exit's
+  refund defaults back to the owner.
+
+The per-owner READS (PRO-1772) close the loop the money routes open. All three
+take `earn:read` only — no `wallets:read` (end-user wallets carry no custody
+bindings, same as the position reads) and NO provider gate (ADR 0002: they
+report on money that already moved). All 404 an owner the exact project has
+never claimed a position for (`hasExternalWalletPositionOwner` — existence and
+ownership collapse to one answer), and none of them is reachable through
+`GET /movements`, whose vault arm requires a custody-wallet match an
+owner-signed row can never satisfy
+(`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
+three).
+
+- `GET /external-wallet/movements?ownerAddress=…` — **DB ledger list**, one
+  owner's activity newest first in ledger vocabulary, keyset-paged, with
+  `direction`/`status` equality filters. The owner is a REQUIRED query filter
+  rather than a path segment so the collection keeps its `:movementId` detail
+  route unambiguous.
+- `GET /external-wallet/movements/:movementId` — **DB**, the poll that makes
+  the submit's record-before-broadcast answerable on this surface. Scoping
+  answers 404 across the board: organization, EXACT project, environment, and
+  the external-wallet shape itself (`owner_address IS NOT NULL` — a
+  custody-signed movement guessed by id reads as missing). `replayed` is
+  POST-only and never appears on reads.
+- `GET /external-wallet/earnings/:ownerAddress` — **DB ledger + live chain**,
+  balance and total earned per deposit token. `earned` = live `currentValue`
+  minus `totalDeposited` (Σ finalized SDP deposits), stated ONLY when exact and
+  never coerced to zero; otherwise absent with a named
+  `earnedUnavailableReason`: `live_value_unavailable` (hydration failed),
+  `movements_pending` (a movement is still settling, so chain and ledger
+  describe different moments), or `withdrawals_not_valued` (exits are ledgered
+  in SHARES — 0070 pins `payout_token` NULL for vault rows — so once money has
+  gone out no exact token-denominated figure exists; recording the observed
+  token payout at settlement is the follow-up that would close this).
+  Token-level `earned` is computed as Σlive − Σdeposited, which equals the
+  per-position sum, and is withheld whenever ANY contributing position cannot
+  state it — never partial. **Figures cover CURRENTLY HELD positions only**: a
+  fully exited position drops out entirely — its deposits leave
+  `totalDeposited` along with its unvalued withdrawal — because consuming its
+  history would report `withdrawals_not_valued` forever after any full exit,
+  while the open positions' earned is perfectly exact. The exited history
+  stays on the movements list; pinned by the closed-vault test in
+  `../earn.external-wallet-activity.test.ts`. The ADR 0002 hydration caveat
+  applies at full strength: live value reads the owner's WHOLE vault balance,
+  so shares acquired outside SDP inflate `earned`; documented property, not a
+  bug.
+  This read does not blend sources for one figure: `totalDeposited` is ledger,
+  `currentValue` is live, and `earned` is openly their difference — that is
+  its definition, not a violation of the one-source rule.
 
 One gap remains around approvals, and it is narrower than it was. An approved
 deposit or withdrawal is now fully followable — the executor writes the
@@ -676,6 +815,13 @@ kvault program id also resolves on devnet with no accounts under it.
   only provider-shaped refusal, and wallet policy is the org's own custody
   control, not a provider gate. It also ignores `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`:
   the environment fail-close guards the way IN only.
+- **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
+  deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
+  because a deposit quote exists only to open a new position. It takes the
+  deposit's own gates — environment fail-close, surfacing, entitlement,
+  admission — rather than the `assertEarnProviderConfigured`-only rule above,
+  and that does not violate the asymmetry: nothing about an EXISTING position
+  is ever answered through it, so refusing it can never trap funds.
 - **The ledger list**: no provider gate at all (see route map).
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled

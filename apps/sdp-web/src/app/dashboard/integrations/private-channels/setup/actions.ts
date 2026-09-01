@@ -8,6 +8,7 @@ import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/t
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSdpApiClient } from "@/lib/sdp-api";
+import { summarizeProbeFailure } from "./probe-error";
 
 const privateChannelInstanceSchema = privateChannelInstanceInputSchema.extend({
   id: z.string(),
@@ -76,9 +77,11 @@ export type TestConnectionResult =
 export async function testConnectionAction(input: {
   gatewayUrl: string;
   authUrl: string;
+  escrowProgramId: string;
+  escrowInstanceAddr: string;
 }): Promise<TestConnectionResult> {
   const parsed = privateChannelInstanceInputSchema
-    .pick({ gatewayUrl: true, authUrl: true })
+    .pick({ gatewayUrl: true, authUrl: true, escrowProgramId: true, escrowInstanceAddr: true })
     .safeParse(input);
   if (!parsed.success) {
     return { kind: "validation", fieldErrors: flattenFieldErrors(parsed.error) };
@@ -250,22 +253,6 @@ function interpretApiError(error: unknown): ConnectPrivateChannelResult {
 }
 
 type ConnectionProbeDetails = z.infer<typeof connectionProbeDetailsSchema>;
-
-function summarizeProbeFailure(probe: ConnectionProbeDetails): string {
-  if (probe.auth.ok === false) {
-    return `Auth failed: ${probe.auth.error}`;
-  }
-  if (probe.rpc.ok === false) {
-    return `Chain RPC failed: ${probe.rpc.error}`;
-  }
-  if (probe.gateway.status === "degraded") {
-    return `Gateway degraded: ${probe.gateway.reason}`;
-  }
-  if (probe.gateway.status === "unreachable") {
-    return `Gateway unreachable: ${probe.gateway.error}`;
-  }
-  return "Connection check failed.";
-}
 
 function interpretProbeError(details: ConnectionProbeDetails): ConnectPrivateChannelResult {
   return {

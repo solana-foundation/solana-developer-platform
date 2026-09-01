@@ -85,8 +85,14 @@ export interface EarnPositionRow {
   environment: SdpEnvironment;
   provider: string;
   kind: EarnExecutionModel;
-  /** vault_direct only. */
+  /** vault_direct only, SDP-signed shape: the custody wallet holds the shares. */
   custody_wallet_id: string | null;
+  /**
+   * vault_direct only, EXTERNAL-WALLET shape (PRO-1722): the non-custodial wallet
+   * that signs and holds the shares. Exactly one of this and
+   * `custody_wallet_id` is set on a vault row; SDP holds no key for it.
+   */
+  owner_address: string | null;
   /** vault_direct only — the vault's on-chain address. */
   vault_address: string | null;
   share_mint: string | null;
@@ -143,6 +149,9 @@ export interface EarnMovementRow {
   /** Legacy custodial payout stablecoin symbol; NOT the asset identity. */
   payout_token: string | null;
   custody_wallet_id: string | null;
+  /** The external (non-custodial) wallet that signed this movement; exactly one of this and
+   * `custody_wallet_id` is set on a vault row (PRO-1722). */
+  owner_address: string | null;
   vault_address: string | null;
   source_address: string | null;
   destination_address: string | null;
@@ -322,6 +331,68 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
+  /** External-wallet vault claims, exact-project scoped, newest first. */
+  listExternalWalletPositions(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress?: string;
+    limit: number;
+    before: EarnMovementCursor | null;
+  }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
+  /** Whether this exact partner project has ever claimed a position for the owner. */
+  hasExternalWalletPositionOwner(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+  }): Promise<boolean>;
+  /**
+   * One external wallet's recorded movements, exact-project scoped, newest
+   * first (PRO-1772). The per-owner read the cross-provider feed structurally
+   * cannot serve: its vault arm requires a custody-wallet match, and an
+   * owner-signed row has none. Scope is the 0070 claim key — org, PROJECT,
+   * environment, owner — so a sibling project sees nothing.
+   */
+  listExternalWalletMovements(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+    direction?: EarnMovementDirection;
+    status?: string;
+    limit: number;
+    before: EarnMovementCursor | null;
+  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
+  /** One external-wallet movement under the same four scoping rules, or null. */
+  getExternalWalletMovement(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    movementId: string;
+  }): Promise<EarnMovementRow | null>;
+  /**
+   * Ledger inputs to the per-owner earnings figure, grouped by position
+   * (PRO-1772): finalized deposit total (deposit-token units — deposits all
+   * share their position's token denomination, so the SUM never crosses
+   * denominations), finalized withdrawal count, and how many movements are
+   * still unsettled. Failed movements are ignored — that money never moved.
+   */
+  aggregateExternalWalletMovements(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+  }): Promise<
+    Map<
+      string,
+      {
+        finalizedDeposits: string;
+        finalizedWithdrawalCount: number;
+        unsettledMovementCount: number;
+      }
+    >
+  >;
   /**
    * The cross-provider movement feed: one chronological history spanning both
    * execution models, which is what neither legacy table could serve alone.
@@ -371,6 +442,36 @@ export interface EarnMovementsRepository {
    * transaction rolls back; an identical loser returns the winning movement.
    */
   createSignedVaultWithdrawalIntent(input: CreateSignedVaultWithdrawalIntentInput): Promise<{
+    position: EarnPositionRow;
+    movement: EarnMovementRow;
+    replayed: boolean;
+  }>;
+  /**
+   * Atomically consume one BUILT external-wallet transaction into a signed deposit
+   * movement: claim/refresh the external-wallet holding, insert the movement, mark
+   * the built transaction consumed, and activate the holding (PRO-1722).
+   *
+   * The built-transaction row is locked FIRST: one built transaction can land
+   * on chain at most once, so a second submit under a different idempotency
+   * key must answer a clean conflict instead of racing the movement insert
+   * into the ledger's unique signature index. A same-key retry resolves the
+   * recorded movement as a replay before that conflict is reachable.
+   */
+  createSignedExternalWalletDepositIntent(
+    input: CreateSignedExternalWalletDepositIntentInput
+  ): Promise<{
+    position: EarnPositionRow;
+    movement: EarnMovementRow;
+    replayed: boolean;
+  }>;
+  /**
+   * The withdrawal mirror of the above, against an EXISTING external-wallet holding.
+   * Never creates or activates a holding; the movement's composite FK onto
+   * (vault, owner) is what refuses a claim that does not match the position.
+   */
+  createSignedExternalWalletWithdrawalIntent(
+    input: CreateSignedExternalWalletWithdrawalIntentInput
+  ): Promise<{
     position: EarnPositionRow;
     movement: EarnMovementRow;
     replayed: boolean;
@@ -492,6 +593,66 @@ export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRent
   initiatedByKeyId?: string | null;
 }
 
+export interface CreateSignedExternalWalletDepositIntentInput {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: string;
+  /** The vault's on-chain address. */
+  vaultAddress: string;
+  /** The external wallet that signed; SDP holds no key for it. */
+  ownerAddress: string;
+  shareMint: string;
+  tokenMint: string;
+  label: string;
+  /** Decimal string in the vault token's units, as encoded in the transaction. */
+  requestedAmount: string;
+  acceptedMinSharesOut?: string | null;
+  signature: string;
+  signedTransaction: string;
+  lastValidBlockHeight: string;
+  /** The caller's Idempotency-Key: the movement's org-scoped anchor. */
+  requestId: string;
+  idempotencyFingerprint: string;
+  /** The built transaction being consumed (`earn_external_wallet_transactions.id`). */
+  externalWalletTransactionId: string;
+  /**
+   * The builder's observation that this deposit creates the share account. The
+   * funder is always recorded as the owner (NULL by the 0066/0067 convention:
+   * the signing wallet paid its own rent and keeps it), so the exit's refund
+   * defaults back to the owner with no attribution to carry.
+   */
+  createsShareAccount?: boolean;
+  createdBy?: string | null;
+  initiatedByKeyId?: string | null;
+}
+
+export interface CreateSignedExternalWalletWithdrawalIntentInput {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: string;
+  /** The EXISTING external-wallet holding being exited; never created here. */
+  positionId: string;
+  /** Claim facts, FK-verified against the position row on insert. */
+  vaultAddress: string;
+  ownerAddress: string;
+  /** The share mint: the exact quantity the transaction encodes is shares. */
+  shareMint: string;
+  /** Total caller intent in share units; stored on the withdrawal movement. */
+  requestedShares: string;
+  signature: string;
+  signedTransaction: string;
+  lastValidBlockHeight: string;
+  requestId: string;
+  idempotencyFingerprint: string;
+  /** The built transaction being consumed (`earn_external_wallet_transactions.id`). */
+  externalWalletTransactionId: string;
+  createsShareAccount?: boolean;
+  createdBy?: string | null;
+  initiatedByKeyId?: string | null;
+}
+
 export interface CreateCustodialMovementInput {
   organizationId: string;
   projectId: string;
@@ -580,6 +741,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     shares_out: row.shares_out as string | null,
     payout_token: row.payout_token as string | null,
     custody_wallet_id: row.custody_wallet_id as string | null,
+    owner_address: row.owner_address as string | null,
     vault_address: row.vault_address as string | null,
     source_address: row.source_address as string | null,
     destination_address: row.destination_address as string | null,
@@ -795,6 +957,178 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<EarnPositionRow>();
       const rows = result.results ?? [];
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listExternalWalletPositions(params) {
+      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
+      const ownerClause = params.ownerAddress ? "AND owner_address = ?" : "";
+      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
+      const ownerValues = params.ownerAddress ? [params.ownerAddress] : [];
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_positions
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND environment = ?
+               AND kind = 'vault_direct'
+               AND owner_address IS NOT NULL
+               AND activated_at IS NOT NULL
+               AND (
+                 closed_at IS NULL
+                 OR EXISTS (
+                   SELECT 1
+                   FROM earn_movements reentry
+                   WHERE reentry.position_id = earn_positions.id
+                     AND reentry.direction = 'deposit'
+                     AND reentry.status IN ('requested', 'submitted')
+                 )
+               )
+               AND EXISTS (
+                 SELECT 1
+                 FROM earn_movements movement
+                 WHERE movement.position_id = earn_positions.id
+                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
+               )
+               ${ownerClause}
+               ${beforeClause}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          ...ownerValues,
+          ...beforeValues,
+          params.limit + 1
+        )
+        .all<EarnPositionRow>();
+      const rows = result.results ?? [];
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async hasExternalWalletPositionOwner(params) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS present
+             FROM earn_positions
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND environment = ?
+              AND kind = 'vault_direct'
+              AND owner_address = ?
+            LIMIT 1`
+        )
+        .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
+        .first<{ present: number }>();
+      return Boolean(row);
+    },
+
+    async listExternalWalletMovements(params) {
+      const conditions = [
+        "organization_id = ?",
+        "project_id = ?",
+        "environment = ?",
+        "owner_address = ?",
+      ];
+      const bindings: unknown[] = [
+        params.organizationId,
+        params.projectId,
+        params.environment,
+        params.ownerAddress,
+      ];
+      for (const [column, value] of [
+        ["direction", params.direction],
+        ["status", params.status],
+      ] as const) {
+        if (value !== undefined) {
+          conditions.push(`${column} = ?`);
+          bindings.push(value);
+        }
+      }
+      if (params.before) {
+        conditions.push("(created_at, id) < (?, ?)");
+        bindings.push(params.before.createdAt, params.before.id);
+      }
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE ${conditions.join(" AND ")}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+        )
+        .bind(...bindings, params.limit + 1)
+        .all<Record<string, unknown>>();
+      const rows = (result.results ?? []).map(mapMovementRow);
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async getExternalWalletMovement(params) {
+      // owner_address IS NOT NULL is the shape half of the scope: a custody
+      // movement guessed by id answers exactly like a missing row.
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND environment = ?
+               AND owner_address IS NOT NULL`
+        )
+        .bind(params.movementId, params.organizationId, params.projectId, params.environment)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async aggregateExternalWalletMovements(params) {
+      // Postgres numeric is exact, and every summed row shares its position's
+      // deposit-token denomination, so the cast loses nothing. `COALESCE` on
+      // amount_settled is belt and braces: the writer stamps it on every
+      // finalized row.
+      const result = await db
+        .prepare(
+          `SELECT position_id,
+                  COALESCE(SUM(
+                    CASE WHEN direction = 'deposit' AND status = 'finalized'
+                         THEN COALESCE(amount_settled, amount_requested)::numeric
+                         ELSE 0 END
+                  ), 0)::text AS finalized_deposits,
+                  COUNT(*) FILTER (
+                    WHERE direction = 'withdrawal' AND status = 'finalized'
+                  ) AS finalized_withdrawal_count,
+                  COUNT(*) FILTER (
+                    WHERE status IN ('requested', 'submitted', 'confirmed')
+                  ) AS unsettled_movement_count
+             FROM earn_movements
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND environment = ?
+              AND owner_address = ?
+            GROUP BY position_id`
+        )
+        .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
+        .all<{
+          position_id: string;
+          finalized_deposits: string;
+          finalized_withdrawal_count: number;
+          unsettled_movement_count: number;
+        }>();
+      const totals = new Map<
+        string,
+        {
+          finalizedDeposits: string;
+          finalizedWithdrawalCount: number;
+          unsettledMovementCount: number;
+        }
+      >();
+      for (const row of result.results ?? []) {
+        totals.set(row.position_id, {
+          finalizedDeposits: row.finalized_deposits,
+          finalizedWithdrawalCount: Number(row.finalized_withdrawal_count),
+          unsettledMovementCount: Number(row.unsettled_movement_count),
+        });
+      }
+      return totals;
     },
 
     async listMovements(params) {
@@ -1020,6 +1354,113 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           movement.position_id,
           input.organizationId
         );
+        return {
+          position: await requireMovementPosition(transaction, movement),
+          movement,
+          replayed: false,
+        };
+      });
+    },
+
+    async createSignedExternalWalletDepositIntent(input) {
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+
+        const resolved = await resolveExternalWalletTransactionConsumption(
+          transaction,
+          input,
+          "deposit"
+        );
+        if (resolved) {
+          return {
+            position: await requireMovementPosition(transaction, resolved.movement),
+            movement: resolved.movement,
+            replayed: true,
+          };
+        }
+
+        const claimed = await claimExternalWalletVaultPosition(transaction, input);
+        const inserted = await insertExternalWalletDepositMovement(transaction, input, claimed.id);
+        if (!inserted) {
+          // The built-transaction lock serializes same-build racers, so a loser
+          // here reused its KEY against a different build and lost to it; the
+          // fingerprint (which names the build) decides replay versus conflict.
+          const winner = await findVaultMovementByRequest(
+            transaction,
+            input.organizationId,
+            input.requestId
+          );
+          if (!winner)
+            throw new Error("Failed to resolve concurrent earn external-wallet movement");
+          assertMovementIsOwnReplay(winner, input);
+          return {
+            position: await requireMovementPosition(transaction, winner),
+            movement: winner,
+            replayed: true,
+          };
+        }
+
+        await consumeExternalWalletTransaction(
+          transaction,
+          input.externalWalletTransactionId,
+          inserted.id
+        );
+        // AFTER the insert, because the projection reads the row the insert
+        // just wrote (same ordering rule as the custody deposit above).
+        await projectShareAccountRentFunder(transaction, claimed.id, input.organizationId);
+
+        return { position: claimed, movement: inserted, replayed: false };
+      });
+    },
+
+    async createSignedExternalWalletWithdrawalIntent(input) {
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+
+        const resolved = await resolveExternalWalletTransactionConsumption(
+          transaction,
+          input,
+          "withdrawal"
+        );
+        if (resolved) {
+          return {
+            position: await requireMovementPosition(transaction, resolved.movement),
+            movement: resolved.movement,
+            replayed: true,
+          };
+        }
+
+        const movement = await insertExternalWalletWithdrawalMovement(transaction, input);
+        if (!movement) {
+          const winner = await findVaultMovementByRequest(
+            transaction,
+            input.organizationId,
+            input.requestId
+          );
+          if (!winner) {
+            throw new Error("Failed to resolve concurrent earn external-wallet withdrawal");
+          }
+          assertMovementIsOwnReplay(winner, input);
+          return {
+            position: await requireMovementPosition(transaction, winner),
+            movement: winner,
+            replayed: true,
+          };
+        }
+
+        await consumeExternalWalletTransaction(
+          transaction,
+          input.externalWalletTransactionId,
+          movement.id
+        );
+        // An exit that creates the share account claims its rent attribution
+        // too, exactly like the custody exit.
+        await projectShareAccountRentFunder(
+          transaction,
+          movement.position_id,
+          input.organizationId
+        );
+
         return {
           position: await requireMovementPosition(transaction, movement),
           movement,
@@ -1485,6 +1926,249 @@ async function projectShareAccountRentFunder(
     )
     .bind(positionId, organizationId)
     .run();
+}
+
+/**
+ * Lock the built external-wallet transaction named by a submit, and resolve the
+ * submit's idempotency outcome UNDER that lock (PRO-1722).
+ *
+ * The lock ordering is the safety argument: one built transaction can land on
+ * chain at most once, and its signature is globally unique in the ledger, so
+ * two submits racing the same build have to serialize BEFORE either inserts a
+ * movement. The loser then observes either its own key's recorded movement (a
+ * replay) or a row consumed under someone else's key (a clean conflict), never
+ * a unique-violation on the signature index surfaced as a 500.
+ *
+ * Returns the movement to replay, or null when the caller should insert.
+ */
+async function resolveExternalWalletTransactionConsumption(
+  db: AppDb,
+  input: {
+    organizationId: string;
+    projectId: string;
+    requestId: string;
+    idempotencyFingerprint: string;
+    externalWalletTransactionId: string;
+  },
+  direction: EarnMovementDirection
+): Promise<{ movement: EarnMovementRow } | null> {
+  const built = await db
+    .prepare(
+      `SELECT id, movement_id FROM earn_external_wallet_transactions
+        WHERE id = ? AND organization_id = ?
+        FOR UPDATE`
+    )
+    .bind(input.externalWalletTransactionId, input.organizationId)
+    .first<{ id: string; movement_id: string | null }>();
+  if (!built) {
+    // The service resolves the built row before it calls in, so a miss here is
+    // a broken invariant, not caller error.
+    throw new Error(
+      `Earn external-wallet submit references missing built transaction ${input.externalWalletTransactionId}`
+    );
+  }
+
+  const prior = await findVaultMovementByRequest(db, input.organizationId, input.requestId);
+  if (prior) {
+    assertMovementIsOwnReplay(prior, input);
+    if (prior.direction !== direction) {
+      throw conflict("Idempotency key already used with different request payload");
+    }
+    return { movement: prior };
+  }
+
+  if (built.movement_id !== null) {
+    // A DIFFERENT key already consumed this build. Answering it as a replay
+    // would hand one caller intent another intent's movement; a second
+    // movement would be the same transaction ledgered twice.
+    throw conflict("This transaction was already submitted under a different idempotency key");
+  }
+  return null;
+}
+
+/** Mark the built transaction consumed by the movement the caller just inserted. */
+async function consumeExternalWalletTransaction(
+  db: AppDb,
+  externalWalletTransactionId: string,
+  movementId: string
+): Promise<void> {
+  const consumed = await db
+    .prepare(
+      `UPDATE earn_external_wallet_transactions
+          SET movement_id = ?, consumed_at = sdp_iso_now(), updated_at = sdp_iso_now()
+        WHERE id = ? AND movement_id IS NULL
+        RETURNING id`
+    )
+    .bind(movementId, externalWalletTransactionId)
+    .first<{ id: string }>();
+  if (!consumed) {
+    // Unreachable while the FOR UPDATE lock above serializes consumers; failing
+    // loudly rolls the movement back rather than double-ledgering the build.
+    throw new Error(
+      `Earn external-wallet built transaction ${externalWalletTransactionId} was consumed concurrently`
+    );
+  }
+}
+
+/**
+ * Claim or refresh the EXTERNAL-WALLET vault holding: one per (org, project,
+ * environment, provider, vault, owner). Tenancy comes FROM the project row
+ * rather than from the input, like the custody claim below; there is no wallet
+ * scope to validate because SDP holds nothing here — the owner address IS the
+ * holder. A mint-identity mismatch returns nothing and answers 409.
+ */
+async function claimExternalWalletVaultPosition(
+  db: AppDb,
+  input: CreateSignedExternalWalletDepositIntentInput
+): Promise<EarnPositionRow> {
+  const row = await db
+    .prepare(
+      `INSERT INTO earn_positions (
+         id, organization_id, project_id, environment, provider, kind,
+         owner_address, vault_address, share_mint, token_mint, label,
+         created_by, activated_at
+       )
+       SELECT
+         ?, project.organization_id, project.id, project.environment,
+         ?, 'vault_direct', ?, ?, ?, ?, ?, ?, sdp_iso_now()
+       FROM projects project
+       WHERE project.id = ?
+         AND project.organization_id = ?
+         AND project.environment = ?
+       ON CONFLICT (organization_id, project_id, environment, provider, vault_address, owner_address)
+         WHERE kind = 'vault_direct' AND owner_address IS NOT NULL
+       DO UPDATE SET
+         updated_at = sdp_iso_now(),
+         label = EXCLUDED.label,
+         activated_at = COALESCE(earn_positions.activated_at, sdp_iso_now())
+       WHERE earn_positions.token_mint = EXCLUDED.token_mint
+         AND earn_positions.share_mint = EXCLUDED.share_mint
+       RETURNING *`
+    )
+    .bind(
+      generateEarnPositionId(),
+      input.provider,
+      input.ownerAddress,
+      input.vaultAddress,
+      input.shareMint,
+      input.tokenMint,
+      input.label,
+      input.createdBy ?? null,
+      input.projectId,
+      input.organizationId,
+      input.environment
+    )
+    .first<EarnPositionRow>();
+  if (!row) {
+    throw conflict("Vault position does not match project scope or asset identity");
+  }
+  return row;
+}
+
+async function insertExternalWalletDepositMovement(
+  db: AppDb,
+  input: CreateSignedExternalWalletDepositIntentInput,
+  positionId: string
+): Promise<EarnMovementRow | null> {
+  const row = await db
+    .prepare(
+      `INSERT INTO earn_movements (
+         id, organization_id, project_id, environment, provider,
+         execution_model, direction, position_id, status,
+         denomination, amount_requested, min_shares_out,
+         owner_address, vault_address, source_address, destination_address,
+         signature, signed_transaction, last_valid_block_height,
+         request_id, idempotency_fingerprint, created_by, initiated_by_key_id,
+         creates_share_account, share_ata_rent_funder
+       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'deposit', ?, 'requested',
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
+       DO NOTHING
+       RETURNING *`
+    )
+    .bind(
+      generateEarnMovementId(),
+      input.organizationId,
+      input.projectId,
+      input.environment,
+      input.provider,
+      positionId,
+      // Mint units, never USD — the denomination IS the deposit token.
+      input.tokenMint,
+      input.requestedAmount,
+      input.acceptedMinSharesOut ?? null,
+      input.ownerAddress,
+      input.vaultAddress,
+      // The external wallet funds the deposit; the instrument receives it.
+      input.ownerAddress,
+      input.vaultAddress,
+      input.signature,
+      input.signedTransaction,
+      input.lastValidBlockHeight,
+      input.requestId,
+      input.idempotencyFingerprint,
+      input.createdBy ?? null,
+      input.initiatedByKeyId ?? null,
+      // The owner pays its own share-account rent, recorded as the NULL funder
+      // (the 0066/0067 convention: the signing wallet keeps its own rent), so
+      // the exit's refund defaults back to the owner.
+      ...shareAccountClaimBindings({
+        createsShareAccount: input.createsShareAccount,
+        shareAtaRentFunder: null,
+      })
+    )
+    .first<Record<string, unknown>>();
+  return row ? mapMovementRow(row) : null;
+}
+
+async function insertExternalWalletWithdrawalMovement(
+  db: AppDb,
+  input: CreateSignedExternalWalletWithdrawalIntentInput
+): Promise<EarnMovementRow | null> {
+  const row = await db
+    .prepare(
+      `INSERT INTO earn_movements (
+         id, organization_id, project_id, environment, provider,
+         execution_model, direction, position_id, status,
+         denomination, amount_requested,
+         owner_address, vault_address, source_address, destination_address,
+         signature, signed_transaction, last_valid_block_height,
+         request_id, idempotency_fingerprint, created_by, initiated_by_key_id,
+         creates_share_account, share_ata_rent_funder
+       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'withdrawal', ?, 'requested',
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
+       DO NOTHING
+       RETURNING *`
+    )
+    .bind(
+      generateEarnMovementId(),
+      input.organizationId,
+      input.projectId,
+      input.environment,
+      input.provider,
+      input.positionId,
+      input.shareMint,
+      input.requestedShares,
+      input.ownerAddress,
+      input.vaultAddress,
+      // Money leaves the INSTRUMENT and returns to the external wallet.
+      input.vaultAddress,
+      input.ownerAddress,
+      input.signature,
+      input.signedTransaction,
+      input.lastValidBlockHeight,
+      input.requestId,
+      input.idempotencyFingerprint,
+      input.createdBy ?? null,
+      input.initiatedByKeyId ?? null,
+      ...shareAccountClaimBindings({
+        createsShareAccount: input.createsShareAccount,
+        shareAtaRentFunder: null,
+      })
+    )
+    .first<Record<string, unknown>>();
+  return row ? mapMovementRow(row) : null;
 }
 
 async function claimVaultPosition(

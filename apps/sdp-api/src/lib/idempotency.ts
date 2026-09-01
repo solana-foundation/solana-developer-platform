@@ -62,6 +62,28 @@ export async function resolveIdempotencyReplay<
   throw conflict("Idempotency key already used with different request payload");
 }
 
+export async function resolveIdentityBoundIdempotencyReplay<
+  Row extends { idempotency_fingerprint: string | null },
+>(
+  findExisting: () => Promise<Row | null>,
+  fingerprint: string,
+  legacyFingerprint: string,
+  identityMatches: (row: Row) => boolean
+): Promise<Row | null> {
+  const existing = await findExisting();
+  if (!existing || existing.idempotency_fingerprint === null) {
+    return null;
+  }
+  if (
+    identityMatches(existing) &&
+    (existing.idempotency_fingerprint === fingerprint ||
+      existing.idempotency_fingerprint === legacyFingerprint)
+  ) {
+    return existing;
+  }
+  throw conflict("Idempotency key already used with different request payload");
+}
+
 export const normalizeForFingerprint = (value: unknown): unknown => {
   if (value === null || value === undefined) {
     return value;
@@ -89,6 +111,7 @@ export const normalizeForFingerprint = (value: unknown): unknown => {
 };
 
 export interface PaymentTransferFingerprintInput {
+  custodyWalletId: string;
   sourceAddress: string | null;
   destinationAddress: string | null;
   token: string;
@@ -107,16 +130,21 @@ export interface TransferBatchFingerprintRecipientInput {
 }
 
 export interface TransferBatchFingerprintInput {
+  sourceCustodyWalletId: string;
   sourceAddress: string;
   token: string;
   recipients: TransferBatchFingerprintRecipientInput[];
   options: Record<string, unknown> | undefined;
 }
 
-export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
-  JSON.stringify(
+function paymentTransferFingerprint(
+  input: PaymentTransferFingerprintInput,
+  custodyWalletId?: string
+): string {
+  return JSON.stringify(
     normalizeForFingerprint({
       scope: "payment_transfer",
+      custodyWalletId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
@@ -126,17 +154,36 @@ export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprin
       privateTransfer: input.privateTransfer ?? null,
     })
   );
+}
 
-export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
-  JSON.stringify(
+export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
+  paymentTransferFingerprint(input, input.custodyWalletId);
+
+export const buildLegacyPaymentTransferFingerprint = (
+  input: PaymentTransferFingerprintInput
+): string => paymentTransferFingerprint(input);
+
+function transferBatchFingerprint(
+  input: TransferBatchFingerprintInput,
+  sourceCustodyWalletId?: string
+): string {
+  return JSON.stringify(
     normalizeForFingerprint({
       scope: "payment_transfer_batch",
+      sourceCustodyWalletId,
       sourceAddress: input.sourceAddress,
       token: input.token,
       recipients: input.recipients,
       options: input.options ?? null,
     })
   );
+}
+
+export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
+  transferBatchFingerprint(input, input.sourceCustodyWalletId);
+
+export const buildLegacyTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
+  transferBatchFingerprint(input);
 
 export interface EarnVaultDepositFingerprintInput {
   environment: string;
@@ -196,6 +243,8 @@ export interface EarnVaultWithdrawalFingerprintInput {
   positionId: string;
   /** Shares to redeem, decimal string in share units. */
   shares: string;
+  /** Exit slippage floor, or null when the provider takes none. */
+  minAmountOut: string | null;
 }
 
 /**
@@ -207,7 +256,10 @@ export interface EarnVaultWithdrawalFingerprintInput {
  * naming both; `environment` is included because the same key arriving in
  * sandbox and production is two requests against two chains. Decimal spelling
  * is normalized without rounding, exactly like the deposit — `1` and `1.000000`
- * are one intent to the share mint.
+ * are one intent to the share mint. `minAmountOut` earns its place the same way
+ * the deposit's `minSharesOut` does: the floor is baked into the built
+ * instruction, so omitting it would let a caller reuse a key with a weaker
+ * floor and get a silent `replayed: true` for the original, stricter exit.
  */
 export const buildEarnVaultWithdrawalFingerprint = (
   input: EarnVaultWithdrawalFingerprintInput
@@ -220,6 +272,75 @@ export const buildEarnVaultWithdrawalFingerprint = (
       positionId: input.positionId,
       direction: "withdrawal",
       shares: normalizeDecimalString(input.shares),
+      minAmountOut: input.minAmountOut === null ? null : normalizeDecimalString(input.minAmountOut),
+    })
+  );
+
+export interface EarnExternalWalletDepositFingerprintInput {
+  environment: string;
+  provider: string;
+  /** The vault address. */
+  providerReference: string;
+  /** The external wallet that signs and holds the shares. */
+  ownerAddress: string;
+  amount: string;
+  minSharesOut: string | null;
+  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
+  transactionId: string;
+}
+
+/**
+ * Fingerprint for an external-wallet (caller-signed) vault deposit submit.
+ *
+ * Same inclusion test as the custody deposit's: every field changes WHAT MOVES.
+ * `transactionId` earns its place because the submit names one specific built
+ * transaction: two builds are two distinct signable transactions, so a key
+ * retried against a REBUILT transaction is a different request and must 409
+ * rather than silently answer with the first build's movement.
+ */
+export const buildEarnExternalWalletDepositFingerprint = (
+  input: EarnExternalWalletDepositFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_external_wallet_deposit",
+      environment: input.environment,
+      provider: input.provider,
+      providerReference: input.providerReference,
+      ownerAddress: input.ownerAddress,
+      direction: "deposit",
+      amount: normalizeDecimalString(input.amount),
+      minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
+      transactionId: input.transactionId,
+    })
+  );
+
+export interface EarnExternalWalletWithdrawalFingerprintInput {
+  environment: string;
+  provider: string;
+  /** The `earn_positions` row being exited. */
+  positionId: string;
+  /** The external wallet whose shares redeem. */
+  ownerAddress: string;
+  shares: string;
+  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
+  transactionId: string;
+}
+
+/** Fingerprint for an external-wallet withdrawal submit; see the deposit's note. */
+export const buildEarnExternalWalletWithdrawalFingerprint = (
+  input: EarnExternalWalletWithdrawalFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_external_wallet_withdrawal",
+      environment: input.environment,
+      provider: input.provider,
+      positionId: input.positionId,
+      ownerAddress: input.ownerAddress,
+      direction: "withdrawal",
+      shares: normalizeDecimalString(input.shares),
+      transactionId: input.transactionId,
     })
   );
 

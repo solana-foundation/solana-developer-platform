@@ -1,21 +1,16 @@
-import { cookies } from "next/headers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
-import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadMembers } from "../private-channels-page.data";
+import { loadPrincipals } from "../private-channels-page.data";
 import { MembersTable } from "./members-table";
 
 export default async function PrivateChannelsMembersPage() {
   await requirePrivateChannelsAccess();
 
-  const t = await getTranslations();
-
-  const [client, cookieStore] = await Promise.all([createSdpApiClient(), cookies()]);
-  const projectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value;
-  const members = await loadMembers(client, projectId);
+  const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
+  const principals = await loadPrincipals(client);
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -25,14 +20,13 @@ export default async function PrivateChannelsMembersPage() {
           <CardDescription>{t("DashboardPrivateChannels.members.description")}</CardDescription>
         </CardHeader>
         <CardContent>
-          {members.ok ? (
+          {principals.ok ? (
             <MembersTable
-              members={members.data.users}
-              channels={members.data.channels}
-              eligibleProjectMembers={members.data.projectMembers}
+              principals={principals.data.principals}
+              channels={principals.data.channels}
             />
           ) : (
-            <PrivateChannelsLoadError message={members.error} />
+            <PrivateChannelsLoadError message={principals.error} />
           )}
         </CardContent>
       </Card>

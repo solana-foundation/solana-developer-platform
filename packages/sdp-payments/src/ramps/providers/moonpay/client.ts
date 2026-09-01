@@ -19,19 +19,18 @@ import {
   isActiveIso4217CurrencyCode,
   isIso3166Alpha2CountryCode,
   RAMP_RAIL_DUMPS,
-  rampId,
   requireEnv,
   unreportedCurrencyLimit,
 } from "../../shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -120,6 +119,16 @@ function normalizeMoonpayCurrencyCode(value: string): string {
     return `${normalized.slice(0, -"_SOLANA".length)}_SOL`.toLowerCase();
   }
   return normalized.toLowerCase();
+}
+
+function requireMoonpayTransferId(paymentTransferId: string | undefined): string {
+  if (!paymentTransferId) {
+    throw new SdpPaymentsError(
+      "INTERNAL_ERROR",
+      "MoonPay quote creation requires an SDP payment transfer id."
+    );
+  }
+  return paymentTransferId;
 }
 
 async function moonpaySignature(unsignedQuery: string, secretKey: string): Promise<string> {
@@ -327,32 +336,30 @@ export class MoonpayRampClient implements RampProvider {
     return readyCounterparty(this.id, options.direction);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const apiKey = requireEnv(env, "MOONPAY_SANDBOX_API_KEY");
-    const base = "https://api.moonpay.com";
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    if (!context.offline) {
+      const { env, fetchJson, writeDump } = context;
+      const apiKey = requireEnv(env, "MOONPAY_SANDBOX_API_KEY");
+      const base = "https://api.moonpay.com";
 
-    await writeDump(
-      RAMP_RAIL_DUMPS.moonpay.currencies.name,
-      await fetchJson(
-        this.id,
-        "GET /v3/currencies?show=all",
-        `${base}/v3/currencies?show=all&apiKey=${apiKey}`
-      )
-    );
-    await writeDump(
-      RAMP_RAIL_DUMPS.moonpay.countries.name,
-      await fetchJson(this.id, "GET /v3/countries", `${base}/v3/countries`)
-    );
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+      await writeDump(
+        RAMP_RAIL_DUMPS.moonpay.currencies.name,
+        await fetchJson(
+          this.id,
+          "GET /v3/currencies?show=all",
+          `${base}/v3/currencies?show=all&apiKey=${apiKey}`
+        )
+      );
+      await writeDump(
+        RAMP_RAIL_DUMPS.moonpay.countries.name,
+        await fetchJson(this.id, "GET /v3/countries", `${base}/v3/countries`)
+      );
+    }
     const [currencies, countries] = await Promise.all([
-      readDump(RAMP_RAIL_DUMPS.moonpay.currencies.file),
-      readDump(RAMP_RAIL_DUMPS.moonpay.countries.file),
+      context.readDump(RAMP_RAIL_DUMPS.moonpay.currencies.file),
+      context.readDump(RAMP_RAIL_DUMPS.moonpay.countries.file),
     ]);
     return distillMoonpayRailSupport(currencies, countries);
   }
@@ -433,14 +440,14 @@ export class MoonpayRampClient implements RampProvider {
     }
 
     const config = readMoonpayConfig(env, mode);
-    const quoteId = rampId("ramp_quote");
+    const quoteId = requireMoonpayTransferId(input.paymentTransferId);
     const hostedUrl = await buildSignedMoonpayWidgetUrl(config.onrampUrl, config.secretKey, {
       apiKey: config.apiKey,
       baseCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       baseCurrencyAmount: input.fiatAmount,
       currencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       walletAddress: input.destinationWalletAddress,
-      redirectURL: input.redirectUrl,
+      lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });
@@ -459,14 +466,14 @@ export class MoonpayRampClient implements RampProvider {
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
     const config = readMoonpayConfig(env, mode);
-    const quoteId = rampId("ramp_quote");
+    const quoteId = requireMoonpayTransferId(input.paymentTransferId);
     const hostedUrl = await buildSignedMoonpayWidgetUrl(config.offrampUrl, config.secretKey, {
       apiKey: config.apiKey,
       baseCurrencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       baseCurrencyAmount: input.cryptoAmount,
       quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       refundWalletAddress: input.sourceWalletAddress,
-      redirectURL: input.redirectUrl,
+      lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });

@@ -1,11 +1,22 @@
 /**
- * Client seam for the Helius Rings workspace. Fetches go through the
- * /api/dashboard/helius-rings BFF proxies; view-model types mirror the API
- * DTOs without importing server packages.
+ * Client seam for the Helius Rings workspace: fetches go through the
+ * /api/dashboard/helius-rings BFF proxies, and the types mirror the API DTOs
+ * without importing server packages.
  */
 
 export type RingsHealthStatus = "green" | "amber" | "red";
-export type RingsHealth = Record<"rpc" | "prover" | "photon" | "gateway", RingsHealthStatus>;
+
+/** Mirrors RUNTIME_HEALTH_COMPONENTS in @sdp/helius-rings, in the API's order. */
+export const RINGS_HEALTH_COMPONENTS = ["rpc", "prover", "photon"] as const;
+export type RingsHealthComponent = (typeof RINGS_HEALTH_COMPONENTS)[number];
+
+export type RingsHealth = Record<RingsHealthComponent, RingsHealthStatus> & {
+  /**
+   * Keyed `<component>.reason` by the API. An absent entry means "no reason
+   * given", never "healthy".
+   */
+  detail?: Record<string, string>;
+};
 
 export type RingsWalletStatus = "pending" | "ready" | "paused";
 
@@ -27,10 +38,10 @@ export type RingsOperationState =
   | "submitted"
   | "indexing"
   | "completed"
-  | "failed";
+  | "failed"
+  | "voided";
 
-/** Mirrors OP_TYPES in @sdp/helius-rings; a literal union so the typed i18n
- * keys (`activity.opType_*`) resolve. */
+/** Mirrors OP_TYPES in @sdp/helius-rings; literal so `activity.opType_*` resolves. */
 export type RingsOperationOpType =
   | "shield"
   | "transfer_registered"
@@ -43,16 +54,24 @@ export type RingsOperationOpType =
 
 export interface RingsOperationSummary {
   id: string;
+  walletId: string;
   opType: RingsOperationOpType;
   state: RingsOperationState;
   assetMint: string | null;
   amountRaw: string | null;
   createdAt: string;
+  failureCode: string | null;
+  outerTxSignature: string | null;
+  retryable: boolean | null;
+  /** The operation this one was filed to replace, if it is a retry. */
+  retryOfOperationId: string | null;
 }
 
 export interface RingsOperationEvent {
   kind: string;
   createdAt: string;
+  /** Redacted server-side; free-form. Consumers must not trust individual keys. */
+  payload?: Record<string, unknown> | null;
 }
 
 export interface RingsOperationDetail extends RingsOperationSummary {
@@ -68,10 +87,8 @@ interface Envelope<T> {
 type EnvelopeResult<T> = { ok: true; data: T } | { ok: false; status: number; error?: string };
 
 /**
- * Single reader for every `{ data } | { error }` response on this surface. The
- * body is parsed even on failure so the server's own `error.message` reaches
- * the caller rather than a generic string, and `.catch` absorbs a non-JSON
- * error page.
+ * The body is parsed even on failure so the server's own `error.message`
+ * reaches the caller; `.catch` absorbs a non-JSON error page.
  */
 async function readEnvelope<T>(response: Response): Promise<EnvelopeResult<T>> {
   const body = (await response.json().catch(() => ({}))) as Envelope<T>;
@@ -116,8 +133,10 @@ export function fetchRingsOperations(
 
 export interface CreateRingsWalletResult {
   wallet?: RingsWallet;
-  /** Set when the gateway seam refused (503): the wallet stays pending. */
-  pendingIntegration: boolean;
+  /**
+   * The server's own reason, whatever the status was. A 503 names fixable
+   * conditions too, so it must not be rewritten as "awaiting integration".
+   */
   error?: string;
 }
 
@@ -133,120 +152,159 @@ export async function createRingsWallet(input: {
   });
   const result = await readEnvelope<{ wallet: RingsWallet }>(response);
   if (!result.ok) {
-    if (result.status === 503) {
-      return { pendingIntegration: true };
-    }
-    return { pendingIntegration: false, error: result.error };
+    return { error: result.error };
   }
-  return { wallet: result.data.wallet, pendingIntegration: false };
+  return { wallet: result.data.wallet };
 }
 
-export type RingsOpType =
-  | "shield"
-  | "transfer_registered"
-  | "transfer_anonymous"
-  | "withdraw"
-  | "merge"
-  | "timelock_create";
+export interface RingsShieldedBalance {
+  mint: string;
+  symbol: string;
+  /**
+   * uint64 base units as a decimal string. Never parse into a JavaScript
+   * number: anything past 2^53 rounds silently.
+   */
+  amountRaw: string;
+  /** The mint's scale, or null when the API knew of none. Null is not zero. */
+  decimals: number | null;
+  /** USD per whole unit, when pricing was reachable. */
+  usdPrice?: number;
+  /** amountRaw × usdPrice, rounded to 2dp; absent when the mint went unpriced. */
+  usdValue?: number;
+}
+
+export interface RingsWalletSync {
+  balances: RingsShieldedBalance[];
+  /**
+   * The indexer could not read everything it found, so `balances` is partial
+   * and must not be presented as complete.
+   */
+  degraded: boolean;
+  /** When the answer was true — not a position to resume from. */
+  observedAt: string;
+  /** Sum of priced balances, or null if pricing failed for every mint. */
+  totalUsd?: number | null;
+}
+
+/**
+ * Reads the wallet's shielded balances. Operator action only: a sync is a full
+ * indexer scan and advances the wallet's recorded observation point.
+ */
+export async function syncRingsWallet(
+  walletId: string
+): Promise<{ sync?: RingsWalletSync; error?: string }> {
+  const response = await fetch(
+    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/sync`,
+    { method: "POST", cache: "no-store" }
+  );
+  const result = await readEnvelope<RingsWalletSync>(response);
+  if (!result.ok) {
+    return { error: result.error };
+  }
+  return { sync: result.data };
+}
+
+/** Mirrors RingsIdentityStatus in @sdp/helius-rings. */
+export type RingsIdentityStatus = "unregistered" | "ours" | "foreign";
+
+/** Mirrors RingsIdentityMismatch; literal so `identity.mismatch_*` resolves. */
+export type RingsIdentityMismatch = "owner" | "nullifier_key" | "viewing_key";
+
+export interface RingsWalletIdentity {
+  status: RingsIdentityStatus;
+  /** Canonical shielded address this deployment derives for the wallet. */
+  derivedShieldedAddress: string;
+  /** Canonical shielded address the registry publishes; null when unregistered. */
+  publishedShieldedAddress: string | null;
+  /** Which published half differs. Null unless `status` is `foreign`. */
+  mismatch: RingsIdentityMismatch | null;
+  /** What our own row records; null when provisioning never completed. */
+  recordedShieldedAddress: string | null;
+}
+
+/**
+ * Reads what the Rings registry publishes for a wallet's owner. Records
+ * nothing, but still operator action only: it costs an RPC round trip and
+ * derives key material server-side.
+ */
+export async function fetchRingsWalletIdentity(
+  walletId: string
+): Promise<{ identity?: RingsWalletIdentity; error?: string }> {
+  const response = await fetch(
+    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/identity`,
+    { cache: "no-store" }
+  );
+  const result = await readEnvelope<{ identity: RingsWalletIdentity }>(response);
+  if (!result.ok) {
+    return { error: result.error };
+  }
+  return { identity: result.data.identity };
+}
+
+/**
+ * What the API accepts today. Narrower than `RingsOperationOpType`, which also
+ * has to name the older kinds already recorded against this project. The API
+ * rejects anything else on a strict schema, so widening this without widening
+ * that one only moves the refusal later.
+ */
+export type RingsOpType = "shield" | "withdraw" | "transfer_registered";
 
 export interface PrepareRingsOperationInput {
   walletId: string;
   opType: RingsOpType;
-  asset?: { mint: string; amountRaw: string };
+  asset: { mint: string; amountRaw: string };
+  /** Withdrawals only: the public address the funds leave the pool for. */
   to?: string;
-  zoneId?: string;
-  transferMode?: "registered" | "anonymous";
-  timelock?: { unlockAt: string; beneficiary: string };
 }
 
-export async function prepareRingsOperation(
-  input: PrepareRingsOperationInput
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch("/api/dashboard/helius-rings/operations", {
+type OperationResult = { operation?: RingsOperationDetail; error?: string };
+
+async function postOperation(
+  path: string,
+  body?: Record<string, unknown>
+): Promise<OperationResult> {
+  const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...input, clientNonce: crypto.randomUUID() }),
+    ...(body !== undefined && {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
     cache: "no-store",
   });
   const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
+  if (!result.ok) return { error: result.error };
   return { operation: result.data.operation };
 }
 
-/**
- * Advances an operation the server has already cleared. The verdict is read
- * from the stored approval request server-side, so this carries no body.
- */
-export async function executeRingsOperation(
-  operationId: string
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch(
-    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`,
-    { method: "POST", cache: "no-store" }
+export function prepareRingsOperation(input: PrepareRingsOperationInput): Promise<OperationResult> {
+  return postOperation("/api/dashboard/helius-rings/operations", {
+    ...input,
+    clientNonce: crypto.randomUUID(),
+  });
+}
+
+/** The approval verdict is read server-side, so this carries no body. */
+export function executeRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`
   );
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { operation: result.data.operation };
 }
 
-export async function retryRingsOperation(
-  operationId: string
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch(
+export function retryRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
     `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/retry`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientNonce: crypto.randomUUID() }),
-      cache: "no-store",
-    }
-  );
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { operation: result.data.operation };
-}
-
-export interface RingsZone {
-  id: string;
-  name: string;
-  kind: "treasury" | "public";
-}
-
-export function fetchRingsZones(
-  walletId: string,
-  fallbackError: string
-): Promise<{ zones: RingsZone[] }> {
-  return getJson(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/zones`,
-    fallbackError
+    { clientNonce: crypto.randomUUID() }
   );
 }
 
-export async function createRingsZone(input: {
-  walletId: string;
-  name: string;
-  kind: RingsZone["kind"];
-}): Promise<{ zone?: RingsZone; error?: string }> {
-  const response = await fetch(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(input.walletId)}/zones`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input.name, kind: input.kind }),
-      cache: "no-store",
-    }
+export function voidRingsOperation(
+  operationId: string,
+  signature: string
+): Promise<OperationResult> {
+  return postOperation(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/void`,
+    { signature }
   );
-  const result = await readEnvelope<{ zone: RingsZone }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { zone: result.data.zone };
 }
 
 /** Devnet assets seeded in the rings allowlist. */

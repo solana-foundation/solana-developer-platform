@@ -28,18 +28,28 @@ test("automatic production deploys are called from the protected main release fl
   assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
 });
 
-test("manual production redeploy always skips builds and migrations", () => {
+test("release deploys verify and promote the signed image; manual redeploys skip migrations", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
+  assert.doesNotMatch(workflow, /docker build/);
   assert.match(
     workflow,
-    /- name: Build and push image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+    /- name: Verify and promote release image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
   assert.match(
     workflow,
     /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
-  assert.match(workflow, /--build-arg GIT_SHA="\$\{DEPLOY_IMAGE_SHA\}"/);
-  assert.match(workflow, /sdp-api-public:\$\{DEPLOY_IMAGE_SHA\}/);
+  assert.match(workflow, /cosign verify "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
+  assert.match(workflow, /cosign copy --force "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
+  assert.match(workflow, /--certificate-github-workflow-sha "\$\{DEPLOY_IMAGE_SHA\}"/);
+  assert.match(workflow, /\$\{DEST_BASE\}:\$\{DEPLOY_IMAGE_SHA\}/);
+});
+
+test("manual redeploys verify the promoted image signature before rollout", () => {
+  assert.match(
+    workflow,
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
+  );
 });
 
 test("candidate is revision-specific and Cloud Run-ready before promotion", () => {
@@ -140,6 +150,50 @@ test("service and cron use the resolved digest", () => {
     workflow,
     /gcloud run jobs update "\$\{JOB\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
   );
-  assert.match(workflow, /timeout-minutes: 90/);
+  assert.match(workflow, /timeout-minutes: 150/);
   assert.match(workflow, /- name: Promote service and cron with rollback\n\s+timeout-minutes: 10/);
+});
+
+test("merge deploys promote signed per-merge images and never migrate", () => {
+  assert.match(
+    workflow,
+    /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch'\)\) && 'true' \|\| 'false' \}\}/
+  );
+  assert.match(
+    workflow,
+    /- name: Verify and promote merge image\n\s+if: \$\{\{ inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' \}\}/
+  );
+  assert.match(
+    workflow,
+    /certificate-identity "https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/release-images\.yml@refs\/heads\/main"/
+  );
+  assert.doesNotMatch(workflow, /- name: Build and push image/);
+  assert.match(
+    workflow,
+    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+  );
+  assert.match(workflow, /- name: Gate merge deploys on pending migrations/);
+  assert.match(
+    workflow,
+    /git diff --quiet "\$\{last_release\}"\.\.HEAD -- apps\/sdp-api\/src\/db\/migrations/
+  );
+});
+
+test("merge mode skips the internal smoke gate but requires the caller's", () => {
+  assert.match(
+    workflow,
+    /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-dev-smoke\.yml/
+  );
+  assert.match(
+    workflow,
+    /\(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' && needs\.smoke\.result == 'skipped'\)/
+  );
+});
+
+test("rollback verification accepts release-tag and merge-to-main identities", () => {
+  assert.match(
+    workflow,
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
+  );
+  assert.match(workflow, /refs\/tags\/v\.\+\|refs\/heads\/main/);
 });

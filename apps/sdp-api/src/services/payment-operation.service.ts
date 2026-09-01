@@ -138,8 +138,11 @@ export function rampTransferTokenMint(cryptoToken: string, env: RpcEnv): string 
   return mint;
 }
 
-export function resolvePaymentWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
-  const wallet = wallets.find((entry) => entry.walletId === walletId);
+export function resolvePaymentWallet(
+  wallets: CustodyWallet[],
+  custodyWalletId: string
+): CustodyWallet {
+  const wallet = wallets.find((entry) => entry.id === custodyWalletId);
   if (!wallet) {
     throw walletNotFound();
   }
@@ -149,7 +152,7 @@ export function resolvePaymentWallet(wallets: CustodyWallet[], walletId: string)
 export function resolveOutboundPaymentOperation(input: {
   auth: ApiKeyContext;
   wallets: CustodyWallet[];
-  source: string;
+  sourceCustodyWalletId: string;
   destination: string;
   token: string;
   amount: string;
@@ -158,7 +161,7 @@ export function resolveOutboundPaymentOperation(input: {
 }): OutboundPaymentOperation {
   const amount = assertPositivePaymentAmount(input.amount);
 
-  const sourceWallet = resolvePaymentWallet(input.wallets, input.source);
+  const sourceWallet = resolvePaymentWallet(input.wallets, input.sourceCustodyWalletId);
   assertApiKeyWalletAccess(
     input.auth,
     sourceWallet.walletId,

@@ -1,7 +1,7 @@
 "use client";
 
 import type { RampProviderId } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
@@ -10,6 +10,7 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -108,6 +109,8 @@ export interface CounterpartyRequirementsParams extends AdvanceRequirementsPaylo
   counterpartyId: string;
   provider: RampProviderId | null;
   direction: RampDirection;
+  /** Fires when onboarding reaches `ready` — on submit or when the status poll observes it. */
+  onReady?: () => void;
 }
 
 export interface CounterpartyRequirementsState {
@@ -217,6 +220,9 @@ export function useCounterpartyRequirements(
       );
       setOnboarding(result);
       setLastAdvancePayload(payload);
+      if (result.status === "ready") {
+        params.onReady?.();
+      }
       return result;
     } finally {
       setIsAdvancing(false);
@@ -231,7 +237,7 @@ export function useCounterpartyRequirements(
 
   useSWR(
     onboarding && lastAdvancePayload && params?.provider && isOnboardingPending(onboarding.status)
-      ? (["counterparty-requirements-status-poll", subjectKey] as const)
+      ? paymentsQueryKeys.requirementsStatusPoll({ subjectKey })
       : null,
     async () => {
       if (!lastAdvancePayload || !params?.provider) {
@@ -245,17 +251,28 @@ export function useCounterpartyRequirements(
         t
       );
       setOnboarding(result);
+      if (result.status === "ready") {
+        params.onReady?.();
+      }
     },
     { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
   );
 
   const fields = useMemo<RequirementField[]>(
-    () => (data?.status === "collect" ? data.fields : []),
+    () =>
+      data?.status === "collect" ||
+      data?.status === "collect_counterparty" ||
+      data?.status === "collect_account"
+        ? data.fields
+        : [],
     [data]
   );
 
   const isComplete = useMemo(
-    () => fields.every((field) => requirementFieldError(field, collectedData[field.key]) === null),
+    () =>
+      fields
+        .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
+        .every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
 
@@ -272,7 +289,10 @@ export function useCounterpartyRequirements(
     fields,
     collectedData,
     setField,
-    needsCollection: data?.status === "collect",
+    needsCollection:
+      data?.status === "collect" ||
+      data?.status === "collect_counterparty" ||
+      data?.status === "collect_account",
     isComplete,
     isResolved: data !== undefined,
     blockReason,

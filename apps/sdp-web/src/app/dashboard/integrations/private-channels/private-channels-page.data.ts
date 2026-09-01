@@ -1,11 +1,10 @@
 import type {
   CustodyWalletSummary,
-  ListProjectMembersResponse,
   PrivateChannelDto,
   PrivateChannelEventListEnvelope,
   PrivateChannelInstance,
   PrivateChannelInstanceOverview,
-  PrivateChannelUserDto,
+  PrivateChannelPrincipalDto,
   PrivateChannelVerifiedWalletDto,
 } from "@sdp/types";
 import {
@@ -15,8 +14,8 @@ import {
   fetchPrivateChannelEvents,
   fetchPrivateChannelInstance,
   fetchPrivateChannelOverview,
+  fetchPrivateChannelPrincipals,
   fetchPrivateChannels,
-  fetchPrivateChannelUsers,
   fetchVerifiedSignableWallets,
   fetchVerifiedWallets,
 } from "@/lib/private-channels";
@@ -180,35 +179,22 @@ export async function loadChannelBalances(
 }
 
 /**
- * Workspace members plus the channels they can be assigned to, and the project
- * users still eligible for invitation. Loaded together because the members table
- * cannot render a useful row without all three.
+ * Project principals plus the channels they can access.
  */
-export function loadMembers(
-  client: SdpApiClient,
-  projectId: string | undefined
-): Promise<
+export function loadPrincipals(client: SdpApiClient): Promise<
   PrivateChannelsResult<{
-    users: PrivateChannelUserDto[];
+    principals: PrivateChannelPrincipalDto[];
     channels: PrivateChannelDto[];
-    projectMembers: ListProjectMembersResponse["members"];
   }>
 > {
   return toResult(
     async () => {
-      const [users, channels, projectMembers] = await Promise.all([
-        fetchPrivateChannelUsers(client),
+      const [principals, channels] = await Promise.all([
+        fetchPrivateChannelPrincipals(client),
         fetchPrivateChannels(client),
-        projectId
-          ? client
-              .fetch<ListProjectMembersResponse>(
-                `/v1/projects/${encodeURIComponent(projectId)}/members`
-              )
-              .then((response) => response.members)
-          : Promise.resolve([]),
       ]);
-      return { users, channels, projectMembers };
+      return { principals, channels };
     },
-    { users: [], channels: [], projectMembers: [] }
+    { principals: [], channels: [] }
   );
 }

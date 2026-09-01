@@ -143,6 +143,18 @@ export function buildPrivateChannelsPlaygroundEndpointConfigs(
           defaultValue: SANDBOX_AUTH_URL,
           required: true,
         },
+        {
+          key: "escrowProgramId",
+          label: "escrowProgramId",
+          defaultValue: SANDBOX_ESCROW_PROGRAM_ID,
+          required: true,
+        },
+        {
+          key: "escrowInstanceAddr",
+          label: "escrowInstanceAddr",
+          defaultValue: SANDBOX_ESCROW_INSTANCE_ADDR,
+          required: true,
+        },
       ],
       expectedResponse: {
         data: {

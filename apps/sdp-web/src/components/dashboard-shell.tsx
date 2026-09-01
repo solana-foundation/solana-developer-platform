@@ -1,14 +1,7 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
-import {
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  LibraryIcon,
-  LockIcon,
-  PanelLeftIcon,
-  Settings2Icon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -24,6 +17,7 @@ import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
 } from "@/app/dashboard/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
 import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
@@ -75,22 +69,23 @@ import {
   type DashboardSubnavKey,
   dashboardSubnavId,
   dashboardSubnavStorageKey,
-  docsHref,
   getNavSections,
   type NavItem,
   type NavSection,
+  withSubnavOpen,
+  withSubnavToggled,
 } from "@/components/dashboard-nav";
+import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
-import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
+import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
-import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
+import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
 import {
-  DASHBOARD_SIDE_NAV_HREFS,
   type DashboardLoadingRoute,
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
@@ -135,6 +130,8 @@ function resolvePageLoadingComponent(
       return IntegrationsSkeleton;
     case "integration-detail":
       return IntegrationDetailSkeleton;
+    case "private-channels-setup":
+      return PrivateChannelsSetupSkeleton;
     case "token-holdings":
       return TokenHoldingsLoading;
     case "wallets-overview":
@@ -218,6 +215,7 @@ function SidebarGroup({
   showTopSeparator,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
   variant,
 }: {
   title: string;
@@ -228,6 +226,12 @@ function SidebarGroup({
   showTopSeparator: boolean;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  /**
+   * Open a section without closing it again. Following a top-level item is a
+   * request to go there, so it reveals the section's pages; toggling would
+   * collapse the submenu of the page being navigated to (HOO-1218).
+   */
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
@@ -262,7 +266,15 @@ function SidebarGroup({
               <div className="relative flex items-center">
                 <Link
                   href={item.href}
-                  onClick={onNavigate}
+                  onClick={() => {
+                    // The chevron still toggles. This only ever opens, so a
+                    // second click on the section you are already in does not
+                    // hide its pages.
+                    if (subnavKey) {
+                      onSubnavOpen(subnavKey);
+                    }
+                    onNavigate?.();
+                  }}
                   title={isCollapsed ? item.label : undefined}
                   aria-label={
                     isCollapsed && item.badge
@@ -372,7 +384,7 @@ function SidebarGroup({
 }
 
 function DashboardSidebarContent({
-  bottomNavItems,
+  canManageOrgSettings,
   navSections,
   pathname,
   onNavigate,
@@ -382,8 +394,9 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
 }: {
-  bottomNavItems: NavItem[];
+  canManageOrgSettings: boolean;
   navSections: NavSection[];
   pathname: string;
   onNavigate?: () => void;
@@ -393,6 +406,7 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -433,34 +447,19 @@ function DashboardSidebarContent({
             showTopSeparator={idx > 0}
             openSubnavs={openSubnavs}
             onSubnavToggle={onSubnavToggle}
+            onSubnavOpen={onSubnavOpen}
             variant={variant}
           />
         ))}
       </div>
-      <div className="shrink-0 space-y-0.5 px-3 pb-1">
-        <SentryFeedbackWidget collapsed={isCollapsed} />
-        {bottomNavItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href}
-              target={item.external ? "_blank" : undefined}
-              rel={item.external ? "noopener noreferrer" : undefined}
-              onClick={onNavigate}
-              title={isCollapsed ? item.label : undefined}
-              aria-label={isCollapsed ? item.label : undefined}
-              className={cn(
-                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
-                isCollapsed && "justify-center"
-              )}
-            >
-              <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-              {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
-            </Link>
-          );
-        })}
-        {variant === "desktop" ? <NetworkDebugToggle collapsed={isCollapsed} /> : null}
+      <div className="shrink-0 px-3 pb-3">
+        <SidebarUserMenu
+          collapsed={isCollapsed}
+          canManageOrgSettings={canManageOrgSettings}
+          // The mobile slide-over is a 288px column, so the popover only has
+          // room above the trigger there.
+          menuSide={variant === "desktop" ? "right" : "top"}
+        />
       </div>
     </>
   );
@@ -523,23 +522,6 @@ export function DashboardShell({
     pendingApprovalCount,
     privateChannelsEnabled,
   });
-  const bottomNavItems: NavItem[] = [
-    {
-      label: t("Shared.dashboardShell.apiDocs"),
-      href: docsHref,
-      icon: LibraryIcon,
-      external: true,
-    },
-    ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [
-          {
-            label: t("Shared.dashboardShell.settings"),
-            href: DASHBOARD_SIDE_NAV_HREFS.settings,
-            icon: Settings2Icon,
-          },
-        ]
-      : []),
-  ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction
@@ -549,7 +531,9 @@ export function DashboardShell({
     />
   ) : null;
   const headerTabs = pageConfig.headerTabs;
-  const hasHeaderTabs = Boolean(headerTabs);
+  const routeTabs = pageConfig.routeTabs;
+  const hasHeaderTabs = Boolean(headerTabs || routeTabs);
+  const isMarketsHeader = pageConfig.headerVariant === "markets";
   const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder =
@@ -611,14 +595,33 @@ export function DashboardShell({
     subnavHydratedRef.current = true;
   }, []);
 
+  const persistSubnav = (key: DashboardSubnavKey, open: boolean) => {
+    if (subnavHydratedRef.current) {
+      window.localStorage.setItem(dashboardSubnavStorageKey(key), String(open));
+    }
+  };
+
+  // Both handlers compute the next state from the rendered value and write to
+  // storage outside the setter. React may replay a state updater, so a
+  // localStorage write placed inside one runs more than once.
   const toggleSubnav = (key: DashboardSubnavKey) => {
-    setOpenSubnavs((current) => {
-      const next = { ...current, [key]: !current[key] };
-      if (subnavHydratedRef.current) {
-        window.localStorage.setItem(dashboardSubnavStorageKey(key), String(next[key]));
-      }
-      return next;
-    });
+    const next = withSubnavToggled(openSubnavs, key);
+    setOpenSubnavs(next);
+    persistSubnav(key, next[key]);
+  };
+
+  /**
+   * Following a top-level item opens its section (HOO-1218). Persisted like a
+   * toggle, because a section opened by navigating is still the reader's last
+   * expressed preference and should survive a reload.
+   */
+  const openSubnav = (key: DashboardSubnavKey) => {
+    const next = withSubnavOpen(openSubnavs, key);
+    if (next === openSubnavs) {
+      return;
+    }
+    setOpenSubnavs(next);
+    persistSubnav(key, true);
   };
 
   useEffect(() => {
@@ -747,7 +750,7 @@ export function DashboardShell({
           className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
         >
           <DashboardSidebarContent
-            bottomNavItems={bottomNavItems}
+            canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
             navSections={navSections}
             pathname={pathname}
             onNavigate={undefined}
@@ -757,6 +760,7 @@ export function DashboardShell({
             onOrganizationSwitchingChange={setOrganizationSwitching}
             openSubnavs={openSubnavs}
             onSubnavToggle={toggleSubnav}
+            onSubnavOpen={openSubnav}
           />
           <button
             type="button"
@@ -809,7 +813,7 @@ export function DashboardShell({
             />
             <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
-                bottomNavItems={bottomNavItems}
+                canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                 navSections={navSections}
                 pathname={pathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
@@ -819,6 +823,7 @@ export function DashboardShell({
                 onOrganizationSwitchingChange={setOrganizationSwitching}
                 openSubnavs={openSubnavs}
                 onSubnavToggle={toggleSubnav}
+                onSubnavOpen={openSubnav}
               />
             </div>
           </div>
@@ -836,12 +841,14 @@ export function DashboardShell({
               shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
             ].join(" ")}
           >
-            <div className="shrink-0 space-y-4">
+            <div className={cn("shrink-0", !isMarketsHeader && "space-y-4")}>
               <div
                 className={cn(
                   shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
                   shouldLockViewportScroll
-                    ? "px-3 pt-5 md:px-6 md:pt-6"
+                    ? isMarketsHeader
+                      ? "px-4 pt-8 md:px-8 md:pt-10 xl:px-16 xl:pt-11"
+                      : "px-3 pt-5 md:px-6 md:pt-6"
                     : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6"
                 )}
               >
@@ -853,6 +860,7 @@ export function DashboardShell({
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
+                  alignTitleWithTabs={hasHeaderTabs && !isMarketsHeader}
                   showNotifications={assetProfilesEnabled}
                 />
               </div>
@@ -867,6 +875,12 @@ export function DashboardShell({
                   <div className="flex items-end px-3 md:px-6">
                     <DashboardHeaderTabs {...headerTabs} />
                   </div>
+                </div>
+              ) : null}
+
+              {routeTabs ? (
+                <div className="mt-6 border-b border-border-default px-4 md:px-8 xl:px-16">
+                  <DashboardRouteTabs {...routeTabs} pathname={pathname} />
                 </div>
               ) : null}
             </div>

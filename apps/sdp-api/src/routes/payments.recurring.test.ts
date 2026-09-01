@@ -11,7 +11,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
@@ -22,6 +22,7 @@ import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
   createFeePaymentAdapterMock,
+  createOrgSignerForCustodyWalletMock,
   createOrgSignerMock,
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionDelegationMock,
@@ -38,6 +39,7 @@ import {
   sendTransactionMock,
   sendTransactionPreflightError,
   TEST_API_KEY,
+  TEST_CUSTODY_WALLET_ID,
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
@@ -231,6 +233,68 @@ async function activateRecurringPaymentForTest(headers: Record<string, string>) 
 
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
+
+  beforeEach(() => {
+    createOrgSignerForCustodyWalletMock.mockImplementation((signerEnv, orgId, projectId) =>
+      createOrgSignerMock(signerEnv, orgId, projectId)
+    );
+  });
+
+  it("rejects an ambiguous Provider wallet ID before creating recurring work", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "ambiguous_recurring_wallet",
+    });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_ambiguous_recurring', ?, ?, 'privy', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_ambiguous_recurring', 'cust_cfg_ambiguous_recurring', ?, ?, 'active')`
+        )
+        .bind(TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
+    ]);
+
+    const response = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_recurring_payments")
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+  });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
     const headers = {
@@ -1985,7 +2049,7 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
-  it("collects due recurring payments through SDP API routes", async () => {
+  it("collects with the exact custody wallet when a Provider wallet ID could select another signer", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2021,6 +2085,10 @@ describe("Payments routes — recurring", () => {
     const activateBody = (await activateRes.json()) as {
       data: { recurringPayment: { subscriptionId: string } };
     };
+    const duplicateProviderWalletSigner = await generateKeyPairSigner();
+    createOrgSignerMock.mockResolvedValue(duplicateProviderWalletSigner);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const providerSignerCallsBeforeCollection = createOrgSignerMock.mock.calls.length;
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     await getDb(env)
       .prepare(
@@ -2106,19 +2174,29 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
     expect(signAsFeePayerMock).toHaveBeenCalledTimes(1);
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_CUSTODY_WALLET_ID
+    );
+    expect(createOrgSignerMock).toHaveBeenCalledTimes(providerSignerCallsBeforeCollection);
     const submission = await getDb(env)
       .prepare(
-        `SELECT signed_transaction, last_valid_block_height, submission_started_at
+        `SELECT custody_wallet_id, signed_transaction, last_valid_block_height,
+                submission_started_at
            FROM payment_transfers
           WHERE id = ?`
       )
       .bind(collectBody.data.transfer.id)
       .first<{
+        custody_wallet_id: string | null;
         signed_transaction: string | null;
         last_valid_block_height: string | null;
         submission_started_at: string | null;
       }>();
     expect(submission).toMatchObject({
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
       last_valid_block_height: "1000",
     });
     expect(submission?.signed_transaction).toBeTruthy();

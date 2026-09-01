@@ -20,6 +20,7 @@ packages/*
 !packages/sdp-env-config
 !packages/sdp-earn
 !packages/sdp-helius-rings
+!packages/sdp-helius-rings-sdk
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-solana
@@ -29,8 +30,9 @@ packages/*
 !packages/sdp-private-channels
 !packages/sdp-spc-escrow
 !packages/sdp-spc-withdraw
-!packages/kit-augment
 !packages/sdp-kamino
+!packages/bigint-buffer
+!packages/sdp-veda
 docs
 infra
 scripts

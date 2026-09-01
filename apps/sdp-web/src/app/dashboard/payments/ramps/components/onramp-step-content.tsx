@@ -13,10 +13,11 @@ import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
-import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
+import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
+import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
@@ -54,6 +55,9 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     setCollectedField,
     requirementsBlocker,
     refreshQuote,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
     memoRows,
     setMemoRows,
   } = wizard;
@@ -109,11 +113,22 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
+  if (currentStepId === "PROVIDER" && !quote && quoteCreationError) {
+    return (
+      <RampQuoteError
+        error={quoteCreationError}
+        retrying={quoteCreationRetrying}
+        onRetry={() => void retryQuoteCreation()}
+      />
+    );
+  }
+
   if (
     currentStepId === "PROVIDER" &&
     onboarding &&
     !quote &&
-    hasOnboardingLifecycle(onboarding.provider)
+    hasOnboardingLifecycle(onboarding.provider) &&
+    isOnboardingPanelStatus(onboarding.status)
   ) {
     return (
       <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
@@ -147,8 +162,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         <MoneygramRampWidget
           direction="onramp"
           quote={quote}
-          counterparty={selectedCounterparty}
-          sourceWalletId={fields.walletId}
+          sourceWalletId={selectedWallet.id}
           sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
           sourceWalletAddress={selectedWallet.publicKey}
           sourceTokenMint={null}
@@ -178,9 +192,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
             src={quote.hostedUrl}
           />
         )}
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
       </div>
     );
   }

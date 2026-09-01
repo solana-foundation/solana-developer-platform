@@ -16,12 +16,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check Kamino dependency boundary
         run: node scripts/check-kamino-dependency-boundary.mjs
+      # `@sdp/veda` must remain the ONLY owner of @vedatech/svm-sdk: the SDK is
+      # a kit-7 chain client in a kit-6.8 workspace, and a second owner would
+      # spread that nested major past the one sanctioned import site.
+      - name: Check Veda dependency boundary
+        run: node scripts/check-veda-dependency-boundary.mjs
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-          # The preceding check confines this path to API -> @sdp/kamino ->
-          # klend-sdk, and build-node.mjs replaces bigint-buffer with its pure-JS
-          # browser entry before scanning every shipped API bundle for the native
-          # loader. No patched bigint-buffer release exists today.
-          allow-ghsas: GHSA-3gc7-fjrx-p6mg
           comment-summary-in-pr: on-failure

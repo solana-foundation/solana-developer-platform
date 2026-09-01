@@ -14,6 +14,7 @@ import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
+import { runWithCronRunEvent } from "@/cron/run-event";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
@@ -86,13 +87,9 @@ const MANAGED_CHECKIN_MARGIN_MINUTES = 4;
  *    Reconciliation Cadence is their effective cadence, the same degradation
  *    from the per-minute crontab that pending-transfers accepts. Fatal.
  * 4. **Rings indexing poll** — behind no gate here, because the job itself
- *    early-returns unless the rings flag is on AND `HELIUS_RINGS_ADAPTER` is
- *    `http`, which is why the in-process runner also schedules it
- *    unconditionally. This job is the poll's only tick on managed deployments;
- *    without it an operation that reached `indexing` would neither complete nor
- *    ever time out. The configured cadence sits well inside the 30-minute
- *    indexing budget, so the degradation from the per-minute crontab costs
- *    nothing. Fatal.
+ *    early-returns unless the rings flag is on. This job is the poll's only tick
+ *    on managed deployments; without it an operation that reached `indexing`
+ *    would neither complete nor ever time out. Fatal.
  * 5. **Earn vault-movement reconciliation** — deliberately outside the Earn
  *    gate: signed vault intents are an outbox, not feature state, so disabling
  *    new deposits cannot strand old ones. Fatal.
@@ -288,7 +285,7 @@ function createManagedTickRunner({
     const monitorSlug = getManagedMonitorSlug(monitor);
     const checkIn = checkIns.get(monitor);
     try {
-      const result = await work();
+      const result = await runWithCronRunEvent(monitorSlug, work);
       if (checkIn) {
         observability?.captureCheckIn({ ...checkIn, status: "ok" });
       }

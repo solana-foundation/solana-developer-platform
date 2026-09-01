@@ -4,9 +4,7 @@ import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
   type Counterparty,
-  type CounterpartyEntityType,
   type CounterpartyFieldOptionsResponse,
-  type CounterpartyIdentity,
   type CounterpartyResponse,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
@@ -14,6 +12,7 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -43,8 +42,6 @@ import {
   getCounterpartyAccountsRepository,
 } from "./context";
 import {
-  counterpartyBusinessIdentitySchema,
-  counterpartyIdentitySchema,
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   type createCounterpartySchema,
@@ -54,21 +51,18 @@ import {
 } from "./schemas";
 
 function mapToCounterparty(row: CounterpartyRow): Counterparty {
-  const base = {
+  return {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
     externalId: row.external_id,
+    entityType: row.entity_type,
     displayName: row.display_name,
-    email: row.email,
     status: row.status,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-  return row.entity_type === "individual"
-    ? { ...base, entityType: "individual", identity: row.identity }
-    : { ...base, entityType: "business", identity: row.identity };
 }
 
 export const getCounterpartyFieldOptions = async (c: AppContext) => {
@@ -217,6 +211,15 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     );
   }
 
+  const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: auth.organizationId,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: query.data.provider,
+  });
+
   if (query.data.direction === "onramp") {
     const scope = await resolveScope(c);
     const destinationWalletAddress = resolveWalletAddress(
@@ -232,6 +235,9 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
         cryptoToken: query.data.cryptoToken,
         fiatCurrency: query.data.fiatCurrency,
         destinationWalletAddress,
+        ...(providerAccount === null
+          ? {}
+          : { providerCustomerReference: providerAccount.provider_customer_reference }),
       }
     );
     return success(c, requirements);
@@ -244,6 +250,9 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       providerData: counterparty.provider_data,
       cryptoToken: query.data.cryptoToken,
       fiatCurrency: query.data.fiatCurrency,
+      ...(providerAccount === null
+        ? {}
+        : { providerCustomerReference: providerAccount.provider_customer_reference }),
     }
   );
   return success(c, requirements);
@@ -287,6 +296,14 @@ export const submitCounterpartyRequirements = async (
       scope.auth
     );
   }
+  const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: auth.organizationId,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: input.provider,
+  });
   const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
@@ -295,6 +312,9 @@ export const submitCounterpartyRequirements = async (
       ...("cryptoToken" in input ? { cryptoToken: input.cryptoToken } : {}),
       ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
       ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
+      ...(providerAccount === null
+        ? {}
+        : { providerCustomerReference: providerAccount.provider_customer_reference }),
     }
   );
 
@@ -302,11 +322,17 @@ export const submitCounterpartyRequirements = async (
     return success(c, requirements);
   }
 
-  if (requirements.status === "collect") {
+  if (
+    requirements.status === "collect" ||
+    requirements.status === "collect_counterparty" ||
+    requirements.status === "collect_account"
+  ) {
     const collectedData = "collectedData" in input ? input.collectedData : undefined;
-    const missing = requirements.fields.filter(
-      (field) => !collectedData || collectedData[field.key] === undefined
-    );
+    const missing = requirements.fields
+      .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
+      .filter(
+        (field) => field.required && (!collectedData || collectedData[field.key] === undefined)
+      );
     if (missing.length > 0) {
       return success(c, { ...requirements, fields: missing });
     }
@@ -348,8 +374,7 @@ export const createCounterparty = async (
     externalId: body.externalId ?? null,
     entityType: body.entityType,
     displayName: body.displayName,
-    email: body.email,
-    identity: body.identity,
+    providerData: {},
     createdBy,
   });
 
@@ -373,54 +398,6 @@ export const createCounterparty = async (
   const response: CounterpartyResponse = { counterparty: mapToCounterparty(counterparty) };
   return created(c, response);
 };
-
-/**
- * Rejects an update whose resulting (entityType, identity) pair would violate the
- * discriminated identity contract, loading the stored row for whichever side the
- * request omitted. Returns the re-parsed identity when the request provided one.
- */
-async function validateUpdatedIdentity(
-  repo: ReturnType<typeof getCounterpartiesRepository>,
-  input: {
-    counterpartyId: string;
-    organizationId: string;
-    projectId: string;
-    entityType: CounterpartyEntityType | undefined;
-    identity: CounterpartyIdentity | undefined;
-  }
-): Promise<CounterpartyIdentity | undefined> {
-  if (input.identity === undefined && input.entityType === undefined) {
-    return undefined;
-  }
-  let entityType = input.entityType;
-  let identity: unknown = input.identity;
-  if (entityType === undefined || identity === undefined) {
-    const current = await repo.getCounterpartyById(input);
-    if (!current) {
-      throw notFound("Counterparty");
-    }
-    if (entityType === undefined) {
-      entityType = current.entity_type;
-    }
-    if (identity === undefined) {
-      identity = current.identity;
-    }
-  }
-  const identitySchemaForEntityType =
-    entityType === "individual" ? counterpartyIdentitySchema : counterpartyBusinessIdentitySchema;
-  const result = identitySchemaForEntityType.safeParse(identity);
-  if (!result.success) {
-    if (input.identity === undefined) {
-      throw badRequest("Changing entityType requires a matching identity in the same request.", {
-        errors: z.treeifyError(result.error),
-      });
-    }
-    throw badRequest("identity does not match the counterparty's entityType.", {
-      errors: z.treeifyError(result.error),
-    });
-  }
-  return input.identity === undefined ? undefined : result.data;
-}
 
 export const updateCounterparty = async (
   c: ValidatedBodyContext<typeof updateCounterpartySchema>
@@ -449,20 +426,11 @@ export const updateCounterparty = async (
     }
   }
 
-  const validatedIdentity = await validateUpdatedIdentity(repo, {
-    counterpartyId,
-    organizationId: auth.organizationId,
-    projectId,
-    entityType: body.entityType,
-    identity: body.identity,
-  });
-  const update = validatedIdentity === undefined ? body : { ...body, identity: validatedIdentity };
-
   const updated = await repo.updateCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
     projectId,
-    ...update,
+    ...body,
   });
 
   if (!updated) {
