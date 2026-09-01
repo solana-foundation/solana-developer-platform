@@ -7,6 +7,8 @@ import type { EarnVaultInstruction, EarnVaultTransactionPlan } from "@sdp/earn/t
 import { isAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { address } from "@solana/kit";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
@@ -64,13 +66,13 @@ export const RETRY_SWAP_MAX_ACCOUNTS = 24;
  * owner will AUTHORIZE WHOLESALE, so its instructions are admitted against a
  * closed contract rather than trusted:
  *
- * - every top-level program must be on the pinned allowlist below — the swap
- *   itself runs inside Jupiter's aggregator (venues are CPIs under it), and
- *   the setup/cleanup legs are ATA creation and token-account housekeeping,
- *   so nothing else has a legitimate reason to appear;
+ * - the only admitted auxiliary operation is an exact idempotent ATA create
+ *   for the owner and one of the two requested mints; this stablecoin-only
+ *   flow requests no wrapping, tips, platform fees, cleanup, or other work;
  * - the swap instruction's program must be the aggregator itself, so a
  *   "swap" cannot be substituted with a bare token transfer to an attacker's
- *   account dressed in allowlisted programs;
+ *   account, and its fixed accounts plus encoded amount/slippage must match
+ *   the requested owner, mints, token accounts, and zero-fee contract;
  * - the ONLY account that may carry the signer flag is the taker, so the
  *   composed transaction can never grow a second authority.
  *
@@ -85,14 +87,23 @@ export const JUPITER_AGGREGATOR_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi
 // biome-ignore lint/security/noSecrets: SPL Associated Token Account program id, public.
 const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+// biome-ignore lint/security/noSecrets: Jupiter v6 event authority, public on-chain address.
+const JUPITER_EVENT_AUTHORITY = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf";
 
 export const EARN_SWAP_ALLOWED_PROGRAM_IDS: ReadonlySet<string> = new Set([
   JUPITER_AGGREGATOR_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  SYSTEM_PROGRAM_ID,
-  SPL_TOKEN_PROGRAMS["spl-token"],
-  SPL_TOKEN_PROGRAMS["token-2022"],
 ]);
+
+// Anchor instruction discriminators from Jupiter v6's published V2 IDL. The
+// request explicitly selects instructionVersion=V2, and only ExactIn V2 route
+// variants are admitted. Token-ledger, ExactOut, and legacy variants fail
+// closed instead of being interpreted with the wrong account layout.
+const ROUTE_V2_DISCRIMINATOR = "bb64facc31c4af14";
+const SHARED_ACCOUNTS_ROUTE_V2_DISCRIMINATOR = "d19853937cfed8e9";
+const ROUTE_V2_FIXED_BYTES = 8 + 8 + 8 + 2 + 2 + 2;
+const SHARED_ACCOUNTS_ROUTE_V2_FIXED_BYTES = 8 + 1 + 8 + 8 + 2 + 2 + 2;
+const EMPTY_ROUTE_PLAN_BYTES = 4;
 
 /**
  * ── Compute-unit sizing for the composed transaction ────────────────────────
@@ -202,7 +213,15 @@ interface JupiterBuildResponse {
   swapInstruction: JupiterApiInstruction;
   cleanupInstruction?: JupiterApiInstruction | null;
   otherInstructions?: JupiterApiInstruction[];
+  tipInstruction?: JupiterApiInstruction | null;
   addressesByLookupTableAddress?: Record<string, string[]> | null;
+}
+
+interface ExpectedSwapAccounts {
+  sourceTokenAccount: string;
+  destinationTokenAccount: string;
+  sourceTokenProgram: string;
+  destinationTokenProgram: string;
 }
 
 function resolveJupiterSwapConfig(env: Env): { url: string; apiKey: string } {
@@ -280,27 +299,304 @@ function toEarnVaultInstruction(
   };
 }
 
-function swapLegInstructions(body: JupiterBuildResponse, taker: string): EarnVaultInstruction[] {
+function decodeInstructionData(data: string): Buffer {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
+    throw providerUnavailable("Jupiter returned an instruction with malformed base64 data");
+  }
+  return Buffer.from(data, "base64");
+}
+
+function sameAccount(
+  actual: JupiterApiInstruction["accounts"][number] | undefined,
+  expected: { pubkey: string; isSigner: boolean; isWritable: boolean }
+): boolean {
+  return (
+    actual !== undefined &&
+    actual.pubkey === expected.pubkey &&
+    actual.isSigner === expected.isSigner &&
+    actual.isWritable === expected.isWritable
+  );
+}
+
+function isExpectedAtaCreate(
+  instruction: JupiterApiInstruction,
+  taker: string,
+  mint: string,
+  tokenAccount: string,
+  tokenProgram: string
+): boolean {
+  const accounts = instruction.accounts;
+  const data = decodeInstructionData(instruction.data);
+  return (
+    instruction.programId === ASSOCIATED_TOKEN_PROGRAM_ID &&
+    data.length === 1 &&
+    data[0] === 1 &&
+    accounts.length === 6 &&
+    sameAccount(accounts[0], { pubkey: taker, isSigner: true, isWritable: true }) &&
+    sameAccount(accounts[1], { pubkey: tokenAccount, isSigner: false, isWritable: true }) &&
+    sameAccount(accounts[2], { pubkey: taker, isSigner: false, isWritable: false }) &&
+    sameAccount(accounts[3], { pubkey: mint, isSigner: false, isWritable: false }) &&
+    sameAccount(accounts[4], {
+      pubkey: SYSTEM_PROGRAM_ID,
+      isSigner: false,
+      isWritable: false,
+    }) &&
+    sameAccount(accounts[5], { pubkey: tokenProgram, isSigner: false, isWritable: false })
+  );
+}
+
+function requireSwapAccount(
+  accounts: JupiterApiInstruction["accounts"],
+  index: number,
+  expected: { pubkey: string; isSigner: boolean; isWritable: boolean },
+  role: string
+): void {
+  if (!sameAccount(accounts[index], expected)) {
+    throw providerUnavailable(`Jupiter returned a swap with an unexpected ${role}`);
+  }
+}
+
+function validateSwapInstruction(
+  instruction: JupiterApiInstruction,
+  request: JupiterSwapRequest,
+  expected: ExpectedSwapAccounts,
+  inputAtoms: bigint,
+  quotedOutAtoms: bigint
+): void {
+  if (instruction.programId !== JUPITER_AGGREGATOR_PROGRAM_ID) {
+    throw providerUnavailable(
+      "Jupiter returned a swap instruction that does not run its aggregator program",
+      { programId: instruction.programId }
+    );
+  }
+
+  const data = decodeInstructionData(instruction.data);
+  const discriminator = data.subarray(0, 8).toString("hex");
+  const sharedAccounts = discriminator === SHARED_ACCOUNTS_ROUTE_V2_DISCRIMINATOR;
+  const route = discriminator === ROUTE_V2_DISCRIMINATOR;
+  if (!sharedAccounts && !route) {
+    throw providerUnavailable(
+      "Jupiter returned a swap instruction outside the ExactIn V2 contract"
+    );
+  }
+
+  const minimumBytes =
+    (sharedAccounts ? SHARED_ACCOUNTS_ROUTE_V2_FIXED_BYTES : ROUTE_V2_FIXED_BYTES) +
+    EMPTY_ROUTE_PLAN_BYTES;
+  if (data.length < minimumBytes) {
+    throw providerUnavailable("Jupiter returned a truncated swap instruction");
+  }
+
+  // V2 puts the fixed economic contract before its variable route plan. A
+  // shared route adds one byte of router-account identity after the Anchor
+  // discriminator; the remaining fields use the same widths.
+  const amountOffset = sharedAccounts ? 9 : 8;
+  if (
+    data.readBigUInt64LE(amountOffset) !== inputAtoms ||
+    data.readBigUInt64LE(amountOffset + 8) !== quotedOutAtoms ||
+    data.readUInt16LE(amountOffset + 16) !== request.slippageBps ||
+    data.readUInt16LE(amountOffset + 18) !== 0 ||
+    data.readUInt16LE(amountOffset + 20) !== 0
+  ) {
+    throw providerUnavailable(
+      "Jupiter returned a swap instruction that does not match the requested amount, slippage, or zero-fee contract"
+    );
+  }
+
+  const accounts = instruction.accounts;
+  if (route) {
+    requireSwapAccount(
+      accounts,
+      0,
+      { pubkey: request.owner, isSigner: true, isWritable: false },
+      "owner authority"
+    );
+    requireSwapAccount(
+      accounts,
+      1,
+      { pubkey: expected.sourceTokenAccount, isSigner: false, isWritable: true },
+      "owner source token account"
+    );
+    requireSwapAccount(
+      accounts,
+      2,
+      { pubkey: expected.destinationTokenAccount, isSigner: false, isWritable: true },
+      "owner destination token account"
+    );
+    requireSwapAccount(
+      accounts,
+      3,
+      { pubkey: request.inputMint, isSigner: false, isWritable: false },
+      "source mint"
+    );
+    requireSwapAccount(
+      accounts,
+      4,
+      { pubkey: request.outputMint, isSigner: false, isWritable: false },
+      "destination mint"
+    );
+    requireSwapAccount(
+      accounts,
+      5,
+      { pubkey: expected.sourceTokenProgram, isSigner: false, isWritable: false },
+      "source token program"
+    );
+    requireSwapAccount(
+      accounts,
+      6,
+      { pubkey: expected.destinationTokenProgram, isSigner: false, isWritable: false },
+      "destination token program"
+    );
+    const explicitDestination = accounts[7];
+    if (
+      !sameAccount(explicitDestination, {
+        pubkey: JUPITER_AGGREGATOR_PROGRAM_ID,
+        isSigner: false,
+        isWritable: false,
+      }) &&
+      !sameAccount(explicitDestination, {
+        pubkey: expected.destinationTokenAccount,
+        isSigner: false,
+        isWritable: true,
+      })
+    ) {
+      throw providerUnavailable("Jupiter returned a swap with an unrelated output destination");
+    }
+    requireSwapAccount(
+      accounts,
+      8,
+      { pubkey: JUPITER_EVENT_AUTHORITY, isSigner: false, isWritable: false },
+      "event authority"
+    );
+    requireSwapAccount(
+      accounts,
+      9,
+      { pubkey: JUPITER_AGGREGATOR_PROGRAM_ID, isSigner: false, isWritable: false },
+      "aggregator program account"
+    );
+  } else {
+    requireSwapAccount(
+      accounts,
+      0,
+      { pubkey: accounts[0]?.pubkey ?? "", isSigner: false, isWritable: false },
+      "program authority"
+    );
+    requireSwapAccount(
+      accounts,
+      1,
+      { pubkey: request.owner, isSigner: true, isWritable: false },
+      "owner authority"
+    );
+    requireSwapAccount(
+      accounts,
+      2,
+      { pubkey: expected.sourceTokenAccount, isSigner: false, isWritable: true },
+      "owner source token account"
+    );
+    requireSwapAccount(
+      accounts,
+      3,
+      { pubkey: accounts[3]?.pubkey ?? "", isSigner: false, isWritable: true },
+      "program source token account"
+    );
+    requireSwapAccount(
+      accounts,
+      4,
+      { pubkey: accounts[4]?.pubkey ?? "", isSigner: false, isWritable: true },
+      "program destination token account"
+    );
+    requireSwapAccount(
+      accounts,
+      5,
+      { pubkey: expected.destinationTokenAccount, isSigner: false, isWritable: true },
+      "owner destination token account"
+    );
+    requireSwapAccount(
+      accounts,
+      6,
+      { pubkey: request.inputMint, isSigner: false, isWritable: false },
+      "source mint"
+    );
+    requireSwapAccount(
+      accounts,
+      7,
+      { pubkey: request.outputMint, isSigner: false, isWritable: false },
+      "destination mint"
+    );
+    requireSwapAccount(
+      accounts,
+      8,
+      { pubkey: expected.sourceTokenProgram, isSigner: false, isWritable: false },
+      "source token program"
+    );
+    requireSwapAccount(
+      accounts,
+      9,
+      { pubkey: expected.destinationTokenProgram, isSigner: false, isWritable: false },
+      "destination token program"
+    );
+    requireSwapAccount(
+      accounts,
+      10,
+      { pubkey: JUPITER_EVENT_AUTHORITY, isSigner: false, isWritable: false },
+      "event authority"
+    );
+    requireSwapAccount(
+      accounts,
+      11,
+      { pubkey: JUPITER_AGGREGATOR_PROGRAM_ID, isSigner: false, isWritable: false },
+      "aggregator program account"
+    );
+  }
+}
+
+function swapLegInstructions(
+  body: JupiterBuildResponse,
+  request: JupiterSwapRequest,
+  expected: ExpectedSwapAccounts,
+  inputAtoms: bigint,
+  quotedOutAtoms: bigint
+): EarnVaultInstruction[] {
   if (!body.swapInstruction) {
     throw providerUnavailable("Jupiter answered without a swap instruction");
   }
-  // The swap must actually BE a Jupiter swap: routing runs inside the
-  // aggregator (venues are CPIs under it), so an allowlisted-but-different
-  // program here (say, a bare token transfer) is a substituted operation,
-  // not a route.
-  if (body.swapInstruction.programId !== JUPITER_AGGREGATOR_PROGRAM_ID) {
+  const setupInstructions = body.setupInstructions ?? [];
+  const seenSetups = new Set<string>();
+  for (const instruction of setupInstructions) {
+    const source = isExpectedAtaCreate(
+      instruction,
+      request.owner,
+      request.inputMint,
+      expected.sourceTokenAccount,
+      expected.sourceTokenProgram
+    );
+    const destination = isExpectedAtaCreate(
+      instruction,
+      request.owner,
+      request.outputMint,
+      expected.destinationTokenAccount,
+      expected.destinationTokenProgram
+    );
+    const identity = source ? "source" : destination ? "destination" : null;
+    if (identity === null || seenSetups.has(identity)) {
+      throw providerUnavailable(
+        "Jupiter returned a setup instruction outside the requested owner ATA contract"
+      );
+    }
+    seenSetups.add(identity);
+  }
+  if (
+    body.cleanupInstruction != null ||
+    (body.otherInstructions?.length ?? 0) > 0 ||
+    body.tipInstruction != null
+  ) {
     throw providerUnavailable(
-      "Jupiter returned a swap instruction that does not run its aggregator program",
-      { programId: body.swapInstruction.programId }
+      "Jupiter returned auxiliary instructions that this stablecoin swap did not request"
     );
   }
-  const ordered: JupiterApiInstruction[] = [
-    ...(body.setupInstructions ?? []),
-    body.swapInstruction,
-    ...(body.cleanupInstruction ? [body.cleanupInstruction] : []),
-    ...(body.otherInstructions ?? []),
-  ];
-  return ordered.map((instruction) => toEarnVaultInstruction(instruction, taker));
+  validateSwapInstruction(body.swapInstruction, request, expected, inputAtoms, quotedOutAtoms);
+  const ordered: JupiterApiInstruction[] = [...setupInstructions, body.swapInstruction];
+  return ordered.map((instruction) => toEarnVaultInstruction(instruction, request.owner));
 }
 
 /**
@@ -325,11 +621,36 @@ export async function fetchJupiterSwapLeg(
   const { url, apiKey } = resolveJupiterSwapConfig(env);
   const sourceDecimals = requireWellKnownMintDecimals(request.inputMint, "funding token");
   const depositDecimals = requireWellKnownMintDecimals(request.outputMint, "deposit token");
+  const sourceToken = WELL_KNOWN_TOKEN_BY_MINT.get(request.inputMint);
+  const destinationToken = WELL_KNOWN_TOKEN_BY_MINT.get(request.outputMint);
+  if (!sourceToken || !destinationToken) {
+    throw badRequest("Swap-funded deposits require recognized funding and deposit mints");
+  }
 
   const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
   if (amountAtoms <= 0n) {
     throw badRequest("Swap amount must be greater than zero at the funding token's precision");
   }
+  const sourceTokenProgram = SPL_TOKEN_PROGRAMS[sourceToken.tokenProgram];
+  const destinationTokenProgram = SPL_TOKEN_PROGRAMS[destinationToken.tokenProgram];
+  const [[sourceTokenAccount], [destinationTokenAccount]] = await Promise.all([
+    findAssociatedTokenPda({
+      owner: address(request.owner),
+      mint: address(request.inputMint),
+      tokenProgram: address(sourceTokenProgram),
+    }),
+    findAssociatedTokenPda({
+      owner: address(request.owner),
+      mint: address(request.outputMint),
+      tokenProgram: address(destinationTokenProgram),
+    }),
+  ]);
+  const expectedAccounts: ExpectedSwapAccounts = {
+    sourceTokenAccount,
+    destinationTokenAccount,
+    sourceTokenProgram,
+    destinationTokenProgram,
+  };
 
   const query = new URLSearchParams({
     inputMint: request.inputMint,
@@ -338,6 +659,7 @@ export async function fetchJupiterSwapLeg(
     taker: request.owner,
     slippageBps: String(request.slippageBps),
     maxAccounts: String(request.maxAccounts ?? COMPOSED_SWAP_MAX_ACCOUNTS),
+    instructionVersion: "V2",
     // Stable-stable legs never touch native SOL; disabling the wrap avoids
     // gratuitous wSOL setup instructions in a transaction that is size-bound.
     wrapAndUnwrapSol: "false",
@@ -375,13 +697,25 @@ export async function fetchJupiterSwapLeg(
   if (!/^\d+$/.test(body.otherAmountThreshold ?? "") || !/^\d+$/.test(body.outAmount ?? "")) {
     throw earnBadRequest("Jupiter swap routing returned malformed amounts");
   }
+  if (
+    body.inputMint !== request.inputMint ||
+    body.outputMint !== request.outputMint ||
+    body.inAmount !== amountAtoms.toString() ||
+    body.slippageBps !== request.slippageBps
+  ) {
+    throw providerUnavailable("Jupiter returned a quote outside the requested swap contract");
+  }
   const minOutAtoms = BigInt(body.otherAmountThreshold);
+  const quotedOutAtoms = BigInt(body.outAmount);
   if (minOutAtoms <= 0n) {
     throw badRequest("The quoted swap output is zero after slippage; increase the amount");
   }
+  if (quotedOutAtoms < minOutAtoms) {
+    throw providerUnavailable("Jupiter returned a swap floor above its quoted output");
+  }
 
   return {
-    instructions: swapLegInstructions(body, request.owner),
+    instructions: swapLegInstructions(body, request, expectedAccounts, amountAtoms, quotedOutAtoms),
     lookupTableAddresses: Object.keys(body.addressesByLookupTableAddress ?? {}),
     sourceAmount: request.sourceAmount,
     quotedAmount: formatDecimalAmount(BigInt(body.outAmount), depositDecimals),
