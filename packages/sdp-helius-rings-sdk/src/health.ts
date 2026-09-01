@@ -129,11 +129,7 @@ async function probeProver(input: RingsHealthInput, timeoutMs: number): Promise<
   }
 }
 
-/**
- * Reports one status per upstream the shielded flows depend on. `gateway` is
- * always green because the adapter runs in this process; it stays on the
- * response because the dashboard is written against four components.
- */
+/** Reports one status per upstream the shielded flows depend on. */
 export async function probeRingsHealth(input: RingsHealthInput): Promise<RuntimeHealth> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -158,7 +154,6 @@ export async function probeRingsHealth(input: RingsHealthInput): Promise<Runtime
     rpc: rpc.status,
     photon: photon.status,
     prover: prover.status,
-    gateway: "green",
   };
 
   return Object.keys(detail).length === 0 ? health : { ...health, detail };

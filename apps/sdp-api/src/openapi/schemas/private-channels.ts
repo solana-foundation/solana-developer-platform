@@ -66,14 +66,34 @@ export const privateChannelHealthQuerySchema = z.object({
     }),
 });
 
+const privateChannelProbeDeploymentConstraint = {
+  oneOf: [
+    { required: ["escrowProgramId", "escrowInstanceAddr"] },
+    {
+      not: {
+        anyOf: [{ required: ["escrowProgramId"] }, { required: ["escrowInstanceAddr"] }],
+      },
+    },
+  ],
+};
+
 export const privateChannelProbeBodySchema = z
   .object({
     gatewayUrl: z.string().min(1),
     authUrl: z.string().min(1),
+    escrowProgramId: solanaAddressSchema.optional().openapi({
+      description:
+        "Escrow program to verify through the project RPC. Supply with escrowInstanceAddr; omit both for a legacy connectivity-only probe.",
+    }),
+    escrowInstanceAddr: solanaAddressSchema.optional().openapi({
+      description:
+        "Escrow instance to verify through the project RPC. Supply with escrowProgramId; omit both for a legacy connectivity-only probe.",
+    }),
   })
+  .meta(privateChannelProbeDeploymentConstraint)
   .openapi({
     description:
-      "Probe request body. The selected project's configured RPC is probed automatically.",
+      "Probe request body. When deployment addresses are supplied, the selected project's configured RPC verifies them automatically.",
   });
 
 const gatewayProbeResponseSchema = z.object({

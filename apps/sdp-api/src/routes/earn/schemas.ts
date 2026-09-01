@@ -1,11 +1,6 @@
 import { isAddress } from "@sdp/solana/address";
 import {
-  DEFAULT_EARN_BUTTON_ACCENT_COLOR,
   EARN_APY_TYPES,
-  EARN_BUTTON_ACCENT_COLOR_PATTERN,
-  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
-  EARN_BUTTON_PUBLIC_TOKEN_PATTERN,
-  EARN_BUTTON_STYLES,
   EARN_LIQUIDITY_TERMS,
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
@@ -35,22 +30,6 @@ export const listEarnStrategiesQuerySchema = z.object({
   // environment's own cluster — the shelf the caller can act on. Naming the
   // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
   cluster: z.enum(SOLANA_CLUSTERS).optional(),
-});
-
-export const earnButtonConfigurationSchema = z.object({
-  strategyId: z.string().min(1).max(128),
-  style: z.enum(EARN_BUTTON_STYLES),
-  accentColor: z
-    .string()
-    .regex(EARN_BUTTON_ACCENT_COLOR_PATTERN)
-    .default(DEFAULT_EARN_BUTTON_ACCENT_COLOR),
-});
-
-export const earnButtonConfigurationPublicParamsSchema = z.object({
-  publicToken: z
-    .string()
-    .length(EARN_BUTTON_PUBLIC_TOKEN_LENGTH)
-    .regex(EARN_BUTTON_PUBLIC_TOKEN_PATTERN, "Invalid Earn button integration token"),
 });
 
 // ---------------------------------------------------------------------------
@@ -281,6 +260,23 @@ export const earnVaultDepositSchema = z.object({
 });
 
 /**
+ * Quote what a vault deposit would mint right now — a read, no side effects,
+ * so no wallet and no idempotency key. Same amount grammar as the deposit
+ * itself: the quote exists to derive that deposit's floor, and quoting an
+ * amount the deposit route would refuse answers a question nobody can act on.
+ */
+export const earnVaultDepositPreviewSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
+});
+
+/**
  * The recorded movement a caller polls. Bounded because the value goes
  * straight into a bind parameter; the row lookup is org-scoped, so anything
  * this organization does not own answers 404 rather than a validation error.
@@ -341,6 +337,17 @@ export const earnVaultWithdrawalSchema = z.object({
     .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
     .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
   /**
+   * Optional exit slippage floor: the minimum deposit-token amount to accept,
+   * as a decimal string in the token's own units. Providers whose builder
+   * refuses an implicit tolerance (Veda) refuse its absence with a typed 400.
+   */
+  minAmountOut: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "minAmountOut must be a decimal string")
+    .refine((value) => /[1-9]/.test(value), "minAmountOut must be greater than zero")
+    .optional(),
+  /**
    * Retired on this route for the same reason as the deposit's: the chain has
    * no request dedupe to anchor a body key to, so the `Idempotency-Key` header
    * is the only accepted source.
@@ -352,6 +359,21 @@ export const earnVaultWithdrawalSchema = z.object({
 
 /** One recorded withdrawal; org-scoped lookup answers 404 for foreign rows. */
 export const earnVaultWithdrawalParamsSchema = earnVaultMovementParamsSchema;
+
+/**
+ * Quote what redeeming these shares would pay right now — a read, no side
+ * effects, so no idempotency key. The exit twin of the deposit preview.
+ */
+export const earnVaultWithdrawalPreviewSchema = z.object({
+  /** The `earn_positions` row being exited. */
+  positionId: z.string().min(1).max(128),
+  /** Shares to redeem, decimal string in share units. */
+  shares: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
+});
 
 /**
  * Bounded keyset page over recorded withdrawals, newest first. The same
@@ -451,6 +473,33 @@ export const earnExternalWalletPositionsQuerySchema = z
   .strict();
 
 export const earnExternalWalletPositionSummaryQuerySchema = z.object({}).strict();
+
+/**
+ * One external wallet's activity, newest first (PRO-1772). The owner is a
+ * REQUIRED query filter rather than a path segment so the collection keeps its
+ * `:movementId` detail route unambiguous; direction/status are the same
+ * equality filters the cross-provider feed takes, and `status` stays an open
+ * string for the same reason — an unknown value matches nothing, which is the
+ * honest answer.
+ */
+export const earnExternalWalletMovementsQuerySchema = z
+  .object({
+    ownerAddress: solanaOwnerAddressSchema,
+    direction: z.enum(EARN_MOVEMENT_DIRECTIONS).optional(),
+    status: z.string().min(1).max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z.string().min(1).optional(),
+  })
+  .strict();
+
+/** The recorded external-wallet movement a partner polls to a terminal state. */
+export const earnExternalWalletMovementParamsSchema = z
+  .object({ movementId: z.string().min(1).max(128) })
+  .strict();
+
+/** Balance + earned for one external wallet (PRO-1772); no knobs on purpose. */
+export const earnExternalWalletEarningsParamsSchema = earnExternalWalletPositionParamsSchema;
+export const earnExternalWalletEarningsQuerySchema = z.object({}).strict();
 
 /**
  * The cross-provider movement feed.

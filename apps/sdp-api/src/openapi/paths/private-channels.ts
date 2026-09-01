@@ -163,7 +163,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Probe a candidate SPC configuration",
     operationId: "probePrivateChannelConnection",
     description:
-      "Full pre-connect probe: gateway `/health` + `/ready` and chain RPC `getVersion`. Always 200 with the raw probe result; only a malformed body is 400. The Connect handler runs the same probe internally, so `probe.ok === true` here means Connect will not fail on the probe step.",
+      "Full pre-connect probe: gateway `/health` + `/ready`, project RPC connectivity, and escrow deployment verification when both deployment addresses are supplied. Legacy payloads may omit both addresses for connectivity-only probing. Connect always verifies the deployment. The endpoint returns 200 with the raw probe result; only a malformed body is 400.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

@@ -8,14 +8,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
-import {
-  CheckIcon,
-  Code2Icon,
-  InfoIcon,
-  Layers3Icon,
-  ListChecksIcon,
-  PanelsTopLeftIcon,
-} from "lucide-react";
+import { CheckIcon, Code2Icon, InfoIcon, Layers3Icon, ListChecksIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -58,7 +51,6 @@ import {
 
 const FLOW_STEPS = [
   { icon: ListChecksIcon, key: "DashboardMarkets.earnProgram.flowSelect" },
-  { icon: PanelsTopLeftIcon, key: "DashboardMarkets.earnProgram.flowStyle" },
   { icon: Code2Icon, key: "DashboardMarkets.earnProgram.flowIntegrate" },
 ] as const satisfies ReadonlyArray<{ icon: typeof ListChecksIcon; key: MessageKey }>;
 
@@ -76,7 +68,7 @@ function ProgramIntro() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ol className="grid overflow-hidden rounded-xl border border-border-default md:grid-cols-3">
+        <ol className="grid overflow-hidden rounded-xl border border-border-default md:grid-cols-2">
           {FLOW_STEPS.map(({ icon: Icon, key }, index) => (
             <li
               className={cn(
@@ -242,12 +234,12 @@ function StrategyMobileRow({
 }
 
 export function EarnProgramWorkspace({
-  builderHref,
   initialCluster,
+  integrateHref,
   providerAccess,
 }: {
-  builderHref: string;
   initialCluster?: SolanaCluster;
+  integrateHref: string;
   providerAccess: EarnProviderAccess | null;
 }) {
   const t = useTranslations();
@@ -270,11 +262,11 @@ export function EarnProgramWorkspace({
   const selectedStrategy = rows.find((strategy) => strategy.id === selectedStrategyId);
   const depositsEnabled = isVaultDirectDepositEnabled(sdpEnvironment);
 
-  const continueToBuilder = () => {
+  const continueToIntegration = () => {
     if (!selectedStrategy) return;
     const query = new URLSearchParams({ strategy: selectedStrategy.id });
     if (isMainnetPreview) query.set("cluster", "mainnet-beta");
-    router.push(`${builderHref}?${query}`);
+    router.push(`${integrateHref}?${query}`);
   };
 
   const changeCluster = (cluster: SolanaCluster) => {
@@ -408,7 +400,7 @@ export function EarnProgramWorkspace({
                   </p>
                 </div>
               )}
-              <Button disabled={!selectedStrategy} onClick={continueToBuilder} type="button">
+              <Button disabled={!selectedStrategy} onClick={continueToIntegration} type="button">
                 {t("DashboardMarkets.earnProgram.continue")}
               </Button>
             </div>

@@ -200,7 +200,8 @@ export interface MoneygramTransferDetails {
 
 export interface PaymentTransferSummary {
   id: string;
-  walletId?: string;
+  custodyWalletId: string | null;
+  providerWalletId: string;
   status: PaymentTransferStatus;
   signature: string | null;
   error?: string | null;
@@ -251,7 +252,7 @@ export type PreparedPrivateTransfer = MagicBlockPreparedPrivateTransfer;
 
 export interface PaymentTransferRequest {
   projectId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   destination: string;
   token: string;
   amount: string;
@@ -305,7 +306,7 @@ export interface PaymentTransferBatchOptions {
 export interface PaymentTransferBatchRequest {
   projectId?: string;
   externalId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   token: string;
   recipients: PaymentTransferBatchRecipientRequest[];
   options?: PaymentTransferBatchOptions;
@@ -318,7 +319,8 @@ export interface PaymentTransferBatch {
   organizationId: string;
   projectId: string;
   externalId: string | null;
-  sourceWalletId: string;
+  sourceCustodyWalletId: string | null;
+  sourceProviderWalletId: string;
   sourceAddress: string;
   token: string;
   status: PaymentTransferBatchStatus;
@@ -885,7 +887,6 @@ export interface PaymentOnrampQuoteRequest {
   cryptoToken: string;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
-  redirectUrl?: string;
   domain?: string;
   rampsMemo?: Record<string, string>;
 }
@@ -897,7 +898,6 @@ export interface PaymentOfframpQuoteRequest {
   cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
-  redirectUrl?: string;
   rampsMemo?: Record<string, string>;
 }
 

@@ -1,66 +1,4 @@
-import {
-  EARN_BUTTON_ACCENT_COLOR_PATTERN,
-  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
-  EARN_BUTTON_PUBLIC_TOKEN_PATTERN,
-  EARN_BUTTON_STYLES,
-} from "@sdp/types";
 import { isoDateTimeSchema, successResponseSchema, z } from "./base";
-
-const earnButtonStyleSchema = z.enum(EARN_BUTTON_STYLES).openapi({
-  description: "Customer-facing Earn button treatment.",
-  example: "accent",
-});
-
-const earnButtonAccentColorSchema = z.string().regex(EARN_BUTTON_ACCENT_COLOR_PATTERN).openapi({
-  description: "Six-digit hexadecimal accent color used by the accent treatment.",
-  example: "#9945FF",
-});
-
-const earnButtonConfigurationSchema = z
-  .object({
-    id: z.string().min(1).openapi({ example: "earn_button_config_example" }),
-    strategyId: z.string().min(1).openapi({ example: "earn_strategy_example" }),
-    style: earnButtonStyleSchema,
-    accentColor: earnButtonAccentColorSchema,
-    publicToken: z
-      .string()
-      .length(EARN_BUTTON_PUBLIC_TOKEN_LENGTH)
-      .regex(EARN_BUTTON_PUBLIC_TOKEN_PATTERN)
-      .openapi({
-        description: "Stable unguessable token used by the public engineering handoff.",
-        example: "AbCdEfGhIjKlMnOpQrStUvWx",
-      }),
-    createdAt: isoDateTimeSchema,
-    updatedAt: isoDateTimeSchema,
-  })
-  .openapi({ description: "Saved Earn button configuration for one project." });
-
-const publicEarnButtonConfigurationSchema = z
-  .object({
-    strategyId: z.string().min(1).openapi({ example: "earn_strategy_example" }),
-    strategyName: z.string().nullable().openapi({ example: "USDC Yield Vault" }),
-    provider: z.string().nullable().openapi({ example: "kamino" }),
-    style: earnButtonStyleSchema,
-    accentColor: earnButtonAccentColorSchema,
-    strategyAvailable: z.boolean().openapi({
-      description:
-        "False when the configured strategy is hidden, delisted, or not active. " +
-        "Display metadata is withheld and the handoff should render a stale state.",
-      example: true,
-    }),
-  })
-  .openapi({
-    description:
-      "Public integration handoff data. Tenant identifiers and credentials are never included.",
-  });
-
-export const earnButtonConfigurationResponse = successResponseSchema(
-  z.object({ configuration: earnButtonConfigurationSchema })
-);
-
-export const publicEarnButtonConfigurationResponse = successResponseSchema(
-  z.object({ configuration: publicEarnButtonConfigurationSchema })
-);
 
 // ---------------------------------------------------------------------------
 // External-wallet (caller-signed) vault flows (PRO-1722): SDP builds an
@@ -322,6 +260,74 @@ export const earnExternalWalletPositionSummaryResponse = successResponseSchema(
       unavailablePositionCount: z.number().int().nonnegative(),
       totalsByStrategy: z.array(earnExternalWalletStrategyTotalSchema),
       totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+    }),
+  })
+);
+
+export const earnExternalWalletMovementsResponse = successResponseSchema(
+  z.object({
+    ownerAddress: earnOwnerAddressSchema,
+    movements: z.array(earnExternalWalletMovementSchema).openapi({
+      description: "The wallet's recorded movements, newest first, in ledger vocabulary.",
+    }),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  })
+);
+
+export const earnExternalWalletMovementDetailResponse = successResponseSchema(
+  z.object({ movement: earnExternalWalletMovementSchema })
+);
+
+const earnSignedDecimalAmountSchema = z
+  .string()
+  .max(129)
+  .regex(/^-?\d+(\.\d+)?$/)
+  .openapi({
+    description: "Exact decimal figure; a leading '-' marks a genuinely negative value.",
+    example: "5.2",
+  });
+
+const earnExternalWalletTokenEarningsSchema = z
+  .object({
+    tokenMint: z.string().openapi({ example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }),
+    positionCount: z.number().int().nonnegative(),
+    unavailablePositionCount: z.number().int().nonnegative().openapi({
+      description: "Positions whose live value could not hydrate.",
+    }),
+    currentValue: earnLiveDecimalAmountSchema.optional().openapi({
+      description:
+        "Live value across the token's positions. Absent when any contributing position is " +
+        "unavailable, so partial money is never presented as complete.",
+    }),
+    totalDeposited: earnLiveDecimalAmountSchema.openapi({
+      description: "Sum of finalized SDP deposits — a ledger fact, always present.",
+    }),
+    earned: earnSignedDecimalAmountSchema.optional().openapi({
+      description:
+        "`currentValue − totalDeposited`, stated only when exact and never coerced to zero. " +
+        "Live hydration reads the owner's whole vault balance, so shares acquired outside SDP " +
+        "inflate this figure — a documented property of non-custodial reads.",
+    }),
+    earnedUnavailableReason: z
+      .enum(["live_value_unavailable", "movements_pending", "withdrawals_not_valued"])
+      .optional()
+      .openapi({
+        description:
+          "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
+          "or a currently held position has a finalized withdrawal (the ledger records exits in " +
+          "shares, so no exact token-denominated earned figure exists once money has gone out).",
+      }),
+  })
+  .openapi({ description: "Earnings for one deposit token across the wallet's positions." });
+
+export const earnExternalWalletEarningsResponse = successResponseSchema(
+  z.object({
+    earnings: z.object({
+      ownerAddress: earnOwnerAddressSchema,
+      positionCount: z.number().int().nonnegative(),
+      unavailablePositionCount: z.number().int().nonnegative(),
+      totalsByToken: z.array(earnExternalWalletTokenEarningsSchema),
     }),
   })
 );

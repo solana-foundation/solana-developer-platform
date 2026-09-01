@@ -1,9 +1,14 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
-import { sumDecimalAmounts } from "@sdp/payments/decimal";
+import { subtractDecimalAmounts, sumDecimalAmounts } from "@sdp/payments/decimal";
 import type {
   EarnExternalWalletDepositResponse,
   EarnExternalWalletDepositTransactionResponse,
+  EarnExternalWalletEarnedUnavailableReason,
+  EarnExternalWalletEarnings,
+  EarnExternalWalletEarningsResponse,
   EarnExternalWalletMovement,
+  EarnExternalWalletMovementResponse,
+  EarnExternalWalletMovementsPage,
   EarnExternalWalletPosition,
   EarnExternalWalletPositionSummary,
   EarnExternalWalletPositionSummaryResponse,
@@ -24,6 +29,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
+import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
@@ -32,7 +38,6 @@ import { getLogger } from "@/runtime/logger";
 import {
   buildExternalWalletDepositTransaction,
   buildExternalWalletWithdrawalTransaction,
-  type ExternalWalletSubmitResult,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
 } from "@/services/earn/vault-external-wallet.service";
@@ -44,6 +49,10 @@ import type { AppContext } from "../context";
 import { getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   type earnExternalWalletDepositTransactionSchema,
+  earnExternalWalletEarningsParamsSchema,
+  earnExternalWalletEarningsQuerySchema,
+  earnExternalWalletMovementParamsSchema,
+  earnExternalWalletMovementsQuerySchema,
   earnExternalWalletPositionParamsSchema,
   earnExternalWalletPositionSummaryQuerySchema,
   earnExternalWalletPositionsQuerySchema,
@@ -51,6 +60,7 @@ import {
   type earnExternalWalletWithdrawalTransactionSchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
+import { decodeMovementCursor } from "./movements";
 import { parseParams, parseQuery } from "./shared";
 import {
   decodeVaultPositionCursor,
@@ -217,6 +227,259 @@ function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPosition
     next.createdAt < before.createdAt ||
     (next.createdAt === before.createdAt && next.id < before.id)
   );
+}
+
+/**
+ * GET /v1/earn/external-wallet/movements: one end user's activity, newest
+ * first, in the ledger's own vocabulary (PRO-1772).
+ *
+ * The read the cross-provider feed structurally cannot serve: its vault arm
+ * requires a custody-wallet match and an owner-signed row has none. Like every
+ * movement read this takes NO provider gate (ADR 0002 — it reports on money
+ * that already moved) and, like the position reads, no `wallets:read`: these
+ * are end-user wallets SDP does not custody, so wallet bindings have nothing
+ * to say about them.
+ *
+ * The owner is a REQUIRED query filter, not a path segment, so the collection
+ * keeps its `:movementId` detail route unambiguous. An owner this exact
+ * project has never claimed a position for answers 404 — the same
+ * existence-and-ownership collapse the positions read performs — so a partner
+ * cannot distinguish "not yours" from "never seen" and an owner with only
+ * in-flight history still answers an honest empty page.
+ */
+export async function listEarnExternalWalletMovements(c: AppContext) {
+  const query = parseQuery(c, earnExternalWalletMovementsQuerySchema);
+  const before = query.before ? decodeMovementCursor(query.before) : null;
+  if (query.before && !before) {
+    throw badRequest("Invalid external-wallet movement pagination cursor");
+  }
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+
+  const owned = await repo.hasExternalWalletPositionOwner({
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    ownerAddress: query.ownerAddress,
+  });
+  if (!owned) throw notFound("Earn external wallet");
+
+  const page = await repo.listExternalWalletMovements({
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    ownerAddress: query.ownerAddress,
+    direction: query.direction,
+    status: query.status,
+    limit: query.limit,
+    before,
+  });
+  const last = page.rows.at(-1);
+  const response: EarnExternalWalletMovementsPage = {
+    ownerAddress: query.ownerAddress,
+    movements: page.rows.map((row) => toExternalWalletMovementWire(row)),
+    hasMore: page.hasMore,
+    nextCursor: page.hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null,
+  };
+  return success(c, response);
+}
+
+/**
+ * GET /v1/earn/external-wallet/movements/:movementId: poll one movement to a
+ * terminal state.
+ *
+ * This is what makes the submit's record-before-broadcast answerable on this
+ * surface: the partner holds a movement id for a transaction whose fate it
+ * never learned, and the reconciliation sweep settles it. Scoping answers 404
+ * across the board — organization, EXACT project, environment, and the
+ * external-wallet shape itself (a custody movement guessed by id is
+ * indistinguishable from a missing row).
+ */
+export async function getEarnExternalWalletMovement(c: AppContext) {
+  const { movementId } = parseParams(c, earnExternalWalletMovementParamsSchema);
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const row = await createPostgresEarnMovementsRepository(getDb(c.env)).getExternalWalletMovement({
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    movementId,
+  });
+  if (!row) throw notFound("Earn external wallet movement");
+
+  const response: EarnExternalWalletMovementResponse = {
+    movement: toExternalWalletMovementWire(row),
+  };
+  return success(c, response);
+}
+
+/**
+ * GET /v1/earn/external-wallet/earnings/:ownerAddress: balance and total
+ * earned for one end user, grouped by deposit token (PRO-1772).
+ *
+ * `earned` is live current value minus finalized SDP deposits — both facts,
+ * one from the chain and one from the ledger — and it is stated only when it
+ * is exact. Three things make it unstatable, each reported by name and none
+ * of them ever coerced to zero:
+ *
+ * - a position's live value failed to hydrate (`live_value_unavailable`);
+ * - a movement is still settling, so the chain and the ledger describe
+ *   different moments (`movements_pending` — the reconciler drives every row
+ *   terminal within about ninety seconds, so this is a short window, not a
+ *   state);
+ * - the wallet has a finalized withdrawal (`withdrawals_not_valued`): the
+ *   ledger records exits in SHARES (migration 0070 pins `payout_token` NULL
+ *   for vault rows), so no exact token-denominated earned figure exists once
+ *   money has gone out.
+ *
+ * The ADR 0002 caveat applies at full strength: live hydration reads the
+ * owner's WHOLE vault balance, so shares acquired outside SDP inflate
+ * `currentValue` and therefore `earned`. That is the honest non-custodial
+ * answer, documented rather than corrected — the chain cannot attribute
+ * fungible shares to SDP movements.
+ */
+export async function getEarnExternalWalletEarnings(c: AppContext) {
+  const { ownerAddress } = parseParams(c, earnExternalWalletEarningsParamsSchema);
+  parseQuery(c, earnExternalWalletEarningsQuerySchema);
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+
+  const owned = await repo.hasExternalWalletPositionOwner({
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    ownerAddress,
+  });
+  if (!owned) throw notFound("Earn external wallet");
+
+  const scope = { organizationId: auth.organizationId, projectId, environment };
+  const [rows, movementTotals] = await Promise.all([
+    collectAllExternalWalletPositionRows((before) =>
+      repo.listExternalWalletPositions({
+        ...scope,
+        ownerAddress,
+        limit: EXTERNAL_POSITION_PAGE_SIZE,
+        before,
+      })
+    ),
+    repo.aggregateExternalWalletMovements({ ...scope, ownerAddress }),
+  ]);
+  const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
+  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
+
+  const response: EarnExternalWalletEarningsResponse = {
+    earnings: summarizeExternalWalletEarnings(ownerAddress, holdings, live, movementTotals),
+  };
+  return success(c, response);
+}
+
+interface MutableTokenEarnings {
+  tokenMint: string;
+  positionCount: number;
+  unavailablePositionCount: number;
+  values: string[];
+  deposits: string[];
+  earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
+}
+
+/** Higher wins when several positions leave a token's earned unstatable. */
+const EARNED_UNAVAILABLE_PRIORITY: Record<EarnExternalWalletEarnedUnavailableReason, number> = {
+  live_value_unavailable: 3,
+  movements_pending: 2,
+  withdrawals_not_valued: 1,
+};
+
+function summarizeExternalWalletEarnings(
+  ownerAddress: string,
+  holdings: readonly ExternalWalletHolding[],
+  live: ReadonlyMap<string, HydratedVaultPositionValue>,
+  movementTotals: ReadonlyMap<
+    string,
+    { finalizedDeposits: string; finalizedWithdrawalCount: number; unsettledMovementCount: number }
+  >
+): EarnExternalWalletEarnings {
+  const tokens = new Map<string, MutableTokenEarnings>();
+  let unavailablePositionCount = 0;
+
+  for (const holding of holdings) {
+    const value = live.get(holding.id)?.tokenValue;
+    if (value === undefined) unavailablePositionCount += 1;
+    const totals = movementTotals.get(holding.id);
+
+    let token = tokens.get(holding.tokenMint);
+    if (!token) {
+      token = {
+        tokenMint: holding.tokenMint,
+        positionCount: 0,
+        unavailablePositionCount: 0,
+        values: [],
+        deposits: [],
+      };
+      tokens.set(holding.tokenMint, token);
+    }
+    token.positionCount += 1;
+    if (value === undefined) token.unavailablePositionCount += 1;
+    else token.values.push(value);
+    if (totals) token.deposits.push(totals.finalizedDeposits);
+
+    const reason = earnedUnavailableReason(value, totals);
+    if (
+      reason &&
+      (!token.earnedUnavailableReason ||
+        EARNED_UNAVAILABLE_PRIORITY[reason] >
+          EARNED_UNAVAILABLE_PRIORITY[token.earnedUnavailableReason])
+    ) {
+      token.earnedUnavailableReason = reason;
+    }
+  }
+
+  return {
+    ownerAddress,
+    positionCount: holdings.length,
+    unavailablePositionCount,
+    totalsByToken: [...tokens.values()]
+      .map((token) => {
+        const totalDeposited = sumDecimalAmounts(token.deposits);
+        const currentValue =
+          token.unavailablePositionCount === 0 ? sumDecimalAmounts(token.values) : undefined;
+        return {
+          tokenMint: token.tokenMint,
+          positionCount: token.positionCount,
+          unavailablePositionCount: token.unavailablePositionCount,
+          ...(currentValue === undefined ? {} : { currentValue }),
+          totalDeposited,
+          // Σ(live_i − deposited_i) = Σlive − Σdeposited, so the token-level
+          // difference IS the per-position sum — computed once, and only when
+          // every contributing position can state it.
+          ...(token.earnedUnavailableReason || currentValue === undefined
+            ? { earnedUnavailableReason: token.earnedUnavailableReason ?? "live_value_unavailable" }
+            : { earned: subtractDecimalAmounts(currentValue, totalDeposited) }),
+        };
+      })
+      .sort((left, right) => compareWireStrings(left.tokenMint, right.tokenMint)),
+  };
+}
+
+function earnedUnavailableReason(
+  liveTokenValue: string | undefined,
+  totals:
+    | {
+        finalizedDeposits: string;
+        finalizedWithdrawalCount: number;
+        unsettledMovementCount: number;
+      }
+    | undefined
+): EarnExternalWalletEarnedUnavailableReason | null {
+  if (liveTokenValue === undefined) return "live_value_unavailable";
+  if (totals && totals.unsettledMovementCount > 0) return "movements_pending";
+  if (totals && totals.finalizedWithdrawalCount > 0) return "withdrawals_not_valued";
+  return null;
 }
 
 /**
@@ -425,7 +688,7 @@ export async function createEarnExternalWalletDeposit(
   });
 
   const response: EarnExternalWalletDepositResponse = {
-    deposit: toExternalWalletMovementWire(result),
+    deposit: toExternalWalletMovementWire(result.movement, result.replayed),
   };
   return success(c, response);
 }
@@ -452,7 +715,7 @@ export async function createEarnExternalWalletWithdrawal(
   });
 
   const response: EarnExternalWalletWithdrawalResponse = {
-    withdrawal: toExternalWalletMovementWire(result),
+    withdrawal: toExternalWalletMovementWire(result.movement, result.replayed),
   };
   return success(c, response);
 }
@@ -700,12 +963,13 @@ function toExternalWalletTransactionWire(built: EarnExternalWalletTransactionRow
 /**
  * Movement to wire, ledger vocabulary. This surface postdates the unified
  * ledger, so `finalized` keeps its own name and there is no legacy status
- * table to translate through.
+ * table to translate through. `replayed` is a POST-only fact — the reads
+ * leave it absent, because a stored row cannot say how it was asked for.
  */
 function toExternalWalletMovementWire(
-  result: ExternalWalletSubmitResult
+  movement: EarnMovementRow,
+  replayed?: boolean
 ): EarnExternalWalletMovement {
-  const movement: EarnMovementRow = result.movement;
   if (!movement.vault_address || !movement.signature || !movement.owner_address) {
     throw internalError(
       `Earn external-wallet movement ${movement.id} is missing execution details`
@@ -726,6 +990,6 @@ function toExternalWalletMovementWire(
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
     settledAt: movement.settled_at,
-    replayed: result.replayed,
+    ...(replayed === undefined ? {} : { replayed }),
   };
 }

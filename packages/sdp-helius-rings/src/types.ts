@@ -4,6 +4,8 @@ import type {
   MATERIAL_TAGS,
   OP_TYPES,
   OPERATION_STATES,
+  PRIVATE_HISTORY_DIRECTIONS,
+  PRIVATE_HISTORY_KINDS,
   RUNTIME_HEALTH_COMPONENTS,
   RUNTIME_HEALTH_STATUSES,
   TRANSFER_MODES,
@@ -17,6 +19,8 @@ export type OpType = (typeof OP_TYPES)[number];
 export type FailureCode = (typeof FAILURE_CODES)[number];
 export type KeyKind = (typeof KEY_KINDS)[number];
 export type MaterialTag = (typeof MATERIAL_TAGS)[number];
+export type PrivateHistoryKind = (typeof PRIVATE_HISTORY_KINDS)[number];
+export type PrivateHistoryDirection = (typeof PRIVATE_HISTORY_DIRECTIONS)[number];
 export type RuntimeHealthStatus = (typeof RUNTIME_HEALTH_STATUSES)[number];
 export type RuntimeHealthComponent = (typeof RUNTIME_HEALTH_COMPONENTS)[number];
 export type WalletStatus = (typeof WALLET_STATUSES)[number];
@@ -61,22 +65,42 @@ export interface AssetBalance {
   mint: string;
   symbol: string;
   amountRaw: string;
-  /**
-   * The mint's scale, or null when nothing that produced this balance knew it.
-   * Nullable rather than defaulted: zero is a claim that the amount is already
-   * in whole units, which a reader cannot tell apart from an unknown scale.
-   */
   decimals: number | null;
+}
+
+export interface PrivateHistoryEntry {
+  signature: string;
+  slot: string;
+  index: string;
+  kind: PrivateHistoryKind;
+  direction: PrivateHistoryDirection;
+  mint: string;
+  amountRaw: string;
+}
+
+export interface SyncReport {
+  storedNotes: number;
+  unparsedTransactions: number;
+  undecryptableCandidates: number;
+  unknownAssetIds: number;
+  unknownAssetFields: number;
+  degraded: boolean;
 }
 
 export interface PrivateOperationSummary {
   id: string;
+  walletId: string;
   opType: OpType;
   state: OperationState;
   assetMint: string | null;
   amountRaw: string | null;
   createdAt: string;
   updatedAt: string;
+  failureCode: FailureCode | null;
+  outerTxSignature: string | null;
+  retryable: boolean | null;
+  /** The operation this one was filed to replace, if it is a retry. */
+  retryOfOperationId: string | null;
 }
 
 export interface RingsWorkspace {
@@ -90,13 +114,12 @@ export interface RingsWorkspace {
 export interface PrivateOperationInput {
   walletId: string;
   opType: OpType;
-  asset?: { mint: string; amountRaw: string };
+  asset?: { mint: string; amountRaw?: string };
   from?: string;
   to?: string;
   zoneId?: string;
   transferMode?: TransferMode;
   timelock?: { unlockAt: string; beneficiary: string };
-  /** Caller-supplied; contributes to `intent_key` so retries produce a new operation. */
   clientNonce: string;
 }
 
@@ -109,7 +132,6 @@ export interface OperationFailure {
 export interface OperationEvent {
   kind: string;
   createdAt: string;
-  /** Never contains SecretRef material; payloads pass through the redaction registry. */
   payload?: unknown;
 }
 
@@ -129,4 +151,6 @@ export interface PrivateOperation {
   events: OperationEvent[];
   createdAt: string;
   updatedAt: string;
+  /** The operation this one was filed to replace, if it is a retry. */
+  retryOfOperationId: string | null;
 }

@@ -7,7 +7,7 @@
 export type RingsHealthStatus = "green" | "amber" | "red";
 
 /** Mirrors RUNTIME_HEALTH_COMPONENTS in @sdp/helius-rings, in the API's order. */
-export const RINGS_HEALTH_COMPONENTS = ["rpc", "prover", "photon", "gateway"] as const;
+export const RINGS_HEALTH_COMPONENTS = ["rpc", "prover", "photon"] as const;
 export type RingsHealthComponent = (typeof RINGS_HEALTH_COMPONENTS)[number];
 
 export type RingsHealth = Record<RingsHealthComponent, RingsHealthStatus> & {
@@ -38,7 +38,8 @@ export type RingsOperationState =
   | "submitted"
   | "indexing"
   | "completed"
-  | "failed";
+  | "failed"
+  | "voided";
 
 /** Mirrors OP_TYPES in @sdp/helius-rings; literal so `activity.opType_*` resolves. */
 export type RingsOperationOpType =
@@ -53,16 +54,24 @@ export type RingsOperationOpType =
 
 export interface RingsOperationSummary {
   id: string;
+  walletId: string;
   opType: RingsOperationOpType;
   state: RingsOperationState;
   assetMint: string | null;
   amountRaw: string | null;
   createdAt: string;
+  failureCode: string | null;
+  outerTxSignature: string | null;
+  retryable: boolean | null;
+  /** The operation this one was filed to replace, if it is a retry. */
+  retryOfOperationId: string | null;
 }
 
 export interface RingsOperationEvent {
   kind: string;
   createdAt: string;
+  /** Redacted server-side; free-form. Consumers must not trust individual keys. */
+  payload?: Record<string, unknown> | null;
 }
 
 export interface RingsOperationDetail extends RingsOperationSummary {
@@ -158,6 +167,10 @@ export interface RingsShieldedBalance {
   amountRaw: string;
   /** The mint's scale, or null when the API knew of none. Null is not zero. */
   decimals: number | null;
+  /** USD per whole unit, when pricing was reachable. */
+  usdPrice?: number;
+  /** amountRaw × usdPrice, rounded to 2dp; absent when the mint went unpriced. */
+  usdValue?: number;
 }
 
 export interface RingsWalletSync {
@@ -169,6 +182,8 @@ export interface RingsWalletSync {
   degraded: boolean;
   /** When the answer was true — not a position to resume from. */
   observedAt: string;
+  /** Sum of priced balances, or null if pricing failed for every mint. */
+  totalUsd?: number | null;
 }
 
 /**
@@ -226,109 +241,70 @@ export async function fetchRingsWalletIdentity(
   return { identity: result.data.identity };
 }
 
-export type RingsOpType =
-  | "shield"
-  | "transfer_registered"
-  | "transfer_anonymous"
-  | "withdraw"
-  | "merge"
-  | "timelock_create";
+/**
+ * What the API accepts today. Narrower than `RingsOperationOpType`, which also
+ * has to name the older kinds already recorded against this project. The API
+ * rejects anything else on a strict schema, so widening this without widening
+ * that one only moves the refusal later.
+ */
+export type RingsOpType = "shield" | "withdraw" | "transfer_registered";
 
 export interface PrepareRingsOperationInput {
   walletId: string;
   opType: RingsOpType;
-  asset?: { mint: string; amountRaw: string };
+  asset: { mint: string; amountRaw: string };
+  /** Withdrawals only: the public address the funds leave the pool for. */
   to?: string;
-  zoneId?: string;
-  transferMode?: "registered" | "anonymous";
-  timelock?: { unlockAt: string; beneficiary: string };
 }
 
-export async function prepareRingsOperation(
-  input: PrepareRingsOperationInput
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch("/api/dashboard/helius-rings/operations", {
+type OperationResult = { operation?: RingsOperationDetail; error?: string };
+
+async function postOperation(
+  path: string,
+  body?: Record<string, unknown>
+): Promise<OperationResult> {
+  const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...input, clientNonce: crypto.randomUUID() }),
+    ...(body !== undefined && {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
     cache: "no-store",
   });
   const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
+  if (!result.ok) return { error: result.error };
   return { operation: result.data.operation };
+}
+
+export function prepareRingsOperation(input: PrepareRingsOperationInput): Promise<OperationResult> {
+  return postOperation("/api/dashboard/helius-rings/operations", {
+    ...input,
+    clientNonce: crypto.randomUUID(),
+  });
 }
 
 /** The approval verdict is read server-side, so this carries no body. */
-export async function executeRingsOperation(
-  operationId: string
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch(
-    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`,
-    { method: "POST", cache: "no-store" }
+export function executeRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`
   );
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { operation: result.data.operation };
 }
 
-export async function retryRingsOperation(
-  operationId: string
-): Promise<{ operation?: RingsOperationDetail; error?: string }> {
-  const response = await fetch(
+export function retryRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
     `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/retry`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientNonce: crypto.randomUUID() }),
-      cache: "no-store",
-    }
-  );
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { operation: result.data.operation };
-}
-
-export interface RingsZone {
-  id: string;
-  name: string;
-  kind: "treasury" | "public";
-}
-
-export function fetchRingsZones(
-  walletId: string,
-  fallbackError: string
-): Promise<{ zones: RingsZone[] }> {
-  return getJson(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/zones`,
-    fallbackError
+    { clientNonce: crypto.randomUUID() }
   );
 }
 
-export async function createRingsZone(input: {
-  walletId: string;
-  name: string;
-  kind: RingsZone["kind"];
-}): Promise<{ zone?: RingsZone; error?: string }> {
-  const response = await fetch(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(input.walletId)}/zones`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input.name, kind: input.kind }),
-      cache: "no-store",
-    }
+export function voidRingsOperation(
+  operationId: string,
+  signature: string
+): Promise<OperationResult> {
+  return postOperation(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/void`,
+    { signature }
   );
-  const result = await readEnvelope<{ zone: RingsZone }>(response);
-  if (!result.ok) {
-    return { error: result.error };
-  }
-  return { zone: result.data.zone };
 }
 
 /** Devnet assets seeded in the rings allowlist. */

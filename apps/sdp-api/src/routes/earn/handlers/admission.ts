@@ -62,18 +62,15 @@ export function assertStrategyDepositable(
 }
 
 /**
- * The ONE vault money-in gate sequence, shared by every handler that commits a
- * strategy to the vault-deposit path: `POST /vault-deposits` (moves money now)
- * and `PUT /button-configurations/current` (persists a strategy the deposit
- * route must later accept). Runs, in order: deposit-style shape, provider
- * registration, surfacing, entitlement/credentials, catalogue admission.
- * A second copy is a second thing that can drift toward permissive — when a
- * gate is added or production opens, both callers move together.
+ * The ONE vault money-in gate sequence for every handler that commits a
+ * strategy to the vault-deposit path — today that is `POST /vault-deposits`.
+ * Runs, in order: deposit-style shape, provider registration, surfacing,
+ * entitlement/credentials, catalogue admission. Keep it shared if a second
+ * money-in caller appears: a second copy is a second thing that can drift
+ * toward permissive.
  *
  * Strategy RESOLUTION stays with the caller on purpose: the deposit route
- * resolves bare-by-id (browse policy never gates money), while the builder
- * resolves through `requireEarnStrategy` (a hidden row must not be offered to
- * a NEW configuration).
+ * resolves bare-by-id (browse policy never gates money).
  */
 export async function assertVaultDepositAdmissible(
   c: AppContext,

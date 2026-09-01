@@ -23,9 +23,8 @@ import type { Env } from "@/types/env";
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface CustodyWallet {
+interface CustodyWalletFields {
   id: string;
-  custodyConfigId: string;
   walletId: string;
   publicKey: string;
   label: string | null;
@@ -34,7 +33,17 @@ export interface CustodyWallet {
   createdAt: string;
 }
 
-export interface CustodyWalletLookup extends CustodyWallet {
+export type CustodyWallet = CustodyWalletFields &
+  (
+    | { custodyConfigId: string; custodyConnectionId?: never }
+    | { custodyConfigId?: never; custodyConnectionId: string }
+  );
+
+export interface CustodyConfigWallet extends CustodyWalletFields {
+  custodyConfigId: string;
+}
+
+export interface CustodyWalletLookup extends CustodyConfigWallet {
   provider: SigningProviderType;
   projectId: string | null;
 }
@@ -423,7 +432,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     configId: string,
     params: CreateWalletParams,
     options: { setDefault?: boolean } = {}
-  ): Promise<CustodyWallet> {
+  ): Promise<CustodyConfigWallet> {
     const id = `cwlt_${crypto.randomUUID()}`;
 
     const statements: PreparedStatement[] = [
@@ -480,7 +489,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   /**
    * Get all wallets for a custody config.
    */
-  async getWallets(configId: string): Promise<CustodyWallet[]> {
+  async getWallets(configId: string): Promise<CustodyConfigWallet[]> {
     const { results } = await this.db
       .prepare(`SELECT * FROM custody_wallets WHERE custody_config_id = ? AND status = 'active'`)
       .bind(configId)
@@ -489,7 +498,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     return results.map(this.mapWalletRow);
   }
 
-  async getWalletsForConfigs(configIds: string[]): Promise<Map<string, CustodyWallet[]>> {
+  async getWalletsForConfigs(configIds: string[]): Promise<Map<string, CustodyConfigWallet[]>> {
     if (configIds.length === 0) {
       return new Map();
     }
@@ -505,7 +514,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       .all<CustodyWalletRow>();
 
     const walletsByConfigId = new Map(
-      configIds.map((configId) => [configId, [] as CustodyWallet[]])
+      configIds.map((configId) => [configId, [] as CustodyConfigWallet[]])
     );
 
     for (const row of results) {
@@ -758,7 +767,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   async getWalletByPurpose(
     configId: string,
     purpose: WalletPurpose
-  ): Promise<CustodyWallet | null> {
+  ): Promise<CustodyConfigWallet | null> {
     const row = await this.db
       .prepare(
         `SELECT * FROM custody_wallets
@@ -816,7 +825,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       .first<CustodyScopeDefaultRow>();
   }
 
-  private mapWalletRow(row: CustodyWalletRow): CustodyWallet {
+  private mapWalletRow(row: CustodyWalletRow): CustodyConfigWallet {
     return {
       id: row.id,
       custodyConfigId: row.custody_config_id,

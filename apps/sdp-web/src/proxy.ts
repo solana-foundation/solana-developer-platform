@@ -16,8 +16,6 @@ export const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   WORKSPACE_LOADING_PATH,
   "/pay/:token",
-  "/embedded-yield/integrate/:token",
-  "/earn/integrate/:token",
   "/",
   "/docs(.*)",
   // Social-card images are fetched by unauthenticated link unfurlers, and the

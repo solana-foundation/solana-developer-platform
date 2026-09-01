@@ -3,6 +3,7 @@ import {
   createDepositBodySchema,
   createTransferBodySchema,
   createWithdrawalBodySchema,
+  probeConnectionSchema,
 } from "./schemas";
 
 // The three write bodies, tested together because the point is that they agree.
@@ -60,4 +61,37 @@ describe("private-channel write body schemas", () => {
       });
     });
   }
+});
+
+describe("probeConnectionSchema", () => {
+  const legacyProbe = {
+    gatewayUrl: "https://gateway.example.com",
+    authUrl: "https://auth.example.com",
+  };
+
+  it("keeps the legacy connectivity-only payload valid", () => {
+    expect(probeConnectionSchema.safeParse(legacyProbe).success).toBe(true);
+  });
+
+  it("accepts both deployment addresses for the full probe", () => {
+    expect(
+      probeConnectionSchema.safeParse({
+        ...legacyProbe,
+        escrowProgramId: "11111111111111111111111111111111",
+        escrowInstanceAddr: "Vote111111111111111111111111111111111111111",
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects an incomplete deployment pair", () => {
+    const result = probeConnectionSchema.safeParse({
+      ...legacyProbe,
+      escrowProgramId: "11111111111111111111111111111111",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["escrowInstanceAddr"]);
+    }
+  });
 });

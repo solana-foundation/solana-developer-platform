@@ -1,4 +1,5 @@
 import { SdpKaminoError } from "@sdp/kamino";
+import { SdpVedaError } from "@sdp/veda";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -340,6 +341,30 @@ describe("depositIntoVault — idempotency", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * Replay is a property of this service, not of a provider, so it is asserted
+   * for the second `vault_direct` provider rather than assumed to carry over —
+   * the fingerprint includes the provider, and the durable movement is what the
+   * retry returns.
+   */
+  it("replays a Veda deposit from durable state without rebuilding it", async () => {
+    const input = depositInput({ provider: "veda", providerReference: VAULT_B });
+
+    const first = await depositIntoVault(env, input);
+    expect(first.replayed).toBe(false);
+
+    buildVaultDeposit.mockClear();
+    const second = await depositIntoVault(env, input);
+
+    expect(second.replayed).toBe(true);
+    expect(second.movement.id).toBe(first.movement.id);
+    expect(second.movement.signature).toBe(first.movement.signature);
+    // The whole point of a durable replay: no chain work, so a retry survives
+    // an RPC outage.
+    expect(buildVaultDeposit).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it("treats a changed minSharesOut as a different request", async () => {
     buildVaultDeposit.mockResolvedValue(plan({ accepted: { amount: "10", minSharesOut: "1" } }));
     await depositIntoVault(env, depositInput({ minSharesOut: "1" }));
@@ -359,6 +384,45 @@ describe("depositIntoVault — validation and custody identity", () => {
     await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "amount exceeds its mint precision",
+    });
+  });
+
+  /**
+   * Provider-neutral by CODE, not by class. Each of these names something the
+   * request or the vault's current state makes impossible, and the provider's
+   * own sentence explains it better than a status code — while an unrecognised
+   * failure keeps bubbling, because telling a customer their request was wrong
+   * when SDP does not know that would be a guess.
+   */
+  it("maps every refused-build code to a caller 400, across providers", async () => {
+    const refusals = [
+      new SdpKaminoError("INVALID_AMOUNT", "amount exceeds its mint precision"),
+      new SdpVedaError("INVALID_AMOUNT", "minSharesOut is below one share atom"),
+      new SdpVedaError("DEPOSIT_REFUSED", "the vault is at its deposit cap"),
+      new SdpVedaError("COMPLIANCE_APPROVAL_REQUIRED", "this vault requires an approval"),
+    ];
+
+    for (const [index, refusal] of refusals.entries()) {
+      buildVaultDeposit.mockRejectedValueOnce(refusal);
+      await expect(
+        depositIntoVault(
+          env,
+          depositInput({
+            provider: refusal instanceof SdpVedaError ? "veda" : "kamino",
+            requestId: `3333333${index}-3333-4333-8333-333333333333`,
+          })
+        )
+      ).rejects.toMatchObject({ code: "BAD_REQUEST", message: refusal.message });
+    }
+  });
+
+  it("does not dress an unreadable vault up as a caller error", async () => {
+    buildVaultDeposit.mockRejectedValue(
+      new SdpVedaError("VAULT_UNREADABLE", "the configured RPC could not be reached")
+    );
+
+    await expect(depositIntoVault(env, depositInput({ provider: "veda" }))).rejects.toMatchObject({
+      code: "VAULT_UNREADABLE",
     });
   });
 
@@ -818,6 +882,33 @@ describe("depositIntoVault — signed persistence boundary", () => {
     await expect(depositIntoVault(env, depositInput())).rejects.toBeTruthy();
 
     expect(await tableCount("earn_positions")).toBe(0);
+    expect(await tableCount("earn_movements")).toBe(0);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A blown slippage floor is the caller's tolerance, not a fault: the 400
+   * carries `details.reason` so the dashboard can reopen its slippage control
+   * with its own copy instead of relaying a simulation log. Matched on the
+   * program's NAMED error — the bare custom-error number is every Anchor
+   * program's first error code and would relabel unrelated failures.
+   */
+  it("names a slippage-exceeded simulation in the caller's terms", async () => {
+    simulateVaultPlan.mockResolvedValue({
+      ok: false,
+      error: "custom program error: 0x1770",
+      logs: [
+        "Program log: AnchorError occurred. Error Code: SlippageExceeded. " +
+          "Error Number: 6000. Error Message: Slippage tolerance exceeded.",
+      ],
+    });
+
+    await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      details: { reason: "slippage_exceeded" },
+      message: expect.stringContaining("slippage"),
+    });
+
     expect(await tableCount("earn_movements")).toBe(0);
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });

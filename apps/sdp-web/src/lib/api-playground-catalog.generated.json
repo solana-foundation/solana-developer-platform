@@ -1617,7 +1617,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"privy_wallet_123\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -1626,7 +1626,8 @@
             "transfer": {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -1694,20 +1695,13 @@
         "operationId": "listPaymentTransfers",
         "title": "List transfers",
         "method": "GET",
-        "path": "/v1/payments/transfers?wallet={wallet}&walletAddress={walletAddress}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
+        "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
         "pathFields": [
           {
-            "key": "wallet",
-            "label": "wallet",
-            "description": "Filter by wallet `walletId`.",
-            "defaultValue": "privy_wallet_123",
-            "required": false
-          },
-          {
-            "key": "walletAddress",
-            "label": "walletAddress",
-            "description": "Filter by wallet address.",
-            "defaultValue": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "description": "Filter persisted transfers by exact SDP Wallet ID.",
+            "defaultValue": "cwlt_example",
             "required": false
           },
           {
@@ -1843,7 +1837,7 @@
           {
             "key": "includeObserved",
             "label": "includeObserved",
-            "description": "When filtering a wallet, include RPC-observed on-chain activity that has not been recorded by SDP. Disable for stable database-backed pagination.",
+            "description": "When custodyWalletId is supplied, also include RPC-observed activity for that exact wallet row's address. Observed rows have custodyWalletId null.",
             "defaultValue": "false",
             "required": false,
             "kind": "select",
@@ -1925,7 +1919,8 @@
             {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -2002,7 +1997,8 @@
             "transfer": {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -2079,7 +2075,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -2116,7 +2112,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -2127,7 +2123,8 @@
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -2157,7 +2154,8 @@
               {
                 "id": "xfr_example",
                 "organizationId": "org_example",
-                "walletId": "privy_wallet_123",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
                 "direction": "outbound",
@@ -2216,13 +2214,13 @@
         "operationId": "listPaymentTransferBatches",
         "title": "List transfer batches",
         "method": "GET",
-        "path": "/v1/payments/transfer-batches?wallet={wallet}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
+        "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
         "pathFields": [
           {
-            "key": "wallet",
-            "label": "wallet",
-            "description": "Filter by source wallet `walletId`.",
-            "defaultValue": "privy_wallet_123",
+            "key": "sourceCustodyWalletId",
+            "label": "sourceCustodyWalletId",
+            "description": "Filter by exact source SDP Wallet ID.",
+            "defaultValue": "cwlt_example",
             "required": false
           },
           {
@@ -2298,7 +2296,8 @@
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -2341,7 +2340,8 @@
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -2371,7 +2371,8 @@
               {
                 "id": "xfr_example",
                 "organizationId": "org_example",
-                "walletId": "privy_wallet_123",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
                 "direction": "outbound",
@@ -2893,7 +2894,8 @@
             "transfer": {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -5292,7 +5294,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
             "required": true
           }
         ],

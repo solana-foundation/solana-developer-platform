@@ -203,9 +203,6 @@ ELLIPTIC_API_TOKEN=your_token
 MOONPAY_API_KEY=pk_...
 MOONPAY_SECRET_KEY=sk_...
 
-# Exact hostnames tenant-supplied ramp redirect URLs may target (comma-separated).
-# Include your dashboard host. Unset rejects every redirectUrl — fail closed.
-RAMP_REDIRECT_ALLOWED_HOSTS=app.example.com
 ```
 
 ## Running Tests

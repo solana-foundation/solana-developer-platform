@@ -28,6 +28,7 @@ import {
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   generatePaymentTransferId,
@@ -51,9 +52,14 @@ import {
   notFound,
   solanaRpcError,
 } from "@/lib/errors";
-import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
+import {
+  buildLegacyPaymentTransferFingerprint,
+  buildPaymentTransferFingerprint,
+  resolveIdentityBoundIdempotencyReplay,
+} from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { isDryRunRequest } from "@/middleware/dry-run";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -61,7 +67,8 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import {
   assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIdsForPermissions,
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyWalletAuthorizationForPermissions,
 } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
@@ -77,15 +84,13 @@ import {
   submitSignedPaymentTransaction,
 } from "@/services/payments/signed-submission";
 import {
-  approvedWalletOperationAttemptId,
   approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
   beginApprovedWalletOperationEffect,
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
-import {
-  enforceWalletOperationPolicy,
-  walletOperationActorFromAuth,
-} from "@/services/policy/enforcement.service";
+import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
+import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
   type MagicBlockPrivateTransferOptions as MagicBlockProviderTransferOptions,
   type MagicBlockUnsignedTransaction,
@@ -103,7 +108,15 @@ import {
 } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import { resolveMintDecimals, resolveMintTokenProgram } from "../token-accounts";
-import { type ResolvedScope, resolveScope, resolveWallet } from "../wallets";
+import {
+  admitExactPaymentWallet,
+  assertPaymentWalletExactAccess,
+  assertPaymentWalletReadAccess,
+  type ResolvedScope,
+  resolveScope,
+  resolveWallet,
+  resolveWalletByCustodyWalletId,
+} from "../wallets";
 import {
   buildObservedTransfersForSignatures,
   createSignatureHistoryRpc,
@@ -148,11 +161,15 @@ async function resolveTransferIdempotencyReplay(
   organizationId: string,
   projectId: string | null,
   idempotencyKey: string,
-  fingerprint: string
+  fingerprint: string,
+  legacyFingerprint: string,
+  custodyWalletId: string
 ): Promise<TransferRow | null> {
-  return resolveIdempotencyReplay(
+  return resolveIdentityBoundIdempotencyReplay(
     () => repository.findTransferByIdempotency({ organizationId, projectId, idempotencyKey }),
-    fingerprint
+    fingerprint,
+    legacyFingerprint,
+    (row) => row.custody_wallet_id === custodyWalletId
   );
 }
 
@@ -161,6 +178,7 @@ async function createTransferRecord(
   input: {
     organizationId: string;
     projectId: string | null;
+    custodyWalletId: string;
     walletId: string;
     sourceAddress: string;
     destinationAddress: string;
@@ -178,29 +196,36 @@ async function createTransferRecord(
   }
 ): Promise<{ row: TransferRow; replayed: boolean }> {
   const idempotencyKey = input.idempotencyKey ?? null;
+  const fingerprintInput = {
+    custodyWalletId: input.custodyWalletId,
+    sourceAddress: input.sourceAddress,
+    destinationAddress: input.destinationAddress,
+    token: input.token,
+    amount: input.amount,
+    memo: input.memo,
+    type: input.type ?? "transfer",
+    privateTransfer: input.privateTransfer,
+  };
   const idempotencyFingerprint = idempotencyKey
-    ? buildPaymentTransferFingerprint({
-        sourceAddress: input.sourceAddress,
-        destinationAddress: input.destinationAddress,
-        token: input.token,
-        amount: input.amount,
-        memo: input.memo,
-        type: input.type ?? "transfer",
-        privateTransfer: input.privateTransfer,
-      })
+    ? buildPaymentTransferFingerprint(fingerprintInput)
+    : null;
+  const legacyIdempotencyFingerprint = idempotencyKey
+    ? buildLegacyPaymentTransferFingerprint(fingerprintInput)
     : null;
 
   try {
     return await runApprovedWalletOperationEffectTransaction(c, async (db) => {
       const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
 
-      if (idempotencyKey && idempotencyFingerprint) {
+      if (idempotencyKey && idempotencyFingerprint && legacyIdempotencyFingerprint) {
         const existing = await resolveTransferIdempotencyReplay(
           repository,
           input.organizationId,
           input.projectId,
           idempotencyKey,
-          idempotencyFingerprint
+          idempotencyFingerprint,
+          legacyIdempotencyFingerprint,
+          input.custodyWalletId
         );
         if (existing) {
           return { row: existing, replayed: true };
@@ -211,6 +236,7 @@ async function createTransferRecord(
         id: generatePaymentTransferId(),
         organizationId: input.organizationId,
         projectId: input.projectId,
+        custodyWalletId: input.custodyWalletId,
         walletId: input.walletId,
         counterpartyId: null,
         sourceAddress: input.sourceAddress,
@@ -232,7 +258,8 @@ async function createTransferRecord(
         slot: null,
         initiatedByKeyId: input.initiatedByKeyId ?? null,
         idempotencyKey,
-        idempotencyFingerprint,
+        // HOO-1023: persist the K2 shape until rollback support ends.
+        idempotencyFingerprint: legacyIdempotencyFingerprint,
       });
 
       if (!createdRow) {
@@ -242,13 +269,20 @@ async function createTransferRecord(
       return { row: createdRow, replayed: false };
     });
   } catch (error) {
-    if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
+    if (
+      idempotencyKey &&
+      idempotencyFingerprint &&
+      legacyIdempotencyFingerprint &&
+      isPostgresUniqueViolation(error)
+    ) {
       const existing = await resolveTransferIdempotencyReplay(
         getPaymentsRepository(c),
         input.organizationId,
         input.projectId,
         idempotencyKey,
-        idempotencyFingerprint
+        idempotencyFingerprint,
+        legacyIdempotencyFingerprint,
+        input.custodyWalletId
       );
       if (existing) {
         return { row: existing, replayed: true };
@@ -267,6 +301,7 @@ async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: Tr
     transfer.signature !== null &&
     SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((status) => status === transfer.status);
   if (completed) {
+    await assertApprovedWalletOperationCustodyWallet(c, transfer.custody_wallet_id);
     return;
   }
 
@@ -315,33 +350,6 @@ function buildTransferPolicyCandidate(
     },
     providerExtensions: {},
   };
-}
-
-async function enforcePaymentTransferOperationPolicy(
-  c: AppContext,
-  scope: ResolvedScope,
-  operation: OutboundPaymentOperation,
-  input: {
-    operationType: "payment_transfer_execute";
-    memo?: string;
-    privateTransfer?: boolean;
-    rawPayload?: Record<string, unknown>;
-  }
-) {
-  return enforceWalletOperationPolicy(
-    c.env,
-    getRequestTenantScope(c),
-    {
-      ...buildTransferPolicyCandidate(scope, operation, {
-        memo: input.memo === undefined ? null : input.memo,
-        privateTransfer: input.privateTransfer === true,
-      }),
-      legs: [],
-      rawPayload: input.rawPayload,
-    },
-    approvedWalletOperationId(c),
-    approvedWalletOperationAttemptId(c)
-  );
 }
 
 type CreateTransferBody = z.output<typeof createTransferSchema>;
@@ -398,6 +406,7 @@ async function updateOnchainTransferForRamp(
   if (
     existing.type !== "offramp" ||
     existing.direction !== "outbound" ||
+    existing.custody_wallet_id !== operation.sourceWallet.id ||
     existing.wallet_id !== operation.sourceWallet.walletId ||
     existing.source_address !== operation.sourceWallet.publicKey ||
     existing.token !== operation.token ||
@@ -416,6 +425,7 @@ async function updateOnchainTransferForRamp(
   const updated = await runApprovedWalletOperationEffectTransaction(c, async (db) =>
     createPostgresPaymentsRepository(db, getRequestTenantScope(c)).updateOnchainTransferForRamp({
       ...tenant,
+      custodyWalletId: operation.sourceWallet.id,
       walletId: operation.sourceWallet.walletId,
       sourceAddress: operation.sourceWallet.publicKey,
       destinationAddress,
@@ -443,13 +453,19 @@ export async function extractTransferPolicyCandidate(
   c: ValidatedBodyContext<typeof createTransferSchema>
 ): Promise<PolicyGateExtraction> {
   const body = c.req.valid("json");
+  assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
 
-  const scope = await resolveScope(c);
+  const scope = await resolveScope(
+    c,
+    c.req.header("Idempotency-Key") !== undefined && !isDryRunRequest(c)
+      ? body.sourceCustodyWalletId
+      : undefined
+  );
   assertPaymentProjectScope(body.projectId, scope.auth.projectId);
   const operation = resolveOutboundPaymentOperation({
     auth: scope.auth,
     wallets: scope.wallets,
-    source: body.source,
+    sourceCustodyWalletId: body.sourceCustodyWalletId,
     destination: body.destination,
     token: body.token,
     amount: body.amount,
@@ -457,6 +473,7 @@ export async function extractTransferPolicyCandidate(
     requiredWalletPermissions: ["payments:write"],
   });
   const privateTransfer = body.privateTransfer as PrivateTransferRequest | undefined;
+  const { sourceCustodyWalletId: _sourceCustodyWalletId, ...legacyBody } = body;
 
   return {
     candidate: buildTransferPolicyCandidate(scope, operation, {
@@ -466,14 +483,25 @@ export async function extractTransferPolicyCandidate(
     legs: [],
     body,
     resolved: { scope, operation, privateTransfer },
+    // HOO-1023: remove this legacy envelope when K2 rollback support ends.
+    executionRequestBody: { ...legacyBody, source: operation.sourceWallet.walletId },
     rawPayload: {
-      source: body.source,
+      source: operation.sourceWallet.walletId,
       destination: body.destination,
       token: body.token,
       amount: body.amount,
     },
     idempotencyKey: null,
   };
+}
+
+export async function admitTransferRuntimeExecution(
+  c: AppContext,
+  extraction: PolicyGateExtraction
+): Promise<void> {
+  // SAFETY: this callback is wired only beside extractTransferPolicyCandidate in payments/index.ts.
+  const { operation } = extraction.resolved as TransferPolicyResolved;
+  await admitExactPaymentWallet(c, operation.sourceWallet, ["payments:write"]);
 }
 
 /**
@@ -495,20 +523,24 @@ export async function findTransferIdempotentKeyReplay(
   if (body.transferId) return null;
   const { scope, operation, privateTransfer } = extraction.resolved as TransferPolicyResolved;
 
+  const fingerprintInput = {
+    custodyWalletId: operation.sourceWallet.id,
+    sourceAddress: operation.sourceWallet.publicKey,
+    destinationAddress: body.destination,
+    token: operation.token,
+    amount: operation.amount,
+    memo: body.memo,
+    type: privateTransfer ? "transfer_confidential" : "transfer",
+    privateTransfer,
+  };
   const replay = await resolveTransferIdempotencyReplay(
     getPaymentsRepository(c),
     scope.auth.organizationId,
     scope.auth.projectId,
     idempotencyKey,
-    buildPaymentTransferFingerprint({
-      sourceAddress: operation.sourceWallet.publicKey,
-      destinationAddress: body.destination,
-      token: operation.token,
-      amount: operation.amount,
-      memo: body.memo,
-      type: privateTransfer ? "transfer_confidential" : "transfer",
-      privateTransfer,
-    })
+    buildPaymentTransferFingerprint(fingerprintInput),
+    buildLegacyPaymentTransferFingerprint(fingerprintInput),
+    operation.sourceWallet.id
   );
   if (!replay) {
     return null;
@@ -649,11 +681,11 @@ async function executeSolTransfer(
   }
 
   const auth = getAuth(c);
-  const signer = await solanaServices.createOrgSigner(
+  const signer = await solanaServices.createOrgSignerForCustodyWallet(
     c.env,
     auth.organizationId,
     auth.projectId ?? undefined,
-    sourceWallet.walletId
+    sourceWallet.id
   );
 
   if (signer.address !== sourceWallet.publicKey) {
@@ -973,77 +1005,140 @@ function addSponsoredFeePayerToPreparedTransaction(
   };
 }
 
-async function executePreparedPrivateTransfer(
+interface PreparedPrivateTransferSignerPlan {
+  decodedTransaction: ReturnType<typeof decodeMagicBlockPreparedTransaction>;
+  custodyRequiredSigners: string[];
+  signerWallets: CustodyWallet[];
+  shouldReplaceProviderFeePayer: boolean;
+}
+
+async function resolvePreparedPrivateTransferSignerPlan(
   c: AppContext,
   scope: ResolvedScope,
   operation: OutboundPaymentOperation,
   serializedTx: string,
-  lastValidBlockHeight: bigint,
-  metadata: PreparedPrivateTransferMetadata,
-  submissionStore: SignedSubmissionStore
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const walletsByAddress = new Map(scope.wallets.map((wallet) => [wallet.publicKey, wallet]));
-  const signerWallets = new Map<string, CustodyWallet>();
-  const requiredSigners = [...new Set(metadata.magicBlock.requiredSigners)];
+  metadata: PreparedPrivateTransferMetadata
+): Promise<PreparedPrivateTransferSignerPlan> {
   const decodedTransaction = decodeMagicBlockPreparedTransaction(serializedTx);
+  const requiredSigners = [
+    ...new Set(
+      decodedTransaction.compiledMessage.staticAccounts
+        .slice(0, decodedTransaction.compiledMessage.header.numSignerAccounts)
+        .map(String)
+    ),
+  ];
+  const metadataRequiredSigners = new Set(metadata.magicBlock.requiredSigners);
+  const decodedSignerFingerprint = JSON.stringify([...requiredSigners].sort());
+  const metadataSignerFingerprint = JSON.stringify([...metadataRequiredSigners].sort());
+  if (metadataSignerFingerprint !== decodedSignerFingerprint) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "MagicBlock signer metadata does not match the prepared transaction."
+    );
+  }
   const existingFeePayer = decodedTransaction.existingFeePayer;
   const shouldReplaceProviderFeePayer =
-    requiredSigners.includes(existingFeePayer) && !walletsByAddress.has(existingFeePayer);
+    requiredSigners.includes(existingFeePayer) &&
+    !scope.wallets.some((wallet) => wallet.publicKey === existingFeePayer);
   const custodyRequiredSigners = shouldReplaceProviderFeePayer
     ? requiredSigners.filter((signer) => signer !== existingFeePayer)
     : requiredSigners;
-
-  for (const requiredSigner of custodyRequiredSigners) {
-    const wallet = walletsByAddress.get(requiredSigner);
-    if (wallet) {
-      signerWallets.set(wallet.publicKey, wallet);
-    }
-  }
-
-  const missingSignerCount = custodyRequiredSigners.length - signerWallets.size;
-  if (missingSignerCount > 0) {
+  if (!custodyRequiredSigners.includes(operation.sourceWallet.publicKey)) {
     throw new AppError(
-      "BAD_REQUEST",
-      "MagicBlock private transfer requires signer(s) that are not controlled by SDP."
+      "PROVIDER_UNAVAILABLE",
+      "MagicBlock prepared transaction does not require the selected source wallet."
     );
   }
+  const signerWallets = new Map<string, CustodyWallet>();
 
-  // Provider-declared signers are untrusted: authorize the complete custody signer set before
-  // resolving any private keys so one denied signer cannot still produce partial signatures.
-  for (const wallet of signerWallets.values()) {
-    assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
-  }
-
-  for (const wallet of signerWallets.values()) {
-    // The source wallet's operation policy was enforced before preparation.
-    if (wallet.walletId === operation.sourceWallet.walletId) {
+  for (const requiredSigner of custodyRequiredSigners) {
+    if (requiredSigner === operation.sourceWallet.publicKey) {
+      signerWallets.set(operation.sourceWallet.id, operation.sourceWallet);
       continue;
     }
 
-    const signerOperation = {
+    const addressMatches = scope.wallets.filter((wallet) => wallet.publicKey === requiredSigner);
+    if (addressMatches.length === 0) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "MagicBlock private transfer requires signer(s) that are not controlled by SDP."
+      );
+    }
+
+    const authorizedMatches: CustodyWallet[] = [];
+    for (const wallet of addressMatches) {
+      try {
+        await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), scope.auth, wallet.id, [
+          "payments:write",
+        ]);
+        authorizedMatches.push(wallet);
+      } catch (error) {
+        if (!(error instanceof AppError) || error.code !== "FORBIDDEN") throw error;
+      }
+    }
+
+    if (authorizedMatches.length === 0) {
+      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    }
+    if (authorizedMatches.length > 1) {
+      throw new AppError("CONFLICT", "MagicBlock additional signer is ambiguous");
+    }
+
+    const wallet = authorizedMatches[0];
+    if (!wallet) throw new AppError("INTERNAL_ERROR", "MagicBlock signer resolution failed");
+    await admitExactPaymentWallet(c, wallet, ["payments:write"]);
+
+    const signerOperation: OutboundPaymentOperation = {
       ...operation,
       sourceAddress: assertValidAddress(wallet.publicKey, "required signer"),
       sourceWallet: wallet,
     };
-    await enforcePaymentTransferOperationPolicy(c, scope, signerOperation, {
-      operationType: "payment_transfer_execute",
-      privateTransfer: true,
-      rawPayload: {
-        source: wallet.walletId,
-        destination: operation.destinationAddress,
-        token: operation.token,
-        amount: operation.amount,
-      },
-    });
+    const evaluation = await dryRunPolicyCandidate(
+      c.env,
+      getRequestTenantScope(c),
+      buildTransferPolicyCandidate(scope, signerOperation, {
+        memo: null,
+        privateTransfer: true,
+      }),
+      []
+    );
+    const details = { decision: evaluation.decision, reason: evaluation.reason };
+    if (evaluation.decision === "deny" || evaluation.decision === "not_evaluated") {
+      throw new AppError("FORBIDDEN", "Wallet operation denied by policy", details);
+    }
+    if (evaluation.decision !== "allow") {
+      throw new AppError(
+        "CONFLICT",
+        "MagicBlock additional signer requires policy approval, but multi-wallet approval replay is not supported",
+        details
+      );
+    }
+
+    signerWallets.set(wallet.id, wallet);
   }
 
+  return {
+    decodedTransaction,
+    custodyRequiredSigners,
+    signerWallets: [...signerWallets.values()],
+    shouldReplaceProviderFeePayer,
+  };
+}
+
+async function executePreparedPrivateTransfer(
+  c: AppContext,
+  scope: ResolvedScope,
+  lastValidBlockHeight: bigint,
+  signerPlan: PreparedPrivateTransferSignerPlan,
+  submissionStore: SignedSubmissionStore
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const signers = await Promise.all(
-    [...signerWallets.values()].map(async (wallet) => {
-      const signer = await solanaServices.createOrgSigner(
+    signerPlan.signerWallets.map(async (wallet) => {
+      const signer = await solanaServices.createOrgSignerForCustodyWallet(
         c.env,
         scope.auth.organizationId,
         scope.auth.projectId ?? undefined,
-        wallet.walletId
+        wallet.id
       );
 
       if (signer.address !== wallet.publicKey) {
@@ -1057,10 +1152,10 @@ async function executePreparedPrivateTransfer(
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
   const transaction = addSponsoredFeePayerToPreparedTransaction(
-    decodedTransaction,
+    signerPlan.decodedTransaction,
     feePayer,
-    custodyRequiredSigners,
-    { replaceExistingFeePayer: shouldReplaceProviderFeePayer }
+    signerPlan.custodyRequiredSigners,
+    { replaceExistingFeePayer: signerPlan.shouldReplaceProviderFeePayer }
   );
   const signedTransaction =
     signers.length > 0
@@ -1103,11 +1198,11 @@ async function executeSplTransfer(
   submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
-  const signer = await solanaServices.createOrgSigner(
+  const signer = await solanaServices.createOrgSignerForCustodyWallet(
     c.env,
     auth.organizationId,
     auth.projectId ?? undefined,
-    sourceWallet.walletId
+    sourceWallet.id
   );
 
   if (signer.address !== sourceWallet.publicKey) {
@@ -1247,9 +1342,17 @@ export async function createTransfer(c: AppContext) {
       koraSponsoredExecution: true,
     });
     const transferType: TransferType = "transfer_confidential";
+    const signerPlan = await resolvePreparedPrivateTransferSignerPlan(
+      c,
+      scope,
+      operation,
+      mapped.prepared.serializedTx,
+      mapped.metadata
+    );
     const { row: transfer, replayed } = await createTransferRecord(c, {
       organizationId: scope.auth.organizationId,
       projectId: scope.auth.projectId,
+      custodyWalletId: operation.sourceWallet.id,
       walletId: operation.sourceWallet.walletId,
       sourceAddress: operation.sourceWallet.publicKey,
       destinationAddress: body.destination,
@@ -1275,10 +1378,8 @@ export async function createTransfer(c: AppContext) {
       const result = await executePreparedPrivateTransfer(
         c,
         scope,
-        operation,
-        mapped.prepared.serializedTx,
         BigInt(mapped.prepared.lastValidBlockHeight),
-        mapped.metadata,
+        signerPlan,
         submissionStore
       );
       const updated = await updateTransferRecord(c, transfer, {
@@ -1315,6 +1416,7 @@ export async function createTransfer(c: AppContext) {
     : await createTransferRecord(c, {
         organizationId: scope.auth.organizationId,
         projectId: scope.auth.projectId,
+        custodyWalletId: operation.sourceWallet.id,
         walletId: operation.sourceWallet.walletId,
         sourceAddress: operation.sourceWallet.publicKey,
         destinationAddress: body.destination,
@@ -1406,65 +1508,25 @@ function transferRowMatchesFilters(
 
 interface ObservedTransferTarget {
   sourceAddress: string;
+  custodyWalletId: string;
   resolvedWalletId: string;
   walletIdsByAddress: Map<string, string>;
 }
 
-/**
- * Resolves which tenant-owned wallet an observed (on-chain) transfer lookup
- * may run against. On-chain history is restricted to tenant-owned wallets: a
- * walletAddress that matches no org wallet returns null, steering the caller
- * to the DB-only path instead of driving RPC fan-out against an arbitrary
- * address.
- *
- * @throws AppError FORBIDDEN when the API key's wallet bindings exclude the
- *   requested wallet; NOT_FOUND (via resolveWallet) for an unknown walletId.
- */
-function resolveObservedTransferTarget(
-  scope: ResolvedScope,
-  params: {
-    walletId: string | undefined;
-    walletAddress: string | undefined;
-    allowedWalletIds: string[] | null;
-  }
-): ObservedTransferTarget | null {
-  const { walletId, walletAddress, allowedWalletIds } = params;
-
-  if (walletId) {
-    const wallet = resolveWallet(scope.wallets, walletId);
-    assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:read"]);
-    return {
-      sourceAddress: wallet.publicKey,
-      resolvedWalletId: wallet.walletId,
-      walletIdsByAddress: new Map([[wallet.publicKey, wallet.walletId]]),
-    };
-  }
-
-  if (allowedWalletIds) {
-    const authorizedWallet = scope.wallets.find(
-      (wallet) => wallet.publicKey === walletAddress && allowedWalletIds.includes(wallet.walletId)
-    );
-    if (!authorizedWallet) {
-      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-    }
-
-    return {
-      sourceAddress: authorizedWallet.publicKey,
-      resolvedWalletId: authorizedWallet.walletId,
-      walletIdsByAddress: new Map([[authorizedWallet.publicKey, authorizedWallet.walletId]]),
-    };
-  }
-
-  const matchedWallet = scope.wallets.find((wallet) => wallet.publicKey === walletAddress);
-  if (!matchedWallet) {
-    return null;
-  }
-
+function observedTransferTarget(wallet: CustodyWallet): ObservedTransferTarget {
   return {
-    sourceAddress: matchedWallet.publicKey,
-    resolvedWalletId: matchedWallet.walletId,
-    walletIdsByAddress: new Map([[matchedWallet.publicKey, matchedWallet.walletId]]),
+    sourceAddress: wallet.publicKey,
+    custodyWalletId: wallet.id,
+    resolvedWalletId: wallet.walletId,
+    walletIdsByAddress: new Map([[wallet.publicKey, wallet.walletId]]),
   };
+}
+
+function assertTransferReadAccess(c: AppContext, row: TransferRow): void {
+  assertPaymentWalletReadAccess(c, {
+    custodyWalletId: row.custody_wallet_id,
+    providerWalletId: row.wallet_id,
+  });
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Wallet-scoped transfer listing merges DB rows with observed on-chain history.
@@ -1472,13 +1534,14 @@ export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
   if (!query.success) throw badRequestQuery();
-  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
+  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
+    "payments:read",
+  ]);
 
   const {
     page,
     pageSize,
-    wallet: walletId,
-    walletAddress,
+    custodyWalletId,
     search,
     token,
     direction,
@@ -1518,8 +1581,19 @@ export async function listTransfers(c: AppContext) {
   const hasProviderReference = providerReference !== undefined;
   const hasExactProviderReference = hasProvider && hasProviderReference;
 
-  if (walletId && allowedWalletIds && !allowedWalletIds.includes(walletId)) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  let exactWallet: CustodyWallet | null = null;
+  if (custodyWalletId) {
+    if (walletAuthorization && !walletAuthorization.custodyWalletIds.includes(custodyWalletId)) {
+      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    }
+    if (includeObserved) {
+      const scope = await resolveScope(c);
+      exactWallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
+    }
+  }
+
+  if (includeObserved && !exactWallet) {
+    throw new AppError("BAD_REQUEST", "custodyWalletId is required when includeObserved=true");
   }
 
   if (hasProviderReference && !hasProvider) {
@@ -1534,29 +1608,17 @@ export async function listTransfers(c: AppContext) {
       projectId: auth.projectId,
     });
 
-    if (row && allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
-      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-    }
+    if (row) assertTransferReadAccess(c, row);
   }
 
   let transferRows: TransferRow[];
   let total: number;
 
-  // On-chain history may only be pulled for tenant-owned wallets. The target
-  // is resolved before choosing a path so an unowned walletAddress falls
-  // through to the DB-only branch instead of driving RPC fan-out against an
-  // arbitrary address.
-  let observedScope: ResolvedScope | null = null;
-  let observedTarget: ObservedTransferTarget | null = null;
-
-  if ((walletId || walletAddress) && includeObserved && !hasExactProviderReference) {
-    observedScope = await resolveScope(c);
-    observedTarget = resolveObservedTransferTarget(observedScope, {
-      walletId,
-      walletAddress,
-      allowedWalletIds,
-    });
-  }
+  // On-chain history is opt-in and always anchored to one exact wallet row.
+  const observedTarget =
+    exactWallet && includeObserved && !hasExactProviderReference
+      ? observedTransferTarget(exactWallet)
+      : null;
 
   if (observedTarget) {
     // Helius-backed path: fetch on-chain signatures for the wallet address, then
@@ -1568,7 +1630,12 @@ export async function listTransfers(c: AppContext) {
     // billed RPC and must not run unmetered through a limiter outage.
     await enforceMeteredQuota(c, { name: "observed-transfers", actorMax: 30, orgMax: 120 });
 
-    const { sourceAddress, resolvedWalletId, walletIdsByAddress } = observedTarget;
+    const {
+      sourceAddress,
+      custodyWalletId: observedCustodyWalletId,
+      resolvedWalletId,
+      walletIdsByAddress,
+    } = observedTarget;
 
     // 1. Fetch on-chain signature history via Helius (or fallback RPC)
     const heliusRpc = createSignatureHistoryRpc(c.env);
@@ -1632,63 +1699,47 @@ export async function listTransfers(c: AppContext) {
     );
     const sigStrings = onChainSigs.map((s) => String(s.signature));
 
-    // 2. Look up on-chain signatures in our DB
-    const confirmedRows = await repo.listTransfersBySignatures({
+    // 2. Load the exact persisted ledger first. Fetching the first N persisted
+    // rows is sufficient for page N after observed rows are merged: observations
+    // can only push persisted rows later in the combined ordering.
+    const persistedResult = await repo.listTransfers({
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      custodyWalletId: observedCustodyWalletId,
+      counterpartyId,
+      search,
+      token: tokenFilter,
+      direction,
+      statuses,
+      types: transferTypes,
+      provider,
+      createdAtFrom: from,
+      createdAtTo: to,
+      sortBy,
+      sortDirection,
+      limit: offset + pageSize,
+      offset: 0,
+    });
+
+    // 3. Look up every observed signature in our DB before synthesizing rows.
+    // A persisted exact row remains authoritative even when it falls outside
+    // the requested page or filters.
+    const persistedSignatureRows = await repo.listTransfersBySignatures({
       signatures: sigStrings,
       organizationId: auth.organizationId,
       projectId: auth.projectId,
     });
-    const scopedConfirmedRows = allowedWalletIds
-      ? confirmedRows.filter((row) => allowedWalletIds.includes(row.wallet_id))
-      : confirmedRows;
+    const scopedPersistedSignatureRows = persistedSignatureRows.filter(
+      (row) => row.custody_wallet_id === observedCustodyWalletId
+    );
 
-    // 3. Fetch pending/processing/failed from DB (not yet on-chain).
-    //    Skip if the caller's status filter already excludes these — e.g. status=confirmed
-    //    or status=finalized would never match any of these records.
-    const nonChainStatuses: TransferStatus[] = [
-      "pending",
-      "processing",
-      "failed",
-      "awaiting_payment",
-      "settling",
-      "completed",
-      "canceled",
-      "expired",
-    ];
-    const needsNonChainRecords =
-      !statuses || statuses.some((value) => nonChainStatuses.includes(value));
-    const pendingRows: TransferRow[] = [];
-    if (needsNonChainRecords) {
-      const pendingResult = await repo.listTransfers({
-        organizationId: auth.organizationId,
-        projectId: auth.projectId,
-        walletId: resolvedWalletId,
-        walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
-        walletAddress: resolvedWalletId ? undefined : walletAddress,
-        counterpartyId,
-        search,
-        statuses: nonChainStatuses,
-        types: transferTypes,
-        provider,
-        token: tokenFilter,
-        direction,
-        createdAtFrom: from,
-        createdAtTo: to,
-        sortBy,
-        sortDirection,
-        limit: 100,
-        offset: 0,
-      });
-      pendingRows.push(...pendingResult.rows);
-    }
-
-    const confirmedSignatures = new Set(
-      scopedConfirmedRows
+    const persistedSignatures = new Set(
+      scopedPersistedSignatureRows
         .map((row) => row.signature)
         .filter((rowSignature): rowSignature is string => Boolean(rowSignature))
     );
     const missingObservedSignatures = onChainSigs.filter(
-      (signatureInfo) => !confirmedSignatures.has(String(signatureInfo.signature))
+      (signatureInfo) => !persistedSignatures.has(String(signatureInfo.signature))
     );
     const observedRows = await buildObservedTransfersForSignatures(
       c.env,
@@ -1700,59 +1751,36 @@ export async function listTransfers(c: AppContext) {
       }
     );
 
-    // 4. Merge: confirmed (Helius-backed) + non-confirmed (DB), deduplicated
-    const seen = new Set<string>();
-    const merged = [...scopedConfirmedRows, ...observedRows, ...pendingRows].filter((row) => {
-      if (seen.has(row.id)) return false;
-      seen.add(row.id);
-      return true;
-    });
+    // 4. Filter only synthetic observations; the repository already applied
+    // the same filters to the authoritative exact ledger.
+    const filteredObservedRows = observedRows.filter((row) =>
+      transferRowMatchesFilters(row, {
+        search,
+        counterpartyId,
+        provider,
+        statuses,
+        token: tokenFilter,
+        direction,
+        types: transferTypeSet,
+        from,
+        to,
+      })
+    );
 
-    // 5. Apply remaining filters and sort
-    const filtered = merged
-      .filter((row) =>
-        transferRowMatchesFilters(row, {
-          search,
-          counterpartyId,
-          provider,
-          statuses,
-          token: tokenFilter,
-          direction,
-          types: transferTypeSet,
-          from,
-          to,
-        })
-      )
-      .sort((left, right) => compareTransferRows(left, right, sortBy, sortDirection));
+    // 5. Merge the exact ledger with only missing observations, then paginate.
+    const merged = [...persistedResult.rows, ...filteredObservedRows].sort((left, right) =>
+      compareTransferRows(left, right, sortBy, sortDirection)
+    );
 
-    total = filtered.length;
-    transferRows = filtered.slice(offset, offset + pageSize);
+    total = persistedResult.total + filteredObservedRows.length;
+    transferRows = merged.slice(offset, offset + pageSize);
   } else {
-    // DB-only path for org-scoped queries without a specific wallet
-    let resolvedDatabaseWalletId = walletId;
-    let unresolvedDatabaseWalletAddress: string | undefined;
-
-    if (!resolvedDatabaseWalletId && walletAddress) {
-      const scope = observedScope ?? (await resolveScope(c));
-      const matchedWallet = scope.wallets.find((wallet) => wallet.publicKey === walletAddress);
-
-      if (matchedWallet) {
-        if (allowedWalletIds && !allowedWalletIds.includes(matchedWallet.walletId)) {
-          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-        }
-        resolvedDatabaseWalletId = matchedWallet.walletId;
-      } else {
-        if (allowedWalletIds) {
-          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-        }
-        unresolvedDatabaseWalletAddress = walletAddress;
-      }
-    }
-
+    // DB-only path: exact rows are filtered by the canonical SDP Wallet ID.
     if (
-      !resolvedDatabaseWalletId &&
-      !unresolvedDatabaseWalletAddress &&
-      allowedWalletIds?.length === 0
+      !custodyWalletId &&
+      walletAuthorization !== null &&
+      walletAuthorization.custodyWalletIds.length === 0 &&
+      walletAuthorization.providerWalletIds.length === 0
     ) {
       return paginated(c, [], { total: 0, page, pageSize });
     }
@@ -1761,9 +1789,9 @@ export async function listTransfers(c: AppContext) {
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: auth.projectId,
-      walletId: resolvedDatabaseWalletId,
-      walletIds: resolvedDatabaseWalletId ? undefined : (allowedWalletIds ?? undefined),
-      walletAddress: walletId ? walletAddress : unresolvedDatabaseWalletAddress,
+      custodyWalletId,
+      walletAuthorization:
+        custodyWalletId || walletAuthorization === null ? undefined : walletAuthorization,
       counterpartyId,
       search,
       token: tokenFilter,
@@ -1784,6 +1812,7 @@ export async function listTransfers(c: AppContext) {
     });
     total = result.total;
     transferRows = result.rows;
+    for (const row of transferRows) assertTransferReadAccess(c, row);
   }
 
   const transfers = transferRows.map(mapTransferRow);
@@ -1792,7 +1821,6 @@ export async function listTransfers(c: AppContext) {
 
 export async function getTransfer(c: AppContext) {
   const auth = getAuth(c);
-  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
   const params = transferIdParamsSchema.safeParse(c.req.param());
   const repo = getPaymentsRepository(c);
 
@@ -1805,9 +1833,7 @@ export async function getTransfer(c: AppContext) {
   });
 
   if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
-  if (allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-  }
+  assertTransferReadAccess(c, row);
 
   return success(c, { transfer: mapTransferRow(row) });
 }
