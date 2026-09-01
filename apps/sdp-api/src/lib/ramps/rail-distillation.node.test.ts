@@ -1,5 +1,5 @@
 import { distillCoinbaseRailSupport } from "@sdp/payments/ramps/providers/coinbase/client";
-import { distillLightsparkRailSupport } from "@sdp/payments/ramps/providers/lightspark/client";
+import { distillLightsparkRailSupport } from "@sdp/payments/ramps/providers/lightspark/currencies";
 import { distillMuralRailSupport } from "@sdp/payments/ramps/providers/mural/client";
 import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
 import { describe, expect, it } from "vitest";
@@ -58,37 +58,90 @@ describe("ramp rail distillation", () => {
     expect(coinbase.snapshot.onramp.cryptos).toEqual(["sol.solana"]);
   });
 
-  it("distills Lightspark USD minor-unit limits and crypto support", () => {
-    const lightspark = distillLightsparkRailSupport({
-      supportedCurrencies: [
-        {
-          currencyCode: "USD",
-          enabledTransactionTypes: ["INCOMING", "OUTGOING"],
-          minAmount: 100,
-          maxAmount: 1000000,
-        },
-        { currencyCode: "USDC", enabledTransactionTypes: ["INCOMING", "OUTGOING"] },
-      ],
-    });
-    expect(lightspark.snapshot.onramp.currencies.USD).toEqual({
-      min: "1",
-      max: "10000",
-    });
-    expect(lightspark.snapshot.onramp.cryptos).toEqual(["usdc.solana"]);
-  });
-
-  it("throws for non-USD Lightspark currency limits", () => {
-    expect(() =>
-      distillLightsparkRailSupport({
-        supportedCurrencies: [
+  it("distills Lightspark exchange-rate corridors into both directions", () => {
+    const usdc = { code: "USDC", decimals: 6 };
+    const lightspark = distillLightsparkRailSupport(
+      {
+        data: [
           {
-            currencyCode: "EUR",
-            enabledTransactionTypes: ["INCOMING"],
-            minAmount: 100,
-            maxAmount: 1000000,
+            sourceCurrency: usdc,
+            destinationCurrency: { code: "USD", decimals: 2 },
+            minSendingAmount: 1000000,
+            maxSendingAmount: 5000000000,
+          },
+          {
+            sourceCurrency: usdc,
+            destinationCurrency: { code: "USD", decimals: 2 },
+            minSendingAmount: 40455477,
+            maxSendingAmount: 6000000000,
+          },
+          {
+            sourceCurrency: usdc,
+            destinationCurrency: { code: "EUR", decimals: 2 },
+            minSendingAmount: 23341214,
+            maxSendingAmount: 5000000000,
+          },
+          {
+            sourceCurrency: usdc,
+            destinationCurrency: { code: "USDT", decimals: 6 },
+            minSendingAmount: 1000000,
+            maxSendingAmount: 5000000000,
+          },
+          {
+            sourceCurrency: usdc,
+            destinationCurrency: { code: "SLL", decimals: 2 },
+            minSendingAmount: 1000000,
+            maxSendingAmount: 5000000000,
           },
         ],
-      })
-    ).toThrow("only USD minor-unit scaling is verified");
+      },
+      {
+        data: [
+          {
+            sourceCurrency: { code: "USD", decimals: 2 },
+            destinationCurrency: usdc,
+            minSendingAmount: 100,
+            maxSendingAmount: 500000,
+          },
+          {
+            sourceCurrency: { code: "USDB", decimals: 6 },
+            destinationCurrency: usdc,
+            minSendingAmount: 1000000,
+            maxSendingAmount: 0,
+          },
+        ],
+      }
+    );
+    expect(lightspark.snapshot.offramp.currencies.USD).toEqual({ min: "1", max: "6000" });
+    expect(lightspark.snapshot.offramp.currencies.EUR).toEqual({
+      min: "23.341214",
+      max: "5000",
+    });
+    expect(lightspark.snapshot.offramp.currencies.USDT).toBeUndefined();
+    expect(lightspark.snapshot.offramp.currencies.SLL).toBeUndefined();
+    expect(lightspark.snapshot.offramp.cryptos).toEqual(["usdc.solana"]);
+    expect(lightspark.snapshot.onramp.currencies).toEqual({
+      USD: { min: "1", max: "5000" },
+    });
+    expect(lightspark.snapshot.onramp.cryptos).toEqual(["usdc.solana"]);
+    expect(lightspark.droppedCurrencyCodes).toEqual(["SLL", "USDB"]);
+  });
+
+  it("throws when a Lightspark off-ramp corridor is not sourced from a crypto asset", () => {
+    expect(() =>
+      distillLightsparkRailSupport(
+        {
+          data: [
+            {
+              sourceCurrency: { code: "USD", decimals: 2 },
+              destinationCurrency: { code: "EUR", decimals: 2 },
+              minSendingAmount: 100,
+              maxSendingAmount: 500000,
+            },
+          ],
+        },
+        { data: [] }
+      )
+    ).toThrow("must be a crypto asset");
   });
 });
