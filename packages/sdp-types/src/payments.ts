@@ -1,6 +1,6 @@
 import type { Address } from "@solana/addresses";
 import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
-import type { RampFiatCurrency } from "./generated/ramp-support.generated";
+import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
   PolicyDecision,
@@ -887,7 +887,6 @@ export interface PaymentOnrampQuoteRequest {
   cryptoToken: string;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
-  redirectUrl?: string;
   domain?: string;
   rampsMemo?: Record<string, string>;
 }
@@ -899,7 +898,6 @@ export interface PaymentOfframpQuoteRequest {
   cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
-  redirectUrl?: string;
   rampsMemo?: Record<string, string>;
 }
 

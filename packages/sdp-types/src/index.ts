@@ -10,7 +10,7 @@ export * from "./counterparties";
 export * from "./countries";
 export * from "./custody";
 export * from "./earn";
-export * from "./generated/ramp-support.generated";
+export * from "./generated/ramp.generated";
 export * from "./kamino-programs";
 export * from "./kyc";
 export * from "./organizations";

@@ -2,7 +2,7 @@
 
 import { toNumberAmount } from "@sdp/solana/amount";
 import type { MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
 import { address } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";

@@ -337,6 +337,14 @@ export const privateChannelVerifyWalletParamSchema = z.object({
     }),
 });
 
+export const privateChannelVerifyWalletBodySchema = z.object({
+  principalId: z.string().min(1).optional().openapi({
+    description:
+      "Project principal that will own the verified wallet. Defaults to the default principal.",
+    example: "pcu_9f1c...",
+  }),
+});
+
 export const privateChannelDeleteWalletParamSchema = z.object({
   pubkey: z
     .string()
@@ -445,7 +453,7 @@ export const privateChannelTransferSchema = z
     createdAt: z.string(),
     updatedAt: z.string(),
   })
-  .openapi({ description: "A transfer between verified wallets of channel members." });
+  .openapi({ description: "A transfer between verified wallets of channel principals." });
 
 export const privateChannelTransferListSchema = z.object({
   transfers: z.array(privateChannelTransferSchema),
@@ -459,15 +467,15 @@ const privateChannelTransferRecipientSchema = z
       description: "User-assigned custody wallet name, when available.",
     }),
     privateChannelUserId: z.string().openapi({
-      description: "Opaque private-channel member id that owns this verified wallet.",
+      description: "Opaque private-channel principal id that owns this verified wallet.",
     }),
     isSelf: z.boolean().openapi({
-      description: "True when the wallet belongs to the requesting member.",
+      description: "True when the wallet belongs to the requesting project principal.",
     }),
   })
   .openapi({
     description:
-      "One verified wallet that may receive a transfer. A member holding several verified wallets appears once per wallet. Owner identity (email, SDP user id, display name) is not included.",
+      "One verified wallet that may receive a transfer. A principal holding several verified wallets appears once per wallet. Owner identity is not included.",
   });
 
 export const privateChannelTransferRecipientListSchema = z.object({
@@ -477,7 +485,7 @@ export const privateChannelTransferRecipientListSchema = z.object({
 export const createPrivateChannelTransferBodySchema = z
   .object({
     walletId: z.string().min(1).openapi({
-      description: "Verified SDP custody wallet controlled by the acting member.",
+      description: "Verified SDP custody wallet controlled by the project's default principal.",
       example: "wallet_123",
     }),
     recipientVerifiedWalletId: z.string().min(1).openapi({
@@ -494,7 +502,7 @@ export const createPrivateChannelTransferBodySchema = z
         "Token mint to transfer. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
     }),
   })
-  .openapi({ description: "Create a verified member-to-member channel transfer." });
+  .openapi({ description: "Create a verified principal-to-principal channel transfer." });
 
 export const privateChannelTransferChannelIdParamSchema = z.object({
   channelId: z
@@ -567,7 +575,7 @@ export const privateChannelEventReferencesSchema = z
   .object({
     references: z.record(z.string(), z.string()).openapi({
       description:
-        "Flat id→name dictionary for event enrichment. Keys are channel ids, wallet pubkeys/ids, private-channel-user ids, SDP user ids, instance ids, and issued-token mint addresses.",
+        "Flat id→name dictionary for event enrichment. Keys are channel ids, wallet pubkeys/ids, private-channel-principal ids, instance ids, and issued-token mint addresses.",
       example: {
         pch_treasury: "Treasury",
         TreasuryPubkey1111111111111111111111111: "Treasury Wallet",
@@ -579,7 +587,7 @@ export const privateChannelEventReferencesSchema = z
   })
   .openapi({
     description:
-      "Display-name references for Private Channels events (channels, wallets, members, instances, tokens).",
+      "Display-name references for Private Channels events (channels, wallets, principals, instances, tokens).",
   });
 
 export const privateChannelEventsQuerySchema = z.object({

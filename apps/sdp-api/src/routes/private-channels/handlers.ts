@@ -15,13 +15,11 @@ export {
   getPrivateChannelInstance,
 } from "./handlers/instance";
 export {
-  addChannelMembership,
-  deletePrivateChannelUser,
-  getAuthenticatedPrivateChannelUser,
-  getPrivateChannelUser,
-  invitePrivateChannelUser,
-  listPrivateChannelUsers,
-  removeChannelMembership,
+  addPrincipalChannelMembership,
+  createPrivateChannelPrincipal,
+  disablePrivateChannelPrincipal,
+  listPrivateChannelPrincipals,
+  removePrincipalChannelMembership,
 } from "./handlers/members";
 export { getPrivateChannelOverview } from "./handlers/overview";
 export { probePrivateChannelConnection } from "./handlers/probe";

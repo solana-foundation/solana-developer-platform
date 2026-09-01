@@ -363,11 +363,6 @@ export function buildPaymentsPlaygroundEndpointConfigs(
           defaultValue: "250.00",
           required: true,
         },
-        {
-          key: "redirectUrl",
-          label: "redirectUrl",
-          placeholder: t("DashboardPayments.playground.onrampRedirectUrlPlaceholder"),
-        },
       ],
       expectedResponse: {
         data: {
@@ -425,11 +420,6 @@ export function buildPaymentsPlaygroundEndpointConfigs(
           placeholder: "250.00",
           defaultValue: "250.00",
           required: true,
-        },
-        {
-          key: "redirectUrl",
-          label: "redirectUrl",
-          placeholder: t("DashboardPayments.playground.offrampRedirectUrlPlaceholder"),
         },
       ],
       expectedResponse: {

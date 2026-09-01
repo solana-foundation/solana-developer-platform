@@ -4,8 +4,8 @@ import type {
   BvnkPaymentRampInstruction,
   SdpEnvironment,
 } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
