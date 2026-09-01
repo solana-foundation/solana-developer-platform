@@ -43,10 +43,22 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
       </ul>
     ) : null;
 
+  const finishLabel =
+    accounts.length > 0
+      ? t("DashboardPayments.counterparty.done")
+      : t("DashboardPayments.counterparty.skip");
+
   const accountForm = (
     <CryptoAccountForm
       counterpartyId={createdCounterparty.id}
       onAdded={(account) => setAccounts((previous) => [account, ...previous])}
+      footerStart={
+        embedded ? (
+          <Button type="button" variant="outline" onClick={finish}>
+            {finishLabel}
+          </Button>
+        ) : undefined
+      }
     />
   );
 
@@ -63,9 +75,7 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
         footer={
           <div className="flex justify-end">
             <Button type="button" onClick={finish}>
-              {accounts.length > 0
-                ? t("DashboardPayments.counterparty.done")
-                : t("DashboardPayments.counterparty.skip")}
+              {finishLabel}
             </Button>
           </div>
         }
@@ -107,14 +117,6 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
 
       {accountList}
       {accountForm}
-
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" onClick={finish}>
-          {accounts.length > 0
-            ? t("DashboardPayments.counterparty.done")
-            : t("DashboardPayments.counterparty.skip")}
-        </Button>
-      </div>
     </div>
   );
 }

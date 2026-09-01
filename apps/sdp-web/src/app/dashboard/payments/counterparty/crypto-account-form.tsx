@@ -33,9 +33,15 @@ const NETWORK_OPTIONS = CRYPTO_ACCOUNT_NETWORKS.map((value) => ({
 interface CryptoAccountFormProps {
   counterpartyId: string;
   onAdded?: (account: CounterpartyAccount) => void;
+  /** Rendered at the start of the form's action row (e.g. the phase's Skip/Done button). */
+  footerStart?: ReactNode;
 }
 
-export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountFormProps) {
+export function CryptoAccountForm({
+  counterpartyId,
+  onAdded,
+  footerStart,
+}: CryptoAccountFormProps) {
   const t = useTranslations();
   const [label, setLabel] = useState("");
   const [network, setNetwork] = useState<CryptoAccountNetwork>("solana");
@@ -228,7 +234,8 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
         )}
       </AnimatePresence>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        {footerStart ? <div className="mr-auto">{footerStart}</div> : null}
         {phase === "ready" && hasRisk ? (
           <Button
             type="button"
