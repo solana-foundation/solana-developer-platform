@@ -130,7 +130,6 @@ describe("LightsparkWebhookProcessor", () => {
       provider: "lightspark",
       kind: "settled",
       reference: QUOTE_ID,
-      transactionReference: "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690",
       providerCustomerId: "Customer:01a05d36-8279-938e-0000-d5b3cdf7c5fa",
       onchain: {
         signature:
@@ -165,7 +164,7 @@ describe("LightsparkWebhookProcessor", () => {
     });
   });
 
-  it("matches the real completed payload by quote when its legacy description is present", async () => {
+  it("settles the transfer whose quote reference the event carries, idempotently", async () => {
     await seedTransfer();
     await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
     await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
@@ -189,41 +188,17 @@ describe("LightsparkWebhookProcessor", () => {
       destination_address: DESTINATION_ADDRESS,
       signature:
         "43T5oN1GC2xH4LkpsxwtFE7HqWBRjcejKYGbAgaDLJUZriCWTis8NBDG8D2WQBpXYpbXgvYP6d7syisQRxBVwdDH",
-      provider_reference: "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690",
+      provider_reference: QUOTE_ID,
       provider_data: { settlement: { settledAt: "2026-09-01T13:46:18.026988Z" } },
     });
   });
 
-  it("matches by the reserved transfer id when the quote reference corroborates it", async () => {
+  it("ignores an event whose quote reference matches no transfer", async () => {
     await seedTransfer();
     const payload = REAL_COMPLETED_PAYLOAD.replace(
-      '"description": "SDP onramp"',
-      `"description": "${TRANSFER_ID}"`
+      `"quoteId": "${QUOTE_ID}"`,
+      '"quoteId": "Quote:unknown"'
     );
-    await processor.process(appContext, "sandbox", processor.parse(payload));
-
-    const transfer = await getDb(env)
-      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
-      .bind(TRANSFER_ID)
-      .first<{ status: string; signature: string | null }>();
-    expect(transfer).toEqual({
-      status: "completed",
-      signature:
-        "43T5oN1GC2xH4LkpsxwtFE7HqWBRjcejKYGbAgaDLJUZriCWTis8NBDG8D2WQBpXYpbXgvYP6d7syisQRxBVwdDH",
-    });
-  });
-
-  it("refuses to settle a description-named transfer whose references belong to another transaction", async () => {
-    await seedTransfer();
-    const payload = REAL_COMPLETED_PAYLOAD.replace(
-      '"description": "SDP onramp"',
-      `"description": "${TRANSFER_ID}"`
-    )
-      .replace(`"quoteId": "${QUOTE_ID}"`, '"quoteId": "Quote:other"')
-      .replace(
-        '"id": "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690"',
-        '"id": "Transaction:other"'
-      );
     await processor.process(appContext, "sandbox", processor.parse(payload));
 
     const transfer = await getDb(env)
@@ -235,82 +210,5 @@ describe("LightsparkWebhookProcessor", () => {
       signature: null,
       provider_reference: QUOTE_ID,
     });
-  });
-
-  it("settles nothing when the quote and transaction references name different transfers", async () => {
-    await seedTransfer();
-    const otherTransferId = "xfr_lightspark_webhook_other";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers (
-           id, organization_id, project_id, wallet_id, destination_address, token,
-           type, direction, status, provider, provider_reference, delivery_mode,
-           fiat_currency, provider_data, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
-      )
-      .bind(
-        otherTransferId,
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        "wallet_lightspark_webhook_test",
-        DESTINATION_ADDRESS,
-        "USDC",
-        "onramp",
-        "inbound",
-        "awaiting_payment",
-        "lightspark",
-        "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690",
-        "manual_instructions",
-        "USD",
-        {},
-        "2026-09-01T00:00:00.000Z",
-        "2026-09-01T00:00:00.000Z"
-      )
-      .run();
-
-    await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
-
-    const statuses = await getDb(env)
-      .prepare("SELECT id, status FROM payment_transfers WHERE id IN (?, ?) ORDER BY id")
-      .bind(TRANSFER_ID, otherTransferId)
-      .all<{ id: string; status: string }>();
-    expect(statuses.results).toEqual([
-      { id: otherTransferId, status: "awaiting_payment" },
-      { id: TRANSFER_ID, status: "awaiting_payment" },
-    ]);
-  });
-
-  it("refuses a promoted transfer when the event's quote reference disagrees with the stored one", async () => {
-    await seedTransfer();
-    await getDb(env)
-      .prepare(
-        `UPDATE payment_transfers
-         SET provider_reference = ?, provider_data = ?::jsonb, status = 'settling'
-         WHERE id = ?`
-      )
-      .bind(
-        "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690",
-        JSON.stringify({ quoteReference: QUOTE_ID }),
-        TRANSFER_ID
-      )
-      .run();
-
-    const foreignQuotePayload = REAL_COMPLETED_PAYLOAD.replace(
-      `"quoteId": "${QUOTE_ID}"`,
-      '"quoteId": "Quote:garbage"'
-    );
-    await processor.process(appContext, "sandbox", processor.parse(foreignQuotePayload));
-    const afterForeignQuote = await getDb(env)
-      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
-      .bind(TRANSFER_ID)
-      .first<{ status: string }>();
-    expect(afterForeignQuote).toEqual({ status: "settling" });
-
-    await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
-    const afterAgreeingEvent = await getDb(env)
-      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
-      .bind(TRANSFER_ID)
-      .first<{ status: string }>();
-    expect(afterAgreeingEvent).toEqual({ status: "completed" });
   });
 });

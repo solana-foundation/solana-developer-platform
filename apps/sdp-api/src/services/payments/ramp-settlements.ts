@@ -108,19 +108,11 @@ function buildRampSettlementUpdate(
   if ((event.kind === "failed" || event.kind === "expired") && event.error) {
     update.error = event.error;
   }
-  // The row is created with the provider's quote/session reference; the first
-  // event carrying the provider transaction id promotes provider_reference to it.
-  if (
-    event.transactionReference !== undefined &&
-    event.transactionReference !== transfer.provider_reference
-  ) {
-    update.providerReference = event.transactionReference;
-  }
   // The provider's deposit instruction lets the dashboard send the crypto on
   // the customer's behalf; each event replaces the previous instruction, and
   // `null` withdraws it (requote pending) until the provider issues a new one.
   if (event.kind === "awaiting_payment" && event.cryptoDeposit !== undefined) {
-    update.providerData = { cryptoDeposit: event.cryptoDeposit };
+    update.providerData = { ...update.providerData, cryptoDeposit: event.cryptoDeposit };
   }
   // Economics are captured only here, at the terminal settlement webhook — they are not
   // backfilled for transfers that settled before this shipped.
@@ -128,137 +120,9 @@ function buildRampSettlementUpdate(
     (event.kind === "settled" || event.kind === "failed" || event.kind === "expired") &&
     event.settlement
   ) {
-    update.providerData = { settlement: event.settlement };
+    update.providerData = { ...update.providerData, settlement: event.settlement };
   }
   return update;
-}
-
-/**
- * Verifies every event reference against everything the transfer row knows.
- * Rows persisted with a stored quote reference must match the event's quote
- * reference on every event for the row's whole life, and once the row is
- * promoted to the provider transaction id, the event's transaction reference
- * must match it exactly. Rows that predate the stored quote reference fall
- * back to matching provider_reference against either event reference.
- *
- * @param transfer - The correlated transfer row.
- * @param event - The provider settlement event.
- * @returns True when every checkable reference on the event agrees with the row.
- */
-function corroboratesTransferReferences(
-  transfer: PaymentTransferRow,
-  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
-): boolean {
-  const storedQuoteReference = transfer.provider_data.quoteReference;
-  if (typeof storedQuoteReference !== "string") {
-    return (
-      transfer.provider_reference === event.reference ||
-      transfer.provider_reference === event.transactionReference
-    );
-  }
-  if (event.reference !== storedQuoteReference) {
-    return false;
-  }
-  const promoted = transfer.provider_reference !== storedQuoteReference;
-  return !promoted || transfer.provider_reference === event.transactionReference;
-}
-
-/**
- * Correlates one settlement event to the single transfer every supplied
- * identifier agrees on. Identifiers are never ignored: a supplied transfer id
- * that resolves to nothing refuses the event, identifiers resolving to
- * different transfers refuse the event, and every checkable reference on the
- * survivor must agree (see corroboratesTransferReferences). The transaction
- * reference is allowed to resolve to nothing only because it cannot exist
- * before its own first event promotes it onto the row — there the
- * provider-signed quote reference is the binding authority.
- *
- * @param env - Worker environment for database access.
- * @param event - The provider settlement event.
- * @returns The uniquely correlated transfer, or null when the event must not settle anything.
- */
-async function correlateRampSettlementTransfer(
-  env: Env,
-  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
-): Promise<PaymentTransferRow | null> {
-  const repo = createSystemPaymentsRepository(env);
-  const transferIdMatch = event.transferId
-    ? await repo.getTransferById({ transferId: event.transferId })
-    : null;
-  if (event.transferId !== undefined && transferIdMatch === null) {
-    logEvent("warn", {
-      event: "sdp_api_ramp_settlement_unresolved_transfer_id",
-      flow: "ramp-settlement",
-      provider: event.provider,
-      event_transfer_id: event.transferId,
-      event_quote_id: event.reference,
-      event_transaction_id: event.transactionReference,
-    });
-    return null;
-  }
-  const transactionMatch = event.transactionReference
-    ? await repo.getTransferByProviderReference({
-        provider: event.provider,
-        providerReference: event.transactionReference,
-      })
-    : null;
-  const referenceMatch = await repo.getTransferByProviderReference({
-    provider: event.provider,
-    providerReference: event.reference,
-  });
-  const matches = [transferIdMatch, transactionMatch, referenceMatch].filter(
-    (candidate) => candidate !== null
-  );
-  const matchedIds = new Set(matches.map((candidate) => candidate.id));
-  if (matchedIds.size > 1) {
-    logEvent("warn", {
-      event: "sdp_api_ramp_settlement_conflicting_identifiers",
-      flow: "ramp-settlement",
-      provider: event.provider,
-      matched_transfer_ids: [...matchedIds],
-      event_transfer_id: event.transferId,
-      event_quote_id: event.reference,
-      event_transaction_id: event.transactionReference,
-    });
-    return null;
-  }
-  if (matches.length === 0) {
-    logEvent("info", {
-      event: "sdp_api_ramp_settlement_unmatched",
-      flow: "ramp-settlement",
-      provider: event.provider,
-      event_transfer_id: event.transferId,
-      event_quote_id: event.reference,
-      event_transaction_id: event.transactionReference,
-    });
-    return null;
-  }
-  const transfer = matches[0];
-  if (!corroboratesTransferReferences(transfer, event)) {
-    logEvent("warn", {
-      event: "sdp_api_ramp_settlement_reference_mismatch",
-      flow: "ramp-settlement",
-      organization_id: transfer.organization_id,
-      project_id: transfer.project_id,
-      transfer_id: transfer.id,
-      provider: event.provider,
-      transfer_provider_reference: transfer.provider_reference,
-      event_quote_id: event.reference,
-      event_transaction_id: event.transactionReference,
-    });
-    return null;
-  }
-  if (transfer.provider !== event.provider) {
-    logEvent("warn", {
-      event: "sdp_api_ramp_settlement_provider_mismatch",
-      flow: "ramp-settlement",
-      transfer_id: transfer.id,
-      transfer_provider: transfer.provider,
-      provider: event.provider,
-    });
-    return null;
-  }
-  return transfer;
 }
 
 export async function applyRampSettlementEvent(env: Env, event: RampSettlementEvent) {
@@ -266,8 +130,25 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
     return;
   }
 
-  const transfer = await correlateRampSettlementTransfer(env, event);
+  // Reconciliation key: the provider-issued quote/session reference the row
+  // was created with. provider_reference is never rewritten, so the lookup is
+  // exact for the row's whole life; an event whose reference matches no row
+  // is acknowledged and logged, never guessed at.
+  const repo = createSystemPaymentsRepository(env);
+  const transfer = await repo.getTransferByProviderReference({
+    provider: event.provider,
+    providerReference: event.reference,
+  });
   if (!transfer) {
+    logEvent("info", {
+      event: "sdp_api_ramp_settlement_unmatched",
+      flow: "ramp-settlement",
+      provider: event.provider,
+      provider_reference: event.reference,
+    });
+    return;
+  }
+  if (transfer.provider !== event.provider) {
     return;
   }
   if (!isRampTransferType(transfer.type)) {

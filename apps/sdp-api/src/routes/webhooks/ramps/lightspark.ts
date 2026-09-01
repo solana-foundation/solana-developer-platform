@@ -52,7 +52,6 @@ const lightsparkAmountSchema = z
  * never drops a settlement event.
  */
 const lightsparkTransactionDataSchema = z.object({
-  id: z.string().trim().min(1),
   status: z.string().trim().min(1),
   destination: z.object({
     onChainTransaction: z
@@ -64,7 +63,6 @@ const lightsparkTransactionDataSchema = z.object({
   }),
   customerId: z.string().trim().min(1),
   settledAt: z.string().trim().min(1).nullable().optional(),
-  description: z.string(),
   sentAmount: lightsparkAmountSchema,
   exchangeRate: z.number(),
   quoteId: z.string().trim().min(1),
@@ -217,15 +215,12 @@ function parseLightsparkEvent(rawBody: string): RampSettlementEvent {
   const webhook = parseLightsparkJson(rawBody);
   const { data } = webhook;
   const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
-  const transferId = data.description.startsWith("xfr_") ? data.description : undefined;
   const onchain = lightsparkOnchainTransfer(data);
   const settlement = buildLightsparkSettlement(data);
   const identity = {
     provider: "lightspark" as const,
     reference: data.quoteId,
-    transactionReference: data.id,
     providerCustomerId: data.customerId,
-    ...(transferId !== undefined ? { transferId } : {}),
     ...(onchain !== undefined ? { onchain } : {}),
   };
 

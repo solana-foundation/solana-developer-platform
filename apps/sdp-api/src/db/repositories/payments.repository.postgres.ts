@@ -1,6 +1,5 @@
 import { type PaymentTransferStatus, tokenFilterAliases } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
-import { internalError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
@@ -568,10 +567,6 @@ export function createPostgresPaymentsRepository(
         assignments.push("fiat_amount = ?");
         assignmentValues.push(input.fiatAmount);
       }
-      if (input.providerReference !== undefined) {
-        assignments.push("provider_reference = ?");
-        assignmentValues.push(input.providerReference);
-      }
       if (input.providerData !== undefined) {
         assignments.push("provider_data = provider_data || ?::jsonb");
         assignmentValues.push(JSON.stringify(input.providerData));
@@ -594,21 +589,14 @@ export function createPostgresPaymentsRepository(
     },
 
     async getTransferById(params) {
-      if ("organizationId" in params) {
-        assertScope(params);
-      } else if (tenantScope) {
-        throw internalError("Unscoped transfer lookup is available only to system repositories.");
-      }
-      const scope =
-        "organizationId" in params
-          ? buildTransferScopeWhere({
-              organizationId: params.organizationId,
-              projectId: params.projectId,
-              includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-              extraClauses: ["id = ?"],
-              extraValues: [params.transferId],
-            })
-          : { where: "id = ?", values: [params.transferId] };
+      assertScope(params);
+      const scope = buildTransferScopeWhere({
+        organizationId: params.organizationId,
+        projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: ["id = ?"],
+        extraValues: [params.transferId],
+      });
 
       const row = await db
         .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
