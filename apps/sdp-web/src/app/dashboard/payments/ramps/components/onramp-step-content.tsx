@@ -18,6 +18,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
+import { isTerminalTransferStatus, RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -192,6 +193,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "manual_instructions") {
+    // Withdraw the instructions once the transfer can no longer settle: the bank details and
+    // payment reference stay copyable, so leaving them up invites a wire against a dead order.
+    // Ordered ahead of the missing-instructions guard, which would otherwise report a quote
+    // defect for a transfer whose real problem is that it is already dead.
+    if (isTerminalTransferStatus(transferStatus?.status)) {
+      return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
+    }
+
     if (!quote.paymentInstructions) {
       return (
         <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">

@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { CheckCircle2Icon, InfoIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -15,6 +15,21 @@ interface TransferStatusCopy {
 }
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+/**
+ * Statuses a transfer cannot leave. Callers use this to withdraw funding instructions: the
+ * deposit address, bank details and payment reference all stay copyable, so leaving them on
+ * screen invites a customer to fund an order that can never settle.
+ */
+const TERMINAL_TRANSFER_STATUSES = new Set<PaymentTransferStatus>([
+  "canceled",
+  "failed",
+  "expired",
+]);
+
+export function isTerminalTransferStatus(status: PaymentTransferStatus | undefined): boolean {
+  return status !== undefined && TERMINAL_TRANSFER_STATUSES.has(status);
+}
 
 function transferStatusCopy(
   t: Translate,
@@ -81,10 +96,14 @@ function transferStatusCopy(
           : t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
         state: "error",
       };
+    // Cancellation is recorded by SDP, not reported by the provider, so it must not be
+    // rendered as the provider's status — that misattributes the decision.
     case "canceled":
       return {
-        title: t("DashboardPayments.ramps.status.updated"),
-        description: t("DashboardPayments.ramps.status.currentProviderStatus", { status }),
+        title: t("DashboardPayments.ramps.status.canceled"),
+        description: onramp
+          ? t("DashboardPayments.ramps.status.canceledFundingDescription")
+          : t("DashboardPayments.ramps.status.canceledPayoutDescription"),
         state: "error",
       };
     default:
