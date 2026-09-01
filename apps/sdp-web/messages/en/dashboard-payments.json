@@ -190,6 +190,7 @@
       "success": "Success",
       "transferId": "SDP Transfer ID",
       "depositTransaction": "Deposit transaction",
+      "onchainTransaction": "Onchain transaction",
       "quoteId": "Quote ID",
       "depositComplete": "Completed Deposit",
       "payoutComplete": "Completed Payout",

@@ -84,9 +84,11 @@ function completionDetailRows(
       rows.push(row);
     }
   }
-  if (!onramp && transfer.signature) {
+  if (transfer.signature) {
     rows.push({
-      label: t("DashboardPayments.ramps.depositTransaction"),
+      label: onramp
+        ? t("DashboardPayments.ramps.onchainTransaction")
+        : t("DashboardPayments.ramps.depositTransaction"),
       value: shortenAddress(transfer.signature),
       href: explorerTxUrl(transfer.signature, cluster),
       copyValue: transfer.signature,
