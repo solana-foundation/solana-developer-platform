@@ -84,6 +84,7 @@ export function OnrampRail({
     ...wizard.summaryDetails,
   ];
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
+  const showInlineStatus = wizard.onTransactionStage && Boolean(wizard.quote);
   const transferState = getRampTransferState(wizard.transferStatus?.status);
   return (
     <RampWizardShell
@@ -109,8 +110,12 @@ export function OnrampRail({
       onCounterpartyCreated={() => {}}
       summary={<WizardSummaryList details={summaryDetails} />}
       header={
-        hostedStage ? (
-          <RampStatusInline direction="onramp" hosted transfer={wizard.transferStatus} />
+        showInlineStatus ? (
+          <RampStatusInline
+            direction="onramp"
+            hosted={hostedStage}
+            transfer={wizard.transferStatus}
+          />
         ) : undefined
       }
       secondaryLabel={
