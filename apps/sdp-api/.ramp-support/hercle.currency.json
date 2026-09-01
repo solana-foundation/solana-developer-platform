@@ -6,7 +6,10 @@
         "max": null
       }
     },
-    "cryptos": ["usdc.solana"]
+    "cryptos": [
+      "usdc.solana",
+      "sol.solana"
+    ]
   },
   "offramp": {
     "currencies": {
@@ -15,6 +18,9 @@
         "max": null
       }
     },
-    "cryptos": ["usdc.solana"]
+    "cryptos": [
+      "usdc.solana",
+      "sol.solana"
+    ]
   }
 }

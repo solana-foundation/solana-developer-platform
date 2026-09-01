@@ -185,7 +185,7 @@ export class HercleRampClient implements RampProvider {
   ): Promise<ProviderRailSupportDistillation> {
     const corridor = {
       currencies: { EUR: unreportedCurrencyLimit() },
-      cryptos: ["usdc.solana"],
+      cryptos: ["usdc.solana", "sol.solana"],
     } as const;
 
     return {
