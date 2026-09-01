@@ -22,6 +22,7 @@
       "amountInvalid": "Saisissez un montant en USDC supérieur à zéro, avec jusqu'à 6 décimales.",
       "amountWithUnit": "{amount} USDC",
       "tokenLabel": "Token",
+      "noEnabledTokens": "Cette instance Private Channels n'active aucun token pris en charge.",
       "amountForToken": "Montant ({symbol})",
       "amount": "Montant"
     },

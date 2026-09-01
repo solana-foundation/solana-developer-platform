@@ -22,6 +22,7 @@
       "amountInvalid": "Informe um valor em USDC maior que zero, com até 6 casas decimais.",
       "amountWithUnit": "{amount} USDC",
       "tokenLabel": "Token",
+      "noEnabledTokens": "Esta instância do Private Channels não habilita um token compatível.",
       "amountForToken": "Valor ({symbol})",
       "amount": "Valor"
     },

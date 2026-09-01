@@ -15,6 +15,7 @@
       "loadError": "Ocurrió un error al cargar esta sección.",
       "cancel": "Cancelar",
       "tokenLabel": "Token",
+      "noEnabledTokens": "Esta instancia de Private Channels no habilita ningún token compatible.",
       "amountForToken": "Monto ({symbol})",
       "amount": "Monto",
       "amountPlaceholder": "1.5",

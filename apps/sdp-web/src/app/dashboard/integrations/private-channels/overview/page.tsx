@@ -10,6 +10,7 @@ import {
   loadChannels,
   loadEvents,
   loadOverview,
+  loadTokenEligibility,
   loadWalletVerification,
 } from "../private-channels-page.data";
 import {
@@ -32,11 +33,12 @@ export default async function PrivateChannelsOverviewPage() {
   // pane, so switching tabs is a shallow history update instead of a segment
   // navigation that refetches the RSC payload on every toggle.
   const client = await createSdpApiClient();
-  const [overview, wallets, channels, events, apiKeysResult] = await Promise.all([
+  const [overview, wallets, channels, events, tokenEligibility, apiKeysResult] = await Promise.all([
     loadOverview(client),
     loadWalletVerification(client),
     loadChannels(client),
     loadEvents(client),
+    loadTokenEligibility(client),
     fetchActiveApiKeys(client.request),
   ]);
 
@@ -60,10 +62,14 @@ export default async function PrivateChannelsOverviewPage() {
   // fallback cannot produce a truthful partial page. Surface that failure just like
   // the overview request instead of presenting missing channel data as an empty state.
   // The playground pane never needed overview data, so it stays reachable either way.
-  if (!overview.ok || !channels.ok) {
+  if (!overview.ok || !channels.ok || (overview.data && !tokenEligibility.ok)) {
     return (
       <PrivateChannelsTabShell
-        overview={<PrivateChannelsLoadError message={overview.error ?? channels.error} />}
+        overview={
+          <PrivateChannelsLoadError
+            message={overview.error ?? channels.error ?? tokenEligibility.error}
+          />
+        }
         playground={playgroundPane}
       />
     );
@@ -98,7 +104,7 @@ export default async function PrivateChannelsOverviewPage() {
           connected={isConnected}
           loadError={!wallets.ok}
         />
-        <AllowedTokensPanel connected={isConnected} />
+        <AllowedTokensPanel connected={isConnected} tokens={tokenEligibility.data} />
       </div>
 
       {/* Activity only exists once an instance is connected — hide the panel until then. */}

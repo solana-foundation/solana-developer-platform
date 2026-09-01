@@ -14,6 +14,7 @@ import type {
   PrivateChannelInstanceEnvelope,
   PrivateChannelInstanceOverview,
   PrivateChannelPrincipalDto,
+  PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
   PrivateChannelVerifiedWalletDto,
@@ -57,6 +58,16 @@ export function fetchPrivateChannelOverview(client: SdpApiClient): Promise<{
   overview: PrivateChannelInstanceOverview;
 }> {
   return client.fetch("/v1/private-channels/instance/overview");
+}
+
+/** Read SDP's token registry combined with the connected instance's on-chain allowlist. */
+export async function fetchPrivateChannelTokenEligibility(
+  client: SdpApiClient
+): Promise<PrivateChannelTokenEligibility[]> {
+  const { tokens } = await client.fetch<{ tokens: PrivateChannelTokenEligibility[] }>(
+    "/v1/private-channels/tokens"
+  );
+  return tokens;
 }
 
 /** List channels for the active instance (newest first); ensures the default channel exists. */

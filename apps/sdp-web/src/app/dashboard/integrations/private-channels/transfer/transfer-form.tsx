@@ -3,10 +3,10 @@
 import type {
   CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
+  PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
-import { privateChannelTokens } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useTransition } from "react";
 import { toast } from "sonner";
@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { fetchWalletBalancesAction, type WalletBalanceView } from "../wallet-balances";
@@ -42,6 +41,7 @@ interface TransferFormProps {
   channels: PrivateChannelMembershipChannelDto[];
   scopeKey: string;
   sourceWallets: CustodyWalletSummary[];
+  tokens: PrivateChannelTokenEligibility[];
 }
 
 interface TransferFormState {
@@ -102,8 +102,11 @@ export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
   return <TransferFormState key={scopeKey} {...props} />;
 }
 
-function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, "scopeKey">) {
-  const tokens = privateChannelTokens(useSolanaCluster());
+function TransferFormState({
+  channels,
+  sourceWallets,
+  tokens,
+}: Omit<TransferFormProps, "scopeKey">) {
   const t = useTranslations();
   const [state, updateState] = useReducer(transferFormReducer, {
     channelId: channels[0]?.id ?? "",
@@ -285,6 +288,10 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
     if (submitting.current) {
       return;
     }
+    if (!selectedToken) {
+      updateState({ error: t("DashboardPrivateChannels.common.noEnabledTokens") });
+      return;
+    }
 
     updateState({ showAmountError: true });
     let selectionKey: MessageKey | null = null;
@@ -379,7 +386,7 @@ function TransferFields(props: {
   state: TransferFormState;
   submitting: { current: boolean };
   t: Translate;
-  tokens: ReturnType<typeof privateChannelTokens>;
+  tokens: PrivateChannelTokenEligibility[];
   updateState: (update: TransferFormUpdate) => void;
   onSubmit: () => void;
 }) {
@@ -402,6 +409,12 @@ function TransferFields(props: {
         props.onSubmit();
       }}
     >
+      {props.tokens.length === 0 && (
+        <p className="text-secondary text-sm">
+          {props.t("DashboardPrivateChannels.common.noEnabledTokens")}
+        </p>
+      )}
+
       <div className="space-y-1.5">
         <Label>{props.t("DashboardPrivateChannels.transfer.channel")}</Label>
         <Select
@@ -563,6 +576,7 @@ function TransferFields(props: {
           props.isSubmitting ||
           !channelId ||
           !walletId ||
+          props.tokens.length === 0 ||
           !recipientVerifiedWalletId ||
           !amount.trim()
         }

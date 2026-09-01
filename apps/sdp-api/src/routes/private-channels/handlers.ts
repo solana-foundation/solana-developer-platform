@@ -23,6 +23,7 @@ export {
 } from "./handlers/members";
 export { getPrivateChannelOverview } from "./handlers/overview";
 export { probePrivateChannelConnection } from "./handlers/probe";
+export { listPrivateChannelTokenEligibility } from "./handlers/tokens";
 export {
   createPrivateChannelTransfer,
   getPrivateChannelTransferById,

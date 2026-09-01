@@ -27,6 +27,7 @@
       "loadError": "Đã xảy ra lỗi khi tải phần này.",
       "cancel": "Hủy",
       "tokenLabel": "Token",
+      "noEnabledTokens": "Phiên bản Private Channels này không bật token được hỗ trợ.",
       "amountForToken": "Số tiền ({symbol})",
       "amount": "Số tiền",
       "amountPlaceholder": "1.5",
