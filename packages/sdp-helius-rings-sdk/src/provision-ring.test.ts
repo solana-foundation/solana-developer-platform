@@ -158,11 +158,16 @@ function harness(accounts: Map<string, unknown>) {
   return { client, deps };
 }
 
-/** Harness over a fully-registered ring: config, ring-auth and reader grant all on chain. */
-async function registeredHarness() {
+/**
+ * Harness over a fully-registered ring: program, config, ring-auth and reader
+ * grant all on chain, with the upgrade authority matching the config's.
+ */
+async function registeredHarness(upgradeAuthority: Address = AUTHORITY) {
   const derived = await derivedAddresses();
   const { deps, client } = harness(
     new Map<string, unknown>([
+      [RING_PROGRAM, programAccount(derived.programDataAddress)],
+      [derived.programDataAddress, programDataAccount(upgradeAuthority)],
       [derived.configAddress, configAccount(AUTHORITY, derived.configBump)],
       [derived.ringAuth, ringAuthAccount()],
       [derived.grantRecord, grantRecordAccount(derived.grantRecordBump)],
@@ -270,6 +275,20 @@ describe("provisionCustomRing", () => {
     expect(deps.signMessage).toHaveBeenCalledWith(expect.any(String), AUTHORITY);
   });
 
+  it("refuses to adopt a ring whose program another party can upgrade", async () => {
+    // Custody holds the config authority, but the program's upgrade authority
+    // is someone else's key: they could swap the code the notes deposit
+    // under, so adoption must refuse before anything is signed or activated.
+    const foreignAuthority = "Vote111111111111111111111111111111111111111" as Address;
+    const { deps } = await registeredHarness(foreignAuthority);
+
+    await expect(
+      provisionCustomRing(deps, { ringProgramId: RING_PROGRAM, lookupTableAddress: RECORDED_TABLE })
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(deps.signTransaction).not.toHaveBeenCalled();
+    expect(deps.signMessage).not.toHaveBeenCalled();
+  });
+
   it("rents the lookup table for an adopted ring that lacks one", async () => {
     const { deps } = await registeredHarness();
 
@@ -372,9 +391,17 @@ describe("provisionCustomRing", () => {
   });
 
   it("resumes a run that died between config and SPP registration", async () => {
-    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
-      await derivedAddresses();
+    const {
+      configAddress,
+      configBump,
+      grantRecord,
+      grantRecordBump,
+      ringAuth,
+      programDataAddress,
+    } = await derivedAddresses();
     const accounts = new Map<string, unknown>([
+      [RING_PROGRAM, programAccount(programDataAddress)],
+      [programDataAddress, programDataAccount(AUTHORITY)],
       [configAddress, configAccount(AUTHORITY, configBump)],
     ]);
     const { deps } = harness(accounts);
@@ -401,9 +428,11 @@ describe("provisionCustomRing", () => {
   });
 
   it("resumes by granting the initial reader when only the grant is missing", async () => {
-    const { configAddress, configBump, ringAuth } = await derivedAddresses();
+    const { configAddress, configBump, ringAuth, programDataAddress } = await derivedAddresses();
     const { deps } = harness(
       new Map<string, unknown>([
+        [RING_PROGRAM, programAccount(programDataAddress)],
+        [programDataAddress, programDataAccount(AUTHORITY)],
         [configAddress, configAccount(AUTHORITY, configBump)],
         [ringAuth, ringAuthAccount()],
       ])

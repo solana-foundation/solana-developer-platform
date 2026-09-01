@@ -238,12 +238,15 @@ failure recorded on the row.
 - **Resume, never re-key.** Bring-up is idempotent against on-chain state:
   re-submitting the same name and program id resumes from whatever already
   landed. An existing on-chain config is adopted as it stands — re-keying a
-  live ring would orphan its auditor. Adopting a fully-registered ring lands
-  no ring-program transaction, so custody first proves it holds the config
-  authority by signing a challenge; a ring administered by someone else's key
-  is refused with a `409`. A recorded lookup table is adopted when live and
-  complete; one that exists but lacks the ring's addresses was not created by
-  this bring-up and is refused.
+  live ring would orphan its auditor — but only when the program's upgrade
+  authority IS the config authority: a program another party can upgrade
+  could swap the code the notes deposit under, so it is refused with a `409`.
+  Adopting a fully-registered ring lands no ring-program transaction, so
+  custody additionally proves it holds the config authority by signing a
+  challenge; a ring administered by someone else's key is the same `409`. A
+  recorded lookup table is adopted when live and complete; one that exists
+  but lacks the ring's addresses was not created by this bring-up and is
+  refused.
 - **No re-pointing once active.** Re-submitting a recorded name with a
   different program id replaces a ring that never went active (a mistyped id
   binds no notes, so correcting it strands nothing) and is a `409` once the

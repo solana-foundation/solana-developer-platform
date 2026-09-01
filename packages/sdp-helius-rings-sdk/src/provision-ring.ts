@@ -106,6 +106,20 @@ export async function provisionCustomRing(
   // would orphan its auditor, and update paths are deliberately out of reach.
   let custodySigned = false;
   let config = await readRingConfig(deps.client, ringProgramId);
+  if (config !== undefined) {
+    // Adopting a pre-existing config: the signatures and challenge below
+    // prove custody administers the CONFIG, but the program's upgrade
+    // authority governs the code the notes deposit under. A ring another
+    // party can upgrade must not be activated for this project's deposits;
+    // fresh bring-up guarantees the equality by construction (the config is
+    // created with the upgrade authority as its authority).
+    if ((await readUpgradeAuthority(deps.client, ringProgramId)) !== config.authority) {
+      throw new HeliusRingsError(
+        "conflict",
+        "the ring program's upgrade authority is not the ring's config authority; the ring belongs to another operator"
+      );
+    }
+  }
   if (config === undefined) {
     const authority = await readUpgradeAuthority(deps.client, ringProgramId);
     const auditor = await requestAuditorKey(deps, ringProgramId, authority);
