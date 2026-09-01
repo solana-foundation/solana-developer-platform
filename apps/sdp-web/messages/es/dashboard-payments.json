@@ -244,8 +244,11 @@
         "updated": "Estado de la transferencia actualizado",
         "currentProviderStatus": "Estado actual del proveedor: {status}.",
         "preparing": "Preparando el estado de la transferencia",
-        "preparingDescription": "Estamos esperando el registro de la transferencia asociado a esta cotización."
-      }
+        "preparingDescription": "Estamos esperando el registro de la transferencia asociado a esta cotización.",
+        "waitingForPayment": "Esperando el pago",
+        "waitingForPaymentHostedDescription": "Completa el pago en la ventana del proveedor que aparece arriba. Este depósito se actualiza automáticamente cuando el proveedor lo confirma."
+      },
+      "untrustedProviderUrl": "El proveedor devolvió una URL no confiable, por lo que no se cargó. Crea una nueva cotización o contacta a soporte."
     },
     "onchainSend": {
       "noAssets": "Esta Wallet no tiene activos disponibles para enviar.",
@@ -723,7 +726,9 @@
       "solanaSignature": "Firma de Solana",
       "moneygramError": "Error de MoneyGram",
       "lastUpdated": "Última actualización",
-      "copy": "Copiar {label}"
+      "copy": "Copiar {label}",
+      "viewReceipt": "Ver recibo",
+      "receipt": "Recibo"
     },
     "requestFailed": "La solicitud falló.",
     "submitting": "Enviando...",

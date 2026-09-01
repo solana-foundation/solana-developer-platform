@@ -163,61 +163,6 @@ export interface EarnStrategy {
   updatedAt: string;
 }
 
-/** Persisted customer-facing treatments supported by the Earn button builder. */
-export const EARN_BUTTON_STYLES = ["ink", "light", "accent"] as const;
-export type EarnButtonStyle = (typeof EARN_BUTTON_STYLES)[number];
-export const DEFAULT_EARN_BUTTON_ACCENT_COLOR = "#14F195";
-export const EARN_BUTTON_ACCENT_COLOR_PATTERN = /^#[0-9A-F]{6}$/i;
-
-/**
- * Shape of the public engineering-handoff token. The generator lives in the
- * API repository (`customAlphabet(..., EARN_BUTTON_PUBLIC_TOKEN_LENGTH)`);
- * every validator (API route params, OpenAPI, web client) must consume these
- * rather than restating the shape.
- */
-export const EARN_BUTTON_PUBLIC_TOKEN_LENGTH = 24;
-export const EARN_BUTTON_PUBLIC_TOKEN_PATTERN = /^[A-Za-z0-9_-]{24}$/;
-
-/**
- * One project's saved Earn integration handoff. The public token is safe to
- * share with an engineer: it resolves configuration only and never carries an
- * SDP API key.
- */
-export interface EarnButtonConfiguration {
-  id: string;
-  strategyId: string;
-  style: EarnButtonStyle;
-  accentColor: string;
-  publicToken: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EarnButtonConfigurationResponse {
-  configuration: EarnButtonConfiguration;
-}
-
-/** Public, unauthenticated subset served to an integration handoff page. */
-export interface PublicEarnButtonConfiguration {
-  strategyId: string;
-  strategyName: string | null;
-  provider: string | null;
-  style: EarnButtonStyle;
-  accentColor: string;
-  /**
-   * False when the configured strategy is no longer served by the catalogue
-   * read path (hidden, delisted, or not active). The handoff page must render
-   * a stale state instead of the integration snippet, and the display
-   * metadata above is withheld (`strategyName`/`provider` are null) so the
-   * unauthenticated route never names a strategy the catalogue hides.
-   */
-  strategyAvailable: boolean;
-}
-
-export interface PublicEarnButtonConfigurationResponse {
-  configuration: PublicEarnButtonConfiguration;
-}
-
 /**
  * Non-custodial vault positions — the custody wallet owns the vault shares and
  * SDP reads their current value live from the provider on every list request.
@@ -412,6 +357,13 @@ export interface EarnVaultWithdrawalRequest {
   positionId: string;
   /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
   shares: string;
+  /**
+   * Optional exit slippage floor: the minimum deposit-token amount to accept,
+   * decimal string in the token's own units. Required in practice by providers
+   * whose builder refuses an implicit tolerance (Veda); the dashboard derives
+   * it from the live withdrawal quote.
+   */
+  minAmountOut?: string;
 }
 
 /** One signed vault withdrawal movement. */
@@ -535,6 +487,72 @@ export interface EarnExternalWalletDepositResponse {
 /** Response body of POST /v1/earn/external-wallet/withdrawals. */
 export interface EarnExternalWalletWithdrawalResponse {
   withdrawal: EarnExternalWalletMovement;
+}
+
+/** Keyset activity page for exactly one external wallet, newest first. */
+export interface EarnExternalWalletMovementsPage {
+  ownerAddress: string;
+  movements: EarnExternalWalletMovement[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** Response body of GET /v1/earn/external-wallet/movements/:movementId. */
+export interface EarnExternalWalletMovementResponse {
+  movement: EarnExternalWalletMovement;
+}
+
+/**
+ * Why an earned figure is absent. Unavailable is never encoded as zero:
+ * - `live_value_unavailable`: the provider could not hydrate current value.
+ * - `movements_pending`: a movement is still settling, so live value and the
+ *   ledger describe different moments.
+ * - `withdrawals_not_valued`: a currently held position has a finalized
+ *   withdrawal, and the ledger records exits in shares, not in the deposit
+ *   token, so no exact token-denominated earned figure exists (ADR 0002).
+ *
+ * Every earnings figure covers the wallet's CURRENTLY HELD positions: a fully
+ * exited position drops out entirely (its deposits leave `totalDeposited`
+ * along with its unvalued withdrawal), so one full exit does not withhold the
+ * open positions' earned forever. The exited history stays on the movements
+ * list.
+ */
+export type EarnExternalWalletEarnedUnavailableReason =
+  | "live_value_unavailable"
+  | "movements_pending"
+  | "withdrawals_not_valued";
+
+/** Earnings for one deposit token across an external wallet's positions. */
+export interface EarnExternalWalletTokenEarnings {
+  tokenMint: string;
+  positionCount: number;
+  /** Positions whose live value could not hydrate. */
+  unavailablePositionCount: number;
+  /** Live value across the token's positions; absent when any position is unavailable. */
+  currentValue?: string;
+  /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
+  totalDeposited: string;
+  /**
+   * `currentValue − totalDeposited`, signed. Absent (with the reason below)
+   * whenever it cannot be stated exactly. Live value reads the owner's WHOLE
+   * vault balance, so shares acquired outside SDP inflate this figure — a
+   * documented property of non-custodial hydration, not a bug (ADR 0002).
+   */
+  earned?: string;
+  earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
+}
+
+/** Balance and earnings for one external wallet, grouped by deposit token. */
+export interface EarnExternalWalletEarnings {
+  ownerAddress: string;
+  positionCount: number;
+  unavailablePositionCount: number;
+  totalsByToken: EarnExternalWalletTokenEarnings[];
+}
+
+/** Response body of GET /v1/earn/external-wallet/earnings/:ownerAddress. */
+export interface EarnExternalWalletEarningsResponse {
+  earnings: EarnExternalWalletEarnings;
 }
 
 /**

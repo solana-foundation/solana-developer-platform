@@ -232,12 +232,20 @@ export interface InstructionAction {
   doneLabel: string;
 }
 
-function InstructionActionButton({ action }: { action: InstructionAction }) {
+export function InstructionActionButton({
+  action,
+  variant = "secondary",
+  size = "xs",
+}: {
+  action: InstructionAction;
+  variant?: "default" | "secondary";
+  size?: "default" | "xs";
+}) {
   return (
     <Button
       type="button"
-      variant="secondary"
-      size="xs"
+      variant={variant}
+      size={size}
       iconLeft={action.succeeded ? <CheckCircle2Icon /> : action.icon}
       onClick={action.onClick}
       disabled={action.disabled || action.loading || action.succeeded}
@@ -528,7 +536,7 @@ export function ManualInstructionsQuote({
   fiatCurrency: string;
   cryptoToken: string;
   instructions: PaymentRampInstruction[];
-  /** Button rendered in the instruction header (e.g. simulate for onramp, send for offramp). */
+  /** Button rendered in the instruction header (for example, an on-ramp simulation action). */
   action?: InstructionAction;
   /** Overrides the default fiat-deposit copy (e.g. for crypto-funded off-ramp quotes). */
   description?: string;

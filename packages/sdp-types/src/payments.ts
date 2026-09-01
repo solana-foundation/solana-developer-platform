@@ -180,6 +180,14 @@ export type RampTransferSettlement =
   | LightsparkRampSettlement
   | CoinbaseRampSettlement;
 
+/** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
+export interface RampCryptoDeposit {
+  /** Provider-owned wallet address the crypto must be sent to. */
+  destinationAddress: string;
+  /** Crypto amount the provider expects, in display units. */
+  amount: string;
+}
+
 export interface MoneygramTransferDetails {
   transactionId?: string;
   referenceNumber?: string;
@@ -192,9 +200,11 @@ export interface MoneygramTransferDetails {
 
 export interface PaymentTransferSummary {
   id: string;
-  walletId?: string;
-  status: string;
+  custodyWalletId: string | null;
+  providerWalletId: string;
+  status: PaymentTransferStatus;
   signature: string | null;
+  error?: string | null;
   type?: string;
   direction?: string;
   source?: string;
@@ -211,6 +221,7 @@ export interface PaymentTransferSummary {
   fiatCurrency?: string;
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
+  cryptoDeposit?: RampCryptoDeposit;
   moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
@@ -241,7 +252,7 @@ export type PreparedPrivateTransfer = MagicBlockPreparedPrivateTransfer;
 
 export interface PaymentTransferRequest {
   projectId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   destination: string;
   token: string;
   amount: string;
@@ -295,7 +306,7 @@ export interface PaymentTransferBatchOptions {
 export interface PaymentTransferBatchRequest {
   projectId?: string;
   externalId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   token: string;
   recipients: PaymentTransferBatchRecipientRequest[];
   options?: PaymentTransferBatchOptions;
@@ -308,7 +319,8 @@ export interface PaymentTransferBatch {
   organizationId: string;
   projectId: string;
   externalId: string | null;
-  sourceWalletId: string;
+  sourceCustodyWalletId: string | null;
+  sourceProviderWalletId: string;
   sourceAddress: string;
   token: string;
   status: PaymentTransferBatchStatus;
@@ -875,7 +887,6 @@ export interface PaymentOnrampQuoteRequest {
   cryptoToken: string;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
-  redirectUrl?: string;
   domain?: string;
   rampsMemo?: Record<string, string>;
 }
@@ -887,7 +898,6 @@ export interface PaymentOfframpQuoteRequest {
   cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
-  redirectUrl?: string;
   rampsMemo?: Record<string, string>;
 }
 

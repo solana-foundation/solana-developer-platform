@@ -37,12 +37,6 @@ import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export function isTerminalRampTransferStatus(status: string) {
-  return (
-    status === "completed" || status === "failed" || status === "expired" || status === "canceled"
-  );
-}
-
 export type RampWizardStep<TId extends string = string> = {
   id: TId;
   label: string;
@@ -51,6 +45,7 @@ export type RampWizardStep<TId extends string = string> = {
 
 export interface RampQuotePayloadArgs {
   fields: RampFields;
+  selectedWallet: PaymentsDashboardWallet;
   provider: RampProviderId;
   selectedRampPair: SelectedRampPair;
   cryptoToken: string;
@@ -160,6 +155,16 @@ export function useRampWizard<TId extends string>(
     counterpartyId: initialCounterpartyId,
   });
 
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
+  );
+
+  const selectedWallet = useMemo(
+    () => liveWallets.find((wallet) => wallet.id === fields.walletId) ?? null,
+    [liveWallets, fields.walletId]
+  );
+
   const requirementsConfig = config.requirements;
   const requirements = useCounterpartyRequirements({
     counterpartyId: fields.counterpartyId,
@@ -167,7 +172,7 @@ export function useRampWizard<TId extends string>(
     direction: requirementsConfig.direction,
     cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
     fiatCurrency: selectedRampPair.fiatCurrency,
-    destinationWallet: fields.walletId,
+    destinationWallet: selectedWallet?.walletId ?? "",
     // Quote creation is event-driven: it fires the first time onboarding
     // reaches ready (submit response or status poll), never from an effect.
     // `runQuoteCreation` is declared below; the callback only runs after
@@ -181,22 +186,12 @@ export function useRampWizard<TId extends string>(
     },
   });
 
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
-
   const { mutate: mutateCounterparties } = useSWR(
     paymentsQueryKeys.actionCounterparties(),
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
     }
-  );
-
-  const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null,
-    [liveWallets, fields.walletId]
   );
 
   const steps = useMemo<readonly RampWizardStep<TId>[]>(() => {
@@ -259,13 +254,14 @@ export function useRampWizard<TId extends string>(
     quote: PaymentRampQuote;
     transferId: string;
   } | null> => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
       return null;
     }
     const created = await createRampQuote(
       config.quoteEndpoint,
       config.buildQuotePayload({
         fields,
+        selectedWallet,
         provider: fields.provider,
         selectedRampPair,
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
@@ -314,7 +310,7 @@ export function useRampWizard<TId extends string>(
   const retryQuoteCreation = () => void runQuoteCreation();
 
   const advanceRequirementsAndProceed = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
       return;
     }
     setHostedQuoteLoading(true);
@@ -324,7 +320,7 @@ export function useRampWizard<TId extends string>(
     try {
       const result = await requirements.submitRequirements({
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
-        destinationWallet: fields.walletId,
+        destinationWallet: selectedWallet.walletId,
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);

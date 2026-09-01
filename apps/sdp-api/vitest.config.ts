@@ -34,7 +34,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/__tests__/**/*.unit.ts"],
     exclude: ["node_modules", "dist"],
     coverage: {
-      provider: "istanbul",
+      provider: "v8",
       reporter: ["text", "json", "html"],
       reportsDirectory: "./coverage/node",
       include: ["src/**/*.ts"],

@@ -4,6 +4,7 @@ import type { RampDirection } from "@sdp/types/ramp-requirements";
 export const paymentsQueryKeys = {
   actionCounterparties: () => "payments-action-counterparties",
   actionWallets: () => "payments-action-wallets",
+  createTransfer: () => "payments-create-transfer",
   onrampTransferStatus: ({ transferId }: { transferId: string }) =>
     ["onramp-transfer-status", transferId] as const,
   offrampTransferStatus: ({ transferId }: { transferId: string }) =>

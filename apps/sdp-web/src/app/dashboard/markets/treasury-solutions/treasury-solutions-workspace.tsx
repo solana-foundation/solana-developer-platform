@@ -15,25 +15,19 @@ import {
 } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
 import {
-  ArrowDownToLineIcon,
-  ArrowUpFromLineIcon,
+  ArrowDownLeftIcon,
+  ArrowUpRightIcon,
   InfoIcon,
   RefreshCwIcon,
   WalletCardsIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -44,9 +38,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import {
   type EarnFundingWallet,
   useEarnFundingWallets,
@@ -89,40 +85,61 @@ import {
 } from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import {
-  formatAllocationShare,
+  availableTreasuryCashForWallet,
+  estimatedTreasuryApy,
   isOpenVaultPosition,
   summarizeTreasuryAllocation,
   type TreasuryAllocation,
-  type VaultShareMintVocabulary,
 } from "./treasury-allocation";
 
-function AllocationFigure({
-  caption,
+function TreasuryInfoTip({ label }: { label: string }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={label}
+            className="inline-flex size-4 items-center justify-center rounded-full text-tertiary transition-colors hover:text-primary"
+            type="button"
+          >
+            <InfoIcon aria-hidden="true" className="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64 text-xs leading-5">{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function TreasurySummaryFigure({
+  description,
   label,
   value,
 }: {
-  caption: string;
+  description?: string;
   label: string;
   value: string;
 }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-xs font-medium text-tertiary">{label}</dt>
-      {/* Numbers never truncate; a figure too wide for its column wraps
-       * instead of painting over the neighbour. */}
-      <dd className="mt-1.5 text-2xl leading-8 font-medium text-primary tabular-nums [overflow-wrap:anywhere]">
+    <Card className="min-w-0 gap-0 rounded-xl px-7 py-7">
+      <dt className="flex items-center gap-1 text-sm leading-5 font-medium text-secondary">
+        {label}
+        {description ? <TreasuryInfoTip label={description} /> : null}
+      </dt>
+      <dd className="mt-3 text-[28px] leading-8 font-medium tracking-[-0.2px] text-primary tabular-nums [overflow-wrap:anywhere]">
         {value}
       </dd>
-      <dd className="mt-1 text-xs text-tertiary">{caption}</dd>
-    </div>
+    </Card>
   );
 }
 
 function TreasuryAllocationCard({
   allocation,
+  estimatedApy,
   isLoading,
 }: {
   allocation: TreasuryAllocation;
+  estimatedApy: string | undefined;
   isLoading: boolean;
 }) {
   const t = useTranslations();
@@ -130,118 +147,49 @@ function TreasuryAllocationCard({
 
   if (isLoading) {
     return (
-      <Card>
-        <CardContent className="grid gap-6 sm:grid-cols-3">
-          <SkeletonBlock className="h-20 rounded-xl" />
-          <SkeletonBlock className="h-20 rounded-xl" />
-          <SkeletonBlock className="h-20 rounded-xl" />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const summary = allocation;
-
-  return (
-    <Card>
-      <CardContent>
-        <dl className="grid gap-x-6 gap-y-5 sm:grid-cols-3">
-          <AllocationFigure
-            caption={t(
-              summary.availableCash === undefined
-                ? "DashboardMarkets.treasury.summaryCashUnavailable"
-                : "DashboardMarkets.treasury.summaryCashCaption"
-            )}
-            label={t("DashboardMarkets.treasury.summaryCash")}
-            value={formatUsd(summary.availableCash, locale, 2)}
-          />
-          <AllocationFigure
-            caption={
-              summary.deployedValue !== undefined
-                ? t("DashboardMarkets.treasury.summaryDeployedCaption", {
-                    value: formatUsd(summary.deployedValue, locale, 2),
-                  })
-                : t(
-                    summary.deployedAbsence === "unreconciled"
-                      ? "DashboardMarkets.treasury.summaryDeployedUnreconciled"
-                      : "DashboardMarkets.treasury.summaryDeployedUnavailable"
-                  )
-            }
-            label={t("DashboardMarkets.treasury.summaryDeployed")}
-            value={formatAllocationShare(summary.deployedShare, locale)}
-          />
-          <AllocationFigure
-            caption={t(
-              summary.remainingShare !== undefined
-                ? "DashboardMarkets.treasury.summaryRemainingCaption"
-                : summary.sharesAbsence === "empty_float"
-                  ? "DashboardMarkets.treasury.summaryEmptyFloat"
-                  : "DashboardMarkets.treasury.summaryShareUnavailable"
-            )}
-            label={t("DashboardMarkets.treasury.summaryRemaining")}
-            value={formatAllocationShare(summary.remainingShare, locale)}
-          />
-        </dl>
-        {summary.deployedShare !== undefined ? (
-          /* The share stays a decimal string end to end; calc() does the
-           * width multiplication so no Number cast touches the amount. */
-          <div
-            aria-hidden="true"
-            className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-fill-strong"
-            data-testid="treasury-allocation-bar"
-          >
-            <div
-              className="h-full rounded-full bg-primary"
-              style={{ width: `calc(${summary.deployedShare} * 100%)` }}
-            />
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function WalletBalanceList({
-  vaultShareMints,
-  wallet,
-}: {
-  vaultShareMints: ReadonlySet<string>;
-  wallet: EarnFundingWallet;
-}) {
-  const t = useTranslations();
-  const locale = useLocale();
-  if (wallet.balances === undefined) {
-    return (
-      <p className="text-sm text-tertiary">{t("DashboardMarkets.treasury.balanceUnavailable")}</p>
-    );
-  }
-  // Vault share (receipt) tokens are ownership, not cash: they render as the
-  // wallet's "deployed in vaults" line and as position rows below, never as a
-  // token tile with an unreadable mint-derived symbol.
-  const cashBalances = wallet.balances.filter((balance) => !vaultShareMints.has(balance.mint));
-  if (cashBalances.length === 0) {
-    return (
-      <p className="text-sm text-tertiary">{t("DashboardMarkets.treasury.noTokenBalances")}</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <SkeletonBlock className="h-[121px] rounded-xl" />
+        <SkeletonBlock className="h-[121px] rounded-xl" />
+        <SkeletonBlock className="h-[121px] rounded-xl" />
+      </div>
     );
   }
 
   return (
-    <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {cashBalances.map((balance) => (
-        <li
-          className="flex min-w-0 items-center gap-3 rounded-xl bg-fill-subtle px-4 py-3"
-          key={`${wallet.id}:${balance.mint}`}
-        >
-          <TokenMark mint={balance.mint} size="sm" symbol={balance.token} />
-          <div className="min-w-0">
-            <p className="truncate text-xs text-tertiary">{balance.token}</p>
-            <p className="mt-0.5 truncate text-sm font-medium text-primary tabular-nums">
-              {formatProviderAmount(balance.uiAmount, locale)}
-            </p>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <dl className="grid gap-2 sm:grid-cols-3">
+      <TreasurySummaryFigure
+        description={t(
+          allocation.deployedValue === undefined
+            ? allocation.deployedAbsence === "unreconciled"
+              ? "DashboardMarkets.treasury.summaryDeployedUnreconciled"
+              : "DashboardMarkets.treasury.summaryDeployedUnavailable"
+            : "DashboardMarkets.treasury.summaryDeployedCaption",
+          allocation.deployedValue === undefined
+            ? undefined
+            : { value: formatUsd(allocation.deployedValue, locale, 2) }
+        )}
+        label={t("DashboardMarkets.treasury.summaryDeposited")}
+        value={formatUsd(allocation.deployedValue, locale, 2)}
+      />
+      <TreasurySummaryFigure
+        description={t(
+          allocation.availableCash === undefined
+            ? "DashboardMarkets.treasury.summaryCashUnavailable"
+            : "DashboardMarkets.treasury.summaryCashCaption"
+        )}
+        label={t("DashboardMarkets.treasury.summaryCash")}
+        value={formatUsd(allocation.availableCash, locale, 2)}
+      />
+      <TreasurySummaryFigure
+        description={t(
+          estimatedApy === undefined
+            ? "DashboardMarkets.treasury.summaryApyUnavailable"
+            : "DashboardMarkets.treasury.summaryApyCaption"
+        )}
+        label={t("DashboardMarkets.treasury.summaryApy")}
+        value={formatProviderApy(estimatedApy, locale)}
+      />
+    </dl>
   );
 }
 
@@ -249,89 +197,92 @@ function TreasuryWalletsCard({
   allocation,
   error,
   isLoading,
-  shareMints,
   wallets,
 }: {
   allocation: TreasuryAllocation;
   error: unknown;
   isLoading: boolean;
-  shareMints: VaultShareMintVocabulary;
   wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
   const locale = useLocale();
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <WalletCardsIcon aria-hidden="true" className="size-5 text-secondary" />
+    <section>
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <h2 className="text-[19px] leading-6 font-medium text-primary">
           {t("DashboardMarkets.treasury.connectedWallets")}
-        </CardTitle>
-        <CardDescription>{t("DashboardMarkets.treasury.walletDescription")}</CardDescription>
-        <CardAction>
-          <Badge variant="outline">{t("DashboardMarkets.treasury.liveBalances")}</Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SkeletonBlock className="h-28 rounded-xl" />
-            <SkeletonBlock className="h-28 rounded-xl" />
-          </div>
-        ) : error ? (
-          <p className="text-sm text-secondary">{t("DashboardMarkets.treasury.walletsError")}</p>
-        ) : wallets.length === 0 ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.walletsEmptyDescription")}
-            icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.walletsEmptyTitle")}
-          />
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {wallets.map((wallet) => {
-              // Straight from the same result the summary rendered, so the
-              // two cannot disagree about this wallet.
-              const deployment = allocation.deploymentByWalletId.get(wallet.id) ?? {
-                kind: "none" as const,
-              };
-              return (
-                <section
-                  className="rounded-xl border border-border-default px-4 py-4"
-                  key={wallet.id}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-medium text-primary">
-                        {wallet.label?.trim() || t("DashboardMarkets.treasury.unnamedWallet")}
-                      </h3>
-                      <p className="mt-1 text-xs text-tertiary" title={wallet.publicKey}>
-                        {shortenMarketAddress(wallet.publicKey)}
-                      </p>
-                    </div>
-                    <Badge variant={wallet.isRuntimeExecutionAllowed ? "success" : "outline"}>
-                      {wallet.provider ?? t("DashboardMarkets.treasury.walletProviderUnknown")}
-                    </Badge>
+        </h2>
+        <Button asChild size="sm" variant="secondary">
+          <Link href={DASHBOARD_SIDE_NAV_HREFS.wallets}>
+            {t("DashboardMarkets.treasury.viewAll")}
+          </Link>
+        </Button>
+      </div>
+      {isLoading ? (
+        <div className="grid gap-2 md:grid-cols-3">
+          <SkeletonBlock className="h-[175px] rounded-2xl" />
+          <SkeletonBlock className="h-[175px] rounded-2xl" />
+          <SkeletonBlock className="h-[175px] rounded-2xl" />
+        </div>
+      ) : error ? (
+        <p className="text-sm text-secondary">{t("DashboardMarkets.treasury.walletsError")}</p>
+      ) : wallets.length === 0 ? (
+        <ListEmptyState
+          description={t("DashboardMarkets.treasury.walletsEmptyDescription")}
+          icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
+          message={t("DashboardMarkets.treasury.walletsEmptyTitle")}
+        />
+      ) : (
+        <div className="grid gap-2 md:grid-cols-3">
+          {wallets.map((wallet) => {
+            // Straight from the same result the summary rendered, so the
+            // two cannot disagree about this wallet.
+            const deployment = allocation.deploymentByWalletId.get(wallet.id) ?? {
+              kind: "none" as const,
+            };
+            return (
+              <Card className="gap-0 rounded-2xl px-4 py-4" key={wallet.id}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-medium text-primary">
+                      {wallet.label?.trim() || t("DashboardMarkets.treasury.unnamedWallet")}
+                    </h3>
+                    <p className="mt-1 text-xs text-tertiary" title={wallet.publicKey}>
+                      {shortenMarketAddress(wallet.publicKey)}
+                    </p>
                   </div>
-                  <WalletBalanceList vaultShareMints={shareMints.known} wallet={wallet} />
-                  {deployment.kind !== "none" ? (
-                    <div className="mt-3 flex items-center justify-between gap-4 border-t border-border-subtle pt-3">
-                      <span className="text-xs text-tertiary">
-                        {t("DashboardMarkets.treasury.walletDeployed")}
-                      </span>
-                      <span className="text-sm font-medium text-primary tabular-nums">
-                        {deployment.kind === "value"
-                          ? formatUsd(deployment.value, locale, 2)
+                  <Badge variant="outline">
+                    {wallet.provider ?? t("DashboardMarkets.treasury.walletProviderUnknown")}
+                  </Badge>
+                </div>
+                <dl className="mt-4 space-y-2 rounded-xl bg-fill-subtle px-3 py-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="text-xs text-tertiary">
+                      {t("DashboardMarkets.treasury.summaryCash")}
+                    </dt>
+                    <dd className="text-sm font-medium text-primary tabular-nums">
+                      {formatUsd(availableTreasuryCashForWallet(wallet), locale, 2)}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="text-xs text-tertiary">
+                      {t("DashboardMarkets.treasury.walletDeployed")}
+                    </dt>
+                    <dd className="text-sm font-medium text-primary tabular-nums">
+                      {deployment.kind === "value"
+                        ? formatUsd(deployment.value, locale, 2)
+                        : deployment.kind === "none"
+                          ? formatUsd("0", locale, 2)
                           : t("DashboardMarkets.treasury.positionValueUnavailable")}
-                      </span>
-                    </div>
-                  ) : null}
-                </section>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                    </dd>
+                  </div>
+                </dl>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -397,10 +348,10 @@ function StrategyTable({
       <Table className="table-fixed" style={{ minWidth: "62rem" }}>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[31%]">{t("DashboardMarkets.treasury.strategy")}</TableHead>
-            <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
-            <TableHead className="w-[13%]">{t("DashboardMarkets.treasury.apy")}</TableHead>
-            <TableHead className="w-[17%]">{t("DashboardMarkets.treasury.balance")}</TableHead>
+            <TableHead className="w-[28%]">{t("DashboardMarkets.treasury.position")}</TableHead>
+            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
+            <TableHead className="w-[17%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
+            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.apy")}</TableHead>
             <TableHead className="w-[13%]">{t("DashboardMarkets.treasury.status")}</TableHead>
             <TableHead align="right" className="w-[14%]">
               {t("DashboardMarkets.treasury.actions")}
@@ -422,11 +373,13 @@ function StrategyTable({
             return (
               <TableRow key={strategy.id}>
                 <TableCell>
-                  <EarnStrategyIdentity strategy={strategy} />
+                  <EarnStrategyIdentity showAssetMark={false} strategy={strategy} />
                 </TableCell>
-                <TableCell className="text-sm text-secondary">{asset?.symbol ?? "—"}</TableCell>
-                <TableCell className="text-lg font-medium text-primary tabular-nums">
-                  {formatProviderApy(strategy.currentApy, locale)}
+                <TableCell>
+                  <div className="flex items-center gap-2 text-sm text-secondary">
+                    {asset ? <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} /> : null}
+                    {asset?.symbol ?? "—"}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <p className="text-sm text-primary tabular-nums">
@@ -444,6 +397,9 @@ function StrategyTable({
                     </p>
                   ) : null}
                 </TableCell>
+                <TableCell className="text-sm font-medium text-primary tabular-nums">
+                  {formatProviderApy(strategy.currentApy, locale)}
+                </TableCell>
                 <TableCell>
                   <EarnDepositAvailabilityBadge
                     availability={availability}
@@ -455,7 +411,7 @@ function StrategyTable({
                   <div className="flex justify-end gap-2">
                     <Button
                       disabled={!canDeposit}
-                      iconLeft={<ArrowDownToLineIcon />}
+                      iconLeft={<ArrowDownLeftIcon />}
                       onClick={() => onDeposit(strategy)}
                       size="sm"
                       type="button"
@@ -494,14 +450,11 @@ function ActiveVaultPositionsCard({
   const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet] as const));
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader>
-        <CardTitle>{t("DashboardMarkets.treasury.vaultPositionsTitle")}</CardTitle>
-        <CardDescription>
-          {t("DashboardMarkets.treasury.vaultPositionsDescription")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="px-0">
+    <section>
+      <h2 className="mb-4 text-[19px] leading-6 font-medium text-primary">
+        {t("DashboardMarkets.treasury.vaultPositionsTitle")}
+      </h2>
+      <Card className="overflow-hidden rounded-2xl py-0">
         {isLoading ? (
           <div className="grid gap-3 px-6 py-5">
             <SkeletonBlock className="h-14 rounded-xl" />
@@ -532,7 +485,7 @@ function ActiveVaultPositionsCard({
             />
           )
         ) : (
-          <div className="overflow-x-auto border-y border-border-subtle">
+          <div className="overflow-x-auto">
             <Table className="table-fixed" style={{ minWidth: "52rem" }}>
               <TableHeader>
                 <TableRow>
@@ -563,9 +516,14 @@ function ActiveVaultPositionsCard({
                         </p>
                         <p className="mt-0.5 truncate text-xs text-tertiary">{position.provider}</p>
                       </TableCell>
-                      <TableCell className="text-sm text-secondary">{asset.symbol}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2 text-sm text-secondary">
+                          <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
+                          {asset.symbol}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-sm text-primary tabular-nums">
-                        {formatProviderAmount(position.tokenValue, locale, asset.symbol)}
+                        {formatProviderAmount(position.tokenValue, locale)}
                       </TableCell>
                       <TableCell className="text-sm text-secondary">
                         {wallet?.label?.trim() ||
@@ -582,7 +540,7 @@ function ActiveVaultPositionsCard({
                          */}
                         <Button
                           data-earn-vault-withdraw-focus-fallback={position.id}
-                          iconLeft={<ArrowUpFromLineIcon />}
+                          iconLeft={<ArrowUpRightIcon />}
                           onClick={() => onWithdraw(position)}
                           size="sm"
                           type="button"
@@ -598,8 +556,8 @@ function ActiveVaultPositionsCard({
             </Table>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </Card>
+    </section>
   );
 }
 
@@ -675,7 +633,7 @@ function ExistingProgramsCard({
                         <Button
                           data-earn-withdraw-focus-fallback={program.id}
                           disabled={program.wallet.status === "creating" || !withdrawalAvailable}
-                          iconLeft={<ArrowUpFromLineIcon />}
+                          iconLeft={<ArrowUpRightIcon />}
                           onClick={() => onWithdraw(program)}
                           size="sm"
                           type="button"
@@ -747,41 +705,49 @@ function TreasuryStrategiesCard({
   const depositsEnabled = isVaultDirectDepositEnabled(environment);
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader>
-        <CardTitle>{t("DashboardMarkets.treasury.strategiesTitle")}</CardTitle>
-        <CardDescription>{t("DashboardMarkets.treasury.strategiesDescription")}</CardDescription>
-        <CardAction>
-          <div className="flex items-center gap-2">
-            {environment === "sandbox" ? (
-              // Sandbox only (PRO-1742): production has no other shelf to
-              // offer, so the control must not render there at all — reviewing
-              // the mainnet catalogue IS what production shows by default.
-              <SegmentedControl
-                aria-label={t("DashboardMarkets.treasury.clusterToggleLabel")}
-                items={SOLANA_CLUSTERS.map((option) => ({
-                  value: option,
-                  label: SOLANA_CLUSTER_LABELS[option],
-                }))}
-                value={cluster}
-                // Re-clicking the active segment can emit an empty value from
-                // the underlying toggle group; a shelf always has a selection.
-                onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
-              />
-            ) : null}
-            <Button
-              iconLeft={<RefreshCwIcon />}
-              onClick={onRefresh}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              {t("DashboardMarkets.treasury.refresh")}
-            </Button>
-          </div>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="px-0">
+    <section>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="flex items-center gap-1 text-[19px] leading-6 font-medium text-primary">
+          {t("DashboardMarkets.treasury.strategiesTitle")}
+          <TreasuryInfoTip
+            label={t(
+              providerAccess === null
+                ? "DashboardMarkets.treasury.accessDisclosure"
+                : depositsEnabled
+                  ? "DashboardMarkets.treasury.rateDisclosure"
+                  : "DashboardMarkets.treasury.productionDisclosure"
+            )}
+          />
+        </h2>
+        <div className="flex items-center gap-2">
+          {environment === "sandbox" ? (
+            // Sandbox only (PRO-1742): production has no other shelf to
+            // offer, so the control must not render there at all — reviewing
+            // the mainnet catalogue IS what production shows by default.
+            <SegmentedControl
+              aria-label={t("DashboardMarkets.treasury.clusterToggleLabel")}
+              items={SOLANA_CLUSTERS.map((option) => ({
+                value: option,
+                label: SOLANA_CLUSTER_LABELS[option],
+              }))}
+              value={cluster}
+              // Re-clicking the active segment can emit an empty value from
+              // the underlying toggle group; a shelf always has a selection.
+              onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
+            />
+          ) : null}
+          <Button
+            iconLeft={<RefreshCwIcon />}
+            onClick={onRefresh}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {t("DashboardMarkets.treasury.refresh")}
+          </Button>
+        </div>
+      </div>
+      <Card className="overflow-hidden rounded-2xl py-0">
         {isLoading ? (
           <div className="grid gap-3 px-6 py-5">
             <SkeletonBlock className="h-14 rounded-xl" />
@@ -810,20 +776,8 @@ function TreasuryStrategiesCard({
             unrecordedShareMints={unrecordedShareMints}
           />
         )}
-        <div className="flex items-start gap-2 border-t border-border-subtle px-6 py-4 text-xs leading-5 text-tertiary">
-          <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <p>
-            {t(
-              providerAccess === null
-                ? "DashboardMarkets.treasury.accessDisclosure"
-                : depositsEnabled
-                  ? "DashboardMarkets.treasury.rateDisclosure"
-                  : "DashboardMarkets.treasury.productionDisclosure"
-            )}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+      </Card>
+    </section>
   );
 }
 
@@ -1047,24 +1001,14 @@ export function TreasurySolutionsWorkspace({
   const watchedVaultWithdrawalIds = vaultWithdrawalWatches.filter(
     (movementId) => !settledVaultWithdrawalIds.has(movementId)
   );
+  const portfolioApy =
+    allocation.deployedValue === undefined || positionsError || strategiesError
+      ? undefined
+      : estimatedTreasuryApy({ positions, strategies });
 
   return (
-    <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto w-full max-w-7xl space-y-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
-              {t("DashboardMarkets.treasury.eyebrow")}
-            </p>
-            <p className="mt-2 text-sm leading-6 text-secondary">
-              {t("DashboardMarkets.treasury.description")}
-            </p>
-          </div>
-          <Badge variant={sdpEnvironment === "sandbox" ? "default" : "outline"}>
-            {sdpEnvironment}
-          </Badge>
-        </div>
-
+    <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
+      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-11">
         {/* Errors pass undefined so a stale SWR success never renders as a
          * live figure: unavailable must read as unavailable, not as the last
          * total that happened to load. */}
@@ -1073,6 +1017,7 @@ export function TreasurySolutionsWorkspace({
          * without it the summary can only report "unavailable". */}
         <TreasuryAllocationCard
           allocation={allocation}
+          estimatedApy={portfolioApy}
           isLoading={
             !(walletsError || positionsError || strategiesError) &&
             (walletsLoading || positionsLoading || strategiesLoading)
@@ -1083,7 +1028,6 @@ export function TreasurySolutionsWorkspace({
           allocation={allocation}
           error={walletsError}
           isLoading={walletsLoading}
-          shareMints={shareMints}
           wallets={activeWallets}
         />
 

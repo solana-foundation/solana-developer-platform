@@ -1,5 +1,6 @@
 import type { AppDb, DatabaseExecutor } from "@/db";
 import { internalError } from "@/lib/errors";
+import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
   CreatePaymentTransferBatchInput,
   CreatePaymentTransferBatchWithRecipientsInput,
@@ -35,6 +36,7 @@ function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransf
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
     external_id: (row.external_id as string | null | undefined) ?? null,
+    source_custody_wallet_id: parseNullableCustodyWalletId(row.source_custody_wallet_id),
     source_wallet_id: row.source_wallet_id as string,
     source_address: row.source_address as string,
     token: row.token as string,
@@ -73,6 +75,30 @@ function mapPaymentTransferRecipientRow(row: Record<string, unknown>): PaymentTr
 
 function jsonParam(value: Record<string, unknown> | undefined): string | null {
   return value === undefined ? null : JSON.stringify(value);
+}
+
+function batchWalletAuthorizationFilter(
+  input: ListPaymentTransferBatchesInput
+): { sql: string; values: string[] } | null {
+  const authorization = input.walletAuthorization;
+  if (!authorization) return null;
+
+  const clauses: string[] = [];
+  const values: string[] = [];
+  if (authorization.custodyWalletIds.length > 0) {
+    clauses.push(
+      `source_custody_wallet_id IN (${authorization.custodyWalletIds.map(() => "?").join(", ")})`
+    );
+    values.push(...authorization.custodyWalletIds);
+  }
+  if (authorization.providerWalletIds.length > 0) {
+    clauses.push(
+      `(source_custody_wallet_id IS NULL AND source_wallet_id IN (${authorization.providerWalletIds.map(() => "?").join(", ")}))`
+    );
+    values.push(...authorization.providerWalletIds);
+  }
+
+  return { sql: clauses.length > 0 ? `(${clauses.join(" OR ")})` : "1 = 0", values };
 }
 
 function buildScopeWhere(params: {
@@ -148,6 +174,7 @@ async function insertTransferBatch(
          organization_id,
          project_id,
          external_id,
+         source_custody_wallet_id,
          source_wallet_id,
          source_address,
          token,
@@ -160,7 +187,7 @@ async function insertTransferBatch(
          initiated_by_key_id,
          idempotency_key,
          idempotency_fingerprint
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?, ?, ?)
        RETURNING *`
     )
     .bind(
@@ -168,6 +195,7 @@ async function insertTransferBatch(
       input.organizationId,
       input.projectId,
       input.externalId ?? null,
+      input.sourceCustodyWalletId,
       input.sourceWalletId,
       input.sourceAddress,
       input.token,
@@ -278,6 +306,7 @@ export function createPostgresPaymentTransferBatchesRepository(
              organization_id,
              project_id,
              external_id,
+             source_custody_wallet_id,
              source_wallet_id,
              source_address,
              token,
@@ -288,9 +317,10 @@ export function createPostgresPaymentTransferBatchesRepository(
              options,
              error,
              initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              external_id = EXCLUDED.external_id,
+             source_custody_wallet_id = EXCLUDED.source_custody_wallet_id,
              source_wallet_id = EXCLUDED.source_wallet_id,
              source_address = EXCLUDED.source_address,
              token = EXCLUDED.token,
@@ -311,6 +341,7 @@ export function createPostgresPaymentTransferBatchesRepository(
           input.organizationId,
           input.projectId,
           input.externalId ?? null,
+          input.sourceCustodyWalletId,
           input.sourceWalletId,
           input.sourceAddress,
           input.token,
@@ -412,6 +443,16 @@ export function createPostgresPaymentTransferBatchesRepository(
       const extraClauses: string[] = [];
       const extraValues: unknown[] = [];
 
+      const authorizationFilter = batchWalletAuthorizationFilter(input);
+      if (authorizationFilter) {
+        extraClauses.push(authorizationFilter.sql);
+        extraValues.push(...authorizationFilter.values);
+      }
+
+      if (input.sourceCustodyWalletId !== undefined) {
+        extraClauses.push("source_custody_wallet_id = ?");
+        extraValues.push(input.sourceCustodyWalletId);
+      }
       if (input.walletId) {
         extraClauses.push("source_wallet_id = ?");
         extraValues.push(input.walletId);

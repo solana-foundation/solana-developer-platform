@@ -2,7 +2,7 @@ import { getDb } from "@/db";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import { createSigningService } from "@/services/domain/signing.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
   DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
   parsePositiveIntegerConfig,
@@ -61,15 +61,34 @@ async function resolveSourceWallet(
   env: Env,
   row: PaymentRecurringPaymentRow
 ): Promise<CustodyWallet | null> {
-  const wallet = await createSigningService(env).getWalletById(
-    row.organization_id,
-    row.project_id,
-    row.source_wallet_id
-  );
-  if (!wallet || wallet.publicKey !== row.source_address) {
-    return null;
+  try {
+    const wallet = await new CustodyRuntimeTargets(
+      getDb(env),
+      env,
+      new Map()
+    ).findOperationalWallet({
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      walletId: row.source_wallet_id,
+    });
+    if (!wallet || wallet.publicKey !== row.source_address) {
+      return null;
+    }
+    return wallet;
+  } catch (error) {
+    if (error instanceof AppError && error.code === "CONFLICT") {
+      getLogger().warn(
+        {
+          organization_id: row.organization_id,
+          project_id: row.project_id,
+          recurring_payment_id: row.id,
+          reason: "ambiguous_source_wallet",
+        },
+        "collectDueRecurringPayments: skipped ambiguous recurring payment source wallet"
+      );
+    }
+    throw error;
   }
-  return wallet;
 }
 
 function shouldSkipCollectionError(error: unknown): boolean {

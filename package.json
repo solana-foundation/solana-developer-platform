@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.68.0",
+  "version": "0.69.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -10,7 +10,10 @@
   "pnpm": {
     "peerDependencyRules": {
       "allowedVersions": {
-        "@solana/kit": "^6.5.0"
+        "@solana/pay>@solana/kit": "^7.0.0",
+        "@solana/pay>@solana/keys": "^7.0.0",
+        "@solana/pay>@solana/rpc-subscriptions-api": "^7.0.0",
+        "@solana/pay>@solana/rpc-subscriptions-spec": "^7.0.0"
       }
     },
     "overrides": {
@@ -63,6 +66,7 @@
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:kamino-dependency-boundary": "node scripts/check-kamino-dependency-boundary.mjs",
     "check:secretref-serialization": "node scripts/check-secretref-serialization.mjs",
+    "check:veda-dependency-boundary": "node scripts/check-veda-dependency-boundary.mjs",
     "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
     "check:api-playground": "pnpm -C apps/sdp-api playground:check",
     "generate:api-playground": "pnpm -C apps/sdp-api playground:generate",
@@ -103,29 +107,10 @@
     "typescript": "6.0.3",
     "yaml": "2.9.0"
   },
-  "overrides": {
-    "@solana/rpc-spec": "6.5.0",
-    "@solana/kit": "6.5.0"
-  },
   "workspaces": {
     "packages": [
       "apps/*",
       "packages/*"
-    ],
-    "catalog": {
-      "@solana-program/system": "0.13.0",
-      "@solana-program/token-2022": "0.14.0",
-      "@solana/addresses": "6.9.0",
-      "@solana/codecs": "6.8.0",
-      "@solana/instructions": "6.10.0",
-      "@solana/keys": "6.10.0",
-      "@solana/kit": "6.8.0",
-      "@solana/mosaic-sdk": "0.1.1",
-      "@solana/programs": "6.10.0",
-      "@solana/rpc": "6.10.0",
-      "@solana/signers": "6.9.0",
-      "@solana/sysvars": "6.10.0",
-      "@solana/transactions": "6.9.0"
-    }
+    ]
   }
 }

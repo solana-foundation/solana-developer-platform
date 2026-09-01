@@ -30,6 +30,7 @@ import {
   formatDisplayAmount,
   resolveTransferTokenLabel,
 } from "../payments/payments-overview.utils";
+import { custodyQueryKeys } from "./custody-query-key";
 
 interface WalletActivitySectionProps {
   isVisible?: boolean;
@@ -100,7 +101,7 @@ export function WalletActivitySection({
     error: requestError,
     isValidating,
     mutate,
-  } = useSWR(`wallet-activity-${walletId}`, () => fetchWalletActivity(walletId), {
+  } = useSWR(custodyQueryKeys.walletActivity({ walletId }), () => fetchWalletActivity(walletId), {
     revalidateOnFocus: isVisible,
     revalidateOnReconnect: isVisible,
     refreshWhenHidden: false,

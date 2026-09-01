@@ -65,7 +65,7 @@ const OPENAPI_TAG = {
   },
   EARN: {
     name: "Earn",
-    description: "Vault transaction flows and Earn button configuration endpoints.",
+    description: "Caller-signed external-wallet vault deposit and exit transactions.",
   },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },

@@ -1,0 +1,71 @@
+name: Vendor Asset Drift
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vendor-asset-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Pinned assets match upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compare each pinned asset against upstream
+        id: check
+        run: |
+          set -euo pipefail
+          assets="$(jq -r '.[] | [.name, .url, .sha256] | @tsv' .github/vendor-assets.json)"
+          if [[ -z "${assets}" ]]; then
+            echo "vendor-assets.json is empty or unreadable" >&2
+            exit 1
+          fi
+          drifted=()
+          while IFS=$'\t' read -r name url sha; do
+            actual="$(curl -fsSL --max-time 60 --retry 2 "${url}" | sha256sum | cut -d' ' -f1)" || actual="fetch-failed"
+            if [[ "${actual}" != "${sha}" ]]; then
+              drifted+=("${name}: pinned ${sha:0:12}…, upstream ${actual:0:12}…")
+            fi
+          done <<< "${assets}"
+
+          if [[ "${#drifted[@]}" -gt 0 ]]; then
+            printf '%s\n' "${drifted[@]}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            {
+              echo "drifted<<EOF"
+              printf '%s\n' "${drifted[@]}"
+              echo "EOF"
+            } >> "${GITHUB_OUTPUT}"
+            exit 1
+          fi
+          echo "All pinned vendor assets match upstream." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Install Doppler CLI
+        if: failure()
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Notify Slack on drift
+        if: failure()
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: vendor-assets
+          ENV: all
+          STATUS: failure
+          VERSION: ${{ steps.check.outputs.drifted }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: ./scripts/notify-slack.sh

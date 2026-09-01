@@ -244,8 +244,11 @@
         "updated": "Statut du transfert mis à jour",
         "currentProviderStatus": "Statut actuel du fournisseur : {status}.",
         "preparing": "Préparation du statut du transfert",
-        "preparingDescription": "Nous attendons l’enregistrement du transfert lié à ce devis."
-      }
+        "preparingDescription": "Nous attendons l’enregistrement du transfert lié à ce devis.",
+        "waitingForPayment": "En attente de paiement",
+        "waitingForPaymentHostedDescription": "Terminez le paiement dans la fenêtre du fournisseur ci-dessus. Ce dépôt se met à jour automatiquement dès que le fournisseur le confirme."
+      },
+      "untrustedProviderUrl": "Le fournisseur a renvoyé une URL non fiable, elle n'a donc pas été chargée. Créez un nouveau devis ou contactez le support."
     },
     "onchainSend": {
       "noAssets": "Ce Wallet n'a aucun élément disponible à envoyer.",
@@ -688,7 +691,9 @@
       "solanaSignature": "Solana signature",
       "moneygramError": "Erreur MoneyGram",
       "lastUpdated": "Dernière mise à jour",
-      "copy": "Copier {label}"
+      "copy": "Copier {label}",
+      "viewReceipt": "Afficher le reçu",
+      "receipt": "Reçu"
     },
     "requestFailed": "La demande a échoué.",
     "submitting": "Envoi...",

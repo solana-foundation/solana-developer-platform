@@ -161,7 +161,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         <MoneygramRampWidget
           direction="onramp"
           quote={quote}
-          sourceWalletId={fields.walletId}
+          sourceWalletId={selectedWallet.id}
           sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
           sourceWalletAddress={selectedWallet.publicKey}
           sourceTokenMint={null}

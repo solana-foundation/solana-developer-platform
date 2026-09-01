@@ -1062,3 +1062,57 @@ carry the exact-claim FK onto (vault, owner) the way custody movements do onto
 - **An unconsumed build is inert garbage** that expires with its blockhash; rows
   accumulate until a cleanup sweep exists. Nothing reads them but their own
   submit.
+
+## Addendum — 2026-08-31 External wallets: per-owner reads and the earned figure (PRO-1772)
+
+PRO-1722 shipped the B2B2C surface write-only; this addendum adds the reads
+that close the loop: a per-owner activity list and movement detail, and a
+balance-plus-earned read. All three take `earn:read` only (no `wallets:read` —
+an end-user wallet carries no custody binding) and no provider gate (they
+report on money that already moved). Scope is the 0070 claim key — org, EXACT
+project, environment, owner — collapsed to one 404 for anything outside it.
+`GET /v1/earn/movements` deliberately stays custody-scoped: its vault arm
+requires a custody-wallet match an owner-signed row can never satisfy, so the
+per-owner reads are a separate surface rather than a widened union. Index:
+`idx_earn_movements_external_wallet_owner` (migration 0073).
+
+### The earned figure is stated only when it is exact
+
+`earned` = live current value − Σ finalized SDP deposits, per deposit token.
+Three conditions make it unstatable, each answered by an absent field plus a
+named `earnedUnavailableReason`, never a zero:
+
+- `live_value_unavailable` — hydration failed; a failed RPC read cannot
+  support a claim about someone's money (the 0-vs-unavailable rule again).
+- `movements_pending` — a movement is still settling, so the chain and the
+  ledger describe different moments; stating a figure in that window would
+  swing it by the full amount of the in-flight movement in either direction.
+  The reconciler bounds the window (~90 s), so this is a moment, not a state.
+- `withdrawals_not_valued` — the ledger records vault exits in SHARES
+  (`denomination` = share mint; 0070 pins `payout_token` NULL for vault rows),
+  and no share-price history exists to value them in the deposit token.
+  Valuing withdrawn shares at the CURRENT price was considered and rejected:
+  it counts growth that happened after the user exited, so the error is
+  always flattering — the one direction a financial figure must never lean.
+  Closing this properly means observing the actual token payout from the
+  LANDED transaction at settlement (the same settle-time-observation shape as
+  the rent-funder residual above) and is deliberately follow-up work, not
+  part of this change.
+
+Scope: every figure covers the wallet's **currently held positions**. A fully
+exited position drops out entirely — its deposits leave `totalDeposited`
+along with its unvalued withdrawal, so the token stays internally consistent —
+because consuming closed positions' history would answer
+`withdrawals_not_valued` forever after any full exit, permanently withholding
+an earned figure that is exact for what the wallet still holds. The exited
+history remains fully visible on the movements list, and the
+`withdrawals_not_valued` reason therefore describes a withdrawal on a HELD
+position (a partial exit, or a closed-and-re-entered vault, whose claim row is
+reused).
+
+The token-level figure is Σlive − Σdeposited (identical to the per-position
+sum) and is withheld when ANY contributing position cannot state it — the
+never-partial rule the position summary already follows. The live-hydration
+caveat stands unchanged: live value reads the owner's whole vault balance, so
+shares acquired outside SDP inflate `earned`; that stays a documented property
+of non-custodial reads.

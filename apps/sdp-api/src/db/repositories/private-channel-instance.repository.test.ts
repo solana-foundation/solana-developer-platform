@@ -71,6 +71,7 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     if (!inserted) return;
     expect(inserted.id).toMatch(/^pci_/);
     expect(inserted.gateway_url).toBe(SANDBOX_DEFAULTS.gatewayUrl);
+    expect(inserted.chain_rpc_url).toBe("");
     expect(inserted.is_active).toBe(true);
     expect(inserted.auth_url).toBe(SANDBOX_DEFAULTS.authUrl);
 
@@ -145,7 +146,7 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     });
     expect(reactivated?.id).toBe(created.id);
     expect(reactivated?.is_active).toBe(true);
-    expect(reactivated?.chain_rpc_url).toBe("https://mainnet.helius-rpc.com/?api-key=NEW");
+    expect(reactivated?.chain_rpc_url).toBe("");
     expect(reactivated?.auth_url).toBe("http://auth.example:8903");
     // gateway_url is the identity key and must not change on reactivation.
     expect(reactivated?.gateway_url).toBe(created.gateway_url);

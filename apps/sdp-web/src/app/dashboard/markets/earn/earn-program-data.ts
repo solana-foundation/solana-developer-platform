@@ -46,6 +46,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { earnQueryKeys } from "./earn-query-key";
 import {
   EARN_PROGRAM_CREATE_PROVIDER,
   EARN_PROGRAM_CREATION_ENABLED,
@@ -355,7 +356,7 @@ function announceCompletion(
 
 export function useEarnPrograms() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-programs",
+    earnQueryKeys.programs(),
     () => fetchEarnProgramsState(),
     {
       refreshInterval: earnProgramsRefreshInterval,
@@ -427,7 +428,7 @@ export async function fetchEarnProgramDeposits(
 /** Passing no programId issues no request — the honest form of "not ready yet". */
 export function useEarnProgramDeposits(programId: string | undefined) {
   const { data, error, isLoading } = useSWR(
-    programId ? ["dashboard-earn-program-deposits", programId] : null,
+    programId ? earnQueryKeys.programDeposits({ programId }) : null,
     () => fetchEarnProgramDeposits(programId as string),
     // Deposits land on-chain outside the dashboard, so keep the feed fresh.
     { refreshInterval: 15_000 }
@@ -489,7 +490,7 @@ export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
   // screen while the full paged fetch reruns, instead of tearing the table to
   // skeletons (same pattern as activity-tab and wallet-card-balance-value).
   const { data, error, isLoading, mutate } = useSWR(
-    ["dashboard-earn-strategies", cluster ?? "environment-default"],
+    earnQueryKeys.strategies({ cluster: cluster ?? "environment-default" }),
     () => fetchEarnStrategies(cluster),
     { keepPreviousData: true }
   );
@@ -537,7 +538,7 @@ export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
 /** Live position values refresh while the surface is mounted. */
 export function useEarnVaultPositions() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-vault-positions",
+    earnQueryKeys.vaultPositions(),
     () => fetchEarnVaultPositions(),
     { refreshInterval: 15_000 }
   );
@@ -878,6 +879,89 @@ export async function fetchEarnVaultDepositByRequestId(
   return deposit ? { kind: "found", deposit } : { kind: "absent" };
 }
 
+const earnVaultDepositPreviewEnvelopeSchema = z.object({
+  data: z.object({
+    strategyId: z.string(),
+    /** Shares at the provider's live rate, decimal string at share scale. */
+    sharesOut: z.string().regex(/^\d+(\.\d+)?$/),
+    shareDecimals: z.number().int().min(0).max(38),
+    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+  }),
+});
+
+export type EarnVaultDepositPreview = z.infer<typeof earnVaultDepositPreviewEnvelopeSchema>["data"];
+
+export type EarnVaultDepositPreviewResult =
+  | { kind: "quoted"; preview: EarnVaultDepositPreview }
+  | { kind: "unavailable" };
+
+/**
+ * What the vault would mint for this amount right now — the live rate the
+ * deposit modal derives its `minSharesOut` floor from. `unavailable` covers
+ * every failure the same way: a floor must come from a quote or not exist, so
+ * an unreadable quote DISABLES the deposit rather than falling back to
+ * arithmetic on the amount (which is only correct while the rate is 1:1).
+ */
+export async function fetchEarnVaultDepositPreview(
+  input: { strategyId: string; amount: string },
+  signal?: AbortSignal
+): Promise<EarnVaultDepositPreviewResult> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-deposit-previews",
+    {
+      method: "POST",
+      body: { strategyId: input.strategyId, amount: input.amount },
+      signal,
+    }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = earnVaultDepositPreviewEnvelopeSchema.safeParse(result.data);
+  if (!parsed.success) return { kind: "unavailable" };
+  return { kind: "quoted", preview: parsed.data.data };
+}
+
+const earnVaultWithdrawalPreviewEnvelopeSchema = z.object({
+  data: z.object({
+    positionId: z.string(),
+    /** Deposit-token amount at the provider's live rate, decimal string. */
+    assetsOut: z.string().regex(/^\d+(\.\d+)?$/),
+    assetDecimals: z.number().int().min(0).max(38),
+    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+  }),
+});
+
+export type EarnVaultWithdrawalPreview = z.infer<
+  typeof earnVaultWithdrawalPreviewEnvelopeSchema
+>["data"];
+
+export type EarnVaultWithdrawalPreviewResult =
+  | { kind: "quoted"; preview: EarnVaultWithdrawalPreview }
+  | { kind: "unavailable" };
+
+/**
+ * What redeeming these shares would pay right now — the exit twin of
+ * `fetchEarnVaultDepositPreview`, with the same fail-closed rule: a floor must
+ * come from a quote or not exist, so an unreadable quote DISABLES the exit
+ * confirm rather than guessing a number.
+ */
+export async function fetchEarnVaultWithdrawalPreview(
+  input: { positionId: string; shares: string },
+  signal?: AbortSignal
+): Promise<EarnVaultWithdrawalPreviewResult> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-withdrawal-previews",
+    {
+      method: "POST",
+      body: { positionId: input.positionId, shares: input.shares },
+      signal,
+    }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = earnVaultWithdrawalPreviewEnvelopeSchema.safeParse(result.data);
+  if (!parsed.success) return { kind: "unavailable" };
+  return { kind: "quoted", preview: parsed.data.data };
+}
+
 /**
  * The DISCOVERY tier for in-flight deposits, mirroring `useEarnProgramWithdrawals`.
  *
@@ -890,7 +974,7 @@ export async function fetchEarnVaultDepositByRequestId(
  */
 export function useEarnVaultDeposits() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-vault-deposits-in-flight",
+    earnQueryKeys.vaultDepositsInFlight(),
     () => fetchEarnVaultDeposits({ settled: false }),
     { refreshInterval: 30_000 }
   );
@@ -956,7 +1040,7 @@ export function useEarnVaultDepositOutcomeToast(
   const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
-    movementId ? (["dashboard-earn-vault-deposit", movementId] as const) : null,
+    movementId ? earnQueryKeys.vaultDeposit({ movementId }) : null,
     // The id comes from the KEY, which only exists when it is defined — no cast,
     // and no second place that has to stay in sync with the null guard.
     ([, watchedId]) => fetchEarnVaultDeposit(watchedId),
@@ -1054,6 +1138,7 @@ export async function createEarnVaultWithdrawal(
   const body: EarnVaultWithdrawalRequest = {
     positionId: input.positionId,
     shares: input.shares,
+    ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
   };
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-withdrawals", {
     method: "POST",
@@ -1161,7 +1246,7 @@ export async function fetchEarnVaultWithdrawalsByRequestId(
  */
 export function useEarnVaultWithdrawals() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-vault-withdrawals-in-flight",
+    earnQueryKeys.vaultWithdrawalsInFlight(),
     () => fetchEarnVaultWithdrawals({ settled: false }),
     { refreshInterval: 30_000 }
   );
@@ -1198,7 +1283,7 @@ export function useEarnVaultWithdrawalOutcomeToast(
   const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
-    movementId ? (["dashboard-earn-vault-withdrawal", movementId] as const) : null,
+    movementId ? earnQueryKeys.vaultWithdrawal({ movementId }) : null,
     ([, watchedId]) => fetchEarnVaultWithdrawal(watchedId),
     {
       refreshInterval: (withdrawal) =>
@@ -1316,7 +1401,7 @@ export async function fetchEarnProgramWithdrawals(
 /** Passing no program id issues no ledger request. */
 export function useEarnProgramWithdrawals(programId: string | undefined) {
   const { data, error, isLoading, mutate } = useSWR(
-    programId ? ["dashboard-earn-program-withdrawals", programId] : null,
+    programId ? earnQueryKeys.programWithdrawals({ programId }) : null,
     () => fetchEarnProgramWithdrawals(programId as string),
     // Detect withdrawals created from another session while this dashboard is
     // open; the list is a cheap local-DB read and live outcome polling begins
@@ -1376,7 +1461,7 @@ export function useEarnWithdrawalOutcomeToast(
   const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
-    programId && withdrawalRef ? ["dashboard-earn-withdrawal", programId, withdrawalRef] : null,
+    programId && withdrawalRef ? earnQueryKeys.withdrawal({ programId, withdrawalRef }) : null,
     async () => {
       const result = await fetchEarnWithdrawal(programId as string, withdrawalRef as string);
       return result.ok ? result.data.data.withdrawal : undefined;

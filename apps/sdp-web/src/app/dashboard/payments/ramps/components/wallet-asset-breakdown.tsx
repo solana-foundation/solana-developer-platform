@@ -50,7 +50,7 @@ export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWall
 
   return (
     <motion.div
-      key={wallet.walletId}
+      key={wallet.id}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: "easeOut" }}

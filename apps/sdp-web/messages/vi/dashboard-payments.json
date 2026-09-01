@@ -243,8 +243,11 @@
         "updated": "Đã cập nhật trạng thái chuyển",
         "currentProviderStatus": "Trạng thái Provider hiện tại: {status}.",
         "preparing": "Đang chuẩn bị trạng thái chuyển",
-        "preparingDescription": "Đang chờ bản ghi chuyển gắn với Báo giá này."
-      }
+        "preparingDescription": "Đang chờ bản ghi chuyển gắn với Báo giá này.",
+        "waitingForPayment": "Đang chờ thanh toán",
+        "waitingForPaymentHostedDescription": "Hoàn tất thanh toán trong cửa sổ Provider ở trên. Khoản nạp này tự động cập nhật sau khi Provider xác nhận."
+      },
+      "untrustedProviderUrl": "Provider trả về URL không đáng tin cậy nên không được tải. Hãy tạo Báo giá mới hoặc liên hệ hỗ trợ."
     },
     "onchainSend": {
       "noAssets": "Wallet này không có Asset để gửi.",
@@ -720,7 +723,9 @@
       "solanaSignature": "Chữ ký Solana",
       "moneygramError": "Lỗi MoneyGram",
       "lastUpdated": "Cập nhật lần cuối",
-      "copy": "Sao chép {label}"
+      "copy": "Sao chép {label}",
+      "viewReceipt": "Xem biên nhận",
+      "receipt": "Biên nhận"
     },
     "requestFailed": "Yêu cầu thất bại.",
     "submitting": "Đang gửi...",
