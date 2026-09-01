@@ -49,7 +49,10 @@ import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
+import {
+  createPostgresCounterpartyProviderAccountsRepository,
+  isRampTransferType,
+} from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import {
   generatePaymentTransferId,
@@ -1285,14 +1288,16 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   const projectId = requireProjectId(c);
   const repository = getPaymentsRepository(c);
 
-  const transfer = await repository.getTransferByProviderReference({
-    provider: input.provider,
-    providerReference: input.providerReference,
+  const transfer = await repository.getTransferById({
+    transferId: input.transferId,
     organizationId: scope.auth.organizationId,
     projectId,
   });
   if (!transfer) {
     throw notFound("Transfer");
+  }
+  if (!isRampTransferType(transfer.type)) {
+    throw badRequest("Only ramp transfers can be canceled through this endpoint.");
   }
   const cancelableStatuses: readonly PaymentTransferStatus[] = ["pending", "awaiting_payment"];
   if (!cancelableStatuses.includes(transfer.status)) {

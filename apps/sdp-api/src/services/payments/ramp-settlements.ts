@@ -57,7 +57,9 @@ const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
     "settling",
     "expired",
   ],
-  expired: ["pending", "awaiting_payment", "settling"],
+  // `settling` is deliberately absent: a stale redelivered EXPIRED event must
+  // not regress a transfer another event already revived into processing.
+  expired: ["pending", "awaiting_payment"],
 } as const satisfies Record<
   Exclude<RampSettlementEvent["kind"], "ignore">,
   readonly PaymentTransferStatus[]

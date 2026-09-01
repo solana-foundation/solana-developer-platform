@@ -1008,7 +1008,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_1" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_pending" }),
       },
       env
     );
@@ -1040,7 +1040,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_2" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_settling" }),
       },
       env
     );

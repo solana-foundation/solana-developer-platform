@@ -24,7 +24,6 @@ import type {
   RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
-  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -378,8 +377,7 @@ export async function fetchTransferById(
 
 export async function cancelRampTransfer(
   input: {
-    provider: RampProviderId;
-    providerReference: string;
+    transferId: string;
   },
   t: Translate
 ): Promise<void> {

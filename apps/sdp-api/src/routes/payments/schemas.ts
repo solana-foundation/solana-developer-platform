@@ -496,8 +496,7 @@ export const rampFiatCurrencySchema = z.preprocess(
 );
 
 export const cancelRampTransferSchema = z.object({
-  provider: rampProviderSchema,
-  providerReference: z.string().min(1),
+  transferId: z.string().min(1),
 });
 
 export const listOnrampCurrenciesQuerySchema = z.object({

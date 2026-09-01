@@ -324,18 +324,18 @@ export function useRampWizard<TId extends string>(
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);
+      if (result.status === "unsupported") {
+        toast.error(result.reason, { id: toastId, position: "bottom-right" });
+        return;
+      }
       if (
         result.status === "collect" ||
         result.status === "collect_counterparty" ||
-        result.status === "collect_account" ||
-        result.status === "unsupported"
+        result.status === "collect_account"
       ) {
-        toast.error(
-          result.status === "unsupported"
-            ? result.reason
-            : t("DashboardPayments.ramps.moreDetailsNeeded"),
-          { id: toastId, position: "bottom-right" }
-        );
+        // Progressive collection: the provider accepted this step and returned
+        // the next field set, which the step re-renders in place.
+        toast.dismiss(toastId);
         return;
       }
       setStepIndex((current) => current + 1);
@@ -381,7 +381,7 @@ export function useRampWizard<TId extends string>(
   const onTransactionStage = isLastStep && quote !== null;
 
   const cancelTransfer = async () => {
-    if (!quote) {
+    if (!quote || quoteTransferId === null) {
       throw new Error(t("DashboardPayments.ramps.cannotCancelWithoutQuote"));
     }
     if (isCanceling) {
@@ -392,7 +392,7 @@ export function useRampWizard<TId extends string>(
       position: "bottom-right",
     });
     try {
-      await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id }, t);
+      await cancelRampTransfer({ transferId: quoteTransferId }, t);
       toast.success(t("DashboardPayments.ramps.transactionCanceled"), {
         id: toastId,
         position: "bottom-right",
