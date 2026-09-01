@@ -145,7 +145,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     if (
       quote?.provider !== "lightspark" &&
       quote?.provider !== "bvnk" &&
-      quote?.provider !== "mural"
+      quote?.provider !== "mural" &&
+      quote?.provider !== "hercle"
     ) {
       return;
     }
@@ -164,6 +165,15 @@ export function useOnrampWizard(props: UseRampWizardProps) {
           {
             provider: "lightspark",
             payload: { quoteId: quote.id, currencyCode: "USD" },
+          },
+          t
+        );
+      } else if (quote.provider === "hercle") {
+        // The quote id is the Hercle order id, which is also its settlement reference.
+        await simulateSandboxTransfer(
+          {
+            provider: "hercle",
+            payload: { orderId: quote.id, status: "settled" },
           },
           t
         );

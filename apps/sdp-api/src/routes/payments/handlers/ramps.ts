@@ -1449,6 +1449,14 @@ export async function simulateSandboxTransfer(
         body.payload
       );
       break;
+    case "hercle":
+      // The order id is the settlement reference, so no counterparty or wallet lookup
+      // is needed — Hercle answers with the same signed webhook a real deposit produces.
+      transaction = await RAMP_PROVIDER_CLIENTS.hercle.simulateSettlement(rampRuntime(c), {
+        orderId: body.payload.orderId,
+        status: body.payload.status,
+      });
+      break;
     case "bvnk": {
       const payload = body.payload;
       const scope = await resolveScope(c);

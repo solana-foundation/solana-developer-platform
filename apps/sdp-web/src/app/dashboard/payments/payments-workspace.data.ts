@@ -737,6 +737,13 @@ type SandboxTransferSimulationInput =
       };
     }
   | {
+      provider: "hercle";
+      payload: {
+        orderId: string;
+        status?: "awaiting_payment" | "settling" | "settled" | "failed" | "expired";
+      };
+    }
+  | {
       provider: "bvnk";
       payload: {
         counterpartyId: string;

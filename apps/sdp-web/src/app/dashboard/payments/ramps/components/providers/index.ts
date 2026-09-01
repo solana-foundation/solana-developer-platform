@@ -3,7 +3,7 @@ import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-re
 import type { LucideIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
-import { getHercleOnboardingCopy } from "./hercle";
+import { getHercleOnboardingCopy, getHercleSimulateLabels } from "./hercle";
 import {
   getLightsparkOnboardingCopy,
   getLightsparkProvisioningDetail,
@@ -132,6 +132,8 @@ export function simulateActionLabels(
       return getLightsparkSimulateLabels(t);
     case "mural":
       return getMuralSimulateLabels(t);
+    case "hercle":
+      return getHercleSimulateLabels(t);
     default:
       return null;
   }

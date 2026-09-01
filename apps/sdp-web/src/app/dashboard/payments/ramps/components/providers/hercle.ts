@@ -1,6 +1,6 @@
 import { Loader2Icon, ShieldCheckIcon, XCircleIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import type { HercleOnboardingPanelStatus, OnboardingCopy } from "./index";
+import type { HercleOnboardingPanelStatus, OnboardingCopy, SimulateActionLabels } from "./index";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -32,5 +32,13 @@ export function getHercleOnboardingCopy(
       icon: Loader2Icon,
       iconClassName: "animate-spin text-secondary",
     },
+  };
+}
+
+export function getHercleSimulateLabels(t: Translate): SimulateActionLabels {
+  return {
+    idle: t("DashboardPayments.hercle.simulateDeposit"),
+    busy: t("DashboardPayments.hercle.simulating"),
+    done: t("DashboardPayments.hercle.depositSimulated"),
   };
 }

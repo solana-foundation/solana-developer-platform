@@ -15,6 +15,16 @@ export const HERCLE_VERIFICATION_STATUSES = [
 ] as const;
 export type HercleVerificationStatus = (typeof HERCLE_VERIFICATION_STATUSES)[number];
 
+/** Settlement lifecycle carried by `ramp.settlement.status_changed`. */
+export const HERCLE_SETTLEMENT_STATUSES = [
+  "awaiting_payment",
+  "settling",
+  "settled",
+  "failed",
+  "expired",
+] as const;
+export type HercleSettlementStatus = (typeof HERCLE_SETTLEMENT_STATUSES)[number];
+
 /**
  * Shape of `counterparty.provider_data.hercle`. Only metadata lands here — ids,
  * statuses and the hosted verification link; collected KYB data is passed to the

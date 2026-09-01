@@ -36,6 +36,7 @@ import type {
   ValidateCounterpartyOptions,
 } from "../../types";
 import { hercleCounterpartyRequirements } from "./counterparty";
+import type { HercleSettlementStatus } from "./provider-data";
 
 /**
  * Hercle — headless fiat on/off-ramp provider (Signed Key v1 lane, /partner/v1).
@@ -510,5 +511,22 @@ export class HercleRampClient implements RampProvider {
       paymentInstructions: [instruction],
       expiresAt: order.expiresAt,
     };
+  }
+
+  /**
+   * Sandbox only. Applies the outcome a bank rail or chain would report, which Hercle
+   * then delivers as a normal signed settlement webhook — so the event the client sees
+   * is the production one, only its trigger is simulated.
+   */
+  async simulateSettlement(
+    ctx: RampRuntimeContext,
+    input: { orderId: string; status?: HercleSettlementStatus }
+  ): Promise<unknown> {
+    return this.request<unknown>(
+      ctx,
+      "POST",
+      `/partner/v1/orders/${encodeURIComponent(input.orderId)}/simulate-settlement`,
+      { body: { status: input.status ?? "settled" } }
+    );
   }
 }

@@ -319,7 +319,10 @@
       "verificationFailedTitle": "Business verification was not approved",
       "verificationFailedDescription": "Hercle could not verify your business, so payments can't be settled through them. This isn't retryable from here — contact Hercle if you believe this is a mistake.",
       "readyTitle": "Preparing your instructions",
-      "readyDescription": "Your business is verified — fetching your payment details now."
+      "readyDescription": "Your business is verified — fetching your payment details now.",
+      "simulateDeposit": "Simulate Deposit",
+      "simulating": "Simulating...",
+      "depositSimulated": "Deposit Simulated"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",
