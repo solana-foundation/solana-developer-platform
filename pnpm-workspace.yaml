@@ -31,6 +31,15 @@ minimumReleaseAge: 10080
 # pnpm 10.16 matches minimumReleaseAgeExclude by exact dependency alias.
 # Keep @solana packages explicit until this workspace can rely on scoped wildcard exclusions.
 minimumReleaseAgeExclude:
+  # Veda's SVM SDK ships as pre-release alphas cut for this integration, so the
+  # cooldown can block the exact version packages/sdp-veda pins. The cooldown
+  # exists to keep a compromised release from being pulled in unnoticed; that
+  # risk is answered by the pin itself, which is a gate rather than a habit:
+  # `saveExact: true` above plus scripts/check-pinned-dependency-versions.mjs
+  # (the "Pinned Dependency Policy" CI job) reject any non-exact direct
+  # dependency, and its regex admits prerelease tags. A new publish therefore
+  # cannot reach this repo without a lockfile change under review.
+  - '@vedatech/svm-sdk'
   - '@solana/accounts'
   - '@solana/addresses'
   - '@solana/assertions'

@@ -178,32 +178,11 @@ export function bvnkOfframpFields(fiatCurrency: BvnkOfframpCurrency): Requiremen
  */
 export function validateBvnkCounterparty(
   counterparty: Counterparty,
-  {
-    direction,
-    providerData,
-    cryptoToken,
-    fiatCurrency,
-    destinationWalletAddress,
-  }: ValidateCounterpartyOptions
+  options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  const onrampConfiguredStatus = (): CounterpartyRequirements => {
-    if (!cryptoToken) {
-      throw badRequest("cryptoToken is required for BVNK on-ramp requirements.");
-    }
-    if (!fiatCurrency) {
-      throw badRequest("fiatCurrency is required for BVNK on-ramp requirements.");
-    }
-    if (!destinationWalletAddress) {
-      throw badRequest("destinationWallet is required for BVNK on-ramp requirements.");
-    }
-    return bvnkOnrampStatusFromProviderData(providerData, {
-      cryptoToken,
-      fiatCurrency,
-      destinationWalletAddress,
-    });
-  };
+  const { direction, providerData, cryptoToken, fiatCurrency } = options;
 
-  if (direction === "offramp") {
+  if (options.direction === "offramp") {
     if (!fiatCurrency) {
       throw badRequest("fiatCurrency is required for BVNK off-ramp requirements.");
     }
@@ -238,7 +217,20 @@ export function validateBvnkCounterparty(
   }
   const customer = readBvnkCustomer(providerData);
   if (customer.customerReference) {
-    return onrampConfiguredStatus();
+    if (!cryptoToken) {
+      throw badRequest("cryptoToken is required for BVNK on-ramp requirements.");
+    }
+    if (!fiatCurrency) {
+      throw badRequest("fiatCurrency is required for BVNK on-ramp requirements.");
+    }
+    if (!options.destinationWalletAddress) {
+      throw badRequest("destinationWallet is required for BVNK on-ramp requirements.");
+    }
+    return bvnkOnrampStatusFromProviderData(providerData, {
+      cryptoToken,
+      fiatCurrency,
+      destinationWalletAddress: options.destinationWalletAddress,
+    });
   }
 
   throw badRequest(

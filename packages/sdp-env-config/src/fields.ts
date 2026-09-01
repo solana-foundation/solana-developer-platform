@@ -686,14 +686,6 @@ export const FIELDS: EnvField[] = [
     defaultValue: "30",
   },
   {
-    key: "RAMP_REDIRECT_ALLOWED_HOSTS",
-    section: "advanced",
-    kind: "text",
-    label: "Ramp redirect allowed hosts",
-    pattern: /^[A-Za-z0-9.-]+(\s*,\s*[A-Za-z0-9.-]+)*$/,
-    help: "Exact hostnames tenant-supplied ramp redirect URLs may target (comma-separated), e.g. your dashboard host. Leave blank to reject every redirectUrl — fail closed.",
-  },
-  {
     key: "PRIVATE_CHANNELS_ENABLED",
     section: "advanced",
     kind: "select",

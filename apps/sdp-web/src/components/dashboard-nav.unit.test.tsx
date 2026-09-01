@@ -14,6 +14,10 @@ vi.mock("@/components/workspace-switcher", () => ({
   WorkspaceSwitcher: () => <div data-workspace-switcher="true" />,
 }));
 
+vi.mock("@/components/sidebar-user-menu", () => ({
+  SidebarUserMenu: () => <div data-sidebar-user-menu="true" />,
+}));
+
 import { DashboardBottomNav } from "./dashboard-bottom-nav";
 import { DashboardMoreSheet } from "./dashboard-more-sheet";
 import { getNavSections, withSubnavOpen, withSubnavToggled } from "./dashboard-nav";

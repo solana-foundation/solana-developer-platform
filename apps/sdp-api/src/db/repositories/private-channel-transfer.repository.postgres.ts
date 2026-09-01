@@ -174,6 +174,7 @@ export function createPostgresPrivateChannelTransferRepository(
               AND i.is_active = TRUE
               AND pcu.organization_id = ?
               AND pcu.project_id = ?
+              AND pcu.disabled_at IS NULL
             ORDER BY (pcu.id = ?) DESC, pcu.id ASC, vw.pubkey ASC, vw.id ASC`
         )
         .bind(

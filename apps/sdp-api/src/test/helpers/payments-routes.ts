@@ -187,8 +187,6 @@ export const TEST_MONEYGRAM_PUBLIC_KEY = "moneygram_sandbox_public_key";
 
 export const TEST_MONEYGRAM_SECRET_KEY = "moneygram_sandbox_secret_key";
 
-export const TEST_RAMP_REDIRECT_ALLOWED_HOSTS = "example.com";
-
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
@@ -230,8 +228,6 @@ let originalMagicBlockAuthToken: string | undefined;
 let originalMoneygramSandboxPublicKey: string | undefined;
 
 let originalMoneygramSandboxSecretKey: string | undefined;
-
-let originalRampRedirectAllowedHosts: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -642,7 +638,6 @@ export function installPaymentsRouteTestHooks(): void {
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
     originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
     originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
-    originalRampRedirectAllowedHosts = env.RAMP_REDIRECT_ALLOWED_HOSTS;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -665,7 +660,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
-    env.RAMP_REDIRECT_ALLOWED_HOSTS = TEST_RAMP_REDIRECT_ALLOWED_HOSTS;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -693,7 +687,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
-    env.RAMP_REDIRECT_ALLOWED_HOSTS = originalRampRedirectAllowedHosts;
 
     await clearKVStores(env);
   });

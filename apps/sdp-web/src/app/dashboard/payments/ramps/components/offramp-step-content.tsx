@@ -14,7 +14,7 @@ import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
-import { hasOnboardingLifecycle } from "./providers";
+import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
@@ -182,7 +182,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     currentStepId === "COMPLETE" &&
     onboarding &&
     !quote &&
-    hasOnboardingLifecycle(onboarding.provider)
+    hasOnboardingLifecycle(onboarding.provider) &&
+    isOnboardingPanelStatus(onboarding.status)
   ) {
     return (
       <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />

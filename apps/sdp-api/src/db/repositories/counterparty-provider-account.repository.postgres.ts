@@ -1,6 +1,7 @@
 import type { AppDb } from "@/db";
 import type {
   CounterpartyProviderAccountsRepository,
+  GetCounterpartyProviderAccountInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
@@ -12,6 +13,20 @@ export function createPostgresCounterpartyProviderAccountsRepository(
   db: AppDb
 ): CounterpartyProviderAccountsRepository {
   return {
+    async getProviderAccount(input: GetCounterpartyProviderAccountInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?`
+        )
+        .bind(input.organizationId, input.projectId, input.counterpartyId, input.provider)
+        .first<Record<string, unknown>>();
+
+      return row ? counterpartyProviderAccountRowSchema.parse(row) : null;
+    },
     async upsertProviderAccount(input: UpsertCounterpartyProviderAccountInput) {
       const row = await db
         .prepare(

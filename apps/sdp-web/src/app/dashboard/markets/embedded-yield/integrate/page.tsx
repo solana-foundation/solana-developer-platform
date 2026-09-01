@@ -1,0 +1,29 @@
+import { SOLANA_CLUSTERS } from "@sdp/types";
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { EarnIntegrationGuide } from "../../earn/earn-integration-guide";
+import { loadEarnProviderAccess } from "../../earn/earn-provider-access.server";
+
+/** Provider access is organization-scoped and must be resolved per request. */
+export const dynamic = "force-dynamic";
+
+export default async function EmbeddedYieldIntegratePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cluster?: string | string[]; strategy?: string | string[] }>;
+}) {
+  const [{ cluster, strategy }, providerAccess] = await Promise.all([
+    searchParams,
+    loadEarnProviderAccess(),
+  ]);
+  const strategyCluster =
+    typeof cluster === "string" ? SOLANA_CLUSTERS.find((value) => value === cluster) : undefined;
+  return (
+    <EarnIntegrationGuide
+      configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`}
+      earnHref={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
+      providerAccess={providerAccess}
+      strategyCluster={strategyCluster}
+      strategyId={typeof strategy === "string" && strategy !== "" ? strategy : undefined}
+    />
+  );
+}

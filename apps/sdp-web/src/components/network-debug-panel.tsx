@@ -1,16 +1,8 @@
 "use client";
 
-import {
-  BanIcon,
-  BugIcon,
-  CheckIcon,
-  CopyIcon,
-  EraserIcon,
-  PauseIcon,
-  PlayIcon,
-} from "lucide-react";
+import { BanIcon, CheckIcon, CopyIcon, EraserIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
@@ -21,7 +13,6 @@ import {
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
-import { ToggleSwitch } from "./ui/toggle-switch";
 
 const PANEL_TRANSITION = { type: "spring", duration: 0.38, bounce: 0 } as const;
 const CONTENT_FADE_PROPS = {
@@ -168,48 +159,6 @@ function NetworkDebugEntryRow({
       </button>
       {entry.error ? <p className="truncate text-[11px] text-error">{entry.error}</p> : null}
     </motion.li>
-  );
-}
-
-export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean }) {
-  const t = useTranslations();
-  const { available, enabled, setEnabled } = useNetworkDebug();
-  const switchId = useId();
-  const accessibleName = t("Shared.SharedComponents.apiDebugLogs");
-
-  if (!available) {
-    return null;
-  }
-
-  if (collapsed) {
-    return (
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label={accessibleName}
-        title={accessibleName}
-        onClick={() => setEnabled(!enabled)}
-        className="flex h-10 w-full shrink-0 cursor-pointer items-center justify-center rounded-lg text-secondary outline-none transition-colors hover:bg-fill-strong hover:text-primary focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised motion-reduce:transition-none"
-      >
-        <BugIcon aria-hidden="true" className="h-5 w-5" strokeWidth={1.9} />
-      </button>
-    );
-  }
-
-  return (
-    <div className="flex h-10 w-full items-center justify-between gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary motion-reduce:transition-none">
-      <label htmlFor={switchId} className="flex min-w-0 cursor-pointer items-center gap-3">
-        <BugIcon aria-hidden="true" className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-        <span className="whitespace-nowrap">{accessibleName}</span>
-      </label>
-      <ToggleSwitch
-        id={switchId}
-        checked={enabled}
-        onChange={setEnabled}
-        aria-label={accessibleName}
-      />
-    </div>
   );
 }
 

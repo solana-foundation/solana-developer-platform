@@ -23,8 +23,30 @@ export interface OnboardingCopy {
 
 export type OnboardingPanelStatus = Exclude<
   CounterpartyRequirements["status"],
-  "collect" | "unsupported" | "onboarding_not_started"
+  "collect" | "collect_counterparty" | "collect_account" | "unsupported" | "onboarding_not_started"
 >;
+
+/**
+ * Whether a requirements status is an onboarding-lifecycle state the panel can
+ * render, as opposed to a form-collection or terminal-block state.
+ *
+ * @param status - Requirements status from the last advance.
+ * @returns True when the onboarding panel has copy for the status.
+ */
+export function isOnboardingPanelStatus(
+  status: CounterpartyRequirements["status"]
+): status is OnboardingPanelStatus {
+  switch (status) {
+    case "collect":
+    case "collect_counterparty":
+    case "collect_account":
+    case "unsupported":
+    case "onboarding_not_started":
+      return false;
+    default:
+      return true;
+  }
+}
 export type StandardOnboardingPanelStatus = Exclude<
   OnboardingPanelStatus,
   "terms_of_service_required"

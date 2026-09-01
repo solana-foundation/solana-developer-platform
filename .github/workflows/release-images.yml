@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - v*.*.*
+    branches: [main]
 
 permissions:
   contents: read
@@ -22,10 +23,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [sdp-api, sdp-web, sdp-docs]
+        service: ${{ github.ref == 'refs/heads/main' && fromJson('["sdp-api"]') || fromJson('["sdp-api", "sdp-web", "sdp-docs"]') }}
     env:
       GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/sdp/${{ matrix.service }}
-      VERSION: ${{ github.ref_name }}
+      VERSION: ${{ github.ref == 'refs/heads/main' && github.sha || github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -105,9 +106,7 @@ jobs:
           sbom: true
           build-args: |
             GIT_SHA=${{ github.sha }}
-          tags: |
-            ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}
-            ${{ env.GHCR_IMAGE }}:latest
+          tags: ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}${{ github.ref != 'refs/heads/main' && format(',{0}:latest', env.GHCR_IMAGE) || '' }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 

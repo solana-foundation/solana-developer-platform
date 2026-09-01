@@ -80,24 +80,50 @@ export const counterpartyRequirementsQuerySchema = z
       "Ramp provider, direction, asset pair, and (for onramps) destination wallet used to evaluate counterparty requirements.",
   });
 
+const requirementTextFieldSchema = z.object({
+  kind: z.literal("text"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  pattern: z.string().optional(),
+  minLength: z.number().int().nonnegative().optional(),
+  maxLength: z.number().int().nonnegative().optional(),
+  placeholder: z.string().optional(),
+  mask: z.string().optional(),
+});
+
+const requirementSelectFieldSchema = z.object({
+  kind: z.literal("select"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  options: z.array(z.object({ value: z.string(), label: z.string() })),
+});
+
+const requirementDateFieldSchema = z.object({
+  kind: z.literal("date"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  before: z.string().optional(),
+});
+
 const requirementFieldSchema = z.discriminatedUnion("kind", [
+  requirementTextFieldSchema,
+  requirementSelectFieldSchema,
+  requirementDateFieldSchema,
   z.object({
-    kind: z.literal("text"),
+    kind: z.literal("address"),
     key: z.string(),
     label: z.string(),
     required: z.boolean(),
-    pattern: z.string().optional(),
-    minLength: z.number().int().nonnegative().optional(),
-    maxLength: z.number().int().nonnegative().optional(),
-    placeholder: z.string().optional(),
-    mask: z.string().optional(),
-  }),
-  z.object({
-    kind: z.literal("select"),
-    key: z.string(),
-    label: z.string(),
-    required: z.boolean(),
-    options: z.array(z.object({ value: z.string(), label: z.string() })),
+    fields: z.array(
+      z.discriminatedUnion("kind", [
+        requirementTextFieldSchema,
+        requirementSelectFieldSchema,
+        requirementDateFieldSchema,
+      ])
+    ),
   }),
 ]);
 
@@ -124,6 +150,18 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       ...requirementBase,
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("collect"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("lightspark"),
+      status: z.literal("collect_counterparty"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("lightspark"),
+      status: z.literal("collect_account"),
       fields: z.array(requirementFieldSchema),
     }),
     z.object({

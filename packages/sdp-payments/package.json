@@ -109,6 +109,11 @@
       "import": "./src/ramps/providers/lightspark/counterparty.ts",
       "default": "./src/ramps/providers/lightspark/counterparty.ts"
     },
+    "./ramps/providers/lightspark/currencies": {
+      "types": "./src/ramps/providers/lightspark/currencies.ts",
+      "import": "./src/ramps/providers/lightspark/currencies.ts",
+      "default": "./src/ramps/providers/lightspark/currencies.ts"
+    },
     "./ramps/providers/lightspark/provider-data": {
       "types": "./src/ramps/providers/lightspark/provider-data.ts",
       "import": "./src/ramps/providers/lightspark/provider-data.ts",
@@ -165,6 +170,7 @@
     "@solana/fixed-points": "7.1.0",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.3",
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
