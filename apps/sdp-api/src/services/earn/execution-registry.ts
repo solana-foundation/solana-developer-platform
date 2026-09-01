@@ -15,11 +15,11 @@ import {
   type SdpEnvironment,
   type SolanaCluster,
 } from "@sdp/types";
-import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 
