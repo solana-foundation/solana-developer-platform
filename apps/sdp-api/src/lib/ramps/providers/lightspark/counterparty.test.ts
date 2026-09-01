@@ -5,6 +5,7 @@ import {
   lightsparkCounterpartyRequirements,
   lightsparkPayoutCollectedData,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
+import { isLightsparkPurposeOfPayment } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
@@ -118,6 +119,12 @@ describe("lightsparkCounterpartyRequirements", () => {
       throw new Error("Expected purposeOfPayment select field");
     }
     expect(purposeField.options.map((option) => option.value)).toContain("GOODS_OR_SERVICES");
+  });
+
+  it("rejects prototype property names as purpose-of-payment codes", () => {
+    expect(isLightsparkPurposeOfPayment("GOODS_OR_SERVICES")).toBe(true);
+    expect(isLightsparkPurposeOfPayment("toString")).toBe(false);
+    expect(isLightsparkPurposeOfPayment("constructor")).toBe(false);
   });
 
   it("requires fiatCurrency for offramp", () => {

@@ -39,7 +39,7 @@ export const LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS = {
 export type LightsparkPurposeOfPayment = keyof typeof LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS;
 
 export function isLightsparkPurposeOfPayment(value: string): value is LightsparkPurposeOfPayment {
-  return value in LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS;
+  return Object.hasOwn(LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS, value);
 }
 
 /**
