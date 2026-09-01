@@ -1,3 +1,4 @@
+import type { CountryCode } from "./countries";
 import type { RampDirection } from "./payments";
 import type { RampProviderId } from "./provider-access";
 
@@ -63,6 +64,26 @@ export function requirementFieldName(key: string): string {
 /** Slug-keyed values the client collects for `status: "collect"` fields and passes through on the quote. */
 export type CollectedFieldData = Record<string, string>;
 
+/** An existing payout external account for the corridor's fiat currency. */
+export interface PayoutRequirementAccount {
+  destinationCountry: CountryCode;
+  /** Provider-reported external-account status (e.g. Grid's CREATED/ACTIVE). */
+  status: string;
+}
+
+/**
+ * Destination-first payout collection: the client collects a destination
+ * country from `countryRails` keys, offers that country's rails, then renders
+ * exactly `railFields[rail]` with true per-rail requiredness. `accounts` lists
+ * corridor accounts that already exist so the client can reuse one instead of
+ * collecting bank fields again.
+ */
+export interface PayoutRequirementTree {
+  countryRails: Partial<Record<CountryCode, RequirementOption[]>>;
+  railFields: Record<string, RequirementField[]>;
+  accounts: PayoutRequirementAccount[];
+}
+
 // TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
 export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: RampProviderId; status: "ready" }
@@ -70,7 +91,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: RampProviderId; status: "unsupported"; reason: string }
   | { provider: "lightspark"; status: "onboarding_not_started" }
   | { provider: "lightspark"; status: "collect_counterparty"; fields: RequirementField[] }
-  | { provider: "lightspark"; status: "collect_account"; fields: RequirementField[] }
+  | { provider: "lightspark"; status: "collect_account"; payout: PayoutRequirementTree }
   | { provider: "bvnk"; status: "onboarding_not_started" }
   | { provider: "bvnk"; status: "customer_verification_required"; verificationUrl: string }
   | { provider: "bvnk"; status: "customer_verifying" }
