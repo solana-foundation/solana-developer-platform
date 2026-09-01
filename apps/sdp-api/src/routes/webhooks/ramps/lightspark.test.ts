@@ -236,4 +236,47 @@ describe("LightsparkWebhookProcessor", () => {
       provider_reference: QUOTE_ID,
     });
   });
+
+  it("settles nothing when the quote and transaction references name different transfers", async () => {
+    await seedTransfer();
+    const otherTransferId = "xfr_lightspark_webhook_other";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, destination_address, token,
+           type, direction, status, provider, provider_reference, delivery_mode,
+           fiat_currency, provider_data, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        otherTransferId,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        "wallet_lightspark_webhook_test",
+        DESTINATION_ADDRESS,
+        "USDC",
+        "onramp",
+        "inbound",
+        "awaiting_payment",
+        "lightspark",
+        "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690",
+        "manual_instructions",
+        "USD",
+        {},
+        "2026-09-01T00:00:00.000Z",
+        "2026-09-01T00:00:00.000Z"
+      )
+      .run();
+
+    await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
+
+    const statuses = await getDb(env)
+      .prepare("SELECT id, status FROM payment_transfers WHERE id IN (?, ?) ORDER BY id")
+      .bind(TRANSFER_ID, otherTransferId)
+      .all<{ id: string; status: string }>();
+    expect(statuses.results).toEqual([
+      { id: otherTransferId, status: "awaiting_payment" },
+      { id: TRANSFER_ID, status: "awaiting_payment" },
+    ]);
+  });
 });

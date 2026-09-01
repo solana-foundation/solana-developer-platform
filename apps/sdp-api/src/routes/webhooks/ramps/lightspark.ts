@@ -359,30 +359,53 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<string, Ramp
     }
 
     const repository = createSystemPaymentsRepository(c.env);
-    let transfer = event.transferId
+    // Every identifier the event carries resolves independently, and settlement
+    // requires them to agree: the description (operator-writable text, so the
+    // weakest identifier), the Grid transaction id (the promoted
+    // provider_reference), and the Grid quote id (the reference the transfer
+    // row was created with). Any two identifiers naming different transfers,
+    // or a description-only match no reference corroborates, settle nothing.
+    const descriptionMatch = event.transferId
       ? await repository.getTransferById({ transferId: event.transferId })
       : null;
-    if (
-      event.transferId !== undefined &&
-      transfer !== null &&
-      transfer.provider !== this.provider
-    ) {
+    if (descriptionMatch !== null && descriptionMatch.provider !== this.provider) {
       logEvent("warn", {
         event: "sdp_api_lightspark_transfer_provider_mismatch",
         flow: "ramp-settlement",
-        transfer_id: transfer.id,
-        transfer_provider: transfer.provider,
+        transfer_id: descriptionMatch.id,
+        transfer_provider: descriptionMatch.provider,
         provider: this.provider,
         provider_reference: event.reference,
       });
       return;
     }
-
-    // The description is operator-writable text on the Grid transaction, so a
-    // description match is only a hint: it must be corroborated by the event's
-    // quote or transaction reference before it may settle the transfer.
-    // Uncorroborated matches are discarded and matching falls back to the
-    // references, which can only select the transfer that owns them.
+    const transactionMatch = event.transactionReference
+      ? await repository.getTransferByProviderReference({
+          provider: this.provider,
+          providerReference: event.transactionReference,
+        })
+      : null;
+    const quoteMatch = await repository.getTransferByProviderReference({
+      provider: this.provider,
+      providerReference: event.reference,
+    });
+    const matches = [descriptionMatch, transactionMatch, quoteMatch].filter(
+      (candidate) => candidate !== null
+    );
+    const matchedIds = new Set(matches.map((candidate) => candidate.id));
+    if (matchedIds.size > 1) {
+      logEvent("warn", {
+        event: "sdp_api_lightspark_conflicting_event_identifiers",
+        flow: "ramp-settlement",
+        provider: this.provider,
+        matched_transfer_ids: [...matchedIds],
+        event_transfer_id: event.transferId,
+        event_quote_id: event.reference,
+        event_transaction_id: event.transactionReference,
+      });
+      return;
+    }
+    const transfer = matches.length > 0 ? matches[0] : null;
     if (
       transfer !== null &&
       transfer.provider_reference !== event.reference &&
@@ -399,20 +422,7 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<string, Ramp
         event_quote_id: event.reference,
         event_transaction_id: event.transactionReference,
       });
-      transfer = null;
-    }
-
-    if (transfer === null && event.transactionReference !== undefined) {
-      transfer = await repository.getTransferByProviderReference({
-        provider: this.provider,
-        providerReference: event.transactionReference,
-      });
-    }
-    if (transfer === null) {
-      transfer = await repository.getTransferByProviderReference({
-        provider: this.provider,
-        providerReference: event.reference,
-      });
+      return;
     }
     if (transfer === null) {
       logEvent("info", {
