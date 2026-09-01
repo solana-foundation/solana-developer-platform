@@ -12,13 +12,11 @@ describe("Embedded Yield redirects", () => {
     });
   });
 
-  it("permanently redirects public handoff links", async () => {
+  it("no longer redirects the removed public handoff links", async () => {
     const redirects = await nextConfig.redirects?.();
 
-    expect(redirects).toContainEqual({
-      source: "/earn/integrate/:token",
-      destination: "/embedded-yield/integrate/:token",
-      permanent: true,
-    });
+    // The public engineering-handoff pages left with the UI builder; a
+    // redirect whose destination 404s would just move the dead end around.
+    expect(redirects?.some((redirect) => redirect.source === "/earn/integrate/:token")).toBe(false);
   });
 });

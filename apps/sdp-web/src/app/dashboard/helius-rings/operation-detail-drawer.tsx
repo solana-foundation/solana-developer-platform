@@ -1,12 +1,34 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
-import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
+import { Modal } from "@/components/ui/modal";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { fetchRingsOperationDetail, type RingsOperationDetail } from "./helius-rings.data";
-import { formatTimeOfDay, formatWhen } from "./helius-rings.utils";
+import {
+  fetchRingsOperationDetail,
+  type RingsOperationDetail,
+  type RingsOperationState,
+} from "./helius-rings.data";
+import { formatAssetAmount, formatWhen } from "./helius-rings.utils";
+
+type Translate = ReturnType<typeof useTranslations>;
+
+// Mirrors activity-card.tsx so completed reads green here too, not default grey.
+const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
+  draft: "default",
+  preparing: "default",
+  approval_required: "warning",
+  proving: "default",
+  ready_to_sign: "default",
+  submitted: "default",
+  indexing: "default",
+  completed: "success",
+  failed: "danger",
+  voided: "default",
+};
 
 /**
  * Operation detail: identity, failure (code + message, verbatim), and the
@@ -49,10 +71,12 @@ export function OperationDetailDrawer({
     });
   }, [detail]);
 
+  const title = t("DashboardHeliusRings.detail.title");
+
   return (
-    <Drawer open={operationId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DrawerContent className="flex w-full max-w-md flex-col gap-4 p-6">
-        <DrawerTitle>{t("DashboardHeliusRings.detail.title")}</DrawerTitle>
+    <Modal isOpen={operationId !== null} ariaLabel={title} onClose={onClose} size="md">
+      <div className="flex max-h-[calc(100vh-4rem)] flex-col gap-4 overflow-y-auto p-6 pr-14">
+        <h2 className="text-base font-medium text-primary">{title}</h2>
 
         {error ? <Callout variant="danger">{error}</Callout> : null}
 
@@ -69,7 +93,7 @@ export function OperationDetailDrawer({
                   {t("DashboardHeliusRings.activity.state")}
                 </dt>
                 <dd>
-                  <Badge variant={detail.state === "failed" ? "danger" : "default"}>
+                  <Badge variant={STATE_BADGE[detail.state]}>
                     {t(`DashboardHeliusRings.activity.state_${detail.state}`)}
                   </Badge>
                 </dd>
@@ -77,13 +101,19 @@ export function OperationDetailDrawer({
               {detail.amountRaw ? (
                 <DetailRow
                   label={t("DashboardHeliusRings.activity.amount")}
-                  value={detail.amountRaw}
+                  value={formatAssetAmount(detail.amountRaw, detail.assetMint)}
                 />
               ) : null}
               <DetailRow
                 label={t("DashboardHeliusRings.activity.created")}
                 value={formatWhen(detail.createdAt, locale)}
               />
+              {detail.retryOfOperationId ? (
+                <DetailRow
+                  label={t("DashboardHeliusRings.detail.retryOf")}
+                  value={detail.retryOfOperationId}
+                />
+              ) : null}
             </dl>
 
             {detail.failure ? (
@@ -96,7 +126,7 @@ export function OperationDetailDrawer({
               </Callout>
             ) : null}
 
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-3">
               <span className="text-sm font-medium text-primary">
                 {t("DashboardHeliusRings.detail.timeline")}
               </span>
@@ -105,23 +135,83 @@ export function OperationDetailDrawer({
                   {t("DashboardHeliusRings.detail.timelineEmpty")}
                 </p>
               ) : (
-                <ol className="flex flex-col gap-1.5">
-                  {keyedEvents.map((event) => (
-                    <li key={event.key} className="flex items-baseline justify-between gap-4">
-                      <span className="text-sm text-primary">{event.kind}</span>
-                      <span className="text-sm text-secondary">
-                        {formatTimeOfDay(event.createdAt, locale)}
-                      </span>
-                    </li>
-                  ))}
+                <ol className="flex max-h-[45vh] flex-col overflow-y-auto pr-1">
+                  {keyedEvents.map((event, index) => {
+                    const last = index === keyedEvents.length - 1;
+                    return (
+                      <li key={event.key} className="flex gap-2">
+                        {/* Icon column: circle + connector line to the next event. */}
+                        <div className="flex flex-col items-center">
+                          <span className="flex size-3.5 items-center justify-center rounded-full bg-success">
+                            <Check aria-hidden="true" className="size-2 text-on-primary" />
+                          </span>
+                          {last ? null : (
+                            <span
+                              aria-hidden="true"
+                              className="my-0.5 w-px flex-1 bg-border-default"
+                            />
+                          )}
+                        </div>
+                        <div className={last ? "flex flex-col" : "flex flex-col pb-2"}>
+                          <span className="text-[11px] font-medium text-primary">
+                            {formatEventKind(event, t)}
+                          </span>
+                          <span className="text-[10px] text-secondary">
+                            {formatWhen(event.createdAt, locale)}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </div>
           </>
         ) : null}
-      </DrawerContent>
-    </Drawer>
+      </div>
+    </Modal>
   );
+}
+
+// Short human-facing label per event kind and per target state; falls back to
+// the raw kind so a new upstream event is visible rather than silently missing.
+const TIMELINE_STATES = new Set<RingsOperationState>([
+  "draft",
+  "preparing",
+  "approval_required",
+  "proving",
+  "ready_to_sign",
+  "submitted",
+  "indexing",
+  "completed",
+  "failed",
+  "voided",
+]);
+
+const EVENT_KEY: Record<string, MessageKey> = {
+  "operation.created": "DashboardHeliusRings.detail.event_created",
+  "operation.retried": "DashboardHeliusRings.detail.event_retried",
+  "policy.evaluated": "DashboardHeliusRings.detail.event_policyEvaluated",
+  "approval.requested": "DashboardHeliusRings.detail.event_approvalRequested",
+  "approval.granted": "DashboardHeliusRings.detail.event_approvalGranted",
+  "proof.received": "DashboardHeliusRings.detail.event_proofReceived",
+  "transaction.submitted": "DashboardHeliusRings.detail.event_transactionSubmitted",
+  "operation.completed": "DashboardHeliusRings.detail.event_completed",
+  "operation.failed": "DashboardHeliusRings.detail.event_failed",
+  "operation.voided": "DashboardHeliusRings.detail.event_voided",
+  "operation.escalated": "DashboardHeliusRings.detail.event_escalated",
+};
+
+function formatEventKind(event: RingsOperationDetail["events"][number], t: Translate): string {
+  if (event.kind === "state.transitioned") {
+    const to = event.payload && typeof event.payload === "object" ? event.payload.to : undefined;
+    if (typeof to === "string" && TIMELINE_STATES.has(to as RingsOperationState)) {
+      return t(`DashboardHeliusRings.detail.timelineState_${to as RingsOperationState}`);
+    }
+    if (typeof to === "string") return to;
+  }
+  const key = EVENT_KEY[event.kind];
+  return key ? t(key) : event.kind;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {

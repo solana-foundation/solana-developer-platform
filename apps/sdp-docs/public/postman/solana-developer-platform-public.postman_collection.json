@@ -2170,6 +2170,33 @@
           }
         },
         {
+          "name": "List one external wallet's activity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/movements",
+            "description": "Returns one keyset page of the wallet's recorded deposits and withdrawals, newest first, in ledger vocabulary (`requested`, `submitted`, `confirmed`, `finalized`, `failed`; only `finalized` and `failed` are terminal). `ownerAddress` is required; a wallet outside the active partner project answers 404. Reports on money that already moved, so no provider gate applies."
+          }
+        },
+        {
+          "name": "Get one external-wallet movement",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/movements/{{movementId}}",
+            "description": "Polls one recorded movement to a terminal state — the read that settles a submit whose outcome the caller never learned. The reconciliation sweep drives every movement terminal within about ninety seconds; keep polling until `finalized` or `failed`."
+          }
+        },
+        {
+          "name": "Get one external wallet's balance and earnings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/earnings/{{ownerAddress}}",
+            "description": "Returns live balance and total earned per deposit token: `earned` is live value minus finalized SDP deposits, stated only when exact. When it cannot be stated — live value unavailable, movements still settling, or a finalized withdrawal on a held position — the figure is absent with a named reason, never zero. Figures cover currently held positions: a fully exited position's history drops out (it stays on the movements list). Live value reads the owner's whole vault balance, so shares acquired outside SDP inflate it."
+          }
+        },
+        {
           "name": "Build an unsigned external-wallet deposit transaction",
           "request": {
             "method": "POST",

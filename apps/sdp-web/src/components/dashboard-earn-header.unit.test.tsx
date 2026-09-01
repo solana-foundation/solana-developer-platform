@@ -51,9 +51,9 @@ describe("Markets dashboard headers", () => {
     expect(config.routeTabs?.tabs).toHaveLength(2);
   });
 
-  it("centers the Embedded Yield button builder title without header tabs", () => {
+  it("centers the Embedded Yield integration title without header tabs", () => {
     const config = getDashboardPageConfig(
-      "/dashboard/markets/embedded-yield/button-builder",
+      "/dashboard/markets/embedded-yield/integrate",
       t,
       false,
       false

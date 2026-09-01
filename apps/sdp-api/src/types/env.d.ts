@@ -255,10 +255,6 @@ export interface Env {
   // Google address completion (Places API New + Maps Static API)
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
 
-  // Exact hostnames tenant-supplied ramp redirect URLs may target
-  // (comma-separated). Unset means every redirectUrl is rejected — fail closed.
-  RAMP_REDIRECT_ALLOWED_HOSTS?: string;
-
   // MoonPay ramps configuration
   MOONPAY_API_KEY?: string;
   MOONPAY_SECRET_KEY?: string;
@@ -320,8 +316,6 @@ export interface Env {
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
 
   // Earn vault-infra provider configuration
-  VEDA_API_KEY?: string;
-  VEDA_SANDBOX_API_KEY?: string;
   UPSHIFT_API_KEY?: string;
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;

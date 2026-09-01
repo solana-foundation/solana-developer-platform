@@ -888,7 +888,6 @@ export interface PaymentOnrampQuoteRequest {
   cryptoToken: string;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
-  redirectUrl?: string;
   domain?: string;
   rampsMemo?: Record<string, string>;
 }
@@ -900,7 +899,6 @@ export interface PaymentOfframpQuoteRequest {
   cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
-  redirectUrl?: string;
   rampsMemo?: Record<string, string>;
 }
 
