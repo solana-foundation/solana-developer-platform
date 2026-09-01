@@ -13,7 +13,6 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
-import { WizardSummaryList } from "../wizard-summary-list";
 import { BatchSendRail } from "./batch-send-rail";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { CounterpartyRecentTransfers } from "./components/counterparty-recent-transfers";
@@ -28,7 +27,6 @@ import { OfframpRail } from "./offramp-rail";
 import { OnchainReceiveRail } from "./onchain-receive-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
 import { OnrampRail } from "./onramp-rail";
-import { preStepSummaryDetails } from "./wizard-summary";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -211,15 +209,6 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       counterpartyDialogOpen={counterpartyDialogOpen}
       setCounterpartyDialogOpen={setCounterpartyDialogOpen}
       onCounterpartyCreated={handleCounterpartyCreated}
-      summary={
-        <WizardSummaryList
-          details={preStepSummaryDetails(
-            t,
-            counterpartyName,
-            method === null ? null : getPaymentMethodLabel(t, mode, method)
-          )}
-        />
-      }
       header={
         mode === "send" && phase === "counterparty" ? (
           <SendModeToggle value={sendMode} onChange={setSendMode} />

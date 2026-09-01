@@ -2,13 +2,9 @@ import type { ReactElement, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  step: 0,
   createdCounterparty: null as { id: string; displayName: string } | null,
   push: vi.fn(),
-  goNext: vi.fn(),
-  goBack: vi.fn(),
   submit: vi.fn(),
-  finish: vi.fn(),
 }));
 
 vi.mock("@/i18n/provider", () => ({
@@ -19,74 +15,61 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push }),
 }));
 
-vi.mock("../counterparty-create-context", () => ({
+vi.mock("./counterparty-create-context", () => ({
   CounterpartyCreateProvider: ({ children }: { children: ReactNode }) => children,
   useCounterpartyCreate: () => ({
-    step: mocks.step,
-    steps: ["basics", "review"],
-    currentStepId: mocks.step === 0 ? "basics" : "review",
-    direction: 1,
-    createdCounterparty: mocks.createdCounterparty,
-    goNext: mocks.goNext,
-    goBack: mocks.goBack,
     submit: mocks.submit,
     submitting: false,
-    finish: mocks.finish,
+    submitError: null,
+    createdCounterparty: mocks.createdCounterparty,
   }),
 }));
 
-import { CounterpartyCreateDialog } from "../counterparty-create-dialog";
-import { CounterpartyCreatePage } from "../counterparty-create-page";
-import { CryptoAccountsPhase } from "../crypto-accounts-phase";
-import { StepFooter } from "./step-footer";
+import { CounterpartyCreateDialog } from "./counterparty-create-dialog";
+import { CounterpartyCreatePage } from "./counterparty-create-page";
+import { CryptoAccountsPhase } from "./crypto-accounts-phase";
 
 type ActionElement = ReactElement<{ onClick: () => void }>;
+type FooterElement = ReactElement<{ children: [ActionElement, ActionElement] }>;
 
-function secondaryAction(onCancel?: () => void): ActionElement {
-  const footer = StepFooter({ onCancel }) as ReactElement<{
-    children: [ActionElement, ReactElement];
+function embeddedFooter(onCancel?: () => void): FooterElement {
+  const page = CounterpartyCreatePage({ embedded: true, onCancel }) as ReactElement<{
+    children: [ReactElement, ReactElement, FooterElement];
   }>;
-  return footer.props.children[0];
+  return page.props.children[2];
 }
 
 beforeEach(() => {
-  mocks.step = 0;
   mocks.createdCounterparty = null;
   mocks.push.mockReset();
-  mocks.goNext.mockReset();
-  mocks.goBack.mockReset();
   mocks.submit.mockReset();
-  mocks.finish.mockReset();
 });
 
-describe("counterparty create cancel behavior", () => {
-  it("uses the injected cancel action on the first step", () => {
+describe("counterparty create flow", () => {
+  it("cancels through the injected action when embedded", () => {
     const onCancel = vi.fn();
 
-    secondaryAction(onCancel).props.onClick();
+    embeddedFooter(onCancel).props.children[0].props.onClick();
 
     expect(onCancel).toHaveBeenCalledOnce();
     expect(mocks.push).not.toHaveBeenCalled();
   });
 
-  it("returns a standalone create page to the counterparty directory", () => {
-    secondaryAction().props.onClick();
+  it("submits directly from the footer with no review step", () => {
+    embeddedFooter(vi.fn()).props.children[1].props.onClick();
+
+    expect(mocks.submit).toHaveBeenCalledOnce();
+  });
+
+  it("returns the standalone page to the counterparty directory on cancel", () => {
+    const frame = CounterpartyCreatePage({}) as ReactElement<{ footer: FooterElement }>;
+
+    frame.props.footer.props.children[0].props.onClick();
 
     expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments/counterparty");
   });
 
-  it("keeps Back behavior after the first step", () => {
-    const onCancel = vi.fn();
-    mocks.step = 1;
-
-    secondaryAction(onCancel).props.onClick();
-
-    expect(mocks.goBack).toHaveBeenCalledOnce();
-    expect(onCancel).not.toHaveBeenCalled();
-    expect(mocks.push).not.toHaveBeenCalled();
-  });
-
-  it("passes the dialog close action through the create page to the footer", () => {
+  it("passes the dialog close action through the create page", () => {
     const onClose = vi.fn();
     const onCreated = vi.fn();
     const dialog = CounterpartyCreateDialog({ open: true, onClose, onCreated }) as ReactElement<{
@@ -101,12 +84,6 @@ describe("counterparty create cancel behavior", () => {
     expect(page.type).toBe(CounterpartyCreatePage);
     expect(page.props.embedded).toBe(true);
     expect(page.props.onCancel).toBe(onClose);
-
-    const frame = CounterpartyCreatePage({ onCancel: page.props.onCancel }) as ReactElement<{
-      footer: ReactElement<{ onCancel?: () => void }>;
-    }>;
-    expect(frame.props.footer.type).toBe(StepFooter);
-    expect(frame.props.footer.props.onCancel).toBe(onClose);
   });
 
   it("uses the standalone optional-account layout after page creation", () => {
@@ -121,7 +98,7 @@ describe("counterparty create cancel behavior", () => {
     expect(phase.props.embedded).toBe(false);
     expect(phase.props.steps.map((step) => step.label)).toEqual([
       "DashboardPayments.counterparty.basics",
-      "DashboardPayments.counterparty.review",
+      "DashboardPayments.counterparty.cryptoWallet",
     ]);
   });
 

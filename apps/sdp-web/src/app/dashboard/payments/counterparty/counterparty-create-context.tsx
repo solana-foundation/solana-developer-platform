@@ -8,24 +8,11 @@ import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useZodForm, type ZodFormApi } from "@/lib/use-zod-form";
-import { COUNTERPARTY_CREATE_STEPS, defaultBasics } from "./counterparty-create-defaults";
-import {
-  type BasicsClean,
-  type BasicsData,
-  basicsSchema,
-  type StepId,
-} from "./counterparty-create-schemas";
+import { defaultBasics } from "./counterparty-create-defaults";
+import { type BasicsClean, type BasicsData, basicsSchema } from "./counterparty-create-schemas";
 
 interface CounterpartyCreateContextValue {
   basics: ZodFormApi<BasicsData, BasicsClean>;
-
-  step: number;
-  steps: readonly StepId[];
-  currentStepId: StepId;
-  direction: 1 | -1;
-
-  goNext: () => void;
-  goBack: () => void;
 
   submit: () => Promise<void>;
   submitting: boolean;
@@ -55,47 +42,18 @@ export function CounterpartyCreateProvider({
   );
   const basics = useZodForm(basicsSchema, defaultBasics, resolveValidationMessage);
 
-  const [step, setStep] = useState(0);
-  const [direction, setDirection] = useState<1 | -1>(1);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [createdCounterparty, setCreatedCounterparty] = useState<Counterparty | null>(null);
 
-  const steps = COUNTERPARTY_CREATE_STEPS;
-  const currentStepId: StepId = step === 0 ? "basics" : "review";
-
-  function validateCurrentStep(): boolean {
-    switch (currentStepId) {
-      case "basics":
-        return basics.validate().ok;
-      case "review":
-        return true;
-    }
-  }
-
-  function goNext() {
-    if (!validateCurrentStep()) return;
-
-    setDirection(1);
-    setStep((s) => s + 1);
-  }
-
-  function goBack() {
-    setDirection(-1);
-    setStep((s) => Math.max(s - 1, 0));
-  }
-
   async function submit() {
+    const basicsResult = basics.validate();
+    if (!basicsResult.ok) return;
+
     setSubmitError(null);
     setSubmitting(true);
 
     try {
-      const basicsResult = basics.validate();
-
-      if (!basicsResult.ok) {
-        throw new Error("Invalid form state");
-      }
-
       const body: CreateCounterpartyRequest = {
         entityType: basicsResult.data.entityType,
         displayName: basicsResult.data.displayName,
@@ -141,12 +99,6 @@ export function CounterpartyCreateProvider({
     <CounterpartyCreateContext.Provider
       value={{
         basics,
-        step,
-        steps,
-        currentStepId,
-        direction,
-        goNext,
-        goBack,
         submit,
         submitting,
         submitError,

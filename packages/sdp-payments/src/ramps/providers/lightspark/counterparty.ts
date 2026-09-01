@@ -115,7 +115,9 @@ function lightsparkValueLabel(fieldKey: string, value: string): string {
 }
 
 /**
- * Maps one generated payout field spec onto a requirement field.
+ * Maps one generated payout field spec onto a requirement field. Fields are
+ * keyed under the `bankAccount.` group so clients can section the collect
+ * form by the key's top-level dotted segment.
  *
  * @param key - Field key within the account schema.
  * @param spec - Generated validation spec for the field.
@@ -134,7 +136,7 @@ function lightsparkRequirementField(
   }
   if (spec.values !== undefined) {
     return selectField({
-      key,
+      key: `bankAccount.${key}`,
       label: copy.label,
       required,
       options: spec.values.map((value) => ({
@@ -144,7 +146,7 @@ function lightsparkRequirementField(
     });
   }
   return textField({
-    key,
+    key: `bankAccount.${key}`,
     label: copy.label,
     required,
     ...(spec.pattern !== undefined ? { pattern: spec.pattern } : {}),
@@ -374,7 +376,6 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
       pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
       placeholder: "name@example.com",
     }),
-    lightsparkPurposeOfPaymentField(),
     {
       kind: "address",
       key: "customer.address",
@@ -392,6 +393,7 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
         lightsparkCountrySelect("customer.address.countryCode", "Country"),
       ],
     },
+    lightsparkPurposeOfPaymentField(),
   ];
 }
 
@@ -605,7 +607,7 @@ export function buildLightsparkAccountInfo(
     paymentRails: [railKey],
   };
   for (const key of Object.keys(rail.fields)) {
-    const value = supplied[key];
+    const value = supplied[`bankAccount.${key}`];
     if (value === undefined) continue;
     accountInfo[key] = value;
   }

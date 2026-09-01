@@ -105,6 +105,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "REQUIREMENTS") {
     return (
       <RequirementsFields
+        provider={fields.provider}
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}

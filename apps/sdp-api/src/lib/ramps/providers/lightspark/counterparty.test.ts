@@ -66,11 +66,11 @@ describe("lightsparkCounterpartyRequirements", () => {
       "customer.nationality",
       "customer.region",
       "customer.email",
-      "purposeOfPayment",
       "customer.address",
+      "purposeOfPayment",
     ]);
-    const addressField = requirements.fields.at(-1);
-    if (addressField?.kind !== "address") {
+    const addressField = requirements.fields.find((field) => field.kind === "address");
+    if (addressField === undefined) {
       throw new Error("Expected an address field");
     }
     expect(addressField.fields.map((field) => field.key)).toEqual([
@@ -157,7 +157,9 @@ describe("lightsparkCounterpartyRequirements", () => {
       { value: "SWIFT", label: "SWIFT" },
     ]);
     expect(requirements.payout.railFields.ACH).toEqual(
-      expect.arrayContaining([expect.objectContaining({ key: "routingNumber", required: true })])
+      expect.arrayContaining([
+        expect.objectContaining({ key: "bankAccount.routingNumber", required: true }),
+      ])
     );
   });
 
@@ -292,8 +294,8 @@ describe("buildLightsparkAccountInfo", () => {
     const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
       destinationCountry: "US",
       paymentRails: "ACH",
-      routingNumber: "021000021",
-      accountNumber: "12345678901",
+      "bankAccount.routingNumber": "021000021",
+      "bankAccount.accountNumber": "12345678901",
     });
 
     expect(accountInfo).toEqual({
@@ -312,9 +314,9 @@ describe("buildLightsparkAccountInfo", () => {
     const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "XOF", {
       destinationCountry: "SN",
       paymentRails: "MOBILE_MONEY",
-      phoneNumber: "+221770000000",
-      provider: "Orange Money",
-      region: "SN",
+      "bankAccount.phoneNumber": "+221770000000",
+      "bankAccount.provider": "Orange Money",
+      "bankAccount.region": "SN",
     });
 
     expect(accountInfo).toEqual({
@@ -340,8 +342,8 @@ describe("buildLightsparkAccountInfo", () => {
     const accountInfo = buildLightsparkAccountInfo(businessRow, "usdc.solana", "GBP", {
       destinationCountry: "GB",
       paymentRails: "FASTER_PAYMENTS",
-      sortCode: "123456",
-      accountNumber: "12345678",
+      "bankAccount.sortCode": "123456",
+      "bankAccount.accountNumber": "12345678",
     });
 
     expect(accountInfo.beneficiary).toEqual({
@@ -361,8 +363,8 @@ describe("buildLightsparkAccountInfo", () => {
       buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
         destinationCountry: "US",
         paymentRails: "ACH",
-        routingNumber: "not-a-routing-number",
-        accountNumber: "12345678901",
+        "bankAccount.routingNumber": "not-a-routing-number",
+        "bankAccount.accountNumber": "12345678901",
       })
     ).toThrowError(SdpPaymentsError);
   });
@@ -372,8 +374,8 @@ describe("buildLightsparkAccountInfo", () => {
       buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
         destinationCountry: "ZZ",
         paymentRails: "ACH",
-        routingNumber: "021000021",
-        accountNumber: "12345678901",
+        "bankAccount.routingNumber": "021000021",
+        "bankAccount.accountNumber": "12345678901",
       })
     ).toThrowError(SdpPaymentsError);
   });
@@ -383,8 +385,8 @@ describe("buildLightsparkAccountInfo", () => {
       buildLightsparkAccountInfo(counterpartyRow(), "usdc.solana", "USD", {
         destinationCountry: "US",
         paymentRails: "SEPA",
-        routingNumber: "021000021",
-        accountNumber: "12345678901",
+        "bankAccount.routingNumber": "021000021",
+        "bankAccount.accountNumber": "12345678901",
       })
     ).toThrowError(SdpPaymentsError);
   });

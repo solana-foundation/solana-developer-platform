@@ -26,6 +26,8 @@ interface RampWizardShellProps {
   /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
   header?: ReactNode;
   summary?: ReactNode;
+  /** Replaces the "View summary" button text (e.g. the provider-branded chip). */
+  summaryTrigger?: ReactNode;
   footerActions?: ReactNode;
   hidePrimary?: boolean;
   /** Confirm before running the secondary action — used once a transaction is live. */
@@ -50,6 +52,7 @@ export function RampWizardShell({
   children,
   header,
   summary,
+  summaryTrigger,
   footerActions,
   hidePrimary,
   confirmSecondary,
@@ -74,6 +77,7 @@ export function RampWizardShell({
         })}
         header={header}
         summary={summary}
+        summaryTrigger={summaryTrigger}
         footer={
           showFooter ? (
             <div className="flex items-center justify-between gap-3">

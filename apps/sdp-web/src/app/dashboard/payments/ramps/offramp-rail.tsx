@@ -8,6 +8,7 @@ import { toRampCryptoToken } from "@/lib/ramps";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { InstructionActionButton } from "./components/manual-instructions-quote";
 import { OfframpStepContent } from "./components/offramp-step-content";
+import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
 import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
@@ -75,12 +76,19 @@ export function OfframpRail({
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
       summary={
-        <WizardSummaryList
-          details={[
-            ...preStepSummaryDetails(t, counterpartyName, methodLabel),
-            ...wizard.summaryDetails,
-          ]}
-        />
+        wizard.fields.provider === null ? undefined : (
+          <WizardSummaryList
+            details={[
+              ...preStepSummaryDetails(t, counterpartyName, methodLabel),
+              ...wizard.summaryDetails,
+            ]}
+          />
+        )
+      }
+      summaryTrigger={
+        wizard.fields.provider === null ? undefined : (
+          <ProviderSummaryTrigger provider={wizard.fields.provider} />
+        )
       }
       header={
         showInlineStatus ? (

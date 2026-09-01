@@ -162,6 +162,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     return (
       <RequirementsFields
         key={requirementsKey}
+        provider={fields.provider}
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}

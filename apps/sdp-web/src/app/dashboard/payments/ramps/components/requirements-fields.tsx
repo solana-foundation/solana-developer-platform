@@ -1,6 +1,7 @@
 "use client";
 
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   type CollectedFieldData,
   type PayoutRequirementAccount,
@@ -9,10 +10,11 @@ import {
 } from "@sdp/types/ramp-requirements";
 import { Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { autocompletePlaces, fetchPlaceDetails, newPlacesSessionToken } from "@/lib/places";
 import { cn } from "@/lib/utils";
@@ -32,6 +34,105 @@ function lastDateBefore(before: string): string {
 }
 
 type AddressRequirementField = Extract<RequirementField, { kind: "address" }>;
+
+interface RequirementGroupCopy {
+  title: MessageKey;
+  description: MessageKey;
+}
+
+/**
+ * Section copy for grouped collect forms, discriminated by provider then by
+ * the fields' top-level dotted key segment (plus the wizard-synthesized
+ * destination selects). Providers whose fields carry dotted keys need an
+ * entry here for every group slug they emit.
+ */
+const REQUIREMENT_GROUP_COPY: Partial<
+  Record<RampProviderId, Record<string, RequirementGroupCopy>>
+> = {
+  lightspark: {
+    destination: {
+      title: "DashboardPayments.ramps.requirementGroupDestinationTitle",
+      description: "DashboardPayments.ramps.requirementGroupDestinationDescription",
+    },
+    bankAccount: {
+      title: "DashboardPayments.ramps.requirementGroupBankAccountTitle",
+      description: "DashboardPayments.ramps.requirementGroupBankAccountDescription",
+    },
+    customer: {
+      title: "DashboardPayments.ramps.requirementGroupCustomerTitle",
+      description: "DashboardPayments.ramps.requirementGroupCustomerDescription",
+    },
+  },
+};
+
+/**
+ * Resolves the section a requirement field renders under: the key's top-level
+ * dotted segment, or the destination section for the wizard-synthesized
+ * country and rail selects. Flat keys with no section render ungrouped.
+ *
+ * @param field - Requirement field to place.
+ * @returns The section slug, or null for ungrouped fields.
+ */
+function requirementFieldGroup(field: RequirementField): string | null {
+  const separator = field.key.indexOf(".");
+  if (separator !== -1) {
+    return field.key.slice(0, separator);
+  }
+  if (field.key === "destinationCountry" || field.key === "paymentRails") {
+    return "destination";
+  }
+  return null;
+}
+
+/**
+ * Looks up the translated title/description pair for a provider's requirement section.
+ *
+ * @param provider - Selected ramp provider, when one is chosen.
+ * @param group - Section slug derived from the field keys.
+ * @returns Message keys for the section's card header.
+ */
+function requirementGroupCopy(
+  provider: RampProviderId | null,
+  group: string
+): RequirementGroupCopy {
+  const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
+  const copy = providerCopy === undefined ? undefined : providerCopy[group];
+  if (copy === undefined) {
+    throw new Error(`Requirement group "${group}" has no section copy for provider "${provider}".`);
+  }
+  return copy;
+}
+
+interface RequirementFieldRun {
+  group: string | null;
+  fields: RequirementField[];
+}
+
+/**
+ * Partitions the flat field list into consecutive runs sharing a section,
+ * preserving provider field order. Address fields always run alone since they
+ * render their own card.
+ *
+ * @param fields - Flat requirement fields in provider order.
+ * @returns Ordered field runs for card rendering.
+ */
+function requirementFieldRuns(fields: RequirementField[]): RequirementFieldRun[] {
+  const runs: RequirementFieldRun[] = [];
+  for (const field of fields) {
+    if (field.kind === "address") {
+      runs.push({ group: null, fields: [field] });
+      continue;
+    }
+    const group = requirementFieldGroup(field);
+    const last = runs[runs.length - 1];
+    if (last !== undefined && last.group === group && last.fields[0].kind !== "address") {
+      last.fields.push(field);
+      continue;
+    }
+    runs.push({ group, fields: [field] });
+  }
+  return runs;
+}
 
 /**
  * Copies resolved address values into matching nested requirement fields.
@@ -220,9 +321,14 @@ function AddressRequirementField({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center gap-3">
-        <MapPinIcon className="size-5 shrink-0 text-tertiary" aria-hidden="true" />
-        <CardTitle>{field.label}</CardTitle>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-3">
+          <MapPinIcon className="size-5 shrink-0 text-tertiary" aria-hidden="true" />
+          {field.label}
+        </CardTitle>
+        <CardDescription>
+          {t("DashboardPayments.ramps.addressRequirementDescription")}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="relative">
@@ -343,6 +449,7 @@ function AddressRequirementField({
 /**
  * Renders the current dynamic requirement field set.
  *
+ * @param provider - Selected ramp provider, used to resolve section copy.
  * @param fields - Fields currently required by the provider and local selections.
  * @param values - Collected values keyed by requirement field.
  * @param onChange - Callback for updating a collected value.
@@ -350,11 +457,13 @@ function AddressRequirementField({
  * @returns The requirement field group.
  */
 export function RequirementsFields({
+  provider,
   fields,
   values,
   onChange,
   existingPayoutAccount,
 }: {
+  provider: RampProviderId | null;
   fields: RequirementField[];
   values: CollectedFieldData;
   onChange: (key: string, value: string) => void;
@@ -363,25 +472,45 @@ export function RequirementsFields({
   const t = useTranslations();
   return (
     <div className="space-y-6">
-      {fields.map((field) => {
-        if (field.kind === "address") {
+      {requirementFieldRuns(fields).map((run) => {
+        const first = run.fields[0];
+        if (first.kind === "address") {
           return (
             <AddressRequirementField
-              key={field.key}
-              field={field}
+              key={first.key}
+              field={first}
               values={values}
               onChange={onChange}
             />
           );
         }
-        const current = values[field.key];
+        const inputs = run.fields.map((field) => {
+          const current = values[field.key];
+          return (
+            <RequirementFieldInput
+              key={field.key}
+              field={field}
+              value={current === undefined ? "" : current}
+              onChange={(value) => onChange(field.key, value)}
+            />
+          );
+        });
+        if (run.group === null) {
+          return (
+            <div key={first.key} className="space-y-6">
+              {inputs}
+            </div>
+          );
+        }
+        const copy = requirementGroupCopy(provider, run.group);
         return (
-          <RequirementFieldInput
-            key={field.key}
-            field={field}
-            value={current === undefined ? "" : current}
-            onChange={(value) => onChange(field.key, value)}
-          />
+          <Card key={first.key}>
+            <CardHeader>
+              <CardTitle>{t(copy.title)}</CardTitle>
+              <CardDescription>{t(copy.description)}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">{inputs}</CardContent>
+          </Card>
         );
       })}
       {existingPayoutAccount !== undefined && existingPayoutAccount !== null ? (

@@ -19,7 +19,7 @@ const payout = {
     ACH: [
       {
         kind: "text",
-        key: "accountNumber",
+        key: "bankAccount.accountNumber",
         label: "Account number",
         required: true,
       },
@@ -27,7 +27,7 @@ const payout = {
     SEPA: [
       {
         kind: "text",
-        key: "iban",
+        key: "bankAccount.iban",
         label: "IBAN",
         required: true,
       },
@@ -35,13 +35,13 @@ const payout = {
     SWIFT: [
       {
         kind: "text",
-        key: "accountNumber",
+        key: "bankAccount.accountNumber",
         label: "Account number",
         required: false,
       },
       {
         kind: "text",
-        key: "swiftCode",
+        key: "bankAccount.swiftCode",
         label: "SWIFT / BIC code",
         required: true,
       },
@@ -96,7 +96,7 @@ describe("derivePayoutRequirementFields", () => {
     expect(fields.map((field) => field.key)).toEqual([
       "destinationCountry",
       "paymentRails",
-      "accountNumber",
+      "bankAccount.accountNumber",
     ]);
     expect(fields[2]).toMatchObject({ required: true });
   });
