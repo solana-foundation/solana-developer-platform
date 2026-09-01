@@ -5,20 +5,30 @@ import EmbeddedYieldIntegrateLoading from "./embedded-yield/integrate/loading";
 import EmbeddedYieldLoading from "./embedded-yield/loading";
 
 describe("Markets route loading states", () => {
-  it.each([
-    ["workspace", EmbeddedYieldLoading],
-    ["integration guide", EmbeddedYieldIntegrateLoading],
-  ])("renders the complete Embedded Yield %s skeleton", (_name, Loading) => {
-    const markup = renderToStaticMarkup(<Loading />);
+  it("matches the Embedded Yield portfolio while its first read loads", () => {
+    const markup = renderToStaticMarkup(<EmbeddedYieldLoading />);
 
     expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain("max-w-7xl");
-    expect(markup.match(/animate-pulse/g)).toHaveLength(14);
+    expect(markup).toContain('data-embedded-yield-loading="portfolio"');
+    expect(markup).toContain("max-w-[63rem]");
+    expect(markup).toContain("h-[121px]");
   });
 
-  it("preserves the Earn workspace skeleton while configuration loads", () => {
-    expect(renderToStaticMarkup(<EmbeddedYieldConfigureLoading />)).toBe(
-      renderToStaticMarkup(<EmbeddedYieldLoading />)
-    );
+  it("matches the strategy catalogue while configuration loads", () => {
+    const markup = renderToStaticMarkup(<EmbeddedYieldConfigureLoading />);
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('data-embedded-yield-loading="configure"');
+    expect(markup).toContain("max-w-7xl");
+    expect(markup).toContain("h-20");
+  });
+
+  it("matches the code guide while integration loads", () => {
+    const markup = renderToStaticMarkup(<EmbeddedYieldIntegrateLoading />);
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('data-embedded-yield-loading="integrate"');
+    expect(markup).toContain("max-w-5xl");
+    expect(markup).toContain("h-56");
   });
 });

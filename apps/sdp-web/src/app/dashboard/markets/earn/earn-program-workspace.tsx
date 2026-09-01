@@ -35,7 +35,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { EarnProgramSkeleton } from "../markets-route-skeletons";
+import { EarnProgramConfigureSkeleton } from "../markets-route-skeletons";
 import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
 import {
   EarnDepositAvailabilityBadge,
@@ -274,7 +274,7 @@ export function EarnProgramWorkspace({
   const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategiesCluster });
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
 
-  if (isLoading) return <EarnProgramSkeleton />;
+  if (isLoading) return <EarnProgramConfigureSkeleton />;
 
   const rows = strategies ?? [];
   const selectedStrategy = rows.find((strategy) => strategy.id === selectedStrategyId);

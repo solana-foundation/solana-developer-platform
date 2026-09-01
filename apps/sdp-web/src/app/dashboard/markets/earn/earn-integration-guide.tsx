@@ -20,7 +20,7 @@ import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { EarnProgramSkeleton } from "../markets-route-skeletons";
+import { EarnIntegrationGuideSkeleton } from "../markets-route-skeletons";
 import {
   buildEarnIntegrationSections,
   type EarnIntegrationSections,
@@ -138,7 +138,7 @@ export function EarnIntegrationGuide({
   const { sdpEnvironment } = useDashboardWorkspace();
   const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategyCluster });
 
-  if (isLoading) return <EarnProgramSkeleton />;
+  if (isLoading) return <EarnIntegrationGuideSkeleton />;
 
   const strategy = strategies?.find((entry) => entry.id === strategyId);
   const availability = strategy
