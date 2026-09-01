@@ -213,7 +213,7 @@ apply only to providers SDP executes for.
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
 | 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
-| 9. Kora allowlist (executing providers only) | `infra/kora/kora.toml` + sdp-infra `kora/cloud-run/kora.{devnet,mainnet}.toml` | A vault-direct client must implement `sponsoredPrograms(cluster)`, a REQUIRED member of `EarnVaultDirectProvider`, and every id it returns has to be in all three allowlists or Kora rejects the whole sponsored transaction. `vault-sponsorship-allowlist.test.ts` fails CI on the local file. Deployed coverage is DEVNET-only: `kora-earn-sponsorship.test.ts` (the `Kora / Live Smoke` shard) asserts the running devnet service's `getConfig`, so an allowlist merged in sdp-infra but not yet rolled out as a new Cloud Run revision still fails there. The mainnet toml has no live check yet; keep it correct by hand (Earn sponsorship is cluster-gated to devnet via `EARN_VAULT_SPONSORSHIP_CLUSTERS`, so nothing sponsors on mainnet today, and live mainnet coverage belongs with the PRO-1736 opening). Catalogue-only providers skip this step. |
+| 9. Kora allowlist (executing providers only) | `infra/kora/kora.toml` + sdp-infra `kora/cloud-run/kora.{devnet,mainnet}.toml` | A vault-direct client must implement `sponsoredPrograms(cluster)`, a REQUIRED member of `EarnVaultDirectProvider`, and every id it returns has to be in all three allowlists or Kora rejects the whole sponsored transaction. `vault-sponsorship-allowlist.test.ts` fails CI on the local file. Deployed coverage is DEVNET-only, and conditional: `kora-earn-sponsorship.test.ts` (the `Kora / Live Smoke` shard) asserts the running devnet service's `getConfig`, catching an allowlist merged in sdp-infra but not yet rolled out as a new Cloud Run revision. The step runs only on secret-bearing CI runs (fork PRs skip it), and the suite itself skips without `KORA_RPC_URL` + `RUN_INTEGRATION_TESTS=true`, so a green check is not by itself proof it executed; after changing programs, confirm the shard ran or run `pnpm kora:devnet:test` yourself. The mainnet toml has no live check at all; keep it correct by hand (Earn sponsorship is cluster-gated to devnet via `EARN_VAULT_SPONSORSHIP_CLUSTERS`, so nothing sponsors on mainnet today, and live mainnet coverage belongs with the PRO-1736 opening). Catalogue-only providers skip this step. |
 | 10. Execution wiring (executing providers only) | `packages/sdp-<id>` + `apps/sdp-api/src/services/earn-provider-registry.ts` + `apps/sdp-api/src/services/earn/execution-registry.ts` | The executing client lives in its own workspace package and registers TWICE in the API: the composition-root overlay in `earn-provider-registry.ts` (capability resolution for routes) and a branch in `resolveEarnExecutionClient` (the one place a provider id maps to an executing client; everything downstream narrows by capability, so no route edits). Plus workspace plumbing: `apps/sdp-api/package.json` and the Dockerfile's explicit package COPY list. Full walk in §4d. |
 
 ### The keyless variant (public API — Kamino)
@@ -316,8 +316,9 @@ missed):
 - `apps/sdp-api/src/services/earn/vault-sponsorship-allowlist.test.ts`: every
   program an executing provider's `sponsoredPrograms` declares must be in the
   local Kora harness allowlist (step 9's local half; the deployed DEVNET
-  service is asserted by the `Kora / Live Smoke` shard, and mainnet has no
-  live check yet). It iterates the execution registry, so a new executing
+  service is asserted by the `Kora / Live Smoke` shard on secret-bearing
+  runs, which fork PRs and unconfigured environments skip, and mainnet has
+  no live check yet). It iterates the execution registry, so a new executing
   provider enrolls with no test edit.
 
 Verify with `pnpm --filter @sdp/earn typecheck && pnpm --filter @sdp/earn test`
@@ -497,10 +498,14 @@ machinery is provider-specific. What a new executing provider adds:
    `vault-sponsorship-allowlist.test.ts`, which iterates the execution
    registry and enrolls a new provider with no test edit) and sdp-infra's
    `kora/cloud-run/kora.devnet.toml` + `kora.mainnet.toml` (the deployed
-   services). Deployed coverage is DEVNET-only today: the `Kora / Live Smoke`
-   shard asserts the running devnet service's `getConfig`, which catches an
-   allowlist merged in sdp-infra but not yet rolled out as a new revision.
-   The mainnet toml has no live check, so keep it correct by hand. That is
+   services). Deployed coverage is DEVNET-only today, and conditional: the
+   `Kora / Live Smoke` shard asserts the running devnet service's
+   `getConfig`, which catches an allowlist merged in sdp-infra but not yet
+   rolled out as a new revision, but the step is skipped on fork PRs and the
+   suite skips without `KORA_RPC_URL` + `RUN_INTEGRATION_TESTS`, so after
+   changing programs confirm it actually ran (or run
+   `pnpm kora:devnet:test`). The mainnet toml has no live check, so keep it
+   correct by hand. That is
    future-proofing rather than live exposure: Earn sponsorship is
    cluster-gated to devnet (`EARN_VAULT_SPONSORSHIP_CLUSTERS` in
    `apps/sdp-api/src/lib/feature-flags.ts`), and extending live coverage to

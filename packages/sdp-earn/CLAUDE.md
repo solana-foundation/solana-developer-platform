@@ -57,8 +57,8 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
   ids and `allow_create_account = true`, so the harness needs no edit (deployed
-  devnet Kora carries the same allowlist since sdp-infra#64, asserted on every
-  `Kora / Live Smoke` run). Its
+  devnet Kora carries the same allowlist since sdp-infra#64, asserted by the
+  `Kora / Live Smoke` shard on secret-bearing CI runs). Its
   `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
   share-ATA rent for real. The flag fails CLOSED, so a value
   the wrapper drops looks like "sponsorship silently did nothing" rather than an
