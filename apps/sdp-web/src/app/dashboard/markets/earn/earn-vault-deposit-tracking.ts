@@ -71,6 +71,12 @@ export function vaultDepositRequestFingerprint(input: {
    * refuses a replay whose floor changed.
    */
   toleranceBps: number | null;
+  /**
+   * Swap-funded deposits only: the funding mint changes what leaves the
+   * wallet, so paying in a different token is a different request. It is
+   * appended only for swaps, preserving main's unswapped fingerprint shape.
+   */
+  sourceTokenMint?: string;
 }): string {
   return JSON.stringify([
     input.projectId,
@@ -78,6 +84,7 @@ export function vaultDepositRequestFingerprint(input: {
     input.custodyWalletId,
     input.amount,
     input.toleranceBps,
+    ...(input.sourceTokenMint === undefined ? [] : [input.sourceTokenMint]),
   ]);
 }
 

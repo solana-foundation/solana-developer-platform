@@ -69,18 +69,31 @@ async function sdpFetch(path: string, init?: RequestInit) {
  *
  * A built transaction expires with its blockhash (about a minute); build a
  * fresh one if the customer walks away before signing.
+ *
+ * Optional swap funding: pass \`sourceTokenMint\` (USDC, USDG, PYUSD or USDT on
+ * this cluster) to accept a stablecoin the vault does not take — SDP prepends
+ * a Jupiter swap inside the same transaction, \`amount\` becomes the SOURCE
+ * amount, and the response's \`transaction.swap\` reports the derived deposit.
+ * If the composed transaction cannot fit one Solana packet, the response is
+ * \`{ requiresSeparateSwap: true, swap, followUp }\` instead: have the wallet
+ * sign and send \`swap.transaction\` itself, then build again with
+ * \`followUp.amount\` and \`followUp.minSharesOut\` (your original floor,
+ * echoed back) and no \`sourceTokenMint\`.
  */
 export async function buildEarnDepositTransaction({
   ownerAddress,
   amount,
   minSharesOut,
+  sourceTokenMint,
 }: {
   /** The customer's Solana wallet address. */
   ownerAddress: string;
-  /** Deposit amount in the vault token's units, as a decimal string. */
+  /** Deposit amount in the vault token's units — or the source token's, when swapping. */
   amount: string;
   /** Minimum acceptable shares, derived from your quote and slippage tolerance. */
   minSharesOut: string;
+  /** Optional: fund the deposit in a different supported stablecoin. */
+  sourceTokenMint?: string;
 }) {
   const data = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
     method: "POST",
@@ -90,10 +103,12 @@ export async function buildEarnDepositTransaction({
       ownerAddress,
       amount,
       minSharesOut,
+      ...(sourceTokenMint ? { sourceTokenMint } : {}),
     }),
   });
-  // { transactionId, transaction, lastValidBlockHeight, ... }
-  return data.transaction;
+  // { transactionId, transaction, lastValidBlockHeight, swap?, ... }
+  // or { requiresSeparateSwap: true, swap, followUp } — see above.
+  return data;
 }
 
 /**
