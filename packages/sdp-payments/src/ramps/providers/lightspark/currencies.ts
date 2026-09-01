@@ -71,24 +71,6 @@ function mergeSendingLimit(
 }
 
 /**
- * Formats accumulated minor-unit sending bounds as major-unit decimal strings.
- *
- * @param limits - Per-currency minor-unit bounds.
- * @returns Currency table in the snapshot's limit shape.
- */
-function formatLimits(limits: Map<string, MinorUnitLimit>) {
-  return Object.fromEntries(
-    [...limits.entries()].map(([code, limit]) => [
-      code,
-      {
-        min: formatDecimalAmount(BigInt(limit.min), limit.decimals),
-        max: formatDecimalAmount(BigInt(limit.max), limit.decimals),
-      },
-    ])
-  );
-}
-
-/**
  * Distills Lightspark exchange-rate corridors into the rail-support snapshot.
  * Off-ramp rows come from `exchange-rates?sourceCurrency=USDC` (crypto out to
  * fiat), on-ramp rows from `exchange-rates?destinationCurrency=USDC` (fiat in
@@ -151,7 +133,18 @@ function distillDirection(
     }
     mergeSendingLimit(limits, fiat, row);
   }
-  return { currencies: formatLimits(limits), cryptos: [...cryptos].sort() };
+  return {
+    currencies: Object.fromEntries(
+      [...limits.entries()].map(([code, limit]) => [
+        code,
+        {
+          min: formatDecimalAmount(BigInt(limit.min), limit.decimals),
+          max: formatDecimalAmount(BigInt(limit.max), limit.decimals),
+        },
+      ])
+    ),
+    cryptos: [...cryptos].sort(),
+  };
 }
 
 /**
