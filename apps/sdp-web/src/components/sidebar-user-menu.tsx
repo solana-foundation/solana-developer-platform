@@ -207,7 +207,7 @@ function ThemeMenuItem() {
                 setPreference(option);
               }}
               className={cn(
-                "flex size-6 items-center justify-center rounded-md transition-colors",
+                "flex size-6 items-center justify-center rounded-md transition-colors motion-reduce:transition-none",
                 isSelected
                   ? "bg-surface-raised text-primary shadow-sm ring-1 ring-border-default"
                   : "text-tertiary hover:text-primary"
