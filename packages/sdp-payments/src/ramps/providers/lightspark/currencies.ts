@@ -133,18 +133,16 @@ function distillDirection(
     }
     mergeSendingLimit(limits, fiat, row);
   }
-  return {
-    currencies: Object.fromEntries(
-      [...limits.entries()].map(([code, limit]) => [
-        code,
-        {
-          min: formatDecimalAmount(BigInt(limit.min), limit.decimals),
-          max: formatDecimalAmount(BigInt(limit.max), limit.decimals),
-        },
-      ])
-    ),
-    cryptos: [...cryptos].sort(),
-  };
+  const currencies = Object.fromEntries(
+    [...limits.entries()].map(([code, limit]) => [
+      code,
+      {
+        min: formatDecimalAmount(BigInt(limit.min), limit.decimals),
+        max: formatDecimalAmount(BigInt(limit.max), limit.decimals),
+      },
+    ])
+  );
+  return { currencies, cryptos: [...cryptos].sort() };
 }
 
 /**
