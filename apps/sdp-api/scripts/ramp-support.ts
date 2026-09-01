@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   type ProviderRailSupportSnapshot,
@@ -243,6 +242,17 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
 function biomeFormat(filePaths: readonly string[]): void {
   execFileSync("pnpm", ["exec", "biome", "format", "--write", ...filePaths], {
     stdio: "ignore",
+  });
+}
+
+/**
+ * Formats text in memory with the repo's biome config, as if it lived at the
+ * given path. Used by the drift check so no scratch file is ever written.
+ */
+function biomeFormatText(virtualPath: string, text: string): string {
+  return execFileSync("pnpm", ["exec", "biome", "format", `--stdin-file-path=${virtualPath}`], {
+    input: text,
+    encoding: "utf8",
   });
 }
 
@@ -1030,10 +1040,7 @@ function summarizeSourceDiff(expected: string, actual: string): string[] {
 
 async function runDrift(): Promise<void> {
   const rendered = await renderGeneratedFromSnapshots();
-  const renderTarget = path.join(tmpdir(), `ramp-support-drift-${process.pid}.generated.ts`);
-  await writeFile(renderTarget, rendered, "utf8");
-  biomeFormat([renderTarget]);
-  const expected = await readFile(renderTarget, "utf8");
+  const expected = biomeFormatText(GENERATED_TARGET, rendered);
   const actual = await readFile(GENERATED_TARGET, "utf8");
   if (expected === actual) {
     console.log("No ramp support drift detected.");
