@@ -208,11 +208,14 @@ test("the orchestrator grants every permission the prod workflow requests", () =
     path.resolve(here, "../.github/workflows/deploy.yml"),
     "utf8"
   );
-  const requested = workflow
-    .match(/^permissions:\n((?:  [a-z-]+: [a-z-]+\n)+)/m)[1]
+  const permissionsBlock = workflow.match(/^permissions:\n((?:  [a-z-]+: [a-z-]+\n)+)/m);
+  assert.ok(permissionsBlock, "prod workflow must declare a top-level permissions block");
+  const requested = permissionsBlock[1]
     .trim()
     .split("\n")
-    .map((line) => line.trim());
+    .map((line) => line.trim())
+    .filter(Boolean);
+  assert.ok(requested.length >= 3, "expected at least contents, id-token, and packages grants");
   const callerJob = orchestrator.match(
     /deploy-api-prod:[\s\S]*?permissions:\n((?:      [a-z-]+: [a-z-]+\n)+)/
   )[1];
