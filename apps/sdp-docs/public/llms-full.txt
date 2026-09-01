@@ -649,7 +649,7 @@ After signing in you'll be prompted to set up your organization. Upload a logo a
 
 If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
 
-<img src="/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
+<img src="/docs/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
 
 ### 3. Organize with projects
 
@@ -699,7 +699,7 @@ The Wallets page shows all supported providers, each with a **New wallet** butto
 
 Click **New wallet** on your chosen provider. In the modal, enter a label for the wallet and click **Create wallet**.
 
-<img src="/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
+<img src="/docs/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
 
 ### 4. View your wallet
 
