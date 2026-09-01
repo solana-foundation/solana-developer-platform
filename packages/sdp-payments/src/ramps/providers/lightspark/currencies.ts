@@ -20,7 +20,6 @@ import {
   rampPayoutAccountSchema,
 } from "../../types";
 import { readLightsparkConfig } from "./client";
-import { LIGHTSPARK_PAYOUT_SPECS, type LightsparkPayoutCurrency } from "./counterparty";
 
 /** Lightspark only supports usdc.solana for now, so corridors are discovered from USDC alone. */
 const LIGHTSPARK_DISCOVERY_CRYPTO = "USDC";
@@ -416,14 +415,4 @@ export async function discoverLightsparkCurrencyAndRails(
     await context.readDump(RAMP_RAIL_DUMPS.lightspark.onrampRates.file),
     await context.readDump(RAMP_RAIL_DUMPS.lightspark.openapi.file)
   );
-}
-
-/**
- * Compiles the fiat currencies Lightspark can pay out, from the payout
- * account specs.
- *
- * @returns Sorted payout currency codes.
- */
-export function lightsparkPayoutCurrencies(): readonly LightsparkPayoutCurrency[] {
-  return (Object.keys(LIGHTSPARK_PAYOUT_SPECS) as LightsparkPayoutCurrency[]).sort();
 }

@@ -82,8 +82,16 @@ describe("lightsparkCounterpartyRequirements", () => {
     }
     expect(requirements.fields.map((field) => field.key)).toEqual([
       "paymentRails",
-      "routingNumber",
       "accountNumber",
+      "bankAccountType",
+      "bankName",
+      "fiToFiInformation",
+      "intermediaryBankName",
+      "intermediaryRoutingNumber",
+      "routingNumber",
+      "country",
+      "iban",
+      "swiftCode",
     ]);
     const railField = requirements.fields[0];
     if (railField?.kind !== "select") {
@@ -91,13 +99,14 @@ describe("lightsparkCounterpartyRequirements", () => {
     }
     expect(railField.options.map((option) => option.value)).toEqual([
       "ACH",
-      "WIRE",
-      "RTP",
       "FEDNOW",
+      "RTP",
+      "WIRE",
+      "SWIFT",
     ]);
   });
 
-  it("omits the rail select for single-rail currencies", () => {
+  it("offers SWIFT alongside the local rails for every currency", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
       providerData: {},
@@ -107,7 +116,20 @@ describe("lightsparkCounterpartyRequirements", () => {
     if (requirements.status !== "collect") {
       throw new Error("Expected collect requirements");
     }
-    expect(requirements.fields.map((field) => field.key)).toEqual(["sortCode", "accountNumber"]);
+    expect(requirements.fields.map((field) => field.key)).toEqual([
+      "paymentRails",
+      "accountNumber",
+      "sortCode",
+      "bankName",
+      "country",
+      "iban",
+      "swiftCode",
+    ]);
+    const railField = requirements.fields[0];
+    if (railField?.kind !== "select") {
+      throw new Error("Expected paymentRails select field");
+    }
+    expect(railField.options.map((option) => option.value)).toEqual(["FASTER_PAYMENTS", "SWIFT"]);
   });
 
   it("returns ready once a payout account is stored for the currency", () => {
@@ -180,9 +202,19 @@ describe("lightsparkCounterpartyRequirements", () => {
       "businessLegalName",
       "businessTaxId",
       "businessIncorporatedOn",
-      "paymentRails",
-      "routingNumber",
-      "accountNumber",
+      ...[
+        "paymentRails",
+        "accountNumber",
+        "bankAccountType",
+        "bankName",
+        "fiToFiInformation",
+        "intermediaryBankName",
+        "intermediaryRoutingNumber",
+        "routingNumber",
+        "country",
+        "iban",
+        "swiftCode",
+      ],
     ]);
   });
 
@@ -198,8 +230,16 @@ describe("lightsparkCounterpartyRequirements", () => {
     }
     expect(requirements.fields.map((field) => field.key)).toEqual([
       "paymentRails",
-      "routingNumber",
       "accountNumber",
+      "bankAccountType",
+      "bankName",
+      "fiToFiInformation",
+      "intermediaryBankName",
+      "intermediaryRoutingNumber",
+      "routingNumber",
+      "country",
+      "iban",
+      "swiftCode",
     ]);
   });
 });
@@ -283,11 +323,12 @@ describe("buildLightsparkAccountInfo", () => {
     });
   });
 
-  it("hardcodes the rail and wraps countries for XOF mobile money", () => {
+  it("builds XOF mobile money accountInfo with the region select", () => {
     const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "XOF", {
+      paymentRails: "MOBILE_MONEY",
       phoneNumber: "+221770000000",
       provider: "Orange Money",
-      countries: "SN",
+      region: "SN",
     });
 
     expect(accountInfo).toEqual({
@@ -295,7 +336,7 @@ describe("buildLightsparkAccountInfo", () => {
       paymentRails: ["MOBILE_MONEY"],
       phoneNumber: "+221770000000",
       provider: "Orange Money",
-      countries: ["SN"],
+      region: "SN",
       beneficiary: {
         beneficiaryType: "INDIVIDUAL",
         fullName: "Ada Lovelace",
@@ -311,7 +352,8 @@ describe("buildLightsparkAccountInfo", () => {
       display_name: "Acme Corp",
     };
     const accountInfo = buildLightsparkAccountInfo(businessRow, "GBP", {
-      sortCode: "12-34-56",
+      paymentRails: "FASTER_PAYMENTS",
+      sortCode: "123456",
       accountNumber: "12345678",
     });
 
