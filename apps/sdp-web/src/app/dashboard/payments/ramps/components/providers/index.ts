@@ -3,6 +3,7 @@ import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-re
 import type { LucideIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
+import { getHercleOnboardingCopy } from "./hercle";
 import {
   getLightsparkOnboardingCopy,
   getLightsparkProvisioningDetail,
@@ -52,6 +53,11 @@ export type StandardOnboardingPanelStatus = Exclude<
   "terms_of_service_required"
 >;
 export type MuralOnboardingPanelStatus = Exclude<OnboardingPanelStatus, "provisioning_failed">;
+/** Hercle provisions no funding account, so these are the only states it can reach. */
+export type HercleOnboardingPanelStatus = Exclude<
+  OnboardingPanelStatus,
+  "terms_of_service_required" | "funding_account_provisioning" | "provisioning_failed"
+>;
 
 export interface SimulateActionLabels {
   idle: string;
@@ -67,7 +73,12 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
  * never render the onboarding panel, so callers must gate on this before rendering it.
  */
 export function hasOnboardingLifecycle(provider: RampProviderId): boolean {
-  return provider === "bvnk" || provider === "lightspark" || provider === "mural";
+  return (
+    provider === "bvnk" ||
+    provider === "lightspark" ||
+    provider === "mural" ||
+    provider === "hercle"
+  );
 }
 
 export function onboardingCopy(
@@ -93,6 +104,16 @@ export function onboardingCopy(
         throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
       }
       return getMuralOnboardingCopy(t)[status];
+    }
+    case "hercle": {
+      if (
+        status === "terms_of_service_required" ||
+        status === "funding_account_provisioning" ||
+        status === "provisioning_failed"
+      ) {
+        throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
+      }
+      return getHercleOnboardingCopy(t)[status];
     }
     default:
       throw new Error(`No onboarding copy for ramp provider: ${provider}`);

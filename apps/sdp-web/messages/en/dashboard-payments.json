@@ -311,6 +311,16 @@
       "simulating": "Simulating...",
       "depositSimulated": "Deposit Simulated"
     },
+    "hercle": {
+      "verificationRequiredTitle": "Verify your business",
+      "verificationRequiredDescription": "Hercle needs to verify your business before it can settle payments for you — this is Hercle's own regulatory requirement as a licensed crypto-asset service provider, and the verdict is theirs. Hit “Complete Verification” to start; this page refreshes automatically once you're approved, and your instructions will appear right here.",
+      "verificationInReviewTitle": "Verification in review",
+      "verificationInReviewDescription": "Hercle is reviewing your business details. There's nothing for you to do — feel free to come back later; your instructions will show up here as soon as you're approved.",
+      "verificationFailedTitle": "Business verification was not approved",
+      "verificationFailedDescription": "Hercle could not verify your business, so payments can't be settled through them. This isn't retryable from here — contact Hercle if you believe this is a mistake.",
+      "readyTitle": "Preparing your instructions",
+      "readyDescription": "Your business is verified — fetching your payment details now."
+    },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",
       "verificationRequiredDescription": "We need to confirm your identity before activating your funding account. This page refreshes automatically once you're approved.",
