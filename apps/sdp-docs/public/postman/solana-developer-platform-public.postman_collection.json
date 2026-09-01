@@ -2211,7 +2211,7 @@
             "description": "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The owner is the fee payer and only required signer; the transaction expires with its blockhash, and nothing moves until the signed bytes are submitted.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\"\n}",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\",\n  \"sourceTokenMint\": \"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo\",\n  \"swapSlippageBps\": 2\n}",
               "options": {
                 "raw": {
                   "language": "json"

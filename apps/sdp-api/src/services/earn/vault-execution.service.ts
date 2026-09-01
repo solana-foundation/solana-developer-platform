@@ -209,6 +209,30 @@ function applyLookupTables<TMessage>(
 const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
 
 /**
+ * Typed oversize refusal, so a caller that can legitimately fall back — the
+ * swap-funded deposit build splits into a swap transaction plus a follow-up
+ * deposit when the composed plan cannot fit — can recognize this exact
+ * verdict without matching on message text. Everything else still treats it
+ * as the hard stop it is.
+ */
+export class VaultTransactionTooLargeError extends Error {
+  constructor(
+    public readonly bytes: number,
+    sponsored: boolean
+  ) {
+    super(
+      `Vault transaction is ${bytes} bytes; Solana allows at most ` +
+        `${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}` +
+        (sponsored
+          ? ". Sponsorship adds 96 bytes (one signature slot plus one account key) " +
+            "that the provider did not know about when it sized this plan."
+          : "")
+    );
+    this.name = "VaultTransactionTooLargeError";
+  }
+}
+
+/**
  * Refuse an oversized transaction, and on the sponsored path refuse it BEFORE
  * the paymaster is contacted.
  *
@@ -221,14 +245,7 @@ const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
  */
 function assertVaultTransactionFits(bytes: Uint8Array, sponsored: boolean): void {
   if (bytes.length <= SOLANA_TRANSACTION_SIZE_LIMIT_BYTES) return;
-  throw new Error(
-    `Vault transaction is ${bytes.length} bytes; Solana allows at most ` +
-      `${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}` +
-      (sponsored
-        ? ". Sponsorship adds 96 bytes (one signature slot plus one account key) " +
-          "that the provider did not know about when it sized this plan."
-        : "")
-  );
+  throw new VaultTransactionTooLargeError(bytes.length, sponsored);
 }
 
 /** Sign exactly one complete vault transaction without broadcasting it. */
@@ -446,7 +463,12 @@ export async function simulateVaultPlan(
     fee: VaultFeeMode;
   }
 ): Promise<
-  | { ok: true; prepared: PreparedVaultPlanExecution }
+  | {
+      ok: true;
+      prepared: PreparedVaultPlanExecution;
+      /** Compute units the simulation consumed, when the RPC reports them. */
+      unitsConsumed?: bigint;
+    }
   | { ok: false; error: string; fault: "caller" | "sponsor"; logs: readonly string[] }
 > {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
@@ -511,8 +533,10 @@ export async function simulateVaultPlan(
       logs: result.value.logs ?? [],
     };
   }
+  const unitsConsumed = result.value.unitsConsumed;
   return {
     ok: true,
     prepared: { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight },
+    ...(unitsConsumed === undefined ? {} : { unitsConsumed: BigInt(unitsConsumed) }),
   };
 }

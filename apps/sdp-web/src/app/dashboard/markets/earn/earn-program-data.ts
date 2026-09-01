@@ -679,6 +679,8 @@ export async function createEarnVaultDeposit(
     custodyWalletId: input.custodyWalletId,
     amount: input.amount,
     ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+    ...(input.sourceTokenMint === undefined ? {} : { sourceTokenMint: input.sourceTokenMint }),
+    ...(input.swapSlippageBps === undefined ? {} : { swapSlippageBps: input.swapSlippageBps }),
   };
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-deposits", {
     method: "POST",

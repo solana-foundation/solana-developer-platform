@@ -726,6 +726,83 @@ describe("EarnVaultDepositModal", () => {
     expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
   });
 
+  it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
+    const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [
+        fundingWallet([
+          { token: "USDC", mint: USDC_MINT, amount: "2500000", uiAmount: "2.5", decimals: 6 },
+          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+        ]),
+      ],
+      error: undefined,
+      isLoading: false,
+    });
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    const user = userEvent.setup();
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await screen.findByRole("dialog");
+
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.click(screen.getByRole("radio", { name: "USDG" }));
+
+    // The whole form speaks the FUNDING token now: label and balance.
+    expect(screen.getAllByText("Available: 7 USDG").length).toBeGreaterThan(0);
+    await user.type(screen.getByLabelText("Amount (USDG)"), "5");
+    await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
+
+    expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "5",
+        sourceTokenMint: USDG_MINT,
+        swapSlippageBps: 2,
+      },
+      IDEMPOTENCY_KEY
+    );
+    // Paying in a different token is a DIFFERENT request: the held-key
+    // fingerprint must not collide with an unswapped deposit of the same
+    // amount, or a retry of one would replay the other.
+    expect(
+      vaultDepositRequestFingerprint({
+        projectId: PROJECT_ID,
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "5",
+        toleranceBps: null,
+        sourceTokenMint: USDG_MINT,
+      })
+    ).not.toBe(
+      vaultDepositRequestFingerprint({
+        projectId: PROJECT_ID,
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "5",
+        toleranceBps: null,
+      })
+    );
+  });
+
+  it("sends no swap fields when the customer pays in the vault's own token", async () => {
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount("1.000000");
+
+    expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      { strategyId: strategy.id, custodyWalletId: "wallet_1", amount: "1" },
+      IDEMPOTENCY_KEY
+    );
+  });
+
   it("does not allow a wallet the API marks unavailable for runtime execution", async () => {
     const unavailableWallet = fundingWallet([]);
     unavailableWallet.isRuntimeExecutionAllowed = false;
