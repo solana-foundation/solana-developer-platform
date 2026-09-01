@@ -105,70 +105,53 @@ export function distillLightsparkRailSupport(
   offrampRatesRaw: unknown,
   onrampRatesRaw: unknown
 ): ProviderRailSupportDistillation {
-  const offrampLimits = new Map<string, MinorUnitLimit>();
-  const onrampLimits = new Map<string, MinorUnitLimit>();
-  const onrampCryptos = new Set<CryptoRailId>();
-  const offrampCryptos = new Set<CryptoRailId>();
   const droppedCurrencyCodes = new Set<string>();
-
-  for (const row of gridExchangeRatesDumpSchema.parse(offrampRatesRaw).data) {
-    const source = row.sourceCurrency.code.trim().toUpperCase();
-    if (!isSolanaCryptoAsset(source)) {
-      throw providerUnavailable(
-        `Lightspark off-ramp rate source must be a crypto asset; got ${source}.`
-      );
-    }
-    offrampCryptos.add(SOLANA_ASSET_TO_RAIL[source]);
-    const destination = row.destinationCurrency.code.trim().toUpperCase();
-    if (isSolanaCryptoAsset(destination)) {
-      continue;
-    }
-    if (!/^[A-Z]{3}$/.test(destination)) {
-      continue;
-    }
-    if (!isActiveIso4217CurrencyCode(destination)) {
-      droppedCurrencyCodes.add(destination);
-      continue;
-    }
-    mergeSendingLimit(offrampLimits, destination, row);
-  }
-
-  for (const row of gridExchangeRatesDumpSchema.parse(onrampRatesRaw).data) {
-    const destination = row.destinationCurrency.code.trim().toUpperCase();
-    if (!isSolanaCryptoAsset(destination)) {
-      throw providerUnavailable(
-        `Lightspark on-ramp rate destination must be a crypto asset; got ${destination}.`
-      );
-    }
-    onrampCryptos.add(SOLANA_ASSET_TO_RAIL[destination]);
-    const source = row.sourceCurrency.code.trim().toUpperCase();
-    if (isSolanaCryptoAsset(source)) {
-      continue;
-    }
-    if (!/^[A-Z]{3,4}$/.test(source)) {
-      continue;
-    }
-    if (!isActiveIso4217CurrencyCode(source)) {
-      droppedCurrencyCodes.add(source);
-      continue;
-    }
-    mergeSendingLimit(onrampLimits, source, row);
-  }
-
+  const offramp = distillDirection(offrampRatesRaw, "sourceCurrency", droppedCurrencyCodes);
+  const onramp = distillDirection(onrampRatesRaw, "destinationCurrency", droppedCurrencyCodes);
   return {
-    snapshot: {
-      onramp: {
-        currencies: formatLimits(onrampLimits),
-        cryptos: [...onrampCryptos].sort(),
-      },
-      offramp: {
-        currencies: formatLimits(offrampLimits),
-        cryptos: [...offrampCryptos].sort(),
-      },
-    },
+    snapshot: { onramp, offramp },
     droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
     droppedCountryCodes: [],
   };
+}
+
+/**
+ * Distills one direction's corridors: the crypto side must always be a known
+ * Solana asset, the other side is the fiat currency table. Crypto-to-crypto
+ * corridors are skipped; non-ISO fiat codes are collected as dropped.
+ *
+ * @param raw - Raw exchange-rates dump for the direction.
+ * @param cryptoSide - Which side of each corridor carries the crypto asset.
+ * @param dropped - Accumulator for currency codes excluded from the snapshot.
+ * @returns The direction's snapshot slice.
+ */
+function distillDirection(
+  raw: unknown,
+  cryptoSide: "sourceCurrency" | "destinationCurrency",
+  dropped: Set<string>
+) {
+  const fiatSide = cryptoSide === "sourceCurrency" ? "destinationCurrency" : "sourceCurrency";
+  const limits = new Map<string, MinorUnitLimit>();
+  const cryptos = new Set<CryptoRailId>();
+  for (const row of gridExchangeRatesDumpSchema.parse(raw).data) {
+    const crypto = row[cryptoSide].code.trim().toUpperCase();
+    if (!isSolanaCryptoAsset(crypto)) {
+      throw providerUnavailable(
+        `Lightspark rate ${cryptoSide} must be a crypto asset; got ${crypto}.`
+      );
+    }
+    cryptos.add(SOLANA_ASSET_TO_RAIL[crypto]);
+    const fiat = row[fiatSide].code.trim().toUpperCase();
+    if (isSolanaCryptoAsset(fiat)) {
+      continue;
+    }
+    if (!isActiveIso4217CurrencyCode(fiat)) {
+      dropped.add(fiat);
+      continue;
+    }
+    mergeSendingLimit(limits, fiat, row);
+  }
+  return { currencies: formatLimits(limits), cryptos: [...cryptos].sort() };
 }
 
 /**
