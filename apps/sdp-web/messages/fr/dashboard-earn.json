@@ -256,6 +256,10 @@
       "variable": "Variable",
       "fixed": "Fixe"
     },
+    "liquidity": {
+      "instant": "Instantané",
+      "delayed": "T+{days}"
+    },
     "withdraw": {
       "title": "Retirer",
       "description": "Les fonds quittent le portfolio partagé et sont réglés à une adresse Solana que vous contrôlez.",

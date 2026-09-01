@@ -256,6 +256,10 @@
       "variable": "Variable",
       "fixed": "Fijo"
     },
+    "liquidity": {
+      "instant": "Instantáneo",
+      "delayed": "T+{days}"
+    },
     "withdraw": {
       "title": "Retirar",
       "description": "Los fondos salen del portafolio compartido y se liquidan en una dirección de Solana que tú controlas.",
