@@ -258,6 +258,8 @@ export interface EarnVaultWithdrawalFingerprintInput {
   positionId: string;
   /** Shares to redeem, decimal string in share units. */
   shares: string;
+  /** Exit slippage floor, or null when the provider takes none. */
+  minAmountOut: string | null;
 }
 
 /**
@@ -269,7 +271,10 @@ export interface EarnVaultWithdrawalFingerprintInput {
  * naming both; `environment` is included because the same key arriving in
  * sandbox and production is two requests against two chains. Decimal spelling
  * is normalized without rounding, exactly like the deposit — `1` and `1.000000`
- * are one intent to the share mint.
+ * are one intent to the share mint. `minAmountOut` earns its place the same way
+ * the deposit's `minSharesOut` does: the floor is baked into the built
+ * instruction, so omitting it would let a caller reuse a key with a weaker
+ * floor and get a silent `replayed: true` for the original, stricter exit.
  */
 export const buildEarnVaultWithdrawalFingerprint = (
   input: EarnVaultWithdrawalFingerprintInput
@@ -282,6 +287,7 @@ export const buildEarnVaultWithdrawalFingerprint = (
       positionId: input.positionId,
       direction: "withdrawal",
       shares: normalizeDecimalString(input.shares),
+      minAmountOut: input.minAmountOut === null ? null : normalizeDecimalString(input.minAmountOut),
     })
   );
 

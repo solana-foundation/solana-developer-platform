@@ -32,7 +32,9 @@ import {
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   createEarnVaultDeposit,
+  createEarnVaultDepositPreview,
   createEarnVaultWithdrawal,
+  createEarnVaultWithdrawalPreview,
   extractEarnVaultDepositPolicyCandidate,
   extractEarnVaultWithdrawalPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
@@ -51,7 +53,9 @@ import {
   earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
+  earnVaultDepositPreviewSchema,
   earnVaultDepositSchema,
+  earnVaultWithdrawalPreviewSchema,
   earnVaultWithdrawalSchema,
 } from "./schemas";
 
@@ -141,6 +145,16 @@ earn.post(
   }),
   createEarnVaultDeposit
 );
+// The deposit QUOTE: a read carrying the deposit's own money-in gates (it
+// exists only to open a new position) but no policy gate, no wallet and no
+// idempotency key — it moves nothing. POST because the parameters are a body,
+// exactly like the custodial withdrawal-preview.
+earn.post(
+  "/vault-deposit-previews",
+  requirePermissions("earn:read"),
+  validateBody(earnVaultDepositPreviewSchema),
+  createEarnVaultDepositPreview
+);
 // The deposit READS take no policy gate and no provider gate — they move no
 // money and report on money that already left the wallet. They are what makes a
 // signed-but-unconfirmed deposit answerable: `POST` records before broadcast,
@@ -176,6 +190,21 @@ earn.post(
     findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
   }),
   createEarnVaultWithdrawal
+);
+// The exit QUOTE: a read with EXIT gates only — position scoping and the
+// read-side wallet binding (both 404), capability (501), and deliberately
+// nothing money-in-shaped (ADR 0002 exit safety): no surfacing, no
+// entitlement, no admission, no environment capability.
+earn.post(
+  "/vault-withdrawal-previews",
+  // wallets:read is NOT a money-in gate, so ADR 0002 does not argue for
+  // dropping it — and dropping it is load-bearing the wrong way: for a key
+  // with no wallet bindings the binding check is a documented no-op, so
+  // earn:read alone would read any org position's live payout here while
+  // GET /vault-positions answers the same key 403.
+  requirePermissions("earn:read", "wallets:read"),
+  validateBody(earnVaultWithdrawalPreviewSchema),
+  createEarnVaultWithdrawalPreview
 );
 // Withdrawal READS mirror the deposit reads: no policy gate, no provider gate,
 // collection before the `:movementId` route, `?requestId=` finds the whole leg

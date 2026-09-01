@@ -1,6 +1,5 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { SdpKaminoError } from "@sdp/kamino";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
@@ -36,6 +35,7 @@ import {
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
+import { refusedBuildMessage } from "./vault-refusals";
 import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 
 /**
@@ -285,9 +285,8 @@ export async function depositIntoVault(
       );
     } catch (error) {
       getLogger().error({ error }, "vault deposit: build failed before signing");
-      if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-        throw badRequest(error.message);
-      }
+      const refusal = refusedBuildMessage(error);
+      if (refusal) throw badRequest(refusal);
       throw error;
     }
 
