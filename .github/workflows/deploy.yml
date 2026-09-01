@@ -194,6 +194,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: read
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
     with:
       image_sha: ${{ github.sha }}

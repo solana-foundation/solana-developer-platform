@@ -202,3 +202,24 @@ test("no static Doppler token remains in the deploy pipeline", () => {
   assert.doesNotMatch(workflow, /DOPPLER_TOKEN_CI/);
   assert.match(workflow, /- name: Doppler OIDC login/);
 });
+
+test("the orchestrator grants every permission the prod workflow requests", () => {
+  const orchestrator = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/deploy.yml"),
+    "utf8"
+  );
+  const requested = workflow
+    .match(/^permissions:\n((?:  [a-z-]+: [a-z-]+\n)+)/m)[1]
+    .trim()
+    .split("\n")
+    .map((line) => line.trim());
+  const callerJob = orchestrator.match(
+    /deploy-api-prod:[\s\S]*?permissions:\n((?:      [a-z-]+: [a-z-]+\n)+)/
+  )[1];
+  for (const grant of requested) {
+    assert.ok(
+      callerJob.includes(grant),
+      `deploy.yml's deploy-api-prod must grant "${grant}" or the run fails at startup`
+    );
+  }
+});
