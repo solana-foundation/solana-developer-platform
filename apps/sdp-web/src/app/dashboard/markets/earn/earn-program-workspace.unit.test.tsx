@@ -194,13 +194,14 @@ describe("EarnProgramWorkspace", () => {
       />
     );
 
-    expect(screen.getAllByText("Sandbox only")).toHaveLength(2);
+    // The shelf size is a BD decision (EARN_PROVIDER_SURFACING), so assert the
+    // invariant per rendered instance — every strategy (desktop row + mobile
+    // card) is production-closed — rather than pinning a count.
+    const selectButtons = screen.getAllByRole("button", { name: "Select" });
+    expect(screen.getAllByText("Sandbox only")).toHaveLength(selectButtons.length);
+    expect(screen.queryByText("Sandbox ready")).toBeNull();
     expect(screen.queryByLabelText("Strategy network")).toBeNull();
-    expect(
-      screen
-        .getAllByRole("button", { name: "Select" })
-        .every((button) => (button as HTMLButtonElement).disabled)
-    ).toBe(true);
+    expect(selectButtons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     expect(document.body.textContent).toContain("intentionally closed in production");
   });
 
@@ -214,11 +215,11 @@ describe("EarnProgramWorkspace", () => {
       />
     );
 
-    expect(screen.getAllByText("Setup required")).toHaveLength(2);
-    expect(
-      screen
-        .getAllByRole("button", { name: "Select" })
-        .every((button) => (button as HTMLButtonElement).disabled)
-    ).toBe(true);
+    // Same rule as the production test above: no access entry means every
+    // surfaced provider fails closed, however many are surfaced today.
+    const selectButtons = screen.getAllByRole("button", { name: "Select" });
+    expect(screen.getAllByText("Setup required")).toHaveLength(selectButtons.length);
+    expect(screen.queryByText("Sandbox ready")).toBeNull();
+    expect(selectButtons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
   });
 });
