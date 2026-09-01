@@ -607,7 +607,7 @@ describe("TreasurySolutionsWorkspace", () => {
       },
     ];
 
-    renderWorkspace();
+    const view = renderWorkspace();
     const strategyRow = screen
       .getAllByText("Kamino USDC Vault")
       .map((element) => element.closest("tr"))
@@ -627,6 +627,30 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       screen.getByRole("button", {
         name: "Depositing: The deposit was sent to Solana and is waiting for confirmation.",
+      })
+    ).toBeTruthy();
+
+    mocks.vaultWithdrawals = [
+      {
+        createdAt: "2099-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId: "earn_vault_withdrawal_just_submitted",
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      },
+      ...mocks.vaultWithdrawals,
+    ];
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <TreasurySolutionsWorkspace
+          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
+        />
+      </I18nProvider>
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Finalizing: Solana confirmed the withdrawal. SDP is waiting for final settlement.",
       })
     ).toBeTruthy();
   });

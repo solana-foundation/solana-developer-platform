@@ -99,12 +99,16 @@ import {
 type TrackedVaultDeposit = Pick<
   EarnVaultDepositRecord,
   "failureReason" | "movementId" | "positionId" | "status"
-> & { createdAt?: string };
+> & { createdAt?: string; observedOrder: number };
+
+type VaultDepositWatchInput = Omit<TrackedVaultDeposit, "observedOrder">;
 
 type TrackedVaultWithdrawal = Pick<
   EarnVaultWithdrawal,
   "createdAt" | "failureReason" | "movementId" | "positionId" | "status"
->;
+> & { observedOrder: number };
+
+type VaultWithdrawalWatchInput = Omit<TrackedVaultWithdrawal, "observedOrder">;
 
 type TrackedVaultActivity =
   | { kind: "deposit"; movement: TrackedVaultDeposit }
@@ -165,12 +169,12 @@ function SortableNumericTableHead({
   );
 }
 
-function replaceTrackedVaultMovement<Movement extends { movementId: string }>(
-  current: readonly Movement[],
-  updated: Movement
-): readonly Movement[] {
+function replaceTrackedVaultMovement<
+  Movement extends { movementId: string },
+  Update extends { movementId: string },
+>(current: readonly Movement[], updated: Update): readonly Movement[] {
   return current.map((candidate) =>
-    candidate.movementId === updated.movementId ? updated : candidate
+    candidate.movementId === updated.movementId ? { ...candidate, ...updated } : candidate
   );
 }
 
@@ -689,15 +693,18 @@ function ActiveVaultPositionsCard({
     const current = latestActivityByPositionId.get(activity.movement.positionId);
     const activityCreatedAt = activity.movement.createdAt;
     const currentCreatedAt = current?.movement.createdAt;
-    // A missing timestamp identifies the deposit just observed from this
-    // session's POST response. It is newest by event order until its detail
-    // read supplies the server timestamp. Never compare server time with a
-    // browser-generated substitute: clock skew can resurrect older activity.
-    if (
-      !current ||
-      activityCreatedAt === undefined ||
-      (currentCreatedAt !== undefined && activityCreatedAt >= currentCreatedAt)
-    ) {
+    // Server timestamps are authoritative when both movements have one. Until
+    // a just-submitted deposit's detail read supplies its timestamp, compare
+    // the order in which this client observed the movements. This avoids both
+    // browser clock skew and a timestamp-less deposit masking a later exit.
+    const isNewer =
+      current === undefined ||
+      (activityCreatedAt !== undefined && currentCreatedAt !== undefined
+        ? activityCreatedAt > currentCreatedAt ||
+          (activityCreatedAt === currentCreatedAt &&
+            activity.movement.observedOrder > current.movement.observedOrder)
+        : activity.movement.observedOrder > current.movement.observedOrder);
+    if (isNewer) {
       latestActivityByPositionId.set(activity.movement.positionId, activity);
     }
   };
@@ -1163,6 +1170,7 @@ export function TreasurySolutionsWorkspace({
   const [withdrawPosition, setWithdrawPosition] = useState<EarnVaultPosition | null>(null);
   const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
   const settledWithdrawalKeys = useRef(new Set<string>());
+  const vaultActivityOrder = useRef(0);
   const [vaultDepositWatches, setVaultDepositWatches] = useState<readonly TrackedVaultDeposit[]>(
     []
   );
@@ -1179,13 +1187,17 @@ export function TreasurySolutionsWorkspace({
   // Pure updater: the recovery list re-asserts every 30s, so this runs often
   // and must not have side effects (StrictMode double-invokes it in dev).
   const addVaultDepositWatches = useCallback(
-    (incoming: readonly TrackedVaultDeposit[]) => {
+    (incoming: readonly VaultDepositWatchInput[]) => {
+      const observedIncoming = [...incoming].reverse().map((deposit) => ({
+        ...deposit,
+        observedOrder: ++vaultActivityOrder.current,
+      }));
       setVaultDepositWatches((current) => {
         const next = [...current];
         // The collection is newest-first. Reverse it before appending so the
         // latest observed deposit for a position stays last and wins the
         // status column's map reduction.
-        for (const deposit of [...incoming].reverse()) {
+        for (const deposit of observedIncoming) {
           const existingIndex = next.findIndex(
             (candidate) => candidate.movementId === deposit.movementId
           );
@@ -1194,7 +1206,10 @@ export function TreasurySolutionsWorkspace({
           // without a tombstone a settled deposit would resume polling.
           if (settledVaultDepositIds.has(deposit.movementId)) continue;
           if (existingIndex >= 0) {
-            next[existingIndex] = deposit;
+            next[existingIndex] = {
+              ...deposit,
+              observedOrder: next[existingIndex]?.observedOrder ?? deposit.observedOrder,
+            };
           } else {
             next.push(deposit);
           }
@@ -1207,16 +1222,23 @@ export function TreasurySolutionsWorkspace({
 
   // Same pure-updater and tombstone rules as the deposit watches above.
   const addVaultWithdrawalWatches = useCallback(
-    (incoming: readonly TrackedVaultWithdrawal[]) => {
+    (incoming: readonly VaultWithdrawalWatchInput[]) => {
+      const observedIncoming = [...incoming].reverse().map((withdrawal) => ({
+        ...withdrawal,
+        observedOrder: ++vaultActivityOrder.current,
+      }));
       setVaultWithdrawalWatches((current) => {
         const next = [...current];
-        for (const withdrawal of [...incoming].reverse()) {
+        for (const withdrawal of observedIncoming) {
           const existingIndex = next.findIndex(
             (candidate) => candidate.movementId === withdrawal.movementId
           );
           if (settledVaultWithdrawalIds.has(withdrawal.movementId)) continue;
           if (existingIndex >= 0) {
-            next[existingIndex] = withdrawal;
+            next[existingIndex] = {
+              ...withdrawal,
+              observedOrder: next[existingIndex]?.observedOrder ?? withdrawal.observedOrder,
+            };
           } else {
             next.push(withdrawal);
           }
