@@ -32,7 +32,9 @@ import {
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
-  EarnProgramSkeleton,
+  EarnIntegrationGuideSkeleton,
+  EarnProgramConfigureSkeleton,
+  EmbeddedYieldPortfolioSkeleton,
   MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/markets/markets-route-skeletons";
@@ -169,8 +171,12 @@ function resolvePageLoadingComponent(
       return MarketsLandingSkeleton;
     case "treasury-solutions":
       return TreasurySolutionsSkeleton;
-    case "earn-program":
-      return EarnProgramSkeleton;
+    case "embedded-yield-portfolio":
+      return EmbeddedYieldPortfolioSkeleton;
+    case "embedded-yield-configure":
+      return EarnProgramConfigureSkeleton;
+    case "embedded-yield-integrate":
+      return EarnIntegrationGuideSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
     case "payments-pay":

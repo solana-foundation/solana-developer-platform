@@ -42,7 +42,9 @@ export type DashboardLoadingRoute =
   | "payments-overview"
   | "markets-landing"
   | "treasury-solutions"
-  | "earn-program"
+  | "embedded-yield-portfolio"
+  | "embedded-yield-configure"
+  | "embedded-yield-integrate"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -98,12 +100,12 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
     return "treasury-solutions";
   }
-  if (
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`
-  ) {
-    return "earn-program";
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) return "embedded-yield-portfolio";
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`) {
+    return "embedded-yield-configure";
+  }
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`) {
+    return "embedded-yield-integrate";
   }
   return null;
 }

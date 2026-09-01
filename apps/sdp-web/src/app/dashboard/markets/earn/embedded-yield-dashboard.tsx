@@ -29,7 +29,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { EarnProgramSkeleton } from "../markets-route-skeletons";
+import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary } from "./earn-program-data";
 
@@ -196,7 +196,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   const t = useTranslations();
   const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary();
 
-  if (isInitialLoading && !summary) return <EarnProgramSkeleton />;
+  if (isInitialLoading && !summary) return <EmbeddedYieldPortfolioSkeleton />;
 
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
