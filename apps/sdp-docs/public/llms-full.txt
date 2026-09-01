@@ -3462,8 +3462,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
     "destinationWallet": "wal_...",
     "cryptoToken": "USDC",
     "fiatCurrency": "USD",
-    "fiatAmount": "100.00",
-    "redirectUrl": "https://app.example.com/onramp/complete"
+    "fiatAmount": "100.00"
   }'
 ```
 </Tab>
@@ -3484,7 +3483,6 @@ const response = await fetch(
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
-      redirectUrl: "https://app.example.com/onramp/complete",
     }),
   }
 );
@@ -3505,8 +3503,7 @@ HttpRequest request = HttpRequest.newBuilder()
           "destinationWallet": "wal_...",
           "cryptoToken": "USDC",
           "fiatCurrency": "USD",
-          "fiatAmount": "100.00",
-          "redirectUrl": "https://app.example.com/onramp/complete"
+          "fiatAmount": "100.00"
         }"""))
     .build();
 ```
@@ -3523,7 +3520,6 @@ HttpRequest request = HttpRequest.newBuilder()
 | `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, `SOL`, …). |
 | `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow (MoneyGram) can omit it on offramp. |
 | `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |
-| `redirectUrl` | no | Where the provider sends the user back after a hosted flow completes. |
 | `rampsMemo` | no | Up to 20 key/value string pairs stored on the resulting transfer for your own correlation. |
 
 The quote also creates the underlying **Payment Transfer** record for the ramp; log the returned `quote.id` (the transfer's `providerReference`) for your own records.
