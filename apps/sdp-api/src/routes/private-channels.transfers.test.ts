@@ -229,26 +229,29 @@ async function seedRouteState(): Promise<void> {
     db
       .prepare(
         `INSERT INTO private_channel_users
-           (id, organization_id, project_id, user_id, spc_user_id, spc_username,
-            spc_credential_ciphertext)
+           (id, organization_id, project_id, user_id, instance_id, name, is_default,
+            spc_user_id, spc_username, spc_credential_ciphertext)
          VALUES
-           (?, ?, ?, ?, 'spc-actor', 'actor', 'cipher-actor'),
-           (?, ?, ?, ?, 'spc-recipient', 'recipient', 'cipher-recipient'),
-           (?, ?, ?, ?, 'spc-outsider', 'outsider', 'cipher-outsider')`
+           (?, ?, ?, ?, ?, 'Default', true, 'spc-actor', 'actor', 'cipher-actor'),
+           (?, ?, ?, ?, ?, 'Recipient', false, 'spc-recipient', 'recipient', 'cipher-recipient'),
+           (?, ?, ?, ?, ?, 'Outsider', false, 'spc-outsider', 'outsider', 'cipher-outsider')`
       )
       .bind(
         ACTOR_PC_USER_ID,
         ORGANIZATION_ID,
         PROJECT_ID,
         ACTOR_USER_ID,
+        INSTANCE_ID,
         RECIPIENT_PC_USER_ID,
         ORGANIZATION_ID,
         PROJECT_ID,
         RECIPIENT_USER_ID,
+        INSTANCE_ID,
         OUTSIDER_PC_USER_ID,
         ORGANIZATION_ID,
         PROJECT_ID,
-        OUTSIDER_USER_ID
+        OUTSIDER_USER_ID,
+        INSTANCE_ID
       ),
     db
       .prepare(
@@ -411,13 +414,13 @@ describe("Private Channels — transfer access and routes", () => {
     await clearKVStores(env);
   });
 
-  it("requires a real user identity for recipient discovery and transfer creation", async () => {
+  it("allows API keys to use the project's default identity", async () => {
     const recipients = await app.request(
       `/v1/private-channels/channels/${CHANNEL_ID}/transfer-recipients`,
       { headers: apiKeyHeaders() },
       env
     );
-    expect(recipients.status).toBe(403);
+    expect(recipients.status).toBe(200);
 
     const transfer = await postTransfer(
       {
@@ -427,8 +430,8 @@ describe("Private Channels — transfer access and routes", () => {
       },
       apiKeyHeaders()
     );
-    expect(transfer.status).toBe(403);
-    expect(createChannelTransferMock).not.toHaveBeenCalled();
+    expect(transfer.status).toBe(200);
+    expect(createChannelTransferMock).toHaveBeenCalledOnce();
   });
 
   it("lists one entry per verified wallet in the active channel, the caller's own first", async () => {
@@ -595,18 +598,9 @@ describe("Private Channels — transfer access and routes", () => {
   });
 
   it("rejects a recipient wallet whose pubkey equals the sender", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO private_channel_verified_wallets
-           (id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey)
-         VALUES ('pcvw-pct-self', ?, ?, ?, ?, 'wallet-self', ?)`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, RECIPIENT_PC_USER_ID, INSTANCE_ID, ACTOR_ADDRESS)
-      .run();
-
     const response = await postTransfer({
       walletId: ACTOR_WALLET_ID,
-      recipientVerifiedWalletId: "pcvw-pct-self",
+      recipientVerifiedWalletId: "pcvw-pct-actor",
       amount: "1.5",
     });
     expect(response.status).toBe(400);

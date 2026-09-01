@@ -1,10 +1,7 @@
 "use client";
 
 import type { Counterparty, CounterpartyEntityType, PaymentsDashboardWallet } from "@sdp/types";
-import {
-  RAMP_PROVIDER_SUPPORT_DETAILS,
-  type RampFiatCurrency,
-} from "@sdp/types/generated/ramp-support";
+import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,

@@ -15,12 +15,12 @@ import { basicAuthHeader, UNREPORTED_COUNTRY_SUPPORT, unreportedCurrencyLimit } 
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -267,9 +267,9 @@ export class StripeRampClient implements RampProvider {
     return readyCounterparty(this.id, options.direction);
   }
 
-  async _discoverRails(_context: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {}
-
-  async distillRailSupport(_readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+  async discoverCurrencyAndRails(
+    _context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
     return {
       snapshot: {
         onramp: {

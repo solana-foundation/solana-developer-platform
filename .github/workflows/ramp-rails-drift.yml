@@ -4,10 +4,10 @@ name: Ramp Rails Drift
 on:
   pull_request:
     paths:
-      - 'apps/sdp-api/scripts/discover-ramp-rails.ts'
+      - 'apps/sdp-api/scripts/ramp-support.ts'
       - 'packages/sdp-payments/src/ramps/**'
-      - 'apps/sdp-api/.ramp-rails/**'
-      - 'packages/sdp-types/src/generated/ramp-support.generated.ts'
+      - 'apps/sdp-api/.ramp-support/**'
+      - 'packages/sdp-types/src/generated/ramp.generated.ts'
       - 'packages/sdp-types/src/payment-rails.ts'
       - 'packages/sdp-types/src/provider-access.ts'
       - '.github/workflows/ramp-rails-drift.yml'
@@ -15,10 +15,10 @@ on:
     branches:
       - main
     paths:
-      - 'apps/sdp-api/scripts/discover-ramp-rails.ts'
+      - 'apps/sdp-api/scripts/ramp-support.ts'
       - 'packages/sdp-payments/src/ramps/**'
-      - 'apps/sdp-api/.ramp-rails/**'
-      - 'packages/sdp-types/src/generated/ramp-support.generated.ts'
+      - 'apps/sdp-api/.ramp-support/**'
+      - 'packages/sdp-types/src/generated/ramp.generated.ts'
       - 'packages/sdp-types/src/payment-rails.ts'
       - 'packages/sdp-types/src/provider-access.ts'
       - '.github/workflows/ramp-rails-drift.yml'
@@ -56,17 +56,17 @@ jobs:
       - name: Check for committed dumps
         id: dumps
         run: |
-          if [ -n "$(find apps/sdp-api/.ramp-rails -type f -name '*.json' 2>/dev/null)" ]; then
+          if [ -n "$(find apps/sdp-api/.ramp-support -type f -name '*.json' 2>/dev/null)" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Ramp rails drift skipped::No committed dumps under apps/sdp-api/.ramp-rails/ yet. The matrix cannot be regenerated offline; the scheduled ramp-rails-refresh job seeds them via auto-PR."
+            echo "::notice title=Ramp rails drift skipped::No committed dumps under apps/sdp-api/.ramp-support/ yet. The matrix cannot be regenerated offline; the scheduled ramp-rails-refresh job seeds them via auto-PR."
           fi
 
       - name: Regenerate matrix from committed dumps
         if: steps.dumps.outputs.present == 'true'
-        run: pnpm --filter @sdp/api rails:generate
+        run: pnpm --filter @sdp/api ramp-support:generate
 
       - name: Fail on drift
         if: steps.dumps.outputs.present == 'true'
-        run: pnpm --filter @sdp/api rails:drift
+        run: pnpm --filter @sdp/api ramp-support:drift

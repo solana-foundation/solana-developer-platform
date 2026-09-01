@@ -8,7 +8,11 @@ import * as solana from "@/services/solana";
 import type { Env } from "@/types/env";
 import * as gatewayAuth from "./auth/gateway-auth";
 import * as spcSession from "./auth/spc-session";
-import { deletePrivateChannelWallet, verifyPrivateChannelWallet } from "./wallets";
+import {
+  deletePrivateChannelWallet,
+  revokePrivateChannelPrincipalWallets,
+  verifyPrivateChannelWallet,
+} from "./wallets";
 
 // Uses vi.spyOn (+ restoreAllMocks) rather than a module-level vi.mock of
 // widely-used modules like @/db/repositories: spies are transient and restored
@@ -30,7 +34,11 @@ const instance = {
   auth_url: "http://auth.local:8903",
 } as unknown as repositories.PrivateChannelInstanceRow;
 
-const pcUser = { id: "pcu_1" } as unknown as repositories.PrivateChannelUserRow;
+const pcUser = {
+  id: "pcu_1",
+  instance_id: "pci_1",
+  disabled_at: null,
+} as unknown as repositories.PrivateChannelUserRow;
 
 const env = {} as Env;
 
@@ -42,8 +50,16 @@ let client: {
 };
 let verifiedRepo: {
   upsert: ReturnType<typeof vi.fn>;
+  recordPendingRevocation: ReturnType<typeof vi.fn>;
+  listPendingRevocations: ReturnType<typeof vi.fn>;
+  deletePendingRevocation: ReturnType<typeof vi.fn>;
   deleteByUserInstanceAndPubkey: ReturnType<typeof vi.fn>;
+  findByInstanceAndPubkey: ReturnType<typeof vi.fn>;
   listByUserAndInstance: ReturnType<typeof vi.fn>;
+};
+let principalRepo: {
+  findDefaultPrincipal: ReturnType<typeof vi.fn>;
+  getById: ReturnType<typeof vi.fn>;
 };
 let signMessages: ReturnType<typeof vi.fn>;
 
@@ -55,8 +71,28 @@ beforeEach(() => {
       pubkey: PUBKEY,
       verified_at: "2026-07-20T00:00:00Z",
     }),
+    recordPendingRevocation: vi.fn().mockResolvedValue({
+      id: "pcvw_cleanup",
+      wallet_id: WALLET_ID,
+      pubkey: PUBKEY,
+    }),
+    listPendingRevocations: vi.fn().mockResolvedValue([]),
+    deletePendingRevocation: vi.fn().mockResolvedValue(false),
     deleteByUserInstanceAndPubkey: vi.fn().mockResolvedValue(true),
+    findByInstanceAndPubkey: vi.fn().mockResolvedValue({
+      id: "pcvw_1",
+      organization_id: "org_1",
+      project_id: "prj_1",
+      user_id: "pcu_1",
+      instance_id: "pci_1",
+      wallet_id: WALLET_ID,
+      pubkey: PUBKEY,
+    }),
     listByUserAndInstance: vi.fn().mockResolvedValue([]),
+  };
+  principalRepo = {
+    findDefaultPrincipal: vi.fn().mockResolvedValue(pcUser),
+    getById: vi.fn().mockResolvedValue(pcUser),
   };
   client = {
     challengeWallet: vi
@@ -72,7 +108,7 @@ beforeEach(() => {
     getActiveByProject: vi.fn().mockResolvedValue(instance),
   } as never);
   vi.spyOn(repositories, "createPrivateChannelUserRepository").mockReturnValue({
-    findByProjectAndUser: vi.fn().mockResolvedValue(pcUser),
+    ...principalRepo,
   } as never);
   vi.spyOn(repositories, "createPrivateChannelVerifiedWalletRepository").mockReturnValue(
     verifiedRepo as never
@@ -166,6 +202,78 @@ describe("verifyPrivateChannelWallet", () => {
     );
   });
 
+  it("revokes a late SPC binding when the identity was disabled during verification", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    principalRepo.getById.mockResolvedValue({
+      ...pcUser,
+      disabled_at: "2026-08-31T00:00:00.000Z",
+    });
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
+    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledWith(
+      "pcu_1",
+      "pci_1",
+      PUBKEY
+    );
+    expect(verifiedRepo.deletePendingRevocation).toHaveBeenCalledWith("pcu_1", "pci_1", PUBKEY);
+  });
+
+  it("keeps a cleanup marker when late-binding revocation fails", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    principalRepo.getById.mockResolvedValue({
+      ...pcUser,
+      disabled_at: "2026-08-31T00:00:00.000Z",
+    });
+    client.deleteWallet.mockRejectedValue(
+      new PrivateChannelError("AUTH_UNAVAILABLE", "SPC unavailable")
+    );
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+
+    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledTimes(1);
+    expect(verifiedRepo.deleteByUserInstanceAndPubkey).not.toHaveBeenCalled();
+    expect(verifiedRepo.deletePendingRevocation).not.toHaveBeenCalled();
+  });
+
+  it("does not revoke SPC on an unrelated persistence failure for an active identity", async () => {
+    verifiedRepo.upsert.mockRejectedValue(new Error("database unavailable"));
+    principalRepo.getById.mockResolvedValue(pcUser);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toThrow(
+      "database unavailable"
+    );
+
+    expect(client.deleteWallet).not.toHaveBeenCalled();
+  });
+
+  it("verifies a wallet under an explicitly selected project principal", async () => {
+    const selectedPrincipal = {
+      ...pcUser,
+      id: "pcu_treasury",
+      is_default: false,
+    } as repositories.PrivateChannelUserWithIdentityRow;
+    principalRepo.getById.mockResolvedValue(selectedPrincipal);
+
+    await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID, selectedPrincipal.id);
+
+    expect(principalRepo.getById).toHaveBeenCalledWith(
+      { organizationId: "org_1", projectId: "prj_1" },
+      selectedPrincipal.id
+    );
+    expect(verifiedRepo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: selectedPrincipal.id })
+    );
+  });
+
   it("resolves the signer before requesting the SPC challenge", async () => {
     await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID);
     const signerOrder = vi.mocked(solana.createOrgSigner).mock.invocationCallOrder[0];
@@ -197,6 +305,55 @@ describe("verifyPrivateChannelWallet", () => {
 });
 
 describe("deletePrivateChannelWallet", () => {
+  it("authenticates as the identity that owns a non-default wallet", async () => {
+    const openSpy = vi.spyOn(gatewayAuth, "openSpcAuthContext");
+    const selectedPrincipal = {
+      ...pcUser,
+      id: "pcu_treasury",
+      is_default: false,
+    } as repositories.PrivateChannelUserWithIdentityRow;
+    verifiedRepo.findByInstanceAndPubkey.mockResolvedValue({
+      id: "pcvw_treasury",
+      organization_id: "org_1",
+      project_id: "prj_1",
+      user_id: selectedPrincipal.id,
+      instance_id: "pci_1",
+      wallet_id: WALLET_ID,
+      pubkey: PUBKEY,
+    });
+    principalRepo.getById.mockResolvedValue(selectedPrincipal);
+
+    const { deleted } = await deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY);
+
+    expect(principalRepo.getById).toHaveBeenCalledWith(
+      { organizationId: "org_1", projectId: "prj_1" },
+      selectedPrincipal.id
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      env,
+      "org_1",
+      "pci_1",
+      selectedPrincipal,
+      expect.anything()
+    );
+    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledWith(
+      selectedPrincipal.id,
+      "pci_1",
+      PUBKEY
+    );
+    expect(deleted).toBe(true);
+  });
+
+  it("returns false without calling SPC when the local wallet mirror is absent", async () => {
+    verifiedRepo.findByInstanceAndPubkey.mockResolvedValue(null);
+
+    const { deleted } = await deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY);
+
+    expect(deleted).toBe(false);
+    expect(client.deleteWallet).not.toHaveBeenCalled();
+    expect(principalRepo.getById).not.toHaveBeenCalled();
+  });
+
   it("swallows an SPC 'not associated' 400 and still removes the mirror row", async () => {
     client.deleteWallet.mockRejectedValue(
       new PrivateChannelError("BAD_REQUEST", "wallet not associated with this user")
@@ -235,5 +392,37 @@ describe("deletePrivateChannelWallet", () => {
       code: "AUTH_UNAVAILABLE",
     });
     expect(verifiedRepo.deleteByUserInstanceAndPubkey).not.toHaveBeenCalled();
+  });
+});
+
+describe("revokePrivateChannelPrincipalWallets", () => {
+  it("removes every upstream wallet binding before deleting its mirrors", async () => {
+    const secondPubkey = "11111111111111111111111111111111";
+    verifiedRepo.listByUserAndInstance.mockResolvedValue([
+      { user_id: "pcu_1", instance_id: "pci_1", pubkey: PUBKEY },
+      { user_id: "pcu_1", instance_id: "pci_1", pubkey: secondPubkey },
+    ]);
+
+    const revoked = await revokePrivateChannelPrincipalWallets(env, auth, "prj_1", "pcu_1");
+
+    expect(client.deleteWallet).toHaveBeenNthCalledWith(1, "jwt", PUBKEY);
+    expect(client.deleteWallet).toHaveBeenNthCalledWith(2, "jwt", secondPubkey);
+    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledTimes(2);
+    expect(revoked).toEqual([PUBKEY, secondPubkey]);
+  });
+
+  it("retries pending revocations that do not have a verified-wallet mirror", async () => {
+    verifiedRepo.listByUserAndInstance.mockResolvedValue([]);
+    verifiedRepo.listPendingRevocations.mockResolvedValue([
+      { user_id: "pcu_1", instance_id: "pci_1", pubkey: PUBKEY },
+    ]);
+    verifiedRepo.deletePendingRevocation.mockResolvedValue(true);
+
+    await expect(
+      revokePrivateChannelPrincipalWallets(env, auth, "prj_1", "pcu_1")
+    ).resolves.toEqual([PUBKEY]);
+
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.deletePendingRevocation).toHaveBeenCalledWith("pcu_1", "pci_1", PUBKEY);
   });
 });

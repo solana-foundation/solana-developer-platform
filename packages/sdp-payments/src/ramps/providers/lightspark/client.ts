@@ -11,15 +11,9 @@ import {
   type SdpEnvironment,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import {
-  type CryptoAssetSymbol,
-  type CryptoRailId,
-  getCryptoRailAssetLabel,
-  type RampCurrencyLimit,
-} from "@sdp/types/payment-rails";
+import { type CryptoAssetSymbol, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isAddress } from "@solana/addresses";
-import { z } from "zod";
 import { divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
@@ -28,31 +22,27 @@ import {
   SdpPaymentsError,
 } from "../../../errors";
 import { type ProviderRequestInit, providerFetchJson } from "../../fetch";
-import {
-  basicAuthHeader,
-  isActiveIso4217CurrencyCode,
-  isSolanaCryptoAsset,
-  RAMP_RAIL_DUMPS,
-  requireEnv,
-  SOLANA_ASSET_TO_RAIL,
-  UNREPORTED_COUNTRY_SUPPORT,
-  unreportedCurrencyLimit,
-} from "../../shared";
+import { basicAuthHeader, isSolanaCryptoAsset, UNREPORTED_COUNTRY_SUPPORT } from "../../shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
-import { type LightsparkBusinessInfo, lightsparkCounterpartyRequirements } from "./counterparty";
+import {
+  type LightsparkBusinessInfo,
+  type LightsparkIndividualInfo,
+  lightsparkCounterpartyRequirements,
+} from "./counterparty";
+import { discoverLightsparkCurrencyAndRails } from "./currencies";
 
-const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
+export const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
 export const LIGHTSPARK_DECLARED_RAIL_SUPPORT = {
   onramp: {
@@ -60,12 +50,11 @@ export const LIGHTSPARK_DECLARED_RAIL_SUPPORT = {
     entityTypes: ["individual", "business"],
   },
   offramp: {
-    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
     entityTypes: ["individual", "business"],
   },
 } as const satisfies ProviderDeclaredRailSupport;
 
-function readLightsparkConfig(
+export function readLightsparkConfig(
   env: Record<string, string | undefined>,
   mode: SdpEnvironment
 ): LightsparkConfig {
@@ -232,9 +221,8 @@ export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
 
 export type CreateLightsparkCustomerInput = {
   platformCustomerId: string;
-  email?: string;
 } & (
-  | { customerType: "INDIVIDUAL"; fullName: string }
+  | { customerType: "INDIVIDUAL"; individualInfo: LightsparkIndividualInfo }
   | { customerType: "BUSINESS"; businessInfo: LightsparkBusinessInfo }
 );
 
@@ -250,8 +238,12 @@ interface GridCreateCustomerBody {
   platformCustomerId: string;
   customerType: LightsparkCustomerType;
   fullName?: string;
-  businessInfo?: LightsparkBusinessInfo;
+  region?: LightsparkIndividualInfo["region"];
+  birthDate?: string;
+  nationality?: LightsparkIndividualInfo["nationality"];
+  address?: LightsparkIndividualInfo["address"];
   email?: string;
+  businessInfo?: LightsparkBusinessInfo;
 }
 
 interface GridCustomerResponse {
@@ -471,105 +463,6 @@ export interface LightsparkQuote {
   expiresAt?: string;
 }
 
-const lightsparkConfigDumpSchema = z.object({
-  embeddedWalletConfig: z.object({ appName: z.string().optional() }).optional(),
-  supportedCurrencies: z.array(
-    z.object({
-      currencyCode: z.string(),
-      enabledTransactionTypes: z.array(z.string()),
-      minAmount: z.number().optional(),
-      maxAmount: z.number().optional(),
-    })
-  ),
-});
-
-type LightsparkConfigDump = z.infer<typeof lightsparkConfigDumpSchema>;
-
-function usdMinorUnitsToMajorDecimal(amount: number): string {
-  if (!Number.isInteger(amount)) {
-    throw providerUnavailable("Lightspark USD limits must be integer minor units.");
-  }
-  return formatDecimalAmount(BigInt(amount), 2);
-}
-
-function lightsparkFiatLimit(
-  currencyCode: string,
-  entry: LightsparkConfigDump["supportedCurrencies"][number]
-) {
-  const minAmount = entry.minAmount;
-  const maxAmount = entry.maxAmount;
-  const hasMin = minAmount !== undefined;
-  const hasMax = maxAmount !== undefined;
-  if (currencyCode !== "USD" && (hasMin || hasMax)) {
-    throw providerUnavailable(
-      `Lightspark returned ${currencyCode} limits, but only USD minor-unit scaling is verified.`
-    );
-  }
-  if (!hasMin && !hasMax) {
-    return unreportedCurrencyLimit();
-  }
-  if (!hasMin || !hasMax) {
-    throw providerUnavailable(`Lightspark ${currencyCode} limits must include both min and max.`);
-  }
-  return {
-    min: usdMinorUnitsToMajorDecimal(minAmount),
-    max: usdMinorUnitsToMajorDecimal(maxAmount),
-  };
-}
-
-export function distillLightsparkRailSupport(raw: unknown): ProviderRailSupportDistillation {
-  const config = lightsparkConfigDumpSchema.parse(raw);
-  const onrampCurrencies: Record<string, RampCurrencyLimit> = {};
-  const offrampCurrencies: Record<string, RampCurrencyLimit> = {};
-  const onrampCryptos = new Set<CryptoRailId>();
-  const offrampCryptos = new Set<CryptoRailId>();
-  const droppedCurrencyCodes = new Set<string>();
-
-  for (const entry of config.supportedCurrencies) {
-    const code = entry.currencyCode.trim().toUpperCase();
-    if (isSolanaCryptoAsset(code)) {
-      const rail = SOLANA_ASSET_TO_RAIL[code];
-      if (entry.enabledTransactionTypes.includes("INCOMING")) {
-        onrampCryptos.add(rail);
-      }
-      if (entry.enabledTransactionTypes.includes("OUTGOING")) {
-        offrampCryptos.add(rail);
-      }
-      continue;
-    }
-
-    if (!/^[A-Z]{3}$/.test(code)) {
-      continue;
-    }
-    if (!isActiveIso4217CurrencyCode(code)) {
-      droppedCurrencyCodes.add(code);
-      continue;
-    }
-    const limit = lightsparkFiatLimit(code, entry);
-    if (entry.enabledTransactionTypes.includes("INCOMING")) {
-      onrampCurrencies[code] = limit;
-    }
-    if (entry.enabledTransactionTypes.includes("OUTGOING")) {
-      offrampCurrencies[code] = limit;
-    }
-  }
-
-  return {
-    snapshot: {
-      onramp: {
-        currencies: onrampCurrencies,
-        cryptos: [...onrampCryptos].sort(),
-      },
-      offramp: {
-        currencies: offrampCurrencies,
-        cryptos: [...offrampCryptos].sort(),
-      },
-    },
-    droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
-    droppedCountryCodes: [],
-  };
-}
-
 export class LightsparkRampClient implements RampProvider {
   readonly id = "lightspark";
   readonly declaredRailSupport = LIGHTSPARK_DECLARED_RAIL_SUPPORT;
@@ -581,27 +474,10 @@ export class LightsparkRampClient implements RampProvider {
     return lightsparkCounterpartyRequirements(counterparty, options);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const clientId = requireEnv(env, "LIGHTSPARK_GRID_SANDBOX_CLIENT_ID");
-    const clientSecret = requireEnv(env, "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET");
-    const base =
-      env.LIGHTSPARK_GRID_API_BASE_URL?.trim() || "https://api.lightspark.com/grid/2025-10-13";
-    const headers = {
-      Authorization: basicAuthHeader(clientId, clientSecret),
-    };
-
-    await writeDump(
-      RAMP_RAIL_DUMPS.lightspark.config.name,
-      await fetchJson(this.id, "GET /config", `${base}/config`, { headers })
-    );
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
-    return distillLightsparkRailSupport(await readDump(RAMP_RAIL_DUMPS.lightspark.config.file));
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    return discoverLightsparkCurrencyAndRails(context);
   }
 
   private async request<TResponse, TBody = never>(
@@ -631,14 +507,23 @@ export class LightsparkRampClient implements RampProvider {
       "customers",
       {
         method: "POST",
-        body: {
-          platformCustomerId: input.platformCustomerId,
-          customerType: input.customerType,
-          ...(input.customerType === "INDIVIDUAL"
-            ? { fullName: input.fullName }
-            : { businessInfo: input.businessInfo }),
-          ...(input.email ? { email: input.email } : {}),
-        },
+        body:
+          input.customerType === "INDIVIDUAL"
+            ? {
+                platformCustomerId: input.platformCustomerId,
+                customerType: input.customerType,
+                fullName: input.individualInfo.fullName,
+                region: input.individualInfo.region,
+                birthDate: input.individualInfo.birthDate,
+                nationality: input.individualInfo.nationality,
+                address: input.individualInfo.address,
+                email: input.individualInfo.email,
+              }
+            : {
+                platformCustomerId: input.platformCustomerId,
+                customerType: input.customerType,
+                businessInfo: input.businessInfo,
+              },
       }
     );
 
