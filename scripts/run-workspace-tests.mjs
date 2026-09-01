@@ -111,7 +111,11 @@ try {
           ? ["--filter=@sdp/api"]
           : split === "rest"
             ? changedSince
-              ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api", "--filter=!@sdp/api-integration"]
+              ? [
+                  `--filter=...[${changedSince}]`,
+                  "--filter=!@sdp/api",
+                  "--filter=!@sdp/api-integration",
+                ]
               : ["--filter=!@sdp/api", "--filter=!@sdp/api-integration"]
             : changedSince
               ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
