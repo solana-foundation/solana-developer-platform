@@ -3,9 +3,6 @@ name: Deploy sdp-api to Cloud Run (dev)
 on:
   workflow_dispatch:
   workflow_call:
-    secrets:
-      DOPPLER_TOKEN_CI:
-        required: true
 
 permissions:
   contents: read
@@ -93,7 +90,6 @@ jobs:
     needs: deploy
     permissions:
       contents: read
+      id-token: write
     uses: ./.github/workflows/sdp-dev-smoke.yml
-    secrets:
-      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
 

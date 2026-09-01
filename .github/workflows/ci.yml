@@ -174,8 +174,11 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
-      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
+      CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
       REDIS_URL: redis://127.0.0.1:6379
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
@@ -223,13 +226,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate Doppler bootstrap secret
+      - name: Validate Doppler OIDC configuration
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          if [ -z "${DOPPLER_TOKEN}" ]; then
-            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
+          if [ -z "${{ vars.DOPPLER_CI_IDENTITY_ID }}" ]; then
+            echo "DOPPLER_CI_IDENTITY_ID must be configured as a repository variable for secret-aware CI jobs." >&2
             exit 1
           fi
 
@@ -237,17 +238,23 @@ jobs:
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Unit tests (Doppler)
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
 
       - name: Unit tests (fork-safe)
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
-          echo "::notice title=Fork-safe unit tests::DOPPLER_TOKEN_CI is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
+          echo "::notice title=Fork-safe unit tests::Doppler OIDC authentication is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
           node scripts/run-workspace-tests.mjs unit
 
       - name: Scripts tests
@@ -467,6 +474,9 @@ jobs:
   integration_tests_shard:
     name: Integration Tests (${{ matrix.name }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -514,7 +524,7 @@ jobs:
             rpc_provider: alchemy
             custody_provider: local
     env:
-      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
+      CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
       REDIS_URL: redis://127.0.0.1:6379
       DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,SOLANA_NETWORK,KORA_SURFPOOL_MODE
@@ -567,13 +577,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate Doppler bootstrap secret
+      - name: Validate Doppler OIDC configuration
         if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST != 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          if [ -z "${DOPPLER_TOKEN}" ]; then
-            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
+          if [ -z "${{ vars.DOPPLER_CI_IDENTITY_ID }}" ]; then
+            echo "DOPPLER_CI_IDENTITY_ID must be configured as a repository variable for secret-aware CI jobs." >&2
             exit 1
           fi
 
@@ -581,10 +589,15 @@ jobs:
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Validate integration runtime secrets
         if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
           doppler run --config dev_ci -- bash <<'EOF'
           set -euo pipefail
@@ -601,7 +614,6 @@ jobs:
       - name: Surfpool integration tests
         if: matrix.provider == 'surfpool'
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,SOLANA_NETWORK,KORA_SURFPOOL_MODE
           SDP_INTEGRATION_CUSTODY_PROVIDER: ${{ matrix.custody_provider }}
@@ -615,14 +627,13 @@ jobs:
           elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ]; then
             echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so this Surfpool shard is skipped."
           else
-            echo "DOPPLER_TOKEN_CI must be configured for Surfpool integration shards." >&2
+            echo "Doppler OIDC authentication is required for Surfpool integration shards." >&2
             exit 1
           fi
 
       - name: Live Kora integration tests
         if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
         run: |
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
@@ -631,7 +642,7 @@ jobs:
       - name: Skip secret-backed integration tests for fork
         if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
-          echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Kora/Privy-backed integration tests are skipped. Run this PR from an upstream branch before merge if secret-backed coverage is required."
+          echo "::notice title=Fork-safe integration skip::Forked pull requests cannot authenticate to Doppler via OIDC, so Kora/Privy-backed integration tests are skipped. Run this PR from an upstream branch before merge if secret-backed coverage is required."
 
   integration_tests:
     name: Integration Tests (Surfpool/Kora)
@@ -641,14 +652,14 @@ jobs:
     if: always()
     timeout-minutes: 5
     env:
-      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
+      CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Check integration test results
         env:
           INTEGRATION_SHARD_RESULT: ${{ needs.integration_tests_shard.result }}
         run: |
           if [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${CI_HAS_DOPPLER_TOKEN}" != "true" ] && [ "${INTEGRATION_SHARD_RESULT}" = "success" ]; then
-            echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so the secret-backed integration matrix was intentionally skipped."
+            echo "::notice title=Fork-safe integration skip::Forked pull requests cannot authenticate to Doppler via OIDC, so the secret-backed integration matrix was intentionally skipped."
             exit 0
           fi
           if [ "${CI_HAS_DOPPLER_TOKEN}" != "true" ]; then
@@ -664,6 +675,9 @@ jobs:
   browser_e2e:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -679,7 +693,7 @@ jobs:
             test_script: kora:surfpool:e2e:issuance
             artifact_suffix: issuance
     env:
-      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
+      CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       REDIS_URL: redis://127.0.0.1:6379
       DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START
@@ -734,13 +748,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate Doppler bootstrap secret
+      - name: Validate Doppler OIDC configuration
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          if [ -z "${DOPPLER_TOKEN}" ]; then
-            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
+          if [ -z "${{ vars.DOPPLER_CI_IDENTITY_ID }}" ]; then
+            echo "DOPPLER_CI_IDENTITY_ID must be configured as a repository variable for secret-aware CI jobs." >&2
             exit 1
           fi
 
@@ -748,10 +760,15 @@ jobs:
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Validate browser e2e runtime secrets
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
           doppler run --config dev_ci -- bash <<'EOF'
           set -euo pipefail
@@ -767,8 +784,6 @@ jobs:
 
       - name: Derive Clerk issuer for local API
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
           CLERK_HOST=$(doppler run --config dev_ci -- node - <<'NODE'
           const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
@@ -795,7 +810,6 @@ jobs:
       - name: Build web app for Playwright
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
           NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
@@ -805,7 +819,6 @@ jobs:
       - name: Run browser e2e suite
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: |
@@ -818,7 +831,7 @@ jobs:
       - name: Skip secret-backed browser e2e for fork
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
-          echo "::notice title=Fork-safe browser e2e skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Clerk/Privy-backed browser e2e is skipped. Run this PR from an upstream branch before merge if browser e2e coverage is required."
+          echo "::notice title=Fork-safe browser e2e skip::Forked pull requests cannot authenticate to Doppler via OIDC, so Clerk/Privy-backed browser e2e is skipped. Run this PR from an upstream branch before merge if browser e2e coverage is required."
 
       - name: Upload Playwright artifacts
         if: always() && env.CI_HAS_DOPPLER_TOKEN == 'true'

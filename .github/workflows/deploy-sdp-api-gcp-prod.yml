@@ -18,9 +18,6 @@ on:
         type: string
         required: false
         default: ""
-    secrets:
-      DOPPLER_TOKEN_CI:
-        required: true
   workflow_dispatch:
     inputs:
       image_sha:
@@ -53,10 +50,15 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Notify Slack — deploy started
         env:
           GH_TOKEN: ${{ github.token }}
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
           SERVICE: sdp-api
@@ -80,10 +82,9 @@ jobs:
       github.event_name != 'workflow_dispatch' &&
       inputs.image_sha == ''
     uses: ./.github/workflows/sdp-dev-smoke.yml
-    secrets:
-      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
     permissions:
       contents: read
+      id-token: write
 
   deploy:
     name: Deploy production image
@@ -533,10 +534,15 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Notify Slack — deploy result
         env:
           GH_TOKEN: ${{ github.token }}
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
           SERVICE: sdp-api
