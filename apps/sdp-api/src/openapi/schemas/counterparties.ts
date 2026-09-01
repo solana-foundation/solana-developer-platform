@@ -128,8 +128,8 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
 ]);
 
 const payoutRequirementTreeSchema = z.object({
-  countryRails: z.record(
-    z.string().regex(/^[A-Z]{2}$/),
+  countryRails: z.partialRecord(
+    z.enum(COUNTRY_CODES),
     z.array(z.object({ value: z.string(), label: z.string() }))
   ),
   railFields: z.record(z.string(), z.array(requirementFieldSchema)),
