@@ -35,7 +35,7 @@ function OfframpManualQuoteStep({
   quote: Extract<NonNullable<OfframpWizard["quote"]>, { deliveryMode: "manual_instructions" }>;
   t: Translate;
 }) {
-  const { selectedRampPair, fields, transferStatus } = wizard;
+  const { selectedRampPair, fields } = wizard;
 
   if (!quote.paymentInstructions) {
     return (
@@ -48,22 +48,17 @@ function OfframpManualQuoteStep({
   const cryptoToken = toRampCryptoToken(selectedRampPair.assetRail);
 
   return (
-    <div className="space-y-6">
-      <ManualInstructionsQuote
-        amount={fields.amount.trim()}
-        quote={quote}
-        fiatCurrency={selectedRampPair.fiatCurrency}
-        cryptoToken={cryptoToken}
-        instructions={quote.paymentInstructions}
-        description={t("DashboardPayments.ramps.offrampManualDescription", {
-          amount: fields.amount.trim(),
-          token: cryptoToken.toUpperCase(),
-        })}
-      />
-      <div className="border-t border-border-default pt-5">
-        <RampStatusPanel direction="offramp" transfer={transferStatus} />
-      </div>
-    </div>
+    <ManualInstructionsQuote
+      amount={fields.amount.trim()}
+      quote={quote}
+      fiatCurrency={selectedRampPair.fiatCurrency}
+      cryptoToken={cryptoToken}
+      instructions={quote.paymentInstructions}
+      description={t("DashboardPayments.ramps.offrampManualDescription", {
+        amount: fields.amount.trim(),
+        token: cryptoToken.toUpperCase(),
+      })}
+    />
   );
 }
 
@@ -83,6 +78,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     setField,
     handlePairChange,
     requirementFields,
+    existingPayoutAccount,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -98,6 +94,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const destinationCountry =
+    collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
+  const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
+  const requirementsKey = ["offramp-requirements", destinationCountry, paymentRails].join(":");
 
   if (currentStepId === "WALLET") {
     return (
@@ -161,9 +161,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   if (currentStepId === "REQUIREMENTS") {
     return (
       <RequirementsFields
+        key={requirementsKey}
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}
+        existingPayoutAccount={existingPayoutAccount}
       />
     );
   }

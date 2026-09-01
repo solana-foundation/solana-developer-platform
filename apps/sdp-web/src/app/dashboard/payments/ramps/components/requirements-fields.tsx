@@ -3,6 +3,7 @@
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import {
   type CollectedFieldData,
+  type PayoutRequirementAccount,
   type RequirementField,
   requirementFieldName,
 } from "@sdp/types/ramp-requirements";
@@ -339,15 +340,27 @@ function AddressRequirementField({
   );
 }
 
+/**
+ * Renders the current dynamic requirement field set.
+ *
+ * @param fields - Fields currently required by the provider and local selections.
+ * @param values - Collected values keyed by requirement field.
+ * @param onChange - Callback for updating a collected value.
+ * @param existingPayoutAccount - Active corridor account selected for reuse.
+ * @returns The requirement field group.
+ */
 export function RequirementsFields({
   fields,
   values,
   onChange,
+  existingPayoutAccount,
 }: {
   fields: RequirementField[];
   values: CollectedFieldData;
   onChange: (key: string, value: string) => void;
+  existingPayoutAccount?: PayoutRequirementAccount | null;
 }) {
+  const t = useTranslations();
   return (
     <div className="space-y-6">
       {fields.map((field) => {
@@ -371,6 +384,18 @@ export function RequirementsFields({
           />
         );
       })}
+      {existingPayoutAccount !== undefined && existingPayoutAccount !== null ? (
+        <Card>
+          <CardContent className="space-y-2">
+            <p className="font-medium text-primary">
+              {t("DashboardPayments.ramps.useExistingAccount")}
+            </p>
+            <p className="text-sm text-secondary">
+              {t("DashboardPayments.ramps.useExistingAccountDescription")}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

@@ -324,7 +324,12 @@ export function useRampWizard<TId extends string>(
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);
-      if (result.status === "collect" || result.status === "unsupported") {
+      if (
+        result.status === "collect" ||
+        result.status === "collect_counterparty" ||
+        result.status === "collect_account" ||
+        result.status === "unsupported"
+      ) {
         toast.error(
           result.status === "unsupported"
             ? result.reason
@@ -446,6 +451,7 @@ export function useRampWizard<TId extends string>(
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
+    existingPayoutAccount: requirements.existingPayoutAccount,
     requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,

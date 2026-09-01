@@ -1,12 +1,15 @@
 "use client";
 
-import type { RampProviderId } from "@sdp/types";
+import { COUNTRIES, isCountryCode, type RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
+  PayoutRequirementAccount,
+  PayoutRequirementTree,
   RampDirection,
   RequirementField,
+  RequirementOption,
 } from "@sdp/types/ramp-requirements";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
@@ -17,6 +20,126 @@ import { useTranslations } from "@/i18n/provider";
 import { requirementFieldError } from "../schema";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+export interface PayoutRequirementFieldLabels {
+  destinationCountry: string;
+  paymentRail: string;
+}
+
+/**
+ * Finds the active corridor account for a selected destination.
+ *
+ * @param payout - Provider payout decision tree.
+ * @param destinationCountry - Selected destination country code.
+ * @returns The active account for the destination, or null when one is not available.
+ */
+export function findActivePayoutAccount(
+  payout: PayoutRequirementTree,
+  destinationCountry: string
+): PayoutRequirementAccount | null {
+  const account = payout.accounts.find(
+    (candidate) =>
+      candidate.destinationCountry === destinationCountry &&
+      candidate.status.toUpperCase() === "ACTIVE"
+  );
+  return account === undefined ? null : account;
+}
+
+/**
+ * Converts payout country keys into country-name options.
+ *
+ * @param countryRails - Payout rails grouped by destination country.
+ * @returns Country select options in the payout tree's key order.
+ */
+function payoutCountryOptions(
+  countryRails: PayoutRequirementTree["countryRails"]
+): RequirementOption[] {
+  return Object.entries(countryRails).map(([code, rails]) => {
+    if (rails === undefined) {
+      throw new Error(`Lightspark payout requirements have no rails for ${code}.`);
+    }
+    const country = COUNTRIES.find((candidate) => candidate.code === code);
+    if (country === undefined) {
+      throw new Error(`Lightspark payout requirements have an unknown country ${code}.`);
+    }
+    return { value: code, label: country.name };
+  });
+}
+
+/**
+ * Reads the rails available for one selected destination country.
+ *
+ * @param countryRails - Payout rails grouped by destination country.
+ * @param destinationCountry - Selected destination country code.
+ * @returns The provider-supplied rail options for that country.
+ */
+function payoutRailsForCountry(
+  countryRails: PayoutRequirementTree["countryRails"],
+  destinationCountry: string
+): RequirementOption[] {
+  if (!isCountryCode(destinationCountry)) {
+    throw new Error(
+      `Lightspark payout requirements have an unknown country ${destinationCountry}.`
+    );
+  }
+  const rails = countryRails[destinationCountry];
+  if (rails === undefined) {
+    throw new Error(`Lightspark payout requirements have no rails for ${destinationCountry}.`);
+  }
+  return rails;
+}
+
+/**
+ * Derives the visible country, rail, and exact bank fields for a payout tree.
+ *
+ * @param payout - Provider payout decision tree.
+ * @param values - Locally collected payout selections.
+ * @param labels - Translated labels for synthesized fields.
+ * @returns The fields visible for the current local selection.
+ */
+export function derivePayoutRequirementFields(
+  payout: PayoutRequirementTree,
+  values: CollectedFieldData,
+  labels: PayoutRequirementFieldLabels
+): RequirementField[] {
+  const destinationCountryField = {
+    kind: "select",
+    key: "destinationCountry",
+    label: labels.destinationCountry,
+    required: true,
+    options: payoutCountryOptions(payout.countryRails),
+  } satisfies Extract<RequirementField, { kind: "select" }>;
+  const destinationCountry = values.destinationCountry;
+  if (destinationCountry === undefined || destinationCountry.length === 0) {
+    return [destinationCountryField];
+  }
+
+  const rails = payoutRailsForCountry(payout.countryRails, destinationCountry);
+  if (findActivePayoutAccount(payout, destinationCountry) !== null) {
+    return [destinationCountryField];
+  }
+
+  const paymentRailField = {
+    kind: "select",
+    key: "paymentRails",
+    label: labels.paymentRail,
+    required: true,
+    options: rails,
+  } satisfies Extract<RequirementField, { kind: "select" }>;
+  const paymentRail = values.paymentRails;
+  if (paymentRail === undefined || paymentRail.length === 0) {
+    return [destinationCountryField, paymentRailField];
+  }
+  if (!rails.some((rail) => rail.value === paymentRail)) {
+    return [destinationCountryField, paymentRailField];
+  }
+
+  const staticFields = payout.railFields[paymentRail];
+  if (staticFields === undefined) {
+    throw new Error(`Lightspark payout requirements have no fields for ${paymentRail}.`);
+  }
+  return [destinationCountryField, paymentRailField, ...staticFields];
+}
 
 async function fetchCounterpartyRequirements(
   counterpartyId: string,
@@ -116,6 +239,8 @@ export interface CounterpartyRequirementsParams extends AdvanceRequirementsPaylo
 export interface CounterpartyRequirementsState {
   /** Fields the client must collect; empty unless the provider returned `collect`. */
   fields: RequirementField[];
+  /** Active corridor account selected for reuse, when the payout country has one. */
+  existingPayoutAccount: PayoutRequirementAccount | null;
   collectedData: CollectedFieldData;
   setField: (key: string, value: string) => void;
   /** The chosen provider needs fields collected for this counterparty. */
@@ -148,7 +273,20 @@ export function useCounterpartyRequirements(
   const t = useTranslations();
   const [collectedData, setCollectedData] = useState<CollectedFieldData>({});
   const setField = (key: string, value: string) => {
-    setCollectedData((prev) => ({ ...prev, [key]: value }));
+    setCollectedData((previous) => {
+      if (key === "destinationCountry" && previous.destinationCountry !== value) {
+        return { destinationCountry: value };
+      }
+      if (key === "paymentRails" && previous.paymentRails !== value) {
+        const next: CollectedFieldData = {};
+        if (previous.destinationCountry !== undefined) {
+          next.destinationCountry = previous.destinationCountry;
+        }
+        next.paymentRails = value;
+        return next;
+      }
+      return { ...previous, [key]: value };
+    });
   };
 
   // Reset collected answers when the counterparty/provider/currency changes by comparing
@@ -186,7 +324,7 @@ export function useCounterpartyRequirements(
   // Requirements are deterministic for a (counterparty, provider, corridor) for the
   // wizard's lifetime — never revalidate, so `needsCollection` (and thus the wizard's
   // step list) can't flip out from under the user mid-flow.
-  const { data, error } = useSWR(
+  const { data, error, mutate } = useSWR(
     key,
     ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
       fetchCounterpartyRequirements(
@@ -220,6 +358,13 @@ export function useCounterpartyRequirements(
       );
       setOnboarding(result);
       setLastAdvancePayload(payload);
+      if (
+        result.status === "collect" ||
+        result.status === "collect_counterparty" ||
+        result.status === "collect_account"
+      ) {
+        await mutate(result, { revalidate: false });
+      }
       if (result.status === "ready") {
         params.onReady?.();
       }
@@ -258,14 +403,33 @@ export function useCounterpartyRequirements(
     { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
   );
 
-  const fields = useMemo<RequirementField[]>(
+  const payoutLabels = useMemo<PayoutRequirementFieldLabels>(
+    () => ({
+      destinationCountry: t("DashboardPayments.ramps.destinationCountry"),
+      paymentRail: t("DashboardPayments.ramps.paymentRail"),
+    }),
+    [t]
+  );
+  const payout = data !== undefined && data.status === "collect_account" ? data.payout : null;
+  const fields = useMemo<RequirementField[]>(() => {
+    if (payout !== null) {
+      return derivePayoutRequirementFields(payout, collectedData, payoutLabels);
+    }
+    if (
+      data !== undefined &&
+      (data.status === "collect" || data.status === "collect_counterparty")
+    ) {
+      return data.fields;
+    }
+    return [];
+  }, [collectedData, data, payout, payoutLabels]);
+
+  const existingPayoutAccount = useMemo(
     () =>
-      data?.status === "collect" ||
-      data?.status === "collect_counterparty" ||
-      data?.status === "collect_account"
-        ? data.fields
-        : [],
-    [data]
+      payout === null || collectedData.destinationCountry === undefined
+        ? null
+        : findActivePayoutAccount(payout, collectedData.destinationCountry),
+    [collectedData.destinationCountry, payout]
   );
 
   const isComplete = useMemo(
@@ -287,6 +451,7 @@ export function useCounterpartyRequirements(
 
   return {
     fields,
+    existingPayoutAccount,
     collectedData,
     setField,
     needsCollection:

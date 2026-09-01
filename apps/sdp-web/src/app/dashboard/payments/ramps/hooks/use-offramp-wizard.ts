@@ -6,6 +6,7 @@ import type {
   PaymentTransferSummary,
   RampCryptoDeposit,
 } from "@sdp/types";
+import { isCountryCode } from "@sdp/types";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -109,9 +110,10 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       provider,
       selectedRampPair,
       cryptoToken,
+      collectedData,
       rampsMemo,
-    }) =>
-      ({
+    }) => {
+      const base = {
         provider,
         counterpartyId: fields.counterpartyId,
         sourceWallet: selectedWallet.walletId,
@@ -119,7 +121,18 @@ export function useOfframpWizard(props: UseRampWizardProps) {
         fiatCurrency: selectedRampPair.fiatCurrency,
         cryptoAmount: fields.amount.trim(),
         rampsMemo,
-      }) satisfies PaymentOfframpQuoteRequest,
+      } satisfies PaymentOfframpQuoteRequest;
+      if (provider !== "lightspark") {
+        return base;
+      }
+      const destinationCountry = collectedData.destinationCountry;
+      if (destinationCountry === undefined || !isCountryCode(destinationCountry)) {
+        throw new Error(
+          "Select a payout destination country in the requirements step before requesting a Lightspark quote."
+        );
+      }
+      return { ...base, destinationCountry };
+    },
     onQuoteCreated: () => {
       resetCreateTransfer();
       setQuoteExpired(false);
