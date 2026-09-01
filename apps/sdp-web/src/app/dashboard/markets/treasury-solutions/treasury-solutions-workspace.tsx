@@ -687,7 +687,17 @@ function ActiveVaultPositionsCard({
   const latestActivityByPositionId = new Map<string, TrackedVaultActivity>();
   const rememberLatest = (activity: TrackedVaultActivity) => {
     const current = latestActivityByPositionId.get(activity.movement.positionId);
-    if (!current || (activity.movement.createdAt ?? "") >= (current.movement.createdAt ?? "")) {
+    const activityCreatedAt = activity.movement.createdAt;
+    const currentCreatedAt = current?.movement.createdAt;
+    // A missing timestamp identifies the deposit just observed from this
+    // session's POST response. It is newest by event order until its detail
+    // read supplies the server timestamp. Never compare server time with a
+    // browser-generated substitute: clock skew can resurrect older activity.
+    if (
+      !current ||
+      activityCreatedAt === undefined ||
+      (currentCreatedAt !== undefined && activityCreatedAt >= currentCreatedAt)
+    ) {
       latestActivityByPositionId.set(activity.movement.positionId, activity);
     }
   };
@@ -1378,7 +1388,7 @@ export function TreasurySolutionsWorkspace({
             // claimed position row and the debited wallet right away; the
             // watch below is what re-reads them once the chain has actually
             // decided, which is the only point at which the holding is real.
-            addVaultDepositWatches([{ ...deposit, createdAt: new Date().toISOString() }]);
+            addVaultDepositWatches([deposit]);
             refreshPositions();
             refreshWallets();
           }}

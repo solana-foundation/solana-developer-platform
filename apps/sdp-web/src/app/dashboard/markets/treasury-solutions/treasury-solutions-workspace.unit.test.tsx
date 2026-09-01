@@ -70,6 +70,16 @@ const mocks = vi.hoisted(() => ({
       }) => void;
     }
   >,
+  vaultDepositModal: undefined as
+    | {
+        onDeposited?: (deposit: {
+          failureReason: string | null;
+          movementId: string;
+          positionId: string;
+          status: string;
+        }) => void;
+      }
+    | undefined,
   walletBalances: undefined as
     | Array<{
         token: string;
@@ -387,9 +397,18 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
 }));
 
 vi.mock("../earn/earn-vault-deposit-modal", () => ({
-  EarnVaultDepositModal: ({ strategy }: { strategy: { name: string } }) => (
-    <div role="dialog">Deposit into {strategy.name}</div>
-  ),
+  EarnVaultDepositModal: (props: {
+    onDeposited?: (deposit: {
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
+    strategy: { name: string };
+  }) => {
+    mocks.vaultDepositModal = props;
+    return <div role="dialog">Deposit into {props.strategy.name}</div>;
+  },
   EarnVaultDepositOutcomeTracker: (props: {
     movementId: string;
     onUpdated?: (deposit: {
@@ -439,6 +458,7 @@ beforeEach(() => {
   mocks.vaultWithdrawals = [];
   mocks.vaultDepositTrackers = {};
   mocks.vaultWithdrawalTrackers = {};
+  mocks.vaultDepositModal = undefined;
   mocks.walletBalances = [
     { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
     // The vault receipt token the custody wallet actually holds on chain, for
@@ -570,6 +590,44 @@ describe("TreasurySolutionsWorkspace", () => {
       await screen.findByText(
         "Solana confirmed the withdrawal. SDP is waiting for final settlement."
       )
+    ).toBeTruthy();
+  });
+
+  it("keeps a locally submitted deposit newest without comparing browser and server clocks", async () => {
+    const user = userEvent.setup();
+    mocks.vaultWithdrawals = [
+      {
+        // Deliberately far in the future. A skewed browser clock must not let
+        // this older server movement outrank the deposit the user just made.
+        createdAt: "2099-09-01T17:21:00.000Z",
+        failureReason: null,
+        movementId: "earn_vault_withdrawal_older",
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      },
+    ];
+
+    renderWorkspace();
+    const strategyRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    if (!strategyRow) throw new Error("Expected the deposit strategy row");
+    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
+
+    act(() => {
+      mocks.vaultDepositModal?.onDeposited?.({
+        failureReason: null,
+        movementId: "earn_vault_deposit_just_submitted",
+        positionId: "earn_vault_position_live",
+        status: "submitted",
+      });
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Depositing: The deposit was sent to Solana and is waiting for confirmation.",
+      })
     ).toBeTruthy();
   });
 

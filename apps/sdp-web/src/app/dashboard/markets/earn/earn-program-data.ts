@@ -1064,8 +1064,6 @@ function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(in
   const reported = useRef<string | undefined>(undefined);
   const reportedVersion = useRef<string | undefined>(undefined);
   const pollStartedAt = useVaultMovementPollStartedAt(movementId);
-  const notifySettled = useEffectEvent((movement: Movement) => onSettled?.(movement));
-  const notifyUpdated = useEffectEvent((movement: Movement) => onUpdated?.(movement));
 
   const { data } = useSWR(queryKey, ([, watchedId]) => fetchMovement(watchedId), {
     refreshInterval: (movement) =>
@@ -1074,19 +1072,18 @@ function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(in
         startedAt: pollStartedAt,
       }),
     dedupingInterval: VAULT_MOVEMENT_DEDUPING_MS,
+    onSuccess: (movement) => {
+      if (!movement) return;
+      const version = vaultMovementVersion(movement);
+      if (reportedVersion.current !== version) {
+        reportedVersion.current = version;
+        onUpdated?.(movement);
+      }
+      if (!isSettled(movement) || reported.current === movement.movementId) return;
+      reported.current = movement.movementId;
+      onSettled?.(movement);
+    },
   });
-
-  useEffect(() => {
-    if (!data) return;
-    const version = vaultMovementVersion(data);
-    if (reportedVersion.current !== version) {
-      reportedVersion.current = version;
-      notifyUpdated(data);
-    }
-    if (!isSettled(data) || reported.current === data.movementId) return;
-    reported.current = data.movementId;
-    notifySettled(data);
-  }, [data, isSettled]);
 
   return data;
 }
