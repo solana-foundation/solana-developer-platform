@@ -1,38 +1,65 @@
-import type {
-  CustodyConnectionCheckStatus,
-  CustodyConnectionFailureCode,
-  CustodyConnectionLifecycle,
-  CustodyProvider,
-  CustodyWalletSummary,
+import {
+  CUSTODY_CONNECTION_CHECK_STATUSES,
+  CUSTODY_CONNECTION_FAILURE_CODES,
+  CUSTODY_CONNECTION_LIFECYCLES,
+  CUSTODY_PROVIDERS,
+  type CustodyWalletSummary,
 } from "@sdp/types";
+import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const CONNECTIONS_PAGE_SIZE = 20;
 
-export interface ConnectionLastCheck {
-  status: CustodyConnectionCheckStatus;
-  at: string | null;
-  failureCode: CustodyConnectionFailureCode | null;
-}
+const connectionLastCheckSchema = z
+  .object({
+    status: z.enum(CUSTODY_CONNECTION_CHECK_STATUSES),
+    at: z.string().nullable(),
+    failureCode: z.enum(CUSTODY_CONNECTION_FAILURE_CODES).nullable(),
+  })
+  .strict();
 
-export interface CustodyConnectionListItem {
-  id: string;
-  provider: CustodyProvider;
-  label: string;
-  status: CustodyConnectionLifecycle;
-  isDefault: boolean;
-  isRuntimeExecutionAllowed: boolean;
-  defaultCustodyWalletId: string | null;
-  createdAt: string;
-  activatedAt: string | null;
-  lastCheck: ConnectionLastCheck | null;
-  pendingWalletLabel: string | null;
-}
+const custodyConnectionListItemSchema = z
+  .object({
+    id: z.string(),
+    provider: z.enum(CUSTODY_PROVIDERS),
+    label: z.string(),
+    status: z.enum(CUSTODY_CONNECTION_LIFECYCLES),
+    isDefault: z.boolean(),
+    isRuntimeExecutionAllowed: z.boolean(),
+    defaultCustodyWalletId: z.string().nullable(),
+    createdAt: z.string(),
+    activatedAt: z.string().nullable(),
+    lastCheck: connectionLastCheckSchema.nullable(),
+    pendingWalletLabel: z.string().nullable(),
+  })
+  .strict();
 
-export interface ConnectionsPageResult {
-  connections: CustodyConnectionListItem[];
-  pagination: { limit: number; offset: number; total: number };
-}
+const connectionsPageResultSchema = z
+  .object({
+    connections: z.array(custodyConnectionListItemSchema),
+    pagination: z
+      .object({
+        limit: z.number().int().nonnegative(),
+        offset: z.number().int().nonnegative(),
+        total: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const connectionsPageEnvelopeSchema = z
+  .object({
+    data: connectionsPageResultSchema,
+    meta: z
+      .object({ requestId: z.string().optional(), timestamp: z.string().optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export type ConnectionLastCheck = z.infer<typeof connectionLastCheckSchema>;
+export type CustodyConnectionListItem = z.infer<typeof custodyConnectionListItemSchema>;
+export type ConnectionsPageResult = z.infer<typeof connectionsPageResultSchema>;
 
 export interface ConnectionsFilters {
   page: number;
@@ -82,8 +109,7 @@ export async function fetchConnectionsPage(
   if (!res.ok) {
     throw new ConnectionsRequestError(res.status);
   }
-  const json = (await res.json()) as { data: ConnectionsPageResult };
-  return json.data;
+  return connectionsPageEnvelopeSchema.parse(await res.json()).data;
 }
 
 /**

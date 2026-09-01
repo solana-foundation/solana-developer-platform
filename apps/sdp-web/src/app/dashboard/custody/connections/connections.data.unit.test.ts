@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildConnectionsSearchParams,
   ConnectionsRequestError,
+  type CustodyConnectionListItem,
   fetchConnectionsPage,
   fetchWalletsByConnection,
   parseConnectionsFilters,
@@ -13,6 +14,26 @@ function jsonResponse(body: unknown): Response {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function connection(id: string): CustodyConnectionListItem {
+  return {
+    id,
+    provider: "privy",
+    label: "Treasury",
+    status: "active",
+    isDefault: true,
+    isRuntimeExecutionAllowed: true,
+    defaultCustodyWalletId: "cwlt_treasury",
+    createdAt: "2026-08-10T09:00:00.000Z",
+    activatedAt: "2026-08-10T09:05:00.000Z",
+    lastCheck: {
+      status: "success",
+      at: "2026-08-10T09:05:00.000Z",
+      failureCode: null,
+    },
+    pendingWalletLabel: null,
+  };
 }
 
 describe("parseConnectionsFilters", () => {
@@ -34,7 +55,10 @@ describe("buildConnectionsSearchParams", () => {
 describe("fetchConnectionsPage", () => {
   it("converts the page to a limit/offset query", async () => {
     const request = vi.fn(async () =>
-      jsonResponse({ data: { connections: [], pagination: { limit: 20, offset: 40, total: 0 } } })
+      jsonResponse({
+        data: { connections: [], pagination: { limit: 20, offset: 40, total: 0 } },
+        meta: { requestId: "req-connections", timestamp: "2026-09-01T12:00:00.000Z" },
+      })
     );
 
     await fetchConnectionsPage(request, { page: 3 });
@@ -55,6 +79,14 @@ describe("fetchConnectionsPage", () => {
       ConnectionsRequestError
     );
   });
+
+  it("rejects a malformed successful response", async () => {
+    const request = vi.fn(async () =>
+      jsonResponse({ data: { connections: [{ id: "conn-1" }], pagination: {} } })
+    );
+
+    await expect(fetchConnectionsPage(request, { page: 1 })).rejects.toThrow();
+  });
 });
 
 describe("resolveConnectionsPage", () => {
@@ -66,7 +98,7 @@ describe("resolveConnectionsPage", () => {
           })
         : jsonResponse({
             data: {
-              connections: [{ id: "conn-1" }],
+              connections: [connection("conn-1")],
               pagination: { limit: 20, offset: 0, total: 4 },
             },
           })
@@ -91,7 +123,7 @@ describe("resolveConnectionsPage", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
-            connections: [{ id: "conn-1" }],
+            connections: [connection("conn-1")],
             pagination: { limit: 20, offset: 0, total: 20 },
           },
         })
@@ -119,7 +151,7 @@ describe("resolveConnectionsPage", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
-            connections: [{ id: "conn-1" }],
+            connections: [connection("conn-1")],
             pagination: { limit: 20, offset: 0, total: 5 },
           },
         })
