@@ -103,12 +103,19 @@ try {
     ]);
   } else {
     const changedSince = mode === "unit" ? process.env.TEST_CHANGED_SINCE?.trim() : undefined;
+    const split = mode === "unit" ? process.env.TEST_WORKSPACE_SPLIT?.trim() : undefined;
     const filters =
       mode === "integration"
         ? ["--filter=@sdp/api-integration"]
-        : changedSince
-          ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
-          : ["--filter=!@sdp/api-integration"];
+        : split === "api"
+          ? ["--filter=@sdp/api"]
+          : split === "rest"
+            ? changedSince
+              ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api", "--filter=!@sdp/api-integration"]
+              : ["--filter=!@sdp/api", "--filter=!@sdp/api-integration"]
+            : changedSince
+              ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
+              : ["--filter=!@sdp/api-integration"];
     await run("pnpm", [
       "exec",
       "turbo",
