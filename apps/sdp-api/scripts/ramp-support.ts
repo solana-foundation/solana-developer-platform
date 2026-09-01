@@ -244,7 +244,9 @@ async function readCountryRailsByProvider(): Promise<CountryRailsByProvider> {
     const providerName = entry.name.slice(0, -".rails.json".length);
     const provider = rampProviderIdSchema.parse(providerName);
     const text = await readFile(path.join(RAMP_SUPPORT_ROOT_DIR, entry.name), "utf8");
-    const parsed: unknown = JSON.parse(text);
+    const { $comment: _sourceNote, ...parsed } = z
+      .looseObject({ $comment: z.string() })
+      .parse(JSON.parse(text));
     countryRails.set(provider, providerCountryRailsSchema.parse(parsed));
   }
   return countryRails;
