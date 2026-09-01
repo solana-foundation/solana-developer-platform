@@ -1,4 +1,4 @@
-import type { Counterparty } from "@sdp/types";
+import { COUNTRIES, type Counterparty, type CountryCode, isCountryCode } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { OFFRAMP_PAYOUT_ACCOUNTS, OFFRAMP_SWIFT_SUPPORT } from "@sdp/types/generated/ramp";
 import type { RampPayoutAccountSpec, RampPayoutFieldSpec } from "@sdp/types/payment-rails";
@@ -10,15 +10,14 @@ import type {
 import type { CounterpartyRow } from "../../../counterparty";
 import { badRequest, providerUnavailable, unsupportedCounterparty } from "../../../errors";
 import {
+  dateField,
   parseCollectedFields,
   readyCounterparty,
   selectField,
   textField,
 } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import { latestLightsparkPayoutAccount, readLightsparkCustomerId } from "./provider-data";
-
-const ISO_DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
+import { latestLightsparkPayoutAccount } from "./provider-data";
 
 const LIGHTSPARK_RAIL_LABELS = {
   ACH: "ACH",
@@ -204,29 +203,36 @@ function lightsparkRailLabel(rail: string): string {
   return label;
 }
 
-export const LIGHTSPARK_BUSINESS_INFO_FIELDS: readonly RequirementField[] = [
-  textField({
-    key: "businessLegalName",
-    label: "Legal business name",
-    required: true,
-    maxLength: 256,
-    placeholder: "Acme Corporation, Inc.",
-  }),
-  textField({
-    key: "businessTaxId",
-    label: "Business tax ID",
-    required: true,
-    maxLength: 32,
-    placeholder: "47-1234567",
-  }),
-  textField({
-    key: "businessIncorporatedOn",
-    label: "Date of incorporation",
-    required: true,
-    pattern: ISO_DATE_PATTERN,
-    placeholder: "2018-03-14",
-  }),
-];
+/**
+ * Business details collected to create the Grid BUSINESS customer. Values pass
+ * through to Grid just-in-time and are never persisted.
+ *
+ * @returns Business requirement fields for a business counterparty.
+ */
+export function lightsparkBusinessInfoFields(): RequirementField[] {
+  return [
+    textField({
+      key: "businessLegalName",
+      label: "Legal business name",
+      required: true,
+      maxLength: 256,
+      placeholder: "Acme Corporation, Inc.",
+    }),
+    textField({
+      key: "businessTaxId",
+      label: "Business tax ID",
+      required: true,
+      maxLength: 32,
+      placeholder: "47-1234567",
+    }),
+    dateField({
+      key: "businessIncorporatedOn",
+      label: "Date of incorporation",
+      required: true,
+      before: new Date().toISOString().slice(0, 10),
+    }),
+  ];
+}
 
 export interface LightsparkBusinessInfo {
   legalName: string;
@@ -248,7 +254,7 @@ export function buildLightsparkBusinessInfo(
     );
   }
   const supplied = parseCollectedFields(
-    LIGHTSPARK_BUSINESS_INFO_FIELDS,
+    lightsparkBusinessInfoFields(),
     collectedData,
     "Missing or invalid business details for Lightspark onboarding."
   );
@@ -330,43 +336,182 @@ export function lightsparkPayoutFields(fiatCurrency: string): RequirementField[]
   ];
 }
 
+function lightsparkCountrySelect(key: string, label: string): RequirementField {
+  return selectField({
+    key,
+    label,
+    required: true,
+    options: COUNTRIES.map((country) => ({ value: country.code, label: country.name })),
+  });
+}
+
+/**
+ * PII collected to create the Grid INDIVIDUAL customer. Values pass through
+ * to Grid just-in-time and are never persisted.
+ *
+ * @returns Identity requirement fields for an individual counterparty.
+ */
+export function lightsparkIndividualInfoFields(): RequirementField[] {
+  return [
+    textField({ key: "customer.fullName", label: "Full name", required: true, maxLength: 256 }),
+    dateField({
+      key: "customer.birthDate",
+      label: "Date of birth",
+      required: true,
+      before: new Date().toISOString().slice(0, 10),
+    }),
+    lightsparkCountrySelect("customer.nationality", "Nationality"),
+    lightsparkCountrySelect("customer.region", "Region"),
+    textField({
+      key: "customer.email",
+      label: "Email",
+      required: true,
+      maxLength: 320,
+      pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+      placeholder: "name@example.com",
+    }),
+    {
+      kind: "address",
+      key: "customer.address",
+      label: "Residential address",
+      required: true,
+      fields: [
+        textField({ key: "customer.address.line1", label: "Address line 1", required: true }),
+        textField({ key: "customer.address.city", label: "City", required: true }),
+        textField({
+          key: "customer.address.subdivisionCode",
+          label: "State / region",
+          required: false,
+        }),
+        textField({ key: "customer.address.postalCode", label: "Postal code", required: true }),
+        lightsparkCountrySelect("customer.address.countryCode", "Country"),
+      ],
+    },
+  ];
+}
+
+export interface LightsparkIndividualInfo {
+  fullName: string;
+  birthDate: string;
+  nationality: CountryCode;
+  region: CountryCode;
+  email: string;
+  address: {
+    line1: string;
+    city: string;
+    state?: string;
+    postalCode: string;
+    country: CountryCode;
+  };
+}
+
+/**
+ * Maps collected individual PII into the Grid createCustomer payload.
+ * Collected values pass through to Grid and are never persisted.
+ *
+ * @param collectedData - Collected identity fields keyed by requirement key.
+ * @returns The Grid individual customer info.
+ */
+export function buildLightsparkIndividualInfo(
+  collectedData: CollectedFieldData | undefined
+): LightsparkIndividualInfo {
+  if (!collectedData) {
+    throw badRequest(
+      "collectedData with individual details is required to onboard an individual counterparty with Lightspark."
+    );
+  }
+  const supplied = parseCollectedFields(
+    lightsparkIndividualInfoFields(),
+    collectedData,
+    "Missing or invalid individual details for Lightspark onboarding."
+  );
+  const fullName = supplied["customer.fullName"];
+  const birthDate = supplied["customer.birthDate"];
+  const nationality = supplied["customer.nationality"];
+  const region = supplied["customer.region"];
+  const email = supplied["customer.email"];
+  const line1 = supplied["customer.address.line1"];
+  const city = supplied["customer.address.city"];
+  const subdivisionCode = supplied["customer.address.subdivisionCode"];
+  const postalCode = supplied["customer.address.postalCode"];
+  const countryCode = supplied["customer.address.countryCode"];
+  if (
+    typeof fullName !== "string" ||
+    typeof birthDate !== "string" ||
+    typeof nationality !== "string" ||
+    !isCountryCode(nationality) ||
+    typeof region !== "string" ||
+    !isCountryCode(region) ||
+    typeof email !== "string" ||
+    typeof line1 !== "string" ||
+    typeof city !== "string" ||
+    typeof postalCode !== "string" ||
+    typeof countryCode !== "string" ||
+    !isCountryCode(countryCode)
+  ) {
+    throw badRequest("Missing required individual details for Lightspark onboarding.");
+  }
+  return {
+    fullName,
+    birthDate,
+    nationality,
+    region,
+    email,
+    address: {
+      line1,
+      city,
+      ...(typeof subdivisionCode === "string" && subdivisionCode.length > 0
+        ? { state: subdivisionCode }
+        : {}),
+      postalCode,
+      country: countryCode,
+    },
+  };
+}
+
+/**
+ * Requirement state machine keyed on the handler-resolved
+ * `counterparty_provider_accounts` link: no link → collect_counterparty (PII
+ * to create the Grid customer); linked onramp → ready; linked offramp →
+ * collect_account until a payout account exists for the currency.
+ */
 export function lightsparkCounterpartyRequirements(
   counterparty: Counterparty,
-  { direction, providerData, fiatCurrency }: ValidateCounterpartyOptions
+  options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  const businessInfoFields =
-    counterparty.entityType === "business" && !readLightsparkCustomerId(providerData)
-      ? LIGHTSPARK_BUSINESS_INFO_FIELDS
-      : [];
-  if (direction === "onramp") {
-    if (businessInfoFields.length > 0) {
-      return {
-        provider: "lightspark",
-        direction,
-        status: "collect",
-        fields: [...businessInfoFields],
-      };
-    }
-    return readyCounterparty("lightspark", direction);
+  if (options.providerCustomerReference === undefined) {
+    return {
+      provider: "lightspark",
+      direction: options.direction,
+      status: "collect_counterparty",
+      fields:
+        counterparty.entityType === "individual"
+          ? lightsparkIndividualInfoFields()
+          : lightsparkBusinessInfoFields(),
+    };
   }
+  if (options.direction === "onramp") {
+    return readyCounterparty("lightspark", "onramp");
+  }
+  const { providerData, fiatCurrency } = options;
   if (!fiatCurrency) {
     throw badRequest("fiatCurrency is required for Lightspark off-ramp requirements.");
   }
   if (lightsparkPayoutRails(fiatCurrency) === undefined) {
     return unsupportedCounterparty(
       "lightspark",
-      direction,
+      "offramp",
       `Lightspark off-ramp does not support payouts in ${fiatCurrency}.`
     );
   }
   if (latestLightsparkPayoutAccount(providerData, fiatCurrency)) {
-    return readyCounterparty("lightspark", direction);
+    return readyCounterparty("lightspark", "offramp");
   }
   return {
     provider: "lightspark",
-    direction,
-    status: "collect",
-    fields: [...businessInfoFields, ...lightsparkPayoutFields(fiatCurrency)],
+    direction: "offramp",
+    status: "collect_account",
+    fields: lightsparkPayoutFields(fiatCurrency),
   };
 }
 

@@ -1,6 +1,7 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
+  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
@@ -18,7 +19,7 @@ import {
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
@@ -259,13 +260,23 @@ export interface RampOfframpQuoteInput {
   bvnkCompliance?: BvnkComplianceInput;
 }
 
-export interface ValidateCounterpartyOptions {
-  direction: RampDirection;
-  providerData: CounterpartyProviderData;
-  cryptoToken?: string;
-  fiatCurrency?: RampFiatCurrency;
-  destinationWalletAddress?: string;
-}
+export type ValidateCounterpartyOptions =
+  | {
+      direction: "onramp";
+      providerData: CounterpartyProviderData;
+      cryptoToken?: string;
+      fiatCurrency?: RampFiatCurrency;
+      destinationWalletAddress?: string;
+      providerCustomerReference?: string;
+    }
+  | {
+      direction: "offramp";
+      providerData: CounterpartyProviderData;
+      cryptoToken?: string;
+      fiatCurrency?: RampFiatCurrency;
+      destinationCountry?: CountryCode;
+      providerCustomerReference?: string;
+    };
 
 /**
  * Full provider contract: rail discovery plus the runtime quote/execute flow.

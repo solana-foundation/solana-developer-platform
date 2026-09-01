@@ -35,7 +35,11 @@ import type {
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
-import { type LightsparkBusinessInfo, lightsparkCounterpartyRequirements } from "./counterparty";
+import {
+  type LightsparkBusinessInfo,
+  type LightsparkIndividualInfo,
+  lightsparkCounterpartyRequirements,
+} from "./counterparty";
 import { discoverLightsparkCurrencyAndRails } from "./currencies";
 
 export const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
@@ -217,9 +221,8 @@ export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
 
 export type CreateLightsparkCustomerInput = {
   platformCustomerId: string;
-  email?: string;
 } & (
-  | { customerType: "INDIVIDUAL"; fullName: string }
+  | { customerType: "INDIVIDUAL"; individualInfo: LightsparkIndividualInfo }
   | { customerType: "BUSINESS"; businessInfo: LightsparkBusinessInfo }
 );
 
@@ -235,8 +238,12 @@ interface GridCreateCustomerBody {
   platformCustomerId: string;
   customerType: LightsparkCustomerType;
   fullName?: string;
-  businessInfo?: LightsparkBusinessInfo;
+  region?: LightsparkIndividualInfo["region"];
+  birthDate?: string;
+  nationality?: LightsparkIndividualInfo["nationality"];
+  address?: LightsparkIndividualInfo["address"];
   email?: string;
+  businessInfo?: LightsparkBusinessInfo;
 }
 
 interface GridCustomerResponse {
@@ -500,14 +507,23 @@ export class LightsparkRampClient implements RampProvider {
       "customers",
       {
         method: "POST",
-        body: {
-          platformCustomerId: input.platformCustomerId,
-          customerType: input.customerType,
-          ...(input.customerType === "INDIVIDUAL"
-            ? { fullName: input.fullName }
-            : { businessInfo: input.businessInfo }),
-          ...(input.email ? { email: input.email } : {}),
-        },
+        body:
+          input.customerType === "INDIVIDUAL"
+            ? {
+                platformCustomerId: input.platformCustomerId,
+                customerType: input.customerType,
+                fullName: input.individualInfo.fullName,
+                region: input.individualInfo.region,
+                birthDate: input.individualInfo.birthDate,
+                nationality: input.individualInfo.nationality,
+                address: input.individualInfo.address,
+                email: input.individualInfo.email,
+              }
+            : {
+                platformCustomerId: input.platformCustomerId,
+                customerType: input.customerType,
+                businessInfo: input.businessInfo,
+              },
       }
     );
 
