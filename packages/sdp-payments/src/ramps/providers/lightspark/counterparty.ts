@@ -17,7 +17,11 @@ import {
   textField,
 } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import { latestLightsparkPayoutAccount } from "./provider-data";
+import {
+  LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
+  latestLightsparkPayoutAccount,
+  readLightsparkPurposeOfPayment,
+} from "./provider-data";
 
 const LIGHTSPARK_RAIL_LABELS = {
   ACH: "ACH",
@@ -204,8 +208,46 @@ function lightsparkRailLabel(rail: string): string {
 }
 
 /**
+ * Purpose-of-payment selector. Grid mandates the code on quotes for some
+ * payout corridors, so it is collected once during counterparty onboarding
+ * and stored in provider_data.
+ *
+ * @returns Requirement field for the purpose-of-payment code.
+ */
+export function lightsparkPurposeOfPaymentField(): RequirementField {
+  return selectField({
+    key: "purposeOfPayment",
+    label: "Purpose of payment",
+    required: true,
+    options: Object.entries(LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS).map(([value, label]) => ({
+      value,
+      label,
+    })),
+  });
+}
+
+/**
+ * Requirements asking for just the purpose-of-payment code: the follow-up
+ * collection state for customers linked before the field existed.
+ *
+ * @param direction - Ramp direction the requirements were requested for.
+ * @returns collect_counterparty requirements with only the purpose field.
+ */
+export function lightsparkPurposeOfPaymentRequirement(
+  direction: "onramp" | "offramp"
+): CounterpartyRequirements {
+  return {
+    provider: "lightspark",
+    direction,
+    status: "collect_counterparty",
+    fields: [lightsparkPurposeOfPaymentField()],
+  };
+}
+
+/**
  * Business details collected to create the Grid BUSINESS customer. Values pass
- * through to Grid just-in-time and are never persisted.
+ * through to Grid just-in-time and are never persisted, except the
+ * purpose-of-payment code, which is stored for quote requests.
  *
  * @returns Business requirement fields for a business counterparty.
  */
@@ -231,6 +273,7 @@ export function lightsparkBusinessInfoFields(): RequirementField[] {
       required: true,
       before: new Date().toISOString().slice(0, 10),
     }),
+    lightsparkPurposeOfPaymentField(),
   ];
 }
 
@@ -347,7 +390,8 @@ function lightsparkCountrySelect(key: string, label: string): RequirementField {
 
 /**
  * PII collected to create the Grid INDIVIDUAL customer. Values pass through
- * to Grid just-in-time and are never persisted.
+ * to Grid just-in-time and are never persisted, except the purpose-of-payment
+ * code, which is stored for quote requests.
  *
  * @returns Identity requirement fields for an individual counterparty.
  */
@@ -370,6 +414,7 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
       pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
       placeholder: "name@example.com",
     }),
+    lightsparkPurposeOfPaymentField(),
     {
       kind: "address",
       key: "customer.address",
@@ -472,8 +517,10 @@ export function buildLightsparkIndividualInfo(
 /**
  * Requirement state machine keyed on the handler-resolved
  * `counterparty_provider_accounts` link: no link → collect_counterparty (PII
- * to create the Grid customer); linked onramp → ready; linked offramp →
- * collect_account until a payout account exists for the currency.
+ * to create the Grid customer); linked but no stored purpose-of-payment →
+ * collect_counterparty for just that field (customers linked before the field
+ * existed); linked onramp → ready; linked offramp → collect_account until a
+ * payout account exists for the currency.
  */
 export function lightsparkCounterpartyRequirements(
   counterparty: Counterparty,
@@ -489,6 +536,9 @@ export function lightsparkCounterpartyRequirements(
           ? lightsparkIndividualInfoFields()
           : lightsparkBusinessInfoFields(),
     };
+  }
+  if (readLightsparkPurposeOfPayment(options.providerData) === null) {
+    return lightsparkPurposeOfPaymentRequirement(options.direction);
   }
   if (options.direction === "onramp") {
     return readyCounterparty("lightspark", "onramp");

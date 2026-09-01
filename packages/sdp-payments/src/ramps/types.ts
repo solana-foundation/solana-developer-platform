@@ -22,6 +22,7 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
+import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export type {
@@ -232,6 +233,8 @@ export interface RampOnrampQuoteInput {
   paymentTransferId?: string;
   /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
   customerId?: string;
+  /** Handler-resolved purpose-of-payment code stored during counterparty onboarding (Lightspark). */
+  purposeOfPayment?: LightsparkPurposeOfPayment;
   bvnkCompliance?: BvnkComplianceInput;
   /** Buyer contact required by Coinbase headless create-order; sourced from the counterparty. */
   email?: string;
@@ -253,6 +256,8 @@ export interface RampOfframpQuoteInput {
   paymentTransferId?: string;
   externalCustomerId: string;
   customerId?: string;
+  /** Handler-resolved purpose-of-payment code stored during counterparty onboarding (Lightspark). */
+  purposeOfPayment?: LightsparkPurposeOfPayment;
   /** Handler-resolved Grid external payout account id (Lightspark). */
   payoutAccountId?: string;
   /** Handler-provisioned merchant-owned BVNK off-ramp fiat wallet id. */

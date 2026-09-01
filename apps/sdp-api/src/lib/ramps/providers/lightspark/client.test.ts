@@ -211,6 +211,7 @@ describe("LightsparkRampClient", () => {
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "25",
+      purposeOfPayment: "GOODS_OR_SERVICES",
     });
 
     expect(quote.provider).toBe("lightspark");
@@ -276,6 +277,7 @@ describe("LightsparkRampClient", () => {
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       cryptoAmount: "25",
+      purposeOfPayment: "GOODS_OR_SERVICES",
     });
 
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(`${LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
@@ -295,6 +297,8 @@ describe("LightsparkRampClient", () => {
       lockedCurrencySide: "SENDING",
       lockedCurrencyAmount: 25000000,
       description: "SDP offramp",
+      purposeOfPayment: "GOODS_OR_SERVICES",
+      senderCustomerInfo: { PURPOSE_OF_PAYMENT: "GOODS_OR_SERVICES" },
     });
 
     expect(quote.provider).toBe("lightspark");
@@ -474,6 +478,7 @@ describe("LightsparkRampClient", () => {
         cryptoToken: "USDC",
         fiatCurrency: "USD",
         fiatAmount: "25",
+        purposeOfPayment: "GOODS_OR_SERVICES",
       })
     ).rejects.toThrow(/does not match the requested/);
   });
@@ -505,6 +510,7 @@ describe("LightsparkRampClient", () => {
         cryptoToken: "USDC",
         fiatCurrency: "USD",
         cryptoAmount: "25",
+        purposeOfPayment: "GOODS_OR_SERVICES",
       })
     ).rejects.toThrow(/does not match the requested/);
   });
