@@ -39,13 +39,6 @@ const MODULE_METADATA = [
     ],
   },
   {
-    name: "@sdp/helius-gateway",
-    directory: "apps/sdp-helius-gateway",
-    purpose:
-      "Rust sidecar over the Helius Rings (zolana) SDK; builds unsigned Solana transactions. Built with cargo, not pnpm.",
-    allowedDependencies: [],
-  },
-  {
     name: "sdp-docs",
     directory: "apps/sdp-docs",
     purpose: "Public documentation site and generated API reference.",
