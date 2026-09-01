@@ -141,18 +141,26 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
   return true;
 }
 
+/** The test-seam signer, or the owner's custody signer with failures mapped once. */
+async function ownerSigner(
+  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner"> & {
+    signer?: TransactionSigner;
+  }
+): Promise<TransactionSigner> {
+  try {
+    return input.signer ?? (await resolveOwnerSigner(input));
+  } catch (error) {
+    throw toSignerFailure(error);
+  }
+}
+
 export async function signRingsOuterTransaction(
   input: SignRingsOuterTransactionInput
 ): Promise<string> {
   const base64 = getBase64Codec();
 
-  let signer: TransactionSigner;
+  const signer = await ownerSigner(input);
   let signed: Transaction;
-  try {
-    signer = input.signer ?? (await resolveOwnerSigner(input));
-  } catch (error) {
-    throw toSignerFailure(error);
-  }
 
   // The decoder returns an unbranded Transaction; the gateway built these
   // bytes as a complete compiled tx, which is what the signer brands assert.
@@ -199,12 +207,7 @@ export interface SignRingsMessageInput {
 export async function signRingsMessage(input: SignRingsMessageInput): Promise<string> {
   const base64 = getBase64Codec();
 
-  let signer: TransactionSigner;
-  try {
-    signer = input.signer ?? (await resolveOwnerSigner(input));
-  } catch (error) {
-    throw toSignerFailure(error);
-  }
+  const signer = await ownerSigner(input);
   if (!isMessagePartialSigner(signer)) {
     throw new RingsAdapterError("signer_failed", "custody signer cannot sign raw messages", {
       retryable: false,

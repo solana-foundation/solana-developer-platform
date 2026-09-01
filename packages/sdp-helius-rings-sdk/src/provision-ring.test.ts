@@ -131,6 +131,11 @@ async function derivedAddresses() {
   return { configAddress, configBump, grantRecord, grantRecordBump, programDataAddress, ringAuth };
 }
 
+/** The pool-owned ring-auth marker account SPP registration creates. */
+function ringAuthAccount() {
+  return { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n };
+}
+
 function harness(accounts: Map<string, unknown>) {
   const client = {
     tree: TREE,
@@ -151,6 +156,19 @@ function harness(accounts: Map<string, unknown>) {
     recordLookupTable: vi.fn(async () => {}),
   };
   return { client, deps };
+}
+
+/** Harness over a fully-registered ring: config, ring-auth and reader grant all on chain. */
+async function registeredHarness() {
+  const derived = await derivedAddresses();
+  const { deps, client } = harness(
+    new Map<string, unknown>([
+      [derived.configAddress, configAccount(AUTHORITY, derived.configBump)],
+      [derived.ringAuth, ringAuthAccount()],
+      [derived.grantRecord, grantRecordAccount(derived.grantRecordBump)],
+    ])
+  );
+  return { deps, client, ...derived };
 }
 
 /** The one instruction of an unsigned transaction handed to custody. */
@@ -197,7 +215,7 @@ describe("provisionCustomRing", () => {
       if (!accounts.has(configAddress)) {
         accounts.set(configAddress, configAccount(AUTHORITY, configBump));
       } else if (!accounts.has(ringAuth)) {
-        accounts.set(ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n });
+        accounts.set(ringAuth, ringAuthAccount());
       } else if (!accounts.has(grantRecord)) {
         accounts.set(grantRecord, grantRecordAccount(grantRecordBump));
       }
@@ -233,15 +251,7 @@ describe("provisionCustomRing", () => {
   });
 
   it("adopts a fully-registered ring once custody proves the config authority", async () => {
-    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
-      await derivedAddresses();
-    const { deps } = harness(
-      new Map<string, unknown>([
-        [configAddress, configAccount(AUTHORITY, configBump)],
-        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
-        [grantRecord, grantRecordAccount(grantRecordBump)],
-      ])
-    );
+    const { deps } = await registeredHarness();
 
     const result = await provisionCustomRing(deps, {
       ringProgramId: RING_PROGRAM,
@@ -261,15 +271,7 @@ describe("provisionCustomRing", () => {
   });
 
   it("rents the lookup table for an adopted ring that lacks one", async () => {
-    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
-      await derivedAddresses();
-    const { deps } = harness(
-      new Map<string, unknown>([
-        [configAddress, configAccount(AUTHORITY, configBump)],
-        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
-        [grantRecord, grantRecordAccount(grantRecordBump)],
-      ])
-    );
+    const { deps } = await registeredHarness();
 
     const result = await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM });
 
@@ -282,15 +284,7 @@ describe("provisionCustomRing", () => {
   });
 
   it("recreates the table when the recorded create never landed", async () => {
-    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
-      await derivedAddresses();
-    const { deps } = harness(
-      new Map<string, unknown>([
-        [configAddress, configAccount(AUTHORITY, configBump)],
-        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
-        [grantRecord, grantRecordAccount(grantRecordBump)],
-      ])
-    );
+    const { deps } = await registeredHarness();
     fetchRingLookupTable
       .mockRejectedValueOnce(
         new realRing.RingError("RING_LOOKUP_TABLE_NOT_FOUND", {
@@ -309,15 +303,7 @@ describe("provisionCustomRing", () => {
   });
 
   it("refuses a recorded table that exists but lacks the ring's addresses", async () => {
-    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
-      await derivedAddresses();
-    const { deps } = harness(
-      new Map<string, unknown>([
-        [configAddress, configAccount(AUTHORITY, configBump)],
-        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
-        [grantRecord, grantRecordAccount(grantRecordBump)],
-      ])
-    );
+    const { deps } = await registeredHarness();
     fetchRingLookupTable.mockRejectedValue(
       new realRing.RingError("RING_LOOKUP_TABLE_INCOMPLETE", {
         details: { address: RECORDED_TABLE, missing: [TREE] },
@@ -334,15 +320,7 @@ describe("provisionCustomRing", () => {
   });
 
   it("refuses to sign a lookup-table transaction extending anything but the ring's addresses", async () => {
-    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
-      await derivedAddresses();
-    const { deps } = harness(
-      new Map<string, unknown>([
-        [configAddress, configAccount(AUTHORITY, configBump)],
-        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
-        [grantRecord, grantRecordAccount(grantRecordBump)],
-      ])
-    );
+    const { deps } = await registeredHarness();
     // A builder gone wrong: the real create+extend pair, but the address
     // vector smuggles a foreign account in place of the shielded pool.
     const recentSlot = 42n;
@@ -402,7 +380,7 @@ describe("provisionCustomRing", () => {
     const { deps } = harness(accounts);
     deps.submitTransaction.mockImplementation(async () => {
       if (!accounts.has(ringAuth)) {
-        accounts.set(ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n });
+        accounts.set(ringAuth, ringAuthAccount());
       } else {
         accounts.set(grantRecord, grantRecordAccount(grantRecordBump));
       }
@@ -427,7 +405,7 @@ describe("provisionCustomRing", () => {
     const { deps } = harness(
       new Map<string, unknown>([
         [configAddress, configAccount(AUTHORITY, configBump)],
-        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
+        [ringAuth, ringAuthAccount()],
       ])
     );
 

@@ -186,7 +186,8 @@ describe("Helius Rings routes", () => {
   });
 
   describe("project rings", () => {
-    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+    // A real 32-byte address: the route schema runs `isAddress`, not just a shape regex.
+    const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
     const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
 
     it("lists an empty collection before any ring is recorded", async () => {

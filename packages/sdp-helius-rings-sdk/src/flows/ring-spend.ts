@@ -5,22 +5,19 @@ import {
   buildRingWithdrawalTransaction,
 } from "@heliuslabs/zolana/ring";
 import type { Wallet, WalletAuthority } from "@heliuslabs/zolana/transaction";
-import { HeliusRingsError } from "@sdp/helius-rings";
 import { type Address, address, type Transaction } from "@solana/kit";
 import { withConfiguredAddressErrorBridge } from "../error-bridge.js";
-import { PROTOCOL_NATIVE_MINT, protocolMint } from "./mint.js";
+import { requireProtocolSol } from "./mint.js";
 
 /**
  * Spends of ring-bound notes, through the SDK's one-call ring builders.
  *
  * Unlike the default-pool spends in `spend.ts`, everything happens inside the
- * builder: same-ring note selection, compact change, both proofs (the pool
- * transact and the custom-ring proof), encryption via
- * `authority.encryptCustomRingTransfer`, and compression of the finished v0
- * transaction over the ring's address lookup table. That means no pinned-input
- * contract (a rebuild re-selects notes) and no prepared-intent validation (the
- * builder never exposes the prepared transfer); the final-wire policy is the
- * only custody-side check on these bytes.
+ * builder: same-ring note selection, compact change, both proofs, encryption
+ * via `authority.encryptCustomRingTransfer`, and compression of the finished
+ * v0 transaction over the ring's address lookup table. No pinned-input
+ * contract and no prepared-intent validation; see docs/ops/helius-rings.md,
+ * "Semantics worth knowing".
  *
  * Neither builder is handed `computeUnitLimit`: the default (1.4M, the ring
  * transact verifies two proofs) is exactly the byte-for-byte compute
@@ -47,30 +44,30 @@ export interface RingSpendInput {
   readonly amountRaw: string;
 }
 
-function requireRingSol(mint: string, opType: string): void {
-  // Defense in depth behind the route schema's SOL-only literal; parity with
-  // the default spend paths. The withdrawal builder would refuse SPL anyway,
-  // but the transfer builder would not.
-  if (protocolMint(mint) !== PROTOCOL_NATIVE_MINT) {
-    throw new HeliusRingsError("invalid_input", `only SOL ${opType}s are supported in this build`);
-  }
-}
-
-export async function buildRingWithdrawalTx(
-  deps: RingSpendDeps,
-  input: RingSpendInput & { recipient: string }
-): Promise<Transaction> {
-  requireRingSol(input.mint, "withdrawal");
-
-  return buildRingWithdrawalTransaction({
+/** The argument set both ring builders share; only the recipient differs. */
+function ringSpendArgs(deps: RingSpendDeps, input: RingSpendInput) {
+  return {
     client: deps.client,
     ringProgramId: withConfiguredAddressErrorBridge(() => address(input.ringProgramId)),
     wallet: deps.wallet,
     authority: deps.authority,
     feePayer: deps.owner,
-    recipient: address(input.recipient),
     amount: BigInt(input.amountRaw),
     lookupTable: withConfiguredAddressErrorBridge(() => address(input.lookupTable)),
+  };
+}
+
+// Both builders stay `async` so the guard's and the address bridge's throws
+// surface as rejections, which is the error channel the callers consume.
+export async function buildRingWithdrawalTx(
+  deps: RingSpendDeps,
+  input: RingSpendInput & { recipient: string }
+): Promise<Transaction> {
+  requireProtocolSol(input.mint, "withdrawal");
+
+  return buildRingWithdrawalTransaction({
+    ...ringSpendArgs(deps, input),
+    recipient: address(input.recipient),
   });
 }
 
@@ -84,16 +81,10 @@ export async function buildRingTransferTx(
   deps: RingSpendDeps,
   input: RingSpendInput & { recipient: ShieldedAddress }
 ): Promise<Transaction> {
-  requireRingSol(input.mint, "transfer");
+  requireProtocolSol(input.mint, "transfer");
 
   return buildRingTransferTransaction({
-    client: deps.client,
-    ringProgramId: withConfiguredAddressErrorBridge(() => address(input.ringProgramId)),
-    wallet: deps.wallet,
-    authority: deps.authority,
-    feePayer: deps.owner,
+    ...ringSpendArgs(deps, input),
     recipient: input.recipient,
-    amount: BigInt(input.amountRaw),
-    lookupTable: withConfiguredAddressErrorBridge(() => address(input.lookupTable)),
   });
 }

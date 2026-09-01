@@ -247,7 +247,7 @@ describe("buildRingsOperation ring-bound operations", () => {
       // Pinned inputs are deliberately ignored on the ring path: the one-call
       // builder re-selects same-ring notes on every build.
       pinnedInputs: ["note_1"],
-      ringLookupTable: RING_LOOKUP_TABLE,
+      ring: { programId: RING_PROGRAM, lookupTable: RING_LOOKUP_TABLE },
       operation: { ...base.operation, ringProgramId: RING_PROGRAM },
     };
 

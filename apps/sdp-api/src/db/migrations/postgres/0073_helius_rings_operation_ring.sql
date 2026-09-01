@@ -7,11 +7,10 @@
 -- against this column, so the ring the approver saw is the ring that runs.
 -- NULL means the default public ring.
 --
--- No FK to helius_rings_project_rings: its ring_program_id carries no UNIQUE
--- constraint to reference, a never-active ring row can be re-pointed under a
--- failed operation, and an operation is history -- it outlives edits to the
--- ring row. The only writer is the service, which copies the id from the
--- project's ring row (or writes NULL).
+-- No FK to helius_rings_project_rings: a never-active ring row can be
+-- re-pointed under a failed operation, and an operation is history -- it
+-- outlives edits to the ring row. The only writer is the service, which
+-- copies the id from the project's ring row (or writes NULL).
 
 -- No backfill: no environment has ever run a custom-ring operation (the
 -- lockout-era code shipped nowhere that used it), so every existing row is a

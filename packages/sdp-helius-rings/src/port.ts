@@ -77,10 +77,12 @@ export interface BuildOperationInput {
   knownAssets?: KnownAsset[];
   requireSlot?: string;
   /**
-   * The ring's address lookup table; required whenever `operation.ringProgramId`
-   * is set on a spend. Ring transacts are v0 transactions compressed through it.
+   * The pinned ring and its address lookup table, resolved together from the
+   * ring row; present exactly when the operation is a ring-bound spend. Ring
+   * transacts are v0 transactions compressed through the table. (A ring shield
+   * builds from `operation.ringProgramId` alone and needs no table.)
    */
-  ringLookupTable?: string;
+  ring?: { programId: string; lookupTable: string };
   /**
    * Present only for private transfers: identifies the recipient wallet so the
    * SDK can load its material and derive the ShieldedAddress needed to build the
@@ -131,11 +133,8 @@ export interface RingsGatewayPort {
   probeHealth(): Promise<RuntimeHealth>;
   provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult>;
   /**
-   * Completes bring-up of a pre-deployed ring program: auditor key, ring
-   * config, shielded-pool registration, the config authority as its own
-   * initial reader, and the ring's address lookup table. Idempotent against
-   * on-chain state, so a run that died mid-way resumes by calling it again
-   * with the same id.
+   * Completes bring-up of a pre-deployed ring program. Idempotent against
+   * on-chain state; see docs/ops/helius-rings.md for the step sequence.
    */
   provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult>;
   readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult>;

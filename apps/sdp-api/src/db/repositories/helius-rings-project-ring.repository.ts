@@ -1,4 +1,5 @@
 import type { HeliusRingsErrorCode, ProjectRing, RingStatus } from "@sdp/helius-rings";
+import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 
 export function generateHeliusRingsProjectRingId(): string {
   return `hrr_${crypto.randomUUID()}`;
@@ -22,13 +23,8 @@ export interface HeliusRingsProjectRingRow {
   updated_at: string;
 }
 
-export interface HeliusRingsRingScope {
-  organizationId: string;
-  projectId: string;
-}
-
 /** A ring is addressed by its name inside the tenant scope. */
-export interface HeliusRingsRingKey extends HeliusRingsRingScope {
+export interface HeliusRingsRingKey extends HeliusRingsProjectScope {
   name: string;
 }
 
@@ -48,7 +44,7 @@ export interface MarkHeliusRingsProjectRingFailedInput extends HeliusRingsRingKe
   failureMessage: string;
 }
 
-export interface RecordHeliusRingsLookupTableInput extends HeliusRingsRingScope {
+export interface RecordHeliusRingsLookupTableInput extends HeliusRingsProjectScope {
   ringProgramId: string;
   lookupTableAddress: string;
 }
@@ -70,11 +66,11 @@ export interface HeliusRingsProjectRingRepository {
     input: ReserveHeliusRingsProjectRingInput
   ): Promise<HeliusRingsProjectRingRow | HeliusRingsProgramInUse | null>;
   /** All of the project's rings, oldest first. */
-  listByProject(scope: HeliusRingsRingScope): Promise<HeliusRingsProjectRingRow[]>;
+  listByProject(scope: HeliusRingsProjectScope): Promise<HeliusRingsProjectRingRow[]>;
   getByName(key: HeliusRingsRingKey): Promise<HeliusRingsProjectRingRow | null>;
   /** Well-defined per project thanks to UNIQUE(project_id, ring_program_id). */
   getByProgramId(
-    input: HeliusRingsRingScope & { ringProgramId: string }
+    input: HeliusRingsProjectScope & { ringProgramId: string }
   ): Promise<HeliusRingsProjectRingRow | null>;
   /**
    * Replaces the named ring's program id and resets the row to `pending`, but

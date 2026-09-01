@@ -1,3 +1,4 @@
+import { CUSTOM_RING_PROOF_LENGTH } from "@heliuslabs/zolana/client";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   DEFAULT_TREE_ADDRESS,
@@ -32,8 +33,6 @@ const RING_DEPOSIT_TAG = 14;
 const TRANSACT_TAG = 12;
 /** Byte 0 of a ring program's transact instruction (its own dispatch, not the pool's). */
 const RING_TRANSACT_TAG = 3;
-/** zolana's CUSTOM_RING_PROOF_LENGTH: a(32) || b(64) || c(32) || commitment(32) || commitmentPok(32). */
-const RING_PROOF_LENGTH = 192;
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
 const ZERO_32 = new Uint8Array(32);
 const COMPUTE_LIMIT = getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT });
@@ -58,22 +57,19 @@ export type OuterTransactionPolicyIntent =
       mint: string;
       amountRaw: string;
       /**
-       * Present when the spend was pinned to a custom ring at prepare time;
-       * always arrives together with `ringLookupTable`. The transact must then
-       * be the ring program's own tag-3 instruction, ALT-compressed over that
-       * table.
+       * Present when the spend was pinned to a custom ring at prepare time.
+       * The transact must then be the ring program's own tag-3 instruction,
+       * ALT-compressed over the ring's persisted lookup table.
        */
-      ringProgramId?: string;
-      ringLookupTable?: string;
+      ring?: Readonly<{ programId: string; lookupTable: string }>;
     }>
   | Readonly<{
       opType: "withdraw";
       mint: string;
       amountRaw: string;
       to: string;
-      /** Same contract as the transfer arm's ring pair. */
-      ringProgramId?: string;
-      ringLookupTable?: string;
+      /** Same contract as the transfer arm's `ring`. */
+      ring?: Readonly<{ programId: string; lookupTable: string }>;
     }>;
 
 /** Kit-neutral DTO accepted at the SDK/API major-version boundary. */
@@ -226,23 +222,26 @@ class StrictReader {
   }
 }
 
+/** The asset-kind prefix shared by tag-11 and tag-14 deposit payloads. */
+function readDepositAsset(
+  reader: StrictReader
+): Readonly<{ assetKind: "sol" | "spl"; splInterfaceBump?: number }> {
+  const kind = reader.u8();
+  const asset: { assetKind: "sol" | "spl"; splInterfaceBump?: number } =
+    kind === 0
+      ? { assetKind: "sol" }
+      : kind === 1
+        ? { assetKind: "spl", splInterfaceBump: reader.u8() }
+        : mismatch();
+  if (reader.u8() !== 1 || reader.u8() !== 0) mismatch();
+  return asset;
+}
+
 function parseDeposit(data: Uint8Array): ParsedDeposit {
   const reader = new StrictReader(data);
   if (reader.u8() !== DEPOSIT_TAG || reader.u8() !== 1) mismatch();
 
-  const kind = reader.u8();
-  let assetKind: ParsedDeposit["assetKind"];
-  let splInterfaceBump: number | undefined;
-  if (kind === 0) {
-    assetKind = "sol";
-  } else if (kind === 1) {
-    assetKind = "spl";
-    splInterfaceBump = reader.u8();
-  } else {
-    return mismatch();
-  }
-
-  if (reader.u8() !== 1 || reader.u8() !== 0) mismatch();
+  const asset = readDepositAsset(reader);
   const viewTag = reader.bytes(32);
   const recipientOwnerHash = reader.bytes(32);
   reader.bytes(32); // random blinding
@@ -251,13 +250,7 @@ function parseDeposit(data: Uint8Array): ParsedDeposit {
   if (reader.bool() || reader.bool()) mismatch();
   reader.done();
 
-  return {
-    assetKind,
-    ...(splInterfaceBump === undefined ? {} : { splInterfaceBump }),
-    viewTag,
-    recipientOwnerHash,
-    amount,
-  };
+  return { ...asset, viewTag, recipientOwnerHash, amount };
 }
 
 /**
@@ -276,19 +269,7 @@ function parseRingDeposit(data: Uint8Array): ParsedRingDeposit {
   const reader = new StrictReader(data);
   if (reader.u8() !== RING_DEPOSIT_TAG || reader.u8() !== 1) mismatch();
 
-  const kind = reader.u8();
-  let assetKind: ParsedRingDeposit["assetKind"];
-  let splInterfaceBump: number | undefined;
-  if (kind === 0) {
-    assetKind = "sol";
-  } else if (kind === 1) {
-    assetKind = "spl";
-    splInterfaceBump = reader.u8();
-  } else {
-    return mismatch();
-  }
-
-  if (reader.u8() !== 1 || reader.u8() !== 0) mismatch();
+  const asset = readDepositAsset(reader);
   const viewTag = reader.bytes(32);
   reader.bytes(32); // ownerUtxoHash: Poseidon commitment, opaque by design
   const amount = reader.u64();
@@ -300,12 +281,7 @@ function parseRingDeposit(data: Uint8Array): ParsedRingDeposit {
   reader.bytes(reader.u16()); // encrypted.ciphertext
   reader.done();
 
-  return {
-    assetKind,
-    ...(splInterfaceBump === undefined ? {} : { splInterfaceBump }),
-    viewTag,
-    amount,
-  };
+  return { ...asset, viewTag, amount };
 }
 
 function parsePublicInterfaceTransfers(data: Uint8Array): readonly ParsedInterfaceTransfer[] {
@@ -324,7 +300,7 @@ function parsePublicInterfaceTransfers(data: Uint8Array): readonly ParsedInterfa
 function parseRingTransact(data: Uint8Array): readonly ParsedInterfaceTransfer[] {
   const reader = new StrictReader(data);
   if (reader.u8() !== RING_TRANSACT_TAG) mismatch();
-  reader.bytes(RING_PROOF_LENGTH);
+  reader.bytes(CUSTOM_RING_PROOF_LENGTH);
   return parseTransactBody(reader);
 }
 
@@ -372,20 +348,52 @@ function accountRole(
   return { signer, writable };
 }
 
+type ResolvedAccount = Readonly<{ address: string; signer: boolean; writable: boolean }>;
+
+/**
+ * The accounts a validated lookup loads, in v0 message order (all writable
+ * indexes, then all readonly), resolved against the locally derived table.
+ */
+function loadedAccounts(
+  lookup: DecodedAddressTableLookup,
+  expectedTable: readonly string[]
+): readonly ResolvedAccount[] {
+  const resolve = (index: number, writable: boolean): ResolvedAccount => {
+    const accountAddress = expectedTable[index];
+    if (!accountAddress) mismatch();
+    return { address: accountAddress, signer: false, writable };
+  };
+  return [
+    ...lookup.writableIndexes.map((index) => resolve(index, true)),
+    ...lookup.readonlyIndexes.map((index) => resolve(index, false)),
+  ];
+}
+
+/**
+ * Resolves an instruction over the message's combined account space
+ * `[statics..., loaded lookups...]`. With no loaded accounts (a legacy-shaped
+ * v0 message) any index past the statics is a mismatch. The program address
+ * must stay static: programs cannot be loaded through a lookup table.
+ */
 function resolvedInstruction(
   message: DecodedMessage,
-  instruction: DecodedInstruction
+  instruction: DecodedInstruction,
+  loaded: readonly ResolvedAccount[] = []
 ): Readonly<{
   program: string;
-  accounts: readonly Readonly<{ address: string; signer: boolean; writable: boolean }>[];
+  accounts: readonly ResolvedAccount[];
   data: Uint8Array;
 }> {
   const program = message.staticAccounts[instruction.programAddressIndex];
   if (!program) mismatch();
+  const statics = message.staticAccounts.length;
   const accounts = (instruction.accountIndices ?? []).map((index) => {
-    const accountAddress = message.staticAccounts[index];
-    if (!accountAddress) mismatch();
-    return { address: accountAddress, ...accountRole(message, index) };
+    if (index < statics) {
+      const accountAddress = message.staticAccounts[index];
+      if (!accountAddress) mismatch();
+      return { address: accountAddress, ...accountRole(message, index) };
+    }
+    return loaded[index - statics] ?? mismatch();
   });
   return { program, accounts, data: instruction.data ?? new Uint8Array() };
 }
@@ -422,14 +430,23 @@ function expectStaticAccounts(message: DecodedMessage, expected: readonly string
   }
 }
 
+/**
+ * The custody envelope invariant, one copy for every op type: version 0, the
+ * owner as the only signer, and exactly one unsigned signature slot keyed by
+ * the owner. Without `lookups` the message must carry no address-table
+ * lookups; with it, exactly one over the given table, every index unique and
+ * in range — an address named in `writableIndexes` is writable in the signed
+ * transaction even if no instruction references it, so the index lists are
+ * part of the account universe custody signs.
+ */
 function validateEnvelope(
   message: DecodedMessage,
   signatures: Record<string, unknown>,
-  owner: Address
-): void {
+  owner: Address,
+  lookups?: Readonly<{ table: Address; tableLength: number }>
+): DecodedAddressTableLookup | null {
   if (
     message.version !== 0 ||
-    (message.addressTableLookups?.length ?? 0) !== 0 ||
     message.header.numSignerAccounts !== 1 ||
     message.header.numReadonlySignerAccounts !== 0 ||
     message.staticAccounts[0] !== owner
@@ -441,6 +458,23 @@ function validateEnvelope(
   if (entries.length !== 1 || entries[0]?.[0] !== owner || entries[0]?.[1] !== null) {
     mismatch();
   }
+
+  const tableLookups = message.addressTableLookups ?? [];
+  if (!lookups) {
+    if (tableLookups.length !== 0) mismatch();
+    return null;
+  }
+
+  const lookup = tableLookups[0];
+  if (tableLookups.length !== 1 || !lookup || lookup.lookupTableAddress !== lookups.table) {
+    mismatch();
+  }
+  const indexes = [...lookup.writableIndexes, ...lookup.readonlyIndexes];
+  if (new Set(indexes).size !== indexes.length) mismatch();
+  for (const index of indexes) {
+    if (!Number.isInteger(index) || index < 0 || index >= lookups.tableLength) mismatch();
+  }
+  return lookup;
 }
 
 async function splAccounts(
@@ -468,8 +502,12 @@ async function splAccounts(
   return { sourceTokenAccount, splInterface, bump };
 }
 
-/** The ring program's own signer PDA; the one account a ring deposit adds. */
-async function ringAuthAddress(ringProgramId: Address): Promise<Address> {
+/**
+ * The ring program's own signer PDA; the one account a ring deposit adds.
+ * Derived locally on purpose — not zolana's `ringAuthAddress` — as part of
+ * this file's independent read of the wire.
+ */
+async function derivedRingAuthAddress(ringProgramId: Address): Promise<Address> {
   const [derived] = await getProgramDerivedAddress({
     programAddress: ringProgramId,
     seeds: [textEncoder.encode("ring_auth")],
@@ -487,10 +525,6 @@ async function ringAuthAddress(ringProgramId: Address): Promise<Address> {
  * zolana's `ringLookupTableAddresses` with inputTree === outputTree deduped; a
  * unit test pins the two together so upstream drift breaks the build instead
  * of custody.
- *
- * Exported for one other caller: the bring-up gate in `provision-ring.ts`,
- * which refuses to let custody sign an extend carrying any other address
- * vector — the second half of the chain of custody above.
  */
 export async function expectedRingTable(ring: Address, tree: Address): Promise<readonly string[]> {
   const [ringConfig] = await getProgramDerivedAddress({
@@ -502,93 +536,10 @@ export async function expectedRingTable(ring: Address, tree: Address): Promise<r
     tree,
     SHIELDED_POOL_PROGRAM_ID,
     SYSTEM_PROGRAM,
-    await ringAuthAddress(ring),
+    await derivedRingAuthAddress(ring),
     ring,
     COMPUTE_LIMIT.programAddress,
   ];
-}
-
-/**
- * The ring analog of `validateEnvelope`: same version, signer and signature
- * checks, but exactly one address-table lookup and only over the ring's own
- * persisted table. Every index must be unique and land inside the expected
- * table — an address named in `writableIndexes` is writable in the signed
- * transaction even if no instruction references it, so the index lists are
- * part of the account universe custody signs.
- */
-function validateRingSpendEnvelope(
-  message: DecodedMessage,
-  signatures: Record<string, unknown>,
-  owner: Address,
-  ringLookupTable: Address,
-  tableLength: number
-): DecodedAddressTableLookup {
-  if (
-    message.version !== 0 ||
-    message.header.numSignerAccounts !== 1 ||
-    message.header.numReadonlySignerAccounts !== 0 ||
-    message.staticAccounts[0] !== owner
-  ) {
-    mismatch();
-  }
-
-  const entries = Object.entries(signatures);
-  if (entries.length !== 1 || entries[0]?.[0] !== owner || entries[0]?.[1] !== null) {
-    mismatch();
-  }
-
-  const lookups = message.addressTableLookups ?? [];
-  const lookup = lookups[0];
-  if (lookups.length !== 1 || !lookup || lookup.lookupTableAddress !== ringLookupTable) {
-    mismatch();
-  }
-  const indexes = [...lookup.writableIndexes, ...lookup.readonlyIndexes];
-  if (new Set(indexes).size !== indexes.length) mismatch();
-  for (const index of indexes) {
-    if (!Number.isInteger(index) || index < 0 || index >= tableLength) mismatch();
-  }
-  return lookup;
-}
-
-/**
- * Like `resolvedInstruction`, but over a v0 message's combined account space
- * `[statics..., writable lookups..., readonly lookups...]`, resolving lookup
- * indices against the locally derived expected table. The program address must
- * stay static: programs cannot be loaded through a lookup table.
- */
-function resolvedRingInstruction(
-  message: DecodedMessage,
-  instruction: DecodedInstruction,
-  lookup: DecodedAddressTableLookup,
-  expectedTable: readonly string[]
-): Readonly<{
-  program: string;
-  accounts: readonly Readonly<{ address: string; signer: boolean; writable: boolean }>[];
-  data: Uint8Array;
-}> {
-  const program = message.staticAccounts[instruction.programAddressIndex];
-  if (!program) mismatch();
-
-  const statics = message.staticAccounts.length;
-  const accounts = (instruction.accountIndices ?? []).map((index) => {
-    if (index < statics) {
-      const accountAddress = message.staticAccounts[index];
-      if (!accountAddress) mismatch();
-      return { address: accountAddress, ...accountRole(message, index) };
-    }
-    const writableOffset = index - statics;
-    if (writableOffset < lookup.writableIndexes.length) {
-      const accountAddress = expectedTable[lookup.writableIndexes[writableOffset] as number];
-      if (!accountAddress) mismatch();
-      return { address: accountAddress, signer: false, writable: true };
-    }
-    const readonlyOffset = writableOffset - lookup.writableIndexes.length;
-    if (readonlyOffset >= lookup.readonlyIndexes.length) mismatch();
-    const accountAddress = expectedTable[lookup.readonlyIndexes[readonlyOffset] as number];
-    if (!accountAddress) mismatch();
-    return { address: accountAddress, signer: false, writable: false };
-  });
-  return { program, accounts, data: instruction.data ?? new Uint8Array() };
 }
 
 /**
@@ -615,61 +566,81 @@ function expectRingLookups(
   check(lookup.readonlyIndexes, expectedReadonly);
 }
 
-type RingSpendPolicyIntent = Extract<
+type SpendPolicyIntent = Extract<
   OuterTransactionPolicyIntent,
   { opType: "transfer_registered" } | { opType: "withdraw" }
 >;
 
 /**
+ * The public settlement a spend's wire must carry: none on a transfer,
+ * exactly the approved recipient and amount on a withdraw. Returns what the
+ * settlement appends to the transact's common account and static lists. A
+ * transfer's recipient and amount are encrypted in the wire and only checked
+ * for well-formedness here; where they ARE bound differs by rail (see
+ * docs/ops/helius-rings.md, "Semantics worth knowing").
+ */
+function expectPublicSettlement(
+  intent: SpendPolicyIntent,
+  interfaceTransfers: readonly ParsedInterfaceTransfer[]
+): Readonly<{
+  extraAccounts: readonly AccountExpectation[];
+  extraStatics: readonly string[];
+}> {
+  if (intent.opType === "transfer_registered") {
+    requiredAddress(intent.mint);
+    requiredAmount(intent.amountRaw);
+    if (interfaceTransfers.length !== 0) mismatch();
+    return { extraAccounts: [], extraStatics: [] };
+  }
+
+  const amount = requiredAmount(intent.amountRaw);
+  const recipient = requiredAddress(intent.to);
+  const settlement = interfaceTransfers[0];
+  if (interfaceTransfers.length !== 1 || settlement?.tag !== 1 || settlement.amount !== amount) {
+    mismatch();
+  }
+  return {
+    extraAccounts: [
+      { address: SOL_INTERFACE, signer: false, writable: true },
+      // If recipient === owner, Solana correctly merges this with the signer role.
+      { address: recipient, writable: true },
+    ],
+    extraStatics: [SOL_INTERFACE, recipient],
+  };
+}
+
+/**
  * A ring-bound spend: one compute instruction, then the ring program's own
- * tag-3 transact, ALT-compressed over the ring's persisted lookup table.
- *
- * What this gate can and cannot prove. It proves the right ring program, the
- * right tree, the pinned lookup table, the exact account universe (statics
- * plus both lookup lists), a single owner signature, and the public
- * settlement: none on a transfer, exactly the approved recipient and amount on
- * a withdraw. On a TRANSFER it cannot verify the recipient or amount — they
- * live inside encrypted outputs bound by the ring proof, and the auditor
- * message is ciphertext to custody. The default spend path binds those fields
- * pre-encryption in `validatePreparedTransferIntent`; ring spends never reach
- * it because the one-call ring builders do not expose the prepared transfer.
- * Accepted because the transaction is built in-process against the approved
- * persisted intent inside the same buildOperation call, and the transfer
- * recipient is a same-tenant wallet's ShieldedAddress loaded from custody
- * material.
+ * tag-3 transact, ALT-compressed over the ring's persisted lookup table. For
+ * what this gate can and cannot prove (notably a ring transfer's recipient
+ * and amount), see docs/ops/helius-rings.md, "Semantics worth knowing".
  */
 async function validateRingSpend(
-  intent: RingSpendPolicyIntent & { ringProgramId: string },
+  intent: SpendPolicyIntent & { ring: Readonly<{ programId: string; lookupTable: string }> },
   message: DecodedMessage,
   signatures: Record<string, unknown>,
   owner: Address,
   tree: Address
 ): Promise<void> {
-  const ring = requiredAddress(intent.ringProgramId);
-  // The service pins the table alongside the ring; one without the other is a
-  // build this SDK never produced.
-  if (intent.ringLookupTable === undefined) mismatch();
-  const ringLookupTable = requiredAddress(intent.ringLookupTable);
+  const ring = requiredAddress(intent.ring.programId);
+  const ringLookupTable = requiredAddress(intent.ring.lookupTable);
   const expectedTable = await expectedRingTable(ring, tree);
 
-  const lookup = validateRingSpendEnvelope(
-    message,
-    signatures,
-    owner,
-    ringLookupTable,
-    expectedTable.length
-  );
+  const lookup = validateEnvelope(message, signatures, owner, {
+    table: ringLookupTable,
+    tableLength: expectedTable.length,
+  });
+  if (!lookup) mismatch();
 
   if (message.instructions.length !== 2) mismatch();
   const computeProgram = validateComputeInstruction(
     message,
     message.instructions[0] as DecodedInstruction
   );
-  const instruction = resolvedRingInstruction(
+  const instruction = resolvedInstruction(
     message,
     message.instructions[1] as DecodedInstruction,
-    lookup,
-    expectedTable
+    loadedAccounts(lookup, expectedTable)
   );
   if (instruction.program !== ring) mismatch();
   if (protocolMint(intent.mint) !== PROTOCOL_NATIVE_MINT) mismatch();
@@ -688,39 +659,88 @@ async function validateRingSpend(
     { address: SYSTEM_PROGRAM, signer: false, writable: false },
     { address: ringAuth, signer: false, writable: false },
   ];
-  const lookupWritable = [tree as string];
-  const lookupReadonly = [ringConfig, SHIELDED_POOL_PROGRAM_ID as string, SYSTEM_PROGRAM, ringAuth];
 
-  if (intent.opType === "transfer_registered") {
-    // Well-formedness only; see the gap note above — a ring transfer's
-    // recipient and amount cannot be re-derived from these bytes.
-    requiredAddress(intent.mint);
-    requiredAmount(intent.amountRaw);
-    if (interfaceTransfers.length !== 0) mismatch();
-    expectAccounts(instruction.accounts, commonAccounts);
-    expectStaticAccounts(message, [owner, ring, computeProgram]);
-    expectRingLookups(lookup, expectedTable, lookupWritable, lookupReadonly);
+  const settlement = expectPublicSettlement(intent, interfaceTransfers);
+  expectAccounts(instruction.accounts, [...commonAccounts, ...settlement.extraAccounts]);
+  expectStaticAccounts(message, [owner, ...settlement.extraStatics, ring, computeProgram]);
+  expectRingLookups(
+    lookup,
+    expectedTable,
+    [tree as string],
+    [ringConfig, SHIELDED_POOL_PROGRAM_ID as string, SYSTEM_PROGRAM, ringAuth]
+  );
+}
+
+type ShieldPolicyIntent = Extract<OuterTransactionPolicyIntent, { opType: "shield" }>;
+
+/**
+ * The deposit's account expectations, shared by the pool and ring rails: the
+ * ring rail inserts its ring-auth PDA after the owner and adds the ring plus
+ * that PDA to the statics; everything else, including the SPL vault
+ * derivation and bump check, is identical.
+ */
+async function expectDepositAccounts(
+  args: Readonly<{
+    message: DecodedMessage;
+    accounts: readonly ResolvedAccount[];
+    deposit: Readonly<{ assetKind: "sol" | "spl"; splInterfaceBump?: number }>;
+    mint: string;
+    owner: Address;
+    tree: Address;
+    afterOwner: readonly AccountExpectation[];
+    extraStatics: readonly string[];
+  }>
+): Promise<void> {
+  const { message, accounts, deposit, owner, tree } = args;
+  const protocolAsset = protocolMint(args.mint);
+  if (protocolAsset === PROTOCOL_NATIVE_MINT) {
+    if (deposit.assetKind !== "sol") mismatch();
+    expectAccounts(accounts, [
+      { address: tree, signer: false, writable: true },
+      { address: owner, signer: true, writable: true },
+      ...args.afterOwner,
+      { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
+      { address: SYSTEM_PROGRAM, signer: false, writable: false },
+      { address: SOL_INTERFACE, signer: false, writable: true },
+    ]);
+    expectStaticAccounts(message, [
+      owner,
+      tree,
+      ...args.extraStatics,
+      SHIELDED_POOL_PROGRAM_ID,
+      SYSTEM_PROGRAM,
+      SOL_INTERFACE,
+    ]);
     return;
   }
 
-  const amount = requiredAmount(intent.amountRaw);
-  const recipient = requiredAddress(intent.to);
-  const settlement = interfaceTransfers[0];
-  if (interfaceTransfers.length !== 1 || settlement?.tag !== 1 || settlement.amount !== amount) {
-    mismatch();
-  }
-  expectAccounts(instruction.accounts, [
-    ...commonAccounts,
-    { address: SOL_INTERFACE, signer: false, writable: true },
-    // If recipient === owner, Solana correctly merges this with the signer role.
-    { address: recipient, writable: true },
+  if (deposit.assetKind !== "spl") mismatch();
+  const derived = await splAccounts(owner, address(protocolAsset));
+  if (deposit.splInterfaceBump !== derived.bump) mismatch();
+  expectAccounts(accounts, [
+    { address: tree, signer: false, writable: true },
+    { address: owner, signer: true, writable: true },
+    ...args.afterOwner,
+    { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
+    { address: SPL_TOKEN_PROGRAM_ID, signer: false, writable: false },
+    { address: protocolAsset, signer: false, writable: false },
+    { address: derived.sourceTokenAccount, signer: false, writable: true },
+    { address: derived.splInterface, signer: false, writable: true },
   ]);
-  expectStaticAccounts(message, [owner, SOL_INTERFACE, recipient, ring, computeProgram]);
-  expectRingLookups(lookup, expectedTable, lookupWritable, lookupReadonly);
+  expectStaticAccounts(message, [
+    owner,
+    tree,
+    ...args.extraStatics,
+    SHIELDED_POOL_PROGRAM_ID,
+    SPL_TOKEN_PROGRAM_ID,
+    protocolAsset,
+    derived.sourceTokenAccount,
+    derived.splInterface,
+  ]);
 }
 
 async function validateRingShield(
-  intent: Extract<OuterTransactionPolicyIntent, { opType: "shield" }> & { ringProgramId: string },
+  intent: ShieldPolicyIntent & { ringProgramId: string },
   message: DecodedMessage,
   owner: Address,
   tree: Address
@@ -735,78 +755,32 @@ async function validateRingShield(
   const deposit = parseRingDeposit(instruction.data);
   if (deposit.amount !== amount || !equalBytes(deposit.viewTag, viewTag)) mismatch();
 
-  const ringAuth = await ringAuthAddress(ring);
-  const protocolAsset = protocolMint(intent.mint);
-  if (protocolAsset === PROTOCOL_NATIVE_MINT) {
-    if (deposit.assetKind !== "sol") mismatch();
-    expectAccounts(instruction.accounts, [
-      { address: tree, signer: false, writable: true },
-      { address: owner, signer: true, writable: true },
-      // The ring program signs this account inside its CPI to the pool.
-      { address: ringAuth, signer: false, writable: false },
-      { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
-      { address: SYSTEM_PROGRAM, signer: false, writable: false },
-      { address: SOL_INTERFACE, signer: false, writable: true },
-    ]);
-    expectStaticAccounts(message, [
-      owner,
-      tree,
-      ring,
-      ringAuth,
-      SHIELDED_POOL_PROGRAM_ID,
-      SYSTEM_PROGRAM,
-      SOL_INTERFACE,
-    ]);
-    return;
-  }
-
-  if (deposit.assetKind !== "spl") mismatch();
-  const derived = await splAccounts(owner, address(protocolAsset));
-  if (deposit.splInterfaceBump !== derived.bump) mismatch();
-  expectAccounts(instruction.accounts, [
-    { address: tree, signer: false, writable: true },
-    { address: owner, signer: true, writable: true },
-    { address: ringAuth, signer: false, writable: false },
-    { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
-    { address: SPL_TOKEN_PROGRAM_ID, signer: false, writable: false },
-    { address: protocolAsset, signer: false, writable: false },
-    { address: derived.sourceTokenAccount, signer: false, writable: true },
-    { address: derived.splInterface, signer: false, writable: true },
-  ]);
-  expectStaticAccounts(message, [
+  const ringAuth = await derivedRingAuthAddress(ring);
+  await expectDepositAccounts({
+    message,
+    accounts: instruction.accounts,
+    deposit,
+    mint: intent.mint,
     owner,
     tree,
-    ring,
-    ringAuth,
-    SHIELDED_POOL_PROGRAM_ID,
-    SPL_TOKEN_PROGRAM_ID,
-    protocolAsset,
-    derived.sourceTokenAccount,
-    derived.splInterface,
-  ]);
+    // The ring program signs this account inside its CPI to the pool.
+    afterOwner: [{ address: ringAuth, signer: false, writable: false }],
+    extraStatics: [ring, ringAuth],
+  });
 }
 
 async function validateShield(
-  input: OuterTransactionPolicyInput,
+  intent: ShieldPolicyIntent,
   message: DecodedMessage,
   owner: Address,
   tree: Address
 ): Promise<void> {
-  if (input.intent.opType !== "shield" || message.instructions.length !== 1) mismatch();
-  if (input.intent.ringProgramId !== undefined) {
-    await validateRingShield(
-      { ...input.intent, ringProgramId: input.intent.ringProgramId },
-      message,
-      owner,
-      tree
-    );
-    return;
-  }
+  if (message.instructions.length !== 1) mismatch();
   const instruction = resolvedInstruction(message, message.instructions[0] as DecodedInstruction);
   if (instruction.program !== SHIELDED_POOL_PROGRAM_ID) mismatch();
 
-  const amount = requiredAmount(input.intent.amountRaw);
-  const ownerHash = expectedOwnerHash(input.intent.expectedShieldedAddress);
+  const amount = requiredAmount(intent.amountRaw);
+  const ownerHash = expectedOwnerHash(intent.expectedShieldedAddress);
   const deposit = parseDeposit(instruction.data);
   if (
     deposit.amount !== amount ||
@@ -816,47 +790,16 @@ async function validateShield(
     mismatch();
   }
 
-  const protocolAsset = protocolMint(input.intent.mint);
-  if (protocolAsset === PROTOCOL_NATIVE_MINT) {
-    if (deposit.assetKind !== "sol") mismatch();
-    expectAccounts(instruction.accounts, [
-      { address: tree, signer: false, writable: true },
-      { address: owner, signer: true, writable: true },
-      { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
-      { address: SYSTEM_PROGRAM, signer: false, writable: false },
-      { address: SOL_INTERFACE, signer: false, writable: true },
-    ]);
-    expectStaticAccounts(message, [
-      owner,
-      tree,
-      SHIELDED_POOL_PROGRAM_ID,
-      SYSTEM_PROGRAM,
-      SOL_INTERFACE,
-    ]);
-    return;
-  }
-
-  if (deposit.assetKind !== "spl") mismatch();
-  const derived = await splAccounts(owner, address(protocolAsset));
-  if (deposit.splInterfaceBump !== derived.bump) mismatch();
-  expectAccounts(instruction.accounts, [
-    { address: tree, signer: false, writable: true },
-    { address: owner, signer: true, writable: true },
-    { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
-    { address: SPL_TOKEN_PROGRAM_ID, signer: false, writable: false },
-    { address: protocolAsset, signer: false, writable: false },
-    { address: derived.sourceTokenAccount, signer: false, writable: true },
-    { address: derived.splInterface, signer: false, writable: true },
-  ]);
-  expectStaticAccounts(message, [
+  await expectDepositAccounts({
+    message,
+    accounts: instruction.accounts,
+    deposit,
+    mint: intent.mint,
     owner,
     tree,
-    SHIELDED_POOL_PROGRAM_ID,
-    SPL_TOKEN_PROGRAM_ID,
-    protocolAsset,
-    derived.sourceTokenAccount,
-    derived.splInterface,
-  ]);
+    afterOwner: [],
+    extraStatics: [],
+  });
 }
 
 function validateComputeInstruction(
@@ -878,7 +821,7 @@ function validateComputeInstruction(
 }
 
 function validateSpend(
-  input: OuterTransactionPolicyInput,
+  intent: SpendPolicyIntent,
   message: DecodedMessage,
   owner: Address,
   tree: Address
@@ -890,7 +833,9 @@ function validateSpend(
   );
   const instruction = resolvedInstruction(message, message.instructions[1] as DecodedInstruction);
   if (instruction.program !== SHIELDED_POOL_PROGRAM_ID) mismatch();
-  if (input.intent.opType === "shield") mismatch();
+  if (intent.opType === "withdraw" && protocolMint(intent.mint) !== PROTOCOL_NATIVE_MINT) {
+    mismatch();
+  }
   const interfaceTransfers = parsePublicInterfaceTransfers(instruction.data);
 
   const commonAccounts: AccountExpectation[] = [
@@ -901,49 +846,14 @@ function validateSpend(
     { address: SYSTEM_PROGRAM, signer: false, writable: false },
   ];
 
-  if (input.intent.opType === "transfer_registered") {
-    // These fields must be well formed, but they are encrypted in the wire and
-    // cannot be re-derived here. `validatePreparedTransferIntent` binds them
-    // before encryption; this layer proves there is no public settlement.
-    requiredAddress(input.intent.mint);
-    requiredAmount(input.intent.amountRaw);
-    if (interfaceTransfers.length !== 0) mismatch();
-    expectAccounts(instruction.accounts, commonAccounts);
-    expectStaticAccounts(message, [
-      owner,
-      tree,
-      SHIELDED_POOL_PROGRAM_ID,
-      SYSTEM_PROGRAM,
-      computeProgram,
-    ]);
-    return;
-  }
-
-  if (
-    input.intent.opType !== "withdraw" ||
-    protocolMint(input.intent.mint) !== PROTOCOL_NATIVE_MINT
-  ) {
-    mismatch();
-  }
-  const amount = requiredAmount(input.intent.amountRaw);
-  const recipient = requiredAddress(input.intent.to);
-  const settlement = interfaceTransfers[0];
-  if (interfaceTransfers.length !== 1 || settlement?.tag !== 1 || settlement.amount !== amount) {
-    mismatch();
-  }
-  expectAccounts(instruction.accounts, [
-    ...commonAccounts,
-    { address: SOL_INTERFACE, signer: false, writable: true },
-    // If recipient === owner, Solana correctly merges this with the signer role.
-    { address: recipient, writable: true },
-  ]);
+  const settlement = expectPublicSettlement(intent, interfaceTransfers);
+  expectAccounts(instruction.accounts, [...commonAccounts, ...settlement.extraAccounts]);
   expectStaticAccounts(message, [
     owner,
     tree,
     SHIELDED_POOL_PROGRAM_ID,
     SYSTEM_PROGRAM,
-    SOL_INTERFACE,
-    recipient,
+    ...settlement.extraStatics,
     computeProgram,
   ]);
 }
@@ -975,15 +885,24 @@ async function validate(input: OuterTransactionPolicyInput): Promise<void> {
   }
   const message = decodedMessage as DecodedMessage;
 
-  if (input.intent.opType === "shield") {
+  const intent = input.intent;
+  if (intent.opType === "shield") {
     validateEnvelope(message, transaction.signatures, owner);
-    await validateShield(input, message, owner, tree);
+    if (intent.ringProgramId !== undefined) {
+      await validateRingShield(
+        { ...intent, ringProgramId: intent.ringProgramId },
+        message,
+        owner,
+        tree
+      );
+    } else {
+      await validateShield(intent, message, owner, tree);
+    }
     return;
   }
-  const intent = input.intent;
-  if (intent.ringProgramId !== undefined) {
+  if (intent.ring !== undefined) {
     await validateRingSpend(
-      { ...intent, ringProgramId: intent.ringProgramId },
+      { ...intent, ring: intent.ring },
       message,
       transaction.signatures,
       owner,
@@ -992,7 +911,7 @@ async function validate(input: OuterTransactionPolicyInput): Promise<void> {
     return;
   }
   validateEnvelope(message, transaction.signatures, owner);
-  validateSpend(input, message, owner, tree);
+  validateSpend(intent, message, owner, tree);
 }
 
 /**

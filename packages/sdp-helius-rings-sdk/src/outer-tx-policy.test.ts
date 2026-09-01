@@ -1,4 +1,5 @@
 import { getAssociatedTokenAddress } from "@heliuslabs/zolana/addresses";
+import { CUSTOM_RING_PROOF_LENGTH } from "@heliuslabs/zolana/client";
 import {
   DEFAULT_TREE_ADDRESS,
   DepositAsset,
@@ -381,13 +382,12 @@ function withdrawalPolicy(
 
 const RING_LOOKUP_TABLE = address("LookupTab1e11111111111111111111111111111111");
 const RING_TRANSACT_TAG = 3;
-const RING_PROOF_LENGTH = 192;
 
 /** The ring wire: `tag(3) || proof(192) || the pool transact body` (no inner tag). */
 function ringTransactData(options: Parameters<typeof opaqueTransactData>[0] = {}): Uint8Array {
   return Uint8Array.from([
     RING_TRANSACT_TAG,
-    ...bytes(RING_PROOF_LENGTH, 0x33),
+    ...bytes(CUSTOM_RING_PROOF_LENGTH, 0x33),
     ...opaqueTransactData(options).slice(1),
   ]);
 }
@@ -483,8 +483,7 @@ function ringTransferPolicy(
   > = {}
 ): OuterTransactionPolicyInput {
   return transferPolicy(outerUnsignedTxBase64, {
-    ringProgramId: RING_PROGRAM,
-    ringLookupTable: RING_LOOKUP_TABLE,
+    ring: { programId: RING_PROGRAM, lookupTable: RING_LOOKUP_TABLE },
     ...overrides,
   });
 }
@@ -494,8 +493,7 @@ function ringWithdrawalPolicy(
   overrides: Partial<Extract<OuterTransactionPolicyInput["intent"], { opType: "withdraw" }>> = {}
 ): OuterTransactionPolicyInput {
   return withdrawalPolicy(outerUnsignedTxBase64, {
-    ringProgramId: RING_PROGRAM,
-    ringLookupTable: RING_LOOKUP_TABLE,
+    ring: { programId: RING_PROGRAM, lookupTable: RING_LOOKUP_TABLE },
     ...overrides,
   });
 }
@@ -1042,7 +1040,7 @@ describe("validateOuterTransaction", () => {
               await ringTransfer({
                 data: Uint8Array.from([
                   RING_TRANSACT_TAG,
-                  ...bytes(RING_PROOF_LENGTH - 1, 0x33),
+                  ...bytes(CUSTOM_RING_PROOF_LENGTH - 1, 0x33),
                   ...opaqueTransactData().slice(1),
                 ]),
               })
@@ -1053,20 +1051,13 @@ describe("validateOuterTransaction", () => {
         "a transact from a ring the intent never named",
         async () =>
           ringTransferPolicy(await ringSpendWire(await ringTransfer()), {
-            ringProgramId: OTHER_RING,
+            ring: { programId: OTHER_RING, lookupTable: RING_LOOKUP_TABLE },
           }),
       ],
       [
         "a lookup table that is not the ring's persisted one",
         async () =>
           ringTransferPolicy(await ringSpendWire(await ringTransfer(), { lookupTable: OTHER })),
-      ],
-      [
-        "a ring intent missing its lookup table",
-        async () =>
-          transferPolicy(await ringSpendWire(await ringTransfer()), {
-            ringProgramId: RING_PROGRAM,
-          }),
       ],
       [
         "a default spend intent over compressed bytes",

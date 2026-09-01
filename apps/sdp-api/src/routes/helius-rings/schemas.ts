@@ -5,6 +5,7 @@ import {
   ZONE_KINDS,
 } from "@sdp/helius-rings";
 import { z } from "zod";
+import { solanaAddressSchema } from "@/routes/payments/schemas";
 
 export const createRingsWalletSchema = z.object({
   /** SDP custody wallet id (`walletId` from GET /v1/wallets). */
@@ -23,9 +24,7 @@ export const createProjectRingSchema = z.object({
     .regex(RING_NAME_PATTERN, "name must be a 1-32 character lowercase slug")
     .refine((value) => value !== DEFAULT_RING_NAME, '"default" names the default pool'),
   /** Base58 program id of the pre-deployed custom ring program. */
-  ringProgramId: z
-    .string()
-    .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, "ringProgramId must be a base58 Solana address"),
+  ringProgramId: solanaAddressSchema("ringProgramId"),
 });
 
 /**

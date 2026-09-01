@@ -2,6 +2,7 @@ import type { RingsGatewayPort, RuntimeHealth } from "@sdp/helius-rings";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import {
   createRingsGateway,
+  type OuterTransactionPolicyInput,
   validateOuterTransaction as validateSdkOuterTransaction,
 } from "@sdp/helius-rings-sdk";
 import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
@@ -41,41 +42,12 @@ export interface ResolveRingsGatewayDependencies {
   recordRingLookupTable?: (ringProgramId: string, lookupTableAddress: string) => Promise<void>;
 }
 
-export type RingsOuterTransactionPolicyInput = Readonly<{
-  outerUnsignedTxBase64: string;
-  owner: string;
-  intent:
-    | Readonly<{
-        opType: "shield";
-        mint: string;
-        amountRaw: string;
-        expectedShieldedAddress: string;
-        /** Present when the operation was pinned to one of the project's custom rings. */
-        ringProgramId?: string;
-      }>
-    | Readonly<{
-        opType: "withdraw";
-        mint: string;
-        amountRaw: string;
-        to: string;
-        /**
-         * Present when the spend was pinned to a custom ring; always arrives
-         * together with `ringLookupTable`, the ALT the ring transact
-         * compresses through.
-         */
-        ringProgramId?: string;
-        ringLookupTable?: string;
-      }>
-    | Readonly<{
-        opType: "transfer_registered";
-        mint: string;
-        amountRaw: string;
-        /** Same contract as the withdraw arm's ring pair. */
-        ringProgramId?: string;
-        ringLookupTable?: string;
-      }>;
-  expectedTree?: string;
-}>;
+/**
+ * The SDK's policy input, re-exported under the service's name. The SDK type
+ * deliberately contains only strings and plain DTOs, so no Kit brand crosses
+ * the version boundary and a local mirror would only drift.
+ */
+export type RingsOuterTransactionPolicyInput = OuterTransactionPolicyInput;
 
 export function validateRingsOuterTransaction(
   input: RingsOuterTransactionPolicyInput

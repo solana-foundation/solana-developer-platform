@@ -120,11 +120,9 @@ export {
 } from "./helius-rings-operation.repository";
 export { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 export type {
-  HeliusRingsProgramInUse,
   HeliusRingsProjectRingRepository,
   HeliusRingsProjectRingRow,
   HeliusRingsRingKey,
-  HeliusRingsRingScope,
   MarkHeliusRingsProjectRingActiveInput,
   MarkHeliusRingsProjectRingFailedInput,
   RecordHeliusRingsLookupTableInput,

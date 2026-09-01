@@ -39,6 +39,7 @@ import {
   type HeliusRingsOperationRepository,
   type HeliusRingsOperationRow,
   type HeliusRingsProjectRingRepository,
+  type HeliusRingsProjectRingRow,
   type HeliusRingsWalletRepository,
   mapHeliusRingsEventRow,
   mapHeliusRingsHealthRows,
@@ -326,36 +327,7 @@ export class HeliusRingsService {
       );
     }
 
-    let reserved = await this.projectRings.reserveRing({
-      ...this.tenant,
-      name: input.name,
-      ringProgramId: input.ringProgramId,
-    });
-    if (reserved === "program_in_use") {
-      throw programInUseError();
-    }
-    if (!reserved) {
-      throw new AppError("INTERNAL_ERROR", "ring reservation returned no row");
-    }
-    if (reserved.ring_program_id !== input.ringProgramId) {
-      // A ring that never went active has no ring-bound notes, so a mistyped
-      // id is correctable; the repository refuses once the ring is active.
-      const repointed = await this.projectRings.repointRing({
-        ...this.tenant,
-        name: input.name,
-        ringProgramId: input.ringProgramId,
-      });
-      if (repointed === "program_in_use") {
-        throw programInUseError();
-      }
-      if (!repointed) {
-        throw new HeliusRingsError(
-          "conflict",
-          `ring "${input.name}" is active; re-pointing it would strand its ring-bound notes`
-        );
-      }
-      reserved = repointed;
-    }
+    const reserved = await this.reserveOrRepointRing(input);
     // An active row missing its table cannot exist under 0072's CHECK, but the
     // guard is cheap: falling through lets provisioning backfill the table.
     if (reserved.status === "active" && reserved.lookup_table_address) {
@@ -403,6 +375,48 @@ export class HeliusRingsService {
   }
 
   /**
+   * Reserves the (name, program id) pair, re-pointing a never-active row when
+   * the recorded id differs: a ring that never went active has no ring-bound
+   * notes, so a mistyped id is correctable. The repository refuses the
+   * re-point once the ring is active.
+   */
+  private async reserveOrRepointRing(input: {
+    name: string;
+    ringProgramId: string;
+  }): Promise<HeliusRingsProjectRingRow> {
+    const reserved = await this.projectRings.reserveRing({
+      ...this.tenant,
+      name: input.name,
+      ringProgramId: input.ringProgramId,
+    });
+    if (reserved === "program_in_use") {
+      throw programInUseError();
+    }
+    if (!reserved) {
+      throw new AppError("INTERNAL_ERROR", "ring reservation returned no row");
+    }
+    if (reserved.ring_program_id === input.ringProgramId) {
+      return reserved;
+    }
+
+    const repointed = await this.projectRings.repointRing({
+      ...this.tenant,
+      name: input.name,
+      ringProgramId: input.ringProgramId,
+    });
+    if (repointed === "program_in_use") {
+      throw programInUseError();
+    }
+    if (!repointed) {
+      throw new HeliusRingsError(
+        "conflict",
+        `ring "${input.name}" is active; re-pointing it would strand its ring-bound notes`
+      );
+    }
+    return repointed;
+  }
+
+  /**
    * Resolves a ring name to the program id pinned on the operation; null = the
    * default public ring. A named ring is refused until active — invalid_input
    * when nothing under that name was ever recorded (the request names a ring
@@ -432,14 +446,17 @@ export class HeliusRingsService {
   }
 
   /**
-   * The spend's ring lookup table, re-read from the ring row at build time.
-   * This deliberately diverges from 0073's "never re-read the ring row" rule:
-   * that rule pins INTENT, and the intent stays the operation row's pinned
-   * ring_program_id. The table is transport — the ALT the compiled v0
-   * transaction rides — and safe to read late because an active ring row is
-   * immutable: re-point is status-guarded and there is no delete path.
+   * The spend's pinned ring and its lookup table, the table re-read from the
+   * ring row at build time. This deliberately diverges from 0073's "never
+   * re-read the ring row" rule: that rule pins INTENT, and the intent stays
+   * the operation row's pinned ring_program_id. The table is transport — the
+   * ALT the compiled v0 transaction rides — and safe to read late because an
+   * active ring row is immutable: re-point is status-guarded and there is no
+   * delete path.
    */
-  private async requireRingLookupTable(ringProgramId: string | null): Promise<string | null> {
+  private async requireRing(
+    ringProgramId: string | null
+  ): Promise<{ programId: string; lookupTable: string } | null> {
     if (ringProgramId === null) return null;
     const ring = await this.projectRings.getByProgramId({ ...this.tenant, ringProgramId });
     if (ring?.status !== "active" || !ring.lookup_table_address) {
@@ -448,7 +465,7 @@ export class HeliusRingsService {
         "the operation's ring has not completed bring-up; resume it before running ring operations"
       );
     }
-    return ring.lookup_table_address;
+    return { programId: ringProgramId, lookupTable: ring.lookup_table_address };
   }
 
   /**
@@ -990,18 +1007,27 @@ export class HeliusRingsService {
       // the outer transaction is built for, and the key that must sign it.
       const owner = await this.requireOwner(current.wallet_id);
       const wallet = await this.requireWallet(current.wallet_id);
-      // Private transfers require the recipient wallet's ShieldedAddress; the
-      // SDK reloads its material transiently to lift it out.
-      const recipient =
+      // Three independent reads: the transfer recipient's ShieldedAddress (the
+      // SDK reloads its material transiently to lift it out), the spend's ring
+      // pair (a ring shield builds from the pinned id alone, keeping 0073's
+      // "never re-read the ring row" contract intact for it), and the asset
+      // registry. Settled together, then inspected in the old sequential order
+      // so which failure is recorded is unchanged.
+      const [recipientResult, ringResult, knownAssetsResult] = await Promise.allSettled([
         current.op_type === "transfer_registered"
-          ? await this.resolveTransferRecipient(current)
-          : undefined;
-      // Spends only: a ring shield builds from the pinned id alone, keeping
-      // 0073's "never re-read the ring row" contract intact for it.
-      const ringLookupTable =
+          ? this.resolveTransferRecipient(current)
+          : Promise.resolve(undefined),
         current.op_type === "shield"
-          ? null
-          : await this.requireRingLookupTable(current.ring_program_id);
+          ? Promise.resolve(null)
+          : this.requireRing(current.ring_program_id),
+        this.knownAssets(),
+      ]);
+      if (recipientResult.status === "rejected") throw recipientResult.reason;
+      if (ringResult.status === "rejected") throw ringResult.reason;
+      if (knownAssetsResult.status === "rejected") throw knownAssetsResult.reason;
+      const recipient = recipientResult.value;
+      const ring = ringResult.value;
+
       const built = await this.gateway.buildOperation({
         operation: this.toPrivateOperation(current),
         owner,
@@ -1013,9 +1039,9 @@ export class HeliusRingsService {
         // wallet. Selecting notes from a view older than that can pick one
         // already consumed, and the chain rejects the transaction it goes into.
         ...(wallet.last_indexed_slot ? { requireSlot: wallet.last_indexed_slot } : {}),
-        knownAssets: await this.knownAssets(),
+        knownAssets: knownAssetsResult.value,
         ...(recipient ? { recipient } : {}),
-        ...(ringLookupTable ? { ringLookupTable } : {}),
+        ...(ring ? { ring } : {}),
       });
 
       // Proving and building are one call: the SDK proves inside the builder, so
@@ -1046,7 +1072,7 @@ export class HeliusRingsService {
           owner,
           wallet.shielded_address,
           built.outerUnsignedTxBase64,
-          ringLookupTable
+          ring
         )
       );
 
@@ -1505,17 +1531,12 @@ function outerTransactionPolicyInput(
   owner: string,
   shieldedAddress: string | null,
   outerUnsignedTxBase64: string,
-  ringLookupTable: string | null
+  ring: { programId: string; lookupTable: string } | null
 ): RingsOuterTransactionPolicyInput {
   const mint = requiredOuterPolicyField(operation.asset_mint);
   const amountRaw = requiredOuterPolicyField(operation.amount_raw);
   const common = { mint, amountRaw };
-  // Both or neither: the pinned ring and its table travel together, and the
-  // SDK policy mismatches on one without the other.
-  const ringSpend =
-    operation.ring_program_id && ringLookupTable
-      ? { ringProgramId: operation.ring_program_id, ringLookupTable }
-      : {};
+  const ringSpend = ring ? { ring } : {};
 
   switch (operation.op_type) {
     case "shield":

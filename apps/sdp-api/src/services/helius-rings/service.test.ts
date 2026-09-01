@@ -1430,7 +1430,7 @@ describe("HeliusRingsService", () => {
     const OTHER_RING = "RingProgram2111111111111111111111111111111";
     const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
 
-    const provisioned = () => async () => ({
+    const provisioned = async () => ({
       auditorPublicKeyHex: "04ff",
       lookupTableAddress: LOOKUP_TABLE,
     });
@@ -1448,7 +1448,7 @@ describe("HeliusRingsService", () => {
     }
 
     it("records a named ring and activates it with the auditor key and lookup table", async () => {
-      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned() }) });
+      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned }) });
 
       const ring = await svc.createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM });
 
@@ -1466,7 +1466,7 @@ describe("HeliusRingsService", () => {
     });
 
     it("keeps rings with distinct names side by side, oldest first", async () => {
-      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned() }) });
+      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned }) });
 
       await svc.createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM });
       await svc.createProjectRing({ name: "payroll", ringProgramId: OTHER_RING });
@@ -1488,7 +1488,7 @@ describe("HeliusRingsService", () => {
     });
 
     it("refuses one program under two names", async () => {
-      await service({ gateway: gatewayStub({ provisionRing: provisioned() }) }).createProjectRing({
+      await service({ gateway: gatewayStub({ provisionRing: provisioned }) }).createProjectRing({
         name: "treasury",
         ringProgramId: RING_PROGRAM,
       });
@@ -1503,7 +1503,7 @@ describe("HeliusRingsService", () => {
     });
 
     it("registers rings without a cap and lets an existing name resume", async () => {
-      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned() }) });
+      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned }) });
       const programId = (index: number) => `RingProgram${index}11111111111111111111111111111`;
       // No MAX_PROJECT_RINGS ceiling: a project registers as many as ops deploys.
       for (let index = 1; index <= 12; index += 1) {
@@ -1519,7 +1519,7 @@ describe("HeliusRingsService", () => {
     });
 
     it("returns an active ring as it stands without re-running bring-up", async () => {
-      await service({ gateway: gatewayStub({ provisionRing: provisioned() }) }).createProjectRing({
+      await service({ gateway: gatewayStub({ provisionRing: provisioned }) }).createProjectRing({
         name: "treasury",
         ringProgramId: RING_PROGRAM,
       });
@@ -1567,7 +1567,7 @@ describe("HeliusRingsService", () => {
     });
 
     it("refuses to re-point a name away from an active ring", async () => {
-      await service({ gateway: gatewayStub({ provisionRing: provisioned() }) }).createProjectRing({
+      await service({ gateway: gatewayStub({ provisionRing: provisioned }) }).createProjectRing({
         name: "treasury",
         ringProgramId: RING_PROGRAM,
       });
@@ -1605,7 +1605,7 @@ describe("HeliusRingsService", () => {
 
       // Same name and id, healthy gateway: the failed row is the resume point.
       const resumed = await service({
-        gateway: gatewayStub({ provisionRing: provisioned() }),
+        gateway: gatewayStub({ provisionRing: provisioned }),
       }).createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM });
       expect(resumed).toMatchObject({ status: "active", failure: null });
     });
@@ -1671,11 +1671,10 @@ describe("HeliusRingsService", () => {
 
       expect(operation.state).toBe("indexing");
       expect(operation.ringProgramId).toBe(RING_PROGRAM);
-      expect(builds[0]?.ringLookupTable).toBe(LOOKUP_TABLE);
+      expect(builds[0]?.ring).toEqual({ programId: RING_PROGRAM, lookupTable: LOOKUP_TABLE });
       expect(policyInputs[0]?.intent).toMatchObject({
         opType: "withdraw",
-        ringProgramId: RING_PROGRAM,
-        ringLookupTable: LOOKUP_TABLE,
+        ring: { programId: RING_PROGRAM, lookupTable: LOOKUP_TABLE },
       });
     });
 

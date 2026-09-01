@@ -103,13 +103,7 @@ export async function buildRingsOperation(
       // A pinned ring routes to the SDK's one-call ring builders after wallet
       // hydration. They need the ring's lookup table; its absence fails here,
       // before the wallet read it could never use.
-      const ringLookupTable = operation.ringProgramId ? input.ringLookupTable : undefined;
-      if (operation.ringProgramId && !ringLookupTable) {
-        throw new HeliusRingsError(
-          "config_error",
-          "a ring-bound spend needs the ring's lookup table; resume ring bring-up"
-        );
-      }
+      const ring = operation.ringProgramId ? requireRing(input) : null;
 
       // Every spend reads the wallet first: note selection is only as good as
       // the state it selects from. `requireComplete` makes an incomplete read
@@ -133,15 +127,8 @@ export async function buildRingsOperation(
         ...(input.requireSlot ? { requireSlot: BigInt(input.requireSlot) } : {}),
       });
 
-      if (operation.ringProgramId && ringLookupTable) {
-        return buildRingSpend(deps, input, {
-          ringProgramId: operation.ringProgramId,
-          ringLookupTable,
-          mint,
-          wallet,
-          authority,
-          owner,
-        });
+      if (ring) {
+        return buildRingSpend(deps, input, { ring, mint, wallet, authority, owner });
       }
 
       const spend: SpendDeps = { client: deps.client, wallet, authority, material, owner };
@@ -179,30 +166,35 @@ export async function buildRingsOperation(
   );
 }
 
+type HydratedWallet = Awaited<ReturnType<typeof hydrateWallet>>["wallet"];
+
+/** The port's `ring` pair, or the config_error a ring-bound spend fails with without it. */
+function requireRing(input: BuildOperationInput): NonNullable<BuildOperationInput["ring"]> {
+  if (!input.ring) {
+    throw new HeliusRingsError(
+      "config_error",
+      "a ring-bound spend needs the ring's lookup table; resume ring bring-up"
+    );
+  }
+  return input.ring;
+}
+
 /**
- * A ring-bound spend, through the SDK's one-call ring builders. They return a
- * finished compiled v0 transaction and fetch their own blockhash, so the read
- * here only floors the recorded expiry (the shield branch's contract). No
- * pinned inputs and none returned: the builder re-selects same-ring notes on
- * every build, so `input_notes` round-trips as [] exactly like a shield's and
- * a retry rebuild may spend different notes. Ring spends also never reach
- * validatePreparedTransferIntent — the builders don't expose the prepared
- * transfer — leaving the final-wire policy as the custody-side check on these
- * bytes.
+ * A ring-bound spend, through the SDK's one-call ring builders. No pinned
+ * inputs and none returned; see docs/ops/helius-rings.md, "Semantics worth
+ * knowing", for the rebuild and prepared-intent contracts.
  */
 async function buildRingSpend(
   deps: BuildDeps,
   input: BuildOperationInput,
   context: Readonly<{
-    ringProgramId: string;
-    ringLookupTable: string;
+    ring: Readonly<{ programId: string; lookupTable: string }>;
     mint: string;
-    wallet: Awaited<ReturnType<typeof hydrateWallet>>["wallet"];
+    wallet: HydratedWallet;
     authority: CustodyWalletAuthority;
     owner: ReturnType<typeof address>;
   }>
 ): Promise<BuildOperationResult> {
-  const floor = await deps.client.getLatestBlockhash();
   const ringSpend = {
     client: deps.client,
     wallet: context.wallet,
@@ -210,25 +202,30 @@ async function buildRingSpend(
     owner: context.owner,
   };
   const ringInput = {
-    ringProgramId: context.ringProgramId,
-    lookupTable: context.ringLookupTable,
+    ringProgramId: context.ring.programId,
+    lookupTable: context.ring.lookupTable,
     mint: context.mint,
     amountRaw: requireAmount(input),
   };
 
-  if (input.operation.opType === "transfer_registered") {
-    const tx = await buildRingTransferTx(ringSpend, {
-      ...ringInput,
-      recipient: await liftRecipientShieldedAddress(deps, input),
-    });
-    return finish(tx, [], floor);
-  }
+  // The builders fetch their own blockhash, so this read only floors the
+  // recorded expiry (the shield branch's contract). It is independent of the
+  // transfer's recipient-material load, so the two run together — settled
+  // jointly, then inspected in the old sequential order so which failure
+  // surfaces is unchanged.
+  const [floor, recipient] = await Promise.allSettled([
+    deps.client.getLatestBlockhash(),
+    input.operation.opType === "transfer_registered"
+      ? liftRecipientShieldedAddress(deps, input)
+      : Promise.resolve(null),
+  ]);
+  if (floor.status === "rejected") throw floor.reason;
+  if (recipient.status === "rejected") throw recipient.reason;
 
-  const tx = await buildRingWithdrawalTx(ringSpend, {
-    ...ringInput,
-    recipient: requireRecipient(input),
-  });
-  return finish(tx, [], floor);
+  const tx = recipient.value
+    ? await buildRingTransferTx(ringSpend, { ...ringInput, recipient: recipient.value })
+    : await buildRingWithdrawalTx(ringSpend, { ...ringInput, recipient: requireRecipient(input) });
+  return finish(tx, [], floor.value);
 }
 
 /**
