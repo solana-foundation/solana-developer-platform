@@ -73,11 +73,11 @@ export const RETRY_SWAP_MAX_ACCOUNTS = 24;
  *   "swap" cannot be substituted with a bare token transfer to an attacker's
  *   account, and its fixed accounts plus encoded amount/slippage must match
  *   the requested owner, mints, token accounts, and zero-fee contract;
- * - every V2 route step must be a pinned, direct stablecoin venue whose Borsh
- *   variant, AMM account, allocation, token indices, mints, and quoted atoms
- *   agree with the structured route plan. Intermediate-token and unknown DEX
- *   routes fail closed rather than leaving executable route behavior to the
- *   upstream response;
+ * - the V2 route must contain exactly one pinned, direct stablecoin step whose
+ *   Borsh variant, sole remaining-account slice, AMM account, allocation,
+ *   token indices, mints, and quoted atoms agree with the structured route
+ *   plan. Intermediate-token, split, and unknown DEX routes fail closed rather
+ *   than leaving executable route behavior to the upstream response;
  * - the ONLY account that may carry the signer flag is the taker, so the
  *   composed transaction can never grow a second authority.
  *
@@ -109,7 +109,7 @@ const SHARED_ACCOUNTS_ROUTE_V2_DISCRIMINATOR = "d19853937cfed8e9";
 const ROUTE_V2_FIXED_BYTES = 8 + 8 + 8 + 2 + 2 + 2;
 const SHARED_ACCOUNTS_ROUTE_V2_FIXED_BYTES = 8 + 1 + 8 + 8 + 2 + 2 + 2;
 const EMPTY_ROUTE_PLAN_BYTES = 4;
-const MAX_DIRECT_ROUTE_STEPS = 8;
+const REQUIRED_DIRECT_ROUTE_STEPS = 1;
 
 interface PinnedDirectSwapVariant {
   tag: number;
@@ -428,6 +428,11 @@ function validateDirectRouteStepMetadata(
     typeof info?.label === "string" ? PINNED_DIRECT_SWAP_VARIANTS.get(info.label) : undefined;
   const inAmount = info?.inAmount;
   const outAmount = info?.outAmount;
+  const routeAccounts = accounts.slice(firstRouteAccountIndex);
+  const ammMatches = routeAccounts.filter(
+    (account) =>
+      account.pubkey === info?.ammKey && account.isWritable === true && account.isSigner === false
+  );
   if (!variant) {
     throw providerUnavailable("Jupiter returned a route through an unreviewed swap venue");
   }
@@ -446,7 +451,8 @@ function validateDirectRouteStepMetadata(
   if (
     typeof info.ammKey !== "string" ||
     !isAddress(info.ammKey) ||
-    !accounts.slice(firstRouteAccountIndex).some((account) => account.pubkey === info.ammKey)
+    routeAccounts.length === 0 ||
+    ammMatches.length !== 1
   ) {
     throw providerUnavailable("Jupiter returned a route whose AMM account is not bound");
   }
@@ -509,14 +515,16 @@ function decodeDirectRouteStep(
 /**
  * Decode and bind the executable `RoutePlanStepV2[]` to the structured quote.
  *
- * This deliberately admits direct stablecoin routes only. Each step consumes
- * the requested input mint (token index 0) and produces the requested output
- * mint (token index 1); parallel AMM splits are allowed, but intermediate
- * assets and opaque/dynamic `Swap` variants are not. The instruction's Borsh
+ * This deliberately admits one direct stablecoin route step only. That makes
+ * the entire remaining-account tail the sole step's account slice, avoiding
+ * any ambiguous boundary between response-selected steps. The step consumes
+ * the requested input mint (token index 0), produces the requested output
+ * mint (token index 1), and its named AMM must occur exactly once as a writable
+ * non-signer inside that slice. Intermediate assets, parallel splits, and
+ * opaque/dynamic `Swap` variants are not admitted. The instruction's Borsh
  * variant tag, allocation, indices, and exact end-of-buffer must match the
- * response metadata, and the named AMM must be one of its transaction
- * accounts. That makes the route executable content locally constrained, not
- * merely described by another response-controlled field.
+ * response metadata, making the executable route locally constrained rather
+ * than merely described by another response-controlled field.
  */
 function validateDirectRoutePlan(
   data: Buffer,
@@ -528,12 +536,8 @@ function validateDirectRoutePlan(
   inputAtoms: bigint,
   quotedOutAtoms: bigint
 ): void {
-  if (
-    !Array.isArray(routePlan) ||
-    routePlan.length === 0 ||
-    routePlan.length > MAX_DIRECT_ROUTE_STEPS
-  ) {
-    throw providerUnavailable("Jupiter returned an empty or oversized V2 route plan");
+  if (!Array.isArray(routePlan) || routePlan.length !== REQUIRED_DIRECT_ROUTE_STEPS) {
+    throw providerUnavailable("Jupiter returned a V2 route outside the single-step contract");
   }
 
   requireRouteBytes(data, routePlanOffset, EMPTY_ROUTE_PLAN_BYTES);

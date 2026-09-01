@@ -526,6 +526,35 @@ describe("fetchJupiterSwapLeg", () => {
     ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
   });
 
+  it("refuses a multi-step route so the sole remaining-account slice is unambiguous", async () => {
+    fetchMock.mockResolvedValue(
+      okResponse(
+        buildResponse({
+          routePlan: [
+            directRouteStep({ percent: 50, bps: 5_000 }),
+            directRouteStep({ percent: 50, bps: 5_000 }),
+          ],
+        })
+      )
+    );
+
+    await expect(
+      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+  });
+
+  it("refuses an AMM key duplicated inside the sole route's account slice", async () => {
+    const accounts = sharedRouteAccounts();
+    accounts.push({ pubkey: AMM_KEY, isSigner: false, isWritable: true });
+    fetchMock.mockResolvedValue(
+      okResponse(buildResponse({ swapInstruction: swapInstruction({ accounts }) }))
+    );
+
+    await expect(
+      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+  });
+
   it("accepts Jupiter's non-shared ExactIn V2 route with the same pinned semantics", async () => {
     fetchMock.mockResolvedValue(
       okResponse(
