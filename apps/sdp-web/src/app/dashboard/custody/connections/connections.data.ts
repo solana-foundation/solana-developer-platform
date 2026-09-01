@@ -4,7 +4,6 @@ import type {
   CustodyConnectionLifecycle,
   CustodyProvider,
   CustodyWalletSummary,
-  ProviderCredentialStatus,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
@@ -19,16 +18,15 @@ export interface ConnectionLastCheck {
 export interface CustodyConnectionListItem {
   id: string;
   provider: CustodyProvider;
+  label: string;
   status: CustodyConnectionLifecycle;
+  isDefault: boolean;
+  isRuntimeExecutionAllowed: boolean;
+  defaultCustodyWalletId: string | null;
   createdAt: string;
   activatedAt: string | null;
   lastCheck: ConnectionLastCheck | null;
   pendingWalletLabel: string | null;
-  providerCredential: {
-    id: string;
-    label: string;
-    status: ProviderCredentialStatus;
-  };
 }
 
 export interface ConnectionsPageResult {
