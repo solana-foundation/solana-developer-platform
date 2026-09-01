@@ -12,6 +12,7 @@ import {
 import type { ProviderRailSupportDistillation, RampDiscoveryContext } from "../../types";
 import { readLightsparkConfig } from "./client";
 
+/** Lightspark only supports usdc.solana for now, so corridors are discovered from USDC alone. */
 const LIGHTSPARK_DISCOVERY_CRYPTO = "USDC";
 
 const gridRateCurrencySchema = z.object({
