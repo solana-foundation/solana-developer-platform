@@ -363,6 +363,7 @@ describe("Counterparties Routes", () => {
         "customer.nationality",
         "customer.region",
         "customer.email",
+        "purposeOfPayment",
         "customer.address.line1",
         "customer.address.city",
         "customer.address.postalCode",
@@ -395,6 +396,7 @@ describe("Counterparties Routes", () => {
             "customer.address.city": "San Francisco",
             "customer.address.postalCode": "94105",
             "customer.address.countryCode": "US",
+            purposeOfPayment: "GOODS_OR_SERVICES",
           },
         };
         const res = await app.request(

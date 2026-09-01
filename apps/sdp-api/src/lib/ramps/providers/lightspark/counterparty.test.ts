@@ -5,6 +5,7 @@ import {
   lightsparkCounterpartyRequirements,
   lightsparkPayoutCollectedData,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
+import { isLightsparkPurposeOfPayment } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
@@ -66,6 +67,7 @@ describe("lightsparkCounterpartyRequirements", () => {
       "customer.nationality",
       "customer.region",
       "customer.email",
+      "purposeOfPayment",
       "customer.address",
     ]);
     const addressField = requirements.fields.at(-1);
@@ -95,17 +97,41 @@ describe("lightsparkCounterpartyRequirements", () => {
     expect(
       lightsparkCounterpartyRequirements(counterparty(), {
         direction: "onramp",
-        providerData: {},
+        providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
         providerCustomerReference: "Customer:cus_123",
       })
     ).toEqual({ provider: "lightspark", direction: "onramp", status: "ready" });
+  });
+
+  it("collects only the purpose-of-payment for linked customers missing it", () => {
+    const requirements = lightsparkCounterpartyRequirements(counterparty(), {
+      direction: "onramp",
+      providerData: {},
+      providerCustomerReference: "Customer:cus_123",
+    });
+
+    if (requirements.status !== "collect_counterparty") {
+      throw new Error("Expected collect_counterparty requirements");
+    }
+    expect(requirements.fields.map((field) => field.key)).toEqual(["purposeOfPayment"]);
+    const purposeField = requirements.fields[0];
+    if (purposeField?.kind !== "select") {
+      throw new Error("Expected purposeOfPayment select field");
+    }
+    expect(purposeField.options.map((option) => option.value)).toContain("GOODS_OR_SERVICES");
+  });
+
+  it("rejects prototype property names as purpose-of-payment codes", () => {
+    expect(isLightsparkPurposeOfPayment("GOODS_OR_SERVICES")).toBe(true);
+    expect(isLightsparkPurposeOfPayment("toString")).toBe(false);
+    expect(isLightsparkPurposeOfPayment("constructor")).toBe(false);
   });
 
   it("requires fiatCurrency for offramp", () => {
     expect(() =>
       lightsparkCounterpartyRequirements(counterparty(), {
         direction: "offramp",
-        providerData: {},
+        providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
         providerCustomerReference: "Customer:cus_123",
       })
     ).toThrowError(SdpPaymentsError);
@@ -114,7 +140,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("collects USD payout bank fields including the rail select", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
-      providerData: {},
+      providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "USD",
       providerCustomerReference: "Customer:cus_123",
     });
@@ -152,7 +178,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("offers SWIFT alongside the local rails for every currency", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
-      providerData: {},
+      providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "GBP",
       providerCustomerReference: "Customer:cus_123",
     });
@@ -182,6 +208,7 @@ describe("lightsparkCounterpartyRequirements", () => {
       providerData: {
         lightspark: {
           customerId: "Customer:cus_123",
+          purposeOfPayment: "GOODS_OR_SERVICES",
           payoutAccounts: {
             "USD:ab12cd34ef56ab12": {
               accountId: "ExternalAccount:acc_payout_123",
@@ -201,7 +228,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("returns unsupported for currencies without a Grid payout account type", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
-      providerData: {},
+      providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "TRY",
       providerCustomerReference: "Customer:cus_123",
     });
@@ -222,13 +249,14 @@ describe("lightsparkCounterpartyRequirements", () => {
       "businessLegalName",
       "businessTaxId",
       "businessIncorporatedOn",
+      "purposeOfPayment",
     ]);
   });
 
   it("returns ready for a business on-ramp once the provider customer is linked", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "onramp",
-      providerData: {},
+      providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       providerCustomerReference: "Customer:cus_123",
     });
 
@@ -238,7 +266,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("collects only payout fields once the business has a provider customer", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "offramp",
-      providerData: {},
+      providerData: { lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } },
       fiatCurrency: "USD",
       providerCustomerReference: "Customer:cus_123",
     });
@@ -269,6 +297,7 @@ describe("buildLightsparkBusinessInfo", () => {
         businessLegalName: "Acme Corporation, Inc.",
         businessTaxId: "47-1234567",
         businessIncorporatedOn: "2018-03-14",
+        purposeOfPayment: "GOODS_OR_SERVICES",
       })
     ).toEqual({
       legalName: "Acme Corporation, Inc.",
@@ -287,6 +316,7 @@ describe("buildLightsparkBusinessInfo", () => {
         businessLegalName: "Acme Corporation, Inc.",
         businessTaxId: "47-1234567",
         businessIncorporatedOn: "March 14, 2018",
+        purposeOfPayment: "GOODS_OR_SERVICES",
       })
     ).toThrowError(SdpPaymentsError);
   });
@@ -299,6 +329,7 @@ describe("lightsparkPayoutCollectedData", () => {
         businessLegalName: "Acme Corporation, Inc.",
         businessTaxId: "47-1234567",
         businessIncorporatedOn: "2018-03-14",
+        purposeOfPayment: "GOODS_OR_SERVICES",
         paymentRails: "ACH",
         routingNumber: "021000021",
         accountNumber: "12345678901",

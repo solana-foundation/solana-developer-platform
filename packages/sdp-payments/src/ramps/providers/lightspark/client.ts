@@ -41,6 +41,7 @@ import {
   lightsparkCounterpartyRequirements,
 } from "./counterparty";
 import { discoverLightsparkCurrencyAndRails } from "./currencies";
+import type { LightsparkPurposeOfPayment } from "./provider-data";
 
 export const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
@@ -275,6 +276,14 @@ interface GridCreateQuoteBody {
   lockedCurrencySide: "SENDING" | "RECEIVING";
   lockedCurrencyAmount: number;
   description: string;
+  /** Some payout corridors mandate a purpose-of-payment code on the quote. */
+  purposeOfPayment: LightsparkPurposeOfPayment;
+  /**
+   * Mirror of `purposeOfPayment`: receiver-mandated sender fields are
+   * checked against this key-value map, and a receiver that requires
+   * PURPOSE_OF_PAYMENT rejects the quote when it is absent here.
+   */
+  senderCustomerInfo: { PURPOSE_OF_PAYMENT: LightsparkPurposeOfPayment };
 }
 
 interface GridPaymentInstruction {
@@ -446,6 +455,8 @@ export interface CreateLightsparkOnrampQuoteInput {
   cryptoCurrency: string;
   /** Locked sending amount in the fiat currency's smallest unit (cents). */
   fiatAmountMinorUnits: number;
+  /** Purpose-of-payment code collected during counterparty onboarding. */
+  purposeOfPayment: LightsparkPurposeOfPayment;
   description?: string;
 }
 
@@ -621,6 +632,8 @@ export class LightsparkRampClient implements RampProvider {
         lockedCurrencySide: "SENDING",
         lockedCurrencyAmount: input.fiatAmountMinorUnits,
         description: input.description ?? "SDP onramp",
+        purposeOfPayment: input.purposeOfPayment,
+        senderCustomerInfo: { PURPOSE_OF_PAYMENT: input.purposeOfPayment },
       },
     });
 
@@ -832,6 +845,9 @@ export class LightsparkRampClient implements RampProvider {
     if (!input.customerId) {
       throw badRequest("Lightspark on-ramp requires a resolved customerId");
     }
+    if (!input.purposeOfPayment) {
+      throw badRequest("Lightspark on-ramp requires a resolved purposeOfPayment");
+    }
     const config = readLightsparkConfig(env, mode);
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
     const fiatCurrency = input.fiatCurrency ?? "USD";
@@ -852,6 +868,7 @@ export class LightsparkRampClient implements RampProvider {
       fiatCurrency,
       cryptoCurrency,
       fiatAmountMinorUnits,
+      purposeOfPayment: input.purposeOfPayment,
     });
     assertLightsparkQuoteMatchesRequest(quote, {
       sendingCurrencyCode: fiatCurrency,
@@ -969,6 +986,9 @@ export class LightsparkRampClient implements RampProvider {
     if (!input.payoutAccountId) {
       throw badRequest("Lightspark off-ramp requires a resolved payoutAccountId");
     }
+    if (!input.purposeOfPayment) {
+      throw badRequest("Lightspark off-ramp requires a resolved purposeOfPayment");
+    }
     if (!input.fiatCurrency) {
       throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
     }
@@ -1001,6 +1021,8 @@ export class LightsparkRampClient implements RampProvider {
         lockedCurrencySide: "SENDING",
         lockedCurrencyAmount: cryptoAmountMinorUnits,
         description: "SDP offramp",
+        purposeOfPayment: input.purposeOfPayment,
+        senderCustomerInfo: { PURPOSE_OF_PAYMENT: input.purposeOfPayment },
       },
     });
 
