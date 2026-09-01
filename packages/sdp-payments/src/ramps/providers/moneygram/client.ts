@@ -4,7 +4,7 @@ import type {
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { getCryptoRailAssetLabel, type RampCurrencyLimit } from "@sdp/types/payment-rails";
 import {
   checkRampDestination,

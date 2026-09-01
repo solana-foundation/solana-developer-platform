@@ -8,7 +8,7 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import type { CounterpartyEntityType } from "@sdp/types/counterparties";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
   type RampCountrySupport,

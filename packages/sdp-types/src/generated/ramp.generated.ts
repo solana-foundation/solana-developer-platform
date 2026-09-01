@@ -1,8 +1,9 @@
 // AUTO-GENERATED - do not edit by hand.
-// Refresh raw dumps and snapshots: pnpm --filter @sdp/api rails:discover
-// Regenerate from committed snapshots: pnpm --filter @sdp/api rails:generate
-// Raw dumps live in apps/sdp-api/.ramp-rails/raw/ (gitignored).
-// Support snapshots live in apps/sdp-api/.ramp-rails/*.support.json (committed).
+// Refresh raw dumps and snapshots: pnpm --filter @sdp/api currencies:discover
+// Regenerate support: pnpm --filter @sdp/api ramp-support:generate
+// Raw dumps live in apps/sdp-api/.ramp-support/raw/ (gitignored).
+// Currency-support snapshots live in apps/sdp-api/.ramp-support/*.currency.json (committed).
+// Country rails live in apps/sdp-api/.ramp-support/*.rails.json (hand-compiled).
 
 import type {
   OfframpPairSupport,
@@ -13,13 +14,13 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "d253b18a629c6403c4617cc256ea9a530d013569c4a2c04364a6edd264ecbc0f" as const;
+  "46e4ba86e3bef9b1b7ab1c40331ff9649bad9f4de66acdafb2fa979b0c7c68f9" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moonpay: "1bae9f40aaee0402594dbe2d72babb8c38032e7300131dc3edee1fe543931d41",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  lightspark: "0a65054262fee18de1322bc9f1c6b5bb0656e26d5ca458bd0344a9e01d437aa6",
+  lightspark: "9908750fdd119899bf1074b1d9d61011f15c18fad3b9b0d5b0970744ca7b0a32",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "5683ea502021864b6aea7a5feccb2e6aaae73ceb0ddd0730a21ce366cee6bf91",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -224,6 +225,7 @@ export const RAMP_COUNTRY_CODES = [
   "CF",
   "CG",
   "CH",
+  "CI",
   "CL",
   "CM",
   "CN",
@@ -269,6 +271,7 @@ export const RAMP_COUNTRY_CODES = [
   "ID",
   "IE",
   "IL",
+  "IN",
   "IS",
   "IT",
   "JO",
@@ -304,9 +307,11 @@ export const RAMP_COUNTRY_CODES = [
   "MV",
   "MW",
   "MX",
+  "MY",
   "MZ",
   "NA",
   "NE",
+  "NG",
   "NL",
   "NO",
   "NP",
@@ -335,6 +340,7 @@ export const RAMP_COUNTRY_CODES = [
   "SK",
   "SL",
   "SM",
+  "SN",
   "SR",
   "ST",
   "SV",
@@ -352,6 +358,7 @@ export const RAMP_COUNTRY_CODES = [
   "TV",
   "TW",
   "TZ",
+  "UG",
   "US",
   "UY",
   "UZ",
@@ -559,6 +566,71 @@ export const OFFRAMP_DESTINATION_CURRENCIES = [
   "ZMW",
 ] as const satisfies readonly RampFiatCurrency[];
 export type OfframpDestinationCurrency = (typeof OFFRAMP_DESTINATION_CURRENCIES)[number];
+
+export const OFFRAMP_COUNTRY_RAILS = {
+  lightspark: {
+    AE: ["BANK_TRANSFER"],
+    AT: ["SEPA", "SEPA_INSTANT"],
+    BE: ["SEPA", "SEPA_INSTANT"],
+    BG: ["SEPA", "SEPA_INSTANT"],
+    BJ: ["MOBILE_MONEY"],
+    BR: ["PIX"],
+    BW: ["MOBILE_MONEY"],
+    CA: ["BANK_TRANSFER"],
+    CG: ["MOBILE_MONEY"],
+    CH: ["SEPA", "SEPA_INSTANT"],
+    CI: ["MOBILE_MONEY"],
+    CM: ["MOBILE_MONEY"],
+    CY: ["SEPA", "SEPA_INSTANT"],
+    CZ: ["SEPA", "SEPA_INSTANT"],
+    DE: ["SEPA", "SEPA_INSTANT"],
+    DK: ["SEPA", "SEPA_INSTANT"],
+    EE: ["SEPA", "SEPA_INSTANT"],
+    ES: ["SEPA", "SEPA_INSTANT"],
+    FI: ["SEPA", "SEPA_INSTANT"],
+    FR: ["SEPA", "SEPA_INSTANT"],
+    GB: ["FASTER_PAYMENTS"],
+    GR: ["SEPA", "SEPA_INSTANT"],
+    HK: ["BANK_TRANSFER"],
+    HR: ["SEPA", "SEPA_INSTANT"],
+    HU: ["SEPA", "SEPA_INSTANT"],
+    ID: ["BANK_TRANSFER"],
+    IE: ["SEPA", "SEPA_INSTANT"],
+    IN: ["UPI"],
+    IS: ["SEPA", "SEPA_INSTANT"],
+    IT: ["SEPA", "SEPA_INSTANT"],
+    KE: ["MOBILE_MONEY"],
+    LI: ["SEPA", "SEPA_INSTANT"],
+    LT: ["SEPA", "SEPA_INSTANT"],
+    LU: ["SEPA", "SEPA_INSTANT"],
+    LV: ["SEPA", "SEPA_INSTANT"],
+    MT: ["SEPA", "SEPA_INSTANT"],
+    MW: ["MOBILE_MONEY"],
+    MX: ["SPEI"],
+    MY: ["BANK_TRANSFER"],
+    NG: ["BANK_TRANSFER"],
+    NL: ["SEPA", "SEPA_INSTANT"],
+    NO: ["SEPA", "SEPA_INSTANT"],
+    PH: ["BANK_TRANSFER"],
+    PL: ["SEPA", "SEPA_INSTANT"],
+    PT: ["SEPA", "SEPA_INSTANT"],
+    RO: ["SEPA", "SEPA_INSTANT"],
+    RW: ["MOBILE_MONEY"],
+    SE: ["SEPA", "SEPA_INSTANT"],
+    SG: ["PAYNOW", "FAST", "BANK_TRANSFER"],
+    SI: ["SEPA", "SEPA_INSTANT"],
+    SK: ["SEPA", "SEPA_INSTANT"],
+    SN: ["MOBILE_MONEY"],
+    TH: ["BANK_TRANSFER"],
+    TZ: ["MOBILE_MONEY"],
+    UG: ["MOBILE_MONEY"],
+    US: ["ACH", "WIRE", "RTP", "FEDNOW"],
+    VN: ["BANK_TRANSFER"],
+    ZA: ["BANK_TRANSFER"],
+  },
+} as const satisfies Partial<
+  Record<RampProviderId, Partial<Record<RampCountryCode, readonly string[]>>>
+>;
 
 export const RAMP_PROVIDER_SUPPORT_DETAILS = {
   moonpay: {
@@ -900,7 +972,69 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
       currencies: {
         USD: { min: "1", max: "10000" },
       },
-      countrySupport: { coverage: "unreported" },
+      countrySupport: {
+        coverage: "by-country",
+        countries: {
+          AE: ["AED"],
+          AT: ["EUR"],
+          BE: ["EUR"],
+          BG: ["EUR"],
+          BJ: ["XOF"],
+          BR: ["BRL"],
+          BW: ["BWP"],
+          CA: ["CAD"],
+          CG: ["XAF"],
+          CH: ["EUR"],
+          CI: ["XOF"],
+          CM: ["XAF"],
+          CY: ["EUR"],
+          CZ: ["EUR"],
+          DE: ["EUR"],
+          DK: ["DKK", "EUR"],
+          EE: ["EUR"],
+          ES: ["EUR"],
+          FI: ["EUR"],
+          FR: ["EUR"],
+          GB: ["GBP"],
+          GR: ["EUR"],
+          HK: ["HKD"],
+          HR: ["EUR"],
+          HU: ["EUR"],
+          ID: ["IDR"],
+          IE: ["EUR"],
+          IN: ["INR"],
+          IS: ["EUR"],
+          IT: ["EUR"],
+          KE: ["KES"],
+          LI: ["EUR"],
+          LT: ["EUR"],
+          LU: ["EUR"],
+          LV: ["EUR"],
+          MT: ["EUR"],
+          MW: ["MWK"],
+          MX: ["MXN"],
+          MY: ["MYR"],
+          NG: ["NGN"],
+          NL: ["EUR"],
+          NO: ["EUR"],
+          PH: ["PHP"],
+          PL: ["EUR"],
+          PT: ["EUR"],
+          RO: ["EUR"],
+          RW: ["RWF"],
+          SE: ["EUR"],
+          SG: ["SGD"],
+          SI: ["EUR"],
+          SK: ["EUR"],
+          SN: ["XOF"],
+          TH: ["THB"],
+          TZ: ["TZS"],
+          UG: ["UGX"],
+          US: ["USD"],
+          VN: ["VND"],
+          ZA: ["ZAR"],
+        },
+      },
       entityTypes: ["business", "individual"],
     },
   },

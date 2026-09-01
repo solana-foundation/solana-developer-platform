@@ -60,7 +60,6 @@ export const LIGHTSPARK_DECLARED_RAIL_SUPPORT = {
     entityTypes: ["individual", "business"],
   },
   offramp: {
-    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
     entityTypes: ["individual", "business"],
   },
 } as const satisfies ProviderDeclaredRailSupport;

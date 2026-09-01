@@ -14,7 +14,7 @@ import type {
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,

@@ -15,7 +15,7 @@ import {
   readLightsparkPayoutAccounts,
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import type { LightsparkCustomerResolution } from "@sdp/payments/ramps/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, notFound } from "@/lib/errors";

@@ -1,5 +1,5 @@
 import type { CounterpartyEntityType } from "./counterparties";
-import type { RampFiatCurrency } from "./generated/ramp-support.generated";
+import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { RampProviderId } from "./provider-access";
 
 export const SOLANA_CRYPTO_RAILS = [

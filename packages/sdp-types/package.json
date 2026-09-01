@@ -74,10 +74,10 @@
       "import": "./src/ramp-destinations.ts",
       "default": "./src/ramp-destinations.ts"
     },
-    "./generated/ramp-support": {
-      "types": "./src/generated/ramp-support.generated.ts",
-      "import": "./src/generated/ramp-support.generated.ts",
-      "default": "./src/generated/ramp-support.generated.ts"
+    "./generated/ramp": {
+      "types": "./src/generated/ramp.generated.ts",
+      "import": "./src/generated/ramp.generated.ts",
+      "default": "./src/generated/ramp.generated.ts"
     },
     "./site": {
       "types": "./src/site.ts",
