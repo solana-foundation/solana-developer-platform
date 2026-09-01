@@ -6,8 +6,8 @@ import { useTranslations } from "@/i18n/provider";
 import { RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 
 /**
- * Provider-branded content for the wizard's summary button: "Checkout powered
- * by [logo] Provider".
+ * Provider-branded content for the wizard's summary button: "Powered by
+ * [logo] Provider".
  *
  * @param provider - Selected ramp provider.
  * @returns The branded trigger content.

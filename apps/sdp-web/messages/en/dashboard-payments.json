@@ -137,7 +137,7 @@
       "requirementGroupBankAccountDescription": "The recipient's account details for this rail. They're passed to the provider when the payout executes and never stored.",
       "requirementGroupCustomerTitle": "Recipient details",
       "requirementGroupCustomerDescription": "Lightspark uses these details to verify the recipient's identity. They're sent when you submit and never stored.",
-      "checkoutPoweredBy": "Checkout powered by",
+      "checkoutPoweredBy": "Powered by",
       "addressRequirementDescription": "Search to autofill the address fields, or enter them manually.",
       "useExistingAccount": "Use existing account",
       "useExistingAccountDescription": "An active payout account is already saved for this destination. We'll use it for this payout.",
