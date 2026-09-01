@@ -73,6 +73,11 @@ export const RETRY_SWAP_MAX_ACCOUNTS = 24;
  *   "swap" cannot be substituted with a bare token transfer to an attacker's
  *   account, and its fixed accounts plus encoded amount/slippage must match
  *   the requested owner, mints, token accounts, and zero-fee contract;
+ * - every V2 route step must be a pinned, direct stablecoin venue whose Borsh
+ *   variant, AMM account, allocation, token indices, mints, and quoted atoms
+ *   agree with the structured route plan. Intermediate-token and unknown DEX
+ *   routes fail closed rather than leaving executable route behavior to the
+ *   upstream response;
  * - the ONLY account that may carry the signer flag is the taker, so the
  *   composed transaction can never grow a second authority.
  *
@@ -104,6 +109,36 @@ const SHARED_ACCOUNTS_ROUTE_V2_DISCRIMINATOR = "d19853937cfed8e9";
 const ROUTE_V2_FIXED_BYTES = 8 + 8 + 8 + 2 + 2 + 2;
 const SHARED_ACCOUNTS_ROUTE_V2_FIXED_BYTES = 8 + 1 + 8 + 8 + 2 + 2 + 2;
 const EMPTY_ROUTE_PLAN_BYTES = 4;
+const MAX_DIRECT_ROUTE_STEPS = 8;
+
+interface PinnedDirectSwapVariant {
+  tag: number;
+  /** Bytes carried by the Borsh enum variant before RoutePlanStepV2 fields. */
+  payload: "none" | "bool";
+}
+
+/**
+ * Reviewed subset of Jupiter's V2 `Swap` enum that can express a direct spot
+ * stablecoin swap without arbitrary bytes or nested remaining-account data.
+ *
+ * The label comes from `/build.routePlan`; the tag is independently decoded
+ * from the aggregator instruction. Keeping the map local prevents a response
+ * from labelling a lending, RFQ, staking, or dynamically-dispatched variant as
+ * an ordinary AMM route. New venues deliberately fail closed until reviewed.
+ */
+const PINNED_DIRECT_SWAP_VARIANTS: ReadonlyMap<string, PinnedDirectSwapVariant> = new Map([
+  ["Saber", { tag: 0, payload: "none" }],
+  ["Raydium", { tag: 7, payload: "none" }],
+  ["Lifinity", { tag: 9, payload: "none" }],
+  ["Mercurial", { tag: 10, payload: "none" }],
+  ["Whirlpool", { tag: 17, payload: "bool" }],
+  ["Meteora", { tag: 19, payload: "none" }],
+  ["Lifinity v2", { tag: 25, payload: "none" }],
+  ["Raydium CLMM", { tag: 26, payload: "none" }],
+  ["Meteora DLMM", { tag: 38, payload: "none" }],
+  ["Raydium CP", { tag: 46, payload: "none" }],
+  ["SolFi", { tag: 61, payload: "bool" }],
+]);
 
 /**
  * ── Compute-unit sizing for the composed transaction ────────────────────────
@@ -199,6 +234,19 @@ interface JupiterApiInstruction {
   data: string;
 }
 
+interface JupiterBuildRouteStep {
+  swapInfo?: {
+    ammKey?: string;
+    label?: string;
+    inputMint?: string;
+    outputMint?: string;
+    inAmount?: string;
+    outAmount?: string;
+  };
+  percent?: number;
+  bps?: number;
+}
+
 interface JupiterBuildResponse {
   inputMint: string;
   outputMint: string;
@@ -207,7 +255,7 @@ interface JupiterBuildResponse {
   otherAmountThreshold: string;
   slippageBps: number;
   priceImpactPct: string | number;
-  routePlan?: { swapInfo?: { label?: string } }[];
+  routePlan?: JupiterBuildRouteStep[];
   computeBudgetInstructions?: JupiterApiInstruction[];
   setupInstructions?: JupiterApiInstruction[];
   swapInstruction: JupiterApiInstruction;
@@ -356,8 +404,178 @@ function requireSwapAccount(
   }
 }
 
+function requireRouteBytes(data: Buffer, offset: number, length: number): void {
+  if (offset < 0 || length < 0 || offset + length > data.length) {
+    throw providerUnavailable("Jupiter returned a truncated V2 route plan");
+  }
+}
+
+interface ValidatedDirectRouteStep {
+  variant: PinnedDirectSwapVariant;
+  bps: number;
+  inputAtoms: bigint;
+  outputAtoms: bigint;
+}
+
+function validateDirectRouteStepMetadata(
+  step: JupiterBuildRouteStep,
+  accounts: JupiterApiInstruction["accounts"],
+  firstRouteAccountIndex: number,
+  request: JupiterSwapRequest
+): ValidatedDirectRouteStep {
+  const info = step.swapInfo;
+  const variant =
+    typeof info?.label === "string" ? PINNED_DIRECT_SWAP_VARIANTS.get(info.label) : undefined;
+  const inAmount = info?.inAmount;
+  const outAmount = info?.outAmount;
+  if (!variant) {
+    throw providerUnavailable("Jupiter returned a route through an unreviewed swap venue");
+  }
+  if (
+    info?.inputMint !== request.inputMint ||
+    info.outputMint !== request.outputMint ||
+    typeof inAmount !== "string" ||
+    typeof outAmount !== "string" ||
+    !/^\d+$/.test(inAmount) ||
+    !/^\d+$/.test(outAmount)
+  ) {
+    throw providerUnavailable(
+      "Jupiter returned a route step outside the requested direct stablecoin pair"
+    );
+  }
+  if (
+    typeof info.ammKey !== "string" ||
+    !isAddress(info.ammKey) ||
+    !accounts.slice(firstRouteAccountIndex).some((account) => account.pubkey === info.ammKey)
+  ) {
+    throw providerUnavailable("Jupiter returned a route whose AMM account is not bound");
+  }
+  if (
+    typeof step.bps !== "number" ||
+    !Number.isInteger(step.bps) ||
+    step.bps <= 0 ||
+    step.bps > 10_000 ||
+    typeof step.percent !== "number" ||
+    !Number.isFinite(step.percent) ||
+    step.percent <= 0 ||
+    step.percent > 100 ||
+    Math.abs(step.percent * 100 - step.bps) > 0.5
+  ) {
+    throw providerUnavailable("Jupiter returned a route with an invalid allocation");
+  }
+
+  const inputAtoms = BigInt(inAmount);
+  const outputAtoms = BigInt(outAmount);
+  if (inputAtoms <= 0n || outputAtoms <= 0n) {
+    throw providerUnavailable("Jupiter returned a route with a zero step amount");
+  }
+  return { variant, bps: step.bps, inputAtoms, outputAtoms };
+}
+
+function decodeDirectRouteStep(
+  data: Buffer,
+  offset: number,
+  expected: ValidatedDirectRouteStep
+): number {
+  const payloadBytes = expected.variant.payload === "bool" ? 1 : 0;
+  requireRouteBytes(data, offset, 1 + payloadBytes + 4);
+  let cursor = offset;
+  const actualTag = data.readUInt8(cursor);
+  cursor += 1;
+  if (actualTag !== expected.variant.tag) {
+    throw providerUnavailable(
+      "Jupiter returned a route variant that does not match its quoted venue"
+    );
+  }
+  if (expected.variant.payload === "bool") {
+    const direction = data.readUInt8(cursor);
+    if (direction !== 0 && direction !== 1) {
+      throw providerUnavailable("Jupiter returned a route with an invalid venue direction");
+    }
+    cursor += 1;
+  }
+
+  const encodedBps = data.readUInt16LE(cursor);
+  const inputIndex = data.readUInt8(cursor + 2);
+  const outputIndex = data.readUInt8(cursor + 3);
+  if (encodedBps !== expected.bps || inputIndex !== 0 || outputIndex !== 1) {
+    throw providerUnavailable(
+      "Jupiter returned a route whose allocation or token indices are not direct"
+    );
+  }
+  return cursor + 4;
+}
+
+/**
+ * Decode and bind the executable `RoutePlanStepV2[]` to the structured quote.
+ *
+ * This deliberately admits direct stablecoin routes only. Each step consumes
+ * the requested input mint (token index 0) and produces the requested output
+ * mint (token index 1); parallel AMM splits are allowed, but intermediate
+ * assets and opaque/dynamic `Swap` variants are not. The instruction's Borsh
+ * variant tag, allocation, indices, and exact end-of-buffer must match the
+ * response metadata, and the named AMM must be one of its transaction
+ * accounts. That makes the route executable content locally constrained, not
+ * merely described by another response-controlled field.
+ */
+function validateDirectRoutePlan(
+  data: Buffer,
+  routePlanOffset: number,
+  routePlan: JupiterBuildRouteStep[] | undefined,
+  accounts: JupiterApiInstruction["accounts"],
+  firstRouteAccountIndex: number,
+  request: JupiterSwapRequest,
+  inputAtoms: bigint,
+  quotedOutAtoms: bigint
+): void {
+  if (
+    !Array.isArray(routePlan) ||
+    routePlan.length === 0 ||
+    routePlan.length > MAX_DIRECT_ROUTE_STEPS
+  ) {
+    throw providerUnavailable("Jupiter returned an empty or oversized V2 route plan");
+  }
+
+  requireRouteBytes(data, routePlanOffset, EMPTY_ROUTE_PLAN_BYTES);
+  if (data.readUInt32LE(routePlanOffset) !== routePlan.length) {
+    throw providerUnavailable(
+      "Jupiter returned route metadata that does not match its executable route plan"
+    );
+  }
+
+  let cursor = routePlanOffset + EMPTY_ROUTE_PLAN_BYTES;
+  let totalBps = 0;
+  let totalInputAtoms = 0n;
+  let totalOutputAtoms = 0n;
+
+  for (const step of routePlan) {
+    const validated = validateDirectRouteStepMetadata(
+      step,
+      accounts,
+      firstRouteAccountIndex,
+      request
+    );
+    cursor = decodeDirectRouteStep(data, cursor, validated);
+    totalBps += validated.bps;
+    totalInputAtoms += validated.inputAtoms;
+    totalOutputAtoms += validated.outputAtoms;
+  }
+
+  if (
+    cursor !== data.length ||
+    totalBps !== 10_000 ||
+    totalInputAtoms !== inputAtoms ||
+    totalOutputAtoms !== quotedOutAtoms
+  ) {
+    throw providerUnavailable(
+      "Jupiter returned a route plan outside the requested amount and allocation contract"
+    );
+  }
+}
+
 function validateSwapInstruction(
   instruction: JupiterApiInstruction,
+  routePlan: JupiterBuildRouteStep[] | undefined,
   request: JupiterSwapRequest,
   expected: ExpectedSwapAccounts,
   inputAtoms: bigint,
@@ -402,6 +620,17 @@ function validateSwapInstruction(
       "Jupiter returned a swap instruction that does not match the requested amount, slippage, or zero-fee contract"
     );
   }
+
+  validateDirectRoutePlan(
+    data,
+    amountOffset + 22,
+    routePlan,
+    instruction.accounts,
+    route ? 10 : 12,
+    request,
+    inputAtoms,
+    quotedOutAtoms
+  );
 
   const accounts = instruction.accounts;
   if (route) {
@@ -594,7 +823,14 @@ function swapLegInstructions(
       "Jupiter returned auxiliary instructions that this stablecoin swap did not request"
     );
   }
-  validateSwapInstruction(body.swapInstruction, request, expected, inputAtoms, quotedOutAtoms);
+  validateSwapInstruction(
+    body.swapInstruction,
+    body.routePlan,
+    request,
+    expected,
+    inputAtoms,
+    quotedOutAtoms
+  );
   const ordered: JupiterApiInstruction[] = [...setupInstructions, body.swapInstruction];
   return ordered.map((instruction) => toEarnVaultInstruction(instruction, request.owner));
 }
