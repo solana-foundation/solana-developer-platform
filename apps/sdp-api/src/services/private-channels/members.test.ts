@@ -29,19 +29,25 @@ const completed = {
   spc_user_id: "spc_1",
   spc_username: "treasury-abcde",
   spc_credential_ciphertext: "encrypted",
+  provisioned_at: "2026-08-31T00:00:00.000Z",
 } as PrivateChannelUserRow;
 
 let repo: {
   findDefaultPrincipal: ReturnType<typeof vi.fn>;
+  findPrincipalReservation: ReturnType<typeof vi.fn>;
+  getById: ReturnType<typeof vi.fn>;
   reservePrincipal: ReturnType<typeof vi.fn>;
   completePrincipal: ReturnType<typeof vi.fn>;
   deletePrincipalReservation: ReturnType<typeof vi.fn>;
 };
 let registerSpy: ReturnType<typeof vi.spyOn>;
+let loginSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   repo = {
     findDefaultPrincipal: vi.fn().mockResolvedValue(null),
+    findPrincipalReservation: vi.fn().mockResolvedValue(null),
+    getById: vi.fn().mockResolvedValue(null),
     reservePrincipal: vi.fn().mockResolvedValue(reservation),
     completePrincipal: vi.fn().mockResolvedValue(completed),
     deletePrincipalReservation: vi.fn().mockResolvedValue(true),
@@ -52,8 +58,10 @@ beforeEach(() => {
     role: "user",
     createdAt: "2026-08-31T00:00:00.000Z",
   });
+  loginSpy = vi.spyOn(privateChannels, "spcLogin").mockResolvedValue({ token: "jwt" });
   vi.spyOn(credentialCrypto, "createSpcCredentialCipher").mockReturnValue({
     encrypt: vi.fn().mockResolvedValue("encrypted"),
+    decrypt: vi.fn().mockResolvedValue("password"),
   } as never);
 });
 
@@ -71,6 +79,12 @@ describe("provisionPrincipal", () => {
 
     expect(repo.reservePrincipal.mock.invocationCallOrder[0]).toBeLessThan(
       registerSpy.mock.invocationCallOrder[0]
+    );
+    expect(repo.reservePrincipal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spcUsername: expect.any(String),
+        spcCredentialCiphertext: "encrypted",
+      })
     );
     expect(repo.completePrincipal).toHaveBeenCalledWith(
       expect.objectContaining({ id: reservation.id, spcUserId: "spc_1" })
@@ -92,13 +106,42 @@ describe("provisionPrincipal", () => {
     expect(registerSpy).not.toHaveBeenCalled();
   });
 
-  it("removes the reservation when SPC registration fails", async () => {
+  it("keeps the persisted reservation when SPC registration has an ambiguous failure", async () => {
     registerSpy.mockRejectedValue(new Error("SPC unavailable"));
 
     await expect(
       provisionPrincipal({} as never, repo as unknown as PrivateChannelUserRepository, scope)
     ).rejects.toThrow("SPC unavailable");
-    expect(repo.deletePrincipalReservation).toHaveBeenCalledWith(scope, reservation.id);
+    expect(repo.deletePrincipalReservation).not.toHaveBeenCalled();
     expect(repo.completePrincipal).not.toHaveBeenCalled();
+  });
+
+  it("resumes a pending credential after an earlier SPC registration completed", async () => {
+    repo.reservePrincipal.mockRejectedValue(
+      Object.assign(new Error("duplicate"), { code: "23505" })
+    );
+    repo.findPrincipalReservation.mockResolvedValue({
+      ...reservation,
+      spc_username: "treasury-abcde",
+      spc_credential_ciphertext: "encrypted",
+    });
+    registerSpy.mockRejectedValue(
+      new privateChannels.PrivateChannelError("CONFLICT", "already exists")
+    );
+
+    const result = await provisionPrincipal(
+      {} as never,
+      repo as unknown as PrivateChannelUserRepository,
+      scope
+    );
+
+    expect(loginSpy).toHaveBeenCalledWith(scope.authUrl, {
+      username: "treasury-abcde",
+      password: expect.any(String),
+    });
+    expect(repo.completePrincipal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: reservation.id, spcUserId: null })
+    );
+    expect(result).toEqual({ principal: completed, created: false });
   });
 });

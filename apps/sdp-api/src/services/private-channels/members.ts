@@ -1,7 +1,7 @@
 // Principal provisioning: derive an SPC username, generate a strong random
 // password, register with SPC, encrypt the password, then persist the principal.
 
-import { PrivateChannelError, spcRegister } from "@sdp/private-channels";
+import { PrivateChannelError, spcLogin, spcRegister } from "@sdp/private-channels";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PrivateChannelUserRepository,
@@ -69,6 +69,104 @@ function generatePassword(): string {
   return Buffer.from(bytes).toString("base64url");
 }
 
+interface PrincipalReservation {
+  row: PrivateChannelUserRow;
+  username: string;
+  password: string;
+  ciphertext: string;
+  created: boolean;
+}
+
+async function reserveOrResumePrincipal(
+  repo: PrivateChannelUserRepository,
+  input: ProvisionPrincipalInput,
+  cipher: ReturnType<typeof createSpcCredentialCipher>
+): Promise<PrincipalReservation | ProvisionPrincipalResult> {
+  const password = generatePassword();
+  const username = deriveUsername(input.name);
+  const ciphertext = await cipher.encrypt(input.organizationId, password);
+
+  try {
+    const row = await repo.reservePrincipal({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      instanceId: input.instanceId,
+      name: input.name,
+      isDefault: input.isDefault,
+      createdBy: input.createdBy,
+      spcUsername: username,
+      spcCredentialCiphertext: ciphertext,
+    });
+    return { row, username, password, ciphertext, created: true };
+  } catch (error) {
+    if (!isPostgresUniqueViolation(error)) throw error;
+
+    const pending = await repo.findPrincipalReservation(input);
+    if (pending?.spc_username && pending.spc_credential_ciphertext) {
+      return {
+        row: pending,
+        username: pending.spc_username,
+        password: await cipher.decrypt(input.organizationId, pending.spc_credential_ciphertext),
+        ciphertext: pending.spc_credential_ciphertext,
+        created: false,
+      };
+    }
+
+    if (input.isDefault) {
+      const existing = await repo.findDefaultPrincipal(input, input.instanceId);
+      if (existing) return { principal: existing, created: false };
+    }
+    throw conflict("An active Private Channels identity already uses this name.");
+  }
+}
+
+async function registerOrResumeSpcUser(
+  repo: PrivateChannelUserRepository,
+  input: ProvisionPrincipalInput,
+  reservation: PrincipalReservation
+): Promise<{ spcUserId: string | null; username: string }> {
+  try {
+    const registered = await spcRegister(input.authUrl, {
+      username: reservation.username,
+      password: reservation.password,
+    });
+    return { spcUserId: registered.id, username: registered.username };
+  } catch (error) {
+    if (!(error instanceof PrivateChannelError) || error.code !== "CONFLICT") throw error;
+  }
+
+  // A matching login means a previous attempt registered this persisted
+  // credential but stopped before completing the local reservation.
+  try {
+    await spcLogin(input.authUrl, {
+      username: reservation.username,
+      password: reservation.password,
+    });
+    return { spcUserId: reservation.row.spc_user_id, username: reservation.username };
+  } catch (error) {
+    if (!(error instanceof PrivateChannelError) || error.code !== "UNAUTHORIZED") throw error;
+    await repo.deletePrincipalReservation(input, reservation.row.id);
+    throw conflict("The generated Private Channels username is unavailable. Try again.");
+  }
+}
+
+async function findCompletedReservation(
+  repo: PrivateChannelUserRepository,
+  input: ProvisionPrincipalInput,
+  reservationId: string
+): Promise<PrivateChannelUserRow | null> {
+  try {
+    const current = await repo.getById(input, reservationId);
+    return current && (current.spc_user_id || current.provisioned_at) ? current : null;
+  } catch (statusError) {
+    getLogger().warn(
+      { reservationId, statusError },
+      "private-channel identity: could not read a concurrent provisioning result"
+    );
+    return null;
+  }
+}
+
 /**
  * Provision an SPC credential for a project principal. A principal represents a
  * financial or operational participant; it never represents the SDP actor who
@@ -84,62 +182,30 @@ export async function provisionPrincipal(
     if (existing) return { principal: existing, created: false };
   }
 
+  const cipher = createSpcCredentialCipher(env);
   // Claim the tenant-scoped name/default slot before creating an upstream SPC
-  // user. Concurrent requests now fail locally without leaking an SPC identity.
-  let reservation: PrivateChannelUserRow;
-  try {
-    reservation = await repo.reservePrincipal({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      instanceId: input.instanceId,
-      name: input.name,
-      isDefault: input.isDefault,
-      createdBy: input.createdBy,
-    });
-  } catch (error) {
-    if (isPostgresUniqueViolation(error)) {
-      throw conflict("An active Private Channels identity already uses this name.");
-    }
-    throw error;
-  }
-  try {
-    const password = generatePassword();
-    const cipher = createSpcCredentialCipher(env);
-    const ciphertext = await cipher.encrypt(input.organizationId, password);
+  // user. The encrypted credentials live on the reservation, so a retry resumes
+  // the exact same registration after a crash or ambiguous network response.
+  const reservation = await reserveOrResumePrincipal(repo, input, cipher);
+  if ("principal" in reservation) return reservation;
 
-    let username = deriveUsername(input.name);
-    let registered: Awaited<ReturnType<typeof spcRegister>>;
-    try {
-      registered = await spcRegister(input.authUrl, { username, password });
-    } catch (error) {
-      if (error instanceof PrivateChannelError && error.code === "CONFLICT") {
-        username = deriveUsername(input.name);
-        registered = await spcRegister(input.authUrl, { username, password });
-      } else {
-        throw error;
-      }
-    }
+  try {
+    const registered = await registerOrResumeSpcUser(repo, input, reservation);
 
     const principal = await repo.completePrincipal({
       organizationId: input.organizationId,
       projectId: input.projectId,
-      id: reservation.id,
-      spcUserId: registered.id,
+      id: reservation.row.id,
+      spcUserId: registered.spcUserId,
       spcUsername: registered.username,
-      spcCredentialCiphertext: ciphertext,
+      spcCredentialCiphertext: reservation.ciphertext,
     });
-    return { principal, created: true };
+    return { principal, created: reservation.created };
   } catch (error) {
-    // A reservation has no usable SPC credential. Remove it so a failed remote
-    // call does not leave a broken identity or permanently consume its name.
-    try {
-      await repo.deletePrincipalReservation(input, reservation.id);
-    } catch (cleanupError) {
-      getLogger().warn(
-        { reservationId: reservation.id, cleanupError },
-        "private-channel identity: failed to remove an incomplete reservation"
-      );
-    }
+    // Another retry may have completed the same persisted credential while this
+    // request was at SPC. Converge on that active row instead of failing it.
+    const current = await findCompletedReservation(repo, input, reservation.row.id);
+    if (current) return { principal: current, created: false };
     throw error;
   }
 }

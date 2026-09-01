@@ -92,5 +92,20 @@ describe("0073_private_channel_principals legacy reconciliation", () => {
       "SELECT user_id FROM private_channel_verified_wallets WHERE pubkey = 'shared_pubkey'"
     );
     expect(wallets.rows).toEqual([{ user_id: "pcu_0073_default" }]);
+
+    const indexes = await client.query<{ index_name: string; predicate: string }>(
+      `SELECT indexrelid::regclass::text AS index_name,
+              pg_get_expr(indpred, indrelid) AS predicate
+         FROM pg_index
+        WHERE indexrelid IN (
+          'private_channel_principals_default_key'::regclass,
+          'private_channel_principals_name_key'::regclass
+        )
+        ORDER BY index_name`
+    );
+    expect(indexes.rows).toHaveLength(2);
+    expect(
+      indexes.rows.every(({ predicate }) => predicate.includes("instance_id IS NOT NULL"))
+    ).toBe(true);
   });
 });

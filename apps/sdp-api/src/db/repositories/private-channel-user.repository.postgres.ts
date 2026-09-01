@@ -28,6 +28,7 @@ function mapUserRow(row: Record<string, unknown>): PrivateChannelUserRow {
     spc_user_id: (row.spc_user_id ?? null) as string | null,
     spc_username: (row.spc_username ?? null) as string | null,
     spc_credential_ciphertext: (row.spc_credential_ciphertext ?? null) as string | null,
+    provisioned_at: (row.provisioned_at ?? null) as string | null,
     invited_by: (row.invited_by ?? null) as string | null,
     invite_token: (row.invite_token ?? null) as string | null,
     invited_at: row.invited_at as string,
@@ -101,7 +102,7 @@ export function createPostgresPrivateChannelUserRepository(
             WHERE organization_id = ?
               AND project_id = ?
               AND instance_id = ?
-              AND spc_user_id IS NOT NULL
+              AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
             ORDER BY is_default DESC, created_at ASC, id ASC`
         )
         .bind(scope.organizationId, scope.projectId, instanceId)
@@ -119,7 +120,7 @@ export function createPostgresPrivateChannelUserRepository(
               AND instance_id = ?
               AND is_default = TRUE
               AND disabled_at IS NULL
-              AND spc_user_id IS NOT NULL
+              AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
             LIMIT 1`
         )
         .bind(scope.organizationId, scope.projectId, instanceId)
@@ -137,7 +138,7 @@ export function createPostgresPrivateChannelUserRepository(
               AND pcu.project_id = ?
               AND pcu.is_default = TRUE
               AND pcu.disabled_at IS NULL
-              AND pcu.spc_user_id IS NOT NULL
+              AND (pcu.spc_user_id IS NOT NULL OR pcu.provisioned_at IS NOT NULL)
               AND pci.is_active = TRUE
             ORDER BY pci.created_at DESC, pci.id DESC
             LIMIT 1`
@@ -150,39 +151,48 @@ export function createPostgresPrivateChannelUserRepository(
     async reservePrincipal(input: ReservePrivateChannelPrincipalInput) {
       const row = await db
         .prepare(
-          `WITH stale_reservations AS (
-             DELETE FROM private_channel_users
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND instance_id = ?
-                AND spc_user_id IS NULL
-                AND created_at::timestamptz < NOW() - INTERVAL '5 minutes'
-            RETURNING id
-           )
-           INSERT INTO private_channel_users (
+          `INSERT INTO private_channel_users (
                id, organization_id, project_id, instance_id, user_id,
                name, is_default, created_by,
+               spc_username, spc_credential_ciphertext,
                invited_by, invite_token
              )
-           SELECT ?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL
-             FROM (SELECT COUNT(*) FROM stale_reservations) cleanup
+           VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL)
           RETURNING *`
         )
         .bind(
-          input.organizationId,
-          input.projectId,
-          input.instanceId,
           `pcu_${crypto.randomUUID()}`,
           input.organizationId,
           input.projectId,
           input.instanceId,
           input.name,
           input.isDefault,
-          input.createdBy
+          input.createdBy,
+          input.spcUsername,
+          input.spcCredentialCiphertext
         )
         .first<Record<string, unknown>>();
       if (!row) throw new Error("private channel principal insert returned no row");
       return mapUserRow(row);
+    },
+
+    async findPrincipalReservation(input) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM private_channel_users
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND instance_id = ?
+              AND LOWER(name) = LOWER(?)
+              AND disabled_at IS NULL
+              AND spc_user_id IS NULL
+              AND provisioned_at IS NULL
+            LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.instanceId, input.name)
+        .first<Record<string, unknown>>();
+      return row ? mapUserRow(row) : null;
     },
 
     async completePrincipal(input: CompletePrivateChannelPrincipalInput) {
@@ -192,11 +202,12 @@ export function createPostgresPrivateChannelUserRepository(
               SET spc_user_id = ?,
                   spc_username = ?,
                   spc_credential_ciphertext = ?,
+                  provisioned_at = sdp_iso_now(),
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND spc_user_id IS NULL
+              AND provisioned_at IS NULL
           RETURNING *`
         )
         .bind(
@@ -220,6 +231,7 @@ export function createPostgresPrivateChannelUserRepository(
               AND organization_id = ?
               AND project_id = ?
               AND spc_user_id IS NULL
+              AND provisioned_at IS NULL
           RETURNING id`
         )
         .bind(id, scope.organizationId, scope.projectId)
@@ -406,7 +418,7 @@ export function createPostgresPrivateChannelUserRepository(
                FROM private_channel_users
               WHERE id = ?
                 AND disabled_at IS NULL
-                AND spc_user_id IS NOT NULL
+                AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
               FOR UPDATE
            )
            INSERT INTO private_channel_memberships (

@@ -84,8 +84,8 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     await db
       .prepare(
         `INSERT INTO private_channel_users (
-           id, organization_id, project_id, user_id, instance_id, name, is_default
-         ) VALUES (?, ?, ?, ?, ?, 'Default', TRUE)`
+           id, organization_id, project_id, user_id, instance_id, name, is_default, spc_user_id
+         ) VALUES (?, ?, ?, ?, ?, 'Default', TRUE, 'spc_default')`
       )
       .bind(PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id, instanceA)
       .run();
@@ -128,8 +128,8 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     await db
       .prepare(
         `INSERT INTO private_channel_users (
-           id, organization_id, project_id, instance_id, name, is_default
-         ) VALUES (?, ?, ?, ?, 'Treasury', FALSE)`
+           id, organization_id, project_id, instance_id, name, is_default, spc_user_id
+         ) VALUES (?, ?, ?, ?, 'Treasury', FALSE, 'spc_treasury')`
       )
       .bind(SECOND_PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, instanceA)
       .run();

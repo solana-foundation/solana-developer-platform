@@ -15,17 +15,23 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
     async upsert(input: UpsertVerifiedWalletInput) {
       const row = await db
         .prepare(
-          `INSERT INTO private_channel_verified_wallets (
-               id, organization_id, project_id, user_id, instance_id,
-               wallet_id, pubkey
-             )
-             SELECT ?, ?, ?, ?, ?, ?, ?
+          `WITH active_principal AS (
+             SELECT id
                FROM private_channel_users
               WHERE id = ?
                 AND organization_id = ?
                 AND project_id = ?
                 AND instance_id = ?
                 AND disabled_at IS NULL
+                AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
+              FOR UPDATE
+           )
+           INSERT INTO private_channel_verified_wallets (
+               id, organization_id, project_id, user_id, instance_id,
+               wallet_id, pubkey
+             )
+             SELECT ?, ?, ?, id, ?, ?, ?
+               FROM active_principal
              ON CONFLICT (instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
                    verified_at = sdp_iso_now(),
@@ -34,17 +40,16 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           RETURNING *`
         )
         .bind(
+          input.userId,
+          input.organizationId,
+          input.projectId,
+          input.instanceId,
           generatePrivateChannelVerifiedWalletId(),
           input.organizationId,
           input.projectId,
-          input.userId,
           input.instanceId,
           input.walletId,
-          input.pubkey,
-          input.userId,
-          input.organizationId,
-          input.projectId,
-          input.instanceId
+          input.pubkey
         )
         .first<Record<string, unknown>>();
       if (!row) {

@@ -10,7 +10,14 @@ ALTER TABLE private_channel_users
     ADD COLUMN IF NOT EXISTS name TEXT,
     ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS disabled_at TEXT,
-    ADD COLUMN IF NOT EXISTS created_by TEXT;
+    ADD COLUMN IF NOT EXISTS created_by TEXT,
+    ADD COLUMN IF NOT EXISTS provisioned_at TEXT;
+
+UPDATE private_channel_users
+   SET provisioned_at = COALESCE(accepted_at, created_at)
+ WHERE provisioned_at IS NULL
+   AND spc_username IS NOT NULL
+   AND spc_credential_ciphertext IS NOT NULL;
 
 UPDATE private_channel_users pcu
    SET instance_id = (
@@ -101,11 +108,11 @@ END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS private_channel_principals_default_key
     ON private_channel_users(organization_id, project_id, instance_id)
-    WHERE is_default = TRUE AND disabled_at IS NULL;
+    WHERE is_default = TRUE AND disabled_at IS NULL AND instance_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS private_channel_principals_name_key
     ON private_channel_users(organization_id, project_id, instance_id, LOWER(name))
-    WHERE disabled_at IS NULL;
+    WHERE disabled_at IS NULL AND instance_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS private_channel_principals_instance_created
     ON private_channel_users(instance_id, created_at DESC);

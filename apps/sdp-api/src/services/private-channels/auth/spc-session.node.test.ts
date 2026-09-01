@@ -52,6 +52,7 @@ function pcUser(overrides: Partial<PrivateChannelUserRow> = {}): PrivateChannelU
     spc_user_id: "spc-1",
     spc_username: USERNAME,
     spc_credential_ciphertext: credentialCiphertext,
+    provisioned_at: "2026-01-01T00:00:00.000Z",
     invited_by: null,
     invite_token: null,
     invited_at: "2026-01-01T00:00:00.000Z",

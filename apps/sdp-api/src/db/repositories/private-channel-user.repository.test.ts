@@ -101,8 +101,16 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
     return created.id;
   }
 
+  async function markPrincipalProvisioned(): Promise<void> {
+    await getDb(env)
+      .prepare("UPDATE private_channel_users SET spc_user_id = 'spc_default' WHERE id = ?")
+      .bind(PCU_ID)
+      .run();
+  }
+
   it("counts the member's wallets verified under the active instance", async () => {
     const instanceA = await connectInstance();
+    await markPrincipalProvisioned();
     await walletRepo.upsert({
       ...scope,
       userId: PCU_ID,
@@ -126,6 +134,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
 
   it("excludes verifications made under a since-deactivated instance", async () => {
     const instanceA = await connectInstance();
+    await markPrincipalProvisioned();
     await walletRepo.upsert({
       ...scope,
       userId: PCU_ID,
@@ -151,6 +160,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
 
   it("is 0 when the project has no active instance", async () => {
     const instanceA = await connectInstance();
+    await markPrincipalProvisioned();
     await walletRepo.upsert({
       ...scope,
       userId: PCU_ID,
@@ -211,19 +221,10 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
     });
   });
 
-  it("reclaims a stale incomplete reservation before reserving the same name", async () => {
+  it("keeps an incomplete reservation available for provisioning recovery", async () => {
     const instanceId = await connectInstance();
     const db = getDb(env);
-    await db
-      .prepare(
-        `UPDATE private_channel_users
-            SET name = 'Treasury',
-                is_default = FALSE,
-                created_at = '2020-01-01T00:00:00.000Z'
-          WHERE id = ?`
-      )
-      .bind(PCU_ID)
-      .run();
+    await db.prepare("DELETE FROM private_channel_users WHERE id = ?").bind(PCU_ID).run();
 
     const reserved = await repo.reservePrincipal({
       ...scope,
@@ -231,12 +232,17 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       name: "Treasury",
       isDefault: false,
       createdBy: TEST_USER.id,
+      spcUsername: "treasury-recovery",
+      spcCredentialCiphertext: "encrypted",
     });
 
-    expect(reserved.id).not.toBe(PCU_ID);
     await expect(
-      db.prepare("SELECT id FROM private_channel_users WHERE id = ?").bind(PCU_ID).first()
-    ).resolves.toBeNull();
+      repo.findPrincipalReservation({ ...scope, instanceId, name: "Treasury" })
+    ).resolves.toMatchObject({
+      id: reserved.id,
+      spc_username: "treasury-recovery",
+      provisioned_at: null,
+    });
   });
 
   it("does not add a membership after its principal is disabled", async () => {

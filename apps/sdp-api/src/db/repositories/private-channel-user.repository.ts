@@ -28,6 +28,7 @@ export interface PrivateChannelUserRow {
   spc_user_id: string | null;
   spc_username: string | null;
   spc_credential_ciphertext: string | null;
+  provisioned_at: string | null;
   invited_by: string | null;
   invite_token: string | null;
   invited_at: string;
@@ -79,11 +80,13 @@ export interface ReservePrivateChannelPrincipalInput extends ProjectScope {
   name: string;
   isDefault: boolean;
   createdBy: string | null;
+  spcUsername: string;
+  spcCredentialCiphertext: string;
 }
 
 export interface CompletePrivateChannelPrincipalInput extends ProjectScope {
   id: string;
-  spcUserId: string;
+  spcUserId: string | null;
   spcUsername: string;
   spcCredentialCiphertext: string;
 }
@@ -113,6 +116,14 @@ export interface PrivateChannelUserRepository {
 
   /** Reserve the unique local identity before creating its upstream SPC user. */
   reservePrincipal(input: ReservePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
+
+  /** Find an incomplete reservation so provisioning can resume its credentials. */
+  findPrincipalReservation(
+    input: Pick<
+      ReservePrivateChannelPrincipalInput,
+      "organizationId" | "projectId" | "instanceId" | "name"
+    >
+  ): Promise<PrivateChannelUserRow | null>;
 
   /** Attach the successfully registered SPC credentials to a reservation. */
   completePrincipal(input: CompletePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
