@@ -139,25 +139,36 @@ export const disablePrivateChannelPrincipal = async (c: AppContext) => {
       const disabled = await repo.disablePrincipal(scope, principal.id);
       if (!disabled) throw notFound("Private Channels principal");
     }
-    // Wallet verification has its own disabled-row guard and compensation.
-    // Repeating cleanup makes retries repair any partial external revocation.
-    await revokePrivateChannelPrincipalWallets(c.env, auth, scope.projectId, principal.id);
   } catch (error) {
     throw mapPrivateChannelError(error);
   }
 
-  const memberships = await repo.listMembershipsForUser(principal.id);
-  for (const membership of memberships) {
-    await repo.removeMembership(membership.channel_id, principal.id);
-    await emitMember(
-      c,
-      { ...scope, instanceId: instance.id },
-      PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_REVOKED,
-      {
-        channelId: membership.channel_id,
-        payload: { principalId: principal.id, reason: "principal_disabled" },
+  // These repairs are independent. Await both so a failed upstream wallet
+  // revocation cannot leave a disabled principal visibly attached to channels,
+  // and a membership failure cannot skip durable wallet cleanup.
+  const cleanupResults = await Promise.allSettled([
+    revokePrivateChannelPrincipalWallets(c.env, auth, scope.projectId, principal.id),
+    (async () => {
+      const memberships = await repo.listMembershipsForUser(principal.id);
+      for (const membership of memberships) {
+        await repo.removeMembership(membership.channel_id, principal.id);
+        await emitMember(
+          c,
+          { ...scope, instanceId: instance.id },
+          PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_REVOKED,
+          {
+            channelId: membership.channel_id,
+            payload: { principalId: principal.id, reason: "principal_disabled" },
+          }
+        );
       }
-    );
+    })(),
+  ]);
+  const failedCleanup = cleanupResults.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (failedCleanup) {
+    throw mapPrivateChannelError(failedCleanup.reason);
   }
   return success(c, { disabled: true });
 };
