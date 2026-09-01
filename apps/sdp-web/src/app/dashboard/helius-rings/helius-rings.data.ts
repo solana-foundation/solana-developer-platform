@@ -38,14 +38,15 @@ export interface ProjectRing {
   updatedAt: string;
 }
 
+/** Mirrors RING_NAME_PATTERN in @sdp/helius-rings (no server imports here). */
+export const RING_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
+
+/** The reserved name of the default public pool; can never name a custom ring. */
+export const DEFAULT_RING_NAME = "default";
+
 /** The project's custom rings, oldest first; empty while it only uses the default pool. */
-export async function fetchProjectRings(fallbackError: string): Promise<ProjectRing[]> {
-  const response = await fetch("/api/dashboard/helius-rings/rings", { cache: "no-store" });
-  const result = await readEnvelope<{ rings: ProjectRing[] }>(response);
-  if (!result.ok) {
-    throw new Error(result.error ?? fallbackError);
-  }
-  return result.data.rings;
+export function fetchProjectRings(fallbackError: string): Promise<{ rings: ProjectRing[] }> {
+  return getJson("/api/dashboard/helius-rings/rings", fallbackError);
 }
 
 /**
@@ -56,13 +57,7 @@ export async function createProjectRing(input: {
   name: string;
   ringProgramId: string;
 }): Promise<{ ring?: ProjectRing; error?: string }> {
-  const response = await fetch("/api/dashboard/helius-rings/rings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-    cache: "no-store",
-  });
-  const result = await readEnvelope<{ ring: ProjectRing }>(response);
+  const result = await postJson<{ ring: ProjectRing }>("/api/dashboard/helius-rings/rings", input);
   if (!result.ok) {
     return { error: result.error };
   }
@@ -158,6 +153,22 @@ async function getJson<T>(path: string, fallbackError: string): Promise<T> {
   return result.data;
 }
 
+/** POST through the BFF, JSON body optional, returning the envelope result. */
+async function postJson<T>(
+  path: string,
+  body?: Record<string, unknown>
+): Promise<EnvelopeResult<T>> {
+  const response = await fetch(path, {
+    method: "POST",
+    ...(body !== undefined && {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    cache: "no-store",
+  });
+  return readEnvelope<T>(response);
+}
+
 export function fetchRingsHealth(fallbackError: string): Promise<{ health: RingsHealth }> {
   return getJson("/api/dashboard/helius-rings/health", fallbackError);
 }
@@ -195,13 +206,10 @@ export async function createRingsWallet(input: {
   walletId: string;
   name: string;
 }): Promise<CreateRingsWalletResult> {
-  const response = await fetch("/api/dashboard/helius-rings/wallets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-    cache: "no-store",
-  });
-  const result = await readEnvelope<{ wallet: RingsWallet }>(response);
+  const result = await postJson<{ wallet: RingsWallet }>(
+    "/api/dashboard/helius-rings/wallets",
+    input
+  );
   if (!result.ok) {
     return { error: result.error };
   }
@@ -246,11 +254,9 @@ export interface RingsWalletSync {
 export async function syncRingsWallet(
   walletId: string
 ): Promise<{ sync?: RingsWalletSync; error?: string }> {
-  const response = await fetch(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/sync`,
-    { method: "POST", cache: "no-store" }
+  const result = await postJson<RingsWalletSync>(
+    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/sync`
   );
-  const result = await readEnvelope<RingsWalletSync>(response);
   if (!result.ok) {
     return { error: result.error };
   }
@@ -322,15 +328,7 @@ async function postOperation(
   path: string,
   body?: Record<string, unknown>
 ): Promise<OperationResult> {
-  const response = await fetch(path, {
-    method: "POST",
-    ...(body !== undefined && {
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-    cache: "no-store",
-  });
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
+  const result = await postJson<{ operation: RingsOperationDetail }>(path, body);
   if (!result.ok) return { error: result.error };
   return { operation: result.data.operation };
 }

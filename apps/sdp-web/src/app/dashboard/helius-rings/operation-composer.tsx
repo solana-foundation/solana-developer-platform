@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import {
+  DEFAULT_RING_NAME,
   type ProjectRing,
   prepareRingsOperation,
   RINGS_ALLOWLISTED_ASSETS,
@@ -31,8 +32,8 @@ interface ComposerDraft {
   /** User-typed decimal amount, e.g. "1.01". Converted to base units at submit. */
   amountDecimal: string;
   recipient: string;
-  /** Ring NAME the operation targets; "default" = the default public pool. */
-  ring: string;
+  /** Ring NAME the operation targets; null = the default public pool, as the API speaks it. */
+  ring: string | null;
 }
 
 function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDraft {
@@ -42,7 +43,7 @@ function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDra
     assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
     amountDecimal: "",
     recipient: "",
-    ring: "default",
+    ring: null,
   };
 }
 
@@ -85,7 +86,7 @@ function buildSummaryRows(
   if (projectRings.length > 0) {
     rows.push([
       t("DashboardHeliusRings.composer.summaryRing"),
-      draft.ring === "default" ? t("DashboardHeliusRings.composer.ringDefault") : draft.ring,
+      draft.ring === null ? t("DashboardHeliusRings.composer.ringDefault") : draft.ring,
     ]);
   }
   if (draft.opType === "transfer_registered") {
@@ -153,7 +154,7 @@ export function OperationComposer({
         asset: { mint: draft.assetMint, amountRaw },
         to,
         // Omitted when default: the field exists only to name a custom ring.
-        ...(draft.ring !== "default" ? { ring: draft.ring } : {}),
+        ...(draft.ring ? { ring: draft.ring } : {}),
       });
     } finally {
       setSubmitting(false);
@@ -201,7 +202,7 @@ export function OperationComposer({
                 // destination, a spend's source of funds — so a carried-over
                 // choice would silently redirect value. Every switch starts
                 // from the default pool.
-                patchDraft({ opType, ring: "default" });
+                patchDraft({ opType, ring: null });
               }}
             />
             <ComposeStep
@@ -330,12 +331,15 @@ function ComposeStep({
           <Field label={t("DashboardHeliusRings.composer.ring")}>
             <Select
               ariaLabel={t("DashboardHeliusRings.composer.ring")}
-              value={draft.ring}
+              // DOM select values are strings, so the reserved name stands in
+              // for null at this one boundary; the server makes a ring
+              // literally named "default" impossible.
+              value={draft.ring ?? DEFAULT_RING_NAME}
               onValueChange={(value) => {
-                if (value) onPatch({ ring: value });
+                if (value) onPatch({ ring: value === DEFAULT_RING_NAME ? null : value });
               }}
             >
-              <SelectItem value="default">
+              <SelectItem value={DEFAULT_RING_NAME}>
                 {t("DashboardHeliusRings.composer.ringDefault")}
               </SelectItem>
               {/* Non-active rings are disabled rather than hidden: the option

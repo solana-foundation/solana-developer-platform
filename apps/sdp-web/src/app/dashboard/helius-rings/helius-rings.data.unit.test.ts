@@ -130,14 +130,14 @@ describe("project rings", () => {
   it("reads the project's rings as a list", async () => {
     respondWith(200, { data: { rings: [RING] } });
 
-    await expect(fetchProjectRings("unused")).resolves.toEqual([RING]);
+    await expect(fetchProjectRings("unused")).resolves.toEqual({ rings: [RING] });
   });
 
   // A project with no custom ring is the normal case, not an error.
   it("reads no rings as an empty list", async () => {
     respondWith(200, { data: { rings: [] } });
 
-    await expect(fetchProjectRings("unused")).resolves.toEqual([]);
+    await expect(fetchProjectRings("unused")).resolves.toEqual({ rings: [] });
   });
 
   it("throws the server's own reason, and the caller's copy when it gave none", async () => {

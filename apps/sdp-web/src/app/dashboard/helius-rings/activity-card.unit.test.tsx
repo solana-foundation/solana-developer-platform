@@ -44,7 +44,12 @@ function renderCard(operations: RingsOperationSummary[]) {
   const onSelect = vi.fn();
   render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <ActivityCard operations={operations} onChanged={onChanged} onSelect={onSelect} />
+      <ActivityCard
+        operations={operations}
+        projectRings={[]}
+        onChanged={onChanged}
+        onSelect={onSelect}
+      />
     </I18nProvider>
   );
   return { onChanged, onSelect };

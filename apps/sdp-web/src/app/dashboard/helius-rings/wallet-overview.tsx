@@ -6,8 +6,32 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { ProjectRing, RingsWallet, RingsWalletSync } from "./helius-rings.data";
-import { formatAssetAmount, shortenShieldedAddress } from "./helius-rings.utils";
+import {
+  formatAssetAmount,
+  ringNameByProgramId,
+  shortenShieldedAddress,
+} from "./helius-rings.utils";
 import { useRingsBalance } from "./use-rings-balance";
+
+/**
+ * Adjacent-run grouping over the API's deterministic order (default bucket
+ * first, then rings ascending) — value never merges across rings, so each
+ * ring's notes read as their own block. No client-side re-sort.
+ */
+function groupByRing(
+  balances: RingsWalletSync["balances"]
+): Array<{ ring: string | null; balances: RingsWalletSync["balances"] }> {
+  const groups: Array<{ ring: string | null; balances: RingsWalletSync["balances"] }> = [];
+  for (const balance of balances) {
+    const current = groups[groups.length - 1];
+    if (current && current.ring === balance.ringProgramId) {
+      current.balances.push(balance);
+    } else {
+      groups.push({ ring: balance.ringProgramId, balances: [balance] });
+    }
+  }
+  return groups;
+}
 
 /**
  * Wallet header + full balance summary for the selected wallet. This is the
@@ -22,7 +46,7 @@ export function WalletOverview({
   wallet: RingsWallet;
   refreshTick?: number;
   /** Names the per-ring balance groups; unknown ids fall back to the truncated program id. */
-  projectRings?: ProjectRing[];
+  projectRings: ProjectRing[];
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -69,7 +93,7 @@ export function WalletOverview({
         ) : state.name === "failed" ? (
           <p className="text-error">{t("DashboardHeliusRings.overview.failed")}</p>
         ) : (
-          <Summary sync={state.sync} locale={locale} projectRings={projectRings ?? []} />
+          <Summary sync={state.sync} locale={locale} projectRings={projectRings} />
         )}
       </CardContent>
     </Card>
@@ -95,20 +119,8 @@ function Summary({
     );
   }
 
-  const nameByProgramId = new Map(projectRings.map((ring) => [ring.ringProgramId, ring.name]));
-
-  // Adjacent-run grouping over the API's deterministic order (default bucket
-  // first, then rings ascending) — value never merges across rings, so each
-  // ring's notes read as their own block. No client-side re-sort.
-  const groups: Array<{ ring: string | null; balances: RingsWalletSync["balances"] }> = [];
-  for (const balance of sync.balances) {
-    const current = groups[groups.length - 1];
-    if (current && current.ring === balance.ringProgramId) {
-      current.balances.push(balance);
-    } else {
-      groups.push({ ring: balance.ringProgramId, balances: [balance] });
-    }
-  }
+  const nameByProgramId = ringNameByProgramId(projectRings);
+  const groups = groupByRing(sync.balances);
 
   return (
     <div className="flex flex-col gap-2">
@@ -132,7 +144,7 @@ function Summary({
           <ul className="flex flex-col gap-0.5">
             {group.balances.map((balance) => (
               <li
-                key={`${balance.ringProgramId ?? "default"}:${balance.mint}`}
+                key={balance.mint}
                 className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm"
               >
                 <span className="tabular-nums text-primary">

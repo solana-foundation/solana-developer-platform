@@ -10,16 +10,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { createProjectRing, type ProjectRing, type ProjectRingStatus } from "./helius-rings.data";
+import {
+  createProjectRing,
+  DEFAULT_RING_NAME,
+  type ProjectRing,
+  type ProjectRingStatus,
+  RING_NAME_PATTERN,
+} from "./helius-rings.data";
+import { Address } from "./wallet-identity-check";
 
 const STATUS_BADGE: Record<ProjectRingStatus, BadgeVariant> = {
   pending: "warning",
   active: "success",
   failed: "danger",
 };
-
-/** Mirrors RING_NAME_PATTERN in @sdp/helius-rings (no server imports here). */
-const RING_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 
 /**
  * The project's named custom rings. Ops pre-deploys each ring program;
@@ -73,7 +77,7 @@ export function RingCard({
   const trimmedName = name.trim();
   const formComplete =
     RING_NAME_PATTERN.test(trimmedName) &&
-    trimmedName !== "default" &&
+    trimmedName !== DEFAULT_RING_NAME &&
     ringProgramId.trim().length > 0;
 
   // Keep the page flat as rings grow: the list lives in a dialog, and the
@@ -91,13 +95,7 @@ export function RingCard({
           <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.none")}</p>
         ) : (
           <div>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSelectedRingId((current) => current ?? rings[0].id);
-                setListOpen(true);
-              }}
-            >
+            <Button variant="secondary" onClick={() => setListOpen(true)}>
               <span>{t("DashboardHeliusRings.ring.openList")}</span>
               <Badge variant="default">{rings.length}</Badge>
             </Button>
@@ -151,21 +149,21 @@ export function RingCard({
         </div>
       </CardContent>
 
-      <Modal
-        isOpen={listOpen && selectedRing !== null}
-        ariaLabel={t("DashboardHeliusRings.ring.title")}
-        onClose={() => setListOpen(false)}
-        size="xl"
-      >
-        <div className="p-6 pr-14">
-          <h2 className="text-base font-medium text-primary">
-            {t("DashboardHeliusRings.ring.title")}
-          </h2>
-          <p className="mt-1 text-sm text-secondary">
-            {t("DashboardHeliusRings.ring.dialogDescription")}
-          </p>
+      {selectedRing === null ? null : (
+        <Modal
+          isOpen={listOpen}
+          ariaLabel={t("DashboardHeliusRings.ring.title")}
+          onClose={() => setListOpen(false)}
+          size="xl"
+        >
+          <div className="p-6 pr-14">
+            <h2 className="text-base font-medium text-primary">
+              {t("DashboardHeliusRings.ring.title")}
+            </h2>
+            <p className="mt-1 text-sm text-secondary">
+              {t("DashboardHeliusRings.ring.dialogDescription")}
+            </p>
 
-          {selectedRing === null ? null : (
             <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,13rem)_1fr]">
               <ul className="flex flex-col gap-1" aria-label={t("DashboardHeliusRings.ring.title")}>
                 {rings.map((ring) => {
@@ -219,9 +217,9 @@ export function RingCard({
                 ) : null}
               </div>
             </div>
-          )}
-        </div>
-      </Modal>
+          </div>
+        </Modal>
+      )}
     </Card>
   );
 }
@@ -251,29 +249,20 @@ function RingDetails({ ring }: { ring: ProjectRing }) {
       ) : null}
 
       <dl className="flex flex-col gap-2">
-        <Field label={t("DashboardHeliusRings.ring.programId")} value={ring.ringProgramId} />
+        <Address label={t("DashboardHeliusRings.ring.programId")} value={ring.ringProgramId} />
         {ring.auditorPublicKeyHex === null ? null : (
-          <Field
+          <Address
             label={t("DashboardHeliusRings.ring.auditorKey")}
             value={ring.auditorPublicKeyHex}
           />
         )}
         {ring.lookupTableAddress === null ? null : (
-          <Field
+          <Address
             label={t("DashboardHeliusRings.ring.lookupTable")}
             value={ring.lookupTableAddress}
           />
         )}
       </dl>
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-xs text-secondary">{label}</dt>
-      <dd className="break-all font-mono text-xs text-primary">{value}</dd>
     </div>
   );
 }

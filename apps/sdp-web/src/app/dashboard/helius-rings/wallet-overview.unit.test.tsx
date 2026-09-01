@@ -50,7 +50,7 @@ function sync(balances: RingsWalletSync["balances"], totalUsd?: number | null): 
   return { balances, degraded: false, observedAt: "2026-08-26T12:00:00.000Z", totalUsd };
 }
 
-function renderOverview(projectRings?: ProjectRing[], wallet: RingsWallet = WALLET) {
+function renderOverview(projectRings: ProjectRing[] = [], wallet: RingsWallet = WALLET) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <WalletOverview wallet={wallet} projectRings={projectRings} />

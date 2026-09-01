@@ -27,6 +27,7 @@ import {
   formatAssetAmount,
   formatWhen,
   isSettling,
+  ringNameByProgramId,
   shortenOperationId,
   shortenShieldedAddress,
 } from "./helius-rings.utils";
@@ -117,7 +118,7 @@ export function ActivityCard({
 }: {
   operations: RingsOperationSummary[];
   /** Names the ring pinned on each row; unknown ids fall back to the truncated program id. */
-  projectRings?: ProjectRing[];
+  projectRings: ProjectRing[];
   onChanged: () => Promise<void>;
   onSelect: (operationId: string) => void;
 }) {
@@ -126,10 +127,7 @@ export function ActivityCard({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const ringNameByProgramId = useMemo(
-    () => new Map((projectRings ?? []).map((ring) => [ring.ringProgramId, ring.name])),
-    [projectRings]
-  );
+  const ringNames = useMemo(() => ringNameByProgramId(projectRings), [projectRings]);
 
   const retriedBy = useMemo(() => {
     const successors = new Map<string, string>();
@@ -247,7 +245,7 @@ export function ActivityCard({
                     <TableCell>
                       {operation.ringProgramId === null
                         ? t("DashboardHeliusRings.activity.ringDefault")
-                        : (ringNameByProgramId.get(operation.ringProgramId) ??
+                        : (ringNames.get(operation.ringProgramId) ??
                           shortenShieldedAddress(operation.ringProgramId))}
                     </TableCell>
                     <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>

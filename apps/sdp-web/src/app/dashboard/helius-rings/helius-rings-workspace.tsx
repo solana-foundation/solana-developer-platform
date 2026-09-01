@@ -48,25 +48,39 @@ export function HeliusRingsWorkspace({
 
   const refresh = useCallback(async () => {
     try {
-      const [healthResult, walletsResult, operationsResult, ringsResult] = await Promise.all([
+      const [healthResult, walletsResult, operationsResult] = await Promise.all([
         fetchRingsHealth(loadFailedCopy),
         fetchRingsWallets(loadFailedCopy),
         fetchRingsOperations(loadFailedCopy),
-        fetchProjectRings(loadFailedCopy),
       ]);
       setHealth(healthResult.health);
       setWallets(walletsResult.wallets);
       setOperations(operationsResult.operations);
-      setProjectRings(ringsResult);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : loadFailedCopy);
     }
   }, [loadFailedCopy]);
 
+  // Rings live outside `refresh` on purpose: the settling poll below re-runs
+  // `refresh` every 4s, and the near-static ring rows only change through the
+  // ring card, which refreshes them itself.
+  const refreshRings = useCallback(async () => {
+    try {
+      const { rings } = await fetchProjectRings(loadFailedCopy);
+      setProjectRings(rings);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : loadFailedCopy);
+    }
+  }, [loadFailedCopy]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refresh(), refreshRings()]);
+  }, [refresh, refreshRings]);
+
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refreshAll();
+  }, [refreshAll]);
 
   // Bumped whenever a new operation transitions to completed on our watch, so
   // the balance surfaces re-sync and the just-landed value is on screen without
@@ -171,7 +185,7 @@ export function HeliusRingsWorkspace({
 
       <HealthStrip health={health} alerts={alerts} />
 
-      <RingCard rings={projectRings} onChanged={refresh} />
+      <RingCard rings={projectRings} onChanged={refreshAll} />
 
       <PrivateWalletsCard
         wallets={wallets}
