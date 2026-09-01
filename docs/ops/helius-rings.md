@@ -171,34 +171,26 @@ Enabled when `HELIUS_RINGS_ENABLED=true`.
 
 ## Custom rings
 
-Named custom rings, no fixed cap per project — a project holds as many as ops
-deploys. A custom
-ring is its own on-chain program; deposits into it are ring-bound, so only
-that ring's own instructions can ever spend the notes, and every ring transfer
-carries a message the ring's auditor key can decrypt. Ring membership is a
-property of each note, not of a wallet: one private wallet holds default-pool
-notes and notes of several rings side by side, and each operation names the
-ring it targets — by the operator-chosen name recorded with the ring
-(`"default"` is reserved for the public pool and can never name one). SDP
-operates a ring but does not deploy its program — the TypeScript SDK has no
-program-deploy capability.
+Named custom rings, no fixed cap per project. A custom ring is its own
+on-chain program: deposits into it are ring-bound, so only that ring's own
+instructions can ever spend the notes, and every ring transfer carries a
+message the ring's auditor key can decrypt. Ring membership is a property of
+each note, not of a wallet — one private wallet holds default-pool notes and
+notes of several rings side by side. SDP operates a ring but does not deploy
+its program.
 
 ### Ops runbook: deploying a project's ring program
 
 1. Get the `zolana-ring` CLI from the `custom-rings` release of
-   [`helius-labs/zolana`](https://github.com/helius-labs/zolana). (The old
-   `zolana-ring` cargo-generate template repo is archived; the CLI replaced
-   it.) `zolana-ring new` writes the ring's `ring.toml` and program keypair —
+   [`helius-labs/zolana`](https://github.com/helius-labs/zolana).
+   `zolana-ring new` writes the ring's `ring.toml` and program keypair —
    each ring gets a distinct program id.
 2. Deploy to devnet with `zolana-ring deploy`, with the upgrade authority set
-   to one of the project's active custody wallets. The CLI downloads its
-   release's ring program binary, checks it against the lockfile built into
-   the CLI, and after deploying reads the account back and refuses to report
-   success unless the bytes on chain hash to the file it deployed. Bring-up
-   signs as the upgrade authority through custody, so a program whose
-   authority custody does not hold cannot be brought up. Fund that custody
-   wallet with devnet SOL first: it fee-pays every bring-up transaction and
-   rents the config, ring-auth, reader-record, and lookup-table accounts.
+   to one of the project's active custody wallets: bring-up signs as that
+   authority through custody, so a program whose authority custody does not
+   hold cannot be brought up. Fund the wallet with devnet SOL first — it
+   fee-pays every bring-up transaction and rents the config, ring-auth,
+   reader-record, and lookup-table accounts.
 3. Hand the program id to the project admin. They enter it with a name in the
    dashboard's *Custom rings* card (or `POST /v1/helius-rings/rings`).
 
@@ -245,8 +237,7 @@ failure recorded on the row.
   and the recipient is a same-tenant wallet's shielded address.
 - **Resume, never re-key.** Bring-up is idempotent against on-chain state:
   re-submitting the same name and program id resumes from whatever already
-  landed (config present, pool registration missing, lookup table missing, and
-  so on). An existing on-chain config is adopted as it stands — re-keying a
+  landed. An existing on-chain config is adopted as it stands — re-keying a
   live ring would orphan its auditor. Adopting a fully-registered ring lands
   no ring-program transaction, so custody first proves it holds the config
   authority by signing a challenge; a ring administered by someone else's key
@@ -275,22 +266,6 @@ pool in two hops), SPL ring spends (the withdrawal builder is SOL-only in
 grant makes the custody-held config authority the ring's only reader, so
 serving decrypted reads or granting a third-party reader needs a future
 custody-signed endpoint), and `GET /rings/:name` point reads.
-
-### Local dev DB repair (pre-rename schema)
-
-Migration 0072 was rewritten in place while unmerged (named rings, lookup
-table); no deployed environment ever ran the old shape, but a local dev DB
-that did needs a one-time repair:
-
-```sql
-DELETE FROM schema_migrations WHERE version = '0072_helius_rings_project_rings.sql';
-DROP TABLE helius_rings_project_rings;
-```
-
-Restart the API so migrations re-run with the new DDL,
-then re-`POST /v1/helius-rings/rings` with a name and the same program id:
-bring-up resumes from on-chain state, landing only the new lookup-table step,
-and re-activates. Operation rows are untouched — 0073 has no FK.
 
 ## Diagnostics
 
