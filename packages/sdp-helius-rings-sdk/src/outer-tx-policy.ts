@@ -30,6 +30,10 @@ const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const DEPOSIT_TAG = 11;
 const RING_DEPOSIT_TAG = 14;
 const TRANSACT_TAG = 12;
+/** Byte 0 of a ring program's transact instruction (its own dispatch, not the pool's). */
+const RING_TRANSACT_TAG = 3;
+/** zolana's CUSTOM_RING_PROOF_LENGTH: a(32) || b(64) || c(32) || commitment(32) || commitmentPok(32). */
+const RING_PROOF_LENGTH = 192;
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
 const ZERO_32 = new Uint8Array(32);
 const COMPUTE_LIMIT = getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT });
@@ -53,12 +57,23 @@ export type OuterTransactionPolicyIntent =
       opType: "transfer_registered";
       mint: string;
       amountRaw: string;
+      /**
+       * Present when the spend was pinned to a custom ring at prepare time;
+       * always arrives together with `ringLookupTable`. The transact must then
+       * be the ring program's own tag-3 instruction, ALT-compressed over that
+       * table.
+       */
+      ringProgramId?: string;
+      ringLookupTable?: string;
     }>
   | Readonly<{
       opType: "withdraw";
       mint: string;
       amountRaw: string;
       to: string;
+      /** Same contract as the transfer arm's ring pair. */
+      ringProgramId?: string;
+      ringLookupTable?: string;
     }>;
 
 /** Kit-neutral DTO accepted at the SDK/API major-version boundary. */
@@ -76,6 +91,13 @@ interface DecodedInstruction {
   readonly data?: Uint8Array;
 }
 
+/** Kit's compiled v0 lookup entry; indexes point into the on-chain table's address vector. */
+interface DecodedAddressTableLookup {
+  readonly lookupTableAddress: string;
+  readonly writableIndexes: readonly number[];
+  readonly readonlyIndexes: readonly number[];
+}
+
 interface DecodedMessage {
   readonly version: 0 | "legacy";
   readonly header: Readonly<{
@@ -85,7 +107,7 @@ interface DecodedMessage {
   }>;
   readonly staticAccounts: readonly string[];
   readonly instructions: readonly DecodedInstruction[];
-  readonly addressTableLookups?: readonly unknown[];
+  readonly addressTableLookups?: readonly DecodedAddressTableLookup[];
 }
 
 interface AccountExpectation {
@@ -289,14 +311,30 @@ function parseRingDeposit(data: Uint8Array): ParsedRingDeposit {
 function parsePublicInterfaceTransfers(data: Uint8Array): readonly ParsedInterfaceTransfer[] {
   const reader = new StrictReader(data);
   if (reader.u8() !== TRANSACT_TAG) mismatch();
+  return parseTransactBody(reader);
+}
 
+/**
+ * The ring program's transact: `tag(3) || proof(192) || transact body`. The
+ * body is byte-compatible with the pool transact's — there is no inner
+ * discriminator; the ring tag enters only the proof's external-data hash.
+ * The custom-ring proof is opaque here and verified by the ring program on
+ * chain.
+ */
+function parseRingTransact(data: Uint8Array): readonly ParsedInterfaceTransfer[] {
+  const reader = new StrictReader(data);
+  if (reader.u8() !== RING_TRANSACT_TAG) mismatch();
+  reader.bytes(RING_PROOF_LENGTH);
+  return parseTransactBody(reader);
+}
+
+function parseTransactBody(reader: StrictReader): readonly ParsedInterfaceTransfer[] {
   reader.u64(); // opaque expiry
   reader.bytes(32); // private transaction hash
   reader.bytes(5); // opaque circuit kind, input/output counts and public-asset slots
   reader.bytes(33); // transaction viewing public key
   reader.bytes(16); // salt
   reader.bytes(128); // proof
-
   const inputCount = reader.u8();
   reader.bytes(inputCount * 36);
 
@@ -437,6 +475,248 @@ async function ringAuthAddress(ringProgramId: Address): Promise<Address> {
     seeds: [textEncoder.encode("ring_auth")],
   });
   return derived;
+}
+
+/**
+ * The exact contents of a ring's address lookup table, derived locally with no
+ * RPC and no zolana import. Sound only through a chain of custody this SDK
+ * enforces end to end: the bring-up gate asserts the extend instruction's
+ * address vector byte-equals this list, custody is the table's authority, and
+ * custody never signs another extend (the bring-up gate refuses anything
+ * else). Order is load-bearing — message lookups index into it. Mirrors
+ * zolana's `ringLookupTableAddresses` with inputTree === outputTree deduped; a
+ * unit test pins the two together so upstream drift breaks the build instead
+ * of custody.
+ *
+ * Exported for one other caller: the bring-up gate in `provision-ring.ts`,
+ * which refuses to let custody sign an extend carrying any other address
+ * vector — the second half of the chain of custody above.
+ */
+export async function expectedRingTable(ring: Address, tree: Address): Promise<readonly string[]> {
+  const [ringConfig] = await getProgramDerivedAddress({
+    programAddress: ring,
+    seeds: [textEncoder.encode("config")],
+  });
+  return [
+    ringConfig,
+    tree,
+    SHIELDED_POOL_PROGRAM_ID,
+    SYSTEM_PROGRAM,
+    await ringAuthAddress(ring),
+    ring,
+    COMPUTE_LIMIT.programAddress,
+  ];
+}
+
+/**
+ * The ring analog of `validateEnvelope`: same version, signer and signature
+ * checks, but exactly one address-table lookup and only over the ring's own
+ * persisted table. Every index must be unique and land inside the expected
+ * table — an address named in `writableIndexes` is writable in the signed
+ * transaction even if no instruction references it, so the index lists are
+ * part of the account universe custody signs.
+ */
+function validateRingSpendEnvelope(
+  message: DecodedMessage,
+  signatures: Record<string, unknown>,
+  owner: Address,
+  ringLookupTable: Address,
+  tableLength: number
+): DecodedAddressTableLookup {
+  if (
+    message.version !== 0 ||
+    message.header.numSignerAccounts !== 1 ||
+    message.header.numReadonlySignerAccounts !== 0 ||
+    message.staticAccounts[0] !== owner
+  ) {
+    mismatch();
+  }
+
+  const entries = Object.entries(signatures);
+  if (entries.length !== 1 || entries[0]?.[0] !== owner || entries[0]?.[1] !== null) {
+    mismatch();
+  }
+
+  const lookups = message.addressTableLookups ?? [];
+  const lookup = lookups[0];
+  if (lookups.length !== 1 || !lookup || lookup.lookupTableAddress !== ringLookupTable) {
+    mismatch();
+  }
+  const indexes = [...lookup.writableIndexes, ...lookup.readonlyIndexes];
+  if (new Set(indexes).size !== indexes.length) mismatch();
+  for (const index of indexes) {
+    if (!Number.isInteger(index) || index < 0 || index >= tableLength) mismatch();
+  }
+  return lookup;
+}
+
+/**
+ * Like `resolvedInstruction`, but over a v0 message's combined account space
+ * `[statics..., writable lookups..., readonly lookups...]`, resolving lookup
+ * indices against the locally derived expected table. The program address must
+ * stay static: programs cannot be loaded through a lookup table.
+ */
+function resolvedRingInstruction(
+  message: DecodedMessage,
+  instruction: DecodedInstruction,
+  lookup: DecodedAddressTableLookup,
+  expectedTable: readonly string[]
+): Readonly<{
+  program: string;
+  accounts: readonly Readonly<{ address: string; signer: boolean; writable: boolean }>[];
+  data: Uint8Array;
+}> {
+  const program = message.staticAccounts[instruction.programAddressIndex];
+  if (!program) mismatch();
+
+  const statics = message.staticAccounts.length;
+  const accounts = (instruction.accountIndices ?? []).map((index) => {
+    if (index < statics) {
+      const accountAddress = message.staticAccounts[index];
+      if (!accountAddress) mismatch();
+      return { address: accountAddress, ...accountRole(message, index) };
+    }
+    const writableOffset = index - statics;
+    if (writableOffset < lookup.writableIndexes.length) {
+      const accountAddress = expectedTable[lookup.writableIndexes[writableOffset] as number];
+      if (!accountAddress) mismatch();
+      return { address: accountAddress, signer: false, writable: true };
+    }
+    const readonlyOffset = writableOffset - lookup.writableIndexes.length;
+    if (readonlyOffset >= lookup.readonlyIndexes.length) mismatch();
+    const accountAddress = expectedTable[lookup.readonlyIndexes[readonlyOffset] as number];
+    if (!accountAddress) mismatch();
+    return { address: accountAddress, signer: false, writable: false };
+  });
+  return { program, accounts, data: instruction.data ?? new Uint8Array() };
+}
+
+/**
+ * The lookup-list analog of `expectStaticAccounts`: what each index list loads
+ * must be exactly the expected set — nothing extra rides along as writable.
+ * Set equality suffices: the envelope made the indexes unique and the table's
+ * seven addresses are distinct, so lengths plus membership pin both sides.
+ */
+function expectRingLookups(
+  lookup: DecodedAddressTableLookup,
+  expectedTable: readonly string[],
+  expectedWritable: readonly string[],
+  expectedReadonly: readonly string[]
+): void {
+  const check = (indexes: readonly number[], expected: readonly string[]) => {
+    if (indexes.length !== expected.length) mismatch();
+    const wanted = new Set(expected);
+    for (const index of indexes) {
+      const accountAddress = expectedTable[index];
+      if (!accountAddress || !wanted.has(accountAddress)) mismatch();
+    }
+  };
+  check(lookup.writableIndexes, expectedWritable);
+  check(lookup.readonlyIndexes, expectedReadonly);
+}
+
+type RingSpendPolicyIntent = Extract<
+  OuterTransactionPolicyIntent,
+  { opType: "transfer_registered" } | { opType: "withdraw" }
+>;
+
+/**
+ * A ring-bound spend: one compute instruction, then the ring program's own
+ * tag-3 transact, ALT-compressed over the ring's persisted lookup table.
+ *
+ * What this gate can and cannot prove. It proves the right ring program, the
+ * right tree, the pinned lookup table, the exact account universe (statics
+ * plus both lookup lists), a single owner signature, and the public
+ * settlement: none on a transfer, exactly the approved recipient and amount on
+ * a withdraw. On a TRANSFER it cannot verify the recipient or amount — they
+ * live inside encrypted outputs bound by the ring proof, and the auditor
+ * message is ciphertext to custody. The default spend path binds those fields
+ * pre-encryption in `validatePreparedTransferIntent`; ring spends never reach
+ * it because the one-call ring builders do not expose the prepared transfer.
+ * Accepted because the transaction is built in-process against the approved
+ * persisted intent inside the same buildOperation call, and the transfer
+ * recipient is a same-tenant wallet's ShieldedAddress loaded from custody
+ * material.
+ */
+async function validateRingSpend(
+  intent: RingSpendPolicyIntent & { ringProgramId: string },
+  message: DecodedMessage,
+  signatures: Record<string, unknown>,
+  owner: Address,
+  tree: Address
+): Promise<void> {
+  const ring = requiredAddress(intent.ringProgramId);
+  // The service pins the table alongside the ring; one without the other is a
+  // build this SDK never produced.
+  if (intent.ringLookupTable === undefined) mismatch();
+  const ringLookupTable = requiredAddress(intent.ringLookupTable);
+  const expectedTable = await expectedRingTable(ring, tree);
+
+  const lookup = validateRingSpendEnvelope(
+    message,
+    signatures,
+    owner,
+    ringLookupTable,
+    expectedTable.length
+  );
+
+  if (message.instructions.length !== 2) mismatch();
+  const computeProgram = validateComputeInstruction(
+    message,
+    message.instructions[0] as DecodedInstruction
+  );
+  const instruction = resolvedRingInstruction(
+    message,
+    message.instructions[1] as DecodedInstruction,
+    lookup,
+    expectedTable
+  );
+  if (instruction.program !== ring) mismatch();
+  if (protocolMint(intent.mint) !== PROTOCOL_NATIVE_MINT) mismatch();
+  const interfaceTransfers = parseRingTransact(instruction.data);
+
+  const ringConfig = expectedTable[0] as string;
+  const ringAuth = expectedTable[4] as string;
+  const commonAccounts: AccountExpectation[] = [
+    { address: owner, signer: true, writable: true },
+    { address: ringConfig, signer: false, writable: false },
+    // The payer appears a second time in the ring transact's account list.
+    { address: owner, signer: true, writable: true },
+    { address: tree, signer: false, writable: true },
+    { address: tree, signer: false, writable: true },
+    { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
+    { address: SYSTEM_PROGRAM, signer: false, writable: false },
+    { address: ringAuth, signer: false, writable: false },
+  ];
+  const lookupWritable = [tree as string];
+  const lookupReadonly = [ringConfig, SHIELDED_POOL_PROGRAM_ID as string, SYSTEM_PROGRAM, ringAuth];
+
+  if (intent.opType === "transfer_registered") {
+    // Well-formedness only; see the gap note above — a ring transfer's
+    // recipient and amount cannot be re-derived from these bytes.
+    requiredAddress(intent.mint);
+    requiredAmount(intent.amountRaw);
+    if (interfaceTransfers.length !== 0) mismatch();
+    expectAccounts(instruction.accounts, commonAccounts);
+    expectStaticAccounts(message, [owner, ring, computeProgram]);
+    expectRingLookups(lookup, expectedTable, lookupWritable, lookupReadonly);
+    return;
+  }
+
+  const amount = requiredAmount(intent.amountRaw);
+  const recipient = requiredAddress(intent.to);
+  const settlement = interfaceTransfers[0];
+  if (interfaceTransfers.length !== 1 || settlement?.tag !== 1 || settlement.amount !== amount) {
+    mismatch();
+  }
+  expectAccounts(instruction.accounts, [
+    ...commonAccounts,
+    { address: SOL_INTERFACE, signer: false, writable: true },
+    // If recipient === owner, Solana correctly merges this with the signer role.
+    { address: recipient, writable: true },
+  ]);
+  expectStaticAccounts(message, [owner, SOL_INTERFACE, recipient, ring, computeProgram]);
+  expectRingLookups(lookup, expectedTable, lookupWritable, lookupReadonly);
 }
 
 async function validateRingShield(
@@ -694,12 +974,24 @@ async function validate(input: OuterTransactionPolicyInput): Promise<void> {
     mismatch();
   }
   const message = decodedMessage as DecodedMessage;
-  validateEnvelope(message, transaction.signatures, owner);
 
   if (input.intent.opType === "shield") {
+    validateEnvelope(message, transaction.signatures, owner);
     await validateShield(input, message, owner, tree);
     return;
   }
+  const intent = input.intent;
+  if (intent.ringProgramId !== undefined) {
+    await validateRingSpend(
+      { ...intent, ringProgramId: intent.ringProgramId },
+      message,
+      transaction.signatures,
+      owner,
+      tree
+    );
+    return;
+  }
+  validateEnvelope(message, transaction.signatures, owner);
   validateSpend(input, message, owner, tree);
 }
 

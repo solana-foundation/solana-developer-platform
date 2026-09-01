@@ -33,6 +33,12 @@ export interface ResolveRingsGatewayDependencies {
   signOuterTransaction?: typeof signRingsOuterTransaction;
   signMessage?: typeof signRingsMessage;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
+  /**
+   * Persists a ring's lookup table the moment bring-up confirms it, so a crash
+   * before the service records the result resumes by adoption instead of
+   * renting a second table. The service wires this to the project-ring repo.
+   */
+  recordRingLookupTable?: (ringProgramId: string, lookupTableAddress: string) => Promise<void>;
 }
 
 export type RingsOuterTransactionPolicyInput = Readonly<{
@@ -44,7 +50,7 @@ export type RingsOuterTransactionPolicyInput = Readonly<{
         mint: string;
         amountRaw: string;
         expectedShieldedAddress: string;
-        /** Present when the operation was pinned to the project's custom ring. */
+        /** Present when the operation was pinned to one of the project's custom rings. */
         ringProgramId?: string;
       }>
     | Readonly<{
@@ -52,11 +58,21 @@ export type RingsOuterTransactionPolicyInput = Readonly<{
         mint: string;
         amountRaw: string;
         to: string;
+        /**
+         * Present when the spend was pinned to a custom ring; always arrives
+         * together with `ringLookupTable`, the ALT the ring transact
+         * compresses through.
+         */
+        ringProgramId?: string;
+        ringLookupTable?: string;
       }>
     | Readonly<{
         opType: "transfer_registered";
         mint: string;
         amountRaw: string;
+        /** Same contract as the withdraw arm's ring pair. */
+        ringProgramId?: string;
+        ringLookupTable?: string;
       }>;
   expectedTree?: string;
 }>;
@@ -85,6 +101,7 @@ export function resolveRingsGateway(
   const signMessage = dependencies.signMessage ?? signRingsMessage;
   const submitOuterTransaction = dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
   const create = dependencies.createGateway ?? createRingsGateway;
+  const recordRingLookupTable = dependencies.recordRingLookupTable;
 
   // Optional, unlike the three upstreams: absent, the SDK refuses ring
   // bring-up with a config_error while everything else keeps working.
@@ -93,6 +110,7 @@ export function resolveRingsGateway(
   return create({
     ...configured.upstreams,
     ...(ringRpcUrl === "" ? {} : { ringRpcUrl }),
+    ...(recordRingLookupTable ? { recordRingLookupTable } : {}),
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     allowInsecureHttp: isRingsInsecureHttpAllowed(env),

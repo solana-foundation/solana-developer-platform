@@ -3,6 +3,11 @@ import { ViewingKey } from "@heliuslabs/zolana";
 import type { Bytes32 } from "@heliuslabs/zolana/interface";
 import {
   type Address,
+  appendTransactionMessageInstructions,
+  type Blockhash,
+  compileTransaction,
+  createNoopSigner,
+  createTransactionMessage,
   getAddressEncoder,
   getBase58Codec,
   getBase64Codec,
@@ -10,11 +15,21 @@ import {
   getInstructionsFromCompiledTransactionMessage,
   getProgramDerivedAddress,
   getTransactionDecoder,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
+import {
+  findAddressLookupTablePda,
+  getCreateLookupTableInstruction,
+  getExtendLookupTableInstruction,
+} from "@solana-program/address-lookup-table";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TEST_OWNER } from "./test/shielded-identity-fixtures.js";
 
 const createAuditorKey = vi.fn();
+const fetchRingLookupTable = vi.fn();
+const buildRingLookupTableTransaction = vi.fn();
 
 vi.mock("@heliuslabs/zolana/ring", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@heliuslabs/zolana/ring")>()),
@@ -23,17 +38,23 @@ vi.mock("@heliuslabs/zolana/ring", async (importOriginal) => ({
       return createAuditorKey(...args);
     }
   },
+  fetchRingLookupTable: (...args: unknown[]) => fetchRingLookupTable(...args),
+  buildRingLookupTableTransaction: (...args: unknown[]) => buildRingLookupTableTransaction(...args),
 }));
 
 const { ringAuthAddress, ringProgramDataAddress, readerKeyBytes } = await import(
   "@heliuslabs/zolana/ring"
 );
+const realRing =
+  await vi.importActual<typeof import("@heliuslabs/zolana/ring")>("@heliuslabs/zolana/ring");
 const { provisionCustomRing } = await import("./provision-ring.js");
 
 const RING_PROGRAM = "Stake11111111111111111111111111111111111111" as Address;
 const AUTHORITY = TEST_OWNER as Address;
 const UPGRADEABLE_LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const SHIELDED_POOL = "zkpo1WxqYNGfM2ax4rvjqDLXZdRuosxjMU3893vSjKA";
+const TREE = "trEEbaNobcTESNmtsPBj3FX27q5sDCQePV2kb12FYho" as Address;
+const RECORDED_TABLE = "LookupTab1e11111111111111111111111111111111";
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7));
 const GENESIS_HASH = getBase58Codec().decode(new Uint8Array(32).fill(9));
 
@@ -112,10 +133,14 @@ async function derivedAddresses() {
 
 function harness(accounts: Map<string, unknown>) {
   const client = {
+    tree: TREE,
     getAccount: vi.fn(async (target: string) => accounts.get(target)),
     getLatestBlockhash: vi.fn(async () => ({ blockhash: BLOCKHASH, lastValidBlockHeight: 100n })),
     confirmTransaction: vi.fn(async () => {}),
-    solanaRpc: { getGenesisHash: () => ({ send: async () => GENESIS_HASH }) },
+    solanaRpc: {
+      getGenesisHash: () => ({ send: async () => GENESIS_HASH }),
+      getSlot: () => ({ send: async () => 42n }),
+    },
   };
   const deps = {
     client: client as never,
@@ -123,6 +148,7 @@ function harness(accounts: Map<string, unknown>) {
     signTransaction: vi.fn(async (unsignedTxBase64: string, _owner: string) => unsignedTxBase64),
     signMessage: vi.fn(async () => getBase64Codec().decode(new Uint8Array(64).fill(1))),
     submitTransaction: vi.fn(async () => "sig"),
+    recordLookupTable: vi.fn(async () => {}),
   };
   return { client, deps };
 }
@@ -139,6 +165,10 @@ describe("provisionCustomRing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createAuditorKey.mockResolvedValue({ auditorPublicKey: AUDITOR });
+    // A landed or recorded table verifies complete by default; the not-found
+    // and incomplete paths override per test.
+    fetchRingLookupTable.mockResolvedValue(Object.freeze([]));
+    buildRingLookupTableTransaction.mockImplementation(realRing.buildRingLookupTableTransaction);
   });
 
   it("refuses a ring id that is not an address", async () => {
@@ -168,7 +198,7 @@ describe("provisionCustomRing", () => {
         accounts.set(configAddress, configAccount(AUTHORITY, configBump));
       } else if (!accounts.has(ringAuth)) {
         accounts.set(ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n });
-      } else {
+      } else if (!accounts.has(grantRecord)) {
         accounts.set(grantRecord, grantRecordAccount(grantRecordBump));
       }
       return "sig";
@@ -177,10 +207,11 @@ describe("provisionCustomRing", () => {
     const result = await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM });
 
     expect(result.auditorPublicKeyHex).toBe(hex(AUDITOR.toUncompressed()));
-    // Create-config, SPP registration, then the initial reader grant, all as
-    // the upgrade authority.
-    expect(deps.signTransaction).toHaveBeenCalledTimes(3);
+    // Create-config, SPP registration, the initial reader grant, then the
+    // ring's lookup table — all as the upgrade authority.
+    expect(deps.signTransaction).toHaveBeenCalledTimes(4);
     expect(deps.signTransaction.mock.calls.map(([, owner]) => owner)).toEqual([
+      AUTHORITY,
       AUTHORITY,
       AUTHORITY,
       AUTHORITY,
@@ -190,6 +221,10 @@ describe("provisionCustomRing", () => {
     expect(grant?.data?.[0]).toBe(GRANT_READ_ACCESS_TAG);
     // The reader in the signed bytes is the authority itself, nobody else.
     expect([...(grant?.data ?? [])].slice(1)).toEqual([...readerKeyBytes(AUTHORITY)]);
+    // The table is recorded the moment it confirms, before the result returns,
+    // and the result carries the same address.
+    expect(result.lookupTableAddress).toBeDefined();
+    expect(deps.recordLookupTable).toHaveBeenCalledWith(result.lookupTableAddress);
     const [request] = createAuditorKey.mock.calls[0] as [
       { ringProgramId: string; authority: { address: string } },
     ];
@@ -208,10 +243,15 @@ describe("provisionCustomRing", () => {
       ])
     );
 
-    const result = await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM });
+    const result = await provisionCustomRing(deps, {
+      ringProgramId: RING_PROGRAM,
+      lookupTableAddress: RECORDED_TABLE,
+    });
 
-    // Re-keying a live ring would orphan its auditor, so nothing is rewritten.
+    // Re-keying a live ring would orphan its auditor, so nothing is rewritten,
+    // and a complete recorded table is adopted rather than rented again.
     expect(result.auditorPublicKeyHex).toBe(hex(AUDITOR.toUncompressed()));
+    expect(result.lookupTableAddress).toBe(RECORDED_TABLE);
     expect(createAuditorKey).not.toHaveBeenCalled();
     expect(deps.signTransaction).not.toHaveBeenCalled();
     // Adoption lands no transaction, so the challenge is the only proof that
@@ -220,7 +260,7 @@ describe("provisionCustomRing", () => {
     expect(deps.signMessage).toHaveBeenCalledWith(expect.any(String), AUTHORITY);
   });
 
-  it("refuses to adopt a ring whose config authority custody cannot sign for", async () => {
+  it("rents the lookup table for an adopted ring that lacks one", async () => {
     const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
       await derivedAddresses();
     const { deps } = harness(
@@ -230,17 +270,126 @@ describe("provisionCustomRing", () => {
         [grantRecord, grantRecordAccount(grantRecordBump)],
       ])
     );
-    deps.signMessage.mockRejectedValue(new Error("custody controls no wallet for this owner"));
 
-    const error = await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM }).then(
-      () => null,
-      (thrown: unknown) => thrown
+    const result = await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM });
+
+    // The challenge still ran (no ring-program transaction landed), and the
+    // one signed transaction is the table's create+extend.
+    expect(deps.signMessage).toHaveBeenCalledTimes(1);
+    expect(deps.signTransaction).toHaveBeenCalledTimes(1);
+    expect(result.lookupTableAddress).toBeDefined();
+    expect(deps.recordLookupTable).toHaveBeenCalledWith(result.lookupTableAddress);
+  });
+
+  it("recreates the table when the recorded create never landed", async () => {
+    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
+      await derivedAddresses();
+    const { deps } = harness(
+      new Map<string, unknown>([
+        [configAddress, configAccount(AUTHORITY, configBump)],
+        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
+        [grantRecord, grantRecordAccount(grantRecordBump)],
+      ])
+    );
+    fetchRingLookupTable
+      .mockRejectedValueOnce(
+        new realRing.RingError("RING_LOOKUP_TABLE_NOT_FOUND", {
+          details: { address: RECORDED_TABLE },
+        })
+      )
+      .mockResolvedValue(Object.freeze([]));
+
+    const result = await provisionCustomRing(deps, {
+      ringProgramId: RING_PROGRAM,
+      lookupTableAddress: RECORDED_TABLE,
+    });
+
+    expect(deps.signTransaction).toHaveBeenCalledTimes(1);
+    expect(result.lookupTableAddress).not.toBe(RECORDED_TABLE);
+  });
+
+  it("refuses a recorded table that exists but lacks the ring's addresses", async () => {
+    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
+      await derivedAddresses();
+    const { deps } = harness(
+      new Map<string, unknown>([
+        [configAddress, configAccount(AUTHORITY, configBump)],
+        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
+        [grantRecord, grantRecordAccount(grantRecordBump)],
+      ])
+    );
+    fetchRingLookupTable.mockRejectedValue(
+      new realRing.RingError("RING_LOOKUP_TABLE_INCOMPLETE", {
+        details: { address: RECORDED_TABLE, missing: [TREE] },
+      })
     );
 
-    // Activating anyway would bind the project's deposits to a ring whose
-    // authority, auditor, and reader grants belong to someone else.
-    expect(error).toMatchObject({ code: "conflict" });
-    expect((error as Error).message).toContain("another operator");
+    // Our gate lands create+extend atomically, so a live-but-short table was
+    // not created by this bring-up; adopting it would break the wire policy's
+    // locally derived table model.
+    await expect(
+      provisionCustomRing(deps, { ringProgramId: RING_PROGRAM, lookupTableAddress: RECORDED_TABLE })
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(deps.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses to sign a lookup-table transaction extending anything but the ring's addresses", async () => {
+    const { configAddress, configBump, grantRecord, grantRecordBump, ringAuth } =
+      await derivedAddresses();
+    const { deps } = harness(
+      new Map<string, unknown>([
+        [configAddress, configAccount(AUTHORITY, configBump)],
+        [ringAuth, { owner: SHIELDED_POOL, data: new Uint8Array(1), lamports: 1n }],
+        [grantRecord, grantRecordAccount(grantRecordBump)],
+      ])
+    );
+    // A builder gone wrong: the real create+extend pair, but the address
+    // vector smuggles a foreign account in place of the shielded pool.
+    const recentSlot = 42n;
+    const pda = await findAddressLookupTablePda({ authority: AUTHORITY, recentSlot });
+    const authority = createNoopSigner(AUTHORITY);
+    const perturbed = [
+      ...(await realRing.ringLookupTableAddresses({ ringProgramId: RING_PROGRAM, tree: TREE })),
+    ];
+    perturbed[2] = AUTHORITY;
+    buildRingLookupTableTransaction.mockResolvedValue({
+      transaction: compileTransaction(
+        pipe(
+          createTransactionMessage({ version: 0 }),
+          (message) => setTransactionMessageFeePayer(AUTHORITY, message),
+          (message) =>
+            setTransactionMessageLifetimeUsingBlockhash(
+              { blockhash: BLOCKHASH as Blockhash, lastValidBlockHeight: 100n },
+              message
+            ),
+          (message) =>
+            appendTransactionMessageInstructions(
+              [
+                getCreateLookupTableInstruction({
+                  address: pda,
+                  authority: AUTHORITY,
+                  payer: authority,
+                  recentSlot,
+                }),
+                getExtendLookupTableInstruction({
+                  address: pda[0],
+                  authority,
+                  payer: authority,
+                  addresses: perturbed,
+                }),
+              ],
+              message
+            )
+        )
+      ),
+      address: pda[0],
+      slot: recentSlot,
+    });
+
+    await expect(provisionCustomRing(deps, { ringProgramId: RING_PROGRAM })).rejects.toMatchObject({
+      code: "conflict",
+      message: "refusing to sign a transaction that is not the expected ring lookup-table bring-up",
+    });
     expect(deps.signTransaction).not.toHaveBeenCalled();
   });
 
@@ -262,10 +411,12 @@ describe("provisionCustomRing", () => {
 
     await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM });
 
-    // Only the missing half runs, signed as the authority the config names.
+    // Only the missing half runs, signed as the authority the config names,
+    // plus the ring's lookup table.
     expect(createAuditorKey).not.toHaveBeenCalled();
-    expect(deps.signTransaction).toHaveBeenCalledTimes(2);
+    expect(deps.signTransaction).toHaveBeenCalledTimes(3);
     expect(deps.signTransaction.mock.calls.map(([, owner]) => owner)).toEqual([
+      AUTHORITY,
       AUTHORITY,
       AUTHORITY,
     ]);
@@ -283,7 +434,7 @@ describe("provisionCustomRing", () => {
     await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM });
 
     expect(createAuditorKey).not.toHaveBeenCalled();
-    expect(deps.signTransaction).toHaveBeenCalledTimes(1);
+    expect(deps.signTransaction).toHaveBeenCalledTimes(2);
     const grant = soleInstruction(deps.signTransaction.mock.calls[0]?.[0] as string);
     expect(grant?.data?.[0]).toBe(GRANT_READ_ACCESS_TAG);
   });

@@ -47,6 +47,15 @@ export interface RingsGatewayConfig {
   readonly signMessage?: (messageBase64: string, owner: string) => Promise<string>;
   /** Helius ring RPC that mints custom-ring auditor keys. Only bring-up needs it. */
   readonly ringRpcUrl?: string;
+  /**
+   * Persists a ring's lookup table the moment it confirms, mid-bring-up. Only
+   * bring-up needs it; without it a crash between the table landing and the
+   * caller persisting the result rents a second table on resume.
+   */
+  readonly recordRingLookupTable?: (
+    ringProgramId: string,
+    lookupTableAddress: string
+  ) => Promise<void>;
   readonly tree?: string;
   readonly allowInsecureHttp?: boolean;
   readonly healthTimeoutMs?: number;
@@ -170,6 +179,7 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
 
     async provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult> {
       const bringUp = requireRingBringUpConfig(config);
+      const recordRingLookupTable = config.recordRingLookupTable;
       return withZolanaErrorBridge(async () =>
         provisionCustomRing(
           {
@@ -178,6 +188,12 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             signTransaction: config.signTransaction,
             signMessage: bringUp.signMessage,
             submitTransaction: config.submitTransaction,
+            ...(recordRingLookupTable
+              ? {
+                  recordLookupTable: (lookupTableAddress: string) =>
+                    recordRingLookupTable(input.ringProgramId, lookupTableAddress),
+                }
+              : {}),
           },
           input
         )

@@ -105,8 +105,15 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     if (this.provisionRingOverride) {
       return this.provisionRingOverride(input);
     }
-    // 65-byte uncompressed SEC1 shape: 0x04 then two deterministic 32-byte halves.
-    return { auditorPublicKeyHex: `04${hashHex(`auditor:${input.ringProgramId}`, 64)}` };
+    return {
+      // 65-byte uncompressed SEC1 shape: 0x04 then two deterministic 32-byte halves.
+      auditorPublicKeyHex: `04${hashHex(`auditor:${input.ringProgramId}`, 64)}`,
+      // Adopts a recorded table like real bring-up; otherwise a deterministic
+      // base58-shaped address (hex with 0, the one invalid char, swapped out).
+      lookupTableAddress:
+        input.lookupTableAddress ??
+        `Lt${hashHex(`lookup:${input.ringProgramId}`, 20).replaceAll("0", "z")}`,
+    };
   }
 
   async readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult> {
@@ -169,10 +176,13 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       requiredSigners: [input.owner],
       lastValidBlockHeight: String(this.blockHeight),
       // Honours pinned inputs, so a test can assert that a rebuild spends what
-      // the first build committed to rather than choosing again.
-      inputNotes: SPENDS.has(input.operation.opType)
-        ? (input.pinnedInputs ?? [`note:${hashHex(`${seed}:note`, 16)}`])
-        : [],
+      // the first build committed to rather than choosing again. Ring-bound
+      // spends mirror the real SDK: the one-call builders re-select notes on
+      // every build, so nothing is pinned and nothing comes back.
+      inputNotes:
+        SPENDS.has(input.operation.opType) && !input.operation.ringProgramId
+          ? (input.pinnedInputs ?? [`note:${hashHex(`${seed}:note`, 16)}`])
+          : [],
       proof: {
         source: "simulated",
         ref: new SecretRef(hashHex(`${seed}:proof`, 32)),

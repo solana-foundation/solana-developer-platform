@@ -6,7 +6,6 @@ import type {
   OPERATION_STATES,
   PRIVATE_HISTORY_DIRECTIONS,
   PRIVATE_HISTORY_KINDS,
-  RING_SELECTORS,
   RING_STATUSES,
   RUNTIME_HEALTH_COMPONENTS,
   RUNTIME_HEALTH_STATUSES,
@@ -30,7 +29,6 @@ export type WalletStatus = (typeof WALLET_STATUSES)[number];
 export type ZoneKind = (typeof ZONE_KINDS)[number];
 export type TransferMode = (typeof TRANSFER_MODES)[number];
 export type RingStatus = (typeof RING_STATUSES)[number];
-export type RingSelector = (typeof RING_SELECTORS)[number];
 
 export interface ProofArtifact {
   source: MaterialTag;
@@ -67,16 +65,23 @@ export interface Zone {
 }
 
 /**
- * The one custom ring a project's operations may target. The program is
- * deployed by ops; operations name it per call (`ring: "custom"`) and are
- * refused until this record is `active`. Default-ring operations never
- * consult it.
+ * One of a project's named custom rings. The program is deployed by ops;
+ * operations name a ring per call (`ring: "<name>"`) and are refused until its
+ * record is `active`. Default-ring operations never consult it.
  */
 export interface ProjectRing {
+  id: string;
+  /** Operator-chosen slug operations select the ring by; "default" is reserved. */
+  name: string;
   ringProgramId: string;
   status: RingStatus;
   /** Uncompressed SEC1 P-256 point as hex, as the ring's on-chain config publishes it. */
   auditorPublicKeyHex: string | null;
+  /**
+   * The ring's address lookup table; every ring spend compresses through it.
+   * Null until bring-up lands it.
+   */
+  lookupTableAddress: string | null;
   /** Why the last bring-up attempt failed; null unless `status` is `failed`. */
   failure: { code: HeliusRingsErrorCode; message: string } | null;
   createdAt: string;
@@ -150,8 +155,12 @@ export interface PrivateOperationInput {
   zoneId?: string;
   transferMode?: TransferMode;
   timelock?: { unlockAt: string; beneficiary: string };
-  /** Which ring the operation targets; resolved server-side at prepare. Defaults to "default". */
-  ring?: RingSelector;
+  /**
+   * Ring NAME the operation targets; the server resolves and pins the program
+   * id at prepare. Omitted or "default" = the default public pool. For spends
+   * the named ring is the source of funds.
+   */
+  ring?: string;
   clientNonce: string;
 }
 

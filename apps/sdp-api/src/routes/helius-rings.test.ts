@@ -185,37 +185,60 @@ describe("Helius Rings routes", () => {
     expect(body.data.health.photon).toBe("red");
   });
 
-  describe("project ring", () => {
+  describe("project rings", () => {
     const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+    const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
 
-    it("404s before a ring is recorded", async () => {
-      const res = await app.request("/v1/helius-rings/ring", { headers: authHeaders() }, env);
-      expect(res.status).toBe(404);
+    it("lists an empty collection before any ring is recorded", async () => {
+      const res = await app.request("/v1/helius-rings/rings", { headers: authHeaders() }, env);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { rings: unknown[] } };
+      expect(body.data.rings).toEqual([]);
     });
 
-    it("records the ring, activates it, and serves it back", async () => {
+    it("records a named ring, activates it, and serves it back", async () => {
       gatewayOverride.current = {
-        provisionRing: async () => ({ auditorPublicKeyHex: "04ff" }),
+        provisionRing: async () => ({
+          auditorPublicKeyHex: "04ff",
+          lookupTableAddress: LOOKUP_TABLE,
+        }),
       } as unknown as RingsGatewayPort;
 
-      const created = await post("/v1/helius-rings/ring", { ringProgramId: RING_PROGRAM });
+      const created = await post("/v1/helius-rings/rings", {
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+      });
       expect(created.status).toBe(201);
       const createdBody = (await created.json()) as { data: { ring: Record<string, unknown> } };
       expect(createdBody.data.ring).toMatchObject({
+        name: "treasury",
         ringProgramId: RING_PROGRAM,
         status: "active",
         auditorPublicKeyHex: "04ff",
+        lookupTableAddress: LOOKUP_TABLE,
       });
 
-      const read = await app.request("/v1/helius-rings/ring", { headers: authHeaders() }, env);
+      const read = await app.request("/v1/helius-rings/rings", { headers: authHeaders() }, env);
       expect(read.status).toBe(200);
-      const readBody = (await read.json()) as { data: { ring: Record<string, unknown> } };
-      expect(readBody.data.ring).toMatchObject({ ringProgramId: RING_PROGRAM, status: "active" });
+      const readBody = (await read.json()) as { data: { rings: Record<string, unknown>[] } };
+      expect(readBody.data.rings).toMatchObject([
+        { name: "treasury", ringProgramId: RING_PROGRAM, status: "active" },
+      ]);
     });
 
     it("400s a ring program id that is not base58", async () => {
-      const res = await post("/v1/helius-rings/ring", { ringProgramId: "not base58 0OIl" });
+      const res = await post("/v1/helius-rings/rings", {
+        name: "treasury",
+        ringProgramId: "not base58 0OIl",
+      });
       expect(res.status).toBe(400);
+    });
+
+    it("400s a name outside the slug shape and the reserved word", async () => {
+      for (const name of ["Treasury", "default"]) {
+        const res = await post("/v1/helius-rings/rings", { name, ringProgramId: RING_PROGRAM });
+        expect(res.status).toBe(400);
+      }
     });
   });
 
@@ -373,27 +396,39 @@ describe("Helius Rings routes", () => {
       expect(res.status).toBe(400);
     });
 
-    it("400s ring:custom while the project has no ring recorded", async () => {
+    it("400s a named ring the project never recorded", async () => {
       const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
         asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
         clientNonce: "route-nonce-ring-none",
-        ring: "custom",
+        ring: "treasury",
       });
       expect(res.status).toBe(400);
     });
 
-    // The schema admits `ring` only on the shield variant, and the variants
-    // are strict: a withdraw naming one is refused, never silently stripped.
-    it("400s a withdraw that names a ring", async () => {
+    // Every enabled op type takes `ring` now, but the value is still a slug:
+    // anything else is refused at the schema, never silently stripped.
+    it("400s a ring selector outside the slug shape", async () => {
       const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "withdraw",
         asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
         to: "HrRouteTestPublicKey111111111111111111111111",
         clientNonce: "route-nonce-ring-withdraw",
-        ring: "custom",
+        ring: "Not A Ring",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a withdraw naming a ring the project never recorded", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "withdraw",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        to: "HrRouteTestPublicKey111111111111111111111111",
+        clientNonce: "route-nonce-ring-withdraw-2",
+        ring: "treasury",
       });
       expect(res.status).toBe(400);
     });

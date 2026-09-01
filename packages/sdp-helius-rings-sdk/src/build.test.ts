@@ -2,10 +2,16 @@ import { DEFAULT_TREE_ADDRESS } from "@heliuslabs/zolana/interface";
 import type { BuildOperationInput } from "@sdp/helius-rings";
 import {
   address,
+  type Blockhash,
+  compileTransaction,
+  createTransactionMessage,
   getBase64Codec,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
   type Instruction,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeterministicMaterialSource } from "./deterministic-ka/index.js";
@@ -13,9 +19,16 @@ import { TEST_SEED } from "./test/shielded-identity-fixtures.js";
 
 const buildWithdrawal = vi.fn();
 const hydrateWallet = vi.fn();
+const buildRingWithdrawalTx = vi.fn();
+const buildRingTransferTx = vi.fn();
 
 vi.mock("./flows/spend.js", () => ({
   buildWithdrawal: (...args: unknown[]) => buildWithdrawal(...args),
+}));
+
+vi.mock("./flows/ring-spend.js", () => ({
+  buildRingWithdrawalTx: (...args: unknown[]) => buildRingWithdrawalTx(...args),
+  buildRingTransferTx: (...args: unknown[]) => buildRingTransferTx(...args),
 }));
 
 vi.mock("./wallet.js", () => ({
@@ -29,6 +42,7 @@ const BLOCKHASH = "5DjPMLBWWLbNw3TRUEbCwPFvpXqhkdVv2VUb3RJhZmpJ";
 const PROTOCOL_PROGRAM = address("11111111111111111111111111111111");
 const COMPUTE_BUDGET_PROGRAM = address("ComputeBudget111111111111111111111111111111");
 const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
+const RING_LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
 /** The tag byte a ring program's own deposit instruction leads with. */
 const RING_DEPOSIT_TAG = 14;
 
@@ -192,7 +206,7 @@ describe("buildRingsOperation ring-bound operations", () => {
     expect(instruction?.data?.[0]).toBe(RING_DEPOSIT_TAG);
   });
 
-  it("refuses a ring-pinned withdrawal before any client or wallet read", async () => {
+  it("refuses a ring-pinned spend without its lookup table before the wallet read", async () => {
     const buildDeps = deps();
     const base = operationInput();
     const input = {
@@ -202,11 +216,58 @@ describe("buildRingsOperation ring-bound operations", () => {
 
     await expect(buildRingsOperation(buildDeps, input)).rejects.toMatchObject({
       name: "HeliusRingsError",
-      code: "invalid_input",
-      message: "ring-bound withdrawals and transfers are not supported yet",
+      code: "config_error",
+      message: "a ring-bound spend needs the ring's lookup table; resume ring bring-up",
     });
     expect(vi.mocked(buildDeps.client.getLatestBlockhash)).not.toHaveBeenCalled();
     expect(hydrateWallet).not.toHaveBeenCalled();
+    expect(buildRingWithdrawalTx).not.toHaveBeenCalled();
+  });
+
+  it("routes a ring-pinned withdrawal through the ring builder with no pinned notes", async () => {
+    hydrateWallet.mockResolvedValue({ wallet: { fake: "wallet" } });
+    buildRingWithdrawalTx.mockResolvedValue(
+      compileTransaction(
+        pipe(
+          createTransactionMessage({ version: 0 }),
+          (message) => setTransactionMessageFeePayer(address(OWNER), message),
+          (message) =>
+            setTransactionMessageLifetimeUsingBlockhash(
+              { blockhash: BLOCKHASH as Blockhash, lastValidBlockHeight: 999n },
+              message
+            )
+        )
+      )
+    );
+
+    const buildDeps = deps();
+    const base = operationInput();
+    const input = {
+      ...base,
+      // Pinned inputs are deliberately ignored on the ring path: the one-call
+      // builder re-selects same-ring notes on every build.
+      pinnedInputs: ["note_1"],
+      ringLookupTable: RING_LOOKUP_TABLE,
+      operation: { ...base.operation, ringProgramId: RING_PROGRAM },
+    };
+
+    const result = await buildRingsOperation(buildDeps, input);
+
     expect(buildWithdrawal).not.toHaveBeenCalled();
+    expect(buildRingWithdrawalTx).toHaveBeenCalledTimes(1);
+    const [, ringInput] = buildRingWithdrawalTx.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect(ringInput).toMatchObject({
+      ringProgramId: RING_PROGRAM,
+      lookupTable: RING_LOOKUP_TABLE,
+      mint: "So11111111111111111111111111111111111111112",
+      amountRaw: "1",
+      recipient: OWNER,
+    });
+    expect(ringInput).not.toHaveProperty("pinnedInputs");
+    // No pinned-note contract: input_notes round-trips as [] like a shield's,
+    // and the recorded expiry floors on the pre-build blockhash read.
+    expect(result.inputNotes).toEqual([]);
+    expect(result.lastValidBlockHeight).toBe("1000");
+    expect(result.requiredSigners).toEqual([OWNER]);
   });
 });

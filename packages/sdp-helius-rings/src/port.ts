@@ -77,6 +77,11 @@ export interface BuildOperationInput {
   knownAssets?: KnownAsset[];
   requireSlot?: string;
   /**
+   * The ring's address lookup table; required whenever `operation.ringProgramId`
+   * is set on a spend. Ring transacts are v0 transactions compressed through it.
+   */
+  ringLookupTable?: string;
+  /**
    * Present only for private transfers: identifies the recipient wallet so the
    * SDK can load its material and derive the ShieldedAddress needed to build the
    * transfer output. Same tenant as the sender is enforced upstream.
@@ -105,6 +110,11 @@ export interface VerifyIndexedResult {
 export interface ProvisionRingInput {
   /** Base58 program id of the pre-deployed ring program. */
   ringProgramId: string;
+  /**
+   * The lookup table already recorded for this ring, if any; bring-up adopts a
+   * complete existing table instead of renting a second one.
+   */
+  lookupTableAddress?: string | null;
 }
 
 export interface ProvisionRingResult {
@@ -113,6 +123,8 @@ export interface ProvisionRingResult {
    * config publishes it. The caller persists it; SDP never holds the secret half.
    */
   auditorPublicKeyHex: string;
+  /** The ring's address lookup table, created or adopted by bring-up. */
+  lookupTableAddress: string;
 }
 
 export interface RingsGatewayPort {
@@ -120,9 +132,10 @@ export interface RingsGatewayPort {
   provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult>;
   /**
    * Completes bring-up of a pre-deployed ring program: auditor key, ring
-   * config, shielded-pool registration, and the config authority as its own
-   * initial reader. Idempotent against on-chain state, so a run that died
-   * mid-way resumes by calling it again with the same id.
+   * config, shielded-pool registration, the config authority as its own
+   * initial reader, and the ring's address lookup table. Idempotent against
+   * on-chain state, so a run that died mid-way resumes by calling it again
+   * with the same id.
    */
   provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult>;
   readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult>;

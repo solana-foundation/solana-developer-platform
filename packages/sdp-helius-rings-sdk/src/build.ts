@@ -1,3 +1,4 @@
+import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import { checkedTransactionSize } from "@heliuslabs/zolana/interface";
 import {
@@ -25,6 +26,7 @@ import {
 } from "@solana-program/compute-budget";
 import { CustodyWalletAuthority } from "./authority.js";
 import { withZolanaErrorBridgeSync } from "./error-bridge.js";
+import { buildRingTransferTx, buildRingWithdrawalTx } from "./flows/ring-spend.js";
 import { buildShieldTransaction } from "./flows/shield.js";
 import { buildTransfer, buildWithdrawal, type SpendDeps } from "./flows/spend.js";
 import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
@@ -98,12 +100,14 @@ export async function buildRingsOperation(
         );
       }
 
-      if (operation.ringProgramId) {
-        // The service never pins a ring on a spend; a row that carries one
-        // anyway must not reach the ring-blind default-pool spend builders.
+      // A pinned ring routes to the SDK's one-call ring builders after wallet
+      // hydration. They need the ring's lookup table; its absence fails here,
+      // before the wallet read it could never use.
+      const ringLookupTable = operation.ringProgramId ? input.ringLookupTable : undefined;
+      if (operation.ringProgramId && !ringLookupTable) {
         throw new HeliusRingsError(
-          "invalid_input",
-          "ring-bound withdrawals and transfers are not supported yet"
+          "config_error",
+          "a ring-bound spend needs the ring's lookup table; resume ring bring-up"
         );
       }
 
@@ -129,35 +133,22 @@ export async function buildRingsOperation(
         ...(input.requireSlot ? { requireSlot: BigInt(input.requireSlot) } : {}),
       });
 
+      if (operation.ringProgramId && ringLookupTable) {
+        return buildRingSpend(deps, input, {
+          ringProgramId: operation.ringProgramId,
+          ringLookupTable,
+          mint,
+          wallet,
+          authority,
+          owner,
+        });
+      }
+
       const spend: SpendDeps = { client: deps.client, wallet, authority, material, owner };
 
       if (operation.opType === "transfer_registered") {
-        if (!input.recipient) {
-          throw new HeliusRingsError(
-            "invalid_input",
-            "a private transfer needs a recipient wallet identifier"
-          );
-        }
-        // Load the recipient's material inside its own scope purely to lift out
-        // the ShieldedAddress. That object is public — no secrets outlive the
-        // scope — and Zolana's `.send` needs the full three-key form the
-        // canonical shielded-identity string can't rebuild alone.
-        const recipient = input.recipient;
-        const recipientShieldedAddress = await deps.material.withMaterial(
-          {
-            organizationId: deps.organizationId,
-            projectId: deps.projectId,
-            walletId: recipient.walletId,
-            owner: recipient.owner,
-          },
-          async (recipientMaterial) => {
-            assertProvisionedIdentity(recipientMaterial, recipient.expectedShieldedAddress);
-            return recipientMaterial.shieldedAddress;
-          }
-        );
-
         const built = await buildTransfer(spend, {
-          recipient: recipientShieldedAddress,
+          recipient: await liftRecipientShieldedAddress(deps, input),
           mint,
           amountRaw: requireAmount(input),
           ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
@@ -184,6 +175,89 @@ export async function buildRingsOperation(
         built.inputNotes,
         lifetime
       );
+    }
+  );
+}
+
+/**
+ * A ring-bound spend, through the SDK's one-call ring builders. They return a
+ * finished compiled v0 transaction and fetch their own blockhash, so the read
+ * here only floors the recorded expiry (the shield branch's contract). No
+ * pinned inputs and none returned: the builder re-selects same-ring notes on
+ * every build, so `input_notes` round-trips as [] exactly like a shield's and
+ * a retry rebuild may spend different notes. Ring spends also never reach
+ * validatePreparedTransferIntent — the builders don't expose the prepared
+ * transfer — leaving the final-wire policy as the custody-side check on these
+ * bytes.
+ */
+async function buildRingSpend(
+  deps: BuildDeps,
+  input: BuildOperationInput,
+  context: Readonly<{
+    ringProgramId: string;
+    ringLookupTable: string;
+    mint: string;
+    wallet: Awaited<ReturnType<typeof hydrateWallet>>["wallet"];
+    authority: CustodyWalletAuthority;
+    owner: ReturnType<typeof address>;
+  }>
+): Promise<BuildOperationResult> {
+  const floor = await deps.client.getLatestBlockhash();
+  const ringSpend = {
+    client: deps.client,
+    wallet: context.wallet,
+    authority: context.authority,
+    owner: context.owner,
+  };
+  const ringInput = {
+    ringProgramId: context.ringProgramId,
+    lookupTable: context.ringLookupTable,
+    mint: context.mint,
+    amountRaw: requireAmount(input),
+  };
+
+  if (input.operation.opType === "transfer_registered") {
+    const tx = await buildRingTransferTx(ringSpend, {
+      ...ringInput,
+      recipient: await liftRecipientShieldedAddress(deps, input),
+    });
+    return finish(tx, [], floor);
+  }
+
+  const tx = await buildRingWithdrawalTx(ringSpend, {
+    ...ringInput,
+    recipient: requireRecipient(input),
+  });
+  return finish(tx, [], floor);
+}
+
+/**
+ * Loads the recipient's material inside its own scope purely to lift out the
+ * ShieldedAddress. That object is public — no secrets outlive the scope — and
+ * Zolana's transfer builders need the full three-key form the canonical
+ * shielded-identity string can't rebuild alone.
+ */
+async function liftRecipientShieldedAddress(
+  deps: BuildDeps,
+  input: BuildOperationInput
+): Promise<ShieldedAddress> {
+  if (!input.recipient) {
+    throw new HeliusRingsError(
+      "invalid_input",
+      "a private transfer needs a recipient wallet identifier"
+    );
+  }
+  const recipient = input.recipient;
+  return deps.material.withMaterial(
+    {
+      organizationId: deps.organizationId,
+      projectId: deps.projectId,
+      walletId: recipient.walletId,
+      owner: recipient.owner,
+    },
+    async (recipientMaterial) => {
+      assertProvisionedIdentity(recipientMaterial, recipient.expectedShieldedAddress);
+      return recipientMaterial.shieldedAddress;
     }
   );
 }

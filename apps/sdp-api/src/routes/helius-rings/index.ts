@@ -11,10 +11,10 @@ import {
   executeRingsOperation,
   getRingsHealth,
   getRingsOperation,
-  getRingsProjectRing,
   getRingsWallet,
   getRingsWalletIdentity,
   listRingsOperations,
+  listRingsProjectRings,
   listRingsWallets,
   listRingsZones,
   prepareRingsOperation,
@@ -38,10 +38,10 @@ heliusRings.use("*", projectContextMiddleware());
 
 heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
 
-heliusRings.get("/ring", requirePermissions("payments:read"), getRingsProjectRing);
-// Recording the ring runs bring-up (signed transactions through custody), so it
+heliusRings.get("/rings", requirePermissions("payments:read"), listRingsProjectRings);
+// Recording a ring runs bring-up (signed transactions through custody), so it
 // carries write.
-heliusRings.post("/ring", requirePermissions("payments:write"), createRingsProjectRing);
+heliusRings.post("/rings", requirePermissions("payments:write"), createRingsProjectRing);
 
 heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallets);
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);

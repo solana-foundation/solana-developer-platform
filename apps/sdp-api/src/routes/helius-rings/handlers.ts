@@ -60,22 +60,21 @@ export async function getRingsHealth(c: AppContext) {
   return success(c, { health: await service.probeHealth() });
 }
 
-// --- project ring -----------------------------------------------------------
+// --- project rings ----------------------------------------------------------
 
-/** GET /ring — the project's one custom ring, or 404 while it uses the default ring. */
-export async function getRingsProjectRing(c: AppContext) {
+/** GET /rings — the project's custom rings, oldest first; empty while it only uses the default pool. */
+export async function listRingsProjectRings(c: AppContext) {
   const { tenant } = tenantOf(c);
   const service = getHeliusRingsService(c, tenant);
-  const ring = await withRingsErrors(() => service.getProjectRing());
-  if (!ring) throw notFound("project ring");
-  return success(c, { ring });
+  const rings = await withRingsErrors(() => service.listProjectRings());
+  return success(c, { rings });
 }
 
 /**
- * POST /ring — record the pre-deployed custom ring's program id and complete
- * bring-up through the gateway. Re-submitting the same id resumes a failed
+ * POST /rings — record a named custom ring's program id and complete bring-up
+ * through the gateway. Re-submitting the same name and id resumes a failed
  * bring-up. Once the ring is active, operations can target it (`ring:
- * "custom"`); default-ring operations and sync are never blocked by it.
+ * "<name>"`); default-ring operations and sync are never blocked by it.
  */
 export async function createRingsProjectRing(c: AppContext) {
   const parsed = createProjectRingSchema.safeParse(await c.req.json());

@@ -7,7 +7,12 @@ import {
   SOL_INTERFACE,
   SPL_TOKEN_PROGRAM_ID,
 } from "@heliuslabs/zolana/interface";
-import { buildRingDepositTransaction } from "@heliuslabs/zolana/ring";
+import {
+  buildRingDepositTransaction,
+  ringAuthAddress,
+  ringConfigAddress,
+  ringLookupTableAddresses,
+} from "@heliuslabs/zolana/ring";
 import {
   AccountRole,
   type Address,
@@ -15,6 +20,7 @@ import {
   appendTransactionMessageInstructions,
   type Blockhash,
   compileTransaction,
+  compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
   getAddressEncoder,
   getBase58Decoder,
@@ -33,7 +39,11 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
 } from "@solana-program/compute-budget";
 import { describe, expect, it } from "vitest";
-import { type OuterTransactionPolicyInput, validateOuterTransaction } from "./outer-tx-policy.js";
+import {
+  expectedRingTable,
+  type OuterTransactionPolicyInput,
+  validateOuterTransaction,
+} from "./outer-tx-policy.js";
 import { derivedIdentity, TEST_REQUEST, withDerived } from "./test/shielded-identity-fixtures.js";
 
 const OWNER = address("GsbwXfJraMomNxBcjK1DiP5Mth8ZmQpDUFTmKfhtiHgo");
@@ -365,6 +375,160 @@ function withdrawalPolicy(
       ...overrides,
     },
   };
+}
+
+// --- ring-bound spend fixtures -----------------------------------------------
+
+const RING_LOOKUP_TABLE = address("LookupTab1e11111111111111111111111111111111");
+const RING_TRANSACT_TAG = 3;
+const RING_PROOF_LENGTH = 192;
+
+/** The ring wire: `tag(3) || proof(192) || the pool transact body` (no inner tag). */
+function ringTransactData(options: Parameters<typeof opaqueTransactData>[0] = {}): Uint8Array {
+  return Uint8Array.from([
+    RING_TRANSACT_TAG,
+    ...bytes(RING_PROOF_LENGTH, 0x33),
+    ...opaqueTransactData(options).slice(1),
+  ]);
+}
+
+async function ringTransfer(
+  options: Readonly<{ ring?: Address; data?: Uint8Array }> = {}
+): Promise<Instruction> {
+  return ringSpendInstruction({
+    ...options,
+    data: options.data ?? ringTransactData({ settlements: [] }),
+  });
+}
+
+async function ringWithdrawal(
+  options: Readonly<{ ring?: Address; data?: Uint8Array; recipient?: Address }> = {}
+): Promise<Instruction> {
+  return ringSpendInstruction({
+    ring: options.ring ?? RING_PROGRAM,
+    data: options.data ?? ringTransactData({ settlements: [{ tag: 1, amount: 10n }] }),
+    settlementRecipient: options.recipient ?? RECIPIENT,
+  });
+}
+
+/** `ringTransactAccounts` verbatim: payer twice, both trees, ringAuth at index 7. */
+async function ringSpendInstruction(
+  options: Readonly<{ ring?: Address; data?: Uint8Array; settlementRecipient?: Address }>
+): Promise<Instruction> {
+  const ring = options.ring ?? RING_PROGRAM;
+  const [ringConfig, ringAuth] = await Promise.all([
+    ringConfigAddress(ring),
+    ringAuthAddress(ring),
+  ]);
+  return {
+    programAddress: ring,
+    accounts: [
+      { address: OWNER, role: AccountRole.WRITABLE_SIGNER },
+      { address: ringConfig, role: AccountRole.READONLY },
+      { address: OWNER, role: AccountRole.WRITABLE_SIGNER },
+      { address: DEFAULT_TREE_ADDRESS, role: AccountRole.WRITABLE },
+      { address: DEFAULT_TREE_ADDRESS, role: AccountRole.WRITABLE },
+      { address: SHIELDED_POOL_PROGRAM_ID, role: AccountRole.READONLY },
+      { address: SYSTEM, role: AccountRole.READONLY },
+      { address: ringAuth, role: AccountRole.READONLY },
+      ...(options.settlementRecipient
+        ? [
+            { address: SOL_INTERFACE, role: AccountRole.WRITABLE },
+            { address: options.settlementRecipient, role: AccountRole.WRITABLE },
+          ]
+        : []),
+    ],
+    data: options.data ?? ringTransactData(),
+  };
+}
+
+/** Compute budget + the ring transact, ALT-compressed like the real builders emit. */
+async function ringSpendWire(
+  instruction: Instruction,
+  options: Readonly<{ lookupTable?: Address }> = {}
+): Promise<string> {
+  const tableAddress = options.lookupTable ?? RING_LOOKUP_TABLE;
+  const tables = {
+    [tableAddress]: [
+      ...(await ringLookupTableAddresses({
+        ringProgramId: RING_PROGRAM,
+        tree: DEFAULT_TREE_ADDRESS,
+      })),
+    ],
+  };
+  const transaction = compileTransaction(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayer(OWNER, message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          { blockhash: BLOCKHASH as Blockhash, lastValidBlockHeight: 100n },
+          message
+        ),
+      (message) =>
+        appendTransactionMessageInstructions(
+          [getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }), instruction],
+          message
+        ),
+      (message) => compressTransactionMessageUsingAddressLookupTables(message, tables as never)
+    )
+  );
+  return getBase64Codec().decode(getTransactionEncoder().encode(transaction));
+}
+
+function ringTransferPolicy(
+  outerUnsignedTxBase64: string,
+  overrides: Partial<
+    Extract<OuterTransactionPolicyInput["intent"], { opType: "transfer_registered" }>
+  > = {}
+): OuterTransactionPolicyInput {
+  return transferPolicy(outerUnsignedTxBase64, {
+    ringProgramId: RING_PROGRAM,
+    ringLookupTable: RING_LOOKUP_TABLE,
+    ...overrides,
+  });
+}
+
+function ringWithdrawalPolicy(
+  outerUnsignedTxBase64: string,
+  overrides: Partial<Extract<OuterTransactionPolicyInput["intent"], { opType: "withdraw" }>> = {}
+): OuterTransactionPolicyInput {
+  return withdrawalPolicy(outerUnsignedTxBase64, {
+    ringProgramId: RING_PROGRAM,
+    ringLookupTable: RING_LOOKUP_TABLE,
+    ...overrides,
+  });
+}
+
+/**
+ * Appends an index to one of the message's lookup lists without touching any
+ * instruction — exactly the "unreferenced account rides along" shape the gate
+ * must refuse, because a writable lookup is writable in the signed transaction
+ * whether or not an instruction names it.
+ */
+function addLookupIndex(
+  wire: string,
+  list: "writableIndexes" | "readonlyIndexes",
+  index: number
+): string {
+  const transaction = getTransactionDecoder().decode(getBase64Codec().encode(wire));
+  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+  if (message.version !== 0 || !message.addressTableLookups?.[0]) {
+    throw new Error("test transaction must be a compressed v0 message");
+  }
+  const lookup = message.addressTableLookups[0];
+  const modified = {
+    ...message,
+    addressTableLookups: [{ ...lookup, [list]: [...lookup[list], index] }],
+  };
+  return getBase64Codec().decode(
+    getTransactionEncoder().encode({
+      ...transaction,
+      messageBytes: getCompiledTransactionMessageEncoder().encode(
+        modified as never
+      ) as (typeof transaction)["messageBytes"],
+    })
+  );
 }
 
 async function expectPolicyRejection(input: OuterTransactionPolicyInput): Promise<void> {
@@ -835,6 +999,140 @@ describe("validateOuterTransaction", () => {
       ],
     ])("rejects %s", async (_case, buildInput) => {
       await expectPolicyRejection(buildInput());
+    });
+  });
+
+  describe("ring-bound spend", () => {
+    it("pins the locally derived table to zolana's ringLookupTableAddresses", async () => {
+      // The wire gate resolves lookups against this list without RPC; upstream
+      // drift must break this build, never custody.
+      expect([...(await expectedRingTable(RING_PROGRAM, DEFAULT_TREE_ADDRESS))]).toEqual([
+        ...(await ringLookupTableAddresses({
+          ringProgramId: RING_PROGRAM,
+          tree: DEFAULT_TREE_ADDRESS,
+        })),
+      ]);
+    });
+
+    it("accepts a ring transfer with no public settlement", async () => {
+      await expect(
+        validateOuterTransaction(ringTransferPolicy(await ringSpendWire(await ringTransfer())))
+      ).resolves.toBeUndefined();
+    });
+
+    it("accepts a ring withdrawal with exactly the approved settlement", async () => {
+      await expect(
+        validateOuterTransaction(ringWithdrawalPolicy(await ringSpendWire(await ringWithdrawal())))
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      [
+        "the pool transact tag in place of the ring tag",
+        async () =>
+          ringTransferPolicy(
+            await ringSpendWire(await ringTransfer({ data: opaqueTransactData() }))
+          ),
+      ],
+      [
+        "a truncated custom-ring proof",
+        async () =>
+          ringTransferPolicy(
+            await ringSpendWire(
+              await ringTransfer({
+                data: Uint8Array.from([
+                  RING_TRANSACT_TAG,
+                  ...bytes(RING_PROOF_LENGTH - 1, 0x33),
+                  ...opaqueTransactData().slice(1),
+                ]),
+              })
+            )
+          ),
+      ],
+      [
+        "a transact from a ring the intent never named",
+        async () =>
+          ringTransferPolicy(await ringSpendWire(await ringTransfer()), {
+            ringProgramId: OTHER_RING,
+          }),
+      ],
+      [
+        "a lookup table that is not the ring's persisted one",
+        async () =>
+          ringTransferPolicy(await ringSpendWire(await ringTransfer(), { lookupTable: OTHER })),
+      ],
+      [
+        "a ring intent missing its lookup table",
+        async () =>
+          transferPolicy(await ringSpendWire(await ringTransfer()), {
+            ringProgramId: RING_PROGRAM,
+          }),
+      ],
+      [
+        "a default spend intent over compressed bytes",
+        async () => transferPolicy(await ringSpendWire(await ringTransfer())),
+      ],
+      [
+        "a non-SOL requested mint",
+        async () => ringTransferPolicy(await ringSpendWire(await ringTransfer()), { mint: MINT }),
+      ],
+      [
+        "a public settlement on a ring transfer",
+        async () =>
+          ringTransferPolicy(
+            await ringSpendWire(
+              await ringTransfer({
+                data: ringTransactData({ settlements: [{ tag: 1, amount: 10n }] }),
+              })
+            )
+          ),
+      ],
+      [
+        "a ring withdrawal amount that differs from the approved one",
+        async () =>
+          ringWithdrawalPolicy(
+            await ringSpendWire(
+              await ringWithdrawal({
+                data: ringTransactData({ settlements: [{ tag: 1, amount: 11n }] }),
+              })
+            )
+          ),
+      ],
+      [
+        "a ring withdrawal recipient that differs from the approved one",
+        async () =>
+          ringWithdrawalPolicy(await ringSpendWire(await ringWithdrawal({ recipient: OTHER }))),
+      ],
+      [
+        "an extra writable lookup index nothing references",
+        async () =>
+          ringTransferPolicy(
+            addLookupIndex(await ringSpendWire(await ringTransfer()), "writableIndexes", 6)
+          ),
+      ],
+      [
+        "an extra readonly lookup index nothing references",
+        async () =>
+          ringTransferPolicy(
+            addLookupIndex(await ringSpendWire(await ringTransfer()), "readonlyIndexes", 6)
+          ),
+      ],
+      [
+        "a lookup index past the table's end",
+        async () =>
+          ringTransferPolicy(
+            addLookupIndex(await ringSpendWire(await ringTransfer()), "readonlyIndexes", 7)
+          ),
+      ],
+      [
+        "a duplicated lookup index",
+        async () =>
+          ringTransferPolicy(
+            addLookupIndex(await ringSpendWire(await ringTransfer()), "readonlyIndexes", 0)
+          ),
+      ],
+    ])("rejects %s", async (_case, buildInput) => {
+      await expectPolicyRejection(await buildInput());
     });
   });
 });

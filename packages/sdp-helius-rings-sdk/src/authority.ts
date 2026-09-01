@@ -1,5 +1,6 @@
 import type { Address, Bytes32 } from "@heliuslabs/zolana";
 import { randomSalt } from "@heliuslabs/zolana/keypair";
+import { auditorMessageData, encryptTransactionViewingSecret } from "@heliuslabs/zolana/ring";
 import type { ProofOutputUtxo } from "@heliuslabs/zolana/transaction";
 import { type AssetRegistry, encodeConfidentialSlots } from "@heliuslabs/zolana/transaction";
 import type {
@@ -156,10 +157,35 @@ export class CustodyWalletAuthority implements WalletAuthority {
     return Promise.reject(new RingsUnsupportedFlowError("transfer_anonymous"));
   }
 
+  /**
+   * The confidential encryption plus the two ring-only obligations: the
+   * transaction viewing secret sealed to the ring's P-256 auditor key (so the
+   * auditor can later open the transaction), and the raw audit witness the
+   * ring's second proof consumes. Mirrors the SDK's `LocalWalletAuthority`.
+   *
+   * Needs only viewing-key material, which lives in-process; the Ed25519
+   * custody split is not crossed. The transaction viewing key is deliberately
+   * not destroyed here, unlike `encryptConfidentialTransfer`'s: `secretBytes()`
+   * may alias the key's buffer, and `proveCustomRingTransfer` zeroes
+   * `audit.txViewingSecret` and `audit.ephemeralSecret` in its own `finally`.
+   */
   encryptCustomRingTransfer(
-    _input: Parameters<WalletAuthority["encryptCustomRingTransfer"]>[0]
+    input: Parameters<WalletAuthority["encryptCustomRingTransfer"]>[0]
   ): Promise<EncryptedCustomRingTransfer> {
-    return Promise.reject(new RingsUnsupportedFlowError("transfer_custom_ring"));
+    const transactionViewingKey = this.#material.viewingKey.transactionViewingKey(
+      input.firstNullifier
+    );
+    const salt = randomSalt();
+    const txViewingSecret = transactionViewingKey.secretBytes();
+    const encryption = encryptTransactionViewingSecret(txViewingSecret, input.auditorPublicKey);
+
+    return Promise.resolve({
+      txViewingPublicKey: transactionViewingKey.publicKey(),
+      salt,
+      payload: encodeConfidentialSlots(input.outputs, input.assets, transactionViewingKey, salt),
+      auditorMessage: auditorMessageData(encryption.message, input.auditorPublicKey),
+      audit: Object.freeze({ txViewingSecret, ephemeralSecret: encryption.ephemeralSecret }),
+    });
   }
 
   encryptSplit(_input: Parameters<WalletAuthority["encryptSplit"]>[0]): Promise<EncryptedSplit> {

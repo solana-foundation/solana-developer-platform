@@ -9,16 +9,18 @@ import type {
   PrivateWallet,
   ProjectRing,
   ReadIdentityResult,
-  RingSelector,
   RuntimeHealth,
   SyncPhotonResult,
   TransitionGuard,
   VerifyIndexedResult,
 } from "@sdp/helius-rings";
 import {
+  DEFAULT_RING_NAME,
   HeliusRingsError,
   type HeliusRingsErrorCode,
+  MAX_PROJECT_RINGS,
   nextState,
+  RING_NAME_PATTERN,
   type RingsGatewayPort,
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
@@ -203,13 +205,27 @@ export class HeliusRingsService {
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
-    this.gateway = dependencies.gateway ?? resolveRingsGateway(env, tenant);
+    this.projectRings = dependencies.projectRings ?? createHeliusRingsProjectRingRepository(env);
+    // The bring-up hook persists a ring's lookup table the moment it lands, so
+    // a crash before markActive resumes by adoption instead of renting twice.
+    // It must exist before the gateway that calls it.
+    this.gateway =
+      dependencies.gateway ??
+      resolveRingsGateway(env, tenant, {
+        recordRingLookupTable: async (ringProgramId, lookupTableAddress) => {
+          await this.projectRings.recordLookupTable({
+            organizationId: tenant.organizationId,
+            projectId: tenant.projectId,
+            ringProgramId,
+            lookupTableAddress,
+          });
+        },
+      });
     this.wallets = dependencies.wallets ?? createHeliusRingsWalletRepository(env);
     this.operations = dependencies.operations ?? createHeliusRingsOperationRepository(env);
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
     this.health = dependencies.health ?? createHeliusRingsHealthRepository(env);
     this.assets = dependencies.assets ?? createHeliusRingsAssetRepository(env);
-    this.projectRings = dependencies.projectRings ?? createHeliusRingsProjectRingRepository(env);
     this.enforcePolicy = dependencies.enforcePolicy ?? enforceWalletOperationPolicy;
     this.validateOuterTransaction =
       dependencies.validateOuterTransaction ?? validateRingsOuterTransaction;
@@ -287,24 +303,51 @@ export class HeliusRingsService {
     return { ...identity, recordedShieldedAddress: wallet.shielded_address };
   }
 
-  /** The project's one custom ring, or null while none is recorded. */
-  async getProjectRing(): Promise<ProjectRing | null> {
-    const ring = await this.projectRings.getByProject({ ...this.tenant });
-    return ring ? mapHeliusRingsProjectRingRow(ring) : null;
+  /** The project's custom rings, oldest first. */
+  async listProjectRings(): Promise<ProjectRing[]> {
+    const rings = await this.projectRings.listByProject({ ...this.tenant });
+    return rings.map(mapHeliusRingsProjectRingRow);
   }
 
   /**
-   * Records the project's one custom ring and completes bring-up through the
-   * gateway. Idempotent: re-submitting the same id resumes a pending or failed
-   * bring-up, and an already-active ring returns as it stands. A different id
-   * replaces a ring that never went active (a mistyped id binds no notes) and
-   * is refused once active — re-pointing would strand every ring-bound note.
+   * Records one of the project's named custom rings and completes bring-up
+   * through the gateway. Idempotent: re-submitting the same name and id
+   * resumes a pending or failed bring-up, and an already-active ring returns
+   * as it stands. A different id under the same name replaces a ring that
+   * never went active (a mistyped id binds no notes) and is refused once
+   * active — re-pointing would strand every ring-bound note.
    */
-  async createProjectRing(input: { ringProgramId: string }): Promise<ProjectRing> {
+  async createProjectRing(input: { name: string; ringProgramId: string }): Promise<ProjectRing> {
+    // The route schema enforces both too, but this service owns the invariant:
+    // a request that dodged the schema must not surface the DB CHECK as a 500.
+    if (!RING_NAME_PATTERN.test(input.name) || input.name === DEFAULT_RING_NAME) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        'a ring name is a 1-32 character lowercase slug, and "default" names the default pool'
+      );
+    }
+
+    // Counted here rather than in SQL: a concurrent race can briefly exceed
+    // the cap by one, which wastes rent but breaks nothing.
+    const existing = await this.projectRings.listByProject({ ...this.tenant });
+    if (
+      existing.length >= MAX_PROJECT_RINGS &&
+      !existing.some((ring) => ring.name === input.name)
+    ) {
+      throw new HeliusRingsError(
+        "conflict",
+        `this project already has ${MAX_PROJECT_RINGS} custom rings; re-submit an existing name to resume its bring-up`
+      );
+    }
+
     let reserved = await this.projectRings.reserveRing({
       ...this.tenant,
+      name: input.name,
       ringProgramId: input.ringProgramId,
     });
+    if (reserved === "program_in_use") {
+      throw programInUseError();
+    }
     if (!reserved) {
       throw new AppError("INTERNAL_ERROR", "ring reservation returned no row");
     }
@@ -313,28 +356,37 @@ export class HeliusRingsService {
       // id is correctable; the repository refuses once the ring is active.
       const repointed = await this.projectRings.repointRing({
         ...this.tenant,
+        name: input.name,
         ringProgramId: input.ringProgramId,
       });
+      if (repointed === "program_in_use") {
+        throw programInUseError();
+      }
       if (!repointed) {
         throw new HeliusRingsError(
           "conflict",
-          "this project's custom ring is active; re-pointing it would strand its ring-bound notes"
+          `ring "${input.name}" is active; re-pointing it would strand its ring-bound notes`
         );
       }
       reserved = repointed;
     }
-    if (reserved.status === "active") {
+    // An active row missing its table cannot exist under 0072's CHECK, but the
+    // guard is cheap: falling through lets provisioning backfill the table.
+    if (reserved.status === "active" && reserved.lookup_table_address) {
       return mapHeliusRingsProjectRingRow(reserved);
     }
 
     try {
       const provisioned = await this.gateway.provisionRing({
         ringProgramId: reserved.ring_program_id,
+        lookupTableAddress: reserved.lookup_table_address,
       });
       const active = await this.projectRings.markActive({
         ...this.tenant,
+        name: input.name,
         ringProgramId: reserved.ring_program_id,
         auditorPublicKey: provisioned.auditorPublicKeyHex,
+        lookupTableAddress: provisioned.lookupTableAddress,
       });
       if (!active) {
         // A concurrent submission re-pointed the row under this bring-up (the
@@ -342,7 +394,7 @@ export class HeliusRingsService {
         // re-submitting the same id resumes it; a 500 would hide that.
         throw new HeliusRingsError(
           "conflict",
-          "the project's ring was re-pointed while bring-up ran; re-submit the intended program id"
+          "the ring was re-pointed while bring-up ran; re-submit the intended program id"
         );
       }
       return mapHeliusRingsProjectRingRow(active);
@@ -355,6 +407,7 @@ export class HeliusRingsService {
           : { code: "gateway_unavailable", message: "ring bring-up failed" };
       await this.projectRings.markFailed({
         ...this.tenant,
+        name: input.name,
         ringProgramId: reserved.ring_program_id,
         failureCode: failure.code,
         failureMessage: failure.message,
@@ -364,28 +417,52 @@ export class HeliusRingsService {
   }
 
   /**
-   * Resolves the symbolic ring selector to the program id pinned on the
-   * operation; null = the default public ring. "custom" is refused until the
-   * project's ring is active — invalid_input when nothing was ever recorded
-   * (the request names a ring the project does not have), config_error while
-   * bring-up is unfinished (an operator action makes the same request succeed).
+   * Resolves a ring name to the program id pinned on the operation; null = the
+   * default public ring. A named ring is refused until active — invalid_input
+   * when nothing under that name was ever recorded (the request names a ring
+   * the project does not have), config_error while bring-up is unfinished (an
+   * operator action makes the same request succeed).
    */
-  private async resolveRing(selector: RingSelector | undefined): Promise<string | null> {
-    if (selector !== "custom") return null;
-    const ring = await this.projectRings.getByProject({ ...this.tenant });
-    if (!ring) {
+  private async resolveRing(ring: string | undefined): Promise<string | null> {
+    if (ring === undefined || ring === DEFAULT_RING_NAME) return null;
+    if (!RING_NAME_PATTERN.test(ring)) {
+      throw new HeliusRingsError("invalid_input", "the ring selector is not a valid ring name");
+    }
+    const row = await this.projectRings.getByName({ ...this.tenant, name: ring });
+    if (!row) {
+      // Safe to echo: the name passed the slug pattern above.
       throw new HeliusRingsError(
         "invalid_input",
-        "this project has no custom ring recorded; record one before targeting it"
+        `this project has no ring named "${ring}"; record it before targeting it`
       );
     }
-    if (ring.status !== "active") {
+    if (row.status !== "active") {
       throw new HeliusRingsError(
         "config_error",
-        `the project's custom ring is ${ring.status}; complete ring bring-up before targeting it`
+        `ring "${ring}" is ${row.status}; complete ring bring-up before targeting it`
       );
     }
-    return ring.ring_program_id;
+    return row.ring_program_id;
+  }
+
+  /**
+   * The spend's ring lookup table, re-read from the ring row at build time.
+   * This deliberately diverges from 0073's "never re-read the ring row" rule:
+   * that rule pins INTENT, and the intent stays the operation row's pinned
+   * ring_program_id. The table is transport — the ALT the compiled v0
+   * transaction rides — and safe to read late because an active ring row is
+   * immutable: re-point is status-guarded and there is no delete path.
+   */
+  private async requireRingLookupTable(ringProgramId: string | null): Promise<string | null> {
+    if (ringProgramId === null) return null;
+    const ring = await this.projectRings.getByProgramId({ ...this.tenant, ringProgramId });
+    if (ring?.status !== "active" || !ring.lookup_table_address) {
+      throw new HeliusRingsError(
+        "config_error",
+        "the operation's ring has not completed bring-up; resume it before running ring operations"
+      );
+    }
+    return ring.lookup_table_address;
   }
 
   /**
@@ -405,14 +482,6 @@ export class HeliusRingsService {
     // A retry re-runs the pinned ring, never the selector: the approver and
     // the failed attempt both saw a resolved id, and that is what re-runs.
     const ringProgramId = retry ? retry.ringProgramId : await this.resolveRing(input.ring);
-    // The request schema only admits `ring` on shields; this guards the
-    // persisted paths (retry, resume) that never pass through it.
-    if (ringProgramId !== null && input.opType !== "shield") {
-      throw new HeliusRingsError(
-        "invalid_input",
-        "only shield operations can target the custom ring"
-      );
-    }
     const intentKey = computeIntentKey(input, ringProgramId);
 
     const { operation, reserved } = await this.operations.reserveIntent({
@@ -941,6 +1010,12 @@ export class HeliusRingsService {
         current.op_type === "transfer_registered"
           ? await this.resolveTransferRecipient(current)
           : undefined;
+      // Spends only: a ring shield builds from the pinned id alone, keeping
+      // 0073's "never re-read the ring row" contract intact for it.
+      const ringLookupTable =
+        current.op_type === "shield"
+          ? null
+          : await this.requireRingLookupTable(current.ring_program_id);
       const built = await this.gateway.buildOperation({
         operation: this.toPrivateOperation(current),
         owner,
@@ -954,6 +1029,7 @@ export class HeliusRingsService {
         ...(wallet.last_indexed_slot ? { requireSlot: wallet.last_indexed_slot } : {}),
         knownAssets: await this.knownAssets(),
         ...(recipient ? { recipient } : {}),
+        ...(ringLookupTable ? { ringLookupTable } : {}),
       });
 
       // Proving and building are one call: the SDK proves inside the builder, so
@@ -983,7 +1059,8 @@ export class HeliusRingsService {
           current,
           owner,
           wallet.shielded_address,
-          built.outerUnsignedTxBase64
+          built.outerUnsignedTxBase64,
+          ringLookupTable
         )
       );
 
@@ -1429,15 +1506,30 @@ function requiredOuterPolicyField(value: string | null): string {
   return value;
 }
 
+/** The 409 both ring-reservation paths raise on UNIQUE(project_id, ring_program_id). */
+function programInUseError(): HeliusRingsError {
+  return new HeliusRingsError(
+    "conflict",
+    "that ring program id is already registered under another of this project's rings"
+  );
+}
+
 function outerTransactionPolicyInput(
   operation: HeliusRingsOperationRow,
   owner: string,
   shieldedAddress: string | null,
-  outerUnsignedTxBase64: string
+  outerUnsignedTxBase64: string,
+  ringLookupTable: string | null
 ): RingsOuterTransactionPolicyInput {
   const mint = requiredOuterPolicyField(operation.asset_mint);
   const amountRaw = requiredOuterPolicyField(operation.amount_raw);
   const common = { mint, amountRaw };
+  // Both or neither: the pinned ring and its table travel together, and the
+  // SDK policy mismatches on one without the other.
+  const ringSpend =
+    operation.ring_program_id && ringLookupTable
+      ? { ringProgramId: operation.ring_program_id, ringLookupTable }
+      : {};
 
   switch (operation.op_type) {
     case "shield":
@@ -1459,6 +1551,7 @@ function outerTransactionPolicyInput(
           opType: "withdraw",
           ...common,
           to: requiredOuterPolicyField(operation.to_addr),
+          ...ringSpend,
         },
       };
     case "transfer_registered":
@@ -1468,6 +1561,7 @@ function outerTransactionPolicyInput(
         intent: {
           opType: "transfer_registered",
           ...common,
+          ...ringSpend,
         },
       };
     default:

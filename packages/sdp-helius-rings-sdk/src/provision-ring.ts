@@ -1,8 +1,10 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import type { Bytes32 } from "@heliuslabs/zolana/interface";
 import {
+  buildRingLookupTableTransaction,
   createRingConfigInstruction,
   fetchReaderGrant,
+  fetchRingLookupTable,
   fetchRingProgramConfig,
   grantReadAccessInstruction,
   initSppRingConfigInstruction,
@@ -24,6 +26,7 @@ import {
   compileTransaction,
   createTransactionMessage,
   getAddressDecoder,
+  getAddressEncoder,
   getBase58Encoder,
   getBase64Codec,
   getCompiledTransactionMessageDecoder,
@@ -38,13 +41,15 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type Transaction,
 } from "@solana/kit";
+import { findAddressLookupTablePda } from "@solana-program/address-lookup-table";
+import { expectedRingTable } from "./outer-tx-policy.js";
 
 /**
  * Completes bring-up of a pre-deployed ring program: auditor key from the ring
  * RPC, then the ring's create-config, SPP-registration and initial-reader
- * instructions, signed only through custody. Each step is gated on a read of
- * what already exists on chain, so a run that died mid-way resumes instead of
- * double-submitting.
+ * instructions, and finally the ring's address lookup table — all signed only
+ * through custody. Each step is gated on a read of what already exists on
+ * chain, so a run that died mid-way resumes instead of double-submitting.
  */
 
 export interface ProvisionRingDeps {
@@ -55,6 +60,14 @@ export interface ProvisionRingDeps {
   /** Ed25519 over raw message bytes, for the auditor-key attestation. */
   readonly signMessage: (messageBase64: string, owner: string) => Promise<string>;
   readonly submitTransaction: (signedTxBase64: string) => Promise<string>;
+  /**
+   * Called the moment the ring's lookup table confirms, before bring-up
+   * finishes: an ALT address derives from (authority, recentSlot) and is not
+   * recoverable later, so a crash between the table landing and the caller
+   * persisting the result must resume by adoption, not by renting a second
+   * table.
+   */
+  readonly recordLookupTable?: (lookupTableAddress: string) => Promise<void>;
 }
 
 /**
@@ -68,6 +81,11 @@ const INIT_SPP_RING_CONFIG_TAG = 2;
 const GRANT_READ_ACCESS_TAG = 4;
 
 const UPGRADEABLE_LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
+const ADDRESS_LOOKUP_TABLE_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
+
+/** Native ALT program bincode tags: 0 creates a table, 2 extends one. */
+const ALT_CREATE_TAG = 0;
+const ALT_EXTEND_TAG = 2;
 
 /** `UpgradeableLoaderState` tags: 2 names a program, 3 its programdata. */
 const PROGRAM_STATE_TAG = 2;
@@ -152,7 +170,33 @@ export async function provisionCustomRing(
     await proveCustodyHoldsAuthority(deps, config.authority);
   }
 
-  return { auditorPublicKeyHex: hex(config.auditorPublicKey.toUncompressed()) };
+  // Ring spends are v0 transactions compressed over the ring's one lookup
+  // table, so bring-up rents it as its fourth step. A recorded address is
+  // adopted when the table is live and complete; NOT_FOUND means the recorded
+  // create never landed, so a fresh table replaces it.
+  let lookupTableAddress = parseRecordedLookupTable(input.lookupTableAddress);
+  if (lookupTableAddress !== undefined) {
+    const table = await readRingLookupTable(deps.client, ringProgramId, lookupTableAddress);
+    if (table === "incomplete") {
+      // The gate below lands create+extend atomically, so a live-but-short
+      // table is not one this bring-up created; adopting it would break the
+      // wire policy's locally derived table model.
+      throw new HeliusRingsError(
+        "conflict",
+        "the recorded ring lookup table does not hold the ring's addresses; it was not created by this bring-up"
+      );
+    }
+    if (table === "missing") lookupTableAddress = undefined;
+  }
+  if (lookupTableAddress === undefined) {
+    lookupTableAddress = await createRingLookupTable(deps, ringProgramId, config.authority);
+    await deps.recordLookupTable?.(lookupTableAddress);
+  }
+
+  return {
+    auditorPublicKeyHex: hex(config.auditorPublicKey.toUncompressed()),
+    lookupTableAddress,
+  };
 }
 
 /** Caller input rather than persisted configuration, so a bad value is theirs to fix. */
@@ -161,6 +205,161 @@ function parseRingProgramId(value: string): Address {
     return address(value);
   } catch {
     throw new HeliusRingsError("invalid_input", "the ring program id is not a valid address");
+  }
+}
+
+/** Persisted state, not caller input: a malformed value is a config_error. */
+function parseRecordedLookupTable(value: string | null | undefined): Address | undefined {
+  if (value === null || value === undefined) return undefined;
+  try {
+    return address(value);
+  } catch {
+    throw new HeliusRingsError(
+      "config_error",
+      "the recorded ring lookup table address is malformed"
+    );
+  }
+}
+
+/** Absent and incomplete are states bring-up handles; anything else propagates. */
+async function readRingLookupTable(
+  client: ZolanaClient,
+  ringProgramId: Address,
+  tableAddress: Address
+): Promise<"ok" | "missing" | "incomplete"> {
+  try {
+    await fetchRingLookupTable({ client, ringProgramId, address: tableAddress });
+    return "ok";
+  } catch (error) {
+    if (error instanceof RingError && error.code === "RING_LOOKUP_TABLE_NOT_FOUND") {
+      return "missing";
+    }
+    if (error instanceof RingError && error.code === "RING_LOOKUP_TABLE_INCOMPLETE") {
+      return "incomplete";
+    }
+    throw error;
+  }
+}
+
+async function createRingLookupTable(
+  deps: ProvisionRingDeps,
+  ringProgramId: Address,
+  authority: Address
+): Promise<Address> {
+  const built = await buildRingLookupTableTransaction({
+    client: deps.client,
+    ringProgramId,
+    feePayer: authority,
+  });
+  await assertRingLookupTableBringUp(built.transaction, {
+    ringProgramId,
+    authority,
+    expectedAddress: built.address,
+    tree: deps.client.tree,
+  });
+  await signSubmitConfirm(deps, built.transaction, authority);
+
+  // Confirmation says the transaction landed; the read confirms the account
+  // holds the ring's addresses.
+  if ((await readRingLookupTable(deps.client, ringProgramId, built.address)) !== "ok") {
+    throw new HeliusRingsError(
+      "gateway_unavailable",
+      "the ring lookup table is absent after a confirmed create"
+    );
+  }
+  return built.address;
+}
+
+/**
+ * The lookup-table analog of `assertRingBringUpInstruction`, judged on the
+ * bytes: exactly the create+extend pair over the native Address Lookup Table
+ * program, creating the PDA re-derived from (authority, recentSlot) and
+ * extending it with exactly `expectedRingTable(ring, tree)` — the list the
+ * wire policy re-derives locally for every ring spend. Custody must never
+ * sign any other extend, or that local model breaks; freeze, deactivate and
+ * close are refused with everything else.
+ */
+async function assertRingLookupTableBringUp(
+  transaction: Transaction,
+  expect: Readonly<{
+    ringProgramId: Address;
+    authority: Address;
+    expectedAddress: Address;
+    tree: Address;
+  }>
+): Promise<void> {
+  const refuse = () => {
+    throw new HeliusRingsError(
+      "conflict",
+      "refusing to sign a transaction that is not the expected ring lookup-table bring-up"
+    );
+  };
+
+  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+  const header = (
+    message as {
+      header: Readonly<{ numSignerAccounts: number; numReadonlySignerAccounts: number }>;
+    }
+  ).header;
+  const staticAccounts = (message as { staticAccounts: readonly string[] }).staticAccounts;
+  if (
+    header.numSignerAccounts !== 1 ||
+    header.numReadonlySignerAccounts !== 0 ||
+    staticAccounts[0] !== expect.authority
+  ) {
+    refuse();
+  }
+
+  const instructions = getInstructionsFromCompiledTransactionMessage(message);
+  if (instructions.length !== 2) refuse();
+  const [create, extend] = instructions;
+  if (
+    !create ||
+    !extend ||
+    create.programAddress !== ADDRESS_LOOKUP_TABLE_PROGRAM ||
+    extend.programAddress !== ADDRESS_LOOKUP_TABLE_PROGRAM
+  ) {
+    refuse();
+  }
+
+  // Create: u32 tag 0 || u64 recentSlot || u8 bump. The table PDA re-derived
+  // from (authority, recentSlot) must be the account the instruction creates
+  // and the address the builder claimed.
+  const createData = new Uint8Array(create.data ?? []);
+  if (createData.length !== 13 || readU32(createData, 0) !== ALT_CREATE_TAG) refuse();
+  const recentSlot = readU64(createData, 4);
+  if (recentSlot === undefined) return refuse();
+  const [derivedTable, derivedBump] = await findAddressLookupTablePda({
+    authority: expect.authority,
+    recentSlot,
+  });
+  if (
+    derivedTable !== expect.expectedAddress ||
+    createData[12] !== derivedBump ||
+    create.accounts?.[0]?.address !== derivedTable
+  ) {
+    refuse();
+  }
+
+  // Extend: u32 tag 2 || u64 count || count×32 addresses, targeting the same
+  // table, with the address vector byte-equal to the expected list in order.
+  const expected = await expectedRingTable(expect.ringProgramId, expect.tree);
+  const extendData = new Uint8Array(extend.data ?? []);
+  if (
+    extendData.length !== 12 + expected.length * 32 ||
+    readU32(extendData, 0) !== ALT_EXTEND_TAG ||
+    readU64(extendData, 4) !== BigInt(expected.length) ||
+    extend.accounts?.[0]?.address !== derivedTable
+  ) {
+    refuse();
+  }
+  const addressEncoder = getAddressEncoder();
+  for (let index = 0; index < expected.length; index += 1) {
+    const wanted = new Uint8Array(addressEncoder.encode(address(expected[index] as string)));
+    const actual = extendData.subarray(12 + index * 32, 12 + (index + 1) * 32);
+    for (let byte = 0; byte < 32; byte += 1) {
+      if (wanted[byte] !== actual[byte]) refuse();
+    }
   }
 }
 
@@ -331,9 +530,17 @@ async function landRingTransaction(
     )
   );
   assertRingBringUpInstruction(transaction, input.ringProgramId, input.expectedTag);
+  await signSubmitConfirm(deps, transaction, input.owner);
+}
 
+/** The single point where bytes reach `deps.signTransaction`. */
+async function signSubmitConfirm(
+  deps: ProvisionRingDeps,
+  transaction: Transaction,
+  owner: Address
+): Promise<void> {
   const unsigned = getBase64Codec().decode(getTransactionEncoder().encode(transaction));
-  const signed = await deps.signTransaction(unsigned, input.owner);
+  const signed = await deps.signTransaction(unsigned, owner);
   const signature = await deps.submitTransaction(signed);
 
   await deps.client.confirmTransaction(signature as Signature);
@@ -370,6 +577,13 @@ function readU32(data: Uint8Array, offset: number): number | undefined {
     return undefined;
   }
   return new DataView(data.buffer, data.byteOffset + offset, 4).getUint32(0, true);
+}
+
+function readU64(data: Uint8Array, offset: number): bigint | undefined {
+  if (data.length < offset + 8) {
+    return undefined;
+  }
+  return new DataView(data.buffer, data.byteOffset + offset, 8).getBigUint64(0, true);
 }
 
 function decodeStoredAddress(data: Uint8Array, offset: number): Address | undefined {
