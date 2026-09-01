@@ -238,25 +238,28 @@ export function isEarnProviderSurfaced(provider: string): boolean {
   );
 }
 
+export type RampProviderSurfacing = boolean | "sandbox";
+
 export const RAMP_PROVIDER_SURFACING = {
   moonpay: true,
   lightspark: true,
   bvnk: true,
-  moneygram: false,
+  moneygram: "sandbox",
   coinbase: true,
   mural: true,
   stripe: true,
-} as const satisfies Record<RampProviderId, boolean>;
+} as const satisfies Record<RampProviderId, RampProviderSurfacing>;
 
-export const SURFACED_RAMP_PROVIDERS: readonly RampProviderId[] = RAMP_PROVIDERS.filter(
-  (provider) => RAMP_PROVIDER_SURFACING[provider]
-);
+export function isRampProviderSurfaced(provider: string, environment: SdpEnvironment): boolean {
+  if (!Object.hasOwn(RAMP_PROVIDER_SURFACING, provider)) {
+    return false;
+  }
+  const surfacing = RAMP_PROVIDER_SURFACING[provider as RampProviderId];
+  return surfacing === true || (surfacing === "sandbox" && environment === "sandbox");
+}
 
-export function isRampProviderSurfaced(provider: string): boolean {
-  return (
-    Object.hasOwn(RAMP_PROVIDER_SURFACING, provider) &&
-    RAMP_PROVIDER_SURFACING[provider as RampProviderId]
-  );
+export function surfacedRampProviders(environment: SdpEnvironment): RampProviderId[] {
+  return RAMP_PROVIDERS.filter((provider) => isRampProviderSurfaced(provider, environment));
 }
 
 export const ORGANIZATION_PROVIDER_FAMILIES = [

@@ -20,6 +20,7 @@ import {
   RAMP_PROVIDERS,
   type RampProviderId,
   resolveOrganizationProviderEntitlements,
+  type SdpEnvironment,
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
@@ -764,8 +765,11 @@ export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
   }
 }
 
-export function assertRampProviderSurfaced(providerId: RampProviderId): void {
-  if (!isRampProviderSurfaced(providerId)) {
+export function assertRampProviderSurfaced(
+  providerId: RampProviderId,
+  environment: SdpEnvironment
+): void {
+  if (!isRampProviderSurfaced(providerId, environment)) {
     throw new AppError(
       "FORBIDDEN",
       `${PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId].label} is not currently offered.`

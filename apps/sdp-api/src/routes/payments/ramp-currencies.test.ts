@@ -135,7 +135,7 @@ describe("ramp currency provider details", () => {
       expect(response.status).toBe(200);
       const data = await responseData(response);
 
-      for (const unsurfaced of RAMP_PROVIDERS.filter((p) => !isRampProviderSurfaced(p))) {
+      for (const unsurfaced of RAMP_PROVIDERS.filter((p) => !isRampProviderSurfaced(p, "sandbox"))) {
         expect(sortedProvidersFromPairs(data.pairs)).not.toContain(unsurfaced);
         expect(data.providerDetails).not.toHaveProperty(unsurfaced);
       }
