@@ -453,7 +453,13 @@ function DashboardSidebarContent({
         ))}
       </div>
       <div className="shrink-0 px-3 pb-3">
-        <SidebarUserMenu collapsed={isCollapsed} canManageOrgSettings={canManageOrgSettings} />
+        <SidebarUserMenu
+          collapsed={isCollapsed}
+          canManageOrgSettings={canManageOrgSettings}
+          // The mobile slide-over is a 288px column, so the popover only has
+          // room above the trigger there.
+          menuSide={variant === "desktop" ? "right" : "top"}
+        />
       </div>
     </>
   );

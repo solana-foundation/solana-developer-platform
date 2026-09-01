@@ -35,15 +35,20 @@ import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
-// the sandbox badge, and opens the account menu — feedback, API docs, settings,
-// the API debug-log switch, and the Clerk account actions the top-bar
-// UserButton used to provide.
+// opens the account menu — feedback, API docs, settings, the API debug-log
+// switch, the colour theme, and the Clerk account actions the top-bar
+// UserButton used to provide. The caller names the side the popover opens on,
+// because it knows its own geometry: the desktop sidebar has room to the
+// right, while the mobile More sheet spans the viewport and only has room above
+// (Radix can only mirror a side, so it cannot recover from "right" on its own).
 export function SidebarUserMenu({
   collapsed,
   canManageOrgSettings,
+  menuSide,
 }: {
   collapsed: boolean;
   canManageOrgSettings: boolean;
+  menuSide: "right" | "top";
 }) {
   const t = useTranslations();
   const { user } = useUser();
@@ -89,7 +94,12 @@ export function SidebarUserMenu({
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="right" sideOffset={6} className="w-64">
+      <DropdownMenuContent
+        align={menuSide === "right" ? "end" : "start"}
+        side={menuSide}
+        sideOffset={6}
+        className="w-64"
+      >
         <FeedbackMenuItem />
         <DropdownMenuItem asChild className="gap-2.5">
           <a href={docsHref} target="_blank" rel="noopener noreferrer">

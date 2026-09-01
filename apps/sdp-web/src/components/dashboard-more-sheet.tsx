@@ -230,7 +230,11 @@ export function DashboardMoreSheet({
             <WorkspaceSwitcher collapsed={false} onOrganizationSwitchingChange={() => {}} />
             {/* The account menu lives in the sidebar footer, which has no mobile
                 counterpart — this is where phones reach sign-out and feedback. */}
-            <SidebarUserMenu collapsed={false} canManageOrgSettings={canManageOrgSettings} />
+            <SidebarUserMenu
+              collapsed={false}
+              canManageOrgSettings={canManageOrgSettings}
+              menuSide="top"
+            />
           </div>
 
           {groups.map((group) => (
