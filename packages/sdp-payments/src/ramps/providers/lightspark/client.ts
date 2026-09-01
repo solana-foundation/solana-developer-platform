@@ -26,17 +26,17 @@ import { basicAuthHeader, isSolanaCryptoAsset, UNREPORTED_COUNTRY_SUPPORT } from
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
 import { type LightsparkBusinessInfo, lightsparkCounterpartyRequirements } from "./counterparty";
-import { discoverLightsparkCurrencies, readLightsparkRailSupport } from "./currencies";
+import { discoverLightsparkCurrencyAndRails } from "./currencies";
 
 export const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
@@ -467,12 +467,10 @@ export class LightsparkRampClient implements RampProvider {
     return lightsparkCounterpartyRequirements(counterparty, options);
   }
 
-  async _discoverRails(context: Parameters<RampProvider["_discoverRails"]>[0]) {
-    return discoverLightsparkCurrencies(context);
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
-    return readLightsparkRailSupport(readDump);
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    return discoverLightsparkCurrencyAndRails(context);
   }
 
   private async request<TResponse, TBody = never>(

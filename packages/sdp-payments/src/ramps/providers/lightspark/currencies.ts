@@ -9,11 +9,7 @@ import {
   RAMP_RAIL_DUMPS,
   SOLANA_ASSET_TO_RAIL,
 } from "../../shared";
-import type {
-  ProviderRailSupportDistillation,
-  RampDiscoveryContext,
-  RampRawDumpReader,
-} from "../../types";
+import type { ProviderRailSupportDistillation, RampDiscoveryContext } from "../../types";
 import { readLightsparkConfig } from "./client";
 
 const LIGHTSPARK_DISCOVERY_CRYPTO = "USDC";
@@ -176,52 +172,42 @@ export function distillLightsparkRailSupport(
 }
 
 /**
- * Fetches both exchange-rate corridor dumps from the Grid sandbox API.
+ * Provider entry point for the ramp-support script: fetches both Grid
+ * exchange-rate corridor dumps (skipped when offline) and distills them into
+ * the rail-support snapshot.
  *
- * @param context - Discovery context supplying env, fetch, and dump sinks.
- */
-export async function discoverLightsparkCurrencies({
-  env,
-  fetchJson,
-  writeDump,
-}: RampDiscoveryContext): Promise<void> {
-  const config = readLightsparkConfig(env, "sandbox");
-  const base = config.apiBaseUrl;
-  const headers = {
-    Authorization: basicAuthHeader(config.tokenId, config.clientSecret),
-  };
-
-  await writeDump(
-    RAMP_RAIL_DUMPS.lightspark.offrampRates.name,
-    await fetchJson(
-      "lightspark",
-      `GET /exchange-rates?sourceCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
-      `${base}/exchange-rates?sourceCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
-      { headers }
-    )
-  );
-  await writeDump(
-    RAMP_RAIL_DUMPS.lightspark.onrampRates.name,
-    await fetchJson(
-      "lightspark",
-      `GET /exchange-rates?destinationCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
-      `${base}/exchange-rates?destinationCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
-      { headers }
-    )
-  );
-}
-
-/**
- * Reads both committed corridor dumps and distills the rail-support snapshot.
- *
- * @param readDump - Reader over the committed raw dumps.
+ * @param context - Discovery context supplying env, fetch, and dump access.
  * @returns Distilled snapshot plus dropped currency codes.
  */
-export async function readLightsparkRailSupport(
-  readDump: RampRawDumpReader
+export async function discoverLightsparkCurrencyAndRails(
+  context: RampDiscoveryContext
 ): Promise<ProviderRailSupportDistillation> {
+  if (!context.offline) {
+    const config = readLightsparkConfig(context.env, "sandbox");
+    const headers = {
+      Authorization: basicAuthHeader(config.tokenId, config.clientSecret),
+    };
+    await context.writeDump(
+      RAMP_RAIL_DUMPS.lightspark.offrampRates.name,
+      await context.fetchJson(
+        "lightspark",
+        `GET /exchange-rates?sourceCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
+        `${config.apiBaseUrl}/exchange-rates?sourceCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
+        { headers }
+      )
+    );
+    await context.writeDump(
+      RAMP_RAIL_DUMPS.lightspark.onrampRates.name,
+      await context.fetchJson(
+        "lightspark",
+        `GET /exchange-rates?destinationCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
+        `${config.apiBaseUrl}/exchange-rates?destinationCurrency=${LIGHTSPARK_DISCOVERY_CRYPTO}`,
+        { headers }
+      )
+    );
+  }
   return distillLightsparkRailSupport(
-    await readDump(RAMP_RAIL_DUMPS.lightspark.offrampRates.file),
-    await readDump(RAMP_RAIL_DUMPS.lightspark.onrampRates.file)
+    await context.readDump(RAMP_RAIL_DUMPS.lightspark.offrampRates.file),
+    await context.readDump(RAMP_RAIL_DUMPS.lightspark.onrampRates.file)
   );
 }

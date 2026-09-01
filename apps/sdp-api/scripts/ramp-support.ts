@@ -5,7 +5,6 @@ import {
   type ProviderRailSupportSnapshot,
   providerRailSupportSnapshotSchema,
   RAMP_PROVIDER_CLIENTS,
-  RampClient,
   type RampDiscoveryResponseDump,
 } from "@sdp/payments/ramps";
 import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
@@ -82,7 +81,6 @@ type CountryRailsByProvider = ReadonlyMap<RampProviderId, ProviderCountryRails>;
 
 const CURRENCY_DISCOVERY_SUMMARY: Partial<Record<RampProviderId, { ok: number; failed: number }>> =
   {};
-const rampClient = new RampClient();
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled variant: ${JSON.stringify(value)}`);
@@ -785,10 +783,10 @@ function logDroppedCountryCodes(provider: RampProviderId, codes: readonly string
   );
 }
 
-async function distillCurrencySupportProvider(provider: RampProviderId): Promise<void> {
-  const distillation = await RAMP_PROVIDER_CLIENTS[provider].distillRailSupport(
-    readCurrencySupportRawDump
-  );
+async function writeCurrencySnapshot(
+  provider: RampProviderId,
+  distillation: ProviderRailSupportDistillation
+): Promise<void> {
   const snapshot = sortSnapshot(distillation.snapshot);
   await writeJsonFile(currencySupportSnapshotFile(provider), snapshot);
   logDroppedCurrencyCodes(provider, distillation.droppedCurrencyCodes);
@@ -807,36 +805,41 @@ async function runCurrencyDiscovery(args: readonly string[]): Promise<void> {
     console.log(
       `Currency-support raw dump dir: ${path.relative(process.cwd(), CURRENCY_SUPPORT_RAW_DUMP_DIR)}`
     );
-    for (const provider of selectedProviders) {
-      console.log(`\n[${provider}] fetch`);
-      await rampClient._discoverProviderRails(provider, {
-        env: process.env,
-        fetchJson,
-        writeDump: writeCurrencySupportDump,
-      });
-    }
+  }
 
+  const failedProviders: string[] = [];
+  for (const provider of selectedProviders) {
+    if (!offline) {
+      console.log(`\n[${provider}] fetch`);
+    }
+    const distillation = await RAMP_PROVIDER_CLIENTS[provider].discoverCurrencyAndRails({
+      env: process.env,
+      fetchJson,
+      writeDump: writeCurrencySupportDump,
+      readDump: readCurrencySupportRawDump,
+      offline,
+    });
+    const stats = CURRENCY_DISCOVERY_SUMMARY[provider];
+    if (stats !== undefined && stats.failed > 0) {
+      failedProviders.push(`${provider} (${stats.failed} failed)`);
+      continue;
+    }
+    await writeCurrencySnapshot(provider, distillation);
+  }
+
+  if (!offline) {
     console.log("\nFetch summary:");
-    const failedProviders: string[] = [];
     for (const provider of RAMP_PROVIDERS) {
       const stats = CURRENCY_DISCOVERY_SUMMARY[provider];
       if (stats !== undefined) {
         console.log(`  ${provider}: ${stats.ok} ok, ${stats.failed} failed`);
-        if (stats.failed > 0) {
-          failedProviders.push(`${provider} (${stats.failed} failed)`);
-        }
       }
     }
-    if (failedProviders.length > 0) {
-      throw new Error(
-        `Currency-support discovery had failed requests: ${failedProviders.join(", ")}.`
-      );
-    }
   }
-
-  console.log("\nDistilling support snapshots:");
-  for (const provider of selectedProviders) {
-    await distillCurrencySupportProvider(provider);
+  if (failedProviders.length > 0) {
+    throw new Error(
+      `Currency-support discovery had failed requests: ${failedProviders.join(", ")}.`
+    );
   }
 }
 

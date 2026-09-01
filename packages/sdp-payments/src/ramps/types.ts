@@ -111,6 +111,9 @@ export interface RampDiscoveryContext {
   env: Record<string, string | undefined>;
   fetchJson: RampFetchJson;
   writeDump: RampDumpWriter;
+  readDump: RampRawDumpReader;
+  /** Skip the network fetch and distill from the raw dumps already on disk. */
+  offline: boolean;
 }
 
 export interface RampWebhookValidationContext {
@@ -240,8 +243,13 @@ export interface ValidateCounterpartyOptions {
 export interface RampProvider {
   id: RampProviderId;
   declaredRailSupport: ProviderDeclaredRailSupport;
-  _discoverRails(context: RampDiscoveryContext): Promise<void>;
-  distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation>;
+  /**
+   * Support-matrix generation hook (ramp-support script only, never runtime):
+   * fetches the provider's raw support dumps via `context.fetchJson` and
+   * persists them with `context.writeDump` (skipped when `context.offline`),
+   * then re-reads the dumps and distills them into the currency/rail snapshot.
+   */
+  discoverCurrencyAndRails(context: RampDiscoveryContext): Promise<ProviderRailSupportDistillation>;
   estimateOnramp(
     ctx: RampRuntimeContext,
     input: RampEstimateOnrampInput
