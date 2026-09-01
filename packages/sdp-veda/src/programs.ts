@@ -53,9 +53,9 @@ export function vedaClusterConfig(cluster: SolanaCluster): VedaClusterConfig {
  * The same conversion against an explicitly supplied deployment.
  *
  * Exported so tests can exercise the whole builder against a deployment SDP
- * does not yet have — `VEDA_DEPLOYMENTS` is empty until Veda confirms
- * addresses, and the builder is the half that must already be right when they
- * do.
+ * does not yet have (mainnet's, until Veda names a production vault under
+ * PRO-1777), and the builder is the half that must already be right when
+ * they do.
  */
 export function toClusterConfig(
   cluster: SolanaCluster,

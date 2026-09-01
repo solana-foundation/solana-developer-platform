@@ -18,10 +18,11 @@ import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
  * - Veda's integration docs — the deployment-configuration table an
  *   integration passes to `createVedaClient()` — name the three programs, the
  *   Test Vault's vault-state address, and devnet USDC, per cluster.
- * - SDP's own on-chain audit (2026-08-17, veda-svm-sdk-audit harness) measured
- *   the same addresses against genesis-proved endpoints: all three programs
- *   exist and are executable, the vault state is owned by the vault program,
- *   its asset config references THIS cluster's USDC (`4zMMC9srt…`, exactly the
+ * - SDP's own on-chain audit (2026-08-17, veda-svm-sdk-audit harness; reports
+ *   committed at `docs/earn/veda-svm-audit/`) measured the same addresses
+ *   against genesis-proved endpoints: all three programs exist and are
+ *   executable, the vault state is owned by the vault program, its asset
+ *   config references THIS cluster's USDC (`4zMMC9srt…`, exactly the
  *   well-known devnet USDC mint) and not mainnet's, and a full signed
  *   deposit → queued-withdrawal → cancel lifecycle landed on devnet.
  *
