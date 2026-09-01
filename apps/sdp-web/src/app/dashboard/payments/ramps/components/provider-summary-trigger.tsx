@@ -1,6 +1,7 @@
 "use client";
 
 import type { RampProviderId } from "@sdp/types/provider-access";
+import { InfoIcon } from "lucide-react";
 import Image from "next/image";
 import { useTranslations } from "@/i18n/provider";
 import { RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
@@ -20,6 +21,7 @@ export function ProviderSummaryTrigger({ provider }: { provider: RampProviderId 
   }
   return (
     <>
+      <InfoIcon className="size-4 shrink-0 text-muted" />
       <span className="text-tertiary">{t("DashboardPayments.ramps.checkoutPoweredBy")}</span>
       <Image
         src={RAMP_PROVIDER_LOGOS[provider]}
