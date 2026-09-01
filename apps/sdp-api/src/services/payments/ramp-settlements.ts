@@ -134,11 +134,41 @@ function buildRampSettlementUpdate(
 }
 
 /**
+ * Verifies every event reference against everything the transfer row knows.
+ * Rows persisted with a stored quote reference must match the event's quote
+ * reference on every event for the row's whole life, and once the row is
+ * promoted to the provider transaction id, the event's transaction reference
+ * must match it exactly. Rows that predate the stored quote reference fall
+ * back to matching provider_reference against either event reference.
+ *
+ * @param transfer - The correlated transfer row.
+ * @param event - The provider settlement event.
+ * @returns True when every checkable reference on the event agrees with the row.
+ */
+function corroboratesTransferReferences(
+  transfer: PaymentTransferRow,
+  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
+): boolean {
+  const storedQuoteReference = transfer.provider_data.quoteReference;
+  if (typeof storedQuoteReference !== "string") {
+    return (
+      transfer.provider_reference === event.reference ||
+      transfer.provider_reference === event.transactionReference
+    );
+  }
+  if (event.reference !== storedQuoteReference) {
+    return false;
+  }
+  const promoted = transfer.provider_reference !== storedQuoteReference;
+  return !promoted || transfer.provider_reference === event.transactionReference;
+}
+
+/**
  * Correlates one settlement event to the single transfer every supplied
  * identifier agrees on. Identifiers are never ignored: a supplied transfer id
  * that resolves to nothing refuses the event, identifiers resolving to
- * different transfers refuse the event, and the survivor's provider_reference
- * must equal the event's quote or transaction reference. The transaction
+ * different transfers refuse the event, and every checkable reference on the
+ * survivor must agree (see corroboratesTransferReferences). The transaction
  * reference is allowed to resolve to nothing only because it cannot exist
  * before its own first event promotes it onto the row — there the
  * provider-signed quote reference is the binding authority.
@@ -204,10 +234,7 @@ async function correlateRampSettlementTransfer(
     return null;
   }
   const transfer = matches[0];
-  if (
-    transfer.provider_reference !== event.reference &&
-    transfer.provider_reference !== event.transactionReference
-  ) {
+  if (!corroboratesTransferReferences(transfer, event)) {
     logEvent("warn", {
       event: "sdp_api_ramp_settlement_reference_mismatch",
       flow: "ramp-settlement",

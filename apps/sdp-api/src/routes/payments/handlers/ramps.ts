@@ -555,6 +555,10 @@ async function persistRampQuoteTransfer(
         ...(input.providerData ?? {}),
         ...rampQuoteExpiryProviderData(input.quote),
         ...rampQuoteCryptoDepositProviderData(input),
+        // provider_reference is promoted to the provider transaction id by the
+        // first settlement event, so the quote reference is kept here to stay
+        // verifiable against every later event.
+        quoteReference: input.quote.id,
       },
       serializedTx: null,
       signature: null,

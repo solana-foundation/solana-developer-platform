@@ -279,4 +279,38 @@ describe("LightsparkWebhookProcessor", () => {
       { id: TRANSFER_ID, status: "awaiting_payment" },
     ]);
   });
+
+  it("refuses a promoted transfer when the event's quote reference disagrees with the stored one", async () => {
+    await seedTransfer();
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_transfers
+         SET provider_reference = ?, provider_data = ?::jsonb, status = 'settling'
+         WHERE id = ?`
+      )
+      .bind(
+        "Transaction:01a05d36-ffed-b78f-0000-04e720ad5690",
+        JSON.stringify({ quoteReference: QUOTE_ID }),
+        TRANSFER_ID
+      )
+      .run();
+
+    const foreignQuotePayload = REAL_COMPLETED_PAYLOAD.replace(
+      `"quoteId": "${QUOTE_ID}"`,
+      '"quoteId": "Quote:garbage"'
+    );
+    await processor.process(appContext, "sandbox", processor.parse(foreignQuotePayload));
+    const afterForeignQuote = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string }>();
+    expect(afterForeignQuote).toEqual({ status: "settling" });
+
+    await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
+    const afterAgreeingEvent = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string }>();
+    expect(afterAgreeingEvent).toEqual({ status: "completed" });
+  });
 });
