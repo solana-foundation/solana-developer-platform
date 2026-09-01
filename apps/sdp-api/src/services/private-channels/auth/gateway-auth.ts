@@ -6,8 +6,8 @@
  * burns, tx lookups). See `./spc-session` for KV caching per (instance, SPC user).
  *
  * An SPC instance always has an auth service (enforced at connect time), so the
- * caller must have a user identity and an invited membership — we fail with a
- * clear error rather than letting the gateway answer an opaque 401. Callers hold
+ * project must have an active principal — we fail with a clear error rather
+ * than letting the gateway answer an opaque 401. Callers hold
  * an `SpcAuthContext` and run work through `withGatewayRpc` or `withSpcAuth`, each
  * of which retries ONCE on a strict 401 with a re-minted token.
  */
@@ -55,7 +55,7 @@ export interface ResolveGatewayAuthInput {
   instance: GatewayAuthInstance;
   organizationId: string;
   projectId: string;
-  /** Acting SDP user. Absent for API-key auth, which cannot mint an SPC session. */
+  /** Actor attribution only. SPC authentication is project-principal scoped. */
   userId: string | null | undefined;
 }
 
@@ -98,27 +98,18 @@ export async function openSpcAuthContext(
 
 /**
  * Resolve an SPC auth context for a request. Auth is always required, so this
- * throws a descriptive `FORBIDDEN` when no SPC session can be minted for the
- * caller (no user identity, or not an invited member).
+ * throws a descriptive `FORBIDDEN` when the project has no active SPC principal.
  */
 export async function resolveGatewayAuth(
   env: Env,
-  { instance, organizationId, projectId, userId }: ResolveGatewayAuthInput
+  { instance, organizationId, projectId }: ResolveGatewayAuthInput
 ): Promise<SpcAuthContext> {
-  if (!userId) {
-    throw forbidden(
-      "Reading Private Channels data needs a user identity and is not available for API-key auth."
-    );
-  }
-
-  const pcUser = await createPrivateChannelUserRepository(env).findByProjectAndUser(
+  const pcUser = await createPrivateChannelUserRepository(env).findDefaultPrincipal(
     { organizationId, projectId },
-    userId
+    instance.id
   );
   if (!pcUser) {
-    throw forbidden(
-      "You must be an invited Private Channels member to read channel data on this instance."
-    );
+    throw forbidden("This project has no active Private Channels principal.");
   }
 
   const client = createAuthClient(instance.authUrl, { timeoutMs: SPC_AUTH_TIMEOUT_MS });

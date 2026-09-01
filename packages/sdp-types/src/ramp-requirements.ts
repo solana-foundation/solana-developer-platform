@@ -26,9 +26,39 @@ export type RequirementField =
       label: string;
       required: boolean;
       options: RequirementOption[];
+    }
+  | {
+      kind: "date";
+      key: string;
+      label: string;
+      required: boolean;
+      /** ISO date (YYYY-MM-DD) the collected date must fall before, e.g. today for birth dates. */
+      before?: string;
+    }
+  | {
+      kind: "address";
+      key: string;
+      label: string;
+      required: boolean;
+      /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
+      fields: RequirementField[];
     };
 
 export type RequirementFieldKind = RequirementField["kind"];
+
+/**
+ * Extracts the final field name from a dotted requirement key.
+ *
+ * @param key - Requirement key, which may contain a dotted path.
+ * @returns The field name after the final dot.
+ */
+export function requirementFieldName(key: string): string {
+  const separator = key.lastIndexOf(".");
+  if (separator === -1) {
+    return key;
+  }
+  return key.slice(separator + 1);
+}
 
 /** Slug-keyed values the client collects for `status: "collect"` fields and passes through on the quote. */
 export type CollectedFieldData = Record<string, string>;
@@ -39,6 +69,8 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }
   | { provider: "lightspark"; status: "onboarding_not_started" }
+  | { provider: "lightspark"; status: "collect_counterparty"; fields: RequirementField[] }
+  | { provider: "lightspark"; status: "collect_account"; fields: RequirementField[] }
   | { provider: "bvnk"; status: "onboarding_not_started" }
   | { provider: "bvnk"; status: "customer_verification_required"; verificationUrl: string }
   | { provider: "bvnk"; status: "customer_verifying" }

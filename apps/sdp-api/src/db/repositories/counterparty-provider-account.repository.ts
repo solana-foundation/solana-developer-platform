@@ -27,7 +27,24 @@ export interface UpsertCounterpartyProviderAccountInput {
   providerCustomerReference: string;
 }
 
+export interface GetCounterpartyProviderAccountInput {
+  organizationId: string;
+  projectId: string;
+  counterpartyId: string;
+  provider: RampProviderId;
+}
+
 export interface CounterpartyProviderAccountsRepository {
+  /**
+   * Reads the provider-side customer link for one counterparty and provider.
+   *
+   * @param input - Tenant scope, counterparty, and provider.
+   * @returns The linked row, or null when the counterparty has no provider customer yet.
+   */
+  getProviderAccount(
+    input: GetCounterpartyProviderAccountInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
   /**
    * Links a counterparty to its provider-side customer identity. The first
    * reference seen is canonical: a later event reporting a different customer

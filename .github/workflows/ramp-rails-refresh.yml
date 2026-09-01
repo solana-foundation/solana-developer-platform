@@ -56,18 +56,18 @@ jobs:
       - name: Discover rails live
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-        run: pnpm --filter @sdp/api rails:discover
+        run: pnpm --filter @sdp/api currencies:discover
 
       - name: Regenerate matrix from snapshots
-        run: pnpm --filter @sdp/api rails:generate
+        run: pnpm --filter @sdp/api ramp-support:generate
 
       - name: Summarize drift
-        run: pnpm --silent --filter @sdp/api rails:drift | tee "${{ runner.temp }}/ramp-rails-drift.txt"
+        run: pnpm --silent --filter @sdp/api ramp-support:drift | tee "${{ runner.temp }}/ramp-rails-drift.txt"
 
       - name: Detect matrix/dump changes
         id: changes
         run: |
-          if git status --porcelain -- apps/sdp-api/.ramp-rails packages/sdp-types/src/generated/ramp-support.generated.ts | grep -q .; then
+          if git status --porcelain -- apps/sdp-api/.ramp-support packages/sdp-types/src/generated/ramp.generated.ts | grep -q .; then
             echo "drift=true" >> "$GITHUB_OUTPUT"
           else
             echo "drift=false" >> "$GITHUB_OUTPUT"
@@ -80,4 +80,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRIFT_SUMMARY: ${{ runner.temp }}/ramp-rails-drift.txt
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: ./scripts/ramp-rails/open-drift-pr.sh
+        run: ./scripts/ramp-support/open-drift-pr.sh
