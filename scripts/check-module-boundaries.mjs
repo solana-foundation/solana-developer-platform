@@ -35,6 +35,7 @@ const MODULE_METADATA = [
       "@sdp/spc-escrow",
       "@sdp/spc-withdraw",
       "@sdp/types",
+      "@sdp/veda",
     ],
   },
   {
@@ -63,12 +64,6 @@ const MODULE_METADATA = [
       "@sdp/solana",
       "@sdp/types",
     ],
-  },
-  {
-    name: "@sdp/kit-augment",
-    directory: "packages/kit-augment",
-    purpose: "Shared @solana/kit type augmentation for the generated Codama clients.",
-    allowedDependencies: [],
   },
   {
     name: "@sdp/api-integration",
@@ -126,6 +121,18 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
   },
   {
+    name: "@sdp/veda",
+    directory: "packages/sdp-veda",
+    purpose: "Kit-native Veda SVM vault deposit plans and position reads over @vedatech/svm-sdk.",
+    // The arrow points INWARD and only inward: this package depends on
+    // @sdp/earn (for the provider contract and the catalogue client it extends),
+    // and @sdp/earn must never depend back — its hourly catalogue cron would
+    // then load a chain SDK built against a different @solana/kit major that it
+    // never calls. That one-way edge is also why the Veda deployment registry lives in
+    // @sdp/types, which both reach without a cycle.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+  },
+  {
     name: "@sdp/payments",
     directory: "packages/sdp-payments",
     purpose: "Payment domain services, fee payment, and ramp providers.",
@@ -172,13 +179,13 @@ const MODULE_METADATA = [
     name: "@sdp/spc-escrow",
     directory: "packages/sdp-spc-escrow",
     purpose: "Generated @solana/kit client for the Private Channels escrow program.",
-    allowedDependencies: ["@sdp/kit-augment"],
+    allowedDependencies: [],
   },
   {
     name: "@sdp/spc-withdraw",
     directory: "packages/sdp-spc-withdraw",
     purpose: "Generated @solana/kit client for the Private Channels withdraw program.",
-    allowedDependencies: ["@sdp/kit-augment"],
+    allowedDependencies: [],
   },
   {
     name: "@sdp/types",

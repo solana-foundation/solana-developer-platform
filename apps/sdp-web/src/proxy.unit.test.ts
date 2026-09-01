@@ -25,25 +25,16 @@ describe("public web routes", () => {
     );
   });
 
-  it("keeps canonical and legacy Embedded Yield handoff routes unauthenticated", () => {
+  it("keeps the removed Embedded Yield handoff routes authenticated", () => {
+    // The public engineering-handoff pages left with the UI builder; nothing
+    // under these paths may be reachable without a session again.
     expect(
       isPublicRoute(
         new NextRequest("https://dashboard.example.com/embedded-yield/integrate/public-token")
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate/public-token"))
-    ).toBe(true);
-    expect(
-      isPublicRoute(new NextRequest("https://dashboard.example.com/embedded-yield/integrate"))
-    ).toBe(false);
-    expect(isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate"))).toBe(
-      false
-    );
-    expect(
-      isPublicRoute(
-        new NextRequest("https://dashboard.example.com/earn/integrate/public-token/internal")
-      )
     ).toBe(false);
     expect(
       isPublicRoute(

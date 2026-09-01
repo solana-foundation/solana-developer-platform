@@ -256,7 +256,6 @@ interface BvnkChannelResponse {
   status?: string;
   address?: string;
   network?: string;
-  redirectUrl?: string;
   alternatives?: BvnkChannelAddress[];
 }
 

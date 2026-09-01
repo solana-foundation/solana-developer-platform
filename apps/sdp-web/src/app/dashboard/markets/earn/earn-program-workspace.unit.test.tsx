@@ -92,11 +92,11 @@ describe("EarnProgramWorkspace", () => {
     kamino: { entitled: true, configured: true, enabled: true },
   } as const;
 
-  it("selects a live provider strategy and routes its canonical id to the builder", async () => {
+  it("selects a live provider strategy and routes its canonical id to the integration guide", async () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnProgramWorkspace
-        builderHref="/dashboard/markets/embedded-yield/button-builder"
+        integrateHref="/dashboard/markets/embedded-yield/integrate"
         providerAccess={providerAccess}
       />
     );
@@ -109,7 +109,7 @@ describe("EarnProgramWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Continue to integration" }));
 
     expect(mocks.push).toHaveBeenCalledWith(
-      "/dashboard/markets/embedded-yield/button-builder?strategy=earn_strategy_live"
+      "/dashboard/markets/embedded-yield/integrate?strategy=earn_strategy_live"
     );
     expect(document.body.textContent).not.toContain("Mock");
     const desktopTable = screen.getByRole("region");
@@ -122,7 +122,7 @@ describe("EarnProgramWorkspace", () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnProgramWorkspace
-        builderHref="/dashboard/markets/embedded-yield/button-builder"
+        integrateHref="/dashboard/markets/embedded-yield/integrate"
         providerAccess={providerAccess}
       />
     );
@@ -139,7 +139,7 @@ describe("EarnProgramWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Continue to integration" }));
 
     expect(mocks.push).toHaveBeenCalledWith(
-      "/dashboard/markets/embedded-yield/button-builder?strategy=earn_strategy_mainnet&cluster=mainnet-beta"
+      "/dashboard/markets/embedded-yield/integrate?strategy=earn_strategy_mainnet&cluster=mainnet-beta"
     );
   });
 
@@ -147,7 +147,7 @@ describe("EarnProgramWorkspace", () => {
     mocks.environment = "production";
     renderWithEnglish(
       <EarnProgramWorkspace
-        builderHref="/dashboard/markets/embedded-yield/button-builder"
+        integrateHref="/dashboard/markets/embedded-yield/integrate"
         providerAccess={providerAccess}
       />
     );
@@ -165,7 +165,7 @@ describe("EarnProgramWorkspace", () => {
   it("fails closed when the organization provider is not enabled", () => {
     renderWithEnglish(
       <EarnProgramWorkspace
-        builderHref="/dashboard/markets/embedded-yield/button-builder"
+        integrateHref="/dashboard/markets/embedded-yield/integrate"
         providerAccess={{
           kamino: { entitled: false, configured: true, enabled: false },
         }}

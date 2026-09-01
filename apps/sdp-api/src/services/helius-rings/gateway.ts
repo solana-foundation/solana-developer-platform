@@ -1,19 +1,15 @@
 import type { RingsGatewayPort, RuntimeHealth } from "@sdp/helius-rings";
 import { HeliusRingsError } from "@sdp/helius-rings";
-import { createRingsGateway } from "@sdp/helius-rings-sdk";
+import {
+  createRingsGateway,
+  validateOuterTransaction as validateSdkOuterTransaction,
+} from "@sdp/helius-rings-sdk";
 import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsOuterTransaction } from "./signer-adapter";
 
-/**
- * The only file in `apps/` allowed to import `@sdp/helius-rings-sdk`: the SDK is
- * pinned to `@solana/kit` 7 and this app to 6, and two majors' branded types can
- * match structurally, so only plain strings cross this seam.
- */
-
-/** SDK config field ← environment key, so the two cannot drift apart. */
 const RINGS_UPSTREAM_ENV_KEYS = {
   solanaRpcUrl: "HELIUS_RINGS_RPC_URL",
   indexerUrl: "HELIUS_RINGS_INDEXER_URL",
@@ -22,7 +18,6 @@ const RINGS_UPSTREAM_ENV_KEYS = {
 
 type RingsUpstreams = Record<keyof typeof RINGS_UPSTREAM_ENV_KEYS, string>;
 
-/** Just the variables the gateway reads, so callers need not hold a whole `Env`. */
 export type RingsUpstreamEnv = Pick<
   Env,
   (typeof RINGS_UPSTREAM_ENV_KEYS)[keyof typeof RINGS_UPSTREAM_ENV_KEYS]
@@ -34,25 +29,45 @@ export interface RingsGatewayTenant {
 }
 
 export interface ResolveRingsGatewayDependencies {
-  /** Test seam; production builds the SDK gateway. */
   createGateway?: typeof createRingsGateway;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
 }
 
-/**
- * True when every upstream the SDK needs is set. The indexing poll asks the same
- * question so a half-configured deployment does not warn once per operation.
- */
+export type RingsOuterTransactionPolicyInput = Readonly<{
+  outerUnsignedTxBase64: string;
+  owner: string;
+  intent:
+    | Readonly<{
+        opType: "shield";
+        mint: string;
+        amountRaw: string;
+        expectedShieldedAddress: string;
+      }>
+    | Readonly<{
+        opType: "withdraw";
+        mint: string;
+        amountRaw: string;
+        to: string;
+      }>
+    | Readonly<{
+        opType: "transfer_registered";
+        mint: string;
+        amountRaw: string;
+      }>;
+  expectedTree?: string;
+}>;
+
+export function validateRingsOuterTransaction(
+  input: RingsOuterTransactionPolicyInput
+): Promise<void> {
+  return validateSdkOuterTransaction(input);
+}
+
 export function ringsUpstreamsConfigured(env: RingsUpstreamEnv): boolean {
   return !("missing" in readUpstreams(env));
 }
 
-/**
- * Builds the gateway for one tenant. The tenant is fixed at construction because
- * the SDK derives shielded key material from it, and a per-call tenant could
- * derive under another organization's path.
- */
 export function resolveRingsGateway(
   env: Env,
   tenant: RingsGatewayTenant,
@@ -71,11 +86,7 @@ export function resolveRingsGateway(
     ...configured.upstreams,
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
-    // Off unless an operator says otherwise, so a production typo cannot
-    // quietly authorise plaintext.
     allowInsecureHttp: isRingsInsecureHttpAllowed(env),
-    // The owner's Ed25519 secret stays in custody, so the SDK cannot sign the
-    // registration itself; `owner` names the key the transaction requires.
     signTransaction: (unsignedTxBase64, owner) =>
       asDomainFailure(() =>
         signOuterTransaction({
@@ -91,23 +102,18 @@ export function resolveRingsGateway(
   });
 }
 
-/**
- * What the operator is told when SDP's own signer or RPC failed. Fixed text
- * rather than the upstream message: an RPC error quotes the endpoint it failed
- * on, and this deployment's endpoint carries a Helius API key.
- */
 const ADAPTER_FAILURE_MESSAGES = {
   signer_failed:
     "custody could not sign the Rings registration transaction for this wallet's owner",
   submit_failed:
     "the Rings registration transaction could not be broadcast; confirm the wallet owner holds devnet SOL for the fee",
+  // Preflight rejection during provisioning: the SDK's own submit hook. Same
+  // shape reason as submit_failed here — the caller has to fix the tx before
+  // provisioning can proceed.
+  manual_reconciliation_required:
+    "the Rings registration transaction was rejected by simulation and never broadcast; verify the wallet owner's balance and reprovision",
 } as const satisfies Record<RingsAdapterError["failureCode"], string>;
 
-/**
- * Translates an adapter failure at the one boundary where SDP's signer and RPC
- * cross into the SDK: its error bridge only recognises Zolana's own classes, so
- * an untranslated `RingsAdapterError` reaches the route as an opaque 500.
- */
 async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
@@ -120,10 +126,6 @@ async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/**
- * Either every upstream value, or the names of the ones that are absent. An
- * empty string counts as absent: a `KEY=` line is an unfilled variable.
- */
 function readUpstreams(
   env: RingsUpstreamEnv
 ): { upstreams: RingsUpstreams } | { missing: string[] } {
@@ -144,11 +146,6 @@ function readUpstreams(
   return missing.length > 0 ? { missing } : { upstreams };
 }
 
-/**
- * The gateway for a deployment with something still unset. It does not throw at
- * construction — the service is built outside `withRingsErrors`, so that would
- * 500 even the health probe — so health answers red and the rest fails closed.
- */
 export class UnconfiguredRingsGateway implements RingsGatewayPort {
   private readonly reason: string;
 
@@ -158,21 +155,15 @@ export class UnconfiguredRingsGateway implements RingsGatewayPort {
     } not configured`;
   }
 
-  /**
-   * Every component red with the same reason: nothing was probed, so naming the
-   * missing variables on all four is what the operator needs whichever they read.
-   */
   async probeHealth(): Promise<RuntimeHealth> {
     return {
       rpc: "red",
       photon: "red",
       prover: "red",
-      gateway: "red",
       detail: {
         rpc: this.reason,
         photon: this.reason,
         prover: this.reason,
-        gateway: this.reason,
       },
     };
   }
@@ -193,18 +184,10 @@ export class UnconfiguredRingsGateway implements RingsGatewayPort {
     return this.fail();
   }
 
-  async requestProof(): Promise<never> {
-    return this.fail();
-  }
-
   async verifyIndexed(): Promise<never> {
     return this.fail();
   }
 
-  /**
-   * `config_error`, never `gateway_unavailable`: the fix is an environment edit,
-   * so a retry cannot succeed and must not be offered.
-   */
   private fail(): never {
     throw new HeliusRingsError("config_error", this.reason);
   }

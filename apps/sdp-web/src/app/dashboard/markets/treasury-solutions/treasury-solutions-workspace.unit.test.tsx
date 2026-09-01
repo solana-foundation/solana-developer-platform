@@ -388,13 +388,15 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     expect(screen.getAllByText("Operating treasury").length).toBeGreaterThan(0);
-    expect(screen.getByText("2,500")).toBeTruthy();
+    expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
 
     const vaultRows = screen
       .getAllByText("Kamino USDC Vault")
       .map((element) => element.closest("tr"))
       .filter((row): row is HTMLTableRowElement => row !== null);
-    const vaultPositionRow = vaultRows.find((row) => row.textContent?.includes("125.25 USDC"));
+    const vaultPositionRow = vaultRows.find((row) =>
+      within(row).queryByRole("button", { name: "Withdraw" })
+    );
     const vaultStrategyRow = vaultRows.find((row) => row.textContent?.includes("6.2%"));
     if (!vaultPositionRow || !vaultStrategyRow) {
       throw new Error("Expected separate vault position and strategy rows");
@@ -402,17 +404,17 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(vaultStrategyRow.textContent).toContain("6.2%");
 
     // PRO-1723: the allocation summary totals the float above the tables.
-    expect(screen.getByText("$2,500.00")).toBeTruthy();
-    expect(screen.getByText("5.0%")).toBeTruthy();
-    expect(screen.getByText("95.0%")).toBeTruthy();
-    expect(screen.getByText("$130.50 in open vault positions")).toBeTruthy();
+    expect(screen.getByText("Deposited")).toBeTruthy();
+    expect(screen.getAllByText("Available cash").length).toBeGreaterThan(0);
+    expect(screen.getByText("Est. APY")).toBeTruthy();
+    expect(screen.getByLabelText("$130.50 in open vault positions")).toBeTruthy();
 
     // Vault ownership renders as the wallet's deployed line, never as a
     // receipt-token tile or a raw share count.
     expect(screen.queryByText("kUSDC")).toBeNull();
     expect(screen.queryByText("119.5")).toBeNull();
     expect(screen.getByText("Deployed in vaults")).toBeTruthy();
-    expect(screen.getByText("$130.50")).toBeTruthy();
+    expect(screen.getAllByText("$130.50").length).toBeGreaterThan(0);
     expect(screen.getByText("Retired provider vault")).toBeTruthy();
     expect(screen.queryByText("Exited provider vault")).toBeNull();
 
@@ -433,16 +435,14 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.walletBalances = undefined;
     renderWorkspace();
 
-    expect(screen.getByText("A wallet balance could not be read")).toBeTruthy();
-    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.getByLabelText("A wallet balance could not be read")).toBeTruthy();
     // Deployed goes unavailable too: an unread wallet may hold a receipt token
     // with no recorded position, so the recorded sum is not a certified total.
-    expect(screen.getByText("A position value could not be read")).toBeTruthy();
-    expect(screen.queryByText("$130.50 in open vault positions")).toBeNull();
+    expect(screen.getByLabelText("A position value could not be read")).toBeTruthy();
+    expect(screen.queryByLabelText("$130.50 in open vault positions")).toBeNull();
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("$2,500.00")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
-    expect(screen.getByText("Balance unavailable")).toBeTruthy();
     // And the strategy rows stop claiming an absence they cannot support.
     expect(screen.queryByText("No active position")).toBeNull();
   });
@@ -470,7 +470,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
     renderWorkspace();
 
-    expect(screen.getByText("$1,000.00")).toBeTruthy();
+    expect(screen.getAllByText("$1,000.00").length).toBeGreaterThan(0);
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
   });
@@ -490,7 +490,9 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
     renderWorkspace();
 
-    expect(screen.getByText("A wallet holds vault shares with no matching position")).toBeTruthy();
+    expect(
+      screen.getByLabelText("A wallet holds vault shares with no matching position")
+    ).toBeTruthy();
     expect(screen.getByText("Positions may be incomplete")).toBeTruthy();
     expect(screen.queryByText("No active vault positions")).toBeNull();
   });
@@ -512,16 +514,17 @@ describe("TreasurySolutionsWorkspace", () => {
     if (!usdcRow) throw new Error("Expected the USDC strategy row");
     expect(usdcRow.textContent).toContain("Live value unavailable");
     expect(usdcRow.textContent).not.toContain("125.25 USDC");
-    expect(screen.getByText("A wallet holds vault shares with no matching position")).toBeTruthy();
+    expect(
+      screen.getByLabelText("A wallet holds vault shares with no matching position")
+    ).toBeTruthy();
   });
 
   it("says nothing it cannot witness when the wallet read fails outright", () => {
     mocks.walletsError = true;
     renderWorkspace();
 
-    expect(screen.getByText("A wallet balance could not be read")).toBeTruthy();
-    expect(screen.getByText("A position value could not be read")).toBeTruthy();
-    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.getByLabelText("A wallet balance could not be read")).toBeTruthy();
+    expect(screen.getByLabelText("A position value could not be read")).toBeTruthy();
     expect(screen.getByText("Wallets could not be loaded. Refresh to try again.")).toBeTruthy();
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("No active position")).toBeNull();
@@ -536,8 +539,7 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     // The tile's amount, which only the wallet card renders.
-    expect(screen.getByText("2,500")).toBeTruthy();
-    expect(screen.getByText("$2,500.00")).toBeTruthy();
+    expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
   });
 
   it("renders no allocation bar when the split is unavailable", () => {
@@ -547,10 +549,13 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryByTestId("treasury-allocation-bar")).toBeNull();
   });
 
-  it("renders the allocation bar when the split reads", () => {
+  it("renders the Figma summary trio without the legacy allocation bar", () => {
     renderWorkspace();
 
-    expect(screen.getByTestId("treasury-allocation-bar")).toBeTruthy();
+    expect(screen.queryByTestId("treasury-allocation-bar")).toBeNull();
+    expect(screen.getByText("Deposited")).toBeTruthy();
+    expect(screen.getAllByText("Available cash").length).toBeGreaterThan(0);
+    expect(screen.getByText("Est. APY")).toBeTruthy();
   });
 
   it("treats a catalogue row with no share mint as an incomplete vocabulary", () => {
@@ -560,8 +565,10 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.strategyMissingShareMint = true;
     renderWorkspace();
 
-    expect(screen.getByText("$2,500.00")).toBeTruthy();
-    expect(screen.getByText("A wallet holds vault shares with no matching position")).toBeTruthy();
+    expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
+    expect(
+      screen.getByLabelText("A wallet holds vault shares with no matching position")
+    ).toBeTruthy();
     expect(screen.queryByText("5.0%")).toBeNull();
   });
 
@@ -572,9 +579,10 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.strategiesStaleError = true;
     renderWorkspace();
 
-    expect(screen.getByText("$2,500.00")).toBeTruthy();
-    expect(screen.getByText("A wallet holds vault shares with no matching position")).toBeTruthy();
-    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
+    expect(
+      screen.getByLabelText("A wallet holds vault shares with no matching position")
+    ).toBeTruthy();
     expect(screen.queryByText("5.0%")).toBeNull();
     expect(screen.queryByText("95.0%")).toBeNull();
     expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
@@ -585,8 +593,7 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     // Summary side: deployed unavailable, never zero.
-    expect(screen.getByText("A position value could not be read")).toBeTruthy();
-    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.getByLabelText("A position value could not be read")).toBeTruthy();
     // Wallet card: receipt tiles stay hidden (their mints are known from the
     // stale read), but the deployment must read unavailable, not idle.
     expect(screen.queryByText("kUSDC")).toBeNull();
@@ -621,8 +628,10 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
     // Every read came back here, so the caption names the real problem rather
     // than blaming a position value the table below is listing fine.
-    expect(screen.getByText("A wallet holds vault shares with no matching position")).toBeTruthy();
-    expect(screen.queryByText("A position value could not be read")).toBeNull();
+    expect(
+      screen.getByLabelText("A wallet holds vault shares with no matching position")
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("A position value could not be read")).toBeNull();
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("0.0%")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
@@ -632,7 +641,9 @@ describe("TreasurySolutionsWorkspace", () => {
     if (!pyusdRow) throw new Error("Expected the catalogue-only strategy row");
     expect(pyusdRow.textContent).toContain("Live value unavailable");
     expect(pyusdRow.textContent).not.toContain("No active position");
-    expect(screen.getByText("A wallet holds vault shares with no matching position")).toBeTruthy();
+    expect(
+      screen.getByLabelText("A wallet holds vault shares with no matching position")
+    ).toBeTruthy();
   });
 
   it("reports every money figure as unavailable while the strategy catalogue is not", () => {
@@ -641,9 +652,10 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.strategiesUnavailable = true;
     renderWorkspace();
 
-    expect(screen.getByText("$2,500.00")).toBeTruthy();
-    expect(screen.getByText("A wallet holds vault shares with no matching position")).toBeTruthy();
-    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
+    expect(
+      screen.getByLabelText("A wallet holds vault shares with no matching position")
+    ).toBeTruthy();
     expect(screen.queryByText("5.0%")).toBeNull();
     expect(screen.queryByText("95.0%")).toBeNull();
     expect(screen.queryByText("$130.50")).toBeNull();
@@ -657,18 +669,16 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     // Readable zeros are real zeros; only the shares stay unallocated.
-    expect(screen.getByText("$0.00")).toBeTruthy();
-    expect(screen.getByText("No stablecoin balances to allocate yet")).toBeTruthy();
-    expect(screen.getByText("No cash balances")).toBeTruthy();
+    expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
+    expect(screen.getByText("Est. APY")).toBeTruthy();
   });
 
   it("reads an unhydratable position as unavailable in the summary, never zero", () => {
     mocks.livePositionTokenValue = undefined;
     renderWorkspace();
 
-    expect(screen.getByText("A position value could not be read")).toBeTruthy();
-    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
-    expect(screen.getByText("$2,500.00")).toBeTruthy();
+    expect(screen.getByLabelText("A position value could not be read")).toBeTruthy();
+    expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
     expect(screen.queryByText("0.0%")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
     // The wallet's deployed line refuses a partial total for the same reason.
@@ -683,7 +693,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const vaultPositionRow = screen
       .getAllByText("Kamino USDC Vault")
       .map((element) => element.closest("tr"))
-      .find((row) => row?.textContent?.includes("125.25 USDC"));
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!vaultPositionRow) throw new Error("Expected vault position row");
 
     await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
@@ -699,7 +709,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const vaultPositionRow = screen
       .getAllByText("Kamino USDC Vault")
       .map((element) => element.closest("tr"))
-      .find((row) => row?.textContent?.includes("125.25 USDC"));
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!vaultPositionRow) throw new Error("Expected vault position row");
     expect(
       (within(vaultPositionRow).getByRole("button", { name: "Withdraw" }) as HTMLButtonElement)
@@ -719,7 +729,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
-    expect(document.body.textContent).toContain("intentionally closed in production");
+    expect(screen.getByLabelText(/intentionally closed in production/)).toBeTruthy();
   });
 
   it("fails closed when a persisted program provider has no Solana withdrawal lane", () => {

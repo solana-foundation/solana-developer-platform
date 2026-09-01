@@ -1,15 +1,13 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
+import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NotificationBell } from "@/components/notification-bell";
-import { Badge } from "@/components/ui/badge";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
@@ -23,6 +21,8 @@ type DashboardPageConfig = {
    */
   titlePosition?: "left" | "center";
   headerTabs?: DashboardHeaderTabsConfig;
+  routeTabs?: DashboardRouteTabsConfig;
+  headerVariant?: "default" | "markets";
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
@@ -40,6 +40,7 @@ type DashboardTopBarProps = {
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
+  alignTitleWithTabs?: boolean;
   // Notifications ship with the asset-profiles feature (its only producer today).
   showNotifications?: boolean;
 };
@@ -174,25 +175,15 @@ export function DashboardTopBar({
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
+  alignTitleWithTabs = hasHeaderTabs,
   showNotifications = false,
 }: DashboardTopBarProps) {
-  const t = useTranslations();
-  const { sdpEnvironment } = useDashboardWorkspace();
-  const isSandbox = sdpEnvironment === "sandbox";
-  const sandboxBadge = isSandbox ? (
-    <>
-      <span aria-hidden="true" className="hidden h-4 w-px bg-fill-strong sm:block" />
-      <Badge className="hidden sm:inline-flex">{t("Shared.dashboardShell.sandbox")}</Badge>
-    </>
-  ) : null;
   const centersPageTitle =
     !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
       {showNotifications ? <NotificationBell /> : null}
-      <UserButton />
-      {sandboxBadge}
     </>
   );
 
@@ -218,7 +209,7 @@ export function DashboardTopBar({
     <StandardDashboardTopBar
       hideTitle={hideTitle}
       title={title}
-      alignTitleWithTabs={hasHeaderTabs}
+      alignTitleWithTabs={alignTitleWithTabs}
       leadingContent={
         <>
           <SidebarToggle
@@ -376,23 +367,33 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname === "/dashboard/markets/treasury-solutions") {
+  if (
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram
+  ) {
     return {
-      title: t("Shared.dashboardShell.treasurySolutions"),
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) {
-    return {
-      title: t("Shared.dashboardShell.earnProgram"),
-      titlePosition: "center",
+      title: t("Shared.dashboardShell.markets"),
+      titlePosition: "left",
+      headerVariant: "markets",
+      routeTabs: {
+        ariaLabel: t("Shared.dashboardShell.markets"),
+        tabs: [
+          {
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
+            label: t("Shared.dashboardShell.treasurySolutions"),
+          },
+          {
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+            label: t("Shared.dashboardShell.earnProgram"),
+          },
+        ],
+      },
       contentWidthClass: "max-w-none",
     };
   }
   if (
     pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`
   ) {
     return {
       title: t("Shared.dashboardShell.configureEarnButton"),
