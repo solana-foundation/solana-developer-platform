@@ -39,7 +39,7 @@ const ONBOARDING_STEPS = [
   { icon: Code2Icon, key: "DashboardMarkets.earnProgram.flowIntegrate" },
 ] as const satisfies ReadonlyArray<{ icon: typeof Layers3Icon; key: MessageKey }>;
 
-function PortfolioInfoTip({ label, size = "sm" }: { label: string; size?: "sm" | "md" }) {
+function PortfolioInfoTip({ label }: { label: string }) {
   return (
     <TooltipProvider>
       <Tooltip>
@@ -49,7 +49,7 @@ function PortfolioInfoTip({ label, size = "sm" }: { label: string; size?: "sm" |
             className="inline-flex items-center justify-center rounded-full text-tertiary transition-colors hover:text-primary"
             type="button"
           >
-            <InfoIcon aria-hidden="true" className={size === "md" ? "size-5" : "size-3.5"} />
+            <InfoIcon aria-hidden="true" className="size-5" />
           </button>
         </TooltipTrigger>
         <TooltipContent className="max-w-72 text-xs leading-5">{label}</TooltipContent>
@@ -58,20 +58,11 @@ function PortfolioInfoTip({ label, size = "sm" }: { label: string; size?: "sm" |
   );
 }
 
-function PortfolioMetric({
-  description,
-  label,
-  value,
-}: {
-  description?: string;
-  label: string;
-  value: number;
-}) {
+function PortfolioMetric({ label, value }: { label: string; value: number }) {
   return (
     <Card className="min-w-0 gap-0 rounded-2xl px-7 py-7">
       <dt className="flex items-center gap-1.5 text-sm leading-5 font-normal text-tertiary">
         {label}
-        {description ? <PortfolioInfoTip label={description} /> : null}
       </dt>
       <dd className="mt-3 text-[28px] leading-8 font-medium tracking-[-0.2px] text-primary tabular-nums">
         {value}
@@ -196,20 +187,17 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   const t = useTranslations();
   const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary();
 
-  if (isInitialLoading && !summary) return <EmbeddedYieldPortfolioSkeleton />;
+  if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-4 pt-3">
         <div className="flex items-center justify-between gap-4">
           <h2 className="flex items-center gap-2 text-[19px] leading-6 font-medium text-primary">
-            {t("DashboardMarkets.earnProgram.dashboardEyebrow")}
-            <PortfolioInfoTip
-              label={t("DashboardMarkets.earnProgram.dashboardDescription")}
-              size="md"
-            />
+            {t("DashboardMarkets.earnProgram.dashboardTitle")}
+            <PortfolioInfoTip label={t("DashboardMarkets.earnProgram.dashboardDescription")} />
           </h2>
-          <Button asChild className="h-7 px-2.5" size="xs">
+          <Button asChild size="xs">
             <Link aria-label={t("DashboardMarkets.earnProgram.configure")} href={configureHref}>
               {t("DashboardMarkets.earnProgram.configureShort")}
             </Link>
@@ -239,7 +227,6 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
                 value={summary.walletCount}
               />
               <PortfolioMetric
-                description={t("DashboardMarkets.earnProgram.portfolioDescription")}
                 label={t("DashboardMarkets.earnProgram.livePositions")}
                 value={summary.positionCount}
               />
@@ -249,15 +236,22 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
               />
             </dl>
 
-            {error ? (
-              <div
-                aria-live="polite"
-                className="flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning"
-              >
-                <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                <p>{t("DashboardMarkets.earnProgram.portfolioRefreshError")}</p>
-              </div>
-            ) : null}
+            <div
+              aria-atomic="true"
+              className={
+                error
+                  ? "flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning"
+                  : "sr-only"
+              }
+              role="status"
+            >
+              {error ? (
+                <>
+                  <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  <p>{t("DashboardMarkets.earnProgram.portfolioRefreshError")}</p>
+                </>
+              ) : null}
+            </div>
 
             {summary.unavailablePositionCount > 0 ? (
               <div className="flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning">
@@ -270,6 +264,8 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
               </div>
             ) : null}
 
+            {/* The removed UI builder persists no configuration, so zero recorded positions is
+                the only truthful empty portfolio state. */}
             {summary.positionCount === 0 ? (
               <PortfolioOnboarding configureHref={configureHref} />
             ) : (

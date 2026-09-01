@@ -592,16 +592,15 @@ export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExte
 
 /** Live customer portfolio totals refresh while the Embedded Yield dashboard is mounted. */
 export function useEarnExternalWalletPositionSummary() {
-  const { data, error, isLoading, isValidating, mutate } = useSWR(
+  const { data, error, isLoading, mutate } = useSWR(
     "dashboard-earn-external-wallet-position-summary",
     () => fetchEarnExternalWalletPositionSummary(),
-    { keepPreviousData: true, refreshInterval: 60_000 }
+    { refreshInterval: 60_000 }
   );
   return {
     summary: data,
     error,
     isInitialLoading: isLoading && data === undefined,
-    isRefreshing: isValidating && data !== undefined,
     refresh: () => void mutate(),
   };
 }

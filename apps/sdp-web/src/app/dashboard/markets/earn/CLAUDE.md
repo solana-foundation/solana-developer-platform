@@ -99,6 +99,10 @@ program create still sends the body `requestId` form.
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
   same route-specific skeleton used by its `loading.tsx` boundary.
+- The portfolio's zero-position state is the onboarding card. The removed UI
+  builder persisted the only former configuration state, so there is no honest
+  "configured but awaiting a deposit" distinction to infer from the live
+  position summary.
 
 ## Module map
 

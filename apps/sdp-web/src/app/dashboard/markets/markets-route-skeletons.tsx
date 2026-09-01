@@ -69,7 +69,7 @@ export function EmbeddedYieldPortfolioSkeleton() {
       >
         <div className="flex items-center justify-between gap-4">
           <SkeletonBlock className="h-6 w-48" />
-          <SkeletonBlock className="h-7 w-20 rounded-md" />
+          <SkeletonBlock className="h-6 w-20 rounded-md" />
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           {BALANCE_SKELETON_IDS.map((id) => (
