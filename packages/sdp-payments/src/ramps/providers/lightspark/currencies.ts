@@ -1,5 +1,10 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type {
+  CryptoRailId,
+  RampPayoutAccountSpec,
+  RampPayoutFieldSpec,
+} from "@sdp/types/payment-rails";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { providerUnavailable } from "../../../errors";
 import {
@@ -9,11 +14,28 @@ import {
   RAMP_RAIL_DUMPS,
   SOLANA_ASSET_TO_RAIL,
 } from "../../shared";
-import type { ProviderRailSupportDistillation, RampDiscoveryContext } from "../../types";
+import {
+  type ProviderRailSupportDistillation,
+  type RampDiscoveryContext,
+  rampPayoutAccountSchema,
+} from "../../types";
 import { readLightsparkConfig } from "./client";
+import { LIGHTSPARK_PAYOUT_SPECS, type LightsparkPayoutCurrency } from "./counterparty";
 
 /** Lightspark only supports usdc.solana for now, so corridors are discovered from USDC alone. */
 const LIGHTSPARK_DISCOVERY_CRYPTO = "USDC";
+
+const LIGHTSPARK_OPENAPI_URL =
+  "https://raw.githubusercontent.com/lightsparkdev/grid-api/refs/heads/main/openapi.yaml";
+
+/**
+ * UI input masks by currency and field key. Masks are presentation-only and
+ * have no machine source in the OpenAPI spec; the masked separators must be
+ * stripped before validating against the spec pattern.
+ */
+const LIGHTSPARK_FIELD_MASKS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  GBP: { sortCode: "##-##-##" },
+};
 
 const gridRateCurrencySchema = z.object({
   code: z.string(),
@@ -86,13 +108,18 @@ function mergeSendingLimit(
  */
 export function distillLightsparkRailSupport(
   offrampRatesRaw: unknown,
-  onrampRatesRaw: unknown
+  onrampRatesRaw: unknown,
+  openapiRaw: unknown
 ): ProviderRailSupportDistillation {
   const droppedCurrencyCodes = new Set<string>();
   const offramp = distillDirection(offrampRatesRaw, "sourceCurrency", droppedCurrencyCodes);
   const onramp = distillDirection(onrampRatesRaw, "destinationCurrency", droppedCurrencyCodes);
+  const accounts = distillLightsparkPayoutAccounts(
+    openapiRaw,
+    Object.keys(offramp.currencies).sort()
+  );
   return {
-    snapshot: { onramp, offramp },
+    snapshot: { onramp, offramp: { ...offramp, accounts } },
     droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
     droppedCountryCodes: [],
   };
@@ -146,6 +173,204 @@ function distillDirection(
   return { currencies, cryptos: [...cryptos].sort() };
 }
 
+const openapiPropertySchema = z.looseObject({
+  pattern: z.string().optional(),
+  minLength: z.number().int().optional(),
+  maxLength: z.number().int().optional(),
+  enum: z.array(z.string()).optional(),
+});
+
+const openapiAccountBaseSchema = z.looseObject({
+  required: z.array(z.string()).optional(),
+  description: z.string().optional(),
+  properties: z.record(z.string(), openapiPropertySchema),
+});
+
+const openapiAccountInfoSchema = z.looseObject({
+  allOf: z.array(
+    z.looseObject({
+      properties: z
+        .looseObject({
+          paymentRails: z
+            .looseObject({ items: z.looseObject({ enum: z.array(z.string()) }) })
+            .optional(),
+        })
+        .optional(),
+    })
+  ),
+});
+
+const openapiDocSchema = z.looseObject({
+  components: z.looseObject({ schemas: z.record(z.string(), z.unknown()) }),
+});
+
+type OpenapiProperty = z.infer<typeof openapiPropertySchema>;
+
+/**
+ * Maps one OpenAPI property onto the snapshot field shape, merging in any
+ * hand-maintained UI mask for the currency.
+ *
+ * @param currency - Payout currency the field belongs to.
+ * @param key - Field key within the account schema.
+ * @param property - OpenAPI property definition.
+ * @param required - Whether the selected rail requires the field.
+ * @returns Snapshot field spec.
+ */
+function toPayoutField(
+  currency: string,
+  key: string,
+  property: OpenapiProperty,
+  required: boolean
+): RampPayoutFieldSpec {
+  const field: RampPayoutFieldSpec = { required };
+  if (property.pattern !== undefined) {
+    field.pattern = property.pattern;
+  }
+  if (property.minLength !== undefined) {
+    field.minLength = property.minLength;
+  }
+  if (property.maxLength !== undefined) {
+    field.maxLength = property.maxLength;
+  }
+  if (property.enum !== undefined) {
+    field.values = property.enum;
+  }
+  const mask = LIGHTSPARK_FIELD_MASKS[currency]?.[key];
+  if (mask !== undefined) {
+    field.mask = mask;
+  }
+  return field;
+}
+
+/**
+ * Parses the "Required fields depend on the selected paymentRails" description
+ * format into a rail -> required-field-keys map.
+ *
+ * @param description - OpenAPI account base description.
+ * @returns Per-rail required field keys, or null when fields do not vary by rail.
+ */
+function parsePerRailRequirements(description: string): Record<string, string[]> | null {
+  if (!/Required fields depend/.test(description)) {
+    return null;
+  }
+  const perRail: Record<string, string[]> = {};
+  for (const line of description.split("\n")) {
+    const match = line.match(/^- ([A-Z_]+): (.+)$/);
+    if (match === null) {
+      continue;
+    }
+    perRail[match[1]] = match[2]
+      .split(",")
+      .map((part) => part.trim().split(" ")[0].replace(/\.$/, ""));
+  }
+  if (Object.keys(perRail).length === 0) {
+    throw providerUnavailable(
+      "Lightspark OpenAPI per-rail description matched the marker but no rail lines parsed."
+    );
+  }
+  return perRail;
+}
+
+/**
+ * Distills one currency's payout account from the OpenAPI schemas: account
+ * type, rails, and the exact field set (with validation) each rail needs.
+ *
+ * @param schemas - OpenAPI components.schemas table.
+ * @param currency - Off-ramp fiat currency to distill.
+ * @returns Payout account spec for the currency.
+ */
+function distillPayoutAccount(
+  schemas: Record<string, unknown>,
+  currency: string
+): RampPayoutAccountSpec {
+  const pascal = currency[0] + currency.slice(1).toLowerCase();
+  const baseRaw = schemas[`${pascal}AccountInfoBase`];
+  const infoRaw = schemas[`${pascal}AccountInfo`];
+  if (baseRaw === undefined || infoRaw === undefined) {
+    throw providerUnavailable(
+      `Lightspark OpenAPI spec has no ${pascal}AccountInfo schema for off-ramp currency ${currency}.`
+    );
+  }
+  const base = openapiAccountBaseSchema.parse(baseRaw);
+  const info = openapiAccountInfoSchema.parse(infoRaw);
+  const railsEnum = info.allOf.at(-1)?.properties?.paymentRails?.items.enum;
+  if (railsEnum === undefined) {
+    throw providerUnavailable(`Lightspark ${currency} account schema is missing paymentRails.`);
+  }
+  const accountTypeValues = base.properties.accountType?.enum;
+  if (accountTypeValues === undefined || accountTypeValues.length !== 1) {
+    throw providerUnavailable(`Lightspark ${currency} account schema has no accountType enum.`);
+  }
+  const properties = Object.entries(base.properties).filter(([key]) => key !== "accountType");
+  const baseRequired = new Set(base.required !== undefined ? base.required : []);
+  const perRail = parsePerRailRequirements(base.description !== undefined ? base.description : "");
+
+  const rails: Record<string, Record<string, RampPayoutFieldSpec>> = {};
+  if (perRail === null) {
+    const fields = Object.fromEntries(
+      properties.map(([key, property]) => [
+        key,
+        toPayoutField(currency, key, property, baseRequired.has(key)),
+      ])
+    );
+    for (const rail of railsEnum) {
+      rails[rail] = fields;
+    }
+    return { accountType: accountTypeValues[0], rails };
+  }
+
+  const railScoped = new Set(Object.values(perRail).flat());
+  for (const rail of railsEnum) {
+    const listed = perRail[rail];
+    if (listed === undefined) {
+      throw providerUnavailable(
+        `Lightspark ${currency} rail ${rail} is missing from the per-rail requirements description.`
+      );
+    }
+    const unknown = listed.filter((key) => base.properties[key] === undefined);
+    if (unknown.length > 0) {
+      throw providerUnavailable(
+        `Lightspark ${currency} ${rail} description names unknown fields: ${unknown.join(", ")}.`
+      );
+    }
+    rails[rail] = Object.fromEntries(
+      properties
+        .filter(([key]) => listed.includes(key) || !railScoped.has(key))
+        .map(([key, property]) => [
+          key,
+          toPayoutField(currency, key, property, listed.includes(key)),
+        ])
+    );
+  }
+  return { accountType: accountTypeValues[0], rails };
+}
+
+/**
+ * Distills payout account requirements for each off-ramp currency from the
+ * Grid OpenAPI spec. The spec expresses rail-dependent requirements in a
+ * strict description format; a format drift fails discovery loudly rather
+ * than producing a wrong table.
+ *
+ * @param openapiRaw - Raw openapi.yaml dump body (YAML text).
+ * @param currencies - Off-ramp fiat currencies to distill accounts for.
+ * @returns Payout account table keyed by currency.
+ */
+export function distillLightsparkPayoutAccounts(
+  openapiRaw: unknown,
+  currencies: readonly string[]
+): Record<string, RampPayoutAccountSpec> {
+  if (typeof openapiRaw !== "string") {
+    throw providerUnavailable("Lightspark OpenAPI dump body must be the YAML text.");
+  }
+  const schemas = openapiDocSchema.parse(parseYaml(openapiRaw)).components.schemas;
+  return Object.fromEntries(
+    currencies.map((currency) => [
+      currency,
+      rampPayoutAccountSchema.parse(distillPayoutAccount(schemas, currency)),
+    ])
+  );
+}
+
 /**
  * Provider entry point for the ramp-support script: fetches both Grid
  * exchange-rate corridor dumps (skipped when offline) and distills them into
@@ -180,9 +405,24 @@ export async function discoverLightsparkCurrencyAndRails(
         { headers }
       )
     );
+    await context.writeDump(
+      RAMP_RAIL_DUMPS.lightspark.openapi.name,
+      await context.fetchText("lightspark", "GET openapi.yaml", LIGHTSPARK_OPENAPI_URL)
+    );
   }
   return distillLightsparkRailSupport(
     await context.readDump(RAMP_RAIL_DUMPS.lightspark.offrampRates.file),
-    await context.readDump(RAMP_RAIL_DUMPS.lightspark.onrampRates.file)
+    await context.readDump(RAMP_RAIL_DUMPS.lightspark.onrampRates.file),
+    await context.readDump(RAMP_RAIL_DUMPS.lightspark.openapi.file)
   );
+}
+
+/**
+ * Compiles the fiat currencies Lightspark can pay out, from the payout
+ * account specs.
+ *
+ * @returns Sorted payout currency codes.
+ */
+export function lightsparkPayoutCurrencies(): readonly LightsparkPayoutCurrency[] {
+  return (Object.keys(LIGHTSPARK_PAYOUT_SPECS) as LightsparkPayoutCurrency[]).sort();
 }

@@ -113,38 +113,7 @@ export interface LightsparkPayoutSpec {
   fields: readonly RequirementField[];
 }
 
-export const LIGHTSPARK_PAYOUT_CURRENCIES = [
-  "AED",
-  "BRL",
-  "BWP",
-  "CAD",
-  "DKK",
-  "EUR",
-  "GBP",
-  "HKD",
-  "IDR",
-  "INR",
-  "KES",
-  "MWK",
-  "MXN",
-  "MYR",
-  "NGN",
-  "PHP",
-  "RWF",
-  "SGD",
-  "THB",
-  "TZS",
-  "UGX",
-  "USD",
-  "VND",
-  "XAF",
-  "XOF",
-  "ZAR",
-] as const satisfies readonly RampFiatCurrency[];
-
-export type LightsparkPayoutCurrency = (typeof LIGHTSPARK_PAYOUT_CURRENCIES)[number];
-
-const LIGHTSPARK_PAYOUT_SPECS = {
+export const LIGHTSPARK_PAYOUT_SPECS = {
   AED: {
     accountType: "AED_ACCOUNT",
     rails: ["BANK_TRANSFER"],
@@ -363,7 +332,9 @@ const LIGHTSPARK_PAYOUT_SPECS = {
     rails: ["BANK_TRANSFER"],
     fields: [bankNameField(), accountNumberField("^[0-9]{9,13}$")],
   },
-} as const satisfies Record<LightsparkPayoutCurrency, LightsparkPayoutSpec>;
+} as const satisfies Partial<Record<RampFiatCurrency, LightsparkPayoutSpec>>;
+
+export type LightsparkPayoutCurrency = keyof typeof LIGHTSPARK_PAYOUT_SPECS;
 
 export function isLightsparkPayoutCurrency(value: string): value is LightsparkPayoutCurrency {
   return Object.hasOwn(LIGHTSPARK_PAYOUT_SPECS, value);

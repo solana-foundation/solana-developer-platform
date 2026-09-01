@@ -15,6 +15,7 @@ import {
   ONRAMP_CRYPTO_RAILS,
   type RampCountrySupport,
   type RampCurrencyLimit,
+  type RampPayoutAccountSpec,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
@@ -78,6 +79,10 @@ interface ProviderGenerationSupport {
 type CurrencySupportSnapshots = ReadonlyMap<RampProviderId, ProviderRailSupportSnapshot>;
 type ProviderGenerationSupports = ReadonlyMap<RampProviderId, ProviderGenerationSupport>;
 type CountryRailsByProvider = ReadonlyMap<RampProviderId, ProviderCountryRails>;
+type PayoutAccountsByProvider = ReadonlyMap<
+  RampProviderId,
+  Readonly<Record<string, RampPayoutAccountSpec>>
+>;
 
 const CURRENCY_DISCOVERY_SUMMARY: Partial<Record<RampProviderId, { ok: number; failed: number }>> =
   {};
@@ -168,17 +173,48 @@ function sortCountrySupport(countrySupport: RampCountrySupport): RampCountrySupp
   }
 }
 
+function sortRecordByKey<TValue>(record: Readonly<Record<string, TValue>>): Record<string, TValue> {
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map((key) => [key, record[key]])
+  );
+}
+
+function sortPayoutAccounts(
+  accounts: Readonly<Record<string, RampPayoutAccountSpec>>
+): Record<string, RampPayoutAccountSpec> {
+  return sortRecordByKey(
+    Object.fromEntries(
+      Object.entries(accounts).map(([currency, account]) => [
+        currency,
+        {
+          accountType: account.accountType,
+          rails: sortRecordByKey(
+            Object.fromEntries(
+              Object.entries(account.rails).map(([rail, fields]) => [rail, sortRecordByKey(fields)])
+            )
+          ),
+        },
+      ])
+    )
+  );
+}
+
 function sortDirectionSnapshot(
   direction: ProviderRailSupportSnapshot["onramp"]
 ): ProviderRailSupportSnapshot["onramp"] {
-  const base = {
+  const base: ProviderRailSupportSnapshot["onramp"] = {
     currencies: sortCurrencyRecord(direction.currencies),
     cryptos: [...direction.cryptos].sort(),
   };
-  if (direction.countrySupport === undefined) {
-    return base;
+  if (direction.countrySupport !== undefined) {
+    base.countrySupport = sortCountrySupport(direction.countrySupport);
   }
-  return { ...base, countrySupport: sortCountrySupport(direction.countrySupport) };
+  if (direction.accounts !== undefined) {
+    base.accounts = sortPayoutAccounts(direction.accounts);
+  }
+  return base;
 }
 
 function sortSnapshot(snapshot: ProviderRailSupportSnapshot): ProviderRailSupportSnapshot {
@@ -630,11 +666,31 @@ function renderProviderSupportDetails(support: ProviderGenerationSupports): stri
   }).join("\n")}\n}`;
 }
 
+function renderPayoutAccounts(payoutAccountsByProvider: PayoutAccountsByProvider): string {
+  const rows: string[] = [];
+  for (const provider of RAMP_PROVIDERS) {
+    const accounts = payoutAccountsByProvider.get(provider);
+    if (accounts === undefined) {
+      continue;
+    }
+    const rendered = JSON.stringify(accounts, null, 2)
+      .split("\n")
+      .map((line, index) => (index === 0 ? line : `  ${line}`))
+      .join("\n");
+    rows.push(`  ${provider}: ${rendered},`);
+  }
+  if (rows.length === 0) {
+    return "{}";
+  }
+  return `{\n${rows.join("\n")}\n}`;
+}
+
 function renderGeneratedFile(input: {
   support: ProviderGenerationSupports;
   onrampRows: readonly OnrampRow[];
   offrampRows: readonly OfframpRow[];
   countryRailsByProvider: CountryRailsByProvider;
+  payoutAccountsByProvider: PayoutAccountsByProvider;
 }): string {
   const allFiats = new Set<string>();
   for (const row of input.onrampRows) {
@@ -668,6 +724,7 @@ function renderGeneratedFile(input: {
 import type {
   OfframpPairSupport,
   OnrampPairSupport,
+  RampPayoutAccountSpec,
   RampProviderDirectionSupport,
 } from "../payment-rails";
 import type { RampProviderId } from "../provider-access";
@@ -696,6 +753,10 @@ export const OFFRAMP_COUNTRY_RAILS = ${renderOfframpCountryRails(input.countryRa
   Record<RampProviderId, Partial<Record<RampCountryCode, readonly string[]>>>
 >;
 
+export const OFFRAMP_PAYOUT_ACCOUNTS = ${renderPayoutAccounts(input.payoutAccountsByProvider)} as const satisfies Partial<
+  Record<RampProviderId, Record<string, RampPayoutAccountSpec>>
+>;
+
 export const RAMP_PROVIDER_SUPPORT_DETAILS = ${renderProviderSupportDetails(input.support)} as const satisfies Record<
   RampProviderId,
   {
@@ -714,6 +775,40 @@ ${renderRows(input.offrampRows)}
 `;
 }
 
+/**
+ * Collects each provider's distilled payout-account table and enforces that
+ * every currency named by a hand-compiled country-rails row has an account
+ * spec — the contradiction class where the country table advertises a payout
+ * the provider cannot address.
+ */
+function buildPayoutAccounts(
+  snapshots: CurrencySupportSnapshots,
+  countryRailsByProvider: CountryRailsByProvider
+): PayoutAccountsByProvider {
+  const byProvider = new Map<RampProviderId, Readonly<Record<string, RampPayoutAccountSpec>>>();
+  for (const provider of RAMP_PROVIDERS) {
+    const accounts = snapshots.get(provider)?.offramp.accounts;
+    if (accounts === undefined) {
+      continue;
+    }
+    byProvider.set(provider, accounts);
+    const providerCountryRails = countryRailsByProvider.get(provider);
+    if (providerCountryRails === undefined) {
+      continue;
+    }
+    for (const [countryCode, entry] of Object.entries(providerCountryRails)) {
+      for (const currency of entry.currencies) {
+        if (accounts[currency] === undefined) {
+          throw new Error(
+            `${provider} country rails list ${currency} for ${countryCode}, but the snapshot has no payout account spec for it.`
+          );
+        }
+      }
+    }
+  }
+  return byProvider;
+}
+
 async function renderGeneratedFromSnapshots(): Promise<string> {
   const [snapshots, countryRailsByProvider] = await Promise.all([
     currencySupport.readSnapshots(),
@@ -725,6 +820,7 @@ async function renderGeneratedFromSnapshots(): Promise<string> {
     onrampRows: buildOnrampMatrix(support),
     offrampRows: buildOfframpMatrix(support),
     countryRailsByProvider,
+    payoutAccountsByProvider: buildPayoutAccounts(snapshots, countryRailsByProvider),
   });
 }
 
@@ -754,6 +850,26 @@ async function fetchJson(
   const response = init === undefined ? await fetch(url) : await fetch(url, init);
   const text = await response.text();
   const body: unknown = JSON.parse(text);
+  const summary = providerSummary(provider);
+
+  if (response.ok) {
+    summary.ok += 1;
+    console.log(`  ok ${label} (${response.status})`);
+  } else {
+    summary.failed += 1;
+    console.warn(`  failed ${label} (${response.status})`);
+  }
+
+  return { status: response.status, body };
+}
+
+async function fetchText(
+  provider: RampProviderId,
+  label: string,
+  url: string
+): Promise<RampDiscoveryResponseDump> {
+  const response = await fetch(url);
+  const body = await response.text();
   const summary = providerSummary(provider);
 
   if (response.ok) {
@@ -815,6 +931,7 @@ async function runCurrencyDiscovery(args: readonly string[]): Promise<void> {
     const distillation = await RAMP_PROVIDER_CLIENTS[provider].discoverCurrencyAndRails({
       env: process.env,
       fetchJson,
+      fetchText,
       writeDump: writeCurrencySupportDump,
       readDump: readCurrencySupportRawDump,
       offline,

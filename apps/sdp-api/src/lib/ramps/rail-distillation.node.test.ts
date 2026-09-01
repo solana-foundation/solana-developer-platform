@@ -2,7 +2,72 @@ import { distillCoinbaseRailSupport } from "@sdp/payments/ramps/providers/coinba
 import { distillLightsparkRailSupport } from "@sdp/payments/ramps/providers/lightspark/currencies";
 import { distillMuralRailSupport } from "@sdp/payments/ramps/providers/mural/client";
 import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
+import { resolveOfframpDestination } from "@sdp/types/ramp-resolution";
 import { describe, expect, it } from "vitest";
+
+const LIGHTSPARK_OPENAPI_FIXTURE = `
+components:
+  schemas:
+    UsdAccountInfoBase:
+      type: object
+      required:
+        - accountType
+        - accountNumber
+        - routingNumber
+      properties:
+        accountType:
+          type: string
+          enum:
+            - USD_ACCOUNT
+        accountNumber:
+          type: string
+          minLength: 1
+          maxLength: 34
+        routingNumber:
+          type: string
+          pattern: ^[0-9]{9}$
+    UsdAccountInfo:
+      allOf:
+        - $ref: '#/components/schemas/UsdAccountInfoBase'
+        - type: object
+          properties:
+            paymentRails:
+              type: array
+              items:
+                type: string
+                enum:
+                  - ACH
+                  - WIRE
+    EurAccountInfoBase:
+      type: object
+      required:
+        - accountType
+        - iban
+      properties:
+        accountType:
+          type: string
+          enum:
+            - EUR_ACCOUNT
+        iban:
+          type: string
+          pattern: ^[A-Z]{2}[0-9]{2}[A-Za-z0-9]{11,30}$
+        swiftCode:
+          type: string
+          minLength: 8
+          maxLength: 11
+    EurAccountInfo:
+      allOf:
+        - $ref: '#/components/schemas/EurAccountInfoBase'
+        - type: object
+          properties:
+            paymentRails:
+              type: array
+              items:
+                type: string
+                enum:
+                  - SEPA
+                  - SEPA_INSTANT
+`;
 
 describe("ramp rail distillation", () => {
   it("validates ISO 4217 currency codes", () => {
@@ -110,7 +175,8 @@ describe("ramp rail distillation", () => {
             maxSendingAmount: 0,
           },
         ],
-      }
+      },
+      LIGHTSPARK_OPENAPI_FIXTURE
     );
     expect(lightspark.snapshot.offramp.currencies.USD).toEqual({ min: "1", max: "6000" });
     expect(lightspark.snapshot.offramp.currencies.EUR).toEqual({
@@ -125,6 +191,34 @@ describe("ramp rail distillation", () => {
     });
     expect(lightspark.snapshot.onramp.cryptos).toEqual(["usdc.solana"]);
     expect(lightspark.droppedCurrencyCodes).toEqual(["SLL", "USDB"]);
+    expect(lightspark.snapshot.offramp.accounts).toEqual({
+      USD: {
+        accountType: "USD_ACCOUNT",
+        rails: {
+          ACH: {
+            accountNumber: { required: true, minLength: 1, maxLength: 34 },
+            routingNumber: { required: true, pattern: "^[0-9]{9}$" },
+          },
+          WIRE: {
+            accountNumber: { required: true, minLength: 1, maxLength: 34 },
+            routingNumber: { required: true, pattern: "^[0-9]{9}$" },
+          },
+        },
+      },
+      EUR: {
+        accountType: "EUR_ACCOUNT",
+        rails: {
+          SEPA: {
+            iban: { required: true, pattern: "^[A-Z]{2}[0-9]{2}[A-Za-z0-9]{11,30}$" },
+            swiftCode: { required: false, minLength: 8, maxLength: 11 },
+          },
+          SEPA_INSTANT: {
+            iban: { required: true, pattern: "^[A-Z]{2}[0-9]{2}[A-Za-z0-9]{11,30}$" },
+            swiftCode: { required: false, minLength: 8, maxLength: 11 },
+          },
+        },
+      },
+    });
   });
 
   it("throws when a Lightspark off-ramp corridor is not sourced from a crypto asset", () => {
@@ -140,8 +234,44 @@ describe("ramp rail distillation", () => {
             },
           ],
         },
-        { data: [] }
+        { data: [] },
+        LIGHTSPARK_OPENAPI_FIXTURE
       )
     ).toThrow("must be a crypto asset");
+  });
+
+  it("resolves off-ramp destinations: corridor, country, rail, fields", () => {
+    const malaysia = resolveOfframpDestination({
+      provider: "lightspark",
+      cryptoRail: "usdc.solana",
+      fiatCurrency: "MYR",
+      countryCode: "MY",
+    });
+    if (malaysia === null) {
+      throw new Error("expected a MYR/MY resolution");
+    }
+    expect(malaysia.accountType).toBe("MYR_ACCOUNT");
+    expect(Object.keys(malaysia.rails)).toEqual(["BANK_TRANSFER"]);
+    expect(malaysia.rails.BANK_TRANSFER.swiftCode.required).toBe(true);
+
+    const usdIntoMalaysia = resolveOfframpDestination({
+      provider: "lightspark",
+      cryptoRail: "usdc.solana",
+      fiatCurrency: "USD",
+      countryCode: "MY",
+    });
+    expect(usdIntoMalaysia).toBeNull();
+
+    const germany = resolveOfframpDestination({
+      provider: "lightspark",
+      cryptoRail: "usdc.solana",
+      fiatCurrency: "EUR",
+      countryCode: "DE",
+    });
+    if (germany === null) {
+      throw new Error("expected an EUR/DE resolution");
+    }
+    expect(Object.keys(germany.rails).sort()).toEqual(["SEPA", "SEPA_INSTANT"]);
+    expect(germany.rails.SEPA.iban.required).toBe(true);
   });
 });

@@ -13,6 +13,8 @@ import {
   type CryptoRailId,
   type RampCountrySupport,
   type RampCurrencyLimit,
+  type RampPayoutAccountSpec,
+  type RampPayoutFieldSpec,
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -37,10 +39,29 @@ export type {
 } from "./providers/mural/provider-data";
 export type { StripeCustomerInfo } from "./providers/stripe/client";
 
+export const rampPayoutFieldSchema = z
+  .object({
+    required: z.boolean(),
+    pattern: z.string().optional(),
+    minLength: z.number().int().optional(),
+    maxLength: z.number().int().optional(),
+    values: z.array(z.string()).optional(),
+    mask: z.string().optional(),
+  })
+  .strict() satisfies z.ZodType<RampPayoutFieldSpec>;
+
+export const rampPayoutAccountSchema = z
+  .object({
+    accountType: z.string(),
+    rails: z.record(z.string(), z.record(z.string(), rampPayoutFieldSchema)),
+  })
+  .strict() satisfies z.ZodType<RampPayoutAccountSpec>;
+
 export interface ProviderDirectionSupportSnapshot {
   currencies: Readonly<Record<string, RampCurrencyLimit>>;
   cryptos: readonly CryptoRailId[];
   countrySupport?: RampCountrySupport;
+  accounts?: Readonly<Record<string, RampPayoutAccountSpec>>;
 }
 
 export interface ProviderRailSupportSnapshot {
@@ -69,6 +90,7 @@ const providerDirectionSupportSnapshotSchema = z.object({
   currencies: z.record(z.string(), rampCurrencyLimitSchema),
   cryptos: z.array(z.enum(SOLANA_CRYPTO_RAILS)),
   countrySupport: rampCountrySupportSchema.optional(),
+  accounts: z.record(z.string(), rampPayoutAccountSchema).optional(),
 }) satisfies z.ZodType<ProviderDirectionSupportSnapshot>;
 
 export const providerRailSupportSnapshotSchema = z.object({
@@ -104,12 +126,19 @@ export type RampFetchJson = (
   init?: RequestInit
 ) => Promise<RampDiscoveryResponseDump>;
 
+export type RampFetchText = (
+  provider: RampProviderId,
+  label: string,
+  url: string
+) => Promise<RampDiscoveryResponseDump>;
+
 export type RampDumpWriter = (name: string, payload: RampDiscoveryResponseDump) => Promise<void>;
 export type RampRawDumpReader = (relativePath: string) => Promise<unknown>;
 
 export interface RampDiscoveryContext {
   env: Record<string, string | undefined>;
   fetchJson: RampFetchJson;
+  fetchText: RampFetchText;
   writeDump: RampDumpWriter;
   readDump: RampRawDumpReader;
   /** Skip the network fetch and distill from the raw dumps already on disk. */

@@ -8,19 +8,20 @@
 import type {
   OfframpPairSupport,
   OnrampPairSupport,
+  RampPayoutAccountSpec,
   RampProviderDirectionSupport,
 } from "../payment-rails";
 import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "8ced77087fbf6cbabcdf76bc8f2074373481da243e0102020d1801cc50ccc547" as const;
+  "f90f7eae01ea5c6c275a73f593e2bdcf370db97cf550ee4853af750bffa9553d" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moonpay: "1bae9f40aaee0402594dbe2d72babb8c38032e7300131dc3edee1fe543931d41",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  lightspark: "7ecf311548126908f1a0b9769967766427b5f69c9a4d69aa2d1d0ae88afeca8c",
+  lightspark: "348542cc753393215679da92de0b892ccbd96513add052f2ff6ac7b1560292a3",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "5683ea502021864b6aea7a5feccb2e6aaae73ceb0ddd0730a21ce366cee6bf91",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -632,6 +633,1062 @@ export const OFFRAMP_COUNTRY_RAILS = {
   Record<RampProviderId, Partial<Record<RampCountryCode, readonly string[]>>>
 >;
 
+export const OFFRAMP_PAYOUT_ACCOUNTS = {
+  lightspark: {
+    AED: {
+      accountType: "AED_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          iban: {
+            required: true,
+            pattern: "^AE[0-9]{21}$",
+            minLength: 23,
+            maxLength: 23,
+          },
+          swiftCode: {
+            required: false,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    BDT: {
+      accountType: "BDT_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          branchCode: {
+            required: false,
+            pattern: "^[0-9]{5}$",
+            minLength: 5,
+            maxLength: 5,
+          },
+          swiftCode: {
+            required: false,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+        MOBILE_MONEY: {
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          branchCode: {
+            required: false,
+            pattern: "^[0-9]{5}$",
+            minLength: 5,
+            maxLength: 5,
+          },
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          swiftCode: {
+            required: false,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    BRL: {
+      accountType: "BRL_ACCOUNT",
+      rails: {
+        PIX: {
+          pixKey: {
+            required: true,
+            minLength: 1,
+            maxLength: 77,
+          },
+          pixKeyType: {
+            required: true,
+            values: ["CPF", "CNPJ", "EMAIL", "PHONE", "RANDOM"],
+          },
+          taxId: {
+            required: true,
+            pattern: "^[0-9]{11,14}$",
+            minLength: 11,
+            maxLength: 14,
+          },
+        },
+      },
+    },
+    BWP: {
+      accountType: "BWP_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    CAD: {
+      accountType: "CAD_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            pattern: "^[0-9]{7,12}$",
+            minLength: 7,
+            maxLength: 12,
+          },
+          bankCode: {
+            required: true,
+            pattern: "^[0-9]{3}$",
+            minLength: 3,
+            maxLength: 3,
+          },
+          branchCode: {
+            required: true,
+            pattern: "^[0-9]{5}$",
+            minLength: 5,
+            maxLength: 5,
+          },
+        },
+      },
+    },
+    COP: {
+      accountType: "COP_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankAccountType: {
+            required: true,
+            values: ["CHECKING", "SAVINGS"],
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+        MOBILE_MONEY: {
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+        },
+      },
+    },
+    DKK: {
+      accountType: "DKK_ACCOUNT",
+      rails: {
+        SEPA: {
+          iban: {
+            required: true,
+            pattern: "^DK[0-9]{16}$",
+            minLength: 18,
+            maxLength: 18,
+          },
+          swiftCode: {
+            required: false,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+        SEPA_INSTANT: {
+          iban: {
+            required: true,
+            pattern: "^DK[0-9]{16}$",
+            minLength: 18,
+            maxLength: 18,
+          },
+          swiftCode: {
+            required: false,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    EGP: {
+      accountType: "EGP_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          iban: {
+            required: true,
+            pattern: "^EG[0-9]{27}$",
+            minLength: 29,
+            maxLength: 29,
+          },
+        },
+        MOBILE_MONEY: {
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+        },
+      },
+    },
+    EUR: {
+      accountType: "EUR_ACCOUNT",
+      rails: {
+        SEPA: {
+          iban: {
+            required: true,
+            pattern: "^[A-Z]{2}[0-9]{2}[A-Za-z0-9]{11,30}$",
+            minLength: 15,
+            maxLength: 34,
+          },
+          swiftCode: {
+            required: false,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+        SEPA_INSTANT: {
+          iban: {
+            required: true,
+            pattern: "^[A-Z]{2}[0-9]{2}[A-Za-z0-9]{11,30}$",
+            minLength: 15,
+            maxLength: 34,
+          },
+          swiftCode: {
+            required: false,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    GBP: {
+      accountType: "GBP_ACCOUNT",
+      rails: {
+        FASTER_PAYMENTS: {
+          accountNumber: {
+            required: true,
+            pattern: "^[0-9]{8}$",
+            minLength: 8,
+            maxLength: 8,
+          },
+          sortCode: {
+            required: true,
+            pattern: "^[0-9]{6}$",
+            minLength: 6,
+            maxLength: 6,
+            mask: "##-##-##",
+          },
+        },
+      },
+    },
+    GHS: {
+      accountType: "GHS_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+        MOBILE_MONEY: {
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+        },
+      },
+    },
+    GTQ: {
+      accountType: "GTQ_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankAccountType: {
+            required: true,
+            values: ["CHECKING", "SAVINGS"],
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    HKD: {
+      accountType: "HKD_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    HTG: {
+      accountType: "HTG_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+        },
+      },
+    },
+    IDR: {
+      accountType: "IDR_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+62[0-9]{9,12}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    INR: {
+      accountType: "INR_ACCOUNT",
+      rails: {
+        NEFT: {
+          accountNumber: {
+            required: true,
+            pattern: "^[0-9]{9,18}$",
+            minLength: 9,
+            maxLength: 18,
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 255,
+          },
+          ifsc: {
+            required: true,
+            pattern: "^[A-Z]{4}0[A-Z0-9]{6}$",
+            minLength: 11,
+            maxLength: 11,
+          },
+          rail: {
+            required: true,
+            minLength: 1,
+            maxLength: 32,
+          },
+        },
+        RTGS: {
+          accountNumber: {
+            required: true,
+            pattern: "^[0-9]{9,18}$",
+            minLength: 9,
+            maxLength: 18,
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 255,
+          },
+          ifsc: {
+            required: true,
+            pattern: "^[A-Z]{4}0[A-Z0-9]{6}$",
+            minLength: 11,
+            maxLength: 11,
+          },
+          rail: {
+            required: true,
+            minLength: 1,
+            maxLength: 32,
+          },
+        },
+        UPI: {
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 255,
+          },
+          vpa: {
+            required: true,
+            pattern: "^[a-zA-Z0-9.\\-_]+@[a-zA-Z0-9]+$",
+            minLength: 3,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    JMD: {
+      accountType: "JMD_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankAccountType: {
+            required: true,
+            values: ["CHECKING", "SAVINGS"],
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          branchCode: {
+            required: true,
+            pattern: "^[0-9]{5}$",
+            minLength: 5,
+            maxLength: 5,
+          },
+        },
+      },
+    },
+    KES: {
+      accountType: "KES_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+254[0-9]{9}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    MWK: {
+      accountType: "MWK_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    MXN: {
+      accountType: "MXN_ACCOUNT",
+      rails: {
+        SPEI: {
+          clabeNumber: {
+            required: true,
+            pattern: "^[0-9]{18}$",
+            minLength: 18,
+            maxLength: 18,
+          },
+        },
+      },
+    },
+    MYR: {
+      accountType: "MYR_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    NGN: {
+      accountType: "NGN_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            pattern: "^[0-9]{10}$",
+            minLength: 10,
+            maxLength: 10,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    PHP: {
+      accountType: "PHP_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            pattern: "^[0-9]{8,16}$",
+            minLength: 8,
+            maxLength: 16,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          rail: {
+            required: false,
+            minLength: 1,
+            maxLength: 32,
+          },
+        },
+      },
+    },
+    PKR: {
+      accountType: "PKR_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          iban: {
+            required: false,
+            pattern: "^PK[0-9]{2}[A-Z]{4}[0-9]{16}$",
+            minLength: 24,
+            maxLength: 24,
+          },
+        },
+        MOBILE_MONEY: {
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          iban: {
+            required: false,
+            pattern: "^PK[0-9]{2}[A-Z]{4}[0-9]{16}$",
+            minLength: 24,
+            maxLength: 24,
+          },
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+        },
+      },
+    },
+    RWF: {
+      accountType: "RWF_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+250[0-9]{9}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    SGD: {
+      accountType: "SGD_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 255,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+        FAST: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 255,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+        PAYNOW: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 255,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    THB: {
+      accountType: "THB_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    TZS: {
+      accountType: "TZS_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+255[0-9]{9}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    UGX: {
+      accountType: "UGX_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    USD: {
+      accountType: "USD_ACCOUNT",
+      rails: {
+        ACH: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankAccountType: {
+            required: false,
+            values: ["CHECKING", "SAVINGS"],
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          fiToFiInformation: {
+            required: false,
+            maxLength: 210,
+          },
+          intermediaryBankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          intermediaryRoutingNumber: {
+            required: false,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+          routingNumber: {
+            required: true,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+        },
+        FEDNOW: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankAccountType: {
+            required: false,
+            values: ["CHECKING", "SAVINGS"],
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          fiToFiInformation: {
+            required: false,
+            maxLength: 210,
+          },
+          intermediaryBankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          intermediaryRoutingNumber: {
+            required: false,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+          routingNumber: {
+            required: true,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+        },
+        RTP: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankAccountType: {
+            required: false,
+            values: ["CHECKING", "SAVINGS"],
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          fiToFiInformation: {
+            required: false,
+            maxLength: 210,
+          },
+          intermediaryBankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          intermediaryRoutingNumber: {
+            required: false,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+          routingNumber: {
+            required: true,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+        },
+        WIRE: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankAccountType: {
+            required: false,
+            values: ["CHECKING", "SAVINGS"],
+          },
+          bankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          fiToFiInformation: {
+            required: false,
+            maxLength: 210,
+          },
+          intermediaryBankName: {
+            required: false,
+            minLength: 1,
+            maxLength: 140,
+          },
+          intermediaryRoutingNumber: {
+            required: false,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+          routingNumber: {
+            required: true,
+            pattern: "^[0-9]{9}$",
+            minLength: 9,
+            maxLength: 9,
+          },
+        },
+      },
+    },
+    VND: {
+      accountType: "VND_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            minLength: 1,
+            maxLength: 34,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          swiftCode: {
+            required: true,
+            pattern: "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+            minLength: 8,
+            maxLength: 11,
+          },
+        },
+      },
+    },
+    XAF: {
+      accountType: "XAF_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          region: {
+            required: true,
+            pattern: "^[A-Z]{2}$",
+            minLength: 2,
+            maxLength: 2,
+            values: ["CM", "CG"],
+          },
+        },
+      },
+    },
+    XOF: {
+      accountType: "XOF_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+[0-9]{6,14}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+          region: {
+            required: true,
+            pattern: "^[A-Z]{2}$",
+            minLength: 2,
+            maxLength: 2,
+            values: ["BJ", "CI", "SN", "TG"],
+          },
+        },
+      },
+    },
+    ZAR: {
+      accountType: "ZAR_ACCOUNT",
+      rails: {
+        BANK_TRANSFER: {
+          accountNumber: {
+            required: true,
+            pattern: "^[0-9]{9,13}$",
+            minLength: 9,
+            maxLength: 13,
+          },
+          bankName: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+    ZMW: {
+      accountType: "ZMW_ACCOUNT",
+      rails: {
+        MOBILE_MONEY: {
+          phoneNumber: {
+            required: true,
+            pattern: "^\\+260[0-9]{9}$",
+            minLength: 7,
+            maxLength: 15,
+          },
+          provider: {
+            required: true,
+            minLength: 1,
+            maxLength: 255,
+          },
+        },
+      },
+    },
+  },
+} as const satisfies Partial<Record<RampProviderId, Record<string, RampPayoutAccountSpec>>>;
+
 export const RAMP_PROVIDER_SUPPORT_DETAILS = {
   moonpay: {
     onramp: {
@@ -972,39 +2029,39 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
       currencies: {
         AED: { min: "0.0004", max: "5" },
         BDT: { min: "0.05", max: "50" },
-        BRL: { min: "11.726415", max: "5000" },
-        BWP: { min: "11.186321", max: "708.449686" },
-        CAD: { min: "2.034591", max: "5000" },
+        BRL: { min: "11.725429", max: "5000" },
+        BWP: { min: "11.190328", max: "708.716069" },
+        CAD: { min: "2.035101", max: "5000" },
         COP: { min: "1", max: "5000" },
-        DKK: { min: "3.579403", max: "5000" },
+        DKK: { min: "3.578003", max: "5000" },
         EGP: { min: "0.01", max: "50" },
-        EUR: { min: "23.277516", max: "5000" },
-        GBP: { min: "1.954403", max: "5000" },
+        EUR: { min: "23.297192", max: "5000" },
+        GBP: { min: "1.954758", max: "5000" },
         GHS: { min: "0.005", max: "5" },
         GTQ: { min: "0.005", max: "5" },
-        HKD: { min: "3.603774", max: "5000" },
+        HKD: { min: "3.604524", max: "5000" },
         HTG: { min: "0.05", max: "50" },
         IDR: { min: "3.3936", max: "8285703.0892" },
-        INR: { min: "3.125786", max: "2117.227201" },
+        INR: { min: "3.124805", max: "2116.830733" },
         JMD: { min: "0.05", max: "50" },
-        KES: { min: "5.051887", max: "1944.186321" },
-        MWK: { min: "1.311321", max: "5000" },
+        KES: { min: "5.053822", max: "1944.767551" },
+        MWK: { min: "1.312012", max: "5000" },
         MXN: { min: "1", max: "5000" },
-        MYR: { min: "3.497642", max: "5000" },
+        MYR: { min: "3.49688", max: "5000" },
         NGN: { min: "0.18", max: "3000" },
-        PHP: { min: "1.810535", max: "804.940252" },
+        PHP: { min: "1.810452", max: "804.712168" },
         PKR: { min: "0.1", max: "100" },
-        RWF: { min: "1.091981", max: "5000" },
+        RWF: { min: "1.092824", max: "5000" },
         SGD: { min: "1", max: "5000" },
-        THB: { min: "4.943396", max: "5000" },
-        TZS: { min: "1", max: "3885.496069" },
-        UGX: { min: "4.060535", max: "812.150157" },
+        THB: { min: "4.940718", max: "5000" },
+        TZS: { min: "1", max: "3887.781591" },
+        UGX: { min: "4.065523", max: "813.051482" },
         USD: { min: "1", max: "5000" },
         VND: { min: "0.000264", max: "527.66603" },
-        XAF: { min: "1.034591", max: "2611.606132" },
-        XOF: { min: "1", max: "2750.387579" },
-        ZAR: { min: "12.955189", max: "5000" },
-        ZMW: { min: "6.14544", max: "5000" },
+        XAF: { min: "1.035101", max: "2612.589704" },
+        XOF: { min: "1", max: "2750.728549" },
+        ZAR: { min: "12.936037", max: "5000" },
+        ZMW: { min: "6.147426", max: "5000" },
       },
       countrySupport: {
         coverage: "by-country",
