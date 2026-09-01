@@ -15,13 +15,13 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "f90f7eae01ea5c6c275a73f593e2bdcf370db97cf550ee4853af750bffa9553d" as const;
+  "162bddc6552318446b36e54fa23f968dd13011dc580d15c722089092508a9ea4" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moonpay: "1bae9f40aaee0402594dbe2d72babb8c38032e7300131dc3edee1fe543931d41",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  lightspark: "348542cc753393215679da92de0b892ccbd96513add052f2ff6ac7b1560292a3",
+  lightspark: "07c43f9309b3198adfd2739ca57bc2fdc062b35bd986925e37b27105b7fc8e68",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "5683ea502021864b6aea7a5feccb2e6aaae73ceb0ddd0730a21ce366cee6bf91",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -210,6 +210,7 @@ export const RAMP_COUNTRY_CODES = [
   "AX",
   "AZ",
   "BA",
+  "BD",
   "BE",
   "BG",
   "BH",
@@ -268,6 +269,7 @@ export const RAMP_COUNTRY_CODES = [
   "HK",
   "HN",
   "HR",
+  "HT",
   "HU",
   "ID",
   "IE",
@@ -323,6 +325,7 @@ export const RAMP_COUNTRY_CODES = [
   "PE",
   "PG",
   "PH",
+  "PK",
   "PL",
   "PT",
   "PW",
@@ -2046,6 +2049,7 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
         countries: {
           AE: ["AED"],
           AT: ["EUR"],
+          BD: ["BDT"],
           BE: ["EUR"],
           BG: ["EUR"],
           BJ: ["XOF"],
@@ -2056,18 +2060,22 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
           CH: ["EUR"],
           CI: ["XOF"],
           CM: ["XAF"],
+          CO: ["COP"],
           CY: ["EUR"],
           CZ: ["EUR"],
           DE: ["EUR"],
           DK: ["DKK", "EUR"],
           EE: ["EUR"],
+          EG: ["EGP"],
           ES: ["EUR"],
           FI: ["EUR"],
           FR: ["EUR"],
           GB: ["GBP"],
+          GH: ["GHS"],
           GR: ["EUR"],
           HK: ["HKD"],
           HR: ["EUR"],
+          HT: ["HTG"],
           HU: ["EUR"],
           ID: ["IDR"],
           IE: ["EUR"],
@@ -2087,6 +2095,7 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
           NL: ["EUR"],
           NO: ["EUR"],
           PH: ["PHP"],
+          PK: ["PKR"],
           PL: ["EUR"],
           PT: ["EUR"],
           RO: ["EUR"],
@@ -2102,6 +2111,7 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
           US: ["USD"],
           VN: ["VND"],
           ZA: ["ZAR"],
+          ZM: ["ZMW"],
         },
       },
       entityTypes: ["business", "individual"],

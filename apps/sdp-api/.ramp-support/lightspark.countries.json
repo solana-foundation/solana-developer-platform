@@ -4,6 +4,7 @@
   "countries": {
     "AE": ["AED"],
     "AT": ["EUR"],
+    "BD": ["BDT"],
     "BE": ["EUR"],
     "BJ": ["XOF"],
     "BG": ["EUR"],
@@ -14,18 +15,22 @@
     "CH": ["EUR"],
     "CI": ["XOF"],
     "CM": ["XAF"],
+    "CO": ["COP"],
     "CY": ["EUR"],
     "CZ": ["EUR"],
     "DE": ["EUR"],
     "DK": ["DKK", "EUR"],
     "EE": ["EUR"],
+    "EG": ["EGP"],
     "ES": ["EUR"],
     "FI": ["EUR"],
     "FR": ["EUR"],
     "GB": ["GBP"],
+    "GH": ["GHS"],
     "GR": ["EUR"],
     "HK": ["HKD"],
     "HR": ["EUR"],
+    "HT": ["HTG"],
     "HU": ["EUR"],
     "ID": ["IDR"],
     "IE": ["EUR"],
@@ -45,6 +50,7 @@
     "NL": ["EUR"],
     "NO": ["EUR"],
     "PH": ["PHP"],
+    "PK": ["PKR"],
     "PL": ["EUR"],
     "PT": ["EUR"],
     "RO": ["EUR"],
@@ -59,6 +65,7 @@
     "UG": ["UGX"],
     "US": ["USD"],
     "VN": ["VND"],
-    "ZA": ["ZAR"]
+    "ZA": ["ZAR"],
+    "ZM": ["ZMW"]
   }
 }
