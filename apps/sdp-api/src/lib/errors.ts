@@ -3,6 +3,7 @@
  */
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
+import type { CountryCode } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 
@@ -283,6 +284,24 @@ export function counterpartyNotProvisioned(
     "CONFLICT",
     `Counterparty is not provisioned for ${provider} ${direction}. Complete the counterparty requirements (POST /counterparties/:counterpartyId/requirements) before requesting a quote.`,
     { ...details, provider, direction }
+  );
+}
+
+/**
+ * Creates the error returned when more than one active external account matches a payout corridor.
+ *
+ * @param provider - Ramp provider owning the external accounts.
+ * @param fiatCurrency - Fiat currency of the payout corridor.
+ * @param destinationCountry - Destination country of the payout corridor.
+ * @returns A bad-request error describing the ambiguous corridor.
+ */
+export function counterpartyExternalAccountAmbiguous(
+  provider: RampProviderId,
+  fiatCurrency: string,
+  destinationCountry: CountryCode
+): AppError {
+  return badRequest(
+    `Counterparty has multiple active ${provider} external accounts for ${fiatCurrency} to ${destinationCountry}; explicit external-account selection is required.`
   );
 }
 

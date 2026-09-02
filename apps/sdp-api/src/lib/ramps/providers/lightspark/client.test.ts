@@ -348,6 +348,29 @@ describe("LightsparkRampClient", () => {
     expect(account).toEqual({ id: "ExternalAccount:acc_payout_123", status: "ACTIVE" });
   });
 
+  it("returns payment rails from an external account lookup", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "ExternalAccount:acc_payout_123",
+          status: "ACTIVE",
+          accountInfo: { paymentRails: ["ACH"] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const account = await new LightsparkRampClient().getExternalAccount(LIGHTSPARK_CONTEXT, {
+      accountId: "ExternalAccount:acc_payout_123",
+    });
+
+    expect(account).toEqual({
+      id: "ExternalAccount:acc_payout_123",
+      status: "ACTIVE",
+      accountInfo: { paymentRails: ["ACH"] },
+    });
+  });
+
   it("converges on the existing payout account when Grid returns 409", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")

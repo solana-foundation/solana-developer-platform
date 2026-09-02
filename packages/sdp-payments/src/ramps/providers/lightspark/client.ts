@@ -158,16 +158,46 @@ function readRequiredGridString(
   return value.trim();
 }
 
+/**
+ * Reads payment rails from a provider account payload.
+ *
+ * @param value - Untrusted payment-rails payload value.
+ * @returns The provider payment rails, or undefined when the field is absent.
+ */
+function readOptionalGridPaymentRails(value: unknown): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw badRequest("Lightspark external account paymentRails must be an array");
+  }
+  const paymentRails: string[] = [];
+  for (const paymentRail of value) {
+    if (typeof paymentRail !== "string" || paymentRail.trim().length === 0) {
+      throw badRequest("Lightspark external account paymentRails must contain strings");
+    }
+    paymentRails.push(paymentRail);
+  }
+  return paymentRails;
+}
+
 interface LightsparkExternalAccount {
   id?: string;
   status?: string;
   platformAccountId?: string;
-  accountInfo?: { accountType?: string; address?: string };
+  accountInfo?: LightsparkExternalAccountInfo;
+}
+
+export interface LightsparkExternalAccountInfo {
+  accountType?: string;
+  address?: string;
+  paymentRails?: string[];
 }
 
 export interface LightsparkExternalAccountResolution {
   id: string;
   status: string;
+  accountInfo?: LightsparkExternalAccountInfo;
 }
 
 function parseLightsparkExternalAccountResolution(
@@ -176,10 +206,15 @@ function parseLightsparkExternalAccountResolution(
   if (!isGridRecord(payload)) {
     throw badRequest("Lightspark external account response must be an object");
   }
-  return {
+  const resolution = {
     id: readRequiredGridString(payload, "id", "Lightspark external account"),
     status: readRequiredGridString(payload, "status", "Lightspark external account"),
   };
+  const account = parseLightsparkExternalAccount(payload);
+  if (account.accountInfo === undefined) {
+    return resolution;
+  }
+  return { ...resolution, accountInfo: account.accountInfo };
 }
 
 function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAccount {
@@ -190,7 +225,11 @@ function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAcc
     id?: unknown;
     status?: unknown;
     platformAccountId?: unknown;
-    accountInfo?: { accountType?: unknown; address?: unknown };
+    accountInfo?: {
+      accountType?: unknown;
+      address?: unknown;
+      paymentRails?: unknown;
+    };
   };
   return {
     id: typeof raw.id === "string" ? raw.id : undefined,
@@ -206,6 +245,7 @@ function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAcc
                 : undefined,
             address:
               typeof raw.accountInfo.address === "string" ? raw.accountInfo.address : undefined,
+            paymentRails: readOptionalGridPaymentRails(raw.accountInfo.paymentRails),
           }
         : undefined,
   };

@@ -22,7 +22,7 @@ import {
   createPostgresCounterpartyProviderAccountsRepository,
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, internalError } from "@/lib/errors";
+import { badRequest, counterpartyExternalAccountAmbiguous, internalError } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { type AppContext, rampRuntime } from "../../context";
@@ -174,6 +174,37 @@ interface PayoutAccountContext {
 }
 
 /**
+ * Selects the reusable Lightspark payout account for a corridor.
+ *
+ * @param accounts - Active external accounts for one payout corridor.
+ * @param paymentRail - Requested payment rail, when supplied.
+ * @param fiatCurrency - Fiat currency of the payout corridor.
+ * @param destinationCountry - Destination country of the payout corridor.
+ * @returns The reusable account, or null when the corridor has no active account.
+ */
+export function selectLightsparkPayoutAccount(
+  accounts: readonly CounterpartyProviderAccountRow[],
+  paymentRail: string | undefined,
+  fiatCurrency: string,
+  destinationCountry: CountryCode
+): CounterpartyProviderAccountRow | null {
+  if (accounts.length === 0) {
+    return null;
+  }
+  if (accounts.length === 1) {
+    return accounts[0];
+  }
+  if (paymentRail === undefined) {
+    throw counterpartyExternalAccountAmbiguous("lightspark", fiatCurrency, destinationCountry);
+  }
+  const matches = accounts.filter((account) => account.payment_rail === paymentRail);
+  if (matches.length !== 1) {
+    throw counterpartyExternalAccountAmbiguous("lightspark", fiatCurrency, destinationCountry);
+  }
+  return matches[0];
+}
+
+/**
  * Resolves the collected destination country into the canonical country type.
  *
  * @param collectedData - Collected Lightspark payout fields.
@@ -189,6 +220,10 @@ function requireDestinationCountry(collectedData: CollectedFieldData): CountryCo
 
 /**
  * Resolves the Grid external payout account for one fiat/country corridor.
+ *
+ * @param c - Request context for database and provider access.
+ * @param input - Counterparty, project, customer, crypto rail, fiat currency, and collected payout data.
+ * @returns The existing or newly completed Lightspark external account row.
  */
 export async function ensureLightsparkPayoutAccount(
   c: AppContext,
@@ -198,8 +233,9 @@ export async function ensureLightsparkPayoutAccount(
     throw badRequest("collectedData with destinationCountry is required for Lightspark off-ramp.");
   }
   const destinationCountry = requireDestinationCountry(input.collectedData);
+  const paymentRail: string | undefined = input.collectedData.paymentRails;
   const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const existing = await repository.getActiveExternalAccount({
+  const accounts = await repository.listActiveExternalAccounts({
     organizationId: input.counterparty.organization_id,
     projectId: input.projectId,
     counterpartyId: input.counterparty.id,
@@ -207,18 +243,30 @@ export async function ensureLightsparkPayoutAccount(
     fiatCurrency: input.fiatCurrency,
     destinationCountry,
   });
-  const pending =
-    existing === null
-      ? await repository.insertPendingExternalAccount({
-          organizationId: input.counterparty.organization_id,
-          projectId: input.projectId,
-          counterpartyId: input.counterparty.id,
-          provider: "lightspark",
-          providerCustomerReference: input.customer.customerId,
-          fiatCurrency: input.fiatCurrency,
-          destinationCountry,
-        })
-      : existing;
+  const existing = selectLightsparkPayoutAccount(
+    accounts,
+    paymentRail,
+    input.fiatCurrency,
+    destinationCountry
+  );
+  let pending: CounterpartyProviderAccountRow;
+  if (existing !== null) {
+    pending = existing;
+  } else {
+    if (paymentRail === undefined) {
+      throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
+    }
+    pending = await repository.insertPendingExternalAccount({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: input.customer.customerId,
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry,
+      paymentRail,
+    });
+  }
   if (pending.external_account_reference !== null) {
     return pending;
   }

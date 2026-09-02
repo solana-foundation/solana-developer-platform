@@ -101,7 +101,7 @@ async function lightsparkPayoutSubmissionNeedsRequirements(
   }
   const existing = await createPostgresCounterpartyProviderAccountsRepository(
     getDb(c.env)
-  ).getActiveExternalAccount({
+  ).listActiveExternalAccounts({
     organizationId,
     projectId,
     counterpartyId: counterparty.id,
@@ -109,7 +109,7 @@ async function lightsparkPayoutSubmissionNeedsRequirements(
     fiatCurrency: input.fiatCurrency,
     destinationCountry: collectedData.destinationCountry,
   });
-  return existing === null || existing.external_account_reference === null;
+  return existing.length !== 1 || existing[0].external_account_reference === null;
 }
 
 export const getCounterpartyFieldOptions = async (c: AppContext) => {

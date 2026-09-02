@@ -4,9 +4,10 @@ import type {
   ArchiveExternalAccountInput,
   CompleteExternalAccountInput,
   CounterpartyProviderAccountsRepository,
-  GetActiveExternalAccountInput,
   GetCounterpartyProviderAccountInput,
+  GetExternalAccountByIdInput,
   InsertPendingExternalAccountInput,
+  ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
@@ -80,8 +81,8 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return counterpartyProviderAccountRowSchema.parse(row);
     },
 
-    async getActiveExternalAccount(input: GetActiveExternalAccountInput) {
-      const row = await db
+    async listActiveExternalAccounts(input: ListActiveExternalAccountsInput) {
+      const result = await db
         .prepare(
           `SELECT *
            FROM counterparty_provider_accounts
@@ -91,7 +92,8 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND provider = ?
              AND fiat_currency = ?
              AND destination_country = ?
-             AND status = 'active'`
+             AND status = 'active'
+           ORDER BY created_at ASC`
         )
         .bind(
           input.organizationId,
@@ -101,6 +103,24 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           input.fiatCurrency,
           input.destinationCountry
         )
+        .all<Record<string, unknown>>();
+
+      return result.results.map((row) => counterpartyProviderAccountRowSchema.parse(row));
+    },
+
+    async getExternalAccountById(input: GetExternalAccountByIdInput) {
+      const row = await db
+        .prepare(
+          `SELECT *
+           FROM counterparty_provider_accounts
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND fiat_currency IS NOT NULL`
+        )
+        .bind(input.id, input.organizationId, input.projectId, input.counterpartyId, input.provider)
         .first<Record<string, unknown>>();
 
       return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
@@ -143,13 +163,9 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              provider,
              provider_customer_reference,
              fiat_currency,
-             destination_country
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (counterparty_id, provider, fiat_currency, destination_country)
-             WHERE status = 'active' AND fiat_currency IS NOT NULL
-           DO UPDATE SET updated_at = counterparty_provider_accounts.updated_at
-           WHERE counterparty_provider_accounts.organization_id = EXCLUDED.organization_id
-             AND counterparty_provider_accounts.project_id = EXCLUDED.project_id
+             destination_country,
+             payment_rail
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -160,7 +176,8 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           input.provider,
           input.providerCustomerReference,
           input.fiatCurrency,
-          input.destinationCountry
+          input.destinationCountry,
+          input.paymentRail
         )
         .first<Record<string, unknown>>();
 
@@ -205,6 +222,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         .prepare(
           `UPDATE counterparty_provider_accounts
            SET provider_status = ?,
+               payment_rail = COALESCE(?, payment_rail),
                updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
@@ -217,6 +235,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .bind(
           input.providerStatus,
+          input.paymentRail === undefined ? null : input.paymentRail,
           input.id,
           input.organizationId,
           input.projectId,

@@ -17,6 +17,7 @@ import {
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
+  readLightsparkPaymentRail,
   readLightsparkPurposeOfPayment,
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
@@ -125,6 +126,7 @@ import {
   ensureLightsparkPayoutAccount,
   ensureLightsparkPurposeOfPayment,
   lightsparkProviderCustomerId,
+  selectLightsparkPayoutAccount,
 } from "./ramps/lightspark";
 import {
   muralOnrampQuote,
@@ -642,7 +644,7 @@ async function advanceLightsparkRequirements(
   if (!isCountryCode(collectedData.destinationCountry)) {
     throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
   }
-  const existing = await repository.getActiveExternalAccount({
+  const accounts = await repository.listActiveExternalAccounts({
     organizationId: input.counterparty.organization_id,
     projectId: input.projectId,
     counterpartyId: input.counterparty.id,
@@ -650,17 +652,28 @@ async function advanceLightsparkRequirements(
     fiatCurrency: input.fiatCurrency,
     destinationCountry: collectedData.destinationCountry,
   });
+  const existing = selectLightsparkPayoutAccount(
+    accounts,
+    collectedData.paymentRails,
+    input.fiatCurrency,
+    collectedData.destinationCountry
+  );
   if (existing !== null && existing.external_account_reference !== null) {
     if (existing.provider_status === null) {
       throw badRequest("Lightspark payout account has no provider status yet.");
     }
-    if (isLightsparkExternalAccountActive(existing.provider_status)) {
+    if (
+      isLightsparkExternalAccountActive(existing.provider_status) &&
+      existing.payment_rail !== null
+    ) {
       return readyCounterparty("lightspark", input.direction);
     }
     const refreshed = await RAMP_PROVIDER_CLIENTS.lightspark.getExternalAccount(rampRuntime(c), {
       accountId: existing.external_account_reference,
     });
-    if (refreshed.status !== existing.provider_status) {
+    const paymentRail =
+      existing.payment_rail === null ? readLightsparkPaymentRail(refreshed) : undefined;
+    if (refreshed.status !== existing.provider_status || paymentRail !== undefined) {
       await repository.updateExternalAccountStatus({
         organizationId: input.counterparty.organization_id,
         projectId: input.projectId,
@@ -668,6 +681,7 @@ async function advanceLightsparkRequirements(
         provider: "lightspark",
         id: existing.id,
         providerStatus: refreshed.status,
+        paymentRail,
       });
     }
     if (isLightsparkExternalAccountActive(refreshed.status)) {
@@ -1153,9 +1167,9 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       }
       const customerId = await lightsparkProviderCustomerId(c, counterparty, projectId);
       const purposeOfPayment = readLightsparkPurposeOfPayment(counterparty.provider_data);
-      const payoutAccount = await createPostgresCounterpartyProviderAccountsRepository(
+      const payoutAccounts = await createPostgresCounterpartyProviderAccountsRepository(
         getDb(c.env)
-      ).getActiveExternalAccount({
+      ).listActiveExternalAccounts({
         organizationId: scope.auth.organizationId,
         projectId,
         counterpartyId: counterparty.id,
@@ -1163,6 +1177,12 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         destinationCountry: input.destinationCountry,
       });
+      const payoutAccount = selectLightsparkPayoutAccount(
+        payoutAccounts,
+        undefined,
+        input.fiatCurrency,
+        input.destinationCountry
+      );
       if (
         customerId === null ||
         purposeOfPayment === null ||

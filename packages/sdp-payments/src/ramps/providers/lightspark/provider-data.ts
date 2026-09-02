@@ -1,4 +1,5 @@
 import type { CounterpartyProviderData } from "@sdp/types";
+import type { LightsparkExternalAccountResolution } from "./client";
 
 /**
  * Checks whether Grid reports an external account as active.
@@ -8,6 +9,26 @@ import type { CounterpartyProviderData } from "@sdp/types";
  */
 export function isLightsparkExternalAccountActive(status: string): boolean {
   return status.trim().toUpperCase() === "ACTIVE";
+}
+
+/**
+ * Reads the first payment rail returned for a Lightspark external account.
+ *
+ * @param account - Lightspark external account returned by the provider.
+ * @returns The first provider payment rail, or undefined when the provider omitted the field.
+ */
+export function readLightsparkPaymentRail(
+  account: LightsparkExternalAccountResolution
+): string | undefined {
+  const accountInfo = account.accountInfo;
+  if (accountInfo === undefined) {
+    return undefined;
+  }
+  const paymentRails = accountInfo.paymentRails;
+  if (paymentRails === undefined || paymentRails.length === 0) {
+    return undefined;
+  }
+  return paymentRails[0];
 }
 
 /** Grid purpose-of-payment codes with display labels; some payout corridors mandate one on every quote. */
