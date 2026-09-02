@@ -1,7 +1,6 @@
 import { pathToFileURL } from "node:url";
 import * as solanaRpc from "@sdp/rpc/solana";
 
-import * as Sentry from "@sentry/node";
 import { parse as parseCron, validate as validateCron } from "node-cron";
 import { EARN_CATALOGUE_SYNC_MONITOR, runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import {
@@ -26,13 +25,6 @@ import {
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
-import {
-  type CheckInObservability,
-  getSentryOptions,
-  isSentryEnabled,
-  type Observability,
-} from "@/runtime/observability";
-import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
@@ -49,21 +41,19 @@ import { recoverApprovedWalletOperations } from "@/services/policy/approved-oper
 import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
-const MANAGED_CATALOGUE_CHECKIN_MARGIN_MINUTES = 10;
-const MANAGED_CHECKIN_MARGIN_MINUTES = 4;
 
 /**
  * One-shot reconciliation entrypoint for the managed Cloud Run Job — the only
  * cron tick a managed deployment gets, since web replicas skip the in-process
- * scheduler under K_SERVICE (cron/runner.ts). Its deployment-provided cadence
- * is also the source of truth for managed Sentry monitors. Each execution is a
- * fresh process, so it closes every pool and flushes Sentry on the way out.
+ * scheduler under K_SERVICE (cron/runner.ts). Each execution is a fresh
+ * process, so it closes every pool on the way out. Absence detection is the
+ * Loki dead-man on the per-tick `sdp_cron_run` events.
  *
  * Failure semantics: every tick runs on every execution — a failing tick never
  * blocks the ticks after it, so one persistently broken reconciler cannot
- * starve the rest. Each tick reports to its own Sentry monitor and each
- * failure is logged with its monitor slug, so the failing tick is identifiable
- * even with Sentry disabled. Fatal ticks' failures are collected and rethrown
+ * starve the rest. Each tick emits `sdp_cron_run` under its monitor slug and
+ * each failure is logged with that slug, so the failing tick is identifiable
+ * from logs alone. Fatal ticks' failures are collected and rethrown
  * once everything has run (as an AggregateError when more than one failed, and
  * logged with full causes at the process exit below), failing the job loudly;
  * non-fatal ticks' failures are swallowed after their log. The next execution
@@ -122,11 +112,9 @@ export async function runCronJob(): Promise<void> {
     throw new Error("REDIS_URL is required for the reconciliation job");
   }
   assertCustodyEncryptionScheme(env);
-  const managedCron = getManagedReconciliationCron(env);
-  const managedMaxRuntimeMinutes = getManagedReconciliationMaxRuntimeMinutes(env);
+  getManagedReconciliationCron(env);
+  getManagedReconciliationMaxRuntimeMinutes(env);
   assertSigningProviderAllowed(env);
-
-  initNodeSentry(getSentryOptions(env));
 
   let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
   try {
@@ -154,29 +142,12 @@ export async function runCronJob(): Promise<void> {
     }
   }
 
-  const sentryEnabled = isSentryEnabled(env);
   const privateChannelsEnabled = isPrivateChannelsEnabled(env);
   const assetProfilesEnabled = isAssetProfilesEnabled(env);
   const earnEnabled = isEarnEnabled(env);
-  const managedMonitors = [
-    PENDING_TRANSFERS_MONITOR,
-    RECURRING_PAYMENTS_COLLECTION_MONITOR,
-    PENDING_DEPOSITS_MONITOR,
-    PENDING_WITHDRAWALS_MONITOR,
-    RINGS_INDEXING_MONITOR,
-    EARN_VAULT_MOVEMENTS_MONITOR,
-    WORKFLOW_EXECUTIONS_MONITOR,
-    WORKFLOW_SECRET_RETIREMENTS_MONITOR,
-    EARN_METRICS_REFRESH_MONITOR,
-  ];
 
   try {
-    const monitored = createManagedTickRunner({
-      cadence: managedCron,
-      maxRuntimeMinutes: managedMaxRuntimeMinutes,
-      monitors: managedMonitors,
-      observability: sentryEnabled ? nodeObservability : undefined,
-    });
+    const monitored = createManagedTickRunner();
     const failures: unknown[] = [];
     const collect = async (tick: Promise<unknown>) => {
       try {
@@ -226,74 +197,30 @@ export async function runCronJob(): Promise<void> {
         runEarnMetricsRefreshTick(env, undefined)
       ).catch(() => undefined);
       await collect(
-        runEarnCatalogueSyncIfDue(
-          env,
-          sentryEnabled
-            ? createManagedTaskObservability(nodeObservability, managedMaxRuntimeMinutes)
-            : undefined
+        runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
+          runEarnCatalogueSyncIfDue(env, undefined)
         )
       );
     } else {
       await monitored(EARN_METRICS_REFRESH_MONITOR, async () => undefined);
-      if (sentryEnabled) {
-        await collect(
-          runEarnCatalogueSyncIfDue(
-            env,
-            createManagedTaskObservability(nodeObservability, managedMaxRuntimeMinutes),
-            { workEnabled: false }
-          )
-        );
-      }
+      await collect(
+        runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
+          runEarnCatalogueSyncIfDue(env, undefined, { workEnabled: false })
+        )
+      );
     }
     throwCollected(failures, "reconciliation job had multiple tick failures");
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);
-    await Sentry.close(2000);
   }
 }
 
-interface ManagedTickRunnerOptions {
-  cadence: string;
-  maxRuntimeMinutes: number;
-  monitors: readonly string[];
-  observability?: CheckInObservability;
-}
-
-function createManagedTickRunner({
-  cadence,
-  maxRuntimeMinutes,
-  monitors,
-  observability,
-}: ManagedTickRunnerOptions): <T>(monitor: string, work: () => Promise<T>) => Promise<T> {
-  const checkIns = new Map<string, { checkInId: string; monitorSlug: string }>();
-  if (observability) {
-    for (const monitor of monitors) {
-      const monitorSlug = getManagedMonitorSlug(monitor);
-      const checkInId = observability.captureCheckIn(
-        { monitorSlug, status: "in_progress" },
-        {
-          schedule: { type: "crontab", value: cadence },
-          checkinMargin: MANAGED_CHECKIN_MARGIN_MINUTES,
-          maxRuntime: maxRuntimeMinutes,
-        }
-      );
-      checkIns.set(monitor, { checkInId, monitorSlug });
-    }
-  }
-
+function createManagedTickRunner(): <T>(monitor: string, work: () => Promise<T>) => Promise<T> {
   return async <T>(monitor: string, work: () => Promise<T>): Promise<T> => {
     const monitorSlug = getManagedMonitorSlug(monitor);
-    const checkIn = checkIns.get(monitor);
     try {
-      const result = await runWithCronRunEvent(monitorSlug, work);
-      if (checkIn) {
-        observability?.captureCheckIn({ ...checkIn, status: "ok" });
-      }
-      return result;
+      return await runWithCronRunEvent(monitorSlug, work);
     } catch (error) {
-      if (checkIn) {
-        observability?.captureCheckIn({ ...checkIn, status: "error" });
-      }
       getLogger().error(
         {
           monitor: monitorSlug,
@@ -309,32 +236,6 @@ function createManagedTickRunner({
 export function getManagedMonitorSlug(monitor: string): string {
   const prefix = "sdp-api-";
   return `sdp-api-managed-${monitor.startsWith(prefix) ? monitor.slice(prefix.length) : monitor}`;
-}
-
-function createManagedTaskObservability(
-  observability: Observability,
-  maxRuntimeMinutes: number
-): Observability {
-  return {
-    captureException: (error) => observability.captureException(error),
-    withScope: (callback) => observability.withScope(callback),
-    withMonitor: (monitor, work, options) => {
-      const managedOptions =
-        monitor === EARN_CATALOGUE_SYNC_MONITOR
-          ? {
-              ...options,
-              schedule: { type: "interval" as const, value: 1, unit: "hour" as const },
-              checkinMargin: MANAGED_CATALOGUE_CHECKIN_MARGIN_MINUTES,
-              maxRuntime: maxRuntimeMinutes,
-            }
-          : {
-              ...options,
-              checkinMargin: MANAGED_CHECKIN_MARGIN_MINUTES,
-              maxRuntime: maxRuntimeMinutes,
-            };
-      return observability.withMonitor(getManagedMonitorSlug(monitor), work, managedOptions);
-    },
-  };
 }
 
 export function getManagedReconciliationCron(

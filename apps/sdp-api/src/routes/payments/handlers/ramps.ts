@@ -80,7 +80,6 @@ import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/po
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { isSentryEnabled } from "@/runtime/observability";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -818,7 +817,7 @@ export async function estimateAcrossProviders(
           ...describeError(error),
         });
         const observability = c.get("observability");
-        if (observability && isSentryEnabled(c.env)) {
+        if (observability) {
           try {
             observability.withScope((sentryScope) => {
               sentryScope.setTag("provider", provider);
