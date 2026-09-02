@@ -1,4 +1,3 @@
-import * as Sentry from "@sentry/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
@@ -6,8 +5,6 @@ import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { logEvent } from "@/runtime/money-path-events";
-import { isSentryEnabled } from "@/runtime/observability";
-import { nodeObservability } from "@/runtime/observability-node";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
@@ -25,10 +22,6 @@ import {
   getManagedReconciliationCron,
   runCronJob,
 } from "./job";
-
-vi.mock("@sentry/node", () => ({
-  close: vi.fn(async () => true),
-}));
 
 vi.mock("@/cron/earn-catalogue-sync", () => ({
   EARN_CATALOGUE_SYNC_MONITOR: "sdp-api-sync-earn-catalogue",
@@ -101,23 +94,6 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   logEvent: vi.fn(),
 }));
 
-vi.mock("@/runtime/observability", () => ({
-  getSentryOptions: vi.fn(() => ({})),
-  isSentryEnabled: vi.fn(() => false),
-}));
-
-vi.mock("@/runtime/observability-node", () => ({
-  initNodeSentry: vi.fn(),
-  nodeObservability: {
-    captureException: vi.fn(),
-    captureCheckIn: vi.fn((checkIn: { monitorSlug: string; status: string }) =>
-      checkIn.status === "in_progress" ? `check-in:${checkIn.monitorSlug}` : checkIn.monitorSlug
-    ),
-    withScope: vi.fn(),
-    withMonitor: vi.fn((_slug: string, fn: () => Promise<unknown>) => fn()),
-  },
-}));
-
 vi.mock("@/services/jobs/retire-workflow-secrets", () => ({
   retireOrphanedActionSecrets: vi.fn(async () => ({ retired: 0, failed: 0 })),
 }));
@@ -173,7 +149,6 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
 describe("runCronJob", () => {
   beforeEach(() => {
     vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv());
-    vi.mocked(isSentryEnabled).mockReset().mockReturnValue(false);
     vi.mocked(trackPendingTransfers)
       .mockReset()
       .mockResolvedValue(undefined as never);
@@ -196,17 +171,8 @@ describe("runCronJob", () => {
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(retireOrphanedActionSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
-    vi.mocked(nodeObservability.withMonitor)
-      .mockReset()
-      .mockImplementation((_slug, fn) => fn());
-    vi.mocked(nodeObservability.captureCheckIn)
-      .mockReset()
-      .mockImplementation((checkIn) =>
-        checkIn.status === "in_progress" ? `check-in:${checkIn.monitorSlug}` : checkIn.monitorSlug
-      );
     vi.mocked(closeDatabasePools).mockClear();
     vi.mocked(closeAllRedisClients).mockClear();
-    vi.mocked(Sentry.close).mockClear();
     vi.mocked(logEvent).mockClear();
   });
 
@@ -314,12 +280,13 @@ describe("runCronJob", () => {
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // Managed deployments always have asset profiles on, so the workflow tick runs.
     expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
-    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined, {
+      workEnabled: false,
+    });
     expect(trackPendingDeposits).not.toHaveBeenCalled();
     expect(trackPendingWithdrawals).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
-    expect(Sentry.close).toHaveBeenCalledTimes(1);
   });
 
   it("fails the job on a recurring-collection error but still releases pools", async () => {
@@ -363,44 +330,6 @@ describe("runCronJob", () => {
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
-  it("registers every managed tick before work with deployment cadence and timeout", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
-    vi.mocked(isSentryEnabled).mockReturnValue(true);
-
-    await runCronJob();
-
-    const starts = vi
-      .mocked(nodeObservability.captureCheckIn)
-      .mock.calls.filter(([checkIn]) => checkIn.status === "in_progress");
-    expect(starts.map(([checkIn]) => checkIn.monitorSlug)).toEqual([
-      "sdp-api-managed-track-pending-transfers",
-      "sdp-api-managed-collect-recurring-payments",
-      "sdp-api-managed-track-pending-deposits",
-      "sdp-api-managed-track-pending-withdrawals",
-      "sdp-api-managed-poll-rings-indexing",
-      "sdp-api-managed-reconcile-earn-vault-movements",
-      "sdp-api-managed-run-workflow-executions",
-      "sdp-api-managed-retire-workflow-secrets",
-      "sdp-api-managed-refresh-earn-metrics",
-    ]);
-    for (const [, config] of starts) {
-      expect(config).toEqual({
-        schedule: { type: "crontab", value: "*/3 * * * *" },
-        checkinMargin: 4,
-        maxRuntime: 2,
-      });
-    }
-
-    const lastStartOrder = Math.max(
-      ...vi
-        .mocked(nodeObservability.captureCheckIn)
-        .mock.invocationCallOrder.slice(0, starts.length)
-    );
-    expect(lastStartOrder).toBeLessThan(
-      vi.mocked(trackPendingTransfers).mock.invocationCallOrder[0]
-    );
-  });
-
   it("completes feature-disabled monitors as successful no-ops", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(
       makeEnv({
@@ -410,49 +339,28 @@ describe("runCronJob", () => {
         EARN_ENABLED: "false",
       })
     );
-    vi.mocked(isSentryEnabled).mockReturnValue(true);
-
     await runCronJob();
 
+    const runs = vi
+      .mocked(logEvent)
+      .mock.calls.filter(([, payload]) => payload.event === "sdp_cron_run");
     for (const monitorSlug of [
       "sdp-api-managed-track-pending-deposits",
       "sdp-api-managed-track-pending-withdrawals",
       "sdp-api-managed-run-workflow-executions",
       "sdp-api-managed-refresh-earn-metrics",
     ]) {
-      expect(nodeObservability.captureCheckIn).toHaveBeenCalledWith({
-        monitorSlug,
-        status: "ok",
-        checkInId: `check-in:${monitorSlug}`,
-      });
+      expect(
+        runs.some(([, payload]) => payload.monitor === monitorSlug && payload.status === "ok")
+      ).toBe(true);
     }
     expect(trackPendingDeposits).not.toHaveBeenCalled();
     expect(trackPendingWithdrawals).not.toHaveBeenCalled();
     expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
     expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
-    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledWith(expect.any(Object), expect.any(Object), {
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledWith(expect.any(Object), undefined, {
       workEnabled: false,
     });
-  });
-
-  it("completes managed check-ins by ID with each tick's outcome", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv());
-    vi.mocked(isSentryEnabled).mockReturnValue(true);
-    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
-
-    await expect(runCronJob()).rejects.toThrow("collection down");
-
-    expect(nodeObservability.captureCheckIn).toHaveBeenCalledWith({
-      monitorSlug: "sdp-api-managed-collect-recurring-payments",
-      status: "error",
-      checkInId: "check-in:sdp-api-managed-collect-recurring-payments",
-    });
-    expect(nodeObservability.captureCheckIn).toHaveBeenCalledWith({
-      monitorSlug: "sdp-api-managed-poll-rings-indexing",
-      status: "ok",
-      checkInId: "check-in:sdp-api-managed-poll-rings-indexing",
-    });
-    expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
   });
 
   it("emits one sdp_cron_run event per managed tick", async () => {
@@ -470,6 +378,7 @@ describe("runCronJob", () => {
       "sdp-api-managed-refresh-earn-metrics",
       "sdp-api-managed-retire-workflow-secrets",
       "sdp-api-managed-run-workflow-executions",
+      "sdp-api-managed-sync-earn-catalogue",
       "sdp-api-managed-track-pending-deposits",
       "sdp-api-managed-track-pending-transfers",
       "sdp-api-managed-track-pending-withdrawals",
@@ -547,12 +456,19 @@ describe("runCronJob", () => {
   it("requires both flags — the parent flag alone never runs the earn tick", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ MARKETS_ENABLED: "true" }));
     await runCronJob();
-    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(
+      expect.any(Object),
+      undefined,
+      {
+        workEnabled: false,
+      }
+    );
     expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
 
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ EARN_ENABLED: "true" }));
     await runCronJob();
-    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(runEarnCatalogueSyncIfDue).mock.calls[1][2]).toEqual({ workEnabled: false });
     expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
   });
 
@@ -562,7 +478,6 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    // Sentry disabled: no observability handed to the earn tick.
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined);
     const pairOrder = vi.mocked(reconcileSponsorshipBudgets).mock.invocationCallOrder[0];
     const earnOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0];
@@ -579,7 +494,6 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    // Sentry disabled here, so no observability — same shape as the sync.
     expect(runEarnMetricsRefreshTick).toHaveBeenCalledExactlyOnceWith(env, undefined);
     const refreshOrder = vi.mocked(runEarnMetricsRefreshTick).mock.invocationCallOrder[0];
     const syncOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0];
@@ -598,47 +512,6 @@ describe("runCronJob", () => {
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined);
   });
 
-  it("uses the managed cadence for metrics and a managed identity for the hourly catalogue", async () => {
-    const env = makeEnv({
-      MARKETS_ENABLED: "true",
-      EARN_ENABLED: "true",
-      SDP_MANAGED_RECONCILIATION_CRON: "2-57/5 * * * *",
-    });
-    vi.mocked(getProcessEnv).mockReturnValue(env);
-    vi.mocked(isSentryEnabled).mockReturnValue(true);
-
-    await runCronJob();
-
-    const startedCalls = vi
-      .mocked(nodeObservability.captureCheckIn)
-      .mock.calls.filter(([checkIn]) => checkIn.status === "in_progress");
-    const startedSlugs = startedCalls.map(([checkIn]) => checkIn.monitorSlug);
-    expect(startedSlugs).toContain("sdp-api-managed-refresh-earn-metrics");
-    for (const [, monitorConfig] of startedCalls) {
-      expect(monitorConfig).toMatchObject({ checkinMargin: 4 });
-    }
-    expect(runEarnMetricsRefreshTick).toHaveBeenCalledExactlyOnceWith(env, undefined);
-
-    const catalogueObservability = vi.mocked(runEarnCatalogueSyncIfDue).mock.calls[0][1];
-    expect(catalogueObservability).toBeDefined();
-    expect(catalogueObservability).not.toBe(nodeObservability);
-
-    await catalogueObservability?.withMonitor(
-      "sdp-api-sync-earn-catalogue",
-      async () => undefined,
-      { schedule: { type: "crontab", value: "0 * * * *" } }
-    );
-    expect(nodeObservability.withMonitor).toHaveBeenCalledExactlyOnceWith(
-      "sdp-api-managed-sync-earn-catalogue",
-      expect.any(Function),
-      {
-        schedule: { type: "interval", value: 1, unit: "hour" },
-        checkinMargin: 10,
-        maxRuntime: 2,
-      }
-    );
-  });
-
   it("fails the job on an earn error but still releases pools and clients", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(
       makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
@@ -651,7 +524,6 @@ describe("runCronJob", () => {
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
-    expect(Sentry.close).toHaveBeenCalledTimes(1);
   });
 
   // One persistently broken reconciler must never starve the rest: a failing

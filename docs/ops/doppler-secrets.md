@@ -43,7 +43,6 @@ At minimum, the configs used by local development and CI should contain the valu
 - Solana RPC URLs and API keys
 - Kora and custody-provider values used by integration tests
 - compliance and ramp-provider credentials used by live discovery or integration coverage
-- API observability values such as `SENTRY_DSN` and `SENTRY_TRACES_SAMPLE_RATE` when telemetry is enabled
 
 The web and docs configs additionally provide their public URLs and browser-safe configuration, including:
 
