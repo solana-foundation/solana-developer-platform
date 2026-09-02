@@ -363,11 +363,11 @@ describe("Counterparties Routes", () => {
         "customer.nationality",
         "customer.region",
         "customer.email",
-        "purposeOfPayment",
         "customer.address.line1",
         "customer.address.city",
         "customer.address.postalCode",
         "customer.address.countryCode",
+        "purposeOfPayment",
       ]);
     });
 
