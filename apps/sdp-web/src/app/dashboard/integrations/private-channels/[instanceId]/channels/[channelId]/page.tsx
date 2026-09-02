@@ -19,6 +19,72 @@ function shorten(value: string): string {
   return value.length > 19 ? `${value.slice(0, 8)}…${value.slice(-8)}` : value;
 }
 
+type Translate = Awaited<ReturnType<typeof getTranslations>>;
+type SdpClient = Awaited<ReturnType<typeof createSdpApiClient>>;
+
+async function loadPrivateChannelDetail(
+  instanceId: string,
+  channelId: string,
+  t: Translate,
+  client: SdpClient
+) {
+  const [instance, channels, wallets, tokens] = await Promise.all([
+    loadInstance(client),
+    loadChannels(client),
+    loadWalletVerification(client),
+    loadTokenEligibility(client),
+  ]);
+
+  if (!instance.ok) return { ok: false, error: instance.error } as const;
+  const activeInstance = instance.data;
+  if (!activeInstance || activeInstance.id !== instanceId) notFound();
+  if (!channels.ok) return { ok: false, error: channels.error } as const;
+
+  const channel = channels.data.find((item) => item.id === channelId);
+  if (!channel) notFound();
+
+  const verifiedWallets = wallets.ok ? wallets.data.verified : [];
+  const custodyWallets = wallets.ok ? wallets.data.custody : [];
+  const verifiedPubkeys = new Set(verifiedWallets.map((item) => item.pubkey));
+  const canEnrollWallet =
+    activeInstance.isActive &&
+    wallets.ok &&
+    custodyWallets.some((wallet) => !verifiedPubkeys.has(wallet.publicKey));
+  let enrollDisabledReason: string | null = null;
+  if (!activeInstance.isActive) {
+    enrollDisabledReason = t("DashboardPrivateChannels.channelDetail.enrollNeedsConnection");
+  } else if (!wallets.ok) {
+    enrollDisabledReason = t("DashboardPrivateChannels.channelDetail.enrollWalletsUnavailable");
+  } else if (!canEnrollWallet) {
+    enrollDisabledReason = t("DashboardPrivateChannels.channelDetail.enrollAllWalletsAdded");
+  }
+
+  const allowedTokens = tokens.ok ? tokens.data.filter((token) => token.enabled) : [];
+  const tokenSummary = tokens.ok
+    ? allowedTokens.map((token) => token.symbol).join(", ") ||
+      t("DashboardPrivateChannels.overview.valueNone")
+    : t("DashboardPrivateChannels.overview.valueNone");
+
+  return {
+    ok: true,
+    data: {
+      activeInstance,
+      tokens: tokens.ok ? tokens.data : [],
+      canEnrollWallet,
+      channel,
+      custodyWallets,
+      enrollDisabledReason,
+      loadTokensError: !tokens.ok,
+      loadWalletsError: !wallets.ok,
+      tokenSummary,
+      verifiedWallets,
+      walletSummary: wallets.ok
+        ? String(verifiedWallets.length)
+        : t("DashboardPrivateChannels.overview.valueNone"),
+    },
+  } as const;
+}
+
 export default async function PrivateChannelDetailPage({
   params,
 }: {
@@ -31,44 +97,23 @@ export default async function PrivateChannelDetailPage({
     getTranslations(),
     createSdpApiClient(),
   ]);
-  const [instance, channels, wallets, tokens] = await Promise.all([
-    loadInstance(client),
-    loadChannels(client),
-    loadWalletVerification(client),
-    loadTokenEligibility(client),
-  ]);
-
-  if (!instance.ok) return <PrivateChannelsLoadError message={instance.error} />;
-  const activeInstance = instance.data;
-  if (!activeInstance || activeInstance.id !== instanceId) notFound();
-  if (!channels.ok) return <PrivateChannelsLoadError message={channels.error} />;
-
-  const channel = channels.data.find((item) => item.id === channelId);
-  if (!channel) notFound();
+  const result = await loadPrivateChannelDetail(instanceId, channelId, t, client);
+  if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;
 
   const enrollWalletTriggerId = "channel-enroll-wallet";
-  const verifiedPubkeys = new Set(
-    wallets.ok ? wallets.data.verified.map((item) => item.pubkey) : []
-  );
-  const canEnrollWallet =
-    activeInstance.isActive &&
-    wallets.ok &&
-    wallets.data.custody.some((wallet) => !verifiedPubkeys.has(wallet.publicKey));
-  const enrollDisabledReason = !activeInstance.isActive
-    ? t("DashboardPrivateChannels.channelDetail.enrollNeedsConnection")
-    : !wallets.ok
-      ? t("DashboardPrivateChannels.channelDetail.enrollWalletsUnavailable")
-      : canEnrollWallet
-        ? null
-        : t("DashboardPrivateChannels.channelDetail.enrollAllWalletsAdded");
-  const allowedTokens = tokens.ok ? tokens.data.filter((token) => token.enabled) : [];
-  const tokenSummary = tokens.ok
-    ? allowedTokens.map((token) => token.symbol).join(", ") ||
-      t("DashboardPrivateChannels.overview.valueNone")
-    : t("DashboardPrivateChannels.overview.valueNone");
-  const walletSummary = wallets.ok
-    ? String(wallets.data.verified.length)
-    : t("DashboardPrivateChannels.overview.valueNone");
+  const {
+    activeInstance,
+    canEnrollWallet,
+    channel,
+    custodyWallets,
+    enrollDisabledReason,
+    loadTokensError,
+    loadWalletsError,
+    tokenSummary,
+    tokens,
+    verifiedWallets,
+    walletSummary,
+  } = result.data;
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6" data-private-channel-detail>
@@ -133,15 +178,15 @@ export default async function PrivateChannelDetailPage({
       </Card>
 
       <WalletsTable
-        verifiedWallets={wallets.ok ? wallets.data.verified : []}
-        custodyWallets={wallets.ok ? wallets.data.custody : []}
+        verifiedWallets={verifiedWallets}
+        custodyWallets={custodyWallets}
         channelBalances={{}}
-        loadError={!wallets.ok}
+        loadError={loadWalletsError}
         showBalance={false}
         enrollTriggerId={enrollWalletTriggerId}
       />
 
-      <ChannelTokensPanel channelName={channel.name} tokens={tokens.data} loadError={!tokens.ok} />
+      <ChannelTokensPanel channelName={channel.name} tokens={tokens} loadError={loadTokensError} />
     </div>
   );
 }

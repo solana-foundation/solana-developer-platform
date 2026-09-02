@@ -230,11 +230,10 @@ export function WalletsTable({
         size="sm"
       >
         <form
-          className="space-y-6 p-6"
-          onSubmit={(event) => {
-            event.preventDefault();
+          action={() => {
             if (selectedWallet) handleVerify(selectedWallet.walletId, selectedWallet.publicKey);
           }}
+          className="space-y-6 p-6"
         >
           <div className="space-y-2 pr-8">
             <h2 className="text-xl font-medium text-primary">
