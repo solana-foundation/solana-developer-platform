@@ -1,4 +1,3 @@
-import type { PrivateChannelTokenEligibility } from "@sdp/types";
 import Link from "next/link";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
@@ -21,23 +20,12 @@ import {
   loadTokenEligibility,
 } from "../private-channels-page.data";
 import { PRIVATE_CHANNELS_SETUP_PATH } from "../private-channels-routes";
+import { enabledTokenSymbols, shortenAddress } from "../private-channels-view-data";
 import { ChannelDirectoryRow } from "./channel-directory-row";
 import { CreateChannelButton } from "./create-channel-button";
 
-function instanceAddress(address: string): string {
-  return address.length > 13 ? `${address.slice(0, 6)}…${address.slice(-6)}` : address;
-}
-
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 type SdpClient = Awaited<ReturnType<typeof createSdpApiClient>>;
-
-function enabledTokenSymbols(tokens: PrivateChannelTokenEligibility[]): string[] {
-  const symbols: string[] = [];
-  for (const token of tokens) {
-    if (token.enabled) symbols.push(token.symbol);
-  }
-  return symbols;
-}
 
 async function loadDirectory(client: SdpClient, t: Translate) {
   const instance = await loadInstance(client);
@@ -76,7 +64,7 @@ async function loadDirectory(client: SdpClient, t: Translate) {
     return {
       channel,
       instanceId: activeInstance.id,
-      instanceLabel: instanceAddress(activeInstance.escrowInstanceAddr),
+      instanceLabel: shortenAddress(activeInstance.escrowInstanceAddr, 6),
       tokensSummary,
       walletCount,
     };

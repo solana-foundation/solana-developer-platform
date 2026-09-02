@@ -12,12 +12,9 @@ import {
   loadTokenEligibility,
   loadWalletVerification,
 } from "../../../private-channels-page.data";
+import { shortenAddress } from "../../../private-channels-view-data";
 import { WalletsTable } from "../../../wallets/wallets-table";
 import { ChannelActionsMenu } from "./channel-actions-menu";
-
-function shorten(value: string): string {
-  return value.length > 19 ? `${value.slice(0, 8)}…${value.slice(-8)}` : value;
-}
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 type SdpClient = Awaited<ReturnType<typeof createSdpApiClient>>;
@@ -157,7 +154,7 @@ export default async function PrivateChannelDetailPage({
               className="mt-1 truncate text-sm text-primary"
               title={activeInstance.escrowInstanceAddr}
             >
-              {shorten(activeInstance.escrowInstanceAddr)}
+              {shortenAddress(activeInstance.escrowInstanceAddr, 8)}
             </dd>
           </div>
           <div className="min-w-0 bg-surface-raised px-6 py-4">
