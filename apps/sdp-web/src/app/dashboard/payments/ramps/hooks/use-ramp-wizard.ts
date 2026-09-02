@@ -348,6 +348,12 @@ export function useRampWizard<TId extends string>(
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);
+      if (result === null) {
+        // The corridor changed while the advance was in flight; the response
+        // was discarded, so the wizard stays put on the user's current inputs.
+        toast.dismiss(toastId);
+        return;
+      }
       if (result.status === "unsupported") {
         toast.error(result.reason, { id: toastId, position: "bottom-right" });
         return;

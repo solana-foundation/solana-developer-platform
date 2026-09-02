@@ -314,8 +314,14 @@ export interface CounterpartyRequirementsState {
   blockReason: string | null;
   /** Live provider onboarding lifecycle from the last advance (POST); null until advanced. */
   onboarding: CounterpartyRequirements | null;
-  /** Advances provider provisioning (onramp); resolves to the new lifecycle state. */
-  submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
+  /**
+   * Advances provider provisioning; resolves to the new lifecycle state, or
+   * null when the corridor changed while the request was in flight — the
+   * response was discarded and the caller must not act on it.
+   */
+  submitRequirements: (
+    payload: AdvanceRequirementsPayload
+  ) => Promise<CounterpartyRequirements | null>;
   /** An advance request is in flight (initial submit or a poll tick). */
   isAdvancing: boolean;
   /** Re-runs the advance (POST) to retry — used by the provisioning_failed "Try again" action. */
@@ -386,11 +392,17 @@ export function useCounterpartyRequirements(
     null
   );
   const [isAdvancing, setIsAdvancing] = useState(false);
-  // Live mirror of the active subject for in-flight async continuations: a poll
-  // response that lands after the corridor changed must not restore the
-  // abandoned corridor's onboarding or account selection.
-  const activeSubjectRef = useRef(subjectKey);
-  activeSubjectRef.current = subjectKey;
+  // The corridor an advance or poll answers for: the request subject plus the
+  // collected destination country (which lives outside the subject key). A
+  // response that lands after this identity changed must not be applied — it
+  // would attach an abandoned corridor's onboarding or payout account to the
+  // current flow. Held in a live ref so in-flight continuations compare against
+  // the present identity, not their stale closure.
+  const corridorIdentity = `${subjectKey}:${
+    collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry
+  }`;
+  const activeCorridorRef = useRef(corridorIdentity);
+  activeCorridorRef.current = corridorIdentity;
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
@@ -435,10 +447,11 @@ export function useCounterpartyRequirements(
 
   const submitRequirements = async (
     payload: AdvanceRequirementsPayload
-  ): Promise<CounterpartyRequirements> => {
+  ): Promise<CounterpartyRequirements | null> => {
     if (!params?.provider || !params.counterpartyId) {
       throw new Error(t("DashboardPayments.workspace.requirementsContextMissing"));
     }
+    const submittedCorridor = corridorIdentity;
     setIsAdvancing(true);
     try {
       const result = await advanceCounterpartyRequirements(
@@ -454,6 +467,9 @@ export function useCounterpartyRequirements(
         },
         t
       );
+      if (activeCorridorRef.current !== submittedCorridor) {
+        return null;
+      }
       setOnboarding(result);
       setLastAdvancePayload(payload);
       if (
@@ -491,7 +507,7 @@ export function useCounterpartyRequirements(
       if (!lastAdvancePayload || !params?.provider) {
         return;
       }
-      const polledSubject = subjectKey;
+      const polledCorridor = corridorIdentity;
       const result = await fetchCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
@@ -499,7 +515,7 @@ export function useCounterpartyRequirements(
         lastAdvancePayload,
         t
       );
-      if (activeSubjectRef.current !== polledSubject) {
+      if (activeCorridorRef.current !== polledCorridor) {
         return;
       }
       setOnboarding(result);
