@@ -191,7 +191,14 @@ describe("lightsparkCounterpartyRequirements", () => {
       },
       fiatCurrency: "USD",
       cryptoRail: "usdc.solana",
-      payoutAccounts: [{ destinationCountry: "US", status: "ACTIVE" }],
+      payoutAccounts: [
+        {
+          id: "account_us",
+          destinationCountry: "US",
+          paymentRail: null,
+          status: "ACTIVE",
+        },
+      ],
       providerCustomerReference: "Customer:cus_123",
     });
 
@@ -199,7 +206,14 @@ describe("lightsparkCounterpartyRequirements", () => {
     if (requirements.status !== "collect_account") {
       throw new Error("Expected collect_account requirements");
     }
-    expect(requirements.payout.accounts).toEqual([{ destinationCountry: "US", status: "ACTIVE" }]);
+    expect(requirements.payout.accounts).toEqual([
+      {
+        id: "account_us",
+        destinationCountry: "US",
+        paymentRail: null,
+        status: "ACTIVE",
+      },
+    ]);
   });
 
   it("returns unsupported for currencies without a Grid payout account type", () => {

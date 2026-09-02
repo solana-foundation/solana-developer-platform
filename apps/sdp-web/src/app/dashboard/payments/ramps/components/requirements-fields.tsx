@@ -465,7 +465,7 @@ function AddressRequirementField({
  * @param fields - Fields currently required by the provider and local selections.
  * @param values - Collected values keyed by requirement field.
  * @param onChange - Callback for updating a collected value.
- * @param existingPayoutAccount - Active corridor account selected for reuse.
+ * @param existingPayoutAccounts - Active corridor accounts available for reuse.
  * @returns The requirement field group.
  */
 export function RequirementsFields({
@@ -473,13 +473,13 @@ export function RequirementsFields({
   fields,
   values,
   onChange,
-  existingPayoutAccount,
+  existingPayoutAccounts,
 }: {
   provider: RampProviderId | null;
   fields: RequirementField[];
   values: CollectedFieldData;
   onChange: (key: string, value: string) => void;
-  existingPayoutAccount?: PayoutRequirementAccount | null;
+  existingPayoutAccounts?: PayoutRequirementAccount[];
 }) {
   const t = useTranslations();
   const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
@@ -526,7 +526,7 @@ export function RequirementsFields({
           </Card>
         );
       })}
-      {existingPayoutAccount !== undefined && existingPayoutAccount !== null ? (
+      {existingPayoutAccounts !== undefined && existingPayoutAccounts.length > 0 ? (
         <Card>
           <CardContent className="space-y-2">
             <p className="font-medium text-primary">

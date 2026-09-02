@@ -72,9 +72,13 @@ export type CollectedFieldData = Record<string, string>;
 
 /** An existing payout external account for the corridor's fiat currency. */
 export interface PayoutRequirementAccount {
+  id: string;
   destinationCountry: CountryCode;
+  paymentRail: string | null;
   /** Provider-reported external-account status (e.g. Grid's CREATED/ACTIVE). */
   status: string;
+  bankName?: string;
+  accountNumberLast4?: string;
 }
 
 /**

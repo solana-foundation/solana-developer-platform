@@ -145,8 +145,12 @@ const payoutRequirementTreeSchema = z.object({
   railFields: z.record(z.string(), z.array(requirementFieldSchema)),
   accounts: z.array(
     z.object({
+      id: z.string(),
       destinationCountry: z.enum(COUNTRY_CODES),
+      paymentRail: z.string().nullable(),
       status: z.string(),
+      bankName: z.string().optional(),
+      accountNumberLast4: z.string().optional(),
     })
   ),
 });

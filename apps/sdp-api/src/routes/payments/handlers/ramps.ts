@@ -82,6 +82,8 @@ import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { isSentryEnabled } from "@/runtime/observability";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
+import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
+import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
@@ -630,15 +632,11 @@ async function advanceLightsparkRequirements(
       provider: "lightspark",
       fiatCurrency: input.fiatCurrency,
     });
+    const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), rows);
     return lightsparkCollectAccountRequirements(
       cryptoRail,
       input.fiatCurrency,
-      rows.map((row) => {
-        if (row.destination_country === null || row.provider_status === null) {
-          throw internalError("Lightspark external-account row is missing corridor data.");
-        }
-        return { destinationCountry: row.destination_country, status: row.provider_status };
-      })
+      mapPayoutRequirementAccounts(rows, enriched)
     );
   }
   if (!isCountryCode(collectedData.destinationCountry)) {

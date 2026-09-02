@@ -1,6 +1,9 @@
 import type { PayoutRequirementTree, RequirementField } from "@sdp/types/ramp-requirements";
 import { describe, expect, it } from "vitest";
-import { derivePayoutRequirementFields } from "./use-counterparty-requirements";
+import {
+  activePayoutAccounts,
+  derivePayoutRequirementFields,
+} from "./use-counterparty-requirements";
 
 const labels = {
   destinationCountry: "Destination country",
@@ -47,7 +50,14 @@ const payout = {
       },
     ],
   },
-  accounts: [{ destinationCountry: "CA", status: "ACTIVE" }],
+  accounts: [
+    {
+      id: "account_ca",
+      destinationCountry: "CA",
+      paymentRail: "SWIFT",
+      status: "ACTIVE",
+    },
+  ],
 } satisfies PayoutRequirementTree;
 
 describe("derivePayoutRequirementFields", () => {
@@ -99,5 +109,33 @@ describe("derivePayoutRequirementFields", () => {
       "bankAccount.accountNumber",
     ]);
     expect(fields[2]).toMatchObject({ required: true });
+  });
+});
+
+describe("activePayoutAccounts", () => {
+  it("returns every active account for the selected country", () => {
+    const accounts = activePayoutAccounts(
+      {
+        ...payout,
+        accounts: [
+          ...payout.accounts,
+          {
+            id: "account_ca_second",
+            destinationCountry: "CA",
+            paymentRail: "SEPA",
+            status: "ACTIVE",
+          },
+          {
+            id: "account_ca_archived",
+            destinationCountry: "CA",
+            paymentRail: "ACH",
+            status: "ARCHIVED",
+          },
+        ],
+      },
+      "CA"
+    );
+
+    expect(accounts.map((account) => account.id)).toEqual(["account_ca", "account_ca_second"]);
   });
 });

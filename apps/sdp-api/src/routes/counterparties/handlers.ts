@@ -28,6 +28,7 @@ import {
 import { created, noContent, success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { rampRuntime } from "@/routes/payments/context";
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
@@ -37,6 +38,8 @@ import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
+import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
+import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import { assertRampProviderSurfaced } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -277,12 +280,8 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       provider: "lightspark",
       fiatCurrency: query.data.fiatCurrency,
     });
-    payoutAccounts = rows.map((row) => {
-      if (row.destination_country === null || row.provider_status === null) {
-        throw internalError("Lightspark external-account row is missing corridor data.");
-      }
-      return { destinationCountry: row.destination_country, status: row.provider_status };
-    });
+    const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), rows);
+    payoutAccounts = mapPayoutRequirementAccounts(rows, enriched);
   }
 
   if (query.data.direction === "onramp") {

@@ -786,6 +786,12 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "accounts": {
                         "items": {
                           "properties": {
+                            "accountNumberLast4": {
+                              "type": "string",
+                            },
+                            "bankName": {
+                              "type": "string",
+                            },
                             "destinationCountry": {
                               "enum": [
                                 "AF",
@@ -1040,12 +1046,21 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               ],
                               "type": "string",
                             },
+                            "id": {
+                              "type": "string",
+                            },
+                            "paymentRail": {
+                              "nullable": true,
+                              "type": "string",
+                            },
                             "status": {
                               "type": "string",
                             },
                           },
                           "required": [
+                            "id",
                             "destinationCountry",
+                            "paymentRail",
                             "status",
                           ],
                           "type": "object",

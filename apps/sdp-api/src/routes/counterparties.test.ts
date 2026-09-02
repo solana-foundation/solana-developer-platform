@@ -358,6 +358,17 @@ describe("Counterparties Routes", () => {
   });
 
   describe("GET /v1/counterparties/:counterpartyId/requirements", () => {
+    beforeEach(() => {
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = "lightspark_client_secret";
+    });
+
+    afterEach(() => {
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
+      vi.restoreAllMocks();
+    });
+
     it("surfaces the missing destination wallet for onramp requirements", async () => {
       const created = await createCounterparty();
       const cp = (await created.json()).data.counterparty;
@@ -380,6 +391,114 @@ describe("Counterparties Routes", () => {
           }),
         ])
       );
+    });
+
+    it("returns enriched Lightspark payout accounts in the payout tree", async () => {
+      const created = await createCounterparty({ externalId: "requirements_lightspark_accounts" });
+      const counterparty = (await created.json()).data.counterparty;
+      const providerAccounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+
+      await providerAccounts.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_accounts",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({ lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } }),
+          counterparty.id
+        )
+        .run();
+      await seedProviderAccount({
+        id: "provider_account_requirements_ach",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_accounts",
+        externalAccountReference: "ExternalAccount:requirements_ach",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await seedProviderAccount({
+        id: "provider_account_requirements_wire",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_accounts",
+        externalAccountReference: "ExternalAccount:requirements_wire",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "WIRE",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+
+      const enrichmentPage = {
+        data: [
+          {
+            platformAccountId: "provider_account_requirements_ach",
+            status: "ACTIVE",
+            accountInfo: {
+              accountType: "USD_ACCOUNT",
+              paymentRails: ["ACH"],
+              bankName: "ACH Bank",
+              accountNumber: "123456789",
+            },
+          },
+          {
+            platformAccountId: "provider_account_requirements_wire",
+            status: "ACTIVE",
+            accountInfo: {
+              accountType: "USD_ACCOUNT",
+              paymentRails: ["WIRE"],
+              bankName: "Wire Bank",
+              accountNumber: "987654321",
+            },
+          },
+        ],
+        hasMore: false,
+      };
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(enrichmentPage), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).data.payout.accounts).toEqual([
+        {
+          id: "provider_account_requirements_ach",
+          destinationCountry: "US",
+          paymentRail: "ACH",
+          status: "ACTIVE",
+          bankName: "ACH Bank",
+          accountNumberLast4: "6789",
+        },
+        {
+          id: "provider_account_requirements_wire",
+          destinationCountry: "US",
+          paymentRail: "WIRE",
+          status: "ACTIVE",
+          bankName: "Wire Bank",
+          accountNumberLast4: "4321",
+        },
+      ]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 

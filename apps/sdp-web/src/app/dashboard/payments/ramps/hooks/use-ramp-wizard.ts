@@ -487,7 +487,7 @@ export function useRampWizard<TId extends string>(
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
-    existingPayoutAccount: requirements.existingPayoutAccount,
+    existingPayoutAccounts: requirements.existingPayoutAccounts,
     requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,

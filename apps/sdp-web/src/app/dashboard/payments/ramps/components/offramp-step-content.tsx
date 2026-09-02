@@ -78,7 +78,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     setField,
     handlePairChange,
     requirementFields,
-    existingPayoutAccount,
+    existingPayoutAccounts,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -166,7 +166,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}
-        existingPayoutAccount={existingPayoutAccount}
+        existingPayoutAccounts={existingPayoutAccounts}
       />
     );
   }

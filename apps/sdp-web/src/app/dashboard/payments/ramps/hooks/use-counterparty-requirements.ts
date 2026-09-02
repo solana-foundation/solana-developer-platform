@@ -27,22 +27,21 @@ export interface PayoutRequirementFieldLabels {
 }
 
 /**
- * Finds the active corridor account for a selected destination.
+ * Finds active corridor accounts for a selected destination.
  *
  * @param payout - Provider payout decision tree.
  * @param destinationCountry - Selected destination country code.
- * @returns The active account for the destination, or null when one is not available.
+ * @returns Active accounts for the destination.
  */
-export function findActivePayoutAccount(
+export function activePayoutAccounts(
   payout: PayoutRequirementTree,
   destinationCountry: string
-): PayoutRequirementAccount | null {
-  const account = payout.accounts.find(
+): PayoutRequirementAccount[] {
+  return payout.accounts.filter(
     (candidate) =>
       candidate.destinationCountry === destinationCountry &&
       candidate.status.toUpperCase() === "ACTIVE"
   );
-  return account === undefined ? null : account;
 }
 
 /**
@@ -115,7 +114,7 @@ export function derivePayoutRequirementFields(
   }
 
   const rails = payoutRailsForCountry(payout.countryRails, destinationCountry);
-  if (findActivePayoutAccount(payout, destinationCountry) !== null) {
+  if (activePayoutAccounts(payout, destinationCountry).length > 0) {
     return [destinationCountryField];
   }
 
@@ -239,8 +238,8 @@ export interface CounterpartyRequirementsParams extends AdvanceRequirementsPaylo
 export interface CounterpartyRequirementsState {
   /** Fields the client must collect; empty unless the provider returned `collect`. */
   fields: RequirementField[];
-  /** Active corridor account selected for reuse, when the payout country has one. */
-  existingPayoutAccount: PayoutRequirementAccount | null;
+  /** Active corridor accounts available for reuse in the selected payout country. */
+  existingPayoutAccounts: PayoutRequirementAccount[];
   collectedData: CollectedFieldData;
   setField: (key: string, value: string) => void;
   /** The chosen provider needs fields collected for this counterparty. */
@@ -424,11 +423,11 @@ export function useCounterpartyRequirements(
     return [];
   }, [collectedData, data, payout, payoutLabels]);
 
-  const existingPayoutAccount = useMemo(
+  const existingPayoutAccounts = useMemo(
     () =>
       payout === null || collectedData.destinationCountry === undefined
-        ? null
-        : findActivePayoutAccount(payout, collectedData.destinationCountry),
+        ? []
+        : activePayoutAccounts(payout, collectedData.destinationCountry),
     [collectedData.destinationCountry, payout]
   );
 
@@ -451,7 +450,7 @@ export function useCounterpartyRequirements(
 
   return {
     fields,
-    existingPayoutAccount,
+    existingPayoutAccounts,
     collectedData,
     setField,
     needsCollection:
