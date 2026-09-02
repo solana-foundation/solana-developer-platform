@@ -21,13 +21,13 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
-        SVC["@sdp/earn provider clients<br/>(Ground portfolio · Kamino catalogue-only; Veda/Upshift/Perena stubs)"]
+        SVC["@sdp/earn provider clients<br/>(Ground portfolio · Kamino/Veda/Ondo vault-direct; Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions")]
         CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Ground · Kamino (+ future providers)"]
+        VAULT["Vault-infra APIs<br/>Ground · Kamino · Jupiter swap (Ondo)<br/>+ on-chain reads (Veda, Ondo)"]
         CHAIN["Solana<br/>(funding: customer → wallet deposit address)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
@@ -183,8 +183,9 @@ guarded-CAS shape is the pattern to extend.
 | OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public `/v1/earn` reference once the Markets/Earn flags flip | ⏸ deliberately deferred |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
-(Ground is live — see below; the rest remain `StubEarnClient` subclasses
-carrying `provider` + `declaredSupport`, filled in method-by-method), the
+(Ground, Kamino, Veda and Ondo carry real catalogue reads — see below for
+Ground's flow; Upshift/Perena remain `StubEarnClient` subclasses carrying
+`provider` + `declaredSupport`, filled in method-by-method), the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
 `earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
