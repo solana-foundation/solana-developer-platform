@@ -593,11 +593,11 @@ describe("fetchJupiterSwapQuote", () => {
 
   it("fails closed without the platform credential", async () => {
     await expect(
-      fetchJupiterSwapQuote(
-        swapEnv({ JUPITER_SWAP_API_KEY: undefined }),
-        createVaultDeadline(),
-        { inputMint: USDC, outputMint: PYUSD, sourceAmount: "25" }
-      )
+      fetchJupiterSwapQuote(swapEnv({ JUPITER_SWAP_API_KEY: undefined }), createVaultDeadline(), {
+        inputMint: USDC,
+        outputMint: PYUSD,
+        sourceAmount: "25",
+      })
     ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
     expect(fetchMock).not.toHaveBeenCalled();
   });

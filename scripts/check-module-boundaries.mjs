@@ -117,7 +117,8 @@ const MODULE_METADATA = [
   {
     name: "@sdp/ondo",
     directory: "packages/sdp-ondo",
-    purpose: "Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port.",
+    purpose:
+      "Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port.",
     // The arrow points INWARD and only inward, same as @sdp/kamino and
     // @sdp/veda. This package carries NO chain SDK and no Jupiter client of its
     // own: executable instructions come through a port the API injects, so the
