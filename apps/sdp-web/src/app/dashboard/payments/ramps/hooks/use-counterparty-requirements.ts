@@ -269,13 +269,14 @@ async function advanceCounterpartyRequirements(
 }
 
 /**
- * A completed advance addressed by the corridor it answered for. `seq` makes
- * each advance a distinct polling subject, so an earlier advance's poll cache
- * can never answer for a later advance in the same corridor.
+ * A completed advance addressed by the corridor it answered for. `advanceId`
+ * is globally unique, making each advance a distinct polling subject: no
+ * earlier advance's poll cache can ever answer for a later one — including
+ * across a subject round trip, where any counter would restart and collide.
  */
 interface AdvanceRecord {
   corridor: string;
-  seq: number;
+  advanceId: string;
   payload: AdvanceRequirementsPayload;
   result: CounterpartyRequirements;
 }
@@ -472,12 +473,7 @@ export function useCounterpartyRequirements(
         },
         t
       );
-      setAdvanceRecord((previous) => ({
-        corridor,
-        seq: previous === null ? 1 : previous.seq + 1,
-        payload,
-        result,
-      }));
+      setAdvanceRecord({ corridor, advanceId: crypto.randomUUID(), payload, result });
       return result;
     } finally {
       setIsAdvancing(false);
@@ -497,7 +493,7 @@ export function useCounterpartyRequirements(
   const pollKey =
     advance !== null && params?.provider && isOnboardingPending(advance.result.status)
       ? paymentsQueryKeys.requirementsStatusPoll({
-          subjectKey: `${corridorIdentity}#${advance.seq}`,
+          subjectKey: `${corridorIdentity}#${advance.advanceId}`,
         })
       : null;
   const { data: polledOnboarding } = useSWR(
