@@ -1,0 +1,17 @@
+{
+  "preamble": {
+    "requestId": "req_01",
+    "owner": "11111111111111111111111111111111",
+    "keyMaterial": {
+      "viewingKeys": [
+        {
+          "index": 7,
+          "key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+        }
+      ],
+      "nullifierKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=="
+    },
+    "walletProjection": null,
+    "requireSlot": 42
+  }
+}

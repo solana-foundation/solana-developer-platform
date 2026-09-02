@@ -26,6 +26,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/policy` | Wallet-operation policy engine: rule evaluation and enforcement orchestration. | `@sdp/solana`, `@sdp/types` |
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
+| `@sdp/rings-key-auth` | Internal Rust custody boundary for Helius Rings key material. | None |
 | `@sdp/rpc` | Solana RPC clients, errors, and relay helpers. | `@sdp/types` |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
@@ -50,6 +51,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/payments` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/policy` -> `@sdp/solana`, `@sdp/types`
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
+- `@sdp/rings-key-auth` -> None
 - `@sdp/rpc` -> `@sdp/types`
 - `@sdp/solana` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/spc-escrow` -> None

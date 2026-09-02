@@ -1,0 +1,7 @@
+{
+  "name": "@sdp/rings-key-auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rust key-authority service for Helius Rings",
+  "scripts": {}
+}
