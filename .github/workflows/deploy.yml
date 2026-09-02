@@ -186,7 +186,7 @@ jobs:
   deploy-api-stage:
     name: sdp-api + worker + cron — stage (shadow)
     needs: changes
-    if: needs.changes.outputs.api == 'true' && vars.STAGE_DEPLOY_WIF_PROVIDER != ''
+    if: needs.changes.outputs.api == 'true' && vars.STAGE_DEPLOY_WIF_PROVIDER != '' && vars.STAGE_DEPLOY_SA != ''
     permissions:
       contents: read
       id-token: write
