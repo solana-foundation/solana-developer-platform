@@ -208,7 +208,7 @@ test("the orchestrator grants every permission the prod workflow requests", () =
     path.resolve(here, "../.github/workflows/deploy.yml"),
     "utf8"
   );
-  const permissionsBlock = workflow.match(/^permissions:\n((?:  [a-z-]+: [a-z-]+\n)+)/m);
+  const permissionsBlock = workflow.match(/^permissions:\n((?: {2}[a-z-]+: [a-z-]+\n)+)/m);
   assert.ok(permissionsBlock, "prod workflow must declare a top-level permissions block");
   const requested = permissionsBlock[1]
     .trim()
@@ -217,7 +217,7 @@ test("the orchestrator grants every permission the prod workflow requests", () =
     .filter(Boolean);
   assert.ok(requested.length >= 3, "expected at least contents, id-token, and packages grants");
   const callerJob = orchestrator.match(
-    /deploy-api-prod:[\s\S]*?permissions:\n((?:      [a-z-]+: [a-z-]+\n)+)/
+    /deploy-api-prod:[\s\S]*?permissions:\n((?: {6}[a-z-]+: [a-z-]+\n)+)/
   )[1];
   for (const grant of requested) {
     assert.ok(
@@ -230,17 +230,14 @@ test("the orchestrator grants every permission the prod workflow requests", () =
 test("candidate verification accepts the signed index digest or its child manifests, nothing else", () => {
   assert.match(workflow, /accepted_digests="\$\{expected_digest\}"/);
   assert.match(workflow, /crane manifest "\$\{IMAGE\}"/);
-  assert.match(
-    workflow,
-    /grep -qxF "\$\{revision_digest##\*@\}" <<<"\$\{accepted_digests\}"/
-  );
+  assert.match(workflow, /grep -qxF "\$\{revision_digest##\*@\}" <<<"\$\{accepted_digests\}"/);
 });
 
 // Execute the actual digest-selection block from the workflow against stubbed
 // registries, so CI fails when the shell behavior breaks even if the text
 // fragments above still match.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -255,7 +252,10 @@ const CHILD_DIGEST = "sha256:bbbb00000000000000000000000000000000000000000000000
 const OTHER_DIGEST = "sha256:cccc000000000000000000000000000000000000000000000000000000000000";
 const INDEX_JSON = JSON.stringify({
   mediaType: "application/vnd.oci.image.index.v1+json",
-  manifests: [{ digest: CHILD_DIGEST }, { digest: "sha256:dddd000000000000000000000000000000000000000000000000000000000000" }],
+  manifests: [
+    { digest: CHILD_DIGEST },
+    { digest: "sha256:dddd000000000000000000000000000000000000000000000000000000000000" },
+  ],
 });
 const BARE_JSON = JSON.stringify({ mediaType: "application/vnd.oci.image.manifest.v1+json" });
 
@@ -271,7 +271,7 @@ function runDigestBlock({ craneScript, revisionDigest }) {
     'candidate_revision="rev-test"',
     `revision_digest="registry.example/repo@${revisionDigest}"`,
     digestBlock,
-    'echo GUARD_PASSED',
+    "echo GUARD_PASSED",
   ].join("\n");
   try {
     const out = execFileSync("bash", ["-c", script], {
@@ -316,4 +316,3 @@ test("digest guard still accepts an exact match on a bare (non-index) manifest",
   const r = runDigestBlock({ craneScript: craneBare, revisionDigest: INDEX_DIGEST });
   assert.equal(r.code, 0, r.out);
 });
-
