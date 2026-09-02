@@ -18,12 +18,19 @@ import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { getDb } from "@/db";
+import { asTransactionalClient } from "@/db/client";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   type CounterpartyProviderAccountRow,
   createPostgresCounterpartyProviderAccountsRepository,
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, counterpartyExternalAccountAmbiguous, internalError } from "@/lib/errors";
+import {
+  badRequest,
+  conflict,
+  counterpartyExternalAccountAmbiguous,
+  internalError,
+} from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { type AppContext, rampRuntime } from "../../context";
@@ -291,39 +298,56 @@ export async function ensureLightsparkPayoutAccount(
   // reusing a prior row's id could silently bind this submission to an account
   // created from DIFFERENT bank details, and bank details are never persisted
   // (store-nothing PII), so sameness cannot be proven. Earlier incomplete
-  // reservations for the corridor are archived so they never accumulate; a
-  // remote account a failed attempt may have created stays unlinked at the
-  // provider by design — corridor resolution only reads completed local rows,
-  // so it can never pay out or make selection ambiguous.
-  const staleReservations = (
-    await repository.listActiveExternalAccounts({
-      organizationId: input.counterparty.organization_id,
-      projectId: input.projectId,
-      counterpartyId: input.counterparty.id,
-      provider: "lightspark",
-      fiatCurrency: input.fiatCurrency,
-      destinationCountry,
-    })
-  ).filter((account) => account.external_account_reference === null);
-  for (const stale of staleReservations) {
-    await repository.archiveExternalAccount({
-      organizationId: input.counterparty.organization_id,
-      projectId: input.projectId,
-      counterpartyId: input.counterparty.id,
-      provider: "lightspark",
-      id: stale.id,
+  // reservations for the corridor are archived in the same transaction that
+  // inserts the fresh one, and a partial unique index allows at most one live
+  // reservation per corridor and rail — a concurrent submission loses with a
+  // unique violation instead of completing a second payout identity. A remote
+  // account a failed attempt may have created stays unlinked at the provider by
+  // design: corridor resolution only reads completed local rows.
+  let pending: CounterpartyProviderAccountRow;
+  try {
+    pending = await getDb(c.env).transaction(async (tx) => {
+      const txRepository = createPostgresCounterpartyProviderAccountsRepository(
+        asTransactionalClient(tx)
+      );
+      const staleReservations = (
+        await txRepository.listActiveExternalAccounts({
+          organizationId: input.counterparty.organization_id,
+          projectId: input.projectId,
+          counterpartyId: input.counterparty.id,
+          provider: "lightspark",
+          fiatCurrency: input.fiatCurrency,
+          destinationCountry,
+        })
+      ).filter((account) => account.external_account_reference === null);
+      for (const stale of staleReservations) {
+        await txRepository.archiveExternalAccount({
+          organizationId: input.counterparty.organization_id,
+          projectId: input.projectId,
+          counterpartyId: input.counterparty.id,
+          provider: "lightspark",
+          id: stale.id,
+        });
+      }
+      return txRepository.insertPendingExternalAccount({
+        organizationId: input.counterparty.organization_id,
+        projectId: input.projectId,
+        counterpartyId: input.counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: input.customer.customerId,
+        fiatCurrency: input.fiatCurrency,
+        destinationCountry,
+        paymentRail,
+      });
     });
+  } catch (error) {
+    if (isPostgresUniqueViolation(error)) {
+      throw conflict(
+        "A payout account submission for this corridor is already in progress. Retry once it settles."
+      );
+    }
+    throw error;
   }
-  const pending = await repository.insertPendingExternalAccount({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "lightspark",
-    providerCustomerReference: input.customer.customerId,
-    fiatCurrency: input.fiatCurrency,
-    destinationCountry,
-    paymentRail,
-  });
   const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
     rampRuntime(c),
     {

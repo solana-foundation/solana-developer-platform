@@ -300,4 +300,62 @@ describe("useCounterpartyRequirements — corridor-addressed responses", () => {
     expect(rendered.result.current.onboarding).toBeNull();
     expect(rendered.result.current.resolvedProviderAccountId).toBeNull();
   });
+
+  it("never lets an earlier advance's poll verdict answer for a later same-corridor advance", async () => {
+    const onrampParams: CounterpartyRequirementsParams = {
+      counterpartyId: "cpty_behavior",
+      provider: "bvnk",
+      direction: "onramp",
+      cryptoToken: "USDC",
+      destinationWallet: "wlt_behavior",
+      fiatCurrency: "USD",
+    };
+    const provisioning: CounterpartyRequirements = {
+      provider: "bvnk",
+      direction: "onramp",
+      status: "funding_account_provisioning",
+    };
+    const rendered = renderHook(
+      (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),
+      { wrapper, initialProps: onrampParams }
+    );
+    await release("GET", provisioning);
+    await waitFor(() => expect(rendered.result.current.isResolved).toBe(true));
+
+    let firstSubmit: Promise<CounterpartyRequirements> | null = null;
+    act(() => {
+      firstSubmit = rendered.result.current.submitRequirements({
+        cryptoToken: "USDC",
+        destinationWallet: "wlt_behavior",
+        fiatCurrency: "USD",
+      });
+    });
+    await release("POST", provisioning);
+    await firstSubmit;
+    // The first advance's poll observes ready with an account.
+    await waitFor(() => expect(held.some((request) => request.method === "GET")).toBe(true));
+    await release("GET", {
+      provider: "bvnk",
+      direction: "onramp",
+      status: "ready",
+      providerAccountId: "cpa_first_advance",
+    });
+    expect(rendered.result.current.resolvedProviderAccountId).toBe("cpa_first_advance");
+
+    // A second advance in the SAME corridor answers pending again — the first
+    // advance's cached ready verdict must not answer for it.
+    let secondSubmit: Promise<CounterpartyRequirements> | null = null;
+    act(() => {
+      secondSubmit = rendered.result.current.submitRequirements({
+        cryptoToken: "USDC",
+        destinationWallet: "wlt_behavior",
+        fiatCurrency: "USD",
+      });
+    });
+    await release("POST", provisioning);
+    await secondSubmit;
+
+    expect(rendered.result.current.onboarding).toEqual(provisioning);
+    expect(rendered.result.current.resolvedProviderAccountId).toBeNull();
+  });
 });

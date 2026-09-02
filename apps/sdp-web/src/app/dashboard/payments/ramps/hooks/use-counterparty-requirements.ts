@@ -268,9 +268,14 @@ async function advanceCounterpartyRequirements(
   return body.data;
 }
 
-/** A completed advance addressed by the corridor it answered for. */
+/**
+ * A completed advance addressed by the corridor it answered for. `seq` makes
+ * each advance a distinct polling subject, so an earlier advance's poll cache
+ * can never answer for a later advance in the same corridor.
+ */
 interface AdvanceRecord {
   corridor: string;
+  seq: number;
   payload: AdvanceRequirementsPayload;
   result: CounterpartyRequirements;
 }
@@ -467,7 +472,12 @@ export function useCounterpartyRequirements(
         },
         t
       );
-      setAdvanceRecord({ corridor, payload, result });
+      setAdvanceRecord((previous) => ({
+        corridor,
+        seq: previous === null ? 1 : previous.seq + 1,
+        payload,
+        result,
+      }));
       return result;
     } finally {
       setIsAdvancing(false);
@@ -486,7 +496,9 @@ export function useCounterpartyRequirements(
   // Polling stops itself once its own data reports a non-pending status.
   const pollKey =
     advance !== null && params?.provider && isOnboardingPending(advance.result.status)
-      ? paymentsQueryKeys.requirementsStatusPoll({ subjectKey: corridorIdentity })
+      ? paymentsQueryKeys.requirementsStatusPoll({
+          subjectKey: `${corridorIdentity}#${advance.seq}`,
+        })
       : null;
   const { data: polledOnboarding } = useSWR(
     pollKey,
