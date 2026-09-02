@@ -4,10 +4,12 @@ import type {
   CoinbaseRampEvent,
   Counterparty,
   CounterpartyAccount,
+  CounterpartyProviderAccount,
   CryptoRailId,
   CustodyWalletAggregate,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
+  ListCounterpartyProviderAccountsResponse,
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
@@ -725,6 +727,39 @@ export async function fetchCounterpartyAccounts(
     );
   }
   return body.data?.accounts ?? [];
+}
+
+/**
+ * Loads provider-owned fiat accounts for a counterparty.
+ *
+ * @param counterpartyId - Counterparty whose provider accounts should be loaded.
+ * @param t - Dashboard translation function for request errors.
+ * @returns Provider account rows returned by the dashboard proxy.
+ */
+export async function fetchCounterpartyProviderAccounts(
+  counterpartyId: string,
+  t: Translate
+): Promise<CounterpartyProviderAccount[]> {
+  const response = await fetch(
+    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/provider-accounts`
+  );
+  const body = (await response.json()) as {
+    data?: ListCounterpartyProviderAccountsResponse;
+  };
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.counterpartyProviderAccountsRequestFailed", {
+          status: response.status,
+        })
+      )
+    );
+  }
+  if (!body.data) {
+    throw new Error(t("DashboardPayments.workspace.counterpartyProviderAccountsMissing"));
+  }
+  return body.data.accounts;
 }
 
 type SandboxTransferSimulationInput =
