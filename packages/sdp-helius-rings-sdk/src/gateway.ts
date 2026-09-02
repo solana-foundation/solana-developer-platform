@@ -92,11 +92,11 @@ function requireRingBringUpConfig(config: RingsGatewayConfig): {
   signMessage: NonNullable<RingsGatewayConfig["signMessage"]>;
 } {
   const { ringRpcUrl, signMessage } = config;
-  if (!ringRpcUrl || !signMessage) {
-    throw new HeliusRingsError(
-      "config_error",
-      "ring bring-up needs a ring RPC URL and a custody message signer"
-    );
+  if (!ringRpcUrl) {
+    throw new HeliusRingsError("config_error", "ring bring-up needs a ring RPC URL");
+  }
+  if (!signMessage) {
+    throw new HeliusRingsError("config_error", "ring bring-up needs a custody message signer");
   }
 
   let protocol: string;

@@ -57,7 +57,7 @@ describe("createRingsGateway", () => {
     expect((error as Error).message).not.toContain(configuredTree);
   });
 
-  it("refuses ring bring-up when the ring RPC and message signer are not configured", async () => {
+  it("refuses ring bring-up when the ring RPC is not configured", async () => {
     const error = await createRingsGateway(CONFIG)
       .provisionRing({ ringProgramId: RING_PROGRAM })
       .then(
@@ -68,7 +68,22 @@ describe("createRingsGateway", () => {
     expect(error).toBeInstanceOf(HeliusRingsError);
     expect(error).toMatchObject({
       code: "config_error",
-      message: "ring bring-up needs a ring RPC URL and a custody message signer",
+      message: "ring bring-up needs a ring RPC URL",
+    });
+  });
+
+  it("refuses ring bring-up when the message signer is not configured", async () => {
+    const error = await createRingsGateway({ ...CONFIG, ringRpcUrl: "https://ring-rpc.example" })
+      .provisionRing({ ringProgramId: RING_PROGRAM })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({
+      code: "config_error",
+      message: "ring bring-up needs a custody message signer",
     });
   });
 

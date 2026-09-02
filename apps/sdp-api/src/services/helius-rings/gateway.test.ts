@@ -166,13 +166,31 @@ describe("resolveRingsGateway", () => {
       });
       expect(withUrl.captured[0]).toMatchObject({ ringRpcUrl: "https://ring.invalid" });
 
-      // Absent (or blank) stays absent: the SDK refuses ring bring-up with
-      // config_error rather than dialling an empty string.
+      // Absent (or blank) stays absent: the resolver refuses ring bring-up
+      // itself rather than dialling an empty string.
       const without = capturingCreate();
       resolveRingsGateway(envOf({ HELIUS_RINGS_RING_RPC_URL: "  " }), tenant, {
         createGateway: without.createGateway,
       });
       expect(without.captured[0]).not.toHaveProperty("ringRpcUrl");
+    });
+
+    it("refuses ring bring-up by naming the env var when the ring RPC URL is unset", async () => {
+      const resolved = resolveRingsGateway(envOf(), tenant, {
+        createGateway: capturingCreate().createGateway,
+      });
+
+      const error = await resolved.provisionRing({ ringProgramId: "ring" }).then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+      expect(error).toBeInstanceOf(HeliusRingsError);
+      expect(error).toMatchObject({
+        code: "config_error",
+        message:
+          "ring bring-up needs HELIUS_RINGS_RING_RPC_URL; every other rings operation runs without it",
+      });
     });
 
     it("binds the message-signing callback to the tenant and the named owner", async () => {

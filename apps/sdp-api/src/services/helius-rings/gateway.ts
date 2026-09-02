@@ -76,8 +76,8 @@ export function resolveRingsGateway(
   const create = dependencies.createGateway ?? createRingsGateway;
   const recordRingLookupTable = dependencies.recordRingLookupTable;
 
-  // Optional, unlike the three upstreams: absent, the SDK refuses ring
-  // bring-up with a config_error while everything else keeps working.
+  // Optional, unlike the three upstreams: absent, ring bring-up is refused
+  // while everything else keeps working.
   const ringRpcUrl = (env.HELIUS_RINGS_RING_RPC_URL ?? "").trim();
 
   const gateway = create({
@@ -110,7 +110,23 @@ export function resolveRingsGateway(
     submitTransaction: (signedTxBase64) =>
       asDomainFailure(() => submitOuterTransaction({ env, signedTxBase64 })),
   });
-  return instrumentVendorPort("helius-rings", gateway);
+  // The SDK's refusal can only name the missing config field; the operator
+  // needs the env var. The message is persisted onto the ring row and shown
+  // in the dashboard, so it names exactly what to set.
+  const port =
+    ringRpcUrl === ""
+      ? {
+          ...gateway,
+          provisionRing: () =>
+            Promise.reject(
+              new HeliusRingsError(
+                "config_error",
+                "ring bring-up needs HELIUS_RINGS_RING_RPC_URL; every other rings operation runs without it"
+              )
+            ),
+        }
+      : gateway;
+  return instrumentVendorPort("helius-rings", port);
 }
 
 const ADAPTER_FAILURE_MESSAGES = {
