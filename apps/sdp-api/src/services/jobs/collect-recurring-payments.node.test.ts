@@ -4,6 +4,11 @@ import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
+type StaleUpdateRow = PaymentRecurringPaymentRow & {
+  oldest_updated_at: string;
+  stale_count: number;
+};
+
 const mocks = vi.hoisted(() => ({
   activateRecurringPayment: vi.fn(),
   cancelRecurringPayment: vi.fn(),
@@ -16,6 +21,7 @@ const mocks = vi.hoisted(() => ({
     due: [] as PaymentRecurringPaymentRow[],
     lifecycle: [] as PaymentRecurringPaymentRow[],
     staleCollection: [] as PaymentRecurringPaymentRow[],
+    staleUpdate: [] as StaleUpdateRow[],
   },
 }));
 
@@ -30,6 +36,9 @@ vi.mock("@/db", () => ({
           }
           if (query.includes("JOIN payment_subscription_collection_attempts")) {
             return Promise.resolve({ rows: mocks.rows.staleCollection });
+          }
+          if (query.includes("status = 'updating'")) {
+            return Promise.resolve({ rows: mocks.rows.staleUpdate });
           }
           return Promise.resolve({ rows: mocks.rows.due });
         },
@@ -117,6 +126,7 @@ describe("collectDueRecurringPayments", () => {
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
     mocks.rows.staleCollection = [];
+    mocks.rows.staleUpdate = [];
     mocks.findOperationalWalletById.mockResolvedValue({
       id: "cwlt_1",
       walletId: "wallet_1",
@@ -275,6 +285,66 @@ describe("collectDueRecurringPayments", () => {
         reason: "source_wallet_mismatch",
       },
       "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
+    );
+    warn.mockRestore();
+  });
+
+  it("summarizes stale recurring payment updates without changing them", async () => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    mocks.rows.staleUpdate = [
+      {
+        ...recurringRow("updating", {
+          id: "prp_newer_update",
+          updated_at: "2026-07-01T11:05:00.000Z",
+        }),
+        oldest_updated_at: "2026-07-01T11:00:00.000Z",
+        stale_count: 27,
+      },
+      {
+        ...recurringRow("updating", { id: "prp_older_update" }),
+        oldest_updated_at: "2026-07-01T11:00:00.000Z",
+        stale_count: 27,
+      },
+    ];
+
+    const result = await collectDueRecurringPayments(
+      { PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "2" } as Env,
+      new Date("2026-07-01T12:30:00Z")
+    );
+
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
+    expect(collectRecurringPayment).not.toHaveBeenCalled();
+    expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
+    const staleUpdateQuery = mocks.queryCalls.find((call) =>
+      call.query.includes("status = 'updating'")
+    );
+    expect(staleUpdateQuery?.query).toContain("COUNT(*) OVER () AS stale_count");
+    expect(staleUpdateQuery?.query).toContain("MIN(updated_at) OVER () AS oldest_updated_at");
+    expect(staleUpdateQuery?.query).toContain("ORDER BY updated_at DESC, id DESC");
+    expect(staleUpdateQuery?.bindings).toEqual(["2026-07-01T12:15:00.000Z", 2]);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        oldest_updated_at: "2026-07-01T11:00:00.000Z",
+        reason: "stale_recurring_payment_updates",
+        recurring_payments: [
+          {
+            organization_id: "org_1",
+            project_id: "proj_1",
+            recurring_payment_id: "prp_newer_update",
+            updated_at: "2026-07-01T11:05:00.000Z",
+          },
+          {
+            organization_id: "org_1",
+            project_id: "proj_1",
+            recurring_payment_id: "prp_older_update",
+            updated_at: "2026-07-01T11:00:00.000Z",
+          },
+        ],
+        stale_count: 27,
+        truncated: true,
+      },
+      "collectDueRecurringPayments: recurring payment updates are stale; collections stay paused until callers retry the same updates"
     );
     warn.mockRestore();
   });

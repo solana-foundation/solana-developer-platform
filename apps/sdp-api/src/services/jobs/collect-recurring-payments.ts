@@ -28,6 +28,14 @@ export interface CollectDueRecurringPaymentsResult {
   skipped: number;
 }
 
+type StaleRecurringPaymentUpdateRow = Pick<
+  PaymentRecurringPaymentRow,
+  "id" | "organization_id" | "project_id" | "updated_at"
+> & {
+  oldest_updated_at: string;
+  stale_count: number;
+};
+
 function batchSize(env: Env): number {
   return Math.min(
     parsePositiveIntegerConfig(env.PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE, DEFAULT_BATCH_SIZE),
@@ -254,6 +262,43 @@ export async function collectDueRecurringPayments(
   );
   for (const row of staleLifecyclePayments) {
     addOutcome(result, await recoverLifecycleRow(env, row), "recovered");
+  }
+
+  // Report only. Retrying the same update recovers it; automatic replay is
+  // separate reliability work because an on-chain stage may already have run.
+  const staleUpdatePayments = await getDb(env)
+    .prepare(
+      `SELECT organization_id,
+              project_id,
+              id,
+              updated_at,
+              COUNT(*) OVER () AS stale_count,
+              MIN(updated_at) OVER () AS oldest_updated_at
+         FROM payment_recurring_payments
+      WHERE status = 'updating'
+        AND updated_at <= ?
+      ORDER BY updated_at DESC, id DESC
+      LIMIT ?`
+    )
+    .bind(staleBefore, limit)
+    .all<StaleRecurringPaymentUpdateRow>();
+  const newestStaleUpdate = staleUpdatePayments.rows[0];
+  if (newestStaleUpdate) {
+    getLogger().warn(
+      {
+        oldest_updated_at: newestStaleUpdate.oldest_updated_at,
+        reason: "stale_recurring_payment_updates",
+        recurring_payments: staleUpdatePayments.rows.map((row) => ({
+          organization_id: row.organization_id,
+          project_id: row.project_id,
+          recurring_payment_id: row.id,
+          updated_at: row.updated_at,
+        })),
+        stale_count: newestStaleUpdate.stale_count,
+        truncated: newestStaleUpdate.stale_count > staleUpdatePayments.rows.length,
+      },
+      "collectDueRecurringPayments: recurring payment updates are stale; collections stay paused until callers retry the same updates"
+    );
   }
 
   const staleCollectionPayments = await rowsForQuery(
