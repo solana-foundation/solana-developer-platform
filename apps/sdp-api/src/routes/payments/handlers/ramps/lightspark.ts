@@ -290,10 +290,30 @@ export async function ensureLightsparkPayoutAccount(
   // row is never resumed. The provider converges on platformAccountId, so
   // reusing a prior row's id could silently bind this submission to an account
   // created from DIFFERENT bank details, and bank details are never persisted
-  // (store-nothing PII), so sameness cannot be proven. The trade is a possible
-  // duplicate provider-side account with identical details when a prior attempt
-  // succeeded remotely but failed to complete locally — benign, unlike a payout
-  // to the wrong account.
+  // (store-nothing PII), so sameness cannot be proven. Earlier incomplete
+  // reservations for the corridor are archived so they never accumulate; a
+  // remote account a failed attempt may have created stays unlinked at the
+  // provider by design — corridor resolution only reads completed local rows,
+  // so it can never pay out or make selection ambiguous.
+  const staleReservations = (
+    await repository.listActiveExternalAccounts({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry,
+    })
+  ).filter((account) => account.external_account_reference === null);
+  for (const stale of staleReservations) {
+    await repository.archiveExternalAccount({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      id: stale.id,
+    });
+  }
   const pending = await repository.insertPendingExternalAccount({
     organizationId: input.counterparty.organization_id,
     projectId: input.projectId,

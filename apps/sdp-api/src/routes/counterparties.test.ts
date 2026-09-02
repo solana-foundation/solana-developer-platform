@@ -585,6 +585,19 @@ describe("Counterparties Routes", () => {
         provider: "lightspark",
         providerCustomerReference: "Customer:cus_invalid_bank",
       });
+      await seedProviderAccount({
+        id: "provider_account_stale_reservation",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_invalid_bank",
+        externalAccountReference: null,
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: null,
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
 
       const res = await app.request(
         `/v1/counterparties/${counterparty.id}/requirements`,
@@ -609,13 +622,15 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(400);
       const pendingRows = await getDb(env)
         .prepare(
-          `SELECT COUNT(*) AS count FROM counterparty_provider_accounts
+          `SELECT id, status FROM counterparty_provider_accounts
            WHERE counterparty_id = ? AND payment_rail IS NOT NULL
              AND external_account_reference IS NULL`
         )
         .bind(counterparty.id)
-        .first<{ count: number }>();
-      expect(Number(pendingRows?.count)).toBe(0);
+        .all<{ id: string; status: string }>();
+      expect(pendingRows.results).toEqual([
+        { id: "provider_account_stale_reservation", status: "active" },
+      ]);
     });
 
     it("rejects a providerAccountId owned by another counterparty on the advance", async () => {
