@@ -35,13 +35,31 @@ export {
   type SwapDvp,
   type SwapDvpArgs,
 } from "./generated/accounts/swapDvp";
-// Instruction builders, program errors, and the program address. The accounts
-// barrel is deliberately absent — see the selective re-export above.
+// Instruction builders and program errors. The accounts barrel is deliberately
+// absent — see the selective re-export above.
 export * from "./generated/errors";
 export * from "./generated/instructions";
-export * from "./generated/programs";
-// Friendlier alias for the (verbose, codama-suffixed) program address constant.
-export { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS as DVP_SWAP_PROGRAM_ADDRESS } from "./generated/programs";
+
+// The programs module is re-exported symbol by symbol rather than wholesale.
+// It also exports `dvpSwapProgramProgram()`, a kit client plugin that installs
+// `addSelfFetchFunctions(client, getSwapDvpCodec())` — so a consumer holding
+// an extended client could call `client.dvpSwapProgram.accounts.swapDvp.fetch(...)`
+// on a counterparty-supplied address and get a decoded trade back with no
+// owner, size or canonical-PDA check. That is the same bypass this package
+// exists to prevent, reachable by a more idiomatic route than the named
+// readers, so the plugin stays internal. The symbols below are inert: an
+// address constant, two enums, and instruction-level parsing helpers that
+// never touch account data.
+export {
+  DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
+  // Friendlier alias for the verbose, codama-suffixed constant.
+  DVP_SWAP_PROGRAM_PROGRAM_ADDRESS as DVP_SWAP_PROGRAM_ADDRESS,
+  DvpSwapProgramAccount,
+  DvpSwapProgramInstruction,
+  identifyDvpSwapProgramInstruction,
+  type ParsedDvpSwapProgramInstruction,
+  parseDvpSwapProgramInstruction,
+} from "./generated/programs";
 
 export { getSafeI64Encoder, getSafeU64Encoder } from "./safeNumberCodecs";
 export {
