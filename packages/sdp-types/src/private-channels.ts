@@ -41,6 +41,20 @@ export interface PrivateChannelToken {
   tokenProgram: string;
 }
 
+export type PrivateChannelTokenExclusionCode = "NOT_ALLOWED_BY_INSTANCE" | "ALLOWLIST_UNAVAILABLE";
+
+/** Why a registered token cannot currently be used with the connected instance. */
+export interface PrivateChannelTokenExclusion {
+  code: PrivateChannelTokenExclusionCode;
+  message: string;
+}
+
+/** SDP token metadata combined with the instance's on-chain `allowedMint` state. */
+export interface PrivateChannelTokenEligibility extends PrivateChannelToken {
+  enabled: boolean;
+  exclusionReasons: PrivateChannelTokenExclusion[];
+}
+
 /**
  * Legacy cluster inference used by the currently deployed Private Channels UI.
  *

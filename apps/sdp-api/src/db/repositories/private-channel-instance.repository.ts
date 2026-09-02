@@ -39,6 +39,10 @@ export interface ReactivateInstanceInput extends PrivateChannelInstanceInput {
   id: string;
 }
 
+export interface UpdateActiveInstanceInput extends PrivateChannelInstanceInput, ProjectScope {
+  id: string;
+}
+
 export interface PrivateChannelInstanceRepositoryContext {
   db: RepositoryDbClient;
 }
@@ -56,6 +60,8 @@ export interface PrivateChannelInstanceRepository {
   /** Caller must ensure no other active row for this project (409 upstream). */
   createActive(input: CreateActiveInstanceInput): Promise<PrivateChannelInstanceRow | null>;
   reactivateAndUpdate(input: ReactivateInstanceInput): Promise<PrivateChannelInstanceRow | null>;
+  /** Updates the currently active row after the caller has verified the proposed connection. */
+  updateActive(input: UpdateActiveInstanceInput): Promise<PrivateChannelInstanceRow | null>;
   deactivateActive(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
   /** FK ON DELETE CASCADE handles downstream tables. */
   deleteActive(scope: ProjectScope): Promise<boolean>;

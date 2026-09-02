@@ -1,116 +1,145 @@
+import Link from "next/link";
+import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/playground-api-data";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import {
-  loadChannelBalances,
   loadChannels,
-  loadEvents,
-  loadOverview,
-  loadWalletVerification,
+  loadInstance,
+  loadPrincipals,
+  loadTokenEligibility,
 } from "../private-channels-page.data";
-import {
-  PRIVATE_CHANNELS_CHANNELS_PATH,
-  PRIVATE_CHANNELS_SETUP_PATH,
-  PRIVATE_CHANNELS_WALLETS_PATH,
-} from "../private-channels-routes";
-import { AllowedTokensPanel } from "./allowed-tokens-panel";
-import { ConnectedInstancePanel } from "./connected-instance-panel";
-import { channelNameById } from "./overview-data";
-import { PrivateBalancePanel } from "./private-balance-panel";
-import { PrivateChannelsPlayground } from "./private-channels-playground";
-import { PrivateChannelsTabShell } from "./private-channels-tab-shell";
-import { RecentActivityPanel } from "./recent-activity-panel";
+import { PRIVATE_CHANNELS_SETUP_PATH } from "../private-channels-routes";
+import { ChannelDirectoryRow } from "./channel-directory-row";
+import { CreateChannelButton } from "./create-channel-button";
+
+function instanceAddress(address: string): string {
+  return address.length > 13 ? `${address.slice(0, 6)}…${address.slice(-6)}` : address;
+}
 
 export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
 
-  // The API Playground renders here too, as the Overview's `?tab=playground`
-  // pane, so switching tabs is a shallow history update instead of a segment
-  // navigation that refetches the RSC payload on every toggle.
-  const client = await createSdpApiClient();
-  const [overview, wallets, channels, events, apiKeysResult] = await Promise.all([
-    loadOverview(client),
-    loadWalletVerification(client),
-    loadChannels(client),
-    loadEvents(client),
-    fetchActiveApiKeys(client.request),
-  ]);
+  const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
+  const instance = await loadInstance(client);
 
-  // The old /api-playground segment gave the playground a definite flex height
-  // below the tab strip; its pane keeps that contract so the playground owns its
-  // internal request/response scrolling instead of growing beyond the viewport.
-  const playgroundPane = (
-    <div className="flex min-h-0 w-full flex-1 flex-col">
-      <PrivateChannelsPlayground
-        apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-        apiKeys={apiKeysResult.data ?? []}
-      />
-    </div>
-  );
-
-  // The overview always renders — even with no connected instance, in which case it
-  // shows the "Not connected" state and a connect link. Only a genuine load failure
-  // (not the expected "no active instance" 404, which resolves to ok+null data) keeps
-  // the user on an error screen.
-  // Channels feed both the connected-instance summary and activity labels, so their
-  // fallback cannot produce a truthful partial page. Surface that failure just like
-  // the overview request instead of presenting missing channel data as an empty state.
-  // The playground pane never needed overview data, so it stays reachable either way.
-  if (!overview.ok || !channels.ok) {
-    return (
-      <PrivateChannelsTabShell
-        overview={<PrivateChannelsLoadError message={overview.error ?? channels.error} />}
-        playground={playgroundPane}
-      />
-    );
+  if (!instance.ok) {
+    return <PrivateChannelsLoadError message={instance.error} />;
   }
-  const instance = overview.data?.instance ?? null;
-  const instanceOverview = overview.data?.overview ?? null;
-  const isConnected = instance !== null;
-  const defaultChannelName = channels.data.find((channel) => channel.isDefault)?.name ?? null;
 
-  // Channel balances only exist for verified wallets — unverified reads would 403.
-  const channelBalances = wallets.ok
-    ? await loadChannelBalances(client, wallets.data.verified)
-    : {};
+  const activeInstance = instance.data?.isActive ? instance.data : null;
+  const connectedData = activeInstance
+    ? await Promise.all([
+        loadChannels(client),
+        loadPrincipals(client),
+        loadTokenEligibility(client),
+      ])
+    : null;
+  const channels = connectedData?.[0] ?? null;
+  const principals = connectedData?.[1] ?? null;
+  const tokenEligibility = connectedData?.[2] ?? null;
 
-  const overviewPane = (
-    // The segment layout owns viewport scrolling and gutters. Keep this pane height-bound
-    // so the summary panels take their natural height while the activity panel fills the
-    // remainder and scrolls only its table, leaving the "View all" footer pinned in view.
-    <div className="flex h-full min-h-0 w-full flex-col gap-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <ConnectedInstancePanel
-          instance={instance}
-          overview={instanceOverview}
-          connectHref={PRIVATE_CHANNELS_SETUP_PATH}
-          instanceHref={PRIVATE_CHANNELS_SETUP_PATH}
-          channelsHref={PRIVATE_CHANNELS_CHANNELS_PATH}
-          defaultChannelName={defaultChannelName}
-        />
-        <PrivateBalancePanel
-          channelBalances={channelBalances}
-          walletsHref={PRIVATE_CHANNELS_WALLETS_PATH}
-          connected={isConnected}
-          loadError={!wallets.ok}
-        />
-        <AllowedTokensPanel connected={isConnected} />
-      </div>
+  if (channels && !channels.ok) {
+    return <PrivateChannelsLoadError message={channels.error} />;
+  }
 
-      {/* Activity only exists once an instance is connected — hide the panel until then. */}
-      {isConnected ? (
-        <RecentActivityPanel
-          initialEvents={events.data.events}
-          channelNames={channelNameById(channels.data)}
-          loadError={!events.ok}
-        />
-      ) : null}
+  const enabledSymbols = tokenEligibility?.ok
+    ? tokenEligibility.data.filter((token) => token.enabled).map((token) => token.symbol)
+    : [];
+  const tokensSummary =
+    enabledSymbols.length > 0
+      ? enabledSymbols.join(", ")
+      : tokenEligibility?.ok
+        ? t("DashboardPrivateChannels.directory.noTokens")
+        : t("DashboardPrivateChannels.directory.tokensUnavailable");
+  const channelRows = channels?.data ?? [];
+  const principalRows = principals?.data.principals ?? [];
+
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6" data-private-channels-directory>
+      <section className="space-y-4" aria-labelledby="private-channels-list-title">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+          <div className="space-y-1">
+            <h2
+              className="text-2xl font-medium tracking-tight text-primary"
+              id="private-channels-list-title"
+            >
+              {t("DashboardPrivateChannels.directory.channelsTitle")}
+            </h2>
+            <p className="text-sm text-secondary">
+              {t("DashboardPrivateChannels.directory.channelsDescription")}
+            </p>
+          </div>
+          {activeInstance ? (
+            <CreateChannelButton instanceId={activeInstance.id} />
+          ) : (
+            <Button asChild>
+              <Link href={PRIVATE_CHANNELS_SETUP_PATH}>
+                {t("DashboardPrivateChannels.directory.setupChannel")}
+              </Link>
+            </Button>
+          )}
+        </div>
+        <DashboardWorkspaceCard className="grow-0">
+          <div className="overflow-x-auto">
+            <Table className="rounded-none border-0 [&_table]:min-w-[920px] [&_table]:table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("DashboardPrivateChannels.directory.channelColumn")}</TableHead>
+                  <TableHead>{t("DashboardPrivateChannels.directory.instanceColumn")}</TableHead>
+                  <TableHead>{t("DashboardPrivateChannels.directory.walletsColumn")}</TableHead>
+                  <TableHead>{t("DashboardPrivateChannels.directory.tokensColumn")}</TableHead>
+                  <TableHead>{t("DashboardPrivateChannels.directory.statusColumn")}</TableHead>
+                  <TableHead align="right">
+                    <span className="sr-only">
+                      {t("DashboardPrivateChannels.directory.openColumn")}
+                    </span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {channelRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell className="py-12 text-center text-secondary" colSpan={6}>
+                      {t("DashboardPrivateChannels.directory.empty")}
+                    </TableCell>
+                  </TableRow>
+                ) : activeInstance ? (
+                  channelRows.map((channel) => {
+                    const walletCount = principalRows
+                      .filter(
+                        (principal) =>
+                          principal.status === "active" &&
+                          principal.channels.some((membership) => membership.id === channel.id)
+                      )
+                      .reduce((count, principal) => count + principal.verifiedWalletCount, 0);
+                    return (
+                      <ChannelDirectoryRow
+                        channel={channel}
+                        instanceAddress={instanceAddress(activeInstance.escrowInstanceAddr)}
+                        instanceId={activeInstance.id}
+                        key={channel.id}
+                        tokensSummary={tokensSummary}
+                        walletCount={walletCount}
+                      />
+                    );
+                  })
+                ) : null}
+              </TableBody>
+            </Table>
+          </div>
+        </DashboardWorkspaceCard>
+      </section>
     </div>
   );
-
-  return <PrivateChannelsTabShell overview={overviewPane} playground={playgroundPane} />;
 }

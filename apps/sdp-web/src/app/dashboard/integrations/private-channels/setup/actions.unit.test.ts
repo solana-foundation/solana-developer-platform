@@ -9,7 +9,7 @@ vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: async () => ({ fetch: fetchMock }),
 }));
 
-import { connectPrivateChannelAction } from "./actions";
+import { connectPrivateChannelAction, updatePrivateChannelAction } from "./actions";
 
 const existingInstance: PrivateChannelInstance = {
   ...SANDBOX_DEFAULTS,
@@ -52,6 +52,19 @@ describe("connectPrivateChannelAction", () => {
       kind: "requires-reactivate-confirmation",
       message: "Confirm reactivation.",
       existingInstance,
+    });
+  });
+
+  it("sends a verified update to the active instance", async () => {
+    fetchMock.mockResolvedValue({ instance: { ...existingInstance, isActive: true } });
+    const { chainRpcUrl: _legacyChainRpcUrl, ...input } = SANDBOX_DEFAULTS;
+
+    const result = await updatePrivateChannelAction({ ...input, instanceId: existingInstance.id });
+
+    expect(result).toEqual({ ok: true, instance: { ...existingInstance, isActive: true } });
+    expect(fetchMock).toHaveBeenCalledWith("/v1/private-channels/instance", {
+      method: "PATCH",
+      body: expect.stringContaining(`"instanceId":"${existingInstance.id}"`),
     });
   });
 });

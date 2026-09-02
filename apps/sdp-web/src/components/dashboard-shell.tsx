@@ -572,6 +572,7 @@ export function DashboardShell({
     pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
     isOrganizationOnboardingRoute ||
+    pathname.startsWith("/dashboard/integrations/private-channels") ||
     pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;

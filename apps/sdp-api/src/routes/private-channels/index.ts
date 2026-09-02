@@ -31,6 +31,7 @@ import {
   listPrivateChannelDeposits,
   listPrivateChannelEventReferences,
   listPrivateChannelPrincipals,
+  listPrivateChannelTokenEligibility,
   listPrivateChannelTransferRecipients,
   listPrivateChannelTransfers,
   listPrivateChannelWithdrawals,
@@ -38,6 +39,7 @@ import {
   listVerifiedWallets,
   probePrivateChannelConnection,
   removePrincipalChannelMembership,
+  updatePrivateChannelInstance,
   verifyWallet,
 } from "./handlers";
 import {
@@ -49,6 +51,7 @@ import {
   createTransferBodySchema,
   createWithdrawalBodySchema,
   probeConnectionSchema,
+  updatePrivateChannelInstanceSchema,
   verifyWalletBodySchema,
 } from "./schemas";
 
@@ -93,6 +96,12 @@ instance.post(
   validateBody(connectPrivateChannelInstanceSchema),
   connectPrivateChannelInstance
 );
+instance.patch(
+  "/",
+  requirePermissions("payments:write"),
+  validateBody(updatePrivateChannelInstanceSchema),
+  updatePrivateChannelInstance
+);
 instance.delete("/", requirePermissions("payments:write"), deletePrivateChannelInstance);
 instance.post(
   "/disconnect",
@@ -105,6 +114,14 @@ privateChannels.route("/instance", instance);
 // --- /balance -------------------------------------------------------------
 // Read an owner's channel token balance (per wallet+mint) through the gateway.
 privateChannels.get("/balance", requirePermissions("payments:read"), getPrivateChannelBalance);
+
+// --- /tokens --------------------------------------------------------------
+// Registered tokens with per-instance on-chain enablement and exclusion reasons.
+privateChannels.get(
+  "/tokens",
+  requirePermissions("payments:read"),
+  listPrivateChannelTokenEligibility
+);
 
 // --- /deposits ------------------------------------------------------------
 // Escrow deposits from a custody wallet into the instance (devnet), tracked
