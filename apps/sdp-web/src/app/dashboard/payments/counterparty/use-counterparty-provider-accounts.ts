@@ -31,7 +31,7 @@ async function fetchCounterpartyProviderAccounts(
   }
   const accounts = result.data?.data?.accounts;
   if (!accounts) {
-    throw new Error(t("DashboardPayments.workspace.counterpartyProviderAccountsMissing"));
+    throw new Error(t("DashboardPayments.counterparty.providerAccountsMissing"));
   }
   return accounts;
 }
