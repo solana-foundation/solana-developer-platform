@@ -469,7 +469,14 @@ export async function simulateVaultPlan(
       /** Compute units the simulation consumed, when the RPC reports them. */
       unitsConsumed?: bigint;
     }
-  | { ok: false; error: string; fault: "caller" | "sponsor"; logs: readonly string[] }
+  | {
+      ok: false;
+      error: string;
+      fault: "caller" | "sponsor";
+      /** See `VaultSimulationVerdict.sponsorCause`; present on sponsor faults. */
+      sponsorCause?: "balance" | "prefund";
+      logs: readonly string[];
+    }
 > {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
   let instructions: EarnVaultTransactionPlan["instructions"];
@@ -536,6 +543,7 @@ export async function simulateVaultPlan(
       ok: false,
       error: verdict.message,
       fault: verdict.fault,
+      ...(verdict.sponsorCause === undefined ? {} : { sponsorCause: verdict.sponsorCause }),
       logs: result.value.logs ?? [],
     };
   }
