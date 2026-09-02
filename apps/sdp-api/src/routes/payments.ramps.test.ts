@@ -1736,6 +1736,47 @@ describe("Payments routes — ramps", () => {
       fetchSpy.mockRestore();
     });
 
+    it("rejects an explicitly selected account that is pending or provider-inactive", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_active",
+          externalAccountReference: "ExternalAccount:active",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_pending",
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: null,
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "ACH",
+        providerStatus: null,
+      });
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_created",
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: "ExternalAccount:created",
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "ACH",
+        providerStatus: "CREATED",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      for (const providerAccountId of ["cpa_quote_pending", "cpa_quote_created"]) {
+        const res = await quoteRequest({ counterpartyId, providerAccountId });
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("BAD_REQUEST");
+        expect(body.error.message).toContain("providerAccountId");
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
     it("rejects an ambiguous corridor when no providerAccountId is given", async () => {
       const counterpartyId = await seedLightsparkCounterparty([
         {

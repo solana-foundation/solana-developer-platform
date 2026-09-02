@@ -1196,7 +1196,10 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           selected === null ||
           selected.status !== "active" ||
           selected.fiat_currency !== input.fiatCurrency ||
-          selected.destination_country !== input.destinationCountry
+          selected.destination_country !== input.destinationCountry ||
+          selected.external_account_reference === null ||
+          selected.provider_status === null ||
+          !isLightsparkExternalAccountActive(selected.provider_status)
         ) {
           throw badRequest(
             "providerAccountId does not reference an active lightspark payout account for this corridor."
