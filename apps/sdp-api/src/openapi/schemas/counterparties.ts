@@ -173,6 +173,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       ...requirementBase,
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("ready"),
+      providerAccountId: z.string().optional(),
     }),
     z.object({
       ...requirementBase,

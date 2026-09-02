@@ -99,7 +99,7 @@ async function lightsparkPayoutSubmissionNeedsRequirements(
   if (!isCountryCode(collectedData.destinationCountry)) {
     throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
   }
-  if (collectedData.paymentRails !== undefined) {
+  if (input.providerAccountId !== undefined || collectedData.paymentRails !== undefined) {
     return false;
   }
   const existing = await createPostgresCounterpartyProviderAccountsRepository(

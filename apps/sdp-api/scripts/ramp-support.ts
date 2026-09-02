@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import {
   type ProviderRailSupportSnapshot,
@@ -239,8 +240,11 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
  * what the pre-commit hook enforces; without this, committed snapshots and the
  * generated file drift purely on formatting.
  */
+// Run through node: `pnpm` is a .cmd shim on Windows, which execFileSync cannot spawn.
+const biomeCli = createRequire(import.meta.url).resolve("@biomejs/biome/bin/biome");
+
 function biomeFormat(filePaths: readonly string[]): void {
-  execFileSync("pnpm", ["exec", "biome", "format", "--write", ...filePaths], {
+  execFileSync(process.execPath, [biomeCli, "format", "--write", ...filePaths], {
     stdio: "ignore",
   });
 }
@@ -250,7 +254,7 @@ function biomeFormat(filePaths: readonly string[]): void {
  * given path. Used by the drift check so no scratch file is ever written.
  */
 function biomeFormatText(virtualPath: string, text: string): string {
-  return execFileSync("pnpm", ["exec", "biome", "format", `--stdin-file-path=${virtualPath}`], {
+  return execFileSync(process.execPath, [biomeCli, "format", `--stdin-file-path=${virtualPath}`], {
     input: text,
     encoding: "utf8",
   });
