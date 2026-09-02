@@ -227,7 +227,10 @@
     "backToPrivateChannels": "Retour aux canaux privés",
     "integrations": "Intégrations",
     "holdings": "Détentions",
-    "backToHome": "Retour à l'accueil"
+    "backToHome": "Retour à l'accueil",
+    "manageAccount": "Gérer le compte",
+    "signOut": "Se déconnecter",
+    "accountMenu": "Menu du compte"
   },
   "validation": {
     "allowlistValueRequired": "La valeur Allowlist est requise",

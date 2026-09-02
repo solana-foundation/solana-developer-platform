@@ -225,7 +225,10 @@
     "backToPrivateChannels": "Volver a canales privados",
     "integrations": "Integraciones",
     "holdings": "Tenencia",
-    "backToHome": "Volver al inicio"
+    "backToHome": "Volver al inicio",
+    "manageAccount": "Administrar cuenta",
+    "signOut": "Cerrar sesión",
+    "accountMenu": "Menú de cuenta"
   },
   "validation": {
     "allowlistValueRequired": "El valor de la Allowlist es obligatorio",

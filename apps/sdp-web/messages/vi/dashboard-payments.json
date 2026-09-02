@@ -247,7 +247,25 @@
         "waitingForPayment": "Đang chờ thanh toán",
         "waitingForPaymentHostedDescription": "Hoàn tất thanh toán trong cửa sổ Provider ở trên. Khoản nạp này tự động cập nhật sau khi Provider xác nhận."
       },
-      "untrustedProviderUrl": "Provider trả về URL không đáng tin cậy nên không được tải. Hãy tạo Báo giá mới hoặc liên hệ hỗ trợ."
+      "untrustedProviderUrl": "Provider trả về URL không đáng tin cậy nên không được tải. Hãy tạo Báo giá mới hoặc liên hệ hỗ trợ.",
+      "destinationCountry": "Quốc gia đích",
+      "paymentRail": "Payment rail",
+      "requirementGroupDestinationTitle": "Đích đến",
+      "requirementGroupDestinationDescription": "Chọn nơi khoản chi trả đến và payment rail nội địa mà khoản tiền đi qua.",
+      "requirementGroupBankAccountTitle": "Tài khoản ngân hàng",
+      "requirementGroupBankAccountDescription": "Thông tin tài khoản người nhận cho rail này. Thông tin được chuyển cho nhà cung cấp khi thực hiện chi trả và không bao giờ được lưu trữ.",
+      "requirementGroupCustomerTitle": "Thông tin người nhận",
+      "requirementGroupCustomerDescription": "Lightspark dùng thông tin này để xác minh danh tính người nhận. Thông tin được gửi khi bạn nộp và không bao giờ được lưu trữ.",
+      "checkoutPoweredBy": "Được cung cấp bởi",
+      "addressRequirementDescription": "Tìm kiếm để tự điền các trường địa chỉ, hoặc nhập thủ công.",
+      "useExistingAccount": "Dùng tài khoản có sẵn",
+      "useExistingAccountDescription": "Đã lưu sẵn một tài khoản chi trả đang hoạt động cho đích đến này. Chúng tôi sẽ dùng tài khoản này cho khoản chi trả.",
+      "success": "Thành công",
+      "depositTransaction": "Giao dịch nạp",
+      "onchainTransaction": "Giao dịch Onchain",
+      "addressSearchPlaceholder": "Tìm địa chỉ",
+      "addressAutocompleteFailed": "Chúng tôi không thể tìm kiếm địa chỉ. Thử lại.",
+      "addressDetailsFailed": "Chúng tôi không tải được địa chỉ đó. Hãy thử tìm kiếm khác."
     },
     "onchainSend": {
       "noAssets": "Wallet này không có Asset để gửi.",
@@ -619,7 +637,9 @@
       "details": "Chi tiết",
       "transactions": "Giao dịch",
       "copyAddress": "Sao chép địa chỉ",
-      "addressCopied": "Đã sao chép địa chỉ"
+      "addressCopied": "Đã sao chép địa chỉ",
+      "addAnyway": "Vẫn thêm",
+      "addAnywayTitle": "Thêm địa chỉ bị gắn cờ?"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -725,7 +745,8 @@
       "lastUpdated": "Cập nhật lần cuối",
       "copy": "Sao chép {label}",
       "viewReceipt": "Xem biên nhận",
-      "receipt": "Biên nhận"
+      "receipt": "Biên nhận",
+      "failureReason": "Lý do thất bại"
     },
     "requestFailed": "Yêu cầu thất bại.",
     "submitting": "Đang gửi...",
