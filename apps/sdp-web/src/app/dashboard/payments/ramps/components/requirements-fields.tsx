@@ -1,6 +1,8 @@
 "use client";
 
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
+import { COUNTRIES } from "@sdp/types/countries";
+import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   type CollectedFieldData,
@@ -158,6 +160,14 @@ function populateAddressFields(
   }
 }
 
+const COUNTRY_FIELD_OPTIONS = COUNTRIES.map((country) => {
+  const flag = regionFlagEmoji(country.code);
+  if (flag === null) {
+    throw new Error(`Country ${country.code} has no region flag emoji.`);
+  }
+  return { value: country.code, label: `${flag} ${country.name}` };
+});
+
 function RequirementFieldInput({
   field,
   value,
@@ -170,12 +180,13 @@ function RequirementFieldInput({
   const t = useTranslations();
   switch (field.kind) {
     case "select":
+    case "country":
       return (
         <Combobox
           label={field.label}
           value={value.length > 0 ? value : null}
           onChange={onChange}
-          options={field.options}
+          options={field.kind === "select" ? field.options : COUNTRY_FIELD_OPTIONS}
           placeholder={t("DashboardPayments.ramps.selectField", {
             field: field.label.toLowerCase(),
           })}

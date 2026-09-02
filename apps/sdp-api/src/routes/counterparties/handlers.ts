@@ -9,7 +9,6 @@ import {
   isCountryCode,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
-  US_STATES,
 } from "@sdp/types";
 import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -118,7 +117,6 @@ export const getCounterpartyFieldOptions = async (c: AppContext) => {
     fields: {
       entityTypes: COUNTERPARTY_ENTITY_TYPES,
       countries: COUNTRIES,
-      usStates: US_STATES,
     },
   };
   return success(c, response);

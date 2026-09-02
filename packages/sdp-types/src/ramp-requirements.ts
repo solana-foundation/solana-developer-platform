@@ -29,6 +29,12 @@ export type RequirementField =
       options: RequirementOption[];
     }
   | {
+      kind: "country";
+      key: string;
+      label: string;
+      required: boolean;
+    }
+  | {
       kind: "date";
       key: string;
       label: string;

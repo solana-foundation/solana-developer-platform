@@ -1,3 +1,4 @@
+import { COUNTRY_CODES } from "@sdp/types/countries";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   CollectedFieldData,
@@ -8,6 +9,8 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
+
+const countryCodeSchema = z.enum(COUNTRY_CODES);
 
 export function readyCounterparty(
   provider: RampProviderId,
@@ -47,6 +50,20 @@ export function selectField(args: {
   return { kind: "select", ...args };
 }
 
+/**
+ * Creates a country requirement field validated against ISO 3166-1 alpha-2 codes.
+ *
+ * @param args - Country requirement field properties.
+ * @returns A country requirement field.
+ */
+export function countryField(args: {
+  key: string;
+  label: string;
+  required: boolean;
+}): RequirementField {
+  return { kind: "country", ...args };
+}
+
 export function dateField(args: {
   key: string;
   label: string;
@@ -81,6 +98,8 @@ export function fieldToZod(field: RequirementField): z.ZodTypeAny {
       const schema = z.enum([first, ...rest]);
       return field.required ? schema : schema.optional();
     }
+    case "country":
+      return field.required ? countryCodeSchema : countryCodeSchema.optional();
     case "date": {
       const before = field.before;
       const schema =

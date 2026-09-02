@@ -136,14 +136,12 @@ describe("Counterparties Routes", () => {
           fields: {
             entityTypes: string[];
             countries: { code: string; name: string }[];
-            usStates: { code: string; name: string }[];
           };
         };
       };
       expect(body.data.fields.entityTypes).toContain("individual");
       expect(body.data.fields.entityTypes).toContain("business");
       expect(body.data.fields.countries.some((c) => c.code === "US")).toBe(true);
-      expect(body.data.fields.usStates.length).toBeGreaterThan(0);
     });
   });
 
@@ -369,6 +367,24 @@ describe("Counterparties Routes", () => {
         "customer.address.countryCode",
         "purposeOfPayment",
       ]);
+      expect(body.data.fields[2]).toEqual({
+        kind: "country",
+        key: "customer.nationality",
+        label: "Nationality",
+        required: true,
+      });
+      expect(body.data.fields[3]).toEqual({
+        kind: "country",
+        key: "customer.region",
+        label: "Region",
+        required: true,
+      });
+      expect(body.data.fields[8]).toEqual({
+        kind: "country",
+        key: "customer.address.countryCode",
+        label: "Country",
+        required: true,
+      });
     });
 
     it("creates the Grid customer from collected PII and links the provider account", async () => {

@@ -131,7 +131,6 @@ export interface CounterpartyResponse {
 export interface CounterpartyFieldOptions {
   entityTypes: readonly CounterpartyEntityType[];
   countries: readonly Country[];
-  usStates: readonly { code: string; name: string }[];
 }
 
 export interface CounterpartyFieldOptionsResponse {

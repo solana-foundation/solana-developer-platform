@@ -100,6 +100,13 @@ const requirementSelectFieldSchema = z.object({
   options: z.array(z.object({ value: z.string(), label: z.string() })),
 });
 
+const requirementCountryFieldSchema = z.object({
+  kind: z.literal("country"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+});
+
 const requirementDateFieldSchema = z.object({
   kind: z.literal("date"),
   key: z.string(),
@@ -111,6 +118,7 @@ const requirementDateFieldSchema = z.object({
 const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementTextFieldSchema,
   requirementSelectFieldSchema,
+  requirementCountryFieldSchema,
   requirementDateFieldSchema,
   z.object({
     kind: z.literal("address"),
@@ -121,6 +129,7 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
       z.discriminatedUnion("kind", [
         requirementTextFieldSchema,
         requirementSelectFieldSchema,
+        requirementCountryFieldSchema,
         requirementDateFieldSchema,
       ])
     ),
@@ -396,7 +405,6 @@ export const counterpartyFieldOptionsResponseSchema = withOpenApi(
     fields: z.object({
       entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)),
       countries: z.array(countrySchema),
-      usStates: z.array(countrySchema),
     }),
   }),
   {

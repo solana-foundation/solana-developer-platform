@@ -1,4 +1,4 @@
-import { COUNTRIES, type Counterparty, type CountryCode, isCountryCode } from "@sdp/types";
+import { type Counterparty, type CountryCode, isCountryCode } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDER_SUPPORT_DETAILS } from "@sdp/types/generated/ramp";
 import type { CryptoRailId, RampPayoutFieldSpec } from "@sdp/types/payment-rails";
@@ -14,6 +14,7 @@ import { resolveOfframpDestination } from "@sdp/types/ramp-resolution";
 import type { CounterpartyRow } from "../../../counterparty";
 import { badRequest, providerUnavailable, unsupportedCounterparty } from "../../../errors";
 import {
+  countryField,
   dateField,
   parseCollectedFields,
   readyCounterparty,
@@ -297,22 +298,6 @@ function lightsparkCountryCodes(): CountryCode[] {
 }
 
 /**
- * Builds a country selector for Lightspark identity fields.
- *
- * @param key - Requirement field key.
- * @param label - Requirement field label.
- * @returns A required country selector.
- */
-function lightsparkCountrySelect(key: string, label: string): RequirementField {
-  return selectField({
-    key,
-    label,
-    required: true,
-    options: COUNTRIES.map((country) => ({ value: country.code, label: country.name })),
-  });
-}
-
-/**
  * Builds the destination-first payout requirements from the canonical resolver.
  *
  * @param cryptoRail - Crypto rail being sold.
@@ -366,8 +351,8 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
       required: true,
       before: new Date().toISOString().slice(0, 10),
     }),
-    lightsparkCountrySelect("customer.nationality", "Nationality"),
-    lightsparkCountrySelect("customer.region", "Region"),
+    countryField({ key: "customer.nationality", label: "Nationality", required: true }),
+    countryField({ key: "customer.region", label: "Region", required: true }),
     textField({
       key: "customer.email",
       label: "Email",
@@ -390,7 +375,7 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
           required: false,
         }),
         textField({ key: "customer.address.postalCode", label: "Postal code", required: true }),
-        lightsparkCountrySelect("customer.address.countryCode", "Country"),
+        countryField({ key: "customer.address.countryCode", label: "Country", required: true }),
       ],
     },
     lightsparkPurposeOfPaymentField(),
