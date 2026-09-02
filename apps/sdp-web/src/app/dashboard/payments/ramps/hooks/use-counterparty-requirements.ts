@@ -343,6 +343,15 @@ export function useCounterpartyRequirements(
     kind: "none",
   });
   const setField = (key: string, value: string) => {
+    // A destination-country change abandons the corridor a pending onboarding
+    // was advanced for: drop it and its poll payload so later poll ticks cannot
+    // re-apply the old corridor's account under the new country. Only the
+    // Lightspark payout form collects this field, so no provider's KYC
+    // verification poll is ever cut short by this.
+    if (key === "destinationCountry" && collectedData.destinationCountry !== value) {
+      setOnboarding(null);
+      setLastAdvancePayload(null);
+    }
     const nextPayoutAccountSelection = payoutAccountSelectionAfterFieldChange(
       payoutAccountSelection,
       key,
