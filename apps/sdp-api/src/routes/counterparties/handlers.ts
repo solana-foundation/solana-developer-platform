@@ -6,6 +6,7 @@ import {
   type Counterparty,
   type CounterpartyFieldOptionsResponse,
   type CounterpartyResponse,
+  getCryptoRailAssetLabel,
   isCountryCode,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
@@ -32,7 +33,6 @@ import { rampRuntime } from "@/routes/payments/context";
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
-  requireCryptoRail,
 } from "@/routes/payments/handlers/ramps";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
@@ -296,7 +296,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       {
         direction: query.data.direction,
         providerData: counterparty.provider_data,
-        cryptoToken: query.data.cryptoToken,
+        cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
         fiatCurrency: query.data.fiatCurrency,
         destinationWalletAddress,
         ...(providerAccount === null
@@ -312,10 +312,10 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     {
       direction: query.data.direction,
       providerData: counterparty.provider_data,
-      cryptoToken: query.data.cryptoToken,
+      cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
       fiatCurrency: query.data.fiatCurrency,
       ...(query.data.provider === "lightspark"
-        ? { cryptoRail: requireCryptoRail(query.data.cryptoToken), payoutAccounts }
+        ? { cryptoRail: query.data.assetRail, payoutAccounts }
         : {}),
       ...(providerAccount === null
         ? {}
@@ -376,10 +376,10 @@ export const submitCounterpartyRequirements = async (
     {
       direction: input.direction,
       providerData: counterparty.provider_data,
-      ...("cryptoToken" in input ? { cryptoToken: input.cryptoToken } : {}),
+      ...("assetRail" in input ? { cryptoToken: getCryptoRailAssetLabel(input.assetRail) } : {}),
       ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
       ...(input.provider === "lightspark" && input.direction === "offramp"
-        ? { cryptoRail: requireCryptoRail(input.cryptoToken) }
+        ? { cryptoRail: input.assetRail }
         : {}),
       ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
       ...(providerAccount === null

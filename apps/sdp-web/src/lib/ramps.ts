@@ -133,10 +133,6 @@ export function rampPairKey(pair: SelectedRampPair): string {
   return `${pair.fiatCurrency}:${pair.assetRail}`;
 }
 
-export function toRampCryptoToken(assetRail: SelectedRampPair["assetRail"]): string {
-  return assetRail.split(".")[0]?.toUpperCase() ?? assetRail.toUpperCase();
-}
-
 export function getRampProviderLabel(provider: RampProviderId): string {
   return RAMP_PROVIDER_OPTIONS.find((option) => option.id === provider)?.title ?? provider;
 }

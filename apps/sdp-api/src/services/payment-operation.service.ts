@@ -1,7 +1,14 @@
 import { getSolanaConfig, type RpcEnv } from "@sdp/rpc";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
-import { isWellKnownTokenSymbol, type Permission, SOL_MINT, wellKnownMint } from "@sdp/types";
+import {
+  type CryptoRailId,
+  getCryptoRailAssetLabel,
+  isWellKnownTokenSymbol,
+  type Permission,
+  SOL_MINT,
+  wellKnownMint,
+} from "@sdp/types";
 import { type Address, getI64Encoder, getU64Encoder } from "@solana/kit";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, walletNotFound } from "@/lib/errors";
@@ -116,20 +123,17 @@ export function normalizePaymentToken(token: string, env: RpcEnv): string {
 }
 
 /**
- * Resolves a quoted ramp crypto symbol to the mint recorded on the transfer
+ * Resolves a quoted ramp asset rail to the mint recorded on the transfer
  * row, keeping ramp rows on the same token-is-a-mint contract as every other
- * transfer. Ramp rails only quote well-known symbols, so an unresolvable
- * symbol is a corridor bug and fails loudly.
+ * transfer. The canonical rail is mapped to its well-known asset symbol at
+ * this boundary; unavailable cluster mints fail loudly.
  *
- * @param cryptoToken - The quoted crypto currency symbol, e.g. "USDC".
+ * @param assetRail - The canonical quoted crypto rail, e.g. "usdc.solana".
  * @param env - Worker env used to resolve the active cluster.
  * @returns The mint address for the active cluster.
  */
-export function rampTransferTokenMint(cryptoToken: string, env: RpcEnv): string {
-  const symbol = cryptoToken.trim().toUpperCase();
-  if (!isWellKnownTokenSymbol(symbol)) {
-    throw badRequest(`Unsupported ramp crypto token: ${cryptoToken}`);
-  }
+export function rampTransferTokenMint(assetRail: CryptoRailId, env: RpcEnv): string {
+  const symbol = getCryptoRailAssetLabel(assetRail);
   const cluster = getSolanaConfig(env).network;
   const mint = wellKnownMint(symbol, cluster);
   if (!mint) {

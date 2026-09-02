@@ -134,7 +134,7 @@ export function OnrampRail({
           : undefined
       }
       confirmSecondary={wizard.onTransactionStage && transferState.cancelable}
-      secondaryDisabled={wizard.isCanceling}
+      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
       hideSecondary={wizard.onTransactionStage && !transferState.cancelable}
       footerActions={
         transferState.terminal ? (

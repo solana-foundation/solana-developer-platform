@@ -1043,7 +1043,9 @@ export class BvnkRampClient implements RampProvider {
       throw internalError("BVNK off-ramp requires a provisioned wallet id.");
     }
     const config = readBvnkConfig(env, mode);
-    const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+    const { currency, network } = normalizeBvnkCurrencyAndNetwork(
+      getCryptoRailAssetLabel(input.assetRail)
+    );
     if (!isSolanaCryptoAsset(currency)) {
       throw internalError(`BVNK off-ramp returned unsupported SDP crypto asset: ${currency}`);
     }

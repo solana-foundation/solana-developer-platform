@@ -374,7 +374,7 @@ describe("Counterparties Routes", () => {
       const cp = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&cryptoToken=USDC&fiatCurrency=USD`,
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -474,7 +474,7 @@ describe("Counterparties Routes", () => {
       );
 
       const response = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -554,7 +554,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "lightspark",
             direction: "offramp",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             collectedData: { destinationCountry: "US", purposeOfPayment: "SELF" },
           }),
@@ -700,7 +700,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "bvnk",
             direction: "onramp",
-            cryptoToken: "USDC_SOLANA",
+            assetRail: "usdc.solana",
             destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
             fiatCurrency: "USD",
             collectedData: {

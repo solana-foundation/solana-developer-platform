@@ -1,6 +1,6 @@
 "use client";
 
-import { COUNTRIES, isCountryCode, type RampProviderId } from "@sdp/types";
+import { COUNTRIES, type CryptoRailId, isCountryCode, type RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
@@ -201,7 +201,7 @@ async function fetchCounterpartyRequirements(
   const params = new URLSearchParams({
     provider,
     direction,
-    cryptoToken: corridor.cryptoToken,
+    assetRail: corridor.assetRail,
     fiatCurrency: corridor.fiatCurrency,
   });
   if (direction === "onramp") {
@@ -228,7 +228,7 @@ async function fetchCounterpartyRequirements(
 }
 
 export interface AdvanceRequirementsPayload {
-  cryptoToken: string;
+  assetRail: CryptoRailId;
   destinationWallet: string;
   fiatCurrency: RampFiatCurrency;
 }
@@ -372,11 +372,14 @@ export function useCounterpartyRequirements(
     });
   };
 
-  // Reset collected answers when the counterparty/provider/currency changes by comparing
+  // Reset collected answers when any request-corridor field changes by comparing
   // the previous value during render (React's no-effect way to reset state on a change),
-  // so stale KYC or bank details never leak into a different provider's payload.
+  // so stale KYC or bank details never leak into a different corridor's payload and a
+  // pending onboarding never survives into one.
   const subjectKey =
-    params === null ? "" : `${params.counterpartyId}:${params.provider}:${params.fiatCurrency}`;
+    params === null
+      ? ""
+      : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.assetRail}:${params.fiatCurrency}:${params.destinationWallet}`;
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
   const [onboarding, setOnboarding] = useState<CounterpartyRequirements | null>(null);
   const [lastAdvancePayload, setLastAdvancePayload] = useState<AdvanceRequirementsPayload | null>(
@@ -400,7 +403,7 @@ export function useCounterpartyRequirements(
           params.counterpartyId,
           params.provider,
           params.direction,
-          params.cryptoToken,
+          params.assetRail,
           params.fiatCurrency,
           params.direction === "onramp" ? params.destinationWallet : "",
         ] as const)
@@ -410,13 +413,13 @@ export function useCounterpartyRequirements(
   // step list) can't flip out from under the user mid-flow.
   const { data, error, mutate } = useSWR(
     key,
-    ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
+    ([, counterpartyId, provider, direction, assetRail, fiatCurrency, destinationWallet]) =>
       fetchCounterpartyRequirements(
         counterpartyId,
         provider,
         direction,
         {
-          cryptoToken,
+          assetRail,
           fiatCurrency,
           destinationWallet,
         },
