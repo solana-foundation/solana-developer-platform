@@ -257,9 +257,9 @@ function requireDestinationCountry(collectedData: CollectedFieldData): CountryCo
 
 /**
  * Creates the Grid external payout account a new-account submission defines,
- * resuming an incomplete reservation for the same corridor and rail when one
- * exists. Completed accounts are never adopted — reusing one is an explicit
- * `providerAccountId` selection, not a side effect of submitting fields.
+ * always under a freshly minted platform identity. Completed accounts are never
+ * adopted — reusing one is an explicit `providerAccountId` selection, not a
+ * side effect of submitting fields.
  *
  * @param c - Request context for database and provider access.
  * @param input - Counterparty, project, customer, crypto rail, fiat currency, and collected payout data.
@@ -286,32 +286,24 @@ export async function ensureLightsparkPayoutAccount(
     input.collectedData
   );
   const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const accounts = await repository.listActiveExternalAccounts({
+  // Every submission mints a fresh pending identity — a stale same-rail pending
+  // row is never resumed. The provider converges on platformAccountId, so
+  // reusing a prior row's id could silently bind this submission to an account
+  // created from DIFFERENT bank details, and bank details are never persisted
+  // (store-nothing PII), so sameness cannot be proven. The trade is a possible
+  // duplicate provider-side account with identical details when a prior attempt
+  // succeeded remotely but failed to complete locally — benign, unlike a payout
+  // to the wrong account.
+  const pending = await repository.insertPendingExternalAccount({
     organizationId: input.counterparty.organization_id,
     projectId: input.projectId,
     counterpartyId: input.counterparty.id,
     provider: "lightspark",
+    providerCustomerReference: input.customer.customerId,
     fiatCurrency: input.fiatCurrency,
     destinationCountry,
+    paymentRail,
   });
-  const resumable = accounts.find(
-    (account) => account.payment_rail === paymentRail && account.external_account_reference === null
-  );
-  let pending: CounterpartyProviderAccountRow;
-  if (resumable !== undefined) {
-    pending = resumable;
-  } else {
-    pending = await repository.insertPendingExternalAccount({
-      organizationId: input.counterparty.organization_id,
-      projectId: input.projectId,
-      counterpartyId: input.counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: input.customer.customerId,
-      fiatCurrency: input.fiatCurrency,
-      destinationCountry,
-      paymentRail,
-    });
-  }
   const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
     rampRuntime(c),
     {

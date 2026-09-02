@@ -11,7 +11,7 @@ import type {
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
@@ -386,6 +386,11 @@ export function useCounterpartyRequirements(
     null
   );
   const [isAdvancing, setIsAdvancing] = useState(false);
+  // Live mirror of the active subject for in-flight async continuations: a poll
+  // response that lands after the corridor changed must not restore the
+  // abandoned corridor's onboarding or account selection.
+  const activeSubjectRef = useRef(subjectKey);
+  activeSubjectRef.current = subjectKey;
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
@@ -486,6 +491,7 @@ export function useCounterpartyRequirements(
       if (!lastAdvancePayload || !params?.provider) {
         return;
       }
+      const polledSubject = subjectKey;
       const result = await fetchCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
@@ -493,6 +499,9 @@ export function useCounterpartyRequirements(
         lastAdvancePayload,
         t
       );
+      if (activeSubjectRef.current !== polledSubject) {
+        return;
+      }
       setOnboarding(result);
       if (result.status === "ready") {
         const readyProviderAccountId =
