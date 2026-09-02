@@ -91,11 +91,13 @@ constant or reader in `@sdp/earn/providers/wisdomtree/connect.ts`:
 `WISDOMTREE_SMOKE_SIGNER`), never in CI. Run `surfpool start --no-tui`
 (mainnet fork), fund the throwaway signer via `surfnet_setAccount` /
 `surfnet_setTokenAccount` cheatcodes, and it proves against the REAL mint and
-hook: the subscription leg simulates cleanly, and an unverified wallet's
-redemption fails at the KYC stage (resolver refusal or on-chain hook
-rejection — the test accepts exactly those two). Last run 2026-08-28: all
-three passed; the redemption resolved fully and the hook program rejected it
-in simulation.
+hook: the subscription leg lands, an unverified wallet's redemption fails at
+the KYC stage, and a local round trip succeeds after cheatcodes install the
+exact non-transferable credential ATAs the live hook resolves. The two delayed
+transfer-agent settlements are explicit state transitions in that test; it
+does not claim to exercise the Connect API or WisdomTree's off-chain
+settlement implementation. Last run 2026-09-01: all 33 package tests passed,
+including the live-hook rejection and the emulated-settlement round trip.
 
 ## Not done, deliberately — the go-live checklist
 
@@ -103,7 +105,8 @@ in simulation.
   playbook's rule is flip LAST, in its own PR, after an end-to-end deposit —
   which needs real Connect credentials AND production vault-direct deposits
   (PRO-1703): WisdomTree is mainnet-only and their sandbox is Ethereum
-  Sepolia, so no sandbox E2E can exist.
+  Sepolia, so no official Solana sandbox E2E exists. The Surfpool round trip
+  proves the on-chain integration only; it does not clear this gate.
 - **Order-settlement tracking** (poll `GET /api/orders/*`, correlate with
   movements, surface "order in flight" between transfer finality and token
   settlement) — same expand-only schema question as Veda's queue
