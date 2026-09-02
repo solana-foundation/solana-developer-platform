@@ -1,11 +1,13 @@
 import { isVedaDepositMint } from "@sdp/types/veda-programs";
 import { type Address, address } from "@solana/kit";
 import { createVedaClient, VedaSdkError } from "@vedatech/svm-sdk";
+import { accountExists } from "./accounts";
 import { acceptPositiveAtMintScale, mintDecimals } from "./amounts";
 import { SdpVedaError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { readMintDecimals } from "./mint";
 import type { VedaClusterConfig } from "./programs";
+import { chargeAtaCreationRentTo, createdAtaAddressForMint } from "./rent";
 import { createVedaRpc } from "./rpc";
 import type {
   VedaDepositInput,
@@ -288,23 +290,42 @@ export async function buildVedaDepositPlan(
     throw mapVedaSdkError(cause, `Veda could not build a deposit for vault ${input.vault}`);
   }
 
+  // Read from the same live state used to build, never from a catalogue
+  // row: the API compares builder truth with catalogue metadata before
+  // signing, and both sides being catalogue-derived would make that
+  // comparison vacuous.
+  const shareMint = address(String(state.shareMint));
+
+  // The SDK's order and count preserved exactly — a Veda plan can carry
+  // `protectedInstructionGroups` requiring adjacency, and the rent rewrite
+  // swaps ONE ACCOUNT on the ATA creates without adding, dropping or
+  // reordering anything. The swap is the only way to honour `rentPayer` here:
+  // the SDK names the owner as every create's funding payer and offers no
+  // alternative (see ./rent.ts).
+  const instructions =
+    input.rentPayer === undefined || input.rentPayer === input.owner
+      ? [...plan.instructions]
+      : [...chargeAtaCreationRentTo([...plan.instructions], input.rentPayer)];
+
+  // Whether rent is actually charged is chain state, not plan shape: the
+  // create is idempotent, so only this read can say. The caller records the
+  // answer to refund the right party when the account closes (contract and
+  // pre-execution residual on `EarnVaultTransactionPlan.createsShareAccount`).
+  const shareAta = createdAtaAddressForMint(instructions, shareMint);
+  const createsShareAccount =
+    shareAta === undefined ? undefined : !(await accountExists(runtime.rpcUrl, shareAta));
+
   return assertPlanTargetsCluster(
     {
       cluster: config.cluster,
-      // The SDK's order preserved exactly. A Veda plan can carry
-      // `protectedInstructionGroups` requiring adjacency; keeping the list whole
-      // and unreordered is what honours that without having to interpret it.
-      instructions: [...plan.instructions],
+      instructions,
       lookupTables: [],
       assetIdentity: {
         depositTokenMint: asset.mint,
-        // Read from the same live state used to build, never from a catalogue
-        // row: the API compares builder truth with catalogue metadata before
-        // signing, and both sides being catalogue-derived would make that
-        // comparison vacuous.
-        shareMint: address(String(state.shareMint)),
+        shareMint,
       },
       accepted: { amount: amount.canonical, minSharesOut: minSharesOut.canonical },
+      ...(createsShareAccount === undefined ? {} : { createsShareAccount }),
     },
     config
   );
@@ -424,10 +445,19 @@ export async function buildVedaWithdrawPlan(
     );
   }
 
+  // Same rent rewrite as the deposit: an instant exit creates the owner's
+  // ASSET account idempotently when it is missing, and the SDK names the owner
+  // as its funding payer (see ./rent.ts). No share account is ever created on
+  // the way out, so there is no `createsShareAccount` to report.
+  const instructions =
+    input.rentPayer === undefined || input.rentPayer === input.owner
+      ? [...plan.instructions]
+      : [...chargeAtaCreationRentTo([...plan.instructions], input.rentPayer)];
+
   return assertPlanTargetsCluster(
     {
       cluster: config.cluster,
-      instructions: [...plan.instructions],
+      instructions,
       lookupTables: [],
       assetIdentity: {
         depositTokenMint: asset.mint,

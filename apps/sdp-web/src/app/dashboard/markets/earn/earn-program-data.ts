@@ -893,6 +893,12 @@ const earnVaultDepositPreviewEnvelopeSchema = z.object({
     sharesOut: z.string().regex(/^\d+(\.\d+)?$/),
     shareDecimals: z.number().int().min(0).max(38),
     blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    /**
+     * SDP intends to sponsor this movement's network fee and rent. Optional
+     * for deploy skew against an older API; absent renders wallet-pays copy,
+     * the safe prior. Swap-funded deposits force wallet-pays client-side.
+     */
+    feeSponsored: z.boolean().optional(),
   }),
 });
 
@@ -934,6 +940,8 @@ const earnVaultWithdrawalPreviewEnvelopeSchema = z.object({
     assetsOut: z.string().regex(/^\d+(\.\d+)?$/),
     assetDecimals: z.number().int().min(0).max(38),
     blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    /** Same sponsorship intent as the deposit preview; exits have no swap. */
+    feeSponsored: z.boolean().optional(),
   }),
 });
 

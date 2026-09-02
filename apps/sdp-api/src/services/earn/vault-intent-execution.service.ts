@@ -96,9 +96,11 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
       // retry middleware the caller is at fault (permanent), and would leak
       // SDP's sponsor funding state as a pollable signal. The detail is in the
       // log line above; the caller gets a retryable 5xx with no internals.
+      // "Network costs" rather than "fee": the sponsor also funds the rent of
+      // accounts a sponsored movement creates, and both shortfalls land here.
       if (simulation.fault === "sponsor") {
         throw internalError(
-          `Vault ${operation} simulation failed: SDP could not sponsor the network fee. Retry shortly`
+          `Vault ${operation} simulation failed: SDP could not sponsor the network costs. Retry shortly`
         );
       }
       // A blown floor is the CALLER's tolerance, not a fault: name it in their

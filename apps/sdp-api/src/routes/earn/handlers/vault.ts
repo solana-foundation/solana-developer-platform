@@ -33,6 +33,7 @@ import {
   notFound,
   walletNotFound,
 } from "@/lib/errors";
+import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import {
   buildEarnVaultDepositFingerprint,
   buildEarnVaultWithdrawalFingerprint,
@@ -52,6 +53,7 @@ import {
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
 import {
+  earnClusterFor,
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
@@ -179,6 +181,11 @@ export async function createEarnVaultDepositPreview(
     sharesOut: quote.sharesOut,
     shareDecimals: quote.shareDecimals,
     blockingIssues: quote.blockingIssues,
+    // Sponsorship INTENT, for honest fee copy on the confirm step — the same
+    // flag+cluster gate resolveVaultSponsorship applies at execution. A
+    // swap-funded deposit forces wallet-pays regardless; the swap choice lives
+    // client-side, so the client applies that override to the copy.
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment)),
   });
 }
 
@@ -1381,6 +1388,8 @@ export async function createEarnVaultWithdrawalPreview(
     assetsOut: quote.assetsOut,
     assetDecimals: quote.assetDecimals,
     blockingIssues: quote.blockingIssues,
+    // Same sponsorship intent as the deposit preview; exits have no swap leg.
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment)),
   });
 }
 

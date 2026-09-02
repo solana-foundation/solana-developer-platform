@@ -458,7 +458,13 @@ organization's own custody wallets.
     `describeVaultSimulationError` (services/earn/vault-simulation-error.ts),
     which turns recognized `TransactionError` variants into fee-mode-aware prose
     ("the wallet holds no SOL...") with the raw variant kept in parentheses for
-    log searches; unrecognized shapes fall back to the capped raw JSON. A
+    log searches; unrecognized shapes fall back to the capped raw JSON. Callers
+    holding simulation LOGS pass them too: a bare `Custom: 1` is refined from
+    the failing program's own log line into rent-shortfall prose naming the
+    missing SOL (sponsor-fault under sponsorship) or token-balance prose,
+    because the variant alone is the System program's "insufficient lamports",
+    the Token program's "insufficient funds" and every non-Anchor program's
+    first error code at once. A
     failure the helper attributes to SDP's fee sponsor surfaces as a retryable
     5xx (with no sponsor detail in the body), never a caller-fault 400.
   - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
@@ -537,6 +543,12 @@ organization's own custody wallets.
   quote). A vault that will not take the deposit answers 200 with
   `blockingIssues` in the provider's own words; an unusable amount maps through
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
+  The response also carries `feeSponsored` — sponsorship INTENT
+  (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
+  gate `resolveVaultSponsorship` applies at execution) — which the dashboard
+  uses for honest fee copy on the confirm step; a swap-funded deposit is
+  always wallet-pays and the client owns that override. The withdrawal
+  preview carries the same field.
   POST because the parameters are a body, like the custodial
   withdrawal-preview. See "Gate asymmetry" for why this preview alone carries
   money-in gates.

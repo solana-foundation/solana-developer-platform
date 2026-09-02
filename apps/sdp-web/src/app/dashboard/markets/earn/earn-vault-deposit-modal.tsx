@@ -146,6 +146,30 @@ function DepositQuoteSummaryRows({
   );
 }
 
+/**
+ * The confirm-step note. Names the actual fee payer: SDP when the quote says
+ * this movement is sponsored, the wallet otherwise — and a swap-funded deposit
+ * is always wallet-pays, whatever the quote said, because sponsorship refuses
+ * swap routes.
+ */
+function DepositConfirmNote({
+  quote,
+  swapActive,
+}: {
+  quote: VaultQuoteState<EarnVaultDepositPreview>;
+  swapActive: boolean;
+}) {
+  const t = useTranslations();
+  const sponsored = quote.kind === "quoted" && quote.preview.feeSponsored === true && !swapActive;
+  return (
+    <p id="earn-vault-deposit-note" className="mt-4 text-sm leading-6 text-secondary">
+      {sponsored
+        ? t("DashboardEarn.deposit.vaultConfirmNoteSponsored")
+        : t("DashboardEarn.deposit.vaultConfirmNote")}
+    </p>
+  );
+}
+
 /** Quote-state notices under the summary: loading, unavailable, or blocked. */
 function DepositQuoteNotices({ quote }: { quote: VaultQuoteState<EarnVaultDepositPreview> }) {
   const t = useTranslations();
@@ -1089,9 +1113,7 @@ export function EarnVaultDepositModal({
           />
         ) : null}
 
-        <p id="earn-vault-deposit-note" className="mt-4 text-sm leading-6 text-secondary">
-          {t("DashboardEarn.deposit.vaultConfirmNote")}
-        </p>
+        <DepositConfirmNote quote={quote} swapActive={swapActive} />
         {submitError ? (
           <p
             className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"

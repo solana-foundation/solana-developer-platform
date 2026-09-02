@@ -62,6 +62,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "This is above the last observed balance; the provider will verify it on submit.",
   "DashboardEarn.deposit.vaultConfirmNote":
     "The selected custody wallet signs the vault deposit transaction.",
+  "DashboardEarn.deposit.vaultConfirmNoteSponsored": "SDP covers the network fee.",
   "DashboardEarn.deposit.vaultSubmit": "Confirm deposit",
   "DashboardEarn.deposit.vaultSubmitting": "Submitting…",
   "DashboardEarn.deposit.vaultSubmitError": "The deposit could not be submitted.",
@@ -885,6 +886,48 @@ describe("slippage-floored providers", () => {
     await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
     return user;
   }
+
+  it("switches the confirm note to sponsored copy when the quote says SDP pays", async () => {
+    mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
+      kind: "quoted",
+      preview: {
+        strategyId: vedaStrategy.id,
+        sharesOut: "0.99999",
+        shareDecimals: 6,
+        blockingIssues: [],
+        feeSponsored: true,
+      },
+    });
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+
+    await screen.findByText("SDP covers the network fee.", undefined, { timeout: 3000 });
+    expect(
+      screen.queryByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeNull();
+  });
+
+  it("keeps the wallet-pays note while no quote claims sponsorship", async () => {
+    // `feeSponsored` absent (an older API, or sponsorship off) reads wallet-pays.
+    primeQuote("0.99999");
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    expect(
+      screen.getByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeTruthy();
+  });
 
   it("derives the floor from the LIVE quote, not the amount", async () => {
     // A rate the amount-arithmetic would get wrong: 1 USDC quotes 0.99999

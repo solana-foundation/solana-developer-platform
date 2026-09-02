@@ -807,6 +807,8 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
       assetsOut: "4.997",
       assetDecimals: 6,
       blockingIssues: [],
+      // Sponsorship is unset in this harness, so the intent reads wallet-pays.
+      feeSponsored: false,
     });
     expect(client.quoteVaultWithdrawal).toHaveBeenCalledWith(expect.anything(), {
       providerReference: VAULT,
