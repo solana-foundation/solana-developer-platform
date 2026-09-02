@@ -193,11 +193,11 @@ export function useRampWizard<TId extends string>(
     // the memo step is deferred — the memo-step advance fires it instead.
     // `maybeCreateQuote` is declared below; the callback only runs after
     // render, when every binding is initialized.
-    onReady: () => {
+    onReady: (providerAccountId) => {
       if (!stepPositionRef.current.isLast) {
         return;
       }
-      maybeCreateQuote();
+      maybeCreateQuote(providerAccountId);
     },
   });
 
@@ -269,7 +269,9 @@ export function useRampWizard<TId extends string>(
   const stepPositionRef = useRef({ isLast: false });
   stepPositionRef.current.isLast = isLastStep;
 
-  const createQuoteForCurrentSelection = async (): Promise<{
+  const createQuoteForCurrentSelection = async (
+    providerAccountId: string | null
+  ): Promise<{
     quote: PaymentRampQuote;
     transferId: string;
   } | null> => {
@@ -285,7 +287,7 @@ export function useRampWizard<TId extends string>(
         selectedRampPair,
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
         collectedData: requirements.collectedData,
-        selectedProviderAccountId: requirements.selectedProviderAccountId,
+        selectedProviderAccountId: providerAccountId,
         rampsMemo: memoRowsToRecord(memoRows),
       }),
       t
@@ -296,7 +298,7 @@ export function useRampWizard<TId extends string>(
 
   const refreshQuote = async () => {
     try {
-      await createQuoteForCurrentSelection();
+      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
     } catch (error) {
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
         description:
@@ -316,10 +318,10 @@ export function useRampWizard<TId extends string>(
   const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
   const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
   const quoteCreationAttempted = useRef(false);
-  const runQuoteCreation = async () => {
+  const runQuoteCreation = async (providerAccountId: string | null) => {
     setQuoteCreationRetrying(true);
     try {
-      await createQuoteForCurrentSelection();
+      await createQuoteForCurrentSelection(providerAccountId);
       setQuoteCreationError(null);
     } catch (error) {
       setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
@@ -327,13 +329,13 @@ export function useRampWizard<TId extends string>(
       setQuoteCreationRetrying(false);
     }
   };
-  const retryQuoteCreation = () => void runQuoteCreation();
-  const maybeCreateQuote = () => {
+  const retryQuoteCreation = () => void runQuoteCreation(requirements.selectedProviderAccountId);
+  const maybeCreateQuote = (providerAccountId: string | null) => {
     if (quoteCreationAttempted.current) {
       return;
     }
     quoteCreationAttempted.current = true;
-    void runQuoteCreation();
+    void runQuoteCreation(providerAccountId);
   };
 
   const advanceRequirementsAndProceed = async () => {
@@ -367,7 +369,7 @@ export function useRampWizard<TId extends string>(
       }
       setStepIndex((current) => current + 1);
       if (result.status === "ready" && stepIndex + 1 === steps.length - 1) {
-        maybeCreateQuote();
+        maybeCreateQuote(result.providerAccountId !== undefined ? result.providerAccountId : null);
       }
       toast.dismiss(toastId);
     } catch (error) {
@@ -404,7 +406,7 @@ export function useRampWizard<TId extends string>(
       requirements.onboarding !== null &&
       requirements.onboarding.status === "ready"
     ) {
-      maybeCreateQuote();
+      maybeCreateQuote(requirements.selectedProviderAccountId);
     }
   };
 

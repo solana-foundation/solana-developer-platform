@@ -237,7 +237,10 @@ async function advanceCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  payload: AdvanceRequirementsPayload & { collectedData: CollectedFieldData },
+  payload: AdvanceRequirementsPayload & {
+    collectedData: CollectedFieldData;
+    providerAccountId?: string;
+  },
   t: Translate
 ): Promise<CounterpartyRequirements> {
   const response = await fetch(
@@ -282,8 +285,12 @@ export interface CounterpartyRequirementsParams extends AdvanceRequirementsPaylo
   counterpartyId: string;
   provider: RampProviderId | null;
   direction: RampDirection;
-  /** Fires when onboarding reaches `ready` — on submit or when the status poll observes it. */
-  onReady?: () => void;
+  /**
+   * Fires when onboarding reaches `ready` — on submit or when the status poll
+   * observes it. Receives the payout account the advance resolved so the quote
+   * never depends on a not-yet-rendered selection state update.
+   */
+  onReady?: (providerAccountId: string | null) => void;
 }
 
 export interface CounterpartyRequirementsState {
@@ -430,7 +437,13 @@ export function useCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
         params.direction,
-        { ...payload, collectedData },
+        {
+          ...payload,
+          collectedData,
+          ...(selectedProviderAccountId === null
+            ? {}
+            : { providerAccountId: selectedProviderAccountId }),
+        },
         t
       );
       setOnboarding(result);
@@ -443,10 +456,12 @@ export function useCounterpartyRequirements(
         await mutate(result, { revalidate: false });
       }
       if (result.status === "ready") {
-        if (result.providerAccountId !== undefined) {
-          setPayoutAccountSelection({ kind: "existing", id: result.providerAccountId });
+        const readyProviderAccountId =
+          result.providerAccountId !== undefined ? result.providerAccountId : null;
+        if (readyProviderAccountId !== null) {
+          setPayoutAccountSelection({ kind: "existing", id: readyProviderAccountId });
         }
-        params.onReady?.();
+        params.onReady?.(readyProviderAccountId);
       }
       return result;
     } finally {
@@ -477,10 +492,12 @@ export function useCounterpartyRequirements(
       );
       setOnboarding(result);
       if (result.status === "ready") {
-        if (result.providerAccountId !== undefined) {
-          setPayoutAccountSelection({ kind: "existing", id: result.providerAccountId });
+        const readyProviderAccountId =
+          result.providerAccountId !== undefined ? result.providerAccountId : null;
+        if (readyProviderAccountId !== null) {
+          setPayoutAccountSelection({ kind: "existing", id: readyProviderAccountId });
         }
-        params.onReady?.();
+        params.onReady?.(readyProviderAccountId);
       }
     },
     { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }

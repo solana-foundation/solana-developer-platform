@@ -129,6 +129,7 @@ import {
   ensureLightsparkPayoutAccount,
   ensureLightsparkPurposeOfPayment,
   lightsparkProviderCustomerId,
+  requireLightsparkPayoutAccountById,
   selectLightsparkPayoutAccount,
 } from "./ramps/lightspark";
 import {
@@ -643,21 +644,34 @@ async function advanceLightsparkRequirements(
   if (!isCountryCode(collectedData.destinationCountry)) {
     throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
   }
-  const accounts = await repository.listActiveExternalAccounts({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "lightspark",
-    fiatCurrency: input.fiatCurrency,
-    destinationCountry: collectedData.destinationCountry,
-  });
-  const existing = selectLightsparkPayoutAccount(
-    accounts,
-    collectedData.paymentRails,
-    input.fiatCurrency,
-    collectedData.destinationCountry
-  );
-  if (existing !== null && existing.external_account_reference !== null) {
+  if (input.providerAccountId !== undefined) {
+    const selected = await requireLightsparkPayoutAccountById(c, {
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      providerAccountId: input.providerAccountId,
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry: collectedData.destinationCountry,
+    });
+    return readyCounterparty("lightspark", input.direction, selected.id);
+  }
+  if (collectedData.paymentRails === undefined) {
+    const accounts = await repository.listActiveExternalAccounts({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry: collectedData.destinationCountry,
+    });
+    const existing = selectLightsparkPayoutAccount(
+      accounts,
+      input.fiatCurrency,
+      collectedData.destinationCountry
+    );
+    if (existing === null || existing.external_account_reference === null) {
+      throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
+    }
     if (existing.provider_status === null) {
       throw badRequest("Lightspark payout account has no provider status yet.");
     }
@@ -689,9 +703,6 @@ async function advanceLightsparkRequirements(
     throw badRequest(
       `Lightspark payout account is not active yet (status: ${refreshed.status}). Retry once it is verified.`
     );
-  }
-  if (collectedData.paymentRails === undefined) {
-    throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
   }
   const account = await ensureLightsparkPayoutAccount(c, {
     counterparty: input.counterparty,
@@ -1180,32 +1191,18 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         });
         payoutAccount = selectLightsparkPayoutAccount(
           payoutAccounts,
-          undefined,
           input.fiatCurrency,
           input.destinationCountry
         );
       } else {
-        const selected = await accountsRepository.getExternalAccountById({
+        payoutAccount = await requireLightsparkPayoutAccountById(c, {
           organizationId: scope.auth.organizationId,
           projectId,
           counterpartyId: counterparty.id,
-          provider: "lightspark",
-          id: input.providerAccountId,
+          providerAccountId: input.providerAccountId,
+          fiatCurrency: input.fiatCurrency,
+          destinationCountry: input.destinationCountry,
         });
-        if (
-          selected === null ||
-          selected.status !== "active" ||
-          selected.fiat_currency !== input.fiatCurrency ||
-          selected.destination_country !== input.destinationCountry ||
-          selected.external_account_reference === null ||
-          selected.provider_status === null ||
-          !isLightsparkExternalAccountActive(selected.provider_status)
-        ) {
-          throw badRequest(
-            "providerAccountId does not reference an active lightspark payout account for this corridor."
-          );
-        }
-        payoutAccount = selected;
       }
       if (
         customerId === null ||

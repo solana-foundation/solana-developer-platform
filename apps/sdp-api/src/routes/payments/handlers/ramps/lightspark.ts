@@ -5,6 +5,7 @@ import {
   buildLightsparkIndividualInfo,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
+  isLightsparkExternalAccountActive,
   isLightsparkPurposeOfPayment,
   LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
   type LightsparkPurposeOfPayment,
@@ -174,17 +175,16 @@ interface PayoutAccountContext {
 }
 
 /**
- * Selects the reusable Lightspark payout account for a corridor.
+ * Selects the reusable Lightspark payout account for a corridor when no
+ * explicit account was chosen.
  *
  * @param accounts - Active external accounts for one payout corridor.
- * @param paymentRail - Requested payment rail, when supplied.
  * @param fiatCurrency - Fiat currency of the payout corridor.
  * @param destinationCountry - Destination country of the payout corridor.
- * @returns The reusable account, or null when the corridor has no active account.
+ * @returns The single reusable account, or null when the corridor has none.
  */
 export function selectLightsparkPayoutAccount(
   accounts: readonly CounterpartyProviderAccountRow[],
-  paymentRail: string | undefined,
   fiatCurrency: string,
   destinationCountry: CountryCode
 ): CounterpartyProviderAccountRow | null {
@@ -194,14 +194,51 @@ export function selectLightsparkPayoutAccount(
   if (accounts.length === 1) {
     return accounts[0];
   }
-  if (paymentRail === undefined) {
-    throw counterpartyExternalAccountAmbiguous("lightspark", fiatCurrency, destinationCountry);
+  throw counterpartyExternalAccountAmbiguous("lightspark", fiatCurrency, destinationCountry);
+}
+
+/**
+ * Loads an explicitly selected Lightspark payout account and verifies it is
+ * an active, provider-verified account for the requested corridor.
+ *
+ * @param c - Request context for database access.
+ * @param input - Tenant scope, corridor, and the selected provider account id.
+ * @returns The validated payout account row.
+ */
+export async function requireLightsparkPayoutAccountById(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string;
+    counterpartyId: string;
+    providerAccountId: string;
+    fiatCurrency: RampFiatCurrency;
+    destinationCountry: CountryCode;
   }
-  const matches = accounts.filter((account) => account.payment_rail === paymentRail);
-  if (matches.length !== 1) {
-    throw counterpartyExternalAccountAmbiguous("lightspark", fiatCurrency, destinationCountry);
+): Promise<CounterpartyProviderAccountRow> {
+  const selected = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getExternalAccountById({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    counterpartyId: input.counterpartyId,
+    provider: "lightspark",
+    id: input.providerAccountId,
+  });
+  if (
+    selected === null ||
+    selected.status !== "active" ||
+    selected.fiat_currency !== input.fiatCurrency ||
+    selected.destination_country !== input.destinationCountry ||
+    selected.external_account_reference === null ||
+    selected.provider_status === null ||
+    !isLightsparkExternalAccountActive(selected.provider_status)
+  ) {
+    throw badRequest(
+      "providerAccountId does not reference an active lightspark payout account for this corridor."
+    );
   }
-  return matches[0];
+  return selected;
 }
 
 /**
@@ -219,11 +256,14 @@ function requireDestinationCountry(collectedData: CollectedFieldData): CountryCo
 }
 
 /**
- * Resolves the Grid external payout account for one fiat/country corridor.
+ * Creates the Grid external payout account a new-account submission defines,
+ * resuming an incomplete reservation for the same corridor and rail when one
+ * exists. Completed accounts are never adopted — reusing one is an explicit
+ * `providerAccountId` selection, not a side effect of submitting fields.
  *
  * @param c - Request context for database and provider access.
  * @param input - Counterparty, project, customer, crypto rail, fiat currency, and collected payout data.
- * @returns The existing or newly completed Lightspark external account row.
+ * @returns The newly completed Lightspark external account row.
  */
 export async function ensureLightsparkPayoutAccount(
   c: AppContext,
@@ -234,6 +274,9 @@ export async function ensureLightsparkPayoutAccount(
   }
   const destinationCountry = requireDestinationCountry(input.collectedData);
   const paymentRail: string | undefined = input.collectedData.paymentRails;
+  if (paymentRail === undefined) {
+    throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
+  }
   const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
   const accounts = await repository.listActiveExternalAccounts({
     organizationId: input.counterparty.organization_id,
@@ -243,19 +286,13 @@ export async function ensureLightsparkPayoutAccount(
     fiatCurrency: input.fiatCurrency,
     destinationCountry,
   });
-  const existing = selectLightsparkPayoutAccount(
-    accounts,
-    paymentRail,
-    input.fiatCurrency,
-    destinationCountry
+  const resumable = accounts.find(
+    (account) => account.payment_rail === paymentRail && account.external_account_reference === null
   );
   let pending: CounterpartyProviderAccountRow;
-  if (existing !== null) {
-    pending = existing;
+  if (resumable !== undefined) {
+    pending = resumable;
   } else {
-    if (paymentRail === undefined) {
-      throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
-    }
     pending = await repository.insertPendingExternalAccount({
       organizationId: input.counterparty.organization_id,
       projectId: input.projectId,
@@ -266,9 +303,6 @@ export async function ensureLightsparkPayoutAccount(
       destinationCountry,
       paymentRail,
     });
-  }
-  if (pending.external_account_reference !== null) {
-    return pending;
   }
   const accountInfo = buildLightsparkAccountInfo(
     input.counterparty,
