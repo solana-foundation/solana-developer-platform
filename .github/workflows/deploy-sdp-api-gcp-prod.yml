@@ -381,8 +381,18 @@ jobs:
               --format='value(status.imageDigest)'
           )"
           expected_digest="${IMAGE##*@}"
-          if [[ "${revision_digest##*@}" != "${expected_digest}" ]]; then
-            echo "Candidate ${candidate_revision} resolved to ${revision_digest}, expected ${expected_digest}." >&2
+          accepted_digests="${expected_digest}"
+          registry_host="${IMAGE%%/*}"
+          repo_path="${IMAGE#*/}"; repo_path="${repo_path%@*}"
+          child_digests="$(
+            curl -fsS -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+              -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+              "https://${registry_host}/v2/${repo_path}/manifests/${expected_digest}" \
+              | jq -r '.manifests[]?.digest // empty'
+          )" || child_digests=""
+          accepted_digests="${accepted_digests}"$'\n'"${child_digests}"
+          if ! grep -qx "${revision_digest##*@}" <<<"${accepted_digests}"; then
+            echo "Candidate ${candidate_revision} resolved to ${revision_digest}, expected ${expected_digest} or one of its platform manifests." >&2
             exit 1
           fi
           echo "CANDIDATE_REVISION=${candidate_revision}" >> "${GITHUB_ENV}"

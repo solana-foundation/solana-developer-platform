@@ -190,6 +190,24 @@ test("merge mode skips the internal smoke gate but requires the caller's", () =>
   );
 });
 
+test("candidate identity accepts the index digest or its platform manifests", () => {
+  assert.match(
+    workflow,
+    /accepted_digests="\$\{expected_digest\}"/,
+    "the verified digest itself must stay accepted"
+  );
+  assert.match(
+    workflow,
+    /\.manifests\[\]\?\.digest/,
+    "multi-arch child manifests must be resolved from the index"
+  );
+  assert.match(
+    workflow,
+    /grep -qx "\$\{revision_digest##\*@\}" <<<"\$\{accepted_digests\}"/,
+    "the served digest must match the index or one of its children exactly"
+  );
+});
+
 test("rollback verification accepts release-tag and merge-to-main identities", () => {
   assert.match(
     workflow,
@@ -208,7 +226,7 @@ test("the orchestrator grants every permission the prod workflow requests", () =
     path.resolve(here, "../.github/workflows/deploy.yml"),
     "utf8"
   );
-  const permissionsBlock = workflow.match(/^permissions:\n((?:  [a-z-]+: [a-z-]+\n)+)/m);
+  const permissionsBlock = workflow.match(/^permissions:\n((?: {2}[a-z-]+: [a-z-]+\n)+)/m);
   assert.ok(permissionsBlock, "prod workflow must declare a top-level permissions block");
   const requested = permissionsBlock[1]
     .trim()
@@ -217,7 +235,7 @@ test("the orchestrator grants every permission the prod workflow requests", () =
     .filter(Boolean);
   assert.ok(requested.length >= 3, "expected at least contents, id-token, and packages grants");
   const callerJob = orchestrator.match(
-    /deploy-api-prod:[\s\S]*?permissions:\n((?:      [a-z-]+: [a-z-]+\n)+)/
+    /deploy-api-prod:[\s\S]*?permissions:\n((?: {6}[a-z-]+: [a-z-]+\n)+)/
   )[1];
   for (const grant of requested) {
     assert.ok(
