@@ -707,6 +707,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      providerAccountId: z.string().min(1).optional(),
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),

@@ -16,10 +16,16 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const withdrawFromVault = vi.hoisted(() => vi.fn());
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
+const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
+  vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
+);
 
 vi.mock("@/services/earn/vault-withdraw.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/vault-withdraw.service")>()),
   withdrawFromVault,
+}));
+vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
+  reconcileEarnVaultMovementReadThrough,
 }));
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
@@ -631,6 +637,10 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     };
     expect(body.data.withdrawal.movementId).toBe(recorded.movement.id);
     expect(body.data.withdrawal.signature).toBe(recorded.movement.signature);
+    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: recorded.movement.id })
+    );
   });
 
   it("serves one withdrawal for ?requestId=", async () => {
@@ -683,6 +693,7 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     });
 
     expect((await getWithdrawal(`/${recorded.movement.id}`)).status).toBe(404);
+    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
     expect((await getWithdrawal("?requestId=vw-sibling-key")).status).toBe(200);
     const page = (await (await getWithdrawal("?requestId=vw-sibling-key")).json()) as {
       data: { withdrawals: unknown[] };

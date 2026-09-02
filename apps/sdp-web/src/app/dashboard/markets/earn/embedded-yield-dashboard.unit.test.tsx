@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { EarnExternalWalletPositionSummary } from "@sdp/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -77,9 +77,9 @@ describe("EmbeddedYieldDashboard", () => {
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
 
-    expect(
-      screen.getByRole("link", { name: "Configure Embedded Yield" }).getAttribute("href")
-    ).toBe("/dashboard/markets/embedded-yield/configure");
+    expect(screen.getByRole("link", { name: "Set up Embedded Yield" }).getAttribute("href")).toBe(
+      "/dashboard/markets/embedded-yield/configure"
+    );
     expect(screen.getByText("USDC Core Yield")).toBeTruthy();
     expect(screen.getByText("1,250.42 USDC")).toBeTruthy();
   });
@@ -155,6 +155,26 @@ describe("EmbeddedYieldDashboard", () => {
     expect(screen.getByRole("status").textContent).toBe("");
   });
 
+  it("shows the current two-step setup flow without the removed UI builder", () => {
+    mocks.summary = {
+      walletCount: 0,
+      positionCount: 0,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+      totalsByStrategy: [],
+    };
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+
+    const progress = screen.getByRole("list", { name: "Embedded Yield setup progress" });
+    expect(within(progress).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(progress).getByText("Select a strategy")).toBeTruthy();
+    expect(within(progress).getByText("Integrate the API")).toBeTruthy();
+    expect(screen.queryByText("Preview UI")).toBeNull();
+  });
+
   it("keeps the last complete portfolio visible when a background refresh fails", () => {
     mocks.summary = {
       walletCount: 3,
@@ -169,7 +189,7 @@ describe("EmbeddedYieldDashboard", () => {
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
 
-    expect(screen.getByText("Choose a yield strategy your customers will see")).toBeTruthy();
+    expect(screen.getByText("Choose a yield strategy to integrate")).toBeTruthy();
     expect(screen.getByText(/Showing the last complete portfolio/)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Showing the last complete portfolio");
     expect(screen.queryByText("Customer portfolio unavailable")).toBeNull();
