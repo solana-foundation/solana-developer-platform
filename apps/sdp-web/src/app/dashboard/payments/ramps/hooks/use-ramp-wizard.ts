@@ -187,18 +187,6 @@ export function useRampWizard<TId extends string>(
     cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
     fiatCurrency: selectedRampPair.fiatCurrency,
     destinationWallet: selectedWallet?.walletId ?? "",
-    // Quote creation is event-driven: it fires the first time onboarding
-    // reaches ready (submit response or status poll), never from an effect.
-    // The quote embeds the memo, so readiness observed before the user passes
-    // the memo step is deferred — the memo-step advance fires it instead.
-    // `maybeCreateQuote` is declared below; the callback only runs after
-    // render, when every binding is initialized.
-    onReady: (providerAccountId) => {
-      if (!stepPositionRef.current.isLast) {
-        return;
-      }
-      maybeCreateQuote(providerAccountId);
-    },
   });
 
   const { mutate: mutateCounterparties } = useSWR(
@@ -264,10 +252,6 @@ export function useRampWizard<TId extends string>(
   ]);
 
   const isLastStep = stepIndex === steps.length - 1;
-  // Read by onReady, which fires from submit/poll closures — the ref always
-  // reflects the position of the render the user is actually on.
-  const stepPositionRef = useRef({ isLast: false });
-  stepPositionRef.current.isLast = isLastStep;
 
   const createQuoteForCurrentSelection = async (
     providerAccountId: string | null
@@ -338,6 +322,20 @@ export function useRampWizard<TId extends string>(
     void runQuoteCreation(providerAccountId);
   };
 
+  // Readiness observed by the status poll while the user sits on the transaction
+  // stage fires the deferred quote. Readiness is derived corridor-addressed data,
+  // so a stale corridor can never reach here; `maybeCreateQuote` still guarantees
+  // at most one quote per wizard instance. A genuine network side effect on data
+  // arrival — not derived state — hence the effect.
+  const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
+  const resolvedProviderAccountId = requirements.resolvedProviderAccountId;
+  useEffect(() => {
+    if (!isLastStep || onboardingStatus !== "ready") {
+      return;
+    }
+    maybeCreateQuote(resolvedProviderAccountId);
+  });
+
   const advanceRequirementsAndProceed = async () => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
       return;
@@ -353,12 +351,6 @@ export function useRampWizard<TId extends string>(
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);
-      if (result === null) {
-        // The corridor changed while the advance was in flight; the response
-        // was discarded, so the wizard stays put on the user's current inputs.
-        toast.dismiss(toastId);
-        return;
-      }
       if (result.status === "unsupported") {
         toast.error(result.reason, { id: toastId, position: "bottom-right" });
         return;
@@ -373,10 +365,9 @@ export function useRampWizard<TId extends string>(
         toast.dismiss(toastId);
         return;
       }
+      // Reaching the transaction stage with derived readiness fires the quote
+      // through the single readiness effect above.
       setStepIndex((current) => current + 1);
-      if (result.status === "ready" && stepIndex + 1 === steps.length - 1) {
-        maybeCreateQuote(result.providerAccountId !== undefined ? result.providerAccountId : null);
-      }
       toast.dismiss(toastId);
     } catch (error) {
       setHostedQuoteLoading(false);
@@ -403,17 +394,10 @@ export function useRampWizard<TId extends string>(
       toast.info(t("DashboardPayments.ramps.nextStepSoon"));
       return;
     }
+    // Leaving the memo (last input) step lands on the transaction stage; the
+    // readiness effect fires the deferred quote there, whether provisioning is
+    // already ready or the status poll observes it later.
     setStepIndex((current) => current + 1);
-    // Leaving the memo (last input) step with provisioning already ready fires
-    // the deferred quote; when provisioning is still pending, onReady fires it
-    // once the poll observes ready on the transaction stage.
-    if (
-      stepIndex + 1 === steps.length - 1 &&
-      requirements.onboarding !== null &&
-      requirements.onboarding.status === "ready"
-    ) {
-      maybeCreateQuote(requirements.selectedProviderAccountId);
-    }
   };
 
   const finish = () => {
