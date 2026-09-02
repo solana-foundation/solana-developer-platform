@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import type { EarnStrategy, SdpEnvironment, SolanaCluster } from "@sdp/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -90,7 +91,8 @@ describe("EarnIntegrationGuide", () => {
     kamino: { entitled: true, configured: true, enabled: true },
   } as const;
 
-  it("renders the sectioned server-side guide with the real B2B2C contract", () => {
+  it("renders a compact step-by-step guide with the real B2B2C contract", async () => {
+    const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide
         earnHref="/dashboard/markets/embedded-yield"
@@ -102,23 +104,28 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText("Integrate Embedded Yield")).toBeTruthy();
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
 
-    // Four ordered sections, each a server-only slice of one module.
-    expect(screen.getByText("1 · Set up the server client")).toBeTruthy();
-    expect(screen.getByText("2 · Accept deposits")).toBeTruthy();
-    expect(screen.getByText("3 · Show balance, earnings, and activity")).toBeTruthy();
-    expect(screen.getByText("4 · Withdraw")).toBeTruthy();
-    expect(screen.getAllByText("Server only")).toHaveLength(4);
-    expect(screen.getAllByText("server/embedded-yield.ts")).toHaveLength(4);
-    expect(screen.getByText("Keep the API key server-side")).toBeTruthy();
+    // All four steps stay visible as navigation, while only the active code
+    // slice renders. This keeps the whole flow findable without a long page.
+    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw"];
+    const serverFlow = screen.getByLabelText("Server flow");
+    expect(within(serverFlow).getAllByRole("button")).toHaveLength(4);
+    expect(
+      within(serverFlow).getByRole("button", { name: "Client" }).getAttribute("aria-pressed")
+    ).toBe("true");
+    expect(screen.getAllByText("server/embedded-yield.ts")).toHaveLength(1);
+    expect(screen.getByText("Keep SDP_API_KEY on your server, never in the client.")).toBeTruthy();
 
     // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
     // transaction, the customer's wallet signs, submit the signed bytes. The
     // treasury route (vault-deposits + custodyWalletId) must not appear here —
     // a B2B2C partner cannot name a custody wallet.
-    const code = screen
-      .getAllByRole("figure")
-      .map((figure) => figure.textContent ?? "")
-      .join("\n");
+    const snippets: string[] = [];
+    for (const navigationName of navigationNames) {
+      await user.click(within(serverFlow).getByRole("button", { name: navigationName }));
+      expect(screen.getAllByRole("figure")).toHaveLength(1);
+      snippets.push(screen.getByRole("figure").textContent ?? "");
+    }
+    const code = snippets.join("\n");
     expect(code).toContain("/v1/earn/external-wallet/deposit-transactions");
     expect(code).toContain("/v1/earn/external-wallet/deposits");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
@@ -151,7 +158,8 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("cursor did not advance");
   });
 
-  it("renders a mainnet vault as a sandbox preview with an explicit warning", () => {
+  it("renders a mainnet vault as a sandbox preview with an explicit warning", async () => {
+    const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide
         configureHref="/dashboard/markets/embedded-yield/configure"
@@ -166,6 +174,7 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getAllByText("Kamino JLP Vault").length).toBeGreaterThan(0);
     expect(screen.getByText("Mainnet vault preview")).toBeTruthy();
     expect(screen.getByText(/Production project is required/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Deposits" }));
     expect(screen.getByText(/strategyId: "earn_strategy_mainnet"/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Change strategy" }).getAttribute("href")).toBe(
       "/dashboard/markets/embedded-yield/configure?cluster=mainnet-beta"

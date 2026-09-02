@@ -96,7 +96,12 @@ export interface PayoutRequirementTree {
 
 // TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
 export type CounterpartyRequirements = { direction: RampDirection } & (
-  | { provider: RampProviderId; status: "ready" }
+  | {
+      provider: RampProviderId;
+      status: "ready";
+      /** Payout account resolved by an offramp requirements advance, for explicit quote selection. */
+      providerAccountId?: string;
+    }
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }
   | { provider: "lightspark"; status: "onboarding_not_started" }

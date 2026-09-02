@@ -8,15 +8,10 @@ import {
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
 
-const WALLETS_PATH = "/dashboard/integrations/private-channels/wallets";
-// The Overview's private-balance panel reflects verified-wallet balances too.
-const OVERVIEW_PATH = "/dashboard/integrations/private-channels/overview";
-const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
+const PRIVATE_CHANNELS_PATH = "/dashboard/integrations/private-channels";
 
 function revalidateWalletViews(): void {
-  revalidatePath(WALLETS_PATH);
-  revalidatePath(OVERVIEW_PATH);
-  revalidatePath(PRINCIPALS_PATH);
+  revalidatePath(PRIVATE_CHANNELS_PATH, "layout");
 }
 
 export type VerifyWalletResult =

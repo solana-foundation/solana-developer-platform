@@ -32,6 +32,9 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     ],
                     "type": "string",
                   },
+                  "providerAccountId": {
+                    "type": "string",
+                  },
                   "status": {
                     "enum": [
                       "ready",

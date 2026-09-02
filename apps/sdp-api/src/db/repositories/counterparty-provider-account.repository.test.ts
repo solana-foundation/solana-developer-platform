@@ -114,8 +114,8 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     ).toMatchObject({ id: customer.id });
   });
 
-  it("allows multiple active accounts for the same corridor and rail", async () => {
-    const counterparty = await seedCounterparty("cpacc_multiple_active_accounts");
+  it("allows at most one live reservation per corridor and rail", async () => {
+    const counterparty = await seedCounterparty("cpacc_reservation_unique");
     const customer = await repository.upsertProviderAccount({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -135,19 +135,35 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     } as const;
 
     const first = await repository.insertPendingExternalAccount(input);
-    const second = await repository.insertPendingExternalAccount(input);
+    await expect(repository.insertPendingExternalAccount(input)).rejects.toMatchObject({
+      code: "23505",
+    });
 
-    expect(second.id).not.toBe(first.id);
-    expect(
-      await repository.listActiveExternalAccounts({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: counterparty.id,
-        provider: "lightspark",
-        fiatCurrency: "USD",
-        destinationCountry: "US",
-      })
-    ).toHaveLength(2);
+    // Archiving the live reservation frees the corridor for a fresh one, and a
+    // COMPLETED account does not block new reservations — only an in-flight one.
+    const archived = await repository.archiveExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: first.id,
+    });
+    expect(archived?.status).toBe("archived");
+    const replacementReservation = await repository.insertPendingExternalAccount(input);
+    const completedReplacement = await repository.completeExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: replacementReservation.id,
+      externalAccountReference: "ExternalAccount:reservation_unique",
+      providerStatus: "ACTIVE",
+    });
+    expect(completedReplacement?.external_account_reference).toBe(
+      "ExternalAccount:reservation_unique"
+    );
+    const afterCompletion = await repository.insertPendingExternalAccount(input);
+    expect(afterCompletion.id).not.toBe(replacementReservation.id);
   });
 
   it("scopes external account lookup to the parent counterparty", async () => {

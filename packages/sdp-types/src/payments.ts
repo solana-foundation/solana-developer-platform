@@ -912,6 +912,7 @@ export type PaymentOfframpQuoteRequest =
       provider: "lightspark";
       fiatCurrency: RampFiatCurrency;
       destinationCountry: CountryCode;
+      providerAccountId?: string;
     })
   | (PaymentOfframpQuoteRequestBase & {
       provider: Exclude<RampProviderId, "lightspark">;

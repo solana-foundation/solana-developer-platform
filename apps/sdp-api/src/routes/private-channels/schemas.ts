@@ -17,6 +17,12 @@ export type ConnectPrivateChannelInstanceInput = z.infer<
   typeof connectPrivateChannelInstanceSchema
 >;
 
+/** Reconfigure the active instance only when the URL still names that exact row. */
+export const updatePrivateChannelInstanceSchema = z.intersection(
+  privateChannelInstanceInputSchema,
+  z.object({ instanceId: z.string().min(1) })
+);
+
 /** Body for `POST /probe`: SPC-owned URLs; Solana RPC comes from the project. */
 export const probeConnectionSchema = privateChannelInstanceInputSchema
   .pick({

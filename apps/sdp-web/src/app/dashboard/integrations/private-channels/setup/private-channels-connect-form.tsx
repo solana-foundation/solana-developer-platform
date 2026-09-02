@@ -14,16 +14,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
-import { PRIVATE_CHANNELS_INTEGRATION_PATH } from "../private-channels-routes";
+import {
+  PRIVATE_CHANNELS_INTEGRATION_PATH,
+  privateChannelsInstancePath,
+} from "../private-channels-routes";
 import {
   type ConnectPrivateChannelResult,
   connectPrivateChannelAction,
-  deletePrivateChannelAction,
-  disconnectPrivateChannelAction,
   type FieldErrors,
   testConnectionAction,
+  updatePrivateChannelAction,
 } from "./actions";
 import { isProjectRpcProbeFailure } from "./probe-error";
 
@@ -39,18 +41,14 @@ const FORM_PREFILL: FormValues = {
 
 interface Props {
   initialInstance: PrivateChannelInstance | null;
+  /** Keep embedded connection management on its current page after reactivation. */
+  stayOnPageAfterConnect?: boolean;
+  /** First-time setup can probe independently; existing connections probe when saved. */
+  showTestAction?: boolean;
+  /** Match the full-page Payments creation flow rather than an embedded card or modal. */
+  pageLayout?: boolean;
+  onSuccess?: () => void;
 }
-
-const GATEWAY_DOT: Record<"ready" | "degraded" | "unreachable", string> = {
-  ready: "bg-status-success-text",
-  degraded: "bg-status-warning-text",
-  unreachable: "bg-status-error-text",
-};
-const GATEWAY_TEXT: Record<"ready" | "degraded" | "unreachable", string> = {
-  ready: "text-status-success-text",
-  degraded: "text-status-warning-text",
-  unreachable: "text-status-error-text",
-};
 
 function toValues(instance: PrivateChannelInstance | null): FormValues {
   if (!instance) return { ...FORM_PREFILL };
@@ -68,10 +66,7 @@ interface ConnectFormState {
   values: FormValues;
   errors: FieldErrors;
   formError: string | null;
-  gatewayResult: ConnectionProbeResult["gateway"] | null;
-  authResult: ConnectionProbeResult["auth"] | null;
   reactivatePrompt: { existing: PrivateChannelInstance; message: string } | null;
-  showDelete: boolean;
 }
 
 type ConnectFormUpdate =
@@ -83,49 +78,38 @@ function connectFormReducer(state: ConnectFormState, update: ConnectFormUpdate):
   return { ...state, ...patch };
 }
 
-export function PrivateChannelsConnectForm({ initialInstance }: Props) {
+export function PrivateChannelsConnectForm({
+  initialInstance,
+  stayOnPageAfterConnect = false,
+  showTestAction = true,
+  pageLayout = false,
+  onSuccess,
+}: Props) {
   const [state, updateState] = useReducer(connectFormReducer, {
     instance: initialInstance,
     values: toValues(initialInstance),
     errors: {},
     formError: null,
-    gatewayResult: null,
-    authResult: null,
     reactivatePrompt: null,
-    showDelete: false,
   });
   const [isTesting, startTesting] = useTransition();
   const [isConnecting, startConnecting] = useTransition();
-  const [isDisconnecting, startDisconnecting] = useTransition();
-  const [isDeleting, startDeleting] = useTransition();
+  const [isUpdating, startUpdating] = useTransition();
   const t = useTranslations();
   const router = useRouter();
-  const {
-    instance,
-    values,
-    errors,
-    formError,
-    gatewayResult,
-    authResult,
-    reactivatePrompt,
-    showDelete,
-  } = state;
+  const { instance, values, errors, formError, reactivatePrompt } = state;
 
-  const isLocked = instance?.isActive === true;
-  const busy = isTesting || isConnecting || isDisconnecting || isDeleting;
+  const initiallyConnected = initialInstance?.isActive === true;
+  const busy = isTesting || isConnecting || isUpdating;
 
   const parsed = useMemo(() => privateChannelInstanceInputSchema.safeParse(values), [values]);
   const isValid = parsed.success;
 
   const update = <K extends keyof FormValues>(key: K, value: FormValues[K]) => {
-    if (isLocked) return;
-    // Any edit invalidates the last probe result.
     updateState((current) => ({
       values: { ...current.values, [key]: value },
       errors: { ...current.errors, [key]: undefined },
       formError: null,
-      gatewayResult: null,
-      authResult: null,
     }));
   };
 
@@ -136,12 +120,15 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         values: toValues(result.instance),
         errors: {},
         formError: null,
-        gatewayResult: null,
-        authResult: null,
       });
       toast.success(t("DashboardPrivateChannels.instance.connectSuccess"));
-      // Match other integrations: successful setup returns to the provider detail.
-      router.push(PRIVATE_CHANNELS_INTEGRATION_PATH);
+      onSuccess?.();
+      if (stayOnPageAfterConnect) {
+        router.refresh();
+      } else {
+        // Match other integrations: successful setup returns to the provider detail.
+        router.push(privateChannelsInstancePath(result.instance.id));
+      }
       return;
     }
     if (result.kind === "validation") {
@@ -149,11 +136,7 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       return;
     }
     if (result.kind === "probe") {
-      updateState({
-        gatewayResult: result.probe.gateway,
-        authResult: result.probe.auth,
-        formError: probeFailureMessage(t, result.probe),
-      });
+      updateState({ formError: probeFailureMessage(t, result.probe) });
       return;
     }
     if (result.kind === "requires-reactivate-confirmation") {
@@ -190,20 +173,14 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         return;
       }
       if (result.kind === "request-error") {
-        updateState({
-          errors: {},
-          gatewayResult: null,
-          authResult: null,
-          formError: t("DashboardPrivateChannels.instance.connectionRequestFailed"),
-        });
+        toast.error(t("DashboardPrivateChannels.instance.connectionRequestFailed"));
         return;
       }
-      updateState({
-        errors: {},
-        gatewayResult: result.probe.gateway,
-        authResult: result.probe.auth,
-        formError: result.probe.ok ? null : probeFailureMessage(t, result.probe),
-      });
+      if (result.probe.ok) {
+        toast.success(t("DashboardPrivateChannels.instance.connectionTestSuccess"));
+      } else {
+        toast.error(probeFailureMessage(t, result.probe));
+      }
     });
   };
 
@@ -214,49 +191,45 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
     });
   };
 
-  const runDisconnect = () => {
-    startDisconnecting(async () => {
-      const result = await disconnectPrivateChannelAction();
-      if (result.ok) {
-        updateState({ instance: result.instance, values: toValues(result.instance) });
-        toast.success(t("DashboardPrivateChannels.instance.disconnectSuccess"));
-      } else {
-        toast.error(result.message);
-      }
-    });
-  };
-
-  const runDelete = () => {
-    startDeleting(async () => {
-      const result = await deletePrivateChannelAction();
+  const runUpdate = () => {
+    if (!instance) return;
+    startUpdating(async () => {
+      const result = await updatePrivateChannelAction({ ...values, instanceId: instance.id });
       if (result.ok) {
         updateState({
-          instance: null,
-          values: { ...FORM_PREFILL },
-          gatewayResult: null,
-          authResult: null,
+          instance: result.instance,
+          values: toValues(result.instance),
+          errors: {},
           formError: null,
-          showDelete: false,
         });
-        toast.success(t("DashboardPrivateChannels.instance.deleteSuccess"));
-        router.push(PRIVATE_CHANNELS_INTEGRATION_PATH);
-      } else {
-        toast.error(result.message);
+        toast.success(t("DashboardPrivateChannels.instance.updateSuccess"));
+        onSuccess?.();
+        router.refresh();
+        return;
       }
+      if (result.kind === "validation") {
+        updateState({ errors: result.fieldErrors, formError: null });
+        return;
+      }
+      if (result.kind === "probe") {
+        updateState({ formError: probeFailureMessage(t, result.probe) });
+        return;
+      }
+      updateState({ formError: result.message });
     });
   };
 
-  return (
-    <div className="grid gap-6">
+  const fields = (
+    <>
       <UrlField
         id="gateway-url"
         label={t("DashboardPrivateChannels.instance.gatewayUrl")}
         placeholder={t("DashboardPrivateChannels.instance.gatewayPlaceholder")}
         value={values.gatewayUrl}
         error={errors.gatewayUrl}
-        disabled={isLocked}
+        disabled={busy}
+        large={pageLayout}
         onChange={(v) => update("gatewayUrl", v)}
-        status={gatewayStatus(t, gatewayResult)}
       />
 
       <UrlField
@@ -265,9 +238,9 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         placeholder={t("DashboardPrivateChannels.instance.authPlaceholder")}
         value={values.authUrl}
         error={errors.authUrl}
-        disabled={isLocked}
+        disabled={busy}
+        large={pageLayout}
         onChange={(v) => update("authUrl", v)}
-        status={authStatus(t, authResult)}
       />
 
       <div className="grid gap-2 sm:grid-cols-2">
@@ -276,7 +249,8 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
           label={t("DashboardPrivateChannels.instance.escrowProgramId")}
           value={values.escrowProgramId}
           error={errors.escrowProgramId}
-          disabled={isLocked}
+          disabled={busy}
+          large={pageLayout}
           onChange={(v) => update("escrowProgramId", v)}
         />
         <TextField
@@ -284,7 +258,8 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
           label={t("DashboardPrivateChannels.instance.withdrawProgramId")}
           value={values.withdrawProgramId}
           error={errors.withdrawProgramId}
-          disabled={isLocked}
+          disabled={busy}
+          large={pageLayout}
           onChange={(v) => update("withdrawProgramId", v)}
         />
       </div>
@@ -294,7 +269,8 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         label={t("DashboardPrivateChannels.instance.escrowInstanceAddr")}
         value={values.escrowInstanceAddr}
         error={errors.escrowInstanceAddr}
-        disabled={isLocked}
+        disabled={busy}
+        large={pageLayout}
         onChange={(v) => update("escrowInstanceAddr", v)}
       />
 
@@ -306,44 +282,42 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
           {formError}
         </div>
       ) : null}
+    </>
+  );
 
-      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+  const actionButtons = (
+    <>
+      {showTestAction ? (
         <Button
           type="button"
           variant="secondary"
           className="min-w-36"
           onClick={runTest}
-          disabled={busy || isLocked}
+          disabled={busy}
         >
           {isTesting
             ? t("DashboardPrivateChannels.instance.testing")
             : t("DashboardPrivateChannels.instance.testConnection")}
         </Button>
-        {isLocked ? (
-          <>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => updateState({ showDelete: true })}
-              disabled={busy}
-            >
-              {t("DashboardPrivateChannels.instance.delete")}
-            </Button>
-            <Button type="button" onClick={runDisconnect} disabled={busy}>
-              {isDisconnecting
-                ? t("DashboardPrivateChannels.instance.disconnecting")
-                : t("DashboardPrivateChannels.instance.disconnect")}
-            </Button>
-          </>
-        ) : (
-          <Button type="button" onClick={() => runConnect(false)} disabled={!isValid || busy}>
-            {isConnecting
-              ? t("DashboardPrivateChannels.instance.connecting")
-              : t("DashboardPrivateChannels.instance.connect")}
-          </Button>
-        )}
-      </div>
+      ) : null}
+      {initiallyConnected ? (
+        <Button type="button" onClick={runUpdate} disabled={!isValid || busy}>
+          {isUpdating
+            ? t("DashboardPrivateChannels.instance.updating")
+            : t("DashboardPrivateChannels.instance.update")}
+        </Button>
+      ) : (
+        <Button type="button" onClick={() => runConnect(false)} disabled={!isValid || busy}>
+          {isConnecting
+            ? t("DashboardPrivateChannels.instance.connecting")
+            : t("DashboardPrivateChannels.instance.connect")}
+        </Button>
+      )}
+    </>
+  );
 
+  const confirmationDialogs = (
+    <>
       <ReactivateConfirmationDialog
         prompt={reactivatePrompt}
         working={isConnecting}
@@ -353,14 +327,51 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
           runConnect(true);
         }}
       />
+    </>
+  );
 
-      <DeleteConfirmationDialog
-        isOpen={showDelete}
-        working={isDeleting}
-        gatewayUrl={instance?.gatewayUrl ?? ""}
-        onCancel={() => updateState({ showDelete: false })}
-        onConfirm={runDelete}
-      />
+  if (pageLayout) {
+    const cancelPath = instance
+      ? privateChannelsInstancePath(instance.id)
+      : PRIVATE_CHANNELS_INTEGRATION_PATH;
+
+    return (
+      <WizardFrame
+        steps={[
+          {
+            label: t("DashboardPrivateChannels.instance.setupStepLabel"),
+            title: t("DashboardPrivateChannels.instance.setupDetailsTitle"),
+          },
+        ]}
+        currentStep={0}
+        progressLabel={t("DashboardPrivateChannels.instance.setupStepProgress")}
+        description={t("DashboardPrivateChannels.instance.setupDetailsDescription")}
+        maxWidthClassName="max-w-3xl"
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => router.push(cancelPath)}
+              disabled={busy}
+            >
+              {t("DashboardPrivateChannels.common.cancel")}
+            </Button>
+            <div className="flex items-center gap-3">{actionButtons}</div>
+          </div>
+        }
+      >
+        <div className="grid gap-6 px-1 py-1">{fields}</div>
+        {confirmationDialogs}
+      </WizardFrame>
+    );
+  }
+
+  return (
+    <div className="grid gap-6">
+      {fields}
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">{actionButtons}</div>
+      {confirmationDialogs}
     </div>
   );
 }
@@ -373,75 +384,6 @@ function probeFailureMessage(t: Translate, probe: ConnectionProbeResult): string
     : t("DashboardPrivateChannels.instance.connectionTestFailed");
 }
 
-function gatewayStatus(
-  t: Translate,
-  gatewayResult: ConnectionProbeResult["gateway"] | null
-): StatusIndicator | null {
-  if (!gatewayResult) return null;
-  return {
-    label:
-      gatewayResult.status === "ready"
-        ? t("DashboardPrivateChannels.instance.statusReady")
-        : gatewayResult.status === "degraded"
-          ? t("DashboardPrivateChannels.instance.statusDegraded")
-          : t("DashboardPrivateChannels.instance.statusUnreachable"),
-    dotClass: GATEWAY_DOT[gatewayResult.status],
-    textClass: GATEWAY_TEXT[gatewayResult.status],
-    detail:
-      gatewayResult.status === "ready"
-        ? t("DashboardPrivateChannels.instance.latency", { ms: gatewayResult.latencyMs })
-        : gatewayResult.status === "degraded"
-          ? t("DashboardPrivateChannels.instance.gatewayNotReady")
-          : undefined,
-  };
-}
-
-function authStatus(
-  t: Translate,
-  authResult: ConnectionProbeResult["auth"] | null
-): StatusIndicator | null {
-  if (!authResult) return null;
-  if (authResult.ok) {
-    return {
-      label: t("DashboardPrivateChannels.instance.statusReady"),
-      dotClass: GATEWAY_DOT.ready,
-      textClass: GATEWAY_TEXT.ready,
-      detail: t("DashboardPrivateChannels.instance.latency", { ms: authResult.latencyMs }),
-    };
-  }
-  return {
-    label: t("DashboardPrivateChannels.instance.statusFailed"),
-    dotClass: GATEWAY_DOT.unreachable,
-    textClass: GATEWAY_TEXT.unreachable,
-  };
-}
-
-interface StatusIndicator {
-  label: string;
-  dotClass: string;
-  textClass: string;
-  detail?: string;
-}
-
-function Status({ status }: { status?: StatusIndicator | null }) {
-  if (!status) return null;
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm",
-        status.textClass
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn("inline-block size-2 rounded-full", status.dotClass)}
-      />
-      <span>{status.label}</span>
-      {status.detail ? <span className="text-secondary">· {status.detail}</span> : null}
-    </span>
-  );
-}
-
 function UrlField(props: {
   id: string;
   label: string;
@@ -449,15 +391,12 @@ function UrlField(props: {
   value: string;
   error?: string;
   disabled?: boolean;
+  large?: boolean;
   onChange: (v: string) => void;
-  status?: StatusIndicator | null;
 }) {
   return (
     <div className="grid gap-2">
-      <div className="flex min-h-5 items-center justify-between gap-2">
-        <Label htmlFor={props.id}>{props.label}</Label>
-        <Status status={props.status} />
-      </div>
+      <Label htmlFor={props.id}>{props.label}</Label>
       <Input
         id={props.id}
         name={props.id}
@@ -468,6 +407,7 @@ function UrlField(props: {
         spellCheck={false}
         disabled={props.disabled}
         error={props.error}
+        size={props.large ? "xl" : "lg"}
       />
     </div>
   );
@@ -479,6 +419,7 @@ function TextField(props: {
   value: string;
   error?: string;
   disabled?: boolean;
+  large?: boolean;
   onChange: (v: string) => void;
 }) {
   return (
@@ -493,6 +434,7 @@ function TextField(props: {
         spellCheck={false}
         disabled={props.disabled}
         error={props.error}
+        size={props.large ? "xl" : "lg"}
       />
     </div>
   );
@@ -548,7 +490,7 @@ function ReactivateConfirmationDialog(props: {
   );
 }
 
-function DeleteConfirmationDialog(props: {
+export function DeleteConfirmationDialog(props: {
   isOpen: boolean;
   working: boolean;
   gatewayUrl: string;

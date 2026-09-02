@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEarnVaultDeposit,
   earnProgramsRefreshInterval,
+  earnVaultMovementRefreshInterval,
   fetchEarnExternalWalletPositionSummary,
   fetchEarnExternalWalletPositions,
   fetchEarnProgramDeposits,
@@ -65,6 +66,26 @@ function stubCatalogue(total: number, pageSize = 100) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("earnVaultMovementRefreshInterval", () => {
+  it("polls quickly after submission and backs off without stopping early", () => {
+    const startedAt = 1_000;
+
+    expect(
+      earnVaultMovementRefreshInterval({ settled: false, startedAt, now: startedAt + 14_999 })
+    ).toBe(1_000);
+    expect(
+      earnVaultMovementRefreshInterval({ settled: false, startedAt, now: startedAt + 15_000 })
+    ).toBe(2_500);
+    expect(
+      earnVaultMovementRefreshInterval({ settled: false, startedAt, now: startedAt + 60_000 })
+    ).toBe(5_000);
+  });
+
+  it("stops polling only after the movement reaches a terminal state", () => {
+    expect(earnVaultMovementRefreshInterval({ settled: true, startedAt: 0, now: 120_000 })).toBe(0);
+  });
 });
 
 describe("fetchEarnStrategies", () => {
