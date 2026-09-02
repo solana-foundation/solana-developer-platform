@@ -443,6 +443,9 @@ export function useCounterpartyRequirements(
         await mutate(result, { revalidate: false });
       }
       if (result.status === "ready") {
+        if (result.providerAccountId !== undefined) {
+          setPayoutAccountSelection({ kind: "existing", id: result.providerAccountId });
+        }
         params.onReady?.();
       }
       return result;
@@ -474,6 +477,9 @@ export function useCounterpartyRequirements(
       );
       setOnboarding(result);
       if (result.status === "ready") {
+        if (result.providerAccountId !== undefined) {
+          setPayoutAccountSelection({ kind: "existing", id: result.providerAccountId });
+        }
         params.onReady?.();
       }
     },

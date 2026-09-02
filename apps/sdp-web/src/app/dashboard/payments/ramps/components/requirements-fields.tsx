@@ -126,6 +126,9 @@ function PayoutAccountChooser({
   title,
   description,
   addNewLabel,
+  newAccountFields,
+  values,
+  onFieldChange,
 }: {
   accounts: PayoutRequirementAccount[];
   selection: PayoutAccountSelection;
@@ -133,6 +136,10 @@ function PayoutAccountChooser({
   title: string;
   description: string;
   addNewLabel: string;
+  /** Collection fields rendered in place once the new-account choice is active. */
+  newAccountFields: RequirementField[];
+  values: CollectedFieldData;
+  onFieldChange: (key: string, value: string) => void;
 }) {
   return (
     <Card>
@@ -192,6 +199,27 @@ function PayoutAccountChooser({
           <span>{addNewLabel}</span>
           {selection.kind === "new" ? <CheckIcon className="ml-auto size-5" /> : null}
         </button>
+        {selection.kind === "new" && newAccountFields.length > 0 ? (
+          <div className="space-y-4 rounded-lg border border-border-default p-4">
+            {newAccountFields.map((field) =>
+              field.kind === "address" ? (
+                <AddressRequirementField
+                  key={field.key}
+                  field={field}
+                  values={values}
+                  onChange={onFieldChange}
+                />
+              ) : (
+                <RequirementFieldInput
+                  key={field.key}
+                  field={field}
+                  value={values[field.key] === undefined ? "" : values[field.key]}
+                  onChange={(value) => onFieldChange(field.key, value)}
+                />
+              )
+            )}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -590,9 +618,17 @@ export function RequirementsFields({
 }: RequirementsFieldsProps) {
   const t = useTranslations();
   const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
+  const chooserVisible = existingPayoutAccounts !== undefined && existingPayoutAccounts.length > 0;
+  const addingNewAccount = chooserVisible && payoutAccountSelection.kind === "new";
+  const topLevelFields = addingNewAccount
+    ? fields.filter((field) => field.key === "destinationCountry")
+    : fields;
+  const newAccountFields = addingNewAccount
+    ? fields.filter((field) => field.key !== "destinationCountry")
+    : [];
   return (
     <div className="space-y-6">
-      {requirementFieldRuns(fields).map((run) => {
+      {requirementFieldRuns(topLevelFields).map((run) => {
         const first = run.fields[0];
         if (first.kind === "address") {
           return (
@@ -633,7 +669,7 @@ export function RequirementsFields({
           </Card>
         );
       })}
-      {existingPayoutAccounts !== undefined && existingPayoutAccounts.length > 0 ? (
+      {chooserVisible ? (
         <PayoutAccountChooser
           accounts={existingPayoutAccounts}
           selection={payoutAccountSelection}
@@ -641,6 +677,9 @@ export function RequirementsFields({
           title={t("DashboardPayments.ramps.useExistingAccount")}
           description={t("DashboardPayments.ramps.useExistingAccountDescription")}
           addNewLabel={t("DashboardPayments.ramps.addNewAccount")}
+          newAccountFields={newAccountFields}
+          values={values}
+          onFieldChange={onChange}
         />
       ) : null}
     </div>

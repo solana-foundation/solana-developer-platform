@@ -519,6 +519,60 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
     });
 
+    it("returns ready with the resolved payout account id for an offramp advance", async () => {
+      const created = await createCounterparty({ externalId: "requirements_offramp_ready" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      await repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_offramp_ready",
+      });
+      await seedProviderAccount({
+        id: "provider_account_offramp_ready",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_offramp_ready",
+        externalAccountReference: "ExternalAccount:offramp_ready",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "lightspark",
+            direction: "offramp",
+            cryptoToken: "USDC",
+            fiatCurrency: "USD",
+            collectedData: { destinationCountry: "US", purposeOfPayment: "SELF" },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "lightspark",
+        direction: "offramp",
+        status: "ready",
+        providerAccountId: "provider_account_offramp_ready",
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
     it("returns the missing identity fields when Lightspark has no provider customer", async () => {
       const created = await createCounterparty({ externalId: "requirements_lightspark" });
       expect(created.status).toBe(201);
