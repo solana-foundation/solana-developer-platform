@@ -53,7 +53,7 @@ function quotesResponse(overrides?: Record<string, unknown>): Response {
 
 function onrampInput(overrides?: Partial<RampOnrampQuoteInput>): RampOnrampQuoteInput {
   const input: RampOnrampQuoteInput = {
-    cryptoToken: "usdc.solana",
+    assetRail: "usdc.solana",
     fiatCurrency: "USD",
     fiatAmount: "100",
     destinationWalletAddress: "WALLET123",
@@ -144,7 +144,7 @@ describe("StripeRampClient", () => {
 
     await new StripeRampClient().createOnrampQuote(
       STRIPE_CONTEXT,
-      onrampInput({ cryptoToken: "sol.solana", stripeCustomerInfo: undefined })
+      onrampInput({ assetRail: "sol.solana", stripeCustomerInfo: undefined })
     );
 
     expect(readStripeBody(requireFetchInit(fetchSpy)).get("destination_currency")).toBe("sol");
@@ -166,7 +166,7 @@ describe("StripeRampClient", () => {
     await expect(
       new StripeRampClient().createOnrampQuote(
         STRIPE_CONTEXT,
-        onrampInput({ cryptoToken: "usdt.solana" })
+        onrampInput({ assetRail: "usdt.solana" })
       )
     ).rejects.toThrow(/usdc\.solana and sol\.solana/);
   });

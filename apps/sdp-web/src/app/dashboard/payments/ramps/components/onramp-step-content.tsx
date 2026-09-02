@@ -5,7 +5,6 @@ import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
@@ -214,7 +213,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         amount={fields.amount.trim()}
         quote={quote}
         fiatCurrency={selectedRampPair.fiatCurrency}
-        cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
+        cryptoToken={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
         instructions={quote.paymentInstructions}
         action={simulateAction}
       />

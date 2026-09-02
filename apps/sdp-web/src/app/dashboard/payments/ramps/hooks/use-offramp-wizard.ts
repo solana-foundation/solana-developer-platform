@@ -6,7 +6,7 @@ import type {
   PaymentTransferSummary,
   RampCryptoDeposit,
 } from "@sdp/types";
-import { isCountryCode } from "@sdp/types";
+import { getCryptoRailAssetLabel, isCountryCode } from "@sdp/types";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -22,7 +22,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { offrampPairs, toRampCryptoToken } from "@/lib/ramps";
+import { offrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
@@ -111,14 +111,14 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       selectedWallet,
       provider,
       selectedRampPair,
-      cryptoToken,
+      assetRail,
       collectedData,
       rampsMemo,
     }) => {
       const base = {
         counterpartyId: fields.counterpartyId,
         sourceWallet: selectedWallet.walletId,
-        cryptoToken,
+        assetRail,
         cryptoAmount: fields.amount.trim(),
         rampsMemo,
       };
@@ -207,7 +207,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     return null;
   }, [wizard.quote, wizard.fields.amount, transferStatus]);
 
-  const offrampCryptoToken = toRampCryptoToken(wizard.selectedRampPair.assetRail);
+  const offrampCryptoToken = getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail);
   // The transfers API requires the mint address, not the token symbol.
   const sourceTokenMint = useMemo(() => {
     const balance = wizard.selectedWallet?.balances?.find(

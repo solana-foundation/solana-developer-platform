@@ -7,7 +7,6 @@ import { Combobox } from "@/components/ui/combobox";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import { toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -45,7 +44,7 @@ function OfframpManualQuoteStep({
     );
   }
 
-  const cryptoToken = toRampCryptoToken(selectedRampPair.assetRail);
+  const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
 
   return (
     <ManualInstructionsQuote
@@ -56,7 +55,7 @@ function OfframpManualQuoteStep({
       instructions={quote.paymentInstructions}
       description={t("DashboardPayments.ramps.offrampManualDescription", {
         amount: fields.amount.trim(),
-        token: cryptoToken.toUpperCase(),
+        token: cryptoToken,
       })}
     />
   );

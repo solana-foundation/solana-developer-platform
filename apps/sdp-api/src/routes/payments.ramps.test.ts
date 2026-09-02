@@ -152,6 +152,30 @@ async function seedRampEventTransfer(params: {
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
 
+  it("rejects the retired symbol-shaped onramp quote request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId: "cpty_asset_rail_validation",
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+  });
+
   it("rejects an ambiguous Provider wallet ID before creating a hosted quote", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "ambiguous_ramp_wallet",
@@ -170,7 +194,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -205,7 +229,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -238,7 +262,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_CONNECTION_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -520,7 +544,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           rampsMemo: { invoice: "INV-123", po: "PO-9" },
@@ -606,7 +630,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -672,7 +696,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -713,7 +737,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -773,7 +797,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -806,7 +830,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           rampsMemo,
@@ -835,7 +859,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -859,7 +883,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -906,7 +930,7 @@ describe("Payments routes — ramps", () => {
           provider: "bvnk",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
           rampsMemo: { invoice: "INV-123", po: "PO-9" },
@@ -948,7 +972,7 @@ describe("Payments routes — ramps", () => {
           provider: "bvnk",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -1219,7 +1243,7 @@ describe("Payments routes — ramps", () => {
           },
           body: JSON.stringify({
             provider: "bvnk",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "EUR",
             fiatAmount: "100",
             counterpartyId: "cpty_quota_test",
@@ -1375,7 +1399,7 @@ describe("Payments routes — ramps", () => {
             provider: "moneygram",
             counterpartyId,
             destinationWallet: TEST_WALLET_ID,
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             fiatAmount,
           }),
@@ -1655,7 +1679,7 @@ describe("Payments routes — ramps", () => {
           body: JSON.stringify({
             provider: "lightspark",
             sourceWallet: TEST_WALLET_ID,
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             cryptoAmount: "25",
             fiatCurrency: "USD",
             destinationCountry: "MY",

@@ -1,6 +1,6 @@
 "use client";
 
-import { COUNTRIES, isCountryCode, type RampProviderId } from "@sdp/types";
+import { COUNTRIES, type CryptoRailId, isCountryCode, type RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
@@ -150,7 +150,7 @@ async function fetchCounterpartyRequirements(
   const params = new URLSearchParams({
     provider,
     direction,
-    cryptoToken: corridor.cryptoToken,
+    assetRail: corridor.assetRail,
     fiatCurrency: corridor.fiatCurrency,
   });
   if (direction === "onramp") {
@@ -177,7 +177,7 @@ async function fetchCounterpartyRequirements(
 }
 
 export interface AdvanceRequirementsPayload {
-  cryptoToken: string;
+  assetRail: CryptoRailId;
   destinationWallet: string;
   fiatCurrency: RampFiatCurrency;
 }
@@ -315,7 +315,7 @@ export function useCounterpartyRequirements(
           params.counterpartyId,
           params.provider,
           params.direction,
-          params.cryptoToken,
+          params.assetRail,
           params.fiatCurrency,
           params.direction === "onramp" ? params.destinationWallet : "",
         ] as const)
@@ -325,13 +325,13 @@ export function useCounterpartyRequirements(
   // step list) can't flip out from under the user mid-flow.
   const { data, error, mutate } = useSWR(
     key,
-    ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
+    ([, counterpartyId, provider, direction, assetRail, fiatCurrency, destinationWallet]) =>
       fetchCounterpartyRequirements(
         counterpartyId,
         provider,
         direction,
         {
-          cryptoToken,
+          assetRail,
           fiatCurrency,
           destinationWallet,
         },

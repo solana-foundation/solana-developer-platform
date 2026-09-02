@@ -1,7 +1,11 @@
 import { COUNTERPARTY_ACCOUNT_SUMMARY_TYPES, COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
 import { z } from "zod";
 import { queryBooleanSchema } from "@/openapi/schemas/base";
-import { rampCurrencyCodeSchema, rampFiatCurrencySchema } from "@/routes/payments/schemas";
+import {
+  offrampCryptoRailSchema,
+  onrampCryptoRailSchema,
+  rampFiatCurrencySchema,
+} from "@/routes/payments/schemas";
 
 export const counterpartyEntityTypeSchema = z.enum(COUNTERPARTY_ENTITY_TYPES);
 
@@ -20,7 +24,7 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
       }
     ),
     direction: z.literal("onramp"),
-    cryptoToken: rampCurrencyCodeSchema,
+    assetRail: onrampCryptoRailSchema,
     fiatCurrency: rampFiatCurrencySchema,
     destinationWallet: z
       .string({ error: "destinationWallet is required for onramp requirements" })
@@ -31,7 +35,7 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
       error: "provider does not support offramp requirements",
     }),
     direction: z.literal("offramp"),
-    cryptoToken: rampCurrencyCodeSchema,
+    assetRail: offrampCryptoRailSchema,
     fiatCurrency: rampFiatCurrencySchema,
   }),
 ]);
