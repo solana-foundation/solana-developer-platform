@@ -102,6 +102,9 @@ importers:
       '@sdp/custody':
         specifier: workspace:*
         version: link:../../packages/sdp-custody
+      '@sdp/dvp':
+        specifier: workspace:*
+        version: link:../../packages/sdp-dvp
       '@sdp/earn':
         specifier: workspace:*
         version: link:../../packages/sdp-earn

@@ -21,6 +21,7 @@ const MODULE_METADATA = [
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
+      "@sdp/dvp",
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/helius-rings",
