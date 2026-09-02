@@ -179,6 +179,24 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | No Veda rows in the PRODUCTION catalogue | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row |
 | A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino and Veda are both offered). The gate still exists and still answers this for upshift/perena/ground, and no org override lifts it (§5b) |
 
+## Ondo — a TOKEN-HOLDING strategy, no vault program at all
+
+Registered 2026-09-02 (PRO-1803), un-surfaced. USDY is a plain SPL token whose
+price accrues Treasury yield, so the strategy is HOLDING it: deposit =
+Jupiter-routed USDC→USDY swap, position = the owner's USDY balance, exit = the
+reverse swap. Mainnet-only — Ondo has NO devnet deployment (verified on-chain;
+even their staging environment runs on mainnet with different mints), so the
+sandbox shelf carries the row only through the PRO-1742 browse-only mirror.
+The catalogue read (`providers/ondo/client.ts`) genesis-proves the RPC and
+verifies the mint account before reporting the one-row shelf, and the row is
+the first non-Ground `sourceKind: "rwa"`: the classification traces to the
+issuer's own published mint address in `ONDO_DEPLOYMENTS`
+(`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. No
+`currentApy` — Ondo's rate API is credentialed and SDP holds no key yet.
+Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
+primary mint/redeem facility is deliberately unused (Reg S lockup) and how the
+Jupiter trust boundary stays single-owner in the API.
+
 ## Two provider shapes — read this before assuming Ground's model
 
 Ground is **custodial**: SDP provisions an omnibus portfolio wallet, the

@@ -1,4 +1,5 @@
 import { SdpKaminoError } from "@sdp/kamino";
+import { SdpOndoError } from "@sdp/ondo";
 import { SdpVedaError } from "@sdp/veda";
 
 /**
@@ -34,6 +35,14 @@ const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
 ]);
 
 export function refusedBuildMessage(error: unknown): string | null {
-  if (!(error instanceof SdpKaminoError || error instanceof SdpVedaError)) return null;
+  if (
+    !(
+      error instanceof SdpKaminoError ||
+      error instanceof SdpVedaError ||
+      error instanceof SdpOndoError
+    )
+  ) {
+    return null;
+  }
   return REFUSED_BUILD_CODES.has(error.code) ? error.message : null;
 }

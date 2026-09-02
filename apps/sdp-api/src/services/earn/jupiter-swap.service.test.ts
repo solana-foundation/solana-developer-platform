@@ -8,6 +8,7 @@ import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import {
   fetchJupiterSwapLeg,
+  fetchJupiterSwapQuote,
   type JupiterSwapRequest,
   prependSwapLegToVaultPlan,
 } from "./jupiter-swap.service";
@@ -558,5 +559,84 @@ describe("prependSwapLegToVaultPlan", () => {
     expect(composed.createsShareAccount).toBe(true);
     // The input plan is not mutated.
     expect(plan.instructions).toHaveLength(1);
+  });
+});
+
+describe("fetchJupiterSwapQuote", () => {
+  function quoteResponse(overrides: Record<string, unknown> = {}) {
+    return {
+      inputMint: USDC,
+      outputMint: PYUSD,
+      inAmount: "25000000",
+      outAmount: "24990000",
+      priceImpactPct: "0.0001",
+      ...overrides,
+    };
+  }
+
+  it("prices through /order with no taker and maps atoms to decimal strings", async () => {
+    fetchMock.mockResolvedValue(okResponse(quoteResponse()));
+
+    const quote = await fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
+      inputMint: USDC,
+      outputMint: PYUSD,
+      sourceAmount: "25",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/order?");
+    expect(url).toContain("amount=25000000");
+    expect(url).not.toContain("taker=");
+    expect((init.headers as Record<string, string>)["x-api-key"]).toBe("jup_test_key");
+    expect(quote).toEqual({ outAmount: "24.99", priceImpactPct: "0.0001" });
+  });
+
+  it("fails closed without the platform credential", async () => {
+    await expect(
+      fetchJupiterSwapQuote(
+        swapEnv({ JUPITER_SWAP_API_KEY: undefined }),
+        createVaultDeadline(),
+        { inputMint: USDC, outputMint: PYUSD, sourceAmount: "25" }
+      )
+    ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("maps an upstream 4xx to a caller-readable refusal", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: "No route found for this pair" }), { status: 400 })
+    );
+    await expect(
+      fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
+        inputMint: USDC,
+        outputMint: PYUSD,
+        sourceAmount: "25",
+      })
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError && String(error.message).includes("No route found")
+    );
+  });
+
+  it("refuses a quote outside the requested contract", async () => {
+    fetchMock.mockResolvedValue(okResponse(quoteResponse({ inAmount: "1" })));
+    await expect(
+      fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
+        inputMint: USDC,
+        outputMint: PYUSD,
+        sourceAmount: "25",
+      })
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+  });
+
+  it("refuses malformed amounts from upstream", async () => {
+    fetchMock.mockResolvedValue(okResponse(quoteResponse({ outAmount: "not-a-number" })));
+    await expect(
+      fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
+        inputMint: USDC,
+        outputMint: PYUSD,
+        sourceAmount: "25",
+      })
+    ).rejects.toBeInstanceOf(SdpEarnError);
   });
 });

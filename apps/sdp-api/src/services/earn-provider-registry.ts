@@ -5,6 +5,10 @@ import {
 } from "@sdp/earn";
 import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
+import {
+  assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
+  OndoVaultDirectClient,
+} from "@sdp/ondo";
 import type { EarnProviderId, SolanaCluster } from "@sdp/types";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
@@ -12,6 +16,7 @@ import {
 } from "@sdp/veda";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
+import { createOndoSwapPort } from "./earn/ondo-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";
 
 /**
@@ -46,6 +51,14 @@ assertNotPortfolioProvider(kamino);
 const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertVedaNotPortfolioProvider(veda);
 
+// The swap port is resolved per request from the runtime context (the API
+// constructs `ctx.env` from `Env`), because these are process singletons and
+// the Jupiter credential is request-environment state, same as the RPC URL.
+const ondo = new OndoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
+  createOndoSwapPort(ctx.env as unknown as Env)
+);
+assertOndoNotPortfolioProvider(ondo);
+
 /**
  * API composition root for Earn providers.
  *
@@ -59,6 +72,7 @@ export const EARN_PROVIDER_CLIENTS = {
   ...CATALOGUE_PROVIDER_CLIENTS,
   kamino,
   veda,
+  ondo,
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function resolveEarnProviderClient(provider: string): EarnVaultProvider {

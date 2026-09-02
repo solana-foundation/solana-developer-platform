@@ -196,6 +196,15 @@ holds the money and who signs:
   all-null, so it truthfully catalogues nothing, sponsors nothing and executes
   nothing until real deployments are filled in. Copy this when integrating
   ahead of confirmed deployments.
+- **Ondo: no vault program — the instrument IS the position.** `ondo` id,
+  keyless like Kamino, executing like Veda, and un-surfaced (PRO-1803). The
+  strategy is holding USDY: deposits and exits are Jupiter-routed swaps built
+  through a port the API injects, so the Jupiter instruction trust boundary
+  stays single-owner in `services/earn/jupiter-swap.service.ts` and
+  `packages/sdp-ondo` carries no chain SDK at all. Copy this when a provider's
+  product is a yield-bearing TOKEN rather than a vault — and note its
+  mainnet-only registry (`@sdp/types/ondo-programs`) leaves the sandbox shelf
+  to the PRO-1742 mirror.
 
 Steps 5–8 below are the **credentialed** path; a provider on a public API
 skips most of them (see the keyless variant under the table). Step 10 and §4d

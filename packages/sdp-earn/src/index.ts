@@ -2,6 +2,7 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 import { providerNotConfigured } from "./errors";
 import { GroundEarnClient } from "./providers/ground/client";
 import { KaminoEarnClient } from "./providers/kamino/client";
+import { OndoEarnClient } from "./providers/ondo/client";
 import { PerenaEarnClient } from "./providers/perena/client";
 import { UpshiftEarnClient } from "./providers/upshift/client";
 import { VedaEarnClient } from "./providers/veda/client";
@@ -23,6 +24,7 @@ export {
 } from "./errors";
 export { GroundEarnClient } from "./providers/ground/client";
 export { KaminoEarnClient } from "./providers/kamino/client";
+export { OndoEarnClient } from "./providers/ondo/client";
 export { PerenaEarnClient } from "./providers/perena/client";
 export { StubEarnClient } from "./providers/stub";
 export { UpshiftEarnClient } from "./providers/upshift/client";
@@ -68,6 +70,7 @@ export const EARN_PROVIDER_CLIENTS = {
   perena: new PerenaEarnClient(),
   ground: new GroundEarnClient(),
   kamino: new KaminoEarnClient(),
+  ondo: new OndoEarnClient(),
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function isEarnProviderId(value: string): value is EarnProviderId {

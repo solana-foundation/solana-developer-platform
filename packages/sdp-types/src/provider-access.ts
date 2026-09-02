@@ -39,7 +39,7 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
  * which is why `keyPairCredentialDefinition` in the API's availability service
  * excludes it rather than demanding a `KAMINO_API_KEY` that nothing reads.
  */
-export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground", "kamino"] as const;
+export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground", "kamino", "ondo"] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
 /**
@@ -56,6 +56,7 @@ export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
   perena: [],
   ground: ["usdc"],
   kamino: [],
+  ondo: [],
 } as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
 
 /** Fail closed for provider ids from open database read models. */
@@ -120,6 +121,11 @@ export const EARN_PROVIDER_SURFACING = {
   // read, re-target, withdrawal and ledger access untouched.
   ground: false,
   kamino: true,
+  // Registered dormant while the integration is evaluated (PRO-1803): the
+  // client catalogues USDY from `ONDO_DEPLOYMENTS` and the execution half
+  // builds secondary-market swaps, but nothing reaches customers until this
+  // flips after the Earn V2 review.
+  ondo: false,
 } as const satisfies Record<EarnProviderId, boolean>;
 
 /**
@@ -178,6 +184,11 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
   perena: "vault_direct",
   ground: "custodial",
   kamino: "vault_direct",
+  // Non-custodial like Kamino/Veda, though the "vault" is the open market:
+  // the deposit is a custody-signed USDC→USDY swap and the position is the
+  // USDY balance in the organization's own wallet. There is no address to
+  // fund, so `vault_direct` is the truthful shape here too.
+  ondo: "vault_direct",
 } as const satisfies Record<EarnProviderId, EarnDepositStyle>;
 
 /**
@@ -217,6 +228,12 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
+  // The deposit is a market swap, so its builder REQUIRES an explicit floor
+  // and quotes live (`supportsVaultDepositQuote`). 50 bps default: USDC↔USDY
+  // is a stable-ish pair but a real market — wider than Veda's oracle-rate 10
+  // so an ordinary spread move between quote and landing does not fail the
+  // deposit, still tight enough to bound what a route can take.
+  ondo: { defaultToleranceBps: 50 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -242,6 +259,8 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
+  // The exit is the reverse market swap; same floor contract as the deposit.
+  ondo: { defaultToleranceBps: 50 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */

@@ -49,6 +49,11 @@
       "import": "./src/veda-programs.ts",
       "default": "./src/veda-programs.ts"
     },
+    "./ondo-programs": {
+      "types": "./src/ondo-programs.ts",
+      "import": "./src/ondo-programs.ts",
+      "default": "./src/ondo-programs.ts"
+    },
     "./payments": {
       "types": "./src/payments.ts",
       "import": "./src/payments.ts",
