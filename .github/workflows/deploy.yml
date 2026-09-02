@@ -51,7 +51,7 @@ jobs:
             none) ;;
             api) api=true ;;
             auto|*)
-              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod)?)?\.yml|\.github/workflows/sdp-dev-smoke\.yml)"; then
+              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-dev-smoke\.yml)"; then
                 api=true
               fi
               ;;
@@ -182,6 +182,15 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/deploy-sdp-api-gcp.yml
+
+  deploy-api-stage:
+    name: sdp-api + worker + cron — stage (shadow)
+    needs: changes
+    if: needs.changes.outputs.api == 'true' && vars.STAGE_DEPLOY_WIF_PROVIDER != ''
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp-stage.yml
 
   deploy-api-prod:
     name: sdp-api + worker + cron — prod
