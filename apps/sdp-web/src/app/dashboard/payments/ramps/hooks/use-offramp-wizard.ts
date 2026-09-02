@@ -101,7 +101,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     memoStepId: "MEMO",
     requirements: {
       step: getOfframpRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "WITHDRAW",
       direction: "offramp",
     },
     selectionSchema: withdrawSelectionSchema,

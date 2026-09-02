@@ -75,7 +75,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     memoStepId: "MEMO",
     requirements: {
       step: getOnrampRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "DEPOSIT",
       direction: "onramp",
     },
     selectionSchema: depositSelectionSchema,

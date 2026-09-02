@@ -58,7 +58,7 @@ export interface RampWizardConfig<TId extends string = string> {
   steps: readonly RampWizardStep<TId>[];
   /** Per-step validation gate, keyed by step id. Steps absent here have no gate. */
   stepSchemas: Partial<Record<TId, z.ZodTypeAny>>;
-  /** Step at which the quote is created; the wizard then advances to the next step. */
+  /** Step whose primary action submits the requirements advance (provisioning); the wizard then advances to the next step. */
   quoteStepId: TId;
   memoStepId?: TId;
   selectionSchema: z.ZodTypeAny;
@@ -67,8 +67,10 @@ export interface RampWizardConfig<TId extends string = string> {
   /**
    * Provider-driven requirements flow. The collect step is inserted after
    * `insertAfter` only when the chosen provider reports `status: "collect"`;
-   * the quote step advances provider onboarding via POST /requirements, and
-   * this hook fires the quote once the lifecycle reaches `ready`.
+   * the collect (or quote) step advances provider onboarding via POST
+   * /requirements. The quote embeds the memo, so it fires only once the user
+   * has passed the memo step AND the lifecycle has reached `ready` — whichever
+   * of the two happens last triggers it.
    */
   requirements: {
     step: RampWizardStep<TId>;
@@ -184,14 +186,15 @@ export function useRampWizard<TId extends string>(
     destinationWallet: selectedWallet?.walletId ?? "",
     // Quote creation is event-driven: it fires the first time onboarding
     // reaches ready (submit response or status poll), never from an effect.
-    // `runQuoteCreation` is declared below; the callback only runs after
+    // The quote embeds the memo, so readiness observed before the user passes
+    // the memo step is deferred — the memo-step advance fires it instead.
+    // `maybeCreateQuote` is declared below; the callback only runs after
     // render, when every binding is initialized.
     onReady: () => {
-      if (quoteCreationAttempted.current) {
+      if (!stepPositionRef.current.isLast) {
         return;
       }
-      quoteCreationAttempted.current = true;
-      void runQuoteCreation();
+      maybeCreateQuote();
     },
   });
 
@@ -258,6 +261,10 @@ export function useRampWizard<TId extends string>(
   ]);
 
   const isLastStep = stepIndex === steps.length - 1;
+  // Read by onReady, which fires from submit/poll closures — the ref always
+  // reflects the position of the render the user is actually on.
+  const stepPositionRef = useRef({ isLast: false });
+  stepPositionRef.current.isLast = isLastStep;
 
   const createQuoteForCurrentSelection = async (): Promise<{
     quote: PaymentRampQuote;
@@ -317,6 +324,13 @@ export function useRampWizard<TId extends string>(
     }
   };
   const retryQuoteCreation = () => void runQuoteCreation();
+  const maybeCreateQuote = () => {
+    if (quoteCreationAttempted.current) {
+      return;
+    }
+    quoteCreationAttempted.current = true;
+    void runQuoteCreation();
+  };
 
   const advanceRequirementsAndProceed = async () => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
@@ -348,6 +362,9 @@ export function useRampWizard<TId extends string>(
         return;
       }
       setStepIndex((current) => current + 1);
+      if (result.status === "ready" && stepIndex + 1 === steps.length - 1) {
+        maybeCreateQuote();
+      }
       toast.dismiss(toastId);
     } catch (error) {
       setHostedQuoteLoading(false);
@@ -375,6 +392,16 @@ export function useRampWizard<TId extends string>(
       return;
     }
     setStepIndex((current) => current + 1);
+    // Leaving the memo (last input) step with provisioning already ready fires
+    // the deferred quote; when provisioning is still pending, onReady fires it
+    // once the poll observes ready on the transaction stage.
+    if (
+      stepIndex + 1 === steps.length - 1 &&
+      requirements.onboarding !== null &&
+      requirements.onboarding.status === "ready"
+    ) {
+      maybeCreateQuote();
+    }
   };
 
   const finish = () => {
