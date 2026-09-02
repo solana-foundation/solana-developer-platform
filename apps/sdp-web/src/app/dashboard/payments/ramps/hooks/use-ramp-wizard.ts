@@ -50,6 +50,7 @@ export interface RampQuotePayloadArgs {
   selectedRampPair: SelectedRampPair;
   cryptoToken: string;
   collectedData: CollectedFieldData;
+  selectedProviderAccountId: string | null;
   rampsMemo: Record<string, string>;
 }
 
@@ -284,6 +285,7 @@ export function useRampWizard<TId extends string>(
         selectedRampPair,
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
         collectedData: requirements.collectedData,
+        selectedProviderAccountId: requirements.selectedProviderAccountId,
         rampsMemo: memoRowsToRecord(memoRows),
       }),
       t
@@ -491,6 +493,10 @@ export function useRampWizard<TId extends string>(
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
     existingPayoutAccounts: requirements.existingPayoutAccounts,
+    payoutAccountSelection: requirements.payoutAccountSelection,
+    selectedProviderAccountId: requirements.selectedProviderAccountId,
+    addingNewAccount: requirements.addingNewAccount,
+    selectPayoutAccount: requirements.selectPayoutAccount,
     requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,

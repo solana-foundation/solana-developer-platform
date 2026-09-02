@@ -80,6 +80,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     handlePairChange,
     requirementFields,
     existingPayoutAccounts,
+    payoutAccountSelection,
+    selectedProviderAccountId,
+    addingNewAccount,
+    selectPayoutAccount,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -98,7 +102,13 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const destinationCountry =
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
   const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
-  const requirementsKey = ["offramp-requirements", destinationCountry, paymentRails].join(":");
+  const payoutAccountChoice = addingNewAccount ? "new" : selectedProviderAccountId;
+  const requirementsKey = [
+    "offramp-requirements",
+    destinationCountry,
+    paymentRails,
+    payoutAccountChoice,
+  ].join(":");
 
   if (currentStepId === "WALLET") {
     return (
@@ -169,6 +179,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         values={collectedData}
         onChange={setCollectedField}
         existingPayoutAccounts={existingPayoutAccounts}
+        payoutAccountSelection={payoutAccountSelection}
+        onPayoutAccountSelectionChange={selectPayoutAccount}
       />
     );
   }

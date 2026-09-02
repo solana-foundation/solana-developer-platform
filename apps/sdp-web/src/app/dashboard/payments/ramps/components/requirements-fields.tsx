@@ -10,8 +10,9 @@ import {
   type RequirementField,
   requirementFieldName,
 } from "@sdp/types/ramp-requirements";
-import { Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, Loader2Icon, MapPinIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { autocompletePlaces, fetchPlaceDetails, newPlacesSessionToken } from "@/lib/places";
 import { cn } from "@/lib/utils";
+import type { PayoutAccountSelection } from "../hooks/use-counterparty-requirements";
 import { applyRequirementMask, requirementFieldError } from "../schema";
 
 /**
@@ -106,10 +108,117 @@ function requirementGroupCopy(
   return copy;
 }
 
+/**
+ * Renders reusable payout accounts and the explicit new-account choice.
+ *
+ * @param accounts - Active payout accounts for the selected destination.
+ * @param selection - Current payout account choice.
+ * @param onSelectionChange - Callback for selecting an account or new-account collection.
+ * @param title - Translated chooser title.
+ * @param description - Translated chooser description.
+ * @param addNewLabel - Translated new-account label.
+ * @returns The payout account chooser card.
+ */
+function PayoutAccountChooser({
+  accounts,
+  selection,
+  onSelectionChange,
+  title,
+  description,
+  addNewLabel,
+}: {
+  accounts: PayoutRequirementAccount[];
+  selection: PayoutAccountSelection;
+  onSelectionChange: (selection: PayoutAccountSelection) => void;
+  title: string;
+  description: string;
+  addNewLabel: string;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {accounts.map((account) => {
+          const isSelected = selection.kind === "existing" && selection.id === account.id;
+          const flag = regionFlagEmoji(account.destinationCountry);
+          return (
+            <button
+              key={account.id}
+              type="button"
+              aria-pressed={isSelected}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                isSelected
+                  ? "border-[var(--input-border-focus)] bg-[var(--input-bg-hover)]"
+                  : "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)]"
+              )}
+              onClick={() => onSelectionChange({ kind: "existing", id: account.id })}
+            >
+              {flag !== null ? (
+                <span className="shrink-0 text-xl" aria-hidden="true">
+                  {flag}
+                </span>
+              ) : null}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-primary">
+                  {account.bankName !== undefined ? account.bankName : account.id}
+                </span>
+                <span className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+                  {account.accountNumberLast4 !== undefined ? (
+                    <span>•••• {account.accountNumberLast4}</span>
+                  ) : null}
+                  {account.paymentRail !== null ? <Badge>{account.paymentRail}</Badge> : null}
+                </span>
+              </span>
+              {isSelected ? <CheckIcon className="size-5 shrink-0 text-primary" /> : null}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          aria-pressed={selection.kind === "new"}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            selection.kind === "new"
+              ? "border-[var(--input-border-focus)] bg-[var(--input-bg-hover)] text-primary"
+              : "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] text-secondary hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)] hover:text-primary"
+          )}
+          onClick={() => onSelectionChange({ kind: "new" })}
+        >
+          <PlusIcon className="size-5 shrink-0" aria-hidden="true" />
+          <span>{addNewLabel}</span>
+          {selection.kind === "new" ? <CheckIcon className="ml-auto size-5" /> : null}
+        </button>
+      </CardContent>
+    </Card>
+  );
+}
+
 interface RequirementFieldRun {
   group: string | null;
   fields: RequirementField[];
 }
+
+type RequirementsFieldsProps = {
+  provider: RampProviderId | null;
+  fields: RequirementField[];
+  values: CollectedFieldData;
+  onChange: (key: string, value: string) => void;
+} & (
+  | {
+      existingPayoutAccounts?: undefined;
+      payoutAccountSelection?: undefined;
+      onPayoutAccountSelectionChange?: undefined;
+    }
+  | {
+      existingPayoutAccounts: PayoutRequirementAccount[];
+      payoutAccountSelection: PayoutAccountSelection;
+      onPayoutAccountSelectionChange: (selection: PayoutAccountSelection) => void;
+    }
+);
 
 /**
  * Partitions the flat field list into consecutive runs sharing a section,
@@ -466,6 +575,8 @@ function AddressRequirementField({
  * @param values - Collected values keyed by requirement field.
  * @param onChange - Callback for updating a collected value.
  * @param existingPayoutAccounts - Active corridor accounts available for reuse.
+ * @param payoutAccountSelection - Current reusable-account or new-account choice.
+ * @param onPayoutAccountSelectionChange - Callback for changing the payout account choice.
  * @returns The requirement field group.
  */
 export function RequirementsFields({
@@ -474,13 +585,9 @@ export function RequirementsFields({
   values,
   onChange,
   existingPayoutAccounts,
-}: {
-  provider: RampProviderId | null;
-  fields: RequirementField[];
-  values: CollectedFieldData;
-  onChange: (key: string, value: string) => void;
-  existingPayoutAccounts?: PayoutRequirementAccount[];
-}) {
+  payoutAccountSelection,
+  onPayoutAccountSelectionChange,
+}: RequirementsFieldsProps) {
   const t = useTranslations();
   const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
   return (
@@ -527,16 +634,14 @@ export function RequirementsFields({
         );
       })}
       {existingPayoutAccounts !== undefined && existingPayoutAccounts.length > 0 ? (
-        <Card>
-          <CardContent className="space-y-2">
-            <p className="font-medium text-primary">
-              {t("DashboardPayments.ramps.useExistingAccount")}
-            </p>
-            <p className="text-sm text-secondary">
-              {t("DashboardPayments.ramps.useExistingAccountDescription")}
-            </p>
-          </CardContent>
-        </Card>
+        <PayoutAccountChooser
+          accounts={existingPayoutAccounts}
+          selection={payoutAccountSelection}
+          onSelectionChange={onPayoutAccountSelectionChange}
+          title={t("DashboardPayments.ramps.useExistingAccount")}
+          description={t("DashboardPayments.ramps.useExistingAccountDescription")}
+          addNewLabel={t("DashboardPayments.ramps.addNewAccount")}
+        />
       ) : null}
     </div>
   );

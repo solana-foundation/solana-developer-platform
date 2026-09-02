@@ -26,6 +26,53 @@ export interface PayoutRequirementFieldLabels {
   paymentRail: string;
 }
 
+export type PayoutAccountSelection =
+  | { kind: "none" }
+  | { kind: "existing"; id: string }
+  | { kind: "new" };
+
+/**
+ * Resolves the default payout account choice for a country with one active account.
+ *
+ * @param selection - Current payout account choice.
+ * @param accounts - Active payout accounts for the selected country.
+ * @returns The supplied choice, or the single active account choice.
+ */
+export function resolvePayoutAccountSelection(
+  selection: PayoutAccountSelection,
+  accounts: PayoutRequirementAccount[]
+): PayoutAccountSelection {
+  if (selection.kind === "none" && accounts.length === 1) {
+    const account = accounts[0];
+    if (account === undefined) {
+      throw new Error("A single payout account was expected to be available.");
+    }
+    return { kind: "existing", id: account.id };
+  }
+  return selection;
+}
+
+/**
+ * Resets a payout account choice when the destination country changes.
+ *
+ * @param selection - Current payout account choice.
+ * @param fieldKey - Field being changed.
+ * @param previousCountry - Previously collected destination country.
+ * @param nextCountry - New destination country value.
+ * @returns The reset choice when the country changed, otherwise the current choice.
+ */
+export function payoutAccountSelectionAfterFieldChange(
+  selection: PayoutAccountSelection,
+  fieldKey: string,
+  previousCountry: string | undefined,
+  nextCountry: string
+): PayoutAccountSelection {
+  if (fieldKey === "destinationCountry" && previousCountry !== nextCountry) {
+    return { kind: "none" };
+  }
+  return selection;
+}
+
 /**
  * Finds active corridor accounts for a selected destination.
  *
@@ -99,7 +146,8 @@ function payoutRailsForCountry(
 export function derivePayoutRequirementFields(
   payout: PayoutRequirementTree,
   values: CollectedFieldData,
-  labels: PayoutRequirementFieldLabels
+  labels: PayoutRequirementFieldLabels,
+  payoutAccountSelection: PayoutAccountSelection
 ): RequirementField[] {
   const destinationCountryField = {
     kind: "select",
@@ -114,7 +162,10 @@ export function derivePayoutRequirementFields(
   }
 
   const rails = payoutRailsForCountry(payout.countryRails, destinationCountry);
-  if (activePayoutAccounts(payout, destinationCountry).length > 0) {
+  if (
+    activePayoutAccounts(payout, destinationCountry).length > 0 &&
+    payoutAccountSelection.kind !== "new"
+  ) {
     return [destinationCountryField];
   }
 
@@ -240,6 +291,10 @@ export interface CounterpartyRequirementsState {
   fields: RequirementField[];
   /** Active corridor accounts available for reuse in the selected payout country. */
   existingPayoutAccounts: PayoutRequirementAccount[];
+  payoutAccountSelection: PayoutAccountSelection;
+  selectedProviderAccountId: string | null;
+  addingNewAccount: boolean;
+  selectPayoutAccount: (selection: PayoutAccountSelection) => void;
   collectedData: CollectedFieldData;
   setField: (key: string, value: string) => void;
   /** The chosen provider needs fields collected for this counterparty. */
@@ -271,7 +326,19 @@ export function useCounterpartyRequirements(
 ): CounterpartyRequirementsState {
   const t = useTranslations();
   const [collectedData, setCollectedData] = useState<CollectedFieldData>({});
+  const [payoutAccountSelection, setPayoutAccountSelection] = useState<PayoutAccountSelection>({
+    kind: "none",
+  });
   const setField = (key: string, value: string) => {
+    const nextPayoutAccountSelection = payoutAccountSelectionAfterFieldChange(
+      payoutAccountSelection,
+      key,
+      collectedData.destinationCountry,
+      value
+    );
+    if (nextPayoutAccountSelection !== payoutAccountSelection) {
+      setPayoutAccountSelection(nextPayoutAccountSelection);
+    }
     setCollectedData((previous) => {
       if (key === "destinationCountry" && previous.destinationCountry !== value) {
         return { destinationCountry: value };
@@ -285,6 +352,16 @@ export function useCounterpartyRequirements(
         return next;
       }
       return { ...previous, [key]: value };
+    });
+  };
+  const selectPayoutAccount = (selection: PayoutAccountSelection) => {
+    setPayoutAccountSelection(selection);
+    setCollectedData((previous) => {
+      const next: CollectedFieldData = {};
+      if (previous.destinationCountry !== undefined) {
+        next.destinationCountry = previous.destinationCountry;
+      }
+      return next;
     });
   };
 
@@ -302,6 +379,7 @@ export function useCounterpartyRequirements(
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
+    setPayoutAccountSelection({ kind: "none" });
     setOnboarding(null);
     setLastAdvancePayload(null);
   }
@@ -410,9 +488,25 @@ export function useCounterpartyRequirements(
     [t]
   );
   const payout = data !== undefined && data.status === "collect_account" ? data.payout : null;
+  const existingPayoutAccounts = useMemo(
+    () =>
+      payout === null || collectedData.destinationCountry === undefined
+        ? []
+        : activePayoutAccounts(payout, collectedData.destinationCountry),
+    [collectedData.destinationCountry, payout]
+  );
+  const effectivePayoutAccountSelection = resolvePayoutAccountSelection(
+    payoutAccountSelection,
+    existingPayoutAccounts
+  );
   const fields = useMemo<RequirementField[]>(() => {
     if (payout !== null) {
-      return derivePayoutRequirementFields(payout, collectedData, payoutLabels);
+      return derivePayoutRequirementFields(
+        payout,
+        collectedData,
+        payoutLabels,
+        effectivePayoutAccountSelection
+      );
     }
     if (
       data !== undefined &&
@@ -421,15 +515,11 @@ export function useCounterpartyRequirements(
       return data.fields;
     }
     return [];
-  }, [collectedData, data, payout, payoutLabels]);
+  }, [collectedData, data, effectivePayoutAccountSelection, payout, payoutLabels]);
 
-  const existingPayoutAccounts = useMemo(
-    () =>
-      payout === null || collectedData.destinationCountry === undefined
-        ? []
-        : activePayoutAccounts(payout, collectedData.destinationCountry),
-    [collectedData.destinationCountry, payout]
-  );
+  const selectedProviderAccountId =
+    effectivePayoutAccountSelection.kind === "existing" ? effectivePayoutAccountSelection.id : null;
+  const addingNewAccount = effectivePayoutAccountSelection.kind === "new";
 
   const isComplete = useMemo(
     () =>
@@ -438,6 +528,8 @@ export function useCounterpartyRequirements(
         .every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
+  const isPayoutAccountChoiceComplete =
+    existingPayoutAccounts.length === 0 || effectivePayoutAccountSelection.kind !== "none";
 
   // Every status the provider can return is handled: "collect" → needsCollection,
   // "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
@@ -451,13 +543,17 @@ export function useCounterpartyRequirements(
   return {
     fields,
     existingPayoutAccounts,
+    payoutAccountSelection: effectivePayoutAccountSelection,
+    selectedProviderAccountId,
+    addingNewAccount,
+    selectPayoutAccount,
     collectedData,
     setField,
     needsCollection:
       data?.status === "collect" ||
       data?.status === "collect_counterparty" ||
       data?.status === "collect_account",
-    isComplete,
+    isComplete: isComplete && isPayoutAccountChoiceComplete,
     isResolved: data !== undefined,
     blockReason,
     onboarding,
