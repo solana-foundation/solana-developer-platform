@@ -1,0 +1,105 @@
+name: Deploy sdp-api to Cloud Run (stage)
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-api-gcp-deploy-stage
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: solana-developer-platform-stg
+      REGION: us-central1
+      REPO: sdp-stage
+      SERVICE: sdp-stage-api-public
+      JOB: sdp-stage-api-public-cron
+      WORKER_SERVICE: sdp-stage-worker
+      MIGRATE_JOB: sdp-stage-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.STAGE_DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.STAGE_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}"
+          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${GITHUB_SHA}" -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Run database migrations
+        run: |
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          gcloud run jobs execute "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --wait
+
+      - name: Deploy service
+        run: |
+          gcloud run services update "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+      - name: Verify revision readiness
+        run: |
+          set -euo pipefail
+          REVISION=$(gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format='value(status.latestCreatedRevisionName)')
+          echo "candidate revision: ${REVISION}"
+          for attempt in $(seq 1 12); do
+            READY=$(gcloud run revisions describe "${REVISION}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json \
+              | jq -r '.status.conditions[] | select(.type == "Ready") | .status')
+            if [ "${READY}" = "True" ]; then
+              echo "revision ${REVISION} is ready"
+              exit 0
+            fi
+            echo "attempt ${attempt}/12: revision ${REVISION} not ready yet (${READY:-unknown})"
+            sleep 10
+          done
+          echo "revision ${REVISION} never became ready" >&2
+          exit 1
+
+      - name: Update cron job image
+        run: |
+          node .github/scripts/verify-managed-reconciliation-cadence.mjs \
+            "${JOB}" "${REGION}" "${PROJECT_ID}"
+          gcloud run jobs update "${JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+      - name: Update worker image
+        run: |
+          describe_err="$(mktemp)"
+          if gcloud run services describe "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
+            gcloud run services update "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          elif grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
+            echo "worker service ${WORKER_SERVICE} not created yet; skipping image update"
+          else
+            cat "${describe_err}" >&2
+            exit 1
+          fi

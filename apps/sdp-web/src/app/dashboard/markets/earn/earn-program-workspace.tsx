@@ -8,14 +8,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
-import {
-  CheckIcon,
-  Code2Icon,
-  InfoIcon,
-  Layers3Icon,
-  ListChecksIcon,
-  PanelsTopLeftIcon,
-} from "lucide-react";
+import { CheckIcon, Code2Icon, InfoIcon, Layers3Icon, ListChecksIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -42,7 +35,8 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { EarnProgramSkeleton } from "../markets-route-skeletons";
+import { EarnProgramConfigureSkeleton } from "../markets-route-skeletons";
+import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
 import {
   EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
@@ -58,7 +52,6 @@ import {
 
 const FLOW_STEPS = [
   { icon: ListChecksIcon, key: "DashboardMarkets.earnProgram.flowSelect" },
-  { icon: PanelsTopLeftIcon, key: "DashboardMarkets.earnProgram.flowStyle" },
   { icon: Code2Icon, key: "DashboardMarkets.earnProgram.flowIntegrate" },
 ] as const satisfies ReadonlyArray<{ icon: typeof ListChecksIcon; key: MessageKey }>;
 
@@ -76,7 +69,7 @@ function ProgramIntro() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ol className="grid overflow-hidden rounded-xl border border-border-default md:grid-cols-3">
+        <ol className="grid overflow-hidden rounded-xl border border-border-default md:grid-cols-2">
           {FLOW_STEPS.map(({ icon: Icon, key }, index) => (
             <li
               className={cn(
@@ -154,6 +147,8 @@ function StrategyRow({
     sdpEnvironment,
     strategy,
   });
+  const liquidity = earnStrategyLiquidityLabel(strategy, t);
+  const provider = earnProviderLabel(strategy.provider);
 
   return (
     <TableRow className={cn(selected && "bg-fill-subtle")}>
@@ -161,8 +156,21 @@ function StrategyRow({
         <EarnStrategyIdentity strategy={strategy} />
       </TableCell>
       <TableCell className="text-sm text-secondary">{asset?.symbol ?? "—"}</TableCell>
+      {/* `cn` has no tailwind-merge, so clamping lives on child spans where
+          nothing competes; a long label truncates with the full string on
+          `title` instead of overflowing the next column under `table-fixed`. */}
+      <TableCell className="text-sm text-secondary">
+        <span className="block truncate" title={liquidity}>
+          {liquidity ?? "—"}
+        </span>
+      </TableCell>
       <TableCell className="text-lg font-medium tracking-tight text-primary tabular-nums">
         {formatProviderApy(strategy.currentApy, locale)}
+      </TableCell>
+      <TableCell className="text-sm text-secondary">
+        <span className="block truncate" title={provider}>
+          {provider}
+        </span>
       </TableCell>
       <TableCell>
         <EarnDepositAvailabilityBadge
@@ -208,6 +216,7 @@ function StrategyMobileRow({
     sdpEnvironment,
     strategy,
   });
+  const liquidity = earnStrategyLiquidityLabel(strategy, t);
 
   return (
     <div className={cn("flex items-center gap-3 px-4 py-3", selected && "bg-fill-subtle")}>
@@ -217,6 +226,7 @@ function StrategyMobileRow({
           <span className="text-sm font-medium tracking-tight text-primary tabular-nums">
             {formatProviderApy(strategy.currentApy, locale)}
           </span>
+          <span className="text-sm text-secondary">{liquidity ?? "—"}</span>
           <EarnDepositAvailabilityBadge
             availability={availability}
             labels={PROGRAM_AVAILABILITY_LABELS}
@@ -242,12 +252,12 @@ function StrategyMobileRow({
 }
 
 export function EarnProgramWorkspace({
-  builderHref,
   initialCluster,
+  integrateHref,
   providerAccess,
 }: {
-  builderHref: string;
   initialCluster?: SolanaCluster;
+  integrateHref: string;
   providerAccess: EarnProviderAccess | null;
 }) {
   const t = useTranslations();
@@ -264,17 +274,17 @@ export function EarnProgramWorkspace({
   const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategiesCluster });
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
 
-  if (isLoading) return <EarnProgramSkeleton />;
+  if (isLoading) return <EarnProgramConfigureSkeleton />;
 
   const rows = strategies ?? [];
   const selectedStrategy = rows.find((strategy) => strategy.id === selectedStrategyId);
   const depositsEnabled = isVaultDirectDepositEnabled(sdpEnvironment);
 
-  const continueToBuilder = () => {
+  const continueToIntegration = () => {
     if (!selectedStrategy) return;
     const query = new URLSearchParams({ strategy: selectedStrategy.id });
     if (isMainnetPreview) query.set("cluster", "mainnet-beta");
-    router.push(`${builderHref}?${query}`);
+    router.push(`${integrateHref}?${query}`);
   };
 
   const changeCluster = (cluster: SolanaCluster) => {
@@ -346,22 +356,28 @@ export function EarnProgramWorkspace({
                     />
                   ))}
                 </div>
-                <Table className="hidden md:block [&_table]:min-w-[52rem] [&_table]:table-fixed">
+                <Table className="hidden md:block [&_table]:min-w-[64rem] [&_table]:table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[38%]">
+                      <TableHead className="w-[26%]">
                         {t("DashboardMarkets.earnProgram.strategy")}
                       </TableHead>
-                      <TableHead className="w-[14%]">
+                      <TableHead className="w-[10%]">
                         {t("DashboardMarkets.earnProgram.asset")}
                       </TableHead>
-                      <TableHead className="w-[16%]">
+                      <TableHead className="w-[13%]">
+                        {t("DashboardMarkets.earnProgram.liquidity")}
+                      </TableHead>
+                      <TableHead className="w-[13%]">
                         {t("DashboardMarkets.earnProgram.apy")}
                       </TableHead>
-                      <TableHead className="w-[18%]">
+                      <TableHead className="w-[12%]">
+                        {t("DashboardMarkets.earnProgram.provider")}
+                      </TableHead>
+                      <TableHead className="w-[14%]">
                         {t("DashboardMarkets.earnProgram.availability")}
                       </TableHead>
-                      <TableHead align="right" className="w-[14%]">
+                      <TableHead align="right" className="w-[12%]">
                         <span className="sr-only">{t("DashboardMarkets.earnProgram.select")}</span>
                       </TableHead>
                     </TableRow>
@@ -408,7 +424,7 @@ export function EarnProgramWorkspace({
                   </p>
                 </div>
               )}
-              <Button disabled={!selectedStrategy} onClick={continueToBuilder} type="button">
+              <Button disabled={!selectedStrategy} onClick={continueToIntegration} type="button">
                 {t("DashboardMarkets.earnProgram.continue")}
               </Button>
             </div>

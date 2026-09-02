@@ -11,6 +11,11 @@ const LIST_ROW_IDS = [
   "pc-skeleton-row-5",
 ];
 const FIELD_IDS = ["pc-skeleton-field-1", "pc-skeleton-field-2", "pc-skeleton-field-3"];
+const SETUP_FIELD_IDS = [
+  "pc-skeleton-setup-field-1",
+  "pc-skeleton-setup-field-2",
+  "pc-skeleton-setup-field-3",
+];
 const PANEL_IDS = ["pc-skeleton-panel-1", "pc-skeleton-panel-2", "pc-skeleton-panel-3"];
 
 /** Card chrome shared by every Private Channels skeleton: title + description. */
@@ -107,6 +112,53 @@ export function PrivateChannelsFormSkeleton({ maxWidth = "max-w-2xl" }: { maxWid
             </div>
           ))}
           <SkeletonBlock className="h-10 w-32" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** Mirrors the instance setup screen, which has no Private Channels tab strip. */
+export function PrivateChannelsSetupSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-6">
+      <header className="flex items-start gap-4">
+        <SkeletonBlock className="size-12 shrink-0 rounded-full" />
+        <div className="flex-1 space-y-2 pt-1">
+          <SkeletonBlock className="h-3 w-24" />
+          <SkeletonBlock className="h-6 w-48" />
+          <SkeletonBlock className="h-4 w-full max-w-md" />
+        </div>
+      </header>
+      <Card>
+        <SkeletonCardHeader />
+        <CardContent className="space-y-6">
+          {SETUP_FIELD_IDS.slice(0, 2).map((id) => (
+            <div className="space-y-2" key={id}>
+              <SkeletonBlock className="h-4 w-28" />
+              <SkeletonBlock className="h-10 w-full" />
+            </div>
+          ))}
+          <div className="grid gap-2 sm:grid-cols-2">
+            {SETUP_FIELD_IDS.slice(2).map((id) => (
+              <div className="space-y-2" key={id}>
+                <SkeletonBlock className="h-4 w-32" />
+                <SkeletonBlock className="h-10 w-full" />
+              </div>
+            ))}
+            <div className="space-y-2">
+              <SkeletonBlock className="h-4 w-32" />
+              <SkeletonBlock className="h-10 w-full" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <SkeletonBlock className="h-4 w-36" />
+            <SkeletonBlock className="h-10 w-full" />
+          </div>
+          <div className="flex justify-end gap-3">
+            <SkeletonBlock className="h-10 w-36" />
+            <SkeletonBlock className="h-10 w-28" />
+          </div>
         </CardContent>
       </Card>
     </div>

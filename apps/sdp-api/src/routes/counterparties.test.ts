@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
@@ -34,6 +35,10 @@ describe("Counterparties Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
+    await db
+      .prepare("DELETE FROM counterparty_provider_accounts")
+      .run()
+      .catch(() => {});
     await db
       .prepare("DELETE FROM counterparties")
       .run()
@@ -119,6 +124,68 @@ describe("Counterparties Routes", () => {
       env
     );
 
+  /**
+   * Inserts one provider-account fixture with explicit timestamps.
+   *
+   * @param input - Provider-account fixture values.
+   * @returns The inserted provider-account row.
+   */
+  async function seedProviderAccount(input: {
+    id: string;
+    counterpartyId: string;
+    provider: "lightspark" | "mural";
+    providerCustomerReference: string;
+    externalAccountReference: string | null;
+    fiatCurrency: string;
+    destinationCountry: "US" | "GB";
+    paymentRail: string;
+    providerStatus: string | null;
+    status: "active" | "archived";
+    createdAt: string;
+  }) {
+    const row = await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, external_account_reference, fiat_currency,
+           destination_country, payment_rail, provider_status, status, metadata,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         RETURNING *`
+      )
+      .bind(
+        input.id,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        input.counterpartyId,
+        input.provider,
+        input.providerCustomerReference,
+        input.externalAccountReference,
+        input.fiatCurrency,
+        input.destinationCountry,
+        input.paymentRail,
+        input.providerStatus,
+        input.status,
+        JSON.stringify({}),
+        input.createdAt,
+        input.createdAt
+      )
+      .first<Record<string, unknown>>();
+    expect(row).not.toBeNull();
+    const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+    const inserted = await repository.listProviderAccounts({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: input.counterpartyId,
+    });
+    const result = inserted.find((candidate) => candidate.id === input.id);
+    expect(result).toBeDefined();
+    if (result === undefined) {
+      throw new Error("Provider-account fixture was not inserted");
+    }
+    return result;
+  }
+
   describe("GET /v1/counterparties/metadata", () => {
     it("returns field options (enums + countries)", async () => {
       const res = await app.request(
@@ -132,14 +199,12 @@ describe("Counterparties Routes", () => {
           fields: {
             entityTypes: string[];
             countries: { code: string; name: string }[];
-            usStates: { code: string; name: string }[];
           };
         };
       };
       expect(body.data.fields.entityTypes).toContain("individual");
       expect(body.data.fields.entityTypes).toContain("business");
       expect(body.data.fields.countries.some((c) => c.code === "US")).toBe(true);
-      expect(body.data.fields.usStates.length).toBeGreaterThan(0);
     });
   });
 
@@ -293,6 +358,17 @@ describe("Counterparties Routes", () => {
   });
 
   describe("GET /v1/counterparties/:counterpartyId/requirements", () => {
+    beforeEach(() => {
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = "lightspark_client_secret";
+    });
+
+    afterEach(() => {
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
+      vi.restoreAllMocks();
+    });
+
     it("surfaces the missing destination wallet for onramp requirements", async () => {
       const created = await createCounterparty();
       const cp = (await created.json()).data.counterparty;
@@ -316,6 +392,114 @@ describe("Counterparties Routes", () => {
         ])
       );
     });
+
+    it("returns enriched Lightspark payout accounts in the payout tree", async () => {
+      const created = await createCounterparty({ externalId: "requirements_lightspark_accounts" });
+      const counterparty = (await created.json()).data.counterparty;
+      const providerAccounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+
+      await providerAccounts.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_accounts",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({ lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } }),
+          counterparty.id
+        )
+        .run();
+      await seedProviderAccount({
+        id: "provider_account_requirements_ach",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_accounts",
+        externalAccountReference: "ExternalAccount:requirements_ach",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await seedProviderAccount({
+        id: "provider_account_requirements_wire",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_accounts",
+        externalAccountReference: "ExternalAccount:requirements_wire",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "WIRE",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+
+      const enrichmentPage = {
+        data: [
+          {
+            platformAccountId: "provider_account_requirements_ach",
+            status: "ACTIVE",
+            accountInfo: {
+              accountType: "USD_ACCOUNT",
+              paymentRails: ["ACH"],
+              bankName: "ACH Bank",
+              accountNumber: "123456789",
+            },
+          },
+          {
+            platformAccountId: "provider_account_requirements_wire",
+            status: "ACTIVE",
+            accountInfo: {
+              accountType: "USD_ACCOUNT",
+              paymentRails: ["WIRE"],
+              bankName: "Wire Bank",
+              accountNumber: "987654321",
+            },
+          },
+        ],
+        hasMore: false,
+      };
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(enrichmentPage), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).data.payout.accounts).toEqual([
+        {
+          id: "provider_account_requirements_ach",
+          destinationCountry: "US",
+          paymentRail: "ACH",
+          status: "ACTIVE",
+          bankName: "ACH Bank",
+          accountNumberLast4: "6789",
+        },
+        {
+          id: "provider_account_requirements_wire",
+          destinationCountry: "US",
+          paymentRail: "WIRE",
+          status: "ACTIVE",
+          bankName: "Wire Bank",
+          accountNumberLast4: "4321",
+        },
+      ]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("POST /v1/counterparties/:counterpartyId/requirements", () => {
@@ -335,7 +519,7 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
     });
 
-    it("fails loudly at the Lightspark identity collection seam", async () => {
+    it("returns the missing identity fields when Lightspark has no provider customer", async () => {
       const created = await createCounterparty({ externalId: "requirements_lightspark" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
@@ -350,12 +534,103 @@ describe("Counterparties Routes", () => {
         env
       );
 
-      expect(res.status).toBe(400);
-      expect((await res.json()).error).toEqual({
-        code: "BAD_REQUEST",
-        message:
-          "Lightspark customer creation requires identity fields that are no longer stored; JIT collection is not wired yet",
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.status).toBe("collect_counterparty");
+      expect(body.data.fields.map((field: { key: string }) => field.key)).toEqual([
+        "customer.fullName",
+        "customer.birthDate",
+        "customer.nationality",
+        "customer.region",
+        "customer.email",
+        "customer.address.line1",
+        "customer.address.city",
+        "customer.address.postalCode",
+        "customer.address.countryCode",
+        "purposeOfPayment",
+      ]);
+      expect(body.data.fields[2]).toEqual({
+        kind: "country",
+        key: "customer.nationality",
+        label: "Nationality",
+        required: true,
       });
+      expect(body.data.fields[3]).toEqual({
+        kind: "country",
+        key: "customer.region",
+        label: "Region",
+        required: true,
+      });
+      expect(body.data.fields[8]).toEqual({
+        kind: "country",
+        key: "customer.address.countryCode",
+        label: "Country",
+        required: true,
+      });
+    });
+
+    it("creates the Grid customer from collected PII and links the provider account", async () => {
+      const created = await createCounterparty({ externalId: "requirements_lightspark_pii" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "Customer:cus_new_123" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const advanceBody = {
+          provider: "lightspark",
+          direction: "onramp",
+          collectedData: {
+            "customer.fullName": "Ada Lovelace",
+            "customer.birthDate": "1990-01-01",
+            "customer.nationality": "US",
+            "customer.region": "US",
+            "customer.email": "ada@example.com",
+            "customer.address.line1": "1 Main St",
+            "customer.address.city": "San Francisco",
+            "customer.address.postalCode": "94105",
+            "customer.address.countryCode": "US",
+            purposeOfPayment: "GOODS_OR_SERVICES",
+          },
+        };
+        const res = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify(advanceBody),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data).toEqual({
+          provider: "lightspark",
+          direction: "onramp",
+          status: "ready",
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+        const again = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ provider: "lightspark", direction: "onramp" }),
+          },
+          env
+        );
+
+        expect(again.status).toBe(200);
+        expect((await again.json()).data.status).toBe("ready");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        fetchSpy.mockRestore();
+      }
     });
 
     it("fails loudly at the BVNK identity collection seam", async () => {
@@ -503,6 +778,203 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.code).toBe("BAD_REQUEST");
+    });
+  });
+
+  describe("GET /v1/counterparties/:counterpartyId/provider-accounts", () => {
+    beforeEach(() => {
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = "lightspark_client_secret";
+    });
+
+    afterEach(() => {
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
+      vi.restoreAllMocks();
+    });
+
+    it("lists scoped rows with grouped JIT enrichment, filters, and pending rows", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_owner" });
+      const owner = (await created.json()).data.counterparty;
+      const otherCreated = await createCounterparty({ externalId: "provider_accounts_other" });
+      const other = (await otherCreated.json()).data.counterparty;
+
+      await seedProviderAccount({
+        id: "provider_account_usd_completed",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:owner",
+        externalAccountReference: "ExternalAccount:usd_completed",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "PENDING",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await seedProviderAccount({
+        id: "provider_account_usd_pending",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:owner",
+        externalAccountReference: null,
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "WIRE",
+        providerStatus: null,
+        status: "active",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+      await seedProviderAccount({
+        id: "provider_account_gbp_archived",
+        counterpartyId: owner.id,
+        provider: "mural",
+        providerCustomerReference: "mural_customer",
+        externalAccountReference: "mural_external",
+        fiatCurrency: "GBP",
+        destinationCountry: "GB",
+        paymentRail: "FPS",
+        providerStatus: "ACTIVE",
+        status: "archived",
+        createdAt: "2026-01-03T00:00:00.000Z",
+      });
+      await seedProviderAccount({
+        id: "provider_account_other_counterparty",
+        counterpartyId: other.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:owner",
+        externalAccountReference: "ExternalAccount:other",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-04T00:00:00.000Z",
+      });
+
+      const enrichmentPage = JSON.stringify({
+        data: [
+          {
+            platformAccountId: "provider_account_usd_completed",
+            status: "ACTIVE",
+            accountInfo: {
+              accountType: "USD_ACCOUNT",
+              paymentRails: ["ACH", "WIRE"],
+              bankName: "Example Bank",
+              accountNumber: "123456789",
+            },
+          },
+          {
+            platformAccountId: "provider_account_usd_pending",
+            status: "ACTIVE",
+            accountInfo: {
+              accountType: "USD_ACCOUNT",
+              paymentRails: ["ACH"],
+              bankName: "Should Stay Absent",
+              accountNumber: "999999999",
+            },
+          },
+        ],
+        hasMore: false,
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+        Promise.resolve(
+          new Response(enrichmentPage, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).data).toEqual({
+        accounts: [
+          {
+            id: "provider_account_usd_completed",
+            provider: "lightspark",
+            fiatCurrency: "USD",
+            destinationCountry: "US",
+            paymentRail: "ACH",
+            status: "active",
+            providerStatus: "ACTIVE",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            bankName: "Example Bank",
+            accountNumberLast4: "6789",
+            paymentRails: ["ACH", "WIRE"],
+          },
+          {
+            id: "provider_account_usd_pending",
+            provider: "lightspark",
+            fiatCurrency: "USD",
+            destinationCountry: "US",
+            paymentRail: "WIRE",
+            status: "active",
+            providerStatus: null,
+            createdAt: "2026-01-02T00:00:00.000Z",
+          },
+          {
+            id: "provider_account_gbp_archived",
+            provider: "mural",
+            fiatCurrency: "GBP",
+            destinationCountry: "GB",
+            paymentRail: "FPS",
+            status: "archived",
+            providerStatus: "ACTIVE",
+            createdAt: "2026-01-03T00:00:00.000Z",
+          },
+        ],
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const requestUrl = new URL(String(fetchSpy.mock.calls[0][0]));
+      expect(requestUrl.searchParams.get("customerId")).toBe("Customer:owner");
+      expect(requestUrl.searchParams.get("currency")).toBe("USD");
+
+      const filtered = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts?provider=lightspark&fiatCurrency=USD&destinationCountry=US`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(filtered.status).toBe(200);
+      const filteredBody = await filtered.json();
+      expect(filteredBody.data.accounts.map((account: { id: string }) => account.id)).toEqual([
+        "provider_account_usd_completed",
+        "provider_account_usd_pending",
+      ]);
+    });
+
+    it("returns 503 when Grid enrichment fails", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_failure" });
+      const owner = (await created.json()).data.counterparty;
+      await seedProviderAccount({
+        id: "provider_account_failure",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:failure",
+        externalAccountReference: "ExternalAccount:failure",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "PENDING",
+        status: "active",
+        createdAt: "2026-02-01T00:00:00.000Z",
+      });
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ message: "Grid unavailable" }), { status: 503 })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(503);
     });
   });
 

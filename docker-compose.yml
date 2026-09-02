@@ -127,43 +127,5 @@ services:
     ports:
       - "${SDP_DOCS_PORT:-3001}:3001"
 
-  # Opt-in: `docker compose --profile rings up sdp-helius-gateway`.
-  #
-  # Behind a profile for two reasons. It is a Rust release build of ~450 crates,
-  # which would push the docker_compose_smoke job past its 25-minute timeout; and
-  # it is useless without a reachable Photon indexer and prover, which the default
-  # local stack does not provide.
-  sdp-helius-gateway:
-    profiles:
-      - rings
-    build:
-      # Context is the crate directory, not the repo root: it is not a pnpm
-      # workspace member and has nothing to copy from outside itself.
-      context: apps/sdp-helius-gateway
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      # Loopback-only, unlike the other services here. This one ships working
-      # default HMAC secrets in this file, so an unrestricted mapping would let
-      # anything that can reach the developer's host sign valid requests once the
-      # handlers do real work. Local testing is unaffected.
-      - "127.0.0.1:${HELIUS_GATEWAY_PORT:-8788}:8788"
-    environment:
-      HELIUS_GATEWAY_PORT: 8788
-      # One secret per caller: the gateway verifies each route against its own
-      # caller's secret rather than against either, so the keyless routes and the
-      # key-bearing ones cannot be signed interchangeably.
-      #
-      # Local-only placeholders. Both must be at least 32 bytes, and each must match
-      # what that caller signs with. Never reuse these values anywhere real.
-      HELIUS_GATEWAY_HMAC_SECRET_SDP_API: ${HELIUS_GATEWAY_HMAC_SECRET_SDP_API:-local-development-only-sdp-api-secret-32b}
-      HELIUS_GATEWAY_HMAC_SECRET_KEY_AUTH: ${HELIUS_GATEWAY_HMAC_SECRET_KEY_AUTH:-local-development-only-key-auth-secret-32}
-      # Upstream endpoints are env-only. A caller-supplied prover URL alongside a
-      # decrypted nullifier key would let one request exfiltrate that key.
-      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
-      PHOTON_URL: ${PHOTON_URL:-http://host.docker.internal:8784}
-      PROVER_URL: ${PROVER_URL:-http://host.docker.internal:3001}
-      RUST_LOG: ${RUST_LOG:-info}
-
 volumes:
   sdp-postgres-data:

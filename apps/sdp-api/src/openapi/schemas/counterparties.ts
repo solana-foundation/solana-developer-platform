@@ -1,4 +1,4 @@
-import { COUNTERPARTY_ENTITY_TYPES, RAMP_PROVIDERS } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES, RAMP_PROVIDERS } from "@sdp/types";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
@@ -15,6 +15,7 @@ import {
   listCounterpartyAccountsQuerySchema as listCounterpartyAccountsQuerySchemaBase,
   updateCounterpartyAccountObjectSchema as updateCounterpartyAccountSchemaBase,
 } from "../../routes/counterparty-accounts/schemas";
+import { listCounterpartyProviderAccountsQuerySchema as listCounterpartyProviderAccountsQuerySchemaBase } from "../../routes/counterparty-provider-accounts/schemas";
 import { rampDirectionSchema as rampDirectionSchemaBase } from "../../routes/payments/schemas";
 import {
   isoDateTimeSchema,
@@ -80,26 +81,79 @@ export const counterpartyRequirementsQuerySchema = z
       "Ramp provider, direction, asset pair, and (for onramps) destination wallet used to evaluate counterparty requirements.",
   });
 
+const requirementTextFieldSchema = z.object({
+  kind: z.literal("text"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  pattern: z.string().optional(),
+  minLength: z.number().int().nonnegative().optional(),
+  maxLength: z.number().int().nonnegative().optional(),
+  placeholder: z.string().optional(),
+  mask: z.string().optional(),
+});
+
+const requirementSelectFieldSchema = z.object({
+  kind: z.literal("select"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  options: z.array(z.object({ value: z.string(), label: z.string() })),
+});
+
+const requirementCountryFieldSchema = z.object({
+  kind: z.literal("country"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+});
+
+const requirementDateFieldSchema = z.object({
+  kind: z.literal("date"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  before: z.string().optional(),
+});
+
 const requirementFieldSchema = z.discriminatedUnion("kind", [
+  requirementTextFieldSchema,
+  requirementSelectFieldSchema,
+  requirementCountryFieldSchema,
+  requirementDateFieldSchema,
   z.object({
-    kind: z.literal("text"),
+    kind: z.literal("address"),
     key: z.string(),
     label: z.string(),
     required: z.boolean(),
-    pattern: z.string().optional(),
-    minLength: z.number().int().nonnegative().optional(),
-    maxLength: z.number().int().nonnegative().optional(),
-    placeholder: z.string().optional(),
-    mask: z.string().optional(),
-  }),
-  z.object({
-    kind: z.literal("select"),
-    key: z.string(),
-    label: z.string(),
-    required: z.boolean(),
-    options: z.array(z.object({ value: z.string(), label: z.string() })),
+    fields: z.array(
+      z.discriminatedUnion("kind", [
+        requirementTextFieldSchema,
+        requirementSelectFieldSchema,
+        requirementCountryFieldSchema,
+        requirementDateFieldSchema,
+      ])
+    ),
   }),
 ]);
+
+const payoutRequirementTreeSchema = z.object({
+  countryRails: z.partialRecord(
+    z.enum(COUNTRY_CODES),
+    z.array(z.object({ value: z.string(), label: z.string() }))
+  ),
+  railFields: z.record(z.string(), z.array(requirementFieldSchema)),
+  accounts: z.array(
+    z.object({
+      id: z.string(),
+      destinationCountry: z.enum(COUNTRY_CODES),
+      paymentRail: z.string().nullable(),
+      status: z.string(),
+      bankName: z.string().optional(),
+      accountNumberLast4: z.string().optional(),
+    })
+  ),
+});
 
 const requirementBase = {
   direction: withOpenApi(rampDirectionSchemaBase, {
@@ -125,6 +179,18 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("collect"),
       fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("lightspark"),
+      status: z.literal("collect_counterparty"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("lightspark"),
+      status: z.literal("collect_account"),
+      payout: payoutRequirementTreeSchema,
     }),
     z.object({
       ...requirementBase,
@@ -344,7 +410,6 @@ export const counterpartyFieldOptionsResponseSchema = withOpenApi(
     fields: z.object({
       entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)),
       countries: z.array(countrySchema),
-      usStates: z.array(countrySchema),
     }),
   }),
   {
@@ -388,6 +453,86 @@ export const listCounterpartyAccountsQuerySchema = listCounterpartyAccountsQuery
     }),
   })
   .openapi({ description: "Counterparty account list filters." });
+
+export const counterpartyProviderAccountSchema = withOpenApi(
+  z.object({
+    id: withOpenApi(z.string(), {
+      description: "Counterparty provider-account row identifier.",
+      example: "counterparty_provider_account_example",
+    }),
+    provider: withOpenApi(z.enum(RAMP_PROVIDERS), {
+      description: "Ramp provider owning the account.",
+      example: "lightspark",
+    }),
+    fiatCurrency: withOpenApi(z.string(), {
+      description: "Fiat currency for the provider account corridor.",
+      example: "USD",
+    }),
+    destinationCountry: withOpenApi(z.enum(COUNTRY_CODES), {
+      description: "Destination country for the provider account corridor.",
+      example: "US",
+    }),
+    paymentRail: withOpenApi(z.string().nullable(), {
+      description: "Payment rail selected for the corridor row.",
+      example: "ACH",
+    }),
+    status: counterpartyAccountStatusSchema,
+    providerStatus: withOpenApi(z.string().nullable(), {
+      description: "Current provider-side account status when known.",
+      example: "ACTIVE",
+    }),
+    createdAt: withOpenApi(isoDateTimeSchema, {
+      description: "SDP row creation timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    bankName: withOpenApi(z.string().optional(), {
+      description: "Bank name returned by the provider when available.",
+      example: "Example Bank",
+    }),
+    accountNumberLast4: withOpenApi(z.string().optional(), {
+      description: "Last four digits of the provider account number.",
+      example: "6789",
+    }),
+    paymentRails: withOpenApi(z.array(z.string()).optional(), {
+      description: "Payment rails returned by the provider when available.",
+      example: ["ACH", "WIRE"],
+    }),
+  }),
+  { description: "Counterparty provider-account row with optional JIT provider details." }
+);
+
+export const listCounterpartyProviderAccountsResponseSchema = withOpenApi(
+  z.object({
+    accounts: withOpenApi(z.array(counterpartyProviderAccountSchema), {
+      description: "External provider accounts for the counterparty.",
+    }),
+  }),
+  { description: "Counterparty provider-account list." }
+);
+
+export const listCounterpartyProviderAccountsQuerySchema =
+  listCounterpartyProviderAccountsQuerySchemaBase
+    .extend({
+      provider: withOpenApi(listCounterpartyProviderAccountsQuerySchemaBase.shape.provider, {
+        description: "Filter by ramp provider.",
+        example: "lightspark",
+      }),
+      fiatCurrency: withOpenApi(
+        listCounterpartyProviderAccountsQuerySchemaBase.shape.fiatCurrency,
+        {
+          description: "Filter by fiat currency.",
+          example: "USD",
+        }
+      ),
+      destinationCountry: withOpenApi(
+        listCounterpartyProviderAccountsQuerySchemaBase.shape.destinationCountry,
+        {
+          description: "Filter by ISO 3166-1 alpha-2 destination country.",
+          example: "US",
+        }
+      ),
+    })
+    .openapi({ description: "Counterparty provider-account list filters." });
 
 const createCounterpartyDocFields = {
   externalId: withOpenApi(createCounterpartySchemaBase.shape.externalId, {

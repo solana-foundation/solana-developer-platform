@@ -4,12 +4,14 @@ import {
   DEFAULT_RINGS_OPERATION_LIST_LIMIT,
   type FailHeliusRingsOperationInput,
   generateHeliusRingsOperationId,
+  type HeliusRingsExpiredSubmissionsInput,
   type HeliusRingsOperationRepository,
   type HeliusRingsOperationRow,
   type HeliusRingsTimelockRow,
   type ListHeliusRingsInFlightOperationsInput,
   type ListHeliusRingsOperationsByProjectInput,
   type ListHeliusRingsOperationsByWalletInput,
+  type PersistHeliusRingsSignedInput,
   type ReleaseHeliusRingsTimelockInput,
   type ReserveHeliusRingsIntentInput,
   type TransitionHeliusRingsOperationInput,
@@ -17,10 +19,16 @@ import {
 import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 
 /**
- * States the resume sweep acts on. The partial index is broader; those waiting
- * states must not consume the sweep limit.
+ * The states the resume sweep can actually move forward, a subset of the
+ * partial index's predicate so it still reads from that index.
+ *
+ * `preparing` and `approval_required` are excluded even though the index covers
+ * them: neither holds a wallet's spend slot or blocks a later operation, and an
+ * approval waits on a person indefinitely. Returning them would let a backlog of
+ * rows nothing can advance fill the sweep's row budget, oldest first, and starve
+ * the ones it exists to settle.
  */
-const SWEEP_STATES = ["ready_to_sign", "submitted", "indexing"] as const;
+const IN_FLIGHT_STATES = ["proving", "ready_to_sign", "submitted", "indexing"] as const;
 
 function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
   return {
@@ -48,9 +56,73 @@ function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
     retryable: (row.retryable ?? null) as boolean | null,
     retry_of_operation_id: (row.retry_of_operation_id ?? null) as string | null,
     timelock_unlock_at: (row.timelock_unlock_at ?? null) as string | null,
+    input_notes: mapInputNotes(row.input_notes),
+    signed_transaction: (row.signed_transaction ?? null) as string | null,
+    // NUMERIC comes back as a string from pg, which is what we want: this is a
+    // uint64 and Number would start losing precision partway up the range.
+    last_valid_block_height:
+      row.last_valid_block_height === null || row.last_valid_block_height === undefined
+        ? null
+        : String(row.last_valid_block_height),
+    submission_started_at: (row.submission_started_at ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
+}
+
+/**
+ * jsonb arrives parsed, so this is a shape check rather than a decode. A row
+ * whose notes are not an array of strings cannot be rebuilt against, and
+ * silently treating it as absent would let the rebuild reselect freely — the
+ * exact thing pinning them prevents.
+ */
+function mapInputNotes(value: unknown): string[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error("helius_rings_operations.input_notes is not an array of strings");
+  }
+  return value as string[];
+}
+
+/**
+ * The SET clause for a transition, covering only the columns the caller named.
+ *
+ * Only-what-was-named is the contract: a later step in the pipeline must not
+ * blank the approval id or the note set an earlier one recorded, and a patch
+ * type where every field is optional is how that is expressed.
+ */
+function transitionAssignments(input: TransitionHeliusRingsOperationInput): {
+  assignments: string[];
+  values: unknown[];
+} {
+  const patch = input.patch ?? {};
+  const assignments = ["state = ?", "updated_at = sdp_iso_now()"];
+  const values: unknown[] = [input.nextState];
+
+  const columns: ReadonlyArray<readonly [string, unknown]> = [
+    ["approval_request_id", patch.approvalRequestId],
+    ["policy_evaluation_id", patch.policyEvaluationId],
+    ["proof_source", patch.proofSource],
+    ["proof_ref", patch.proofRef],
+    ["outer_tx_signature", patch.outerTxSignature],
+    ["photon_indexed_at", patch.photonIndexedAt],
+  ];
+
+  for (const [column, value] of columns) {
+    if (value !== undefined) {
+      assignments.push(`${column} = ?`);
+      values.push(value);
+    }
+  }
+
+  // Separate because it is the one jsonb column, and it is written as text with
+  // an explicit cast rather than relying on the driver to guess the type.
+  if (patch.inputNotes !== undefined) {
+    assignments.push("input_notes = ?::jsonb");
+    values.push(patch.inputNotes === null ? null : JSON.stringify(patch.inputNotes));
+  }
+
+  return { assignments, values };
 }
 
 function mapTimelockRow(row: Record<string, unknown>): HeliusRingsTimelockRow {
@@ -89,8 +161,10 @@ export function createPostgresHeliusRingsOperationRepository(
                timelock_unlock_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (intent_key)
-             -- Self-assignment rather than DO NOTHING, which returns zero rows
-             -- on a replay and so cannot be told from a failed insert.
+             -- Self-assignment rather than DO NOTHING: DO NOTHING returns zero
+             -- rows on a replay, which is indistinguishable from a failed
+             -- insert. Assigning updated_at to itself makes RETURNING emit the
+             -- row that is already there without altering it.
              DO UPDATE SET updated_at = helius_rings_operations.updated_at
              RETURNING *`
           )
@@ -113,12 +187,15 @@ export function createPostgresHeliusRingsOperationRepository(
           .first<Record<string, unknown>>();
 
         if (!row) {
+          // The upsert always returns a row; a null here means the statement
+          // matched nothing at all, which is not a state this table can reach.
           throw new Error("helius rings reserveIntent returned no row");
         }
 
         const operation = mapRow(row);
-        // The generated id only survives if this call is the one that inserted;
-        // on a replay the row carries the original.
+        // The id we generated only survives if this call is the one that
+        // inserted. On a replay the row carries the original id, which is a
+        // cheaper and clearer signal than inspecting xmax.
         const reserved = operation.id === id;
 
         if (reserved && input.timelock) {
@@ -177,26 +254,30 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listOperationsByProject(input: ListHeliusRingsOperationsByProjectInput) {
+      if (input.walletIds?.length === 0) return [];
+
+      const bindings: unknown[] = [input.organizationId, input.projectId];
+      const walletScope = input.walletIds ? " AND wallet_id = ANY(?)" : "";
+      if (input.walletIds) bindings.push([...input.walletIds]);
+      bindings.push(input.limit ?? DEFAULT_RINGS_OPERATION_LIST_LIMIT);
+
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE organization_id = ? AND project_id = ?
+            WHERE organization_id = ? AND project_id = ?${walletScope}
             ORDER BY created_at DESC, id DESC
             LIMIT ?`
         )
-        .bind(
-          input.organizationId,
-          input.projectId,
-          input.limit ?? DEFAULT_RINGS_OPERATION_LIST_LIMIT
-        )
+        .bind(...bindings)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
 
     async transitionState(input: TransitionHeliusRingsOperationInput) {
       return db.transaction(async (tx) => {
-        // Lock first: two workers resuming the same operation would otherwise
-        // both read `submitted` and both do the follow-up work.
+        // Lock first. Two workers resuming the same operation would otherwise
+        // both read `submitted`, both write `indexing`, and both go on to do the
+        // follow-up work once each.
         const locked = await tx
           .prepare(
             `SELECT state FROM helius_rings_operations
@@ -208,36 +289,7 @@ export function createPostgresHeliusRingsOperationRepository(
 
         if (!locked || locked.state !== input.expectedState) return null;
 
-        const patch = input.patch ?? {};
-        const assignments: string[] = ["state = ?", "updated_at = sdp_iso_now()"];
-        const values: unknown[] = [input.nextState];
-
-        // Only columns the caller named are written, so a later step cannot
-        // blank what an earlier one recorded.
-        if (patch.approvalRequestId !== undefined) {
-          assignments.push("approval_request_id = ?");
-          values.push(patch.approvalRequestId);
-        }
-        if (patch.policyEvaluationId !== undefined) {
-          assignments.push("policy_evaluation_id = ?");
-          values.push(patch.policyEvaluationId);
-        }
-        if (patch.proofSource !== undefined) {
-          assignments.push("proof_source = ?");
-          values.push(patch.proofSource);
-        }
-        if (patch.proofRef !== undefined) {
-          assignments.push("proof_ref = ?");
-          values.push(patch.proofRef);
-        }
-        if (patch.outerTxSignature !== undefined) {
-          assignments.push("outer_tx_signature = ?");
-          values.push(patch.outerTxSignature);
-        }
-        if (patch.photonIndexedAt !== undefined) {
-          assignments.push("photon_indexed_at = ?");
-          values.push(patch.photonIndexedAt);
-        }
+        const { assignments, values } = transitionAssignments(input);
 
         const row = await tx
           .prepare(
@@ -253,20 +305,224 @@ export function createPostgresHeliusRingsOperationRepository(
       });
     },
 
+    async persistSigned(input: PersistHeliusRingsSignedInput) {
+      // The NULL guards are the idempotency contract, not defensive coding: a
+      // second signing of the same operation produces different bytes for the
+      // same intent, and both sets could land. Losing this update is how a
+      // concurrent worker is told the bytes are already chosen.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET outer_tx_signature = ?,
+                  signed_transaction = ?,
+                  last_valid_block_height = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND state = 'ready_to_sign'
+              AND outer_tx_signature IS NULL
+              AND signed_transaction IS NULL
+              AND last_valid_block_height IS NULL
+              AND submission_started_at IS NULL
+          RETURNING *`
+        )
+        .bind(
+          input.signature,
+          input.signedTransaction,
+          input.lastValidBlockHeight,
+          input.id,
+          input.organizationId,
+          input.projectId
+        )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async markSubmissionStarted(input: HeliusRingsProjectScope & { id: string; at: string }) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET submission_started_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND signed_transaction IS NOT NULL
+              AND submission_started_at IS NULL
+          RETURNING *`
+        )
+        .bind(input.at, input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async listExpiredSubmissions(input: HeliusRingsExpiredSubmissionsInput) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE signed_transaction IS NOT NULL
+              AND last_valid_block_height < ?
+              AND state IN ('submitted', 'indexing')
+            ORDER BY last_valid_block_height ASC
+            LIMIT ?`
+        )
+        .bind(input.blockHeight, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
+    },
+
+    async findBlockingOperation(
+      input: HeliusRingsProjectScope & { walletId: string; opTypes: readonly string[] }
+    ) {
+      // The same predicate the two unique indexes carry, deliberately in step
+      // with them: this exists to give the caller a real message before the
+      // index gives them a constraint name.
+      const row = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE wallet_id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND op_type = ANY(?)
+              AND (
+                    state IN ('proving', 'ready_to_sign', 'submitted', 'indexing')
+                 OR (state = 'failed' AND signed_transaction IS NOT NULL)
+              )
+            ORDER BY created_at ASC
+            LIMIT 1`
+        )
+        .bind(input.walletId, input.organizationId, input.projectId, [...input.opTypes])
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async completeFromFailed(
+      input: HeliusRingsProjectScope & { id: string; photonIndexedAt: string }
+    ) {
+      // Compare-and-swap on `failed`: losing it means another worker or a
+      // concurrent reconcile already moved the row, which is not an error.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET state = 'completed',
+                  failure_code = NULL,
+                  failure_message = NULL,
+                  retryable = NULL,
+                  photon_indexed_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND state = 'failed'
+          RETURNING *`
+        )
+        .bind(input.photonIndexedAt, input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async voidOperation(input: HeliusRingsProjectScope & { id: string }) {
+      // Only from a signed failure. An unsigned one has nothing on chain to
+      // reconcile and belongs to retry instead.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET state = 'voided',
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND state = 'failed'
+              AND signed_transaction IS NOT NULL
+          RETURNING *`
+        )
+        .bind(input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async listSignedFailures(input: { limit?: number }) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE state = 'failed'
+              AND signed_transaction IS NOT NULL
+            ORDER BY updated_at ASC
+            LIMIT ?`
+        )
+        .bind(input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
+    },
+
+    async listExpiredSignedFailures(input: HeliusRingsExpiredSubmissionsInput) {
+      // Same shape as listExpiredSubmissions, but for rows that already failed
+      // with signed bytes and a resolvable code — the ones the reconcile pass
+      // needs to upgrade so an operator can void the wallet's blocked slot.
+      const result = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE state = 'failed'
+              AND signed_transaction IS NOT NULL
+              AND failure_code IS NOT NULL
+              AND failure_code <> 'manual_reconciliation_required'
+              AND last_valid_block_height IS NOT NULL
+              AND last_valid_block_height < ?
+            ORDER BY last_valid_block_height ASC
+            LIMIT ?`
+        )
+        .bind(input.blockHeight, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
+    },
+
+    async escalateToManualReconciliation(input: HeliusRingsProjectScope & { id: string }) {
+      // failure_message deliberately untouched: the original names the actual
+      // reason (rpc error, preflight rejection); overwriting it with a generic
+      // "blockhash expired" would lose the only diagnostic the row carries.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET failure_code = 'manual_reconciliation_required',
+                  retryable = false,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND state = 'failed'
+              AND signed_transaction IS NOT NULL
+              AND failure_code IS NOT NULL
+              AND failure_code <> 'manual_reconciliation_required'
+          RETURNING *`
+        )
+        .bind(input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
     async failOperation(input: FailHeliusRingsOperationInput) {
       return db.transaction(async (tx) => {
         const locked = await tx
           .prepare(
-            `SELECT state FROM helius_rings_operations
+            `SELECT state, signed_transaction FROM helius_rings_operations
               WHERE id = ? AND organization_id = ? AND project_id = ?
               FOR UPDATE`
           )
           .bind(input.id, input.organizationId, input.projectId)
-          .first<{ state: string }>();
+          .first<{ state: string; signed_transaction: string | null }>();
 
         if (!locked || locked.state !== input.expectedState) return null;
+        // `ready_to_sign` is the only failure edge that can race a signer
+        // holding bytes in memory. The row lock arbitrates with persistSigned:
+        // if persistence committed first, recovery must leave the row resumable;
+        // if this failure commits first, persistSigned's state guard loses.
+        if (input.expectedState === "ready_to_sign" && locked.signed_transaction !== null) {
+          return null;
+        }
 
-        // The failure triple moves together because the DB CHECK requires it.
+        // The failure triple moves together because the DB CHECK requires it:
+        // a `failed` row without a code is unactionable in the recovery UI.
         const row = await tx
           .prepare(
             `UPDATE helius_rings_operations
@@ -293,7 +549,7 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listInFlightOperations(input: ListHeliusRingsInFlightOperationsInput) {
-      const placeholders = SWEEP_STATES.map(() => "?").join(", ");
+      const placeholders = IN_FLIGHT_STATES.map(() => "?").join(", ");
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
@@ -303,7 +559,7 @@ export function createPostgresHeliusRingsOperationRepository(
             LIMIT ?`
         )
         .bind(
-          ...SWEEP_STATES,
+          ...IN_FLIGHT_STATES,
           input.staleBefore,
           input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT
         )
@@ -333,8 +589,8 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async releaseTimelock(input: ReleaseHeliusRingsTimelockInput) {
-      // `released_at IS NULL` makes the release single-shot, so two sweeps
-      // racing produce one payout and one null.
+      // `released_at IS NULL` is the whole guard: it makes the release
+      // single-shot, so two sweeps racing produce one payout and one null.
       const row = await db
         .prepare(
           `UPDATE helius_rings_timelocks

@@ -348,6 +348,52 @@ export interface EarnMovementsRepository {
     ownerAddress: string;
   }): Promise<boolean>;
   /**
+   * One external wallet's recorded movements, exact-project scoped, newest
+   * first (PRO-1772). The per-owner read the cross-provider feed structurally
+   * cannot serve: its vault arm requires a custody-wallet match, and an
+   * owner-signed row has none. Scope is the 0070 claim key — org, PROJECT,
+   * environment, owner — so a sibling project sees nothing.
+   */
+  listExternalWalletMovements(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+    direction?: EarnMovementDirection;
+    status?: string;
+    limit: number;
+    before: EarnMovementCursor | null;
+  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
+  /** One external-wallet movement under the same four scoping rules, or null. */
+  getExternalWalletMovement(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    movementId: string;
+  }): Promise<EarnMovementRow | null>;
+  /**
+   * Ledger inputs to the per-owner earnings figure, grouped by position
+   * (PRO-1772): finalized deposit total (deposit-token units — deposits all
+   * share their position's token denomination, so the SUM never crosses
+   * denominations), finalized withdrawal count, and how many movements are
+   * still unsettled. Failed movements are ignored — that money never moved.
+   */
+  aggregateExternalWalletMovements(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+  }): Promise<
+    Map<
+      string,
+      {
+        finalizedDeposits: string;
+        finalizedWithdrawalCount: number;
+        unsettledMovementCount: number;
+      }
+    >
+  >;
+  /**
    * The cross-provider movement feed: one chronological history spanning both
    * execution models, which is what neither legacy table could serve alone.
    *
@@ -976,6 +1022,113 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
         .first<{ present: number }>();
       return Boolean(row);
+    },
+
+    async listExternalWalletMovements(params) {
+      const conditions = [
+        "organization_id = ?",
+        "project_id = ?",
+        "environment = ?",
+        "owner_address = ?",
+      ];
+      const bindings: unknown[] = [
+        params.organizationId,
+        params.projectId,
+        params.environment,
+        params.ownerAddress,
+      ];
+      for (const [column, value] of [
+        ["direction", params.direction],
+        ["status", params.status],
+      ] as const) {
+        if (value !== undefined) {
+          conditions.push(`${column} = ?`);
+          bindings.push(value);
+        }
+      }
+      if (params.before) {
+        conditions.push("(created_at, id) < (?, ?)");
+        bindings.push(params.before.createdAt, params.before.id);
+      }
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE ${conditions.join(" AND ")}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+        )
+        .bind(...bindings, params.limit + 1)
+        .all<Record<string, unknown>>();
+      const rows = (result.results ?? []).map(mapMovementRow);
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async getExternalWalletMovement(params) {
+      // owner_address IS NOT NULL is the shape half of the scope: a custody
+      // movement guessed by id answers exactly like a missing row.
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND environment = ?
+               AND owner_address IS NOT NULL`
+        )
+        .bind(params.movementId, params.organizationId, params.projectId, params.environment)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async aggregateExternalWalletMovements(params) {
+      // Postgres numeric is exact, and every summed row shares its position's
+      // deposit-token denomination, so the cast loses nothing. `COALESCE` on
+      // amount_settled is belt and braces: the writer stamps it on every
+      // finalized row.
+      const result = await db
+        .prepare(
+          `SELECT position_id,
+                  COALESCE(SUM(
+                    CASE WHEN direction = 'deposit' AND status = 'finalized'
+                         THEN COALESCE(amount_settled, amount_requested)::numeric
+                         ELSE 0 END
+                  ), 0)::text AS finalized_deposits,
+                  COUNT(*) FILTER (
+                    WHERE direction = 'withdrawal' AND status = 'finalized'
+                  ) AS finalized_withdrawal_count,
+                  COUNT(*) FILTER (
+                    WHERE status IN ('requested', 'submitted', 'confirmed')
+                  ) AS unsettled_movement_count
+             FROM earn_movements
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND environment = ?
+              AND owner_address = ?
+            GROUP BY position_id`
+        )
+        .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
+        .all<{
+          position_id: string;
+          finalized_deposits: string;
+          finalized_withdrawal_count: number;
+          unsettled_movement_count: number;
+        }>();
+      const totals = new Map<
+        string,
+        {
+          finalizedDeposits: string;
+          finalizedWithdrawalCount: number;
+          unsettledMovementCount: number;
+        }
+      >();
+      for (const row of result.results ?? []) {
+        totals.set(row.position_id, {
+          finalizedDeposits: row.finalized_deposits,
+          finalizedWithdrawalCount: Number(row.finalized_withdrawal_count),
+          unsettledMovementCount: Number(row.unsettled_movement_count),
+        });
+      }
+      return totals;
     },
 
     async listMovements(params) {

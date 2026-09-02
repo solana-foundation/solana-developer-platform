@@ -68,6 +68,15 @@ allowed_programs = [
     "devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY",   # Kamino K-Vault (devnet)
     "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",   # Kamino Lending (both clusters)
     "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",  # Kamino Farms (both clusters)
+
+    # Veda (`vedaProgramAllowlist` in packages/sdp-veda/src/programs.ts, from
+    # the confirmed deployment in packages/sdp-types/src/veda-programs.ts).
+    # Veda deploys the same addresses on both clusters, measured per cluster by
+    # the genesis proof before any read.
+    "ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J",  # Veda boring_vault_svm
+    "fh8uapqMe4GWhep9rt9qZ56Pxi9SYszkuDKXckYMQTT",   # Veda boring_onchain_queue
+    "BmTjMtZGcvx5XB7LwRaGq3x9hdHG1SziYikjP9BAgoE2",  # Veda share-mint transfer hook
+    "Ed25519SigVerify111111111111111111111111111",   # Ed25519 sig-verify (Veda deposit plans)
 ]
 
 # Native SOL (wrapped) is required for fee payment

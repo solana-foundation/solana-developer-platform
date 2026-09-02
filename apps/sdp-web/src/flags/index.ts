@@ -1,4 +1,5 @@
 import { vercelAdapter } from "@flags-sdk/vercel";
+import type { RampProviderId } from "@sdp/types";
 import { dedupe, flag } from "flags/next";
 import { getSdpAuth } from "@/lib/sdp-api";
 
@@ -51,6 +52,27 @@ const identifyDashboardEntities = dedupe(async (): Promise<DashboardFlagEntities
     user: { email },
   };
 });
+
+/**
+ * Creates a Vercel flag for one ramp provider.
+ *
+ * @param provider - The ramp provider identifier.
+ * @param title - The provider's display title.
+ * @returns The provider feature flag definition.
+ */
+function rampProviderFlag(provider: RampProviderId, title: string) {
+  return flag<boolean, DashboardFlagEntities>({
+    key: `ramp-provider-${provider}`,
+    adapter: vercelAdapter(),
+    identify: identifyDashboardEntities,
+    defaultValue: flagDefault(`RAMP_PROVIDER_${provider.toUpperCase()}_ENABLED`, true),
+    description: `Show ${title} as a selectable provider in the onramp and offramp wizards.`,
+    options: [
+      { value: false, label: "Hidden" },
+      { value: true, label: "Enabled" },
+    ],
+  });
+}
 
 export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   key: "homepage-open-signup",
@@ -169,3 +191,11 @@ export const earn = flag<boolean, DashboardFlagEntities>({
     { value: true, label: "Enabled" },
   ],
 });
+
+export const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
+export const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
+export const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
+export const rampProviderMoneygram = rampProviderFlag("moneygram", "MoneyGram");
+export const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
+export const rampProviderMural = rampProviderFlag("mural", "Mural Pay");
+export const rampProviderStripe = rampProviderFlag("stripe", "Stripe");

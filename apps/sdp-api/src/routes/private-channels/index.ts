@@ -6,18 +6,18 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
-  addChannelMembership,
+  addPrincipalChannelMembership,
   connectPrivateChannelInstance,
   createChannel,
   createPrivateChannelDeposit,
+  createPrivateChannelPrincipal,
   createPrivateChannelTransfer,
   createPrivateChannelWithdrawal,
   deleteChannel,
   deletePrivateChannelInstance,
-  deletePrivateChannelUser,
   deleteVerifiedWallet,
+  disablePrivateChannelPrincipal,
   disconnectPrivateChannelInstance,
-  getAuthenticatedPrivateChannelUser,
   getChannel,
   getPrivateChannelBalance,
   getPrivateChannelDepositById,
@@ -25,32 +25,31 @@ import {
   getPrivateChannelInstance,
   getPrivateChannelOverview,
   getPrivateChannelTransferById,
-  getPrivateChannelUser,
   getPrivateChannelWithdrawalById,
-  invitePrivateChannelUser,
   listChannelEvents,
   listChannels,
   listPrivateChannelDeposits,
   listPrivateChannelEventReferences,
+  listPrivateChannelPrincipals,
   listPrivateChannelTransferRecipients,
   listPrivateChannelTransfers,
-  listPrivateChannelUsers,
   listPrivateChannelWithdrawals,
   listProjectEvents,
   listVerifiedWallets,
   probePrivateChannelConnection,
-  removeChannelMembership,
+  removePrincipalChannelMembership,
   verifyWallet,
 } from "./handlers";
 import {
-  addMembershipBodySchema,
+  addPrincipalMembershipBodySchema,
   connectPrivateChannelInstanceSchema,
   createChannelBodySchema,
   createDepositBodySchema,
+  createPrincipalBodySchema,
   createTransferBodySchema,
   createWithdrawalBodySchema,
-  inviteMemberBodySchema,
   probeConnectionSchema,
+  verifyWalletBodySchema,
 } from "./schemas";
 
 const privateChannels = new Hono<{ Bindings: Env }>();
@@ -193,6 +192,7 @@ privateChannels.get("/wallets", requirePermissions("payments:read"), listVerifie
 privateChannels.post(
   "/wallets/:walletId/verify",
   requirePermissions("payments:write"),
+  validateBody(verifyWalletBodySchema),
   verifyWallet
 );
 privateChannels.delete(
@@ -201,44 +201,37 @@ privateChannels.delete(
   deleteVerifiedWallet
 );
 
-// --- /channels/:channelId/memberships -------------------------------------
-// Junction between a channel and an invited workspace user.
+// --- /channels/:channelId/principals --------------------------------------
+// Junction between a channel and a project-scoped SPC principal.
 privateChannels.post(
-  "/channels/:channelId/memberships",
-  requirePermissions("payments:write"),
-  validateBody(addMembershipBodySchema),
-  addChannelMembership
+  "/channels/:channelId/principals",
+  requirePermissions("projects:write"),
+  validateBody(addPrincipalMembershipBodySchema),
+  addPrincipalChannelMembership
 );
 privateChannels.delete(
-  "/channels/:channelId/memberships/:privateChannelUserId",
-  requirePermissions("payments:write"),
-  removeChannelMembership
+  "/channels/:channelId/principals/:principalId",
+  requirePermissions("projects:write"),
+  removePrincipalChannelMembership
 );
 
-// --- /users ---------------------------------------------------------------
-// Workspace-level invites: one row per SDP user with SPC credentials.
-privateChannels.get("/users", requirePermissions("payments:read"), listPrivateChannelUsers);
+// --- /principals ----------------------------------------------------------
+// Project-scoped financial/operational identities. They are not SDP users.
+privateChannels.get(
+  "/principals",
+  requirePermissions("payments:read"),
+  listPrivateChannelPrincipals
+);
 privateChannels.post(
-  "/users",
-  requirePermissions("payments:write"),
-  validateBody(inviteMemberBodySchema),
-  invitePrivateChannelUser
-);
-// /users/me must come before /users/:id so `me` isn't matched as a param.
-privateChannels.get(
-  "/users/me",
-  requirePermissions("payments:read"),
-  getAuthenticatedPrivateChannelUser
-);
-privateChannels.get(
-  "/users/:privateChannelUserId",
-  requirePermissions("payments:read"),
-  getPrivateChannelUser
+  "/principals",
+  requirePermissions("projects:write"),
+  validateBody(createPrincipalBodySchema),
+  createPrivateChannelPrincipal
 );
 privateChannels.delete(
-  "/users/:privateChannelUserId",
-  requirePermissions("payments:write"),
-  deletePrivateChannelUser
+  "/principals/:principalId",
+  requirePermissions("projects:write"),
+  disablePrivateChannelPrincipal
 );
 
 export default privateChannels;

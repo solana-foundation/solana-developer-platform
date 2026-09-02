@@ -1,25 +1,31 @@
-import type { Counterparty } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import { type Counterparty, type CountryCode, isCountryCode } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import { RAMP_PROVIDER_SUPPORT_DETAILS } from "@sdp/types/generated/ramp";
+import type { CryptoRailId, RampPayoutFieldSpec } from "@sdp/types/payment-rails";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
+  PayoutRequirementAccount,
+  PayoutRequirementTree,
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
+import { resolveOfframpDestination } from "@sdp/types/ramp-resolution";
 import type { CounterpartyRow } from "../../../counterparty";
-import { badRequest, unsupportedCounterparty } from "../../../errors";
+import { badRequest, providerUnavailable, unsupportedCounterparty } from "../../../errors";
 import {
+  countryField,
+  dateField,
   parseCollectedFields,
   readyCounterparty,
   selectField,
   textField,
 } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import { latestLightsparkPayoutAccount, readLightsparkCustomerId } from "./provider-data";
-
-const SWIFT_BIC_PATTERN = "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$";
-const INTERNATIONAL_PHONE_PATTERN = "^\\+[0-9]{6,14}$";
-const ISO_DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
+import {
+  LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
+  readLightsparkPurposeOfPayment,
+} from "./provider-data";
 
 const LIGHTSPARK_RAIL_LABELS = {
   ACH: "ACH",
@@ -35,375 +41,207 @@ const LIGHTSPARK_RAIL_LABELS = {
   SPEI: "SPEI",
   PIX: "PIX",
   UPI: "UPI",
+  NEFT: "NEFT",
+  RTGS: "RTGS",
   MOBILE_MONEY: "Mobile money",
+  SWIFT: "SWIFT",
 } as const satisfies Record<string, string>;
 
 export type LightsparkPaymentRail = keyof typeof LIGHTSPARK_RAIL_LABELS;
 
-function railOption(value: LightsparkPaymentRail): RequirementOption {
-  return { value, label: LIGHTSPARK_RAIL_LABELS[value] };
-}
+/** UI copy for every field key the generated payout accounts can carry. */
+const LIGHTSPARK_FIELD_COPY = {
+  accountNumber: { label: "Account number", placeholder: "12345678" },
+  bankAccountType: { label: "Account type" },
+  bankCode: { label: "Bank code" },
+  bankName: { label: "Bank name", placeholder: "Chase" },
+  branchCode: { label: "Branch code" },
+  clabeNumber: { label: "CLABE", placeholder: "002010077777777771" },
+  country: { label: "Bank country (ISO code)", placeholder: "MY" },
+  fiToFiInformation: { label: "Bank-to-bank instructions" },
+  iban: { label: "IBAN", placeholder: "DE89370400440532013000" },
+  ifsc: { label: "IFSC", placeholder: "HDFC0001234" },
+  intermediaryBankName: { label: "Intermediary bank name" },
+  intermediaryRoutingNumber: { label: "Intermediary routing number" },
+  phoneNumber: { label: "Phone number", placeholder: "+254700000000" },
+  pixKey: { label: "PIX key" },
+  pixKeyType: { label: "PIX key type" },
+  provider: { label: "Mobile money provider", placeholder: "M-Pesa" },
+  rail: { label: "Bank rail (NEFT or RTGS)", placeholder: "NEFT" },
+  region: { label: "Region" },
+  routingNumber: { label: "Routing number", placeholder: "021000021" },
+  sortCode: { label: "Sort code", placeholder: "12-34-56" },
+  swiftCode: { label: "SWIFT / BIC code", placeholder: "DEUTDEFF" },
+  taxId: { label: "Tax ID" },
+  vpa: { label: "UPI ID (VPA)", placeholder: "user@okbank" },
+} as const satisfies Record<string, { label: string; placeholder?: string }>;
 
-function bankNameField(): RequirementField {
-  return textField({
-    key: "bankName",
-    label: "Bank name",
-    required: true,
-    maxLength: 256,
-    placeholder: "Chase",
-  });
-}
+/** Display labels for enumerated field values that are not country codes. */
+const LIGHTSPARK_VALUE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  bankAccountType: { CHECKING: "Checking", SAVINGS: "Savings" },
+  pixKeyType: {
+    CPF: "CPF",
+    CNPJ: "CNPJ",
+    EMAIL: "Email",
+    PHONE: "Phone",
+    RANDOM: "Random (EVP)",
+  },
+};
 
-function swiftCodeField(required: boolean): RequirementField {
-  return textField({
-    key: "swiftCode",
-    label: "SWIFT / BIC code",
-    required,
-    pattern: SWIFT_BIC_PATTERN,
-    placeholder: "DEUTDEFF",
-  });
-}
+let regionDisplayNames: Intl.DisplayNames | undefined;
 
-function accountNumberField(pattern?: string): RequirementField {
-  return textField({
-    key: "accountNumber",
-    label: "Account number",
-    required: true,
-    maxLength: 64,
-    placeholder: "12345678",
-    ...(pattern ? { pattern } : {}),
-  });
-}
-
-function ibanField(pattern?: string): RequirementField {
-  return textField({
-    key: "iban",
-    label: "IBAN",
-    required: true,
-    minLength: 15,
-    maxLength: 34,
-    placeholder: "DE89370400440532013000",
-    ...(pattern ? { pattern } : {}),
-  });
-}
-
-function phoneNumberField(pattern: string): RequirementField {
-  return textField({
-    key: "phoneNumber",
-    label: "Phone number",
-    required: true,
-    pattern,
-    placeholder: "+254700000000",
-  });
-}
-
-function mobileMoneyProviderField(): RequirementField {
-  return textField({
-    key: "provider",
-    label: "Mobile money provider",
-    required: true,
-    maxLength: 128,
-    placeholder: "M-Pesa",
-  });
-}
-
-export interface LightsparkPayoutSpec {
-  accountType: string;
-  rails: readonly [LightsparkPaymentRail, ...LightsparkPaymentRail[]];
-  fields: readonly RequirementField[];
-}
-
-export const LIGHTSPARK_PAYOUT_CURRENCIES = [
-  "AED",
-  "BRL",
-  "BWP",
-  "CAD",
-  "DKK",
-  "EUR",
-  "GBP",
-  "HKD",
-  "IDR",
-  "INR",
-  "KES",
-  "MWK",
-  "MXN",
-  "MYR",
-  "NGN",
-  "PHP",
-  "RWF",
-  "SGD",
-  "THB",
-  "TZS",
-  "UGX",
-  "USD",
-  "VND",
-  "XAF",
-  "XOF",
-  "ZAR",
-] as const satisfies readonly RampFiatCurrency[];
-
-export type LightsparkPayoutCurrency = (typeof LIGHTSPARK_PAYOUT_CURRENCIES)[number];
-
-const LIGHTSPARK_PAYOUT_SPECS = {
-  AED: {
-    accountType: "AED_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [ibanField("^AE[0-9]{21}$"), swiftCodeField(false)],
-  },
-  BRL: {
-    accountType: "BRL_ACCOUNT",
-    rails: ["PIX"],
-    fields: [
-      textField({ key: "pixKey", label: "PIX key", required: true, maxLength: 128 }),
-      selectField({
-        key: "pixKeyType",
-        label: "PIX key type",
-        required: true,
-        options: [
-          { value: "CPF", label: "CPF" },
-          { value: "CNPJ", label: "CNPJ" },
-          { value: "EMAIL", label: "Email" },
-          { value: "PHONE", label: "Phone" },
-          { value: "RANDOM", label: "Random (EVP)" },
-        ],
-      }),
-      textField({ key: "taxId", label: "Tax ID", required: true, maxLength: 32 }),
-    ],
-  },
-  BWP: {
-    accountType: "BWP_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [phoneNumberField(INTERNATIONAL_PHONE_PATTERN), mobileMoneyProviderField()],
-  },
-  CAD: {
-    accountType: "CAD_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [
-      textField({ key: "bankCode", label: "Bank code", required: true, pattern: "^[0-9]{3}$" }),
-      textField({
-        key: "branchCode",
-        label: "Branch transit number",
-        required: true,
-        pattern: "^[0-9]{5}$",
-      }),
-      accountNumberField("^[0-9]{7,12}$"),
-    ],
-  },
-  DKK: {
-    accountType: "DKK_ACCOUNT",
-    rails: ["SEPA", "SEPA_INSTANT"],
-    fields: [ibanField(), swiftCodeField(false)],
-  },
-  EUR: {
-    accountType: "EUR_ACCOUNT",
-    rails: ["SEPA", "SEPA_INSTANT"],
-    fields: [ibanField(), swiftCodeField(false)],
-  },
-  GBP: {
-    accountType: "GBP_ACCOUNT",
-    rails: ["FASTER_PAYMENTS"],
-    fields: [
-      textField({
-        key: "sortCode",
-        label: "Sort code",
-        required: true,
-        pattern: "^[0-9]{2}-?[0-9]{2}-?[0-9]{2}$",
-        placeholder: "12-34-56",
-        mask: "##-##-##",
-      }),
-      accountNumberField("^[0-9]{8}$"),
-    ],
-  },
-  HKD: {
-    accountType: "HKD_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [bankNameField(), swiftCodeField(true), accountNumberField()],
-  },
-  IDR: {
-    accountType: "IDR_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [
-      bankNameField(),
-      swiftCodeField(true),
-      accountNumberField(),
-      phoneNumberField("^\\+62[0-9]{9,12}$"),
-    ],
-  },
-  INR: {
-    accountType: "INR_ACCOUNT",
-    rails: ["UPI"],
-    fields: [
-      textField({
-        key: "vpa",
-        label: "UPI ID (VPA)",
-        required: true,
-        maxLength: 256,
-        placeholder: "user@okbank",
-      }),
-    ],
-  },
-  KES: {
-    accountType: "KES_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [phoneNumberField(INTERNATIONAL_PHONE_PATTERN), mobileMoneyProviderField()],
-  },
-  MWK: {
-    accountType: "MWK_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [phoneNumberField("^\\+265[0-9]{9}$"), mobileMoneyProviderField()],
-  },
-  MXN: {
-    accountType: "MXN_ACCOUNT",
-    rails: ["SPEI"],
-    fields: [
-      textField({
-        key: "clabeNumber",
-        label: "CLABE number",
-        required: true,
-        pattern: "^[0-9]{18}$",
-      }),
-    ],
-  },
-  MYR: {
-    accountType: "MYR_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [bankNameField(), swiftCodeField(true), accountNumberField()],
-  },
-  NGN: {
-    accountType: "NGN_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [accountNumberField("^[0-9]{10}$"), bankNameField()],
-  },
-  PHP: {
-    accountType: "PHP_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [bankNameField(), accountNumberField()],
-  },
-  RWF: {
-    accountType: "RWF_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [phoneNumberField("^\\+250[0-9]{9}$"), mobileMoneyProviderField()],
-  },
-  SGD: {
-    accountType: "SGD_ACCOUNT",
-    rails: ["PAYNOW", "FAST", "BANK_TRANSFER"],
-    fields: [bankNameField(), swiftCodeField(true), accountNumberField()],
-  },
-  THB: {
-    accountType: "THB_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [bankNameField(), swiftCodeField(true), accountNumberField()],
-  },
-  TZS: {
-    accountType: "TZS_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [phoneNumberField("^\\+255[0-9]{9}$"), mobileMoneyProviderField()],
-  },
-  UGX: {
-    accountType: "UGX_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [phoneNumberField("^\\+256[0-9]{9}$"), mobileMoneyProviderField()],
-  },
-  USD: {
-    accountType: "USD_ACCOUNT",
-    rails: ["ACH", "WIRE", "RTP", "FEDNOW"],
-    fields: [
-      textField({
-        key: "routingNumber",
-        label: "Routing number",
-        required: true,
-        pattern: "^[0-9]{9}$",
-        placeholder: "021000021",
-      }),
-      accountNumberField("^[0-9]{4,17}$"),
-    ],
-  },
-  VND: {
-    accountType: "VND_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [bankNameField(), swiftCodeField(true), accountNumberField()],
-  },
-  XAF: {
-    accountType: "XAF_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [
-      phoneNumberField(INTERNATIONAL_PHONE_PATTERN),
-      mobileMoneyProviderField(),
-      selectField({
-        key: "region",
-        label: "Region",
-        required: true,
-        options: [
-          { value: "CM", label: "Cameroon" },
-          { value: "CG", label: "Congo" },
-        ],
-      }),
-    ],
-  },
-  XOF: {
-    accountType: "XOF_ACCOUNT",
-    rails: ["MOBILE_MONEY"],
-    fields: [
-      phoneNumberField(INTERNATIONAL_PHONE_PATTERN),
-      mobileMoneyProviderField(),
-      selectField({
-        key: "countries",
-        label: "Country",
-        required: true,
-        options: [
-          { value: "SN", label: "Senegal" },
-          { value: "BJ", label: "Benin" },
-          { value: "CI", label: "Ivory Coast" },
-        ],
-      }),
-    ],
-  },
-  ZAR: {
-    accountType: "ZAR_ACCOUNT",
-    rails: ["BANK_TRANSFER"],
-    fields: [bankNameField(), accountNumberField("^[0-9]{9,13}$")],
-  },
-} as const satisfies Record<LightsparkPayoutCurrency, LightsparkPayoutSpec>;
-
-export function isLightsparkPayoutCurrency(value: string): value is LightsparkPayoutCurrency {
-  return Object.hasOwn(LIGHTSPARK_PAYOUT_SPECS, value);
-}
-
-export function lightsparkPayoutSpec(fiatCurrency: string): LightsparkPayoutSpec {
-  if (!isLightsparkPayoutCurrency(fiatCurrency)) {
-    throw badRequest(`Lightspark off-ramp does not support payouts in ${fiatCurrency}.`);
+/**
+ * Resolves the display label for one enumerated field value: the curated map
+ * first, then region display names for ISO country codes.
+ *
+ * @param fieldKey - Field the value belongs to.
+ * @param value - Enumerated value from the generated spec.
+ * @returns Human-readable option label.
+ */
+function lightsparkValueLabel(fieldKey: string, value: string): string {
+  const curated = LIGHTSPARK_VALUE_LABELS[fieldKey]?.[value];
+  if (curated !== undefined) {
+    return curated;
   }
-  return LIGHTSPARK_PAYOUT_SPECS[fiatCurrency];
+  if (/^[A-Z]{2}$/.test(value)) {
+    if (regionDisplayNames === undefined) {
+      regionDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
+    }
+    const displayName = regionDisplayNames.of(value);
+    if (displayName !== undefined && displayName !== value) {
+      return displayName;
+    }
+  }
+  throw providerUnavailable(`Lightspark field ${fieldKey} has no label for value ${value}.`);
 }
 
 /**
- * Grid requires businessInfo (legalName, taxId, incorporatedOn) to create a
- * BUSINESS customer. Keys are prefixed to avoid colliding with payout-spec
- * fields (BRL collects its own `taxId`).
+ * Maps one generated payout field spec onto a requirement field. Fields are
+ * keyed under the `bankAccount.` group so clients can section the collect
+ * form by the key's top-level dotted segment.
+ *
+ * @param key - Field key within the account schema.
+ * @param spec - Generated validation spec for the field.
+ * @param required - Requiredness in the rendering context.
+ * @returns Requirement field ready for collection or validation.
  */
-export const LIGHTSPARK_BUSINESS_INFO_FIELDS: readonly RequirementField[] = [
-  textField({
-    key: "businessLegalName",
-    label: "Legal business name",
+function lightsparkRequirementField(
+  key: string,
+  spec: RampPayoutFieldSpec,
+  required: boolean
+): RequirementField {
+  const copy: { label: string; placeholder?: string } | undefined =
+    LIGHTSPARK_FIELD_COPY[key as keyof typeof LIGHTSPARK_FIELD_COPY];
+  if (copy === undefined) {
+    throw providerUnavailable(`Lightspark payout field ${key} has no UI copy.`);
+  }
+  if (spec.values !== undefined) {
+    return selectField({
+      key: `bankAccount.${key}`,
+      label: copy.label,
+      required,
+      options: spec.values.map((value) => ({
+        value,
+        label: lightsparkValueLabel(key, value),
+      })),
+    });
+  }
+  return textField({
+    key: `bankAccount.${key}`,
+    label: copy.label,
+    required,
+    ...(spec.pattern !== undefined ? { pattern: spec.pattern } : {}),
+    ...(spec.minLength !== undefined ? { minLength: spec.minLength } : {}),
+    ...(spec.maxLength !== undefined ? { maxLength: spec.maxLength } : {}),
+    ...(spec.mask !== undefined ? { mask: spec.mask } : {}),
+    ...(copy.placeholder !== undefined ? { placeholder: copy.placeholder } : {}),
+  });
+}
+
+/**
+ * Resolves the display label for one generated Lightspark payout rail.
+ *
+ * @param rail - Generated payout rail identifier.
+ * @returns The public rail label.
+ */
+function lightsparkRailLabel(rail: string): string {
+  const label: string | undefined =
+    LIGHTSPARK_RAIL_LABELS[rail as keyof typeof LIGHTSPARK_RAIL_LABELS];
+  if (label === undefined) {
+    throw providerUnavailable(`Lightspark payment rail ${rail} has no label.`);
+  }
+  return label;
+}
+
+/**
+ * Purpose-of-payment selector. Grid mandates the code on quotes for some
+ * payout corridors, so it is collected once during counterparty onboarding
+ * and stored in provider_data.
+ *
+ * @returns Requirement field for the purpose-of-payment code.
+ */
+export function lightsparkPurposeOfPaymentField(): RequirementField {
+  return selectField({
+    key: "purposeOfPayment",
+    label: "Purpose of payment",
     required: true,
-    maxLength: 256,
-    placeholder: "Acme Corporation, Inc.",
-  }),
-  textField({
-    key: "businessTaxId",
-    label: "Business tax ID",
-    required: true,
-    maxLength: 32,
-    placeholder: "47-1234567",
-  }),
-  textField({
-    key: "businessIncorporatedOn",
-    label: "Date of incorporation",
-    required: true,
-    pattern: ISO_DATE_PATTERN,
-    placeholder: "2018-03-14",
-  }),
-];
+    options: Object.entries(LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS).map(([value, label]) => ({
+      value,
+      label,
+    })),
+  });
+}
+
+/**
+ * Requirements asking for just the purpose-of-payment code: the follow-up
+ * collection state for customers linked before the field existed.
+ *
+ * @param direction - Ramp direction the requirements were requested for.
+ * @returns collect_counterparty requirements with only the purpose field.
+ */
+export function lightsparkPurposeOfPaymentRequirement(
+  direction: "onramp" | "offramp"
+): CounterpartyRequirements {
+  return {
+    provider: "lightspark",
+    direction,
+    status: "collect_counterparty",
+    fields: [lightsparkPurposeOfPaymentField()],
+  };
+}
+
+/**
+ * Business details collected to create the Grid BUSINESS customer. Values pass
+ * through to Grid just-in-time and are never persisted, except the
+ * purpose-of-payment code, which is stored for quote requests.
+ *
+ * @returns Business requirement fields for a business counterparty.
+ */
+export function lightsparkBusinessInfoFields(): RequirementField[] {
+  return [
+    textField({
+      key: "businessLegalName",
+      label: "Legal business name",
+      required: true,
+      maxLength: 256,
+      placeholder: "Acme Corporation, Inc.",
+    }),
+    textField({
+      key: "businessTaxId",
+      label: "Business tax ID",
+      required: true,
+      maxLength: 32,
+      placeholder: "47-1234567",
+    }),
+    dateField({
+      key: "businessIncorporatedOn",
+      label: "Date of incorporation",
+      required: true,
+      before: new Date().toISOString().slice(0, 10),
+    }),
+    lightsparkPurposeOfPaymentField(),
+  ];
+}
 
 export interface LightsparkBusinessInfo {
   legalName: string;
@@ -425,7 +263,7 @@ export function buildLightsparkBusinessInfo(
     );
   }
   const supplied = parseCollectedFields(
-    LIGHTSPARK_BUSINESS_INFO_FIELDS,
+    lightsparkBusinessInfoFields(),
     collectedData,
     "Missing or invalid business details for Lightspark onboarding."
   );
@@ -443,78 +281,255 @@ export function buildLightsparkBusinessInfo(
 }
 
 /**
- * Narrows collected data to the payout-spec fields so business onboarding
- * fields don't leak into the external-account payload or its content hash.
- * Returns undefined when no payout fields were collected.
+ * Reads and validates the countries in Lightspark's generated support map.
+ *
+ * @returns Supported Lightspark destination countries.
  */
-export function lightsparkPayoutCollectedData(
+function lightsparkCountryCodes(): CountryCode[] {
+  const countrySupport = RAMP_PROVIDER_SUPPORT_DETAILS.lightspark.offramp.countrySupport;
+  const countryCodes: CountryCode[] = [];
+  for (const countryCode of Object.keys(countrySupport.countries)) {
+    if (!isCountryCode(countryCode)) {
+      throw providerUnavailable(`Lightspark country support has invalid country ${countryCode}.`);
+    }
+    countryCodes.push(countryCode);
+  }
+  return countryCodes;
+}
+
+/**
+ * Builds the destination-first payout requirements from the canonical resolver.
+ *
+ * @param cryptoRail - Crypto rail being sold.
+ * @param fiatCurrency - Fiat currency being delivered.
+ * @param accounts - Existing active corridor accounts.
+ * @returns Country-to-rail options and exact per-rail fields.
+ */
+function lightsparkPayoutRequirementTree(
+  cryptoRail: CryptoRailId,
   fiatCurrency: string,
-  collectedData: CollectedFieldData
-): CollectedFieldData | undefined {
-  const payoutKeys = new Set(
-    lightsparkPayoutFields(lightsparkPayoutSpec(fiatCurrency)).map((field) => field.key)
-  );
-  const payoutData = Object.fromEntries(
-    Object.entries(collectedData).filter(([key]) => payoutKeys.has(key))
-  );
-  return Object.keys(payoutData).length > 0 ? payoutData : undefined;
+  accounts: readonly PayoutRequirementAccount[]
+): PayoutRequirementTree {
+  const countryRails: Partial<Record<CountryCode, RequirementOption[]>> = {};
+  const railFields: Record<string, RequirementField[]> = {};
+  for (const countryCode of lightsparkCountryCodes()) {
+    const resolution = resolveOfframpDestination({
+      provider: "lightspark",
+      cryptoRail,
+      fiatCurrency,
+      countryCode,
+    });
+    if (resolution === null) {
+      continue;
+    }
+    countryRails[countryCode] = Object.keys(resolution.rails).map((rail) => ({
+      value: rail,
+      label: lightsparkRailLabel(rail),
+    }));
+    for (const [rail, railResolution] of Object.entries(resolution.rails)) {
+      railFields[rail] = Object.entries(railResolution.fields).map(([key, spec]) =>
+        lightsparkRequirementField(key, spec, spec.required)
+      );
+    }
+  }
+  return { countryRails, railFields, accounts: [...accounts] };
 }
 
-export function lightsparkPayoutFields(spec: LightsparkPayoutSpec): RequirementField[] {
-  const railField =
-    spec.rails.length > 1
-      ? [
-          selectField({
-            key: "paymentRails",
-            label: "Payment rail",
-            required: true,
-            options: spec.rails.map(railOption),
-          }),
-        ]
-      : [];
-  return [...railField, ...spec.fields];
+/**
+ * PII collected to create the Grid INDIVIDUAL customer. Values pass through
+ * to Grid just-in-time and are never persisted, except the purpose-of-payment
+ * code, which is stored for quote requests.
+ *
+ * @returns Identity requirement fields for an individual counterparty.
+ */
+export function lightsparkIndividualInfoFields(): RequirementField[] {
+  return [
+    textField({ key: "customer.fullName", label: "Full name", required: true, maxLength: 256 }),
+    dateField({
+      key: "customer.birthDate",
+      label: "Date of birth",
+      required: true,
+      before: new Date().toISOString().slice(0, 10),
+    }),
+    countryField({ key: "customer.nationality", label: "Nationality", required: true }),
+    countryField({ key: "customer.region", label: "Region", required: true }),
+    textField({
+      key: "customer.email",
+      label: "Email",
+      required: true,
+      maxLength: 320,
+      pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+      placeholder: "name@example.com",
+    }),
+    {
+      kind: "address",
+      key: "customer.address",
+      label: "Residential address",
+      required: true,
+      fields: [
+        textField({ key: "customer.address.line1", label: "Address line 1", required: true }),
+        textField({ key: "customer.address.city", label: "City", required: true }),
+        textField({
+          key: "customer.address.subdivisionCode",
+          label: "State / region",
+          required: false,
+        }),
+        textField({ key: "customer.address.postalCode", label: "Postal code", required: true }),
+        countryField({ key: "customer.address.countryCode", label: "Country", required: true }),
+      ],
+    },
+    lightsparkPurposeOfPaymentField(),
+  ];
 }
 
+export interface LightsparkIndividualInfo {
+  fullName: string;
+  birthDate: string;
+  nationality: CountryCode;
+  region: CountryCode;
+  email: string;
+  address: {
+    line1: string;
+    city: string;
+    state?: string;
+    postalCode: string;
+    country: CountryCode;
+  };
+}
+
+/**
+ * Maps collected individual PII into the Grid createCustomer payload.
+ * Collected values pass through to Grid and are never persisted.
+ *
+ * @param collectedData - Collected identity fields keyed by requirement key.
+ * @returns The Grid individual customer info.
+ */
+export function buildLightsparkIndividualInfo(
+  collectedData: CollectedFieldData | undefined
+): LightsparkIndividualInfo {
+  if (!collectedData) {
+    throw badRequest(
+      "collectedData with individual details is required to onboard an individual counterparty with Lightspark."
+    );
+  }
+  const supplied = parseCollectedFields(
+    lightsparkIndividualInfoFields(),
+    collectedData,
+    "Missing or invalid individual details for Lightspark onboarding."
+  );
+  const fullName = supplied["customer.fullName"];
+  const birthDate = supplied["customer.birthDate"];
+  const nationality = supplied["customer.nationality"];
+  const region = supplied["customer.region"];
+  const email = supplied["customer.email"];
+  const line1 = supplied["customer.address.line1"];
+  const city = supplied["customer.address.city"];
+  const subdivisionCode = supplied["customer.address.subdivisionCode"];
+  const postalCode = supplied["customer.address.postalCode"];
+  const countryCode = supplied["customer.address.countryCode"];
+  if (
+    typeof fullName !== "string" ||
+    typeof birthDate !== "string" ||
+    typeof nationality !== "string" ||
+    !isCountryCode(nationality) ||
+    typeof region !== "string" ||
+    !isCountryCode(region) ||
+    typeof email !== "string" ||
+    typeof line1 !== "string" ||
+    typeof city !== "string" ||
+    typeof postalCode !== "string" ||
+    typeof countryCode !== "string" ||
+    !isCountryCode(countryCode)
+  ) {
+    throw badRequest("Missing required individual details for Lightspark onboarding.");
+  }
+  return {
+    fullName,
+    birthDate,
+    nationality,
+    region,
+    email,
+    address: {
+      line1,
+      city,
+      ...(typeof subdivisionCode === "string" && subdivisionCode.length > 0
+        ? { state: subdivisionCode }
+        : {}),
+      postalCode,
+      country: countryCode,
+    },
+  };
+}
+
+/**
+ * Requirement state machine keyed on the handler-resolved
+ * `counterparty_provider_accounts` link: no link → collect_counterparty (PII
+ * to create the Grid customer); linked but no stored purpose-of-payment →
+ * collect_counterparty for just that field (customers linked before the field
+ * existed); linked onramp → ready; linked offramp → collect_account until a
+ * payout account exists for the currency.
+ */
 export function lightsparkCounterpartyRequirements(
   counterparty: Counterparty,
-  { direction, providerData, fiatCurrency }: ValidateCounterpartyOptions
+  options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  const businessInfoFields =
-    counterparty.entityType === "business" && !readLightsparkCustomerId(providerData)
-      ? LIGHTSPARK_BUSINESS_INFO_FIELDS
-      : [];
-  if (direction === "onramp") {
-    if (businessInfoFields.length > 0) {
-      return {
-        provider: "lightspark",
-        direction,
-        status: "collect",
-        fields: [...businessInfoFields],
-      };
-    }
-    return readyCounterparty("lightspark", direction);
+  if (options.providerCustomerReference === undefined) {
+    return {
+      provider: "lightspark",
+      direction: options.direction,
+      status: "collect_counterparty",
+      fields:
+        counterparty.entityType === "individual"
+          ? lightsparkIndividualInfoFields()
+          : lightsparkBusinessInfoFields(),
+    };
   }
-  if (!fiatCurrency) {
+  if (readLightsparkPurposeOfPayment(options.providerData) === null) {
+    return lightsparkPurposeOfPaymentRequirement(options.direction);
+  }
+  if (options.direction === "onramp") {
+    return readyCounterparty("lightspark", "onramp");
+  }
+  if (options.fiatCurrency === undefined) {
     throw badRequest("fiatCurrency is required for Lightspark off-ramp requirements.");
   }
-  if (!isLightsparkPayoutCurrency(fiatCurrency)) {
+  if (options.cryptoRail === undefined) {
+    throw badRequest("cryptoRail is required for Lightspark off-ramp requirements.");
+  }
+  const accounts: PayoutRequirementAccount[] = [];
+  if (options.payoutAccounts !== undefined) {
+    accounts.push(...options.payoutAccounts);
+  }
+  return lightsparkCollectAccountRequirements(options.cryptoRail, options.fiatCurrency, accounts);
+}
+
+/**
+ * The collect_account requirements for one payout corridor: the destination
+ * country/rail tree, or unsupported when no country can receive the currency.
+ *
+ * @param cryptoRail - Crypto rail being sold.
+ * @param fiatCurrency - Fiat currency being delivered.
+ * @param accounts - Existing active corridor accounts.
+ * @returns collect_account requirements carrying the payout tree.
+ */
+export function lightsparkCollectAccountRequirements(
+  cryptoRail: CryptoRailId,
+  fiatCurrency: string,
+  accounts: readonly PayoutRequirementAccount[]
+): CounterpartyRequirements {
+  const payout = lightsparkPayoutRequirementTree(cryptoRail, fiatCurrency, accounts);
+  if (Object.keys(payout.countryRails).length === 0) {
     return unsupportedCounterparty(
       "lightspark",
-      direction,
+      "offramp",
       `Lightspark off-ramp does not support payouts in ${fiatCurrency}.`
     );
   }
-  if (latestLightsparkPayoutAccount(providerData, fiatCurrency)) {
-    return readyCounterparty("lightspark", direction);
-  }
   return {
     provider: "lightspark",
-    direction,
-    status: "collect",
-    fields: [
-      ...businessInfoFields,
-      ...lightsparkPayoutFields(LIGHTSPARK_PAYOUT_SPECS[fiatCurrency]),
-    ],
+    direction: "offramp",
+    status: "collect_account",
+    payout,
   };
 }
 
@@ -530,32 +545,56 @@ function lightsparkBeneficiary(counterparty: CounterpartyRow): Record<string, un
 
 export function buildLightsparkAccountInfo(
   counterparty: CounterpartyRow,
+  cryptoRail: CryptoRailId,
   fiatCurrency: RampFiatCurrency,
   collectedData: CollectedFieldData | undefined
 ): Record<string, unknown> {
-  const spec = lightsparkPayoutSpec(fiatCurrency);
-  if (!collectedData) {
+  if (collectedData === undefined) {
     throw badRequest("collectedData with payout bank details is required for Lightspark off-ramp.");
   }
+  const destinationCountryValue = collectedData.destinationCountry;
+  if (destinationCountryValue === undefined || !isCountryCode(destinationCountryValue)) {
+    throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
+  }
+  const railKey = collectedData.paymentRails;
+  if (typeof railKey !== "string") {
+    throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
+  }
+  const resolution = resolveOfframpDestination({
+    provider: "lightspark",
+    cryptoRail,
+    fiatCurrency,
+    countryCode: destinationCountryValue,
+  });
+  if (resolution === null) {
+    throw badRequest(
+      `Lightspark cannot pay out ${fiatCurrency} to destination country ${destinationCountryValue}.`
+    );
+  }
+  const rail = resolution.rails[railKey];
+  if (rail === undefined) {
+    throw badRequest(
+      `Lightspark cannot pay out ${fiatCurrency} to ${destinationCountryValue} over rail ${railKey}.`
+    );
+  }
+
+  const railFields = Object.entries(rail.fields).map(([key, spec]) =>
+    lightsparkRequirementField(key, spec, spec.required)
+  );
   const supplied = parseCollectedFields(
-    lightsparkPayoutFields(spec),
+    railFields,
     collectedData,
     "Missing or invalid payout bank details for Lightspark off-ramp."
   );
 
-  const rail = spec.rails.length > 1 ? supplied.paymentRails : spec.rails[0];
-  if (typeof rail !== "string") {
-    throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
-  }
-
   const accountInfo: Record<string, unknown> = {
-    accountType: spec.accountType,
-    paymentRails: [rail],
+    accountType: rail.accountType,
+    paymentRails: [railKey],
   };
-  for (const field of spec.fields) {
-    const value = supplied[field.key];
+  for (const key of Object.keys(rail.fields)) {
+    const value = supplied[`bankAccount.${key}`];
     if (value === undefined) continue;
-    accountInfo[field.key] = field.key === "countries" ? [value] : value;
+    accountInfo[key] = value;
   }
   accountInfo.beneficiary = lightsparkBeneficiary(counterparty);
   return accountInfo;

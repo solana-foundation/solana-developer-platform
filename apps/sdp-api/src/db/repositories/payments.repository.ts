@@ -29,6 +29,7 @@ export interface PaymentTransferRow {
   id: string;
   organization_id: string;
   project_id: string | null;
+  custody_wallet_id: string | null;
   wallet_id: string;
   counterparty_id: string | null;
   counterparty_display_name?: string | null;
@@ -76,8 +77,11 @@ export type ConfirmedTransferPollVerdict = {
 } & ({ finalized: true; slot: number } | { finalized: false; slot: null });
 
 export interface CreatePaymentTransferInput {
+  /** Server-generated transfer id reserved before an external provider call. */
+  id: string;
   organizationId: string;
   projectId: string | null;
+  custodyWalletId: string;
   walletId: string;
   counterpartyId: string | null;
   sourceAddress: string | null;
@@ -126,6 +130,11 @@ export interface UpdatePaymentTransferInput {
 export interface ListTransfersInput {
   organizationId: string;
   projectId: string | null;
+  walletAuthorization?: {
+    custodyWalletIds: string[];
+    providerWalletIds: string[];
+  };
+  custodyWalletId?: string;
   walletId?: string;
   walletIds?: string[];
   walletAddress?: string;
@@ -180,6 +189,23 @@ export interface PaymentsRepositoryContext {
 
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  /**
+   * Claims an awaiting off-ramp row for its crypto deposit transaction. The
+   * update succeeds only while every on-chain submission field is unoccupied.
+   */
+  updateOnchainTransferForRamp(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    custodyWalletId: string;
+    walletId: string;
+    sourceAddress: string;
+    destinationAddress: string;
+    token: string;
+    amount: string;
+    initiatedByKeyId: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   findTransferByIdempotency(params: {
     organizationId: string;
     projectId: string | null;
@@ -213,6 +239,9 @@ export interface PaymentsRepository {
     fromStatuses: readonly PaymentTransferStatus[];
     toStatus: PaymentTransferStatus;
     updatedAt: string;
+    sourceAddress?: string | null;
+    destinationAddress?: string | null;
+    signature?: string | null;
     amount?: string | null;
     fiatAmount?: string | null;
     providerData?: Record<string, unknown>;
@@ -267,6 +296,17 @@ export interface PaymentsRepository {
   getTransferByProviderReference(
     params: GetTransferByProviderReferenceInput
   ): Promise<PaymentTransferRow | null>;
+  /**
+   * Atomically binds a provider-owned reference to a provider transfer selected
+   * by SDP's internal correlation ID. Replays with the same reference succeed;
+   * a different occupied reference is never overwritten.
+   */
+  setProviderReferenceIfEmpty(input: {
+    transferId: string;
+    provider: RampProviderId;
+    providerReference: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   listTransfersBySignatures(params: {
     signatures: string[];
     organizationId: string;

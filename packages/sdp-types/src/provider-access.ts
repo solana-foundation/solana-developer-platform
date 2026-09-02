@@ -98,10 +98,20 @@ export function earnProgramSolanaPayoutTokens(provider: string): readonly EarnPo
  * provider and never decided whether it was public" cannot happen quietly.
  */
 export const EARN_PROVIDER_SURFACING = {
+  // Surfaced 2026-08-31: the Veda vault-direct integration is live — the
+  // catalogue half reads vaults on chain (@sdp/earn), the execution half builds
+  // deposits and withdrawals (@sdp/veda).
+  //
+  // The shelf follows `VEDA_DEPLOYMENTS` (@sdp/types/veda-programs): devnet is
+  // confirmed, so the SANDBOX catalogue carries Veda's devnet Test Vault;
+  // mainnet is deliberately null, so every production pass reports
+  // PROVIDER_NOT_CONFIGURED and the production shelf stays empty until Veda
+  // names a production vault. Surfacing decides whether rows REACH customers,
+  // never whether any exist.
+  veda: true,
   // Registered so the sync and the registry-consistency test have an entry, but
   // never implemented — their clients throw NOT_IMPLEMENTED and they catalogue
   // nothing, so there is nothing to offer.
-  veda: false,
   upshift: false,
   perena: false,
   // Un-surfaced 2026-08-14: SDP is leading with the Kamino catalogue. Ground's
@@ -154,12 +164,16 @@ export const EARN_DEPOSIT_STYLES = EARN_EXECUTION_MODELS;
 export type EarnDepositStyle = (typeof EARN_DEPOSIT_STYLES)[number];
 
 export const EARN_PROVIDER_DEPOSIT_STYLE = {
+  // Implemented: a non-custodial BoringVault deposit signed from the
+  // organization's custody wallet, same shape as Kamino. Not a stub's
+  // placeholder — `@sdp/veda` builds the instruction and implements no
+  // portfolio-wallet capability, which is what the drift test asserts.
+  veda: "vault_direct",
   // Stubs. They implement no portfolio-wallet capability, so SDP holds no
   // fundable address for them and must not imply one — `vault_direct` is the
   // answer that promises nothing, not a claim about how they will eventually
   // work. Whoever implements one flips this and the capability together; the
   // drift test fails until they agree.
-  veda: "vault_direct",
   upshift: "vault_direct",
   perena: "vault_direct",
   ground: "custodial",
@@ -178,6 +192,65 @@ export function earnDepositStyle(provider: string): EarnDepositStyle {
   return Object.hasOwn(EARN_PROVIDER_DEPOSIT_STYLE, provider)
     ? EARN_PROVIDER_DEPOSIT_STYLE[provider as EarnProviderId]
     : "vault_direct";
+}
+
+/**
+ * Dashboard slippage-floor policy for `vault_direct` deposits.
+ *
+ * An entry says the provider's deposit builder REQUIRES an explicit
+ * `minSharesOut` — it refuses an implicit tolerance (Veda's SDK throws
+ * `SLIPPAGE_PROTECTION_REQUIRED`) — and that the provider quotes deposits
+ * (`supportsVaultDepositQuote`), so the dashboard derives the floor from a
+ * LIVE quote: `quotedShares × (1 − toleranceBps/10⁴)`. Never from the deposit
+ * amount — that arithmetic is only right while the share rate happens to be
+ * 1:1, and stops being right the day yield accrues into the rate. The
+ * tolerance covers exactly what it can: the rate moving between the quote and
+ * the transaction landing.
+ *
+ * `null` means the dashboard sends no derived floor and renders no slippage
+ * control; the provider keeps whatever floor semantics its API contract has.
+ * Exhaustive over `EarnProviderId` so a new provider must state its policy.
+ */
+export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
+  veda: { defaultToleranceBps: 10 },
+  upshift: null,
+  perena: null,
+  ground: null,
+  kamino: null,
+} as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
+
+/** Slippage-floor policy for an OPEN provider string — fails closed to none. */
+export function earnDepositSlippageFloor(provider: string): { defaultToleranceBps: number } | null {
+  return Object.hasOwn(EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR, provider)
+    ? EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR[provider as EarnProviderId]
+    : null;
+}
+
+/**
+ * The EXIT twin of `EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR`: the provider's
+ * withdrawal builder requires an explicit `minAmountOut` and quotes exits
+ * (`supportsVaultWithdrawQuote`), so the dashboard derives the floor from a
+ * live quote — `quotedAssets × (1 − toleranceBps/10⁴)` — never from the share
+ * count. Declared separately because the two directions are separate
+ * capabilities with separate builders: Kamino carries withdrawals today with
+ * no floor contract at all, and folding the declarations together would let a
+ * provider inherit an exit policy from its deposit one.
+ */
+export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
+  veda: { defaultToleranceBps: 10 },
+  upshift: null,
+  perena: null,
+  ground: null,
+  kamino: null,
+} as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
+
+/** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */
+export function earnWithdrawSlippageFloor(
+  provider: string
+): { defaultToleranceBps: number } | null {
+  return Object.hasOwn(EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR, provider)
+    ? EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR[provider as EarnProviderId]
+    : null;
 }
 
 /** The offered providers, in `EARN_PROVIDERS` order. */
@@ -236,6 +309,30 @@ export function isEarnProviderSurfaced(provider: string): boolean {
     Object.hasOwn(EARN_PROVIDER_SURFACING, provider) &&
     EARN_PROVIDER_SURFACING[provider as EarnProviderId]
   );
+}
+
+export type RampProviderSurfacing = boolean | "sandbox";
+
+export const RAMP_PROVIDER_SURFACING = {
+  moonpay: true,
+  lightspark: true,
+  bvnk: true,
+  moneygram: "sandbox",
+  coinbase: true,
+  mural: true,
+  stripe: true,
+} as const satisfies Record<RampProviderId, RampProviderSurfacing>;
+
+export function isRampProviderSurfaced(provider: string, environment: SdpEnvironment): boolean {
+  if (!Object.hasOwn(RAMP_PROVIDER_SURFACING, provider)) {
+    return false;
+  }
+  const surfacing = RAMP_PROVIDER_SURFACING[provider as RampProviderId];
+  return surfacing === true || (surfacing === "sandbox" && environment === "sandbox");
+}
+
+export function surfacedRampProviders(environment: SdpEnvironment): RampProviderId[] {
+  return RAMP_PROVIDERS.filter((provider) => isRampProviderSurfaced(provider, environment));
 }
 
 export const ORGANIZATION_PROVIDER_FAMILIES = [
