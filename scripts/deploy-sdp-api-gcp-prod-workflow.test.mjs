@@ -316,3 +316,12 @@ test("digest guard still accepts an exact match on a bare (non-index) manifest",
   const r = runDigestBlock({ craneScript: craneBare, revisionDigest: INDEX_DIGEST });
   assert.equal(r.code, 0, r.out);
 });
+
+test("rollback verification falls back to the signing origin at the same pinned digest", () => {
+  assert.match(workflow, /if cosign verify "\$\{IMAGE\}" "\$\{verify_flags\[@\]\}"/);
+  assert.match(
+    workflow,
+    /ORIGIN_IMAGE="ghcr\.io\/\$\{\{ github\.repository_owner \}\}\/sdp\/sdp-api@\$\{IMAGE##\*@\}"/
+  );
+  assert.match(workflow, /cosign verify "\$\{ORIGIN_IMAGE\}" "\$\{verify_flags\[@\]\}"/);
+});

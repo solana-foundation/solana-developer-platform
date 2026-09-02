@@ -297,10 +297,24 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
-          cosign verify "${IMAGE}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@(refs/tags/v.+|refs/heads/main)$" \
+          # Modern cosign stores signatures as OCI referrer bundles, which
+          # `cosign copy` does not yet carry into Artifact Registry, so the AR
+          # copy can hold the image without a findable signature. Trust follows
+          # the content-addressed digest, not the registry: verify AR first,
+          # and when AR has no signature, verify the signing origin (GHCR) at
+          # the exact same digest the deploy is pinned to. Anything else still
+          # fails closed.
+          verify_flags=(
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@(refs/tags/v.+|refs/heads/main)$"
             --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"
+          )
+          if cosign verify "${IMAGE}" "${verify_flags[@]}"; then
+            exit 0
+          fi
+          echo "No verifiable signature on the AR copy; verifying the signing origin at the pinned digest." >&2
+          ORIGIN_IMAGE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api@${IMAGE##*@}"
+          cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
       - name: Run database migrations
         if: ${{ inputs.release_sha != '' }}
