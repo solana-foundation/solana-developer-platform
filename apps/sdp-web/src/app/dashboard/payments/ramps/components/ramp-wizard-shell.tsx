@@ -65,6 +65,7 @@ export function RampWizardShell({
   const cancelConfirmationAvailable =
     confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
   const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
+  const isLastStep = stepIndex === steps.length - 1;
   return (
     <>
       <WizardFrame
@@ -76,8 +77,8 @@ export function RampWizardShell({
           total: steps.length,
         })}
         header={header}
-        summary={summary}
-        summaryTrigger={summaryTrigger}
+        summary={isLastStep ? undefined : summary}
+        summaryTrigger={isLastStep ? undefined : summaryTrigger}
         footer={
           showFooter ? (
             <div className="flex items-center justify-between gap-3">
