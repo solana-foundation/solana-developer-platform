@@ -219,6 +219,16 @@ export class WisdomTreeVaultDirectClient
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan> {
+    if (input.minAmountOut !== undefined) {
+      // A primary-market redemption settles after the fund strikes NAV. No
+      // instruction can encode an asset floor, so accepting one would promise
+      // slippage protection the on-chain transfer does not actually enforce.
+      throw badRequest(
+        "WisdomTree redemptions settle at the fund's struck NAV; minAmountOut cannot be enforced " +
+          "on-chain and is refused rather than silently ignored."
+      );
+    }
+
     const plan = await this.withRuntime(
       ctx,
       "Building the WisdomTree redemption transfer",

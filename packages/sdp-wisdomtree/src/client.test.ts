@@ -159,6 +159,34 @@ describe("buildVaultDeposit", () => {
   });
 });
 
+describe("buildVaultWithdrawal", () => {
+  it("refuses minAmountOut as a caller error, before any network or chain read", async () => {
+    const reader = fakeReader({});
+    const fetchSpy = stubConnectFetch();
+    const resolveRpcUrl = vi.fn(async () => "http://offline.invalid");
+    const client = new WisdomTreeVaultDirectClient(
+      resolveRpcUrl,
+      (_label, operation) => operation(() => {}),
+      () => reader
+    );
+
+    await expect(
+      client.buildVaultWithdrawal(productionCtx, {
+        providerReference: WTGXX.mint,
+        owner: OWNER,
+        shares: "10",
+        minAmountOut: "9.9",
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("minAmountOut cannot be enforced"),
+    });
+    expect(resolveRpcUrl).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(reader.reads).toEqual([]);
+  });
+});
+
 describe("readVaultPositions", () => {
   it("answers an empty page on devnet, where no instrument exists", async () => {
     const client = offlineClient(fakeReader({}));
