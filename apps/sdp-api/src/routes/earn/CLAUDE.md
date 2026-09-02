@@ -465,8 +465,9 @@ organization's own custody wallets.
     System program's "insufficient lamports", the Token program's
     "insufficient funds" and every non-Anchor program's first error code at
     once. A rent shortfall's ATTRIBUTION follows the failing frame: inside a
-    top-level ATA create the funding payer is the plan's (the sponsor under
-    sponsorship, after the provider payer swap), while a shortfall inside any
+    top-level ATA create or a top-level System transfer the paying account is
+    the plan's own choice (the sponsor under sponsorship, via the provider
+    payer swap and the allowed-user prefund), while a shortfall inside any
     other program is that program spending the WALLET's lamports, which a
     sponsored plan should have pre-funded (the Veda allowed-user prefund in
     `@sdp/veda`). Sponsor faults therefore carry `sponsorCause`: "balance"

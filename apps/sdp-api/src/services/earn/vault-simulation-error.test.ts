@@ -178,6 +178,27 @@ describe("log-refined instruction failures", () => {
     expect(sponsorCause).toBe("prefund");
   });
 
+  // The prefund transfer itself is a TOP-LEVEL System instruction whose
+  // source is the SPONSOR. A short sponsor there is a refillable balance
+  // problem: labelling it a plan defect would tell operators the plan is
+  // broken while the actual fix is the same refill as any broke fee payer.
+  it("treats a shortfall in the plan's own prefund transfer as sponsor balance", () => {
+    const prefundLogs = [
+      "Program 11111111111111111111111111111111 invoke [1]",
+      "Transfer: insufficient lamports 500000, need 1287600",
+      "Program 11111111111111111111111111111111 failed: custom program error: 0x1",
+    ];
+    const { message, fault, sponsorCause } = describeVaultSimulationError(
+      custom1,
+      sponsored,
+      prefundLogs
+    );
+    expect(message).toContain("SDP's fee sponsor could not fund the rent");
+    expect(message).not.toContain("did not pre-fund");
+    expect(fault).toBe("sponsor");
+    expect(sponsorCause).toBe("balance");
+  });
+
   it("tells a wallet-pays caller about the program-created account in its own terms", () => {
     const { message, fault } = describeVaultSimulationError(custom1, walletPays, programRentLogs);
     expect(message).toContain(

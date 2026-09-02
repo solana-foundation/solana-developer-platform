@@ -98,13 +98,16 @@ const ASSOCIATED_TOKEN_PROGRAM =
   // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 
+const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+
 interface RentShortfall {
   lamports: bigint;
   /**
    * The top-level program whose instruction the shortfall happened inside:
    * the nearest preceding `invoke [1]` frame. It decides WHOSE money was
-   * short: a top-level ATA create's funding payer is chosen by the PLAN (the
-   * sponsor under sponsorship, after the providers' payer swap), while a
+   * short: a top-level ATA create's funding payer and a top-level System
+   * transfer's source are chosen by the PLAN (the sponsor under sponsorship,
+   * via the providers' payer swap and the allowed-user prefund), while a
    * shortfall inside any other program is that program moving lamports from
    * an account IT names: for the vault programs SDP fronts, the depositing
    * wallet, which no transaction-level sponsorship can reach. Undefined when
@@ -155,6 +158,13 @@ function describeInstructionFailureFromLogs(
   if (shortfall !== undefined) {
     const sol = formatSol(shortfall.lamports);
     const insideAtaCreate = shortfall.topLevelProgram === ASSOCIATED_TOKEN_PROGRAM;
+    // A shortfall in a TOP-LEVEL System instruction is a transfer the PLAN
+    // authored, whose source the plan chose: under sponsorship that is the
+    // sponsor itself running short on the allowed-user prefund it fronts, a
+    // refillable balance problem, never a missing prefund. Only a shortfall
+    // inside a NON-System, non-ATA program is that program spending an
+    // account the plan could not redirect.
+    const insidePlanTransfer = shortfall.topLevelProgram === SYSTEM_PROGRAM;
     // Words matched to the failing frame: only the ATA program's create is
     // known to make a TOKEN account; other programs create their own records
     // (Veda's per-user AllowedUser, for one) with the payer as funder rather
@@ -164,7 +174,7 @@ function describeInstructionFailureFromLogs(
     if (insideAtaCreate) {
       created = "a token account this transaction creates";
       callerPhrase = "to create a token account this transaction needs";
-    } else if (shortfall.topLevelProgram === undefined) {
+    } else if (insidePlanTransfer || shortfall.topLevelProgram === undefined) {
       created = "an account this transaction creates";
       callerPhrase = "to create an account this transaction needs";
     } else {
@@ -173,13 +183,14 @@ function describeInstructionFailureFromLogs(
     }
     if (fee?.kind === "sponsored") {
       // Post-PRO-1736 the sponsor funds rent alongside the fee, but only the
-      // rent the PLAN charges it (the ATA creates, payer-swapped by the
-      // provider). A shortfall inside another program is that program
-      // spending the WALLET's lamports, which the plan should have pre-funded
-      // and did not: still SDP's fault, but a plan defect, not a broke
-      // sponsor. The two must not share a message, because "sponsor
-      // balance" sends operators refilling a wallet that is fine.
-      if (insideAtaCreate || shortfall.topLevelProgram === undefined) {
+      // rent the PLAN charges it: the ATA creates (payer-swapped by the
+      // provider) and its own top-level prefund transfer. A shortfall inside
+      // any OTHER program is that program spending the WALLET's lamports,
+      // which the plan should have pre-funded and did not: still SDP's
+      // fault, but a plan defect, not a broke sponsor. The two must not
+      // share a message, because "sponsor balance" sends operators refilling
+      // a wallet that is fine.
+      if (insideAtaCreate || insidePlanTransfer || shortfall.topLevelProgram === undefined) {
         return {
           message:
             `SDP's fee sponsor could not fund the rent for ${created} ` +
