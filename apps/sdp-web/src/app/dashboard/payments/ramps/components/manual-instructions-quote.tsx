@@ -163,7 +163,7 @@ function ManualQuoteSummary({
   );
   const exchangeRate =
     quote.exchangeRate !== undefined
-      ? `1 ${fiatCurrency.toUpperCase()} = ${quote.exchangeRate} ${cryptoToken}`
+      ? `1 ${fiatCurrency.toUpperCase()} = ${quote.exchangeRate} ${cryptoToken.toUpperCase()}`
       : null;
   const expiresAt = formatRampQuoteExpiry(quote.expiresAt);
 

@@ -233,7 +233,7 @@ export interface RampEstimateOfframpInput {
 }
 
 export interface RampOnrampQuoteInput {
-  assetRail: CryptoRailId;
+  cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
   fiatAmount: string;
   destinationWalletAddress: string;
@@ -258,7 +258,7 @@ export interface RampOnrampQuoteInput {
 }
 
 export interface RampOfframpQuoteInput {
-  assetRail: CryptoRailId;
+  cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
   sourceWalletAddress: string;

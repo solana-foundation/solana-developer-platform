@@ -742,7 +742,7 @@ type SandboxTransferSimulationInput =
         counterpartyId: string;
         amount: number;
         fiatCurrency: string;
-        assetRail: CryptoRailId;
+        cryptoToken: string;
         destinationWallet: string;
       };
     }

@@ -887,7 +887,7 @@ export interface PaymentOnrampQuoteRequest {
   provider: RampProviderId;
   counterpartyId: string;
   destinationWallet: string;
-  assetRail: CryptoRailId;
+  cryptoToken: string;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
   domain?: string;
@@ -897,7 +897,7 @@ export interface PaymentOnrampQuoteRequest {
 interface PaymentOfframpQuoteRequestBase {
   counterpartyId: string;
   sourceWallet: string;
-  assetRail: CryptoRailId;
+  cryptoToken: string;
   cryptoAmount: string;
   rampsMemo?: Record<string, string>;
 }

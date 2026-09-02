@@ -342,10 +342,10 @@ export function buildPaymentsPlaygroundEndpointConfigs(
         },
         destinationWalletField,
         {
-          key: "assetRail",
-          label: "assetRail",
+          key: "cryptoToken",
+          label: "cryptoToken",
           placeholder: t("DashboardPayments.playground.usdc"),
-          defaultValue: "usdc.solana",
+          defaultValue: "USDC",
           required: true,
         },
         {
@@ -400,10 +400,10 @@ export function buildPaymentsPlaygroundEndpointConfigs(
         },
         sourceWalletField,
         {
-          key: "assetRail",
-          label: "assetRail",
+          key: "cryptoToken",
+          label: "cryptoToken",
           placeholder: t("DashboardPayments.playground.usdc"),
-          defaultValue: "usdc.solana",
+          defaultValue: "USDC",
           required: true,
         },
         {

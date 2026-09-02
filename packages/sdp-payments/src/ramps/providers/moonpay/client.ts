@@ -445,7 +445,7 @@ export class MoonpayRampClient implements RampProvider {
       apiKey: config.apiKey,
       baseCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       baseCurrencyAmount: input.fiatAmount,
-      currencyCode: normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail)),
+      currencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       walletAddress: input.destinationWalletAddress,
       lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
@@ -469,7 +469,7 @@ export class MoonpayRampClient implements RampProvider {
     const quoteId = requireMoonpayTransferId(input.paymentTransferId);
     const hostedUrl = await buildSignedMoonpayWidgetUrl(config.offrampUrl, config.secretKey, {
       apiKey: config.apiKey,
-      baseCurrencyCode: normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail)),
+      baseCurrencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       baseCurrencyAmount: input.cryptoAmount,
       quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       refundWalletAddress: input.sourceWalletAddress,

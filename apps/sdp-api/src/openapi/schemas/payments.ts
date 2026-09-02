@@ -1648,9 +1648,9 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
         "Destination wallet (`walletId` from GET /v1/wallets) or Solana address for purchased crypto.",
       example: "privy_wallet_123",
     }),
-    assetRail: withOpenApi(createOnrampQuoteSchemaBase.shape.assetRail, {
-      description: "Canonical SDP crypto asset rail.",
-      example: "usdc.solana",
+    cryptoToken: withOpenApi(createOnrampQuoteSchemaBase.shape.cryptoToken, {
+      description: "Crypto token symbol or provider currency code.",
+      example: "USDC",
     }),
     fiatCurrency: withOpenApi(createOnrampQuoteSchemaBase.shape.fiatCurrency, {
       description: "Fiat currency for on-ramp.",
@@ -1672,7 +1672,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       provider: "moonpay",
       counterpartyId: "cpty_example",
       destinationWallet: "privy_wallet_123",
-      assetRail: "usdc.solana",
+      cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     },

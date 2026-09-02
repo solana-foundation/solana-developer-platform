@@ -15,6 +15,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { toRampCryptoToken } from "@/lib/ramps";
 import { findWalletBalanceForToken } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { useRampSelection } from "./ramp-selection-context";
@@ -70,15 +71,17 @@ export function CurrencyPairSelector() {
   );
 
   const isOfframp = direction === "offramp";
-  const assetLabel = getCryptoRailAssetLabel(selectedPair.assetRail);
 
   const offrampBalance = useMemo<string | null>(() => {
     if (!isOfframp || !selectedWallet) {
       return null;
     }
-    const balance = findWalletBalanceForToken(selectedWallet, assetLabel);
+    const balance = findWalletBalanceForToken(
+      selectedWallet,
+      toRampCryptoToken(selectedPair.assetRail)
+    );
     return balance ? balance.uiAmount : "0";
-  }, [isOfframp, selectedWallet, assetLabel]);
+  }, [isOfframp, selectedWallet, selectedPair.assetRail]);
 
   const offrampExceeds =
     offrampBalance !== null && amount !== "" && Number(amount) > Number(offrampBalance);
@@ -136,7 +139,7 @@ export function CurrencyPairSelector() {
               offrampBalance !== null ? (
                 <AmountBalanceReadout
                   available={offrampBalance}
-                  assetLabel={assetLabel}
+                  assetLabel={getCryptoRailAssetLabel(selectedPair.assetRail)}
                   exceeds={offrampExceeds}
                   onMax={
                     Number(offrampBalance) > 0 ? () => onAmountChange(offrampBalance) : undefined

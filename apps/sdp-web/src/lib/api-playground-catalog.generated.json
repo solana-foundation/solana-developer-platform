@@ -5302,7 +5302,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -5626,7 +5626,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationWallet={destinationWallet}",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&cryptoToken={cryptoToken}&fiatCurrency={fiatCurrency}&destinationWallet={destinationWallet}",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5661,34 +5661,11 @@
             ]
           },
           {
-            "key": "assetRail",
-            "label": "assetRail",
-            "description": "Canonical SDP crypto asset rail.",
-            "defaultValue": "usdc.solana",
-            "required": true,
-            "kind": "select",
-            "options": [
-              {
-                "label": "sol.solana",
-                "value": "sol.solana"
-              },
-              {
-                "label": "usdc.solana",
-                "value": "usdc.solana"
-              },
-              {
-                "label": "usdt.solana",
-                "value": "usdt.solana"
-              },
-              {
-                "label": "usdg.solana",
-                "value": "usdg.solana"
-              },
-              {
-                "label": "pyusd.solana",
-                "value": "pyusd.solana"
-              }
-            ]
+            "key": "cryptoToken",
+            "label": "cryptoToken",
+            "description": "Crypto asset symbol.",
+            "defaultValue": "USDC",
+            "required": true
           },
           {
             "key": "fiatCurrency",

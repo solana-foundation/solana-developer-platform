@@ -1,6 +1,6 @@
 "use client";
 
-import { COUNTRIES, type CryptoRailId, isCountryCode, type RampProviderId } from "@sdp/types";
+import { COUNTRIES, isCountryCode, type RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
@@ -201,7 +201,7 @@ async function fetchCounterpartyRequirements(
   const params = new URLSearchParams({
     provider,
     direction,
-    assetRail: corridor.assetRail,
+    cryptoToken: corridor.cryptoToken,
     fiatCurrency: corridor.fiatCurrency,
   });
   if (direction === "onramp") {
@@ -228,7 +228,7 @@ async function fetchCounterpartyRequirements(
 }
 
 export interface AdvanceRequirementsPayload {
-  assetRail: CryptoRailId;
+  cryptoToken: string;
   destinationWallet: string;
   fiatCurrency: RampFiatCurrency;
 }
@@ -394,7 +394,7 @@ export function useCounterpartyRequirements(
   const subjectKey =
     params === null
       ? ""
-      : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.assetRail}:${params.fiatCurrency}:${params.destinationWallet}`;
+      : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.cryptoToken}:${params.fiatCurrency}:${params.destinationWallet}`;
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
   const [onboarding, setOnboarding] = useState<CounterpartyRequirements | null>(null);
   const [lastAdvancePayload, setLastAdvancePayload] = useState<AdvanceRequirementsPayload | null>(
@@ -429,7 +429,7 @@ export function useCounterpartyRequirements(
           params.counterpartyId,
           params.provider,
           params.direction,
-          params.assetRail,
+          params.cryptoToken,
           params.fiatCurrency,
           params.direction === "onramp" ? params.destinationWallet : "",
         ] as const)
@@ -439,13 +439,13 @@ export function useCounterpartyRequirements(
   // step list) can't flip out from under the user mid-flow.
   const { data, error, mutate } = useSWR(
     key,
-    ([, counterpartyId, provider, direction, assetRail, fiatCurrency, destinationWallet]) =>
+    ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
       fetchCounterpartyRequirements(
         counterpartyId,
         provider,
         direction,
         {
-          assetRail,
+          cryptoToken,
           fiatCurrency,
           destinationWallet,
         },

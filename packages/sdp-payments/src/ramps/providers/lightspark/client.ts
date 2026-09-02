@@ -932,9 +932,7 @@ export class LightsparkRampClient implements RampProvider {
       throw badRequest("Lightspark on-ramp requires a resolved purposeOfPayment");
     }
     const config = readLightsparkConfig(env, mode);
-    const cryptoCurrency = normalizeLightsparkCurrencyCode(
-      getCryptoRailAssetLabel(input.assetRail)
-    );
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
     const fiatCurrency = input.fiatCurrency ?? "USD";
     const fiatAmountMinorUnits = toLightsparkMinorUnitsInteger(
       parseDecimalAmount(input.fiatAmount, 2),
@@ -1079,9 +1077,7 @@ export class LightsparkRampClient implements RampProvider {
       throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
     }
     const config = readLightsparkConfig(env, mode);
-    const cryptoCurrency = normalizeLightsparkCurrencyCode(
-      getCryptoRailAssetLabel(input.assetRail)
-    );
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
     if (!isSolanaCryptoAsset(cryptoCurrency)) {
       throw badRequest(
         `Lightspark off-ramp from an SDP wallet supports Solana assets only; got ${cryptoCurrency}.`

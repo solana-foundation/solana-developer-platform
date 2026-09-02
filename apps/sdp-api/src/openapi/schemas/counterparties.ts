@@ -60,9 +60,9 @@ export const counterpartyRequirementsQuerySchema = z
       description: "Ramp direction.",
       example: "onramp",
     }),
-    assetRail: withOpenApi(onrampRequirementsQuerySchema.shape.assetRail, {
-      description: "Canonical SDP crypto asset rail.",
-      example: "usdc.solana",
+    cryptoToken: withOpenApi(onrampRequirementsQuerySchema.shape.cryptoToken, {
+      description: "Crypto asset symbol.",
+      example: "USDC",
     }),
     fiatCurrency: withOpenApi(onrampRequirementsQuerySchema.shape.fiatCurrency, {
       description: "Fiat currency code.",
