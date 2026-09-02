@@ -277,6 +277,14 @@ export async function ensureLightsparkPayoutAccount(
   if (paymentRail === undefined) {
     throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
   }
+  // Validate the submitted bank fields before touching the database: a rejected
+  // submission must not leave a durable pending account row behind.
+  const accountInfo = buildLightsparkAccountInfo(
+    input.counterparty,
+    input.cryptoRail,
+    input.fiatCurrency,
+    input.collectedData
+  );
   const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
   const accounts = await repository.listActiveExternalAccounts({
     organizationId: input.counterparty.organization_id,
@@ -304,12 +312,6 @@ export async function ensureLightsparkPayoutAccount(
       paymentRail,
     });
   }
-  const accountInfo = buildLightsparkAccountInfo(
-    input.counterparty,
-    input.cryptoRail,
-    input.fiatCurrency,
-    input.collectedData
-  );
   const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
     rampRuntime(c),
     {
