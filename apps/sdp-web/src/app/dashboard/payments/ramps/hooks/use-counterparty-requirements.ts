@@ -349,6 +349,10 @@ export function useCounterpartyRequirements(
     // Lightspark payout form collects this field, so no provider's KYC
     // verification poll is ever cut short by this.
     if (key === "destinationCountry" && collectedData.destinationCountry !== value) {
+      // Retire the old corridor synchronously: state updates only take effect on
+      // the next render, and a response resolving before then would still see
+      // the old identity in the ref and pass the staleness guard.
+      activeCorridorRef.current = `${subjectKey}:${value}`;
       setOnboarding(null);
       setLastAdvancePayload(null);
     }
