@@ -31,6 +31,7 @@ import {
   listPrivateChannelDeposits,
   listPrivateChannelEventReferences,
   listPrivateChannelPrincipals,
+  listPrivateChannelTokenEligibility,
   listPrivateChannelTransferRecipients,
   listPrivateChannelTransfers,
   listPrivateChannelWithdrawals,
@@ -105,6 +106,14 @@ privateChannels.route("/instance", instance);
 // --- /balance -------------------------------------------------------------
 // Read an owner's channel token balance (per wallet+mint) through the gateway.
 privateChannels.get("/balance", requirePermissions("payments:read"), getPrivateChannelBalance);
+
+// --- /tokens --------------------------------------------------------------
+// Registered tokens with per-instance on-chain enablement and exclusion reasons.
+privateChannels.get(
+  "/tokens",
+  requirePermissions("payments:read"),
+  listPrivateChannelTokenEligibility
+);
 
 // --- /deposits ------------------------------------------------------------
 // Escrow deposits from a custody wallet into the instance (devnet), tracked

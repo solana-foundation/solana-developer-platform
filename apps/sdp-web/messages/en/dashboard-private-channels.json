@@ -27,6 +27,7 @@
       "loadError": "Something went wrong loading this section.",
       "cancel": "Cancel",
       "tokenLabel": "Token",
+      "noEnabledTokens": "This Private Channels instance does not enable a supported token.",
       "amountForToken": "Amount ({symbol})",
       "amount": "Amount",
       "amountPlaceholder": "1.5",

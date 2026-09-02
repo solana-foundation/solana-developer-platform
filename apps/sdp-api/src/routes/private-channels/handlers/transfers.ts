@@ -66,7 +66,7 @@ export async function createPrivateChannelTransfer(
       amount: body.amount,
       mint: body.mint,
       gatewayAuth,
-      cluster: projectRpc.cluster,
+      projectRpc,
     });
     return success(c, transfer);
   } catch (error) {

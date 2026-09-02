@@ -242,6 +242,31 @@ export const privateChannelBalanceSchema = z
       "An owner's channel token balance (per wallet+mint, via the gateway). Shared across the wallet's channels.",
   });
 
+export const privateChannelTokenEligibilitySchema = z
+  .object({
+    symbol: z.string().openapi({ example: "USDC" }),
+    mint: solanaAddressSchema,
+    decimals: z.number().int().nonnegative().openapi({ example: 6 }),
+    tokenProgram: solanaAddressSchema,
+    enabled: z.boolean().openapi({
+      description: "True when the connected escrow instance has an owned allowed-mint PDA.",
+    }),
+    exclusionReasons: z.array(
+      z.object({
+        code: z.enum(["NOT_ALLOWED_BY_INSTANCE", "ALLOWLIST_UNAVAILABLE"]),
+        message: z.string(),
+      })
+    ),
+  })
+  .openapi({
+    description:
+      "An SDP-registered token combined with its on-chain eligibility for the connected instance.",
+  });
+
+export const privateChannelTokenEligibilityListSchema = z.object({
+  tokens: z.array(privateChannelTokenEligibilitySchema),
+});
+
 export const privateChannelDepositSchema = z
   .object({
     id: z.string().openapi({ example: "dep_9f1c..." }),

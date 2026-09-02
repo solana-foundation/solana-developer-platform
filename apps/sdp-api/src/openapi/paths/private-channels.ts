@@ -25,6 +25,7 @@ import {
   privateChannelProbeBodySchema,
   privateChannelProbeResultSchema,
   privateChannelSchema,
+  privateChannelTokenEligibilityListSchema,
   privateChannelTransferChannelIdParamSchema,
   privateChannelTransferIdParamSchema,
   privateChannelTransferListQuerySchema,
@@ -214,6 +215,25 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(successResponseSchema(privateChannelBalanceSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/private-channels/tokens",
+    tags: [TAG],
+    summary: "List tokens and their eligibility for the connected instance",
+    operationId: "listPrivateChannelTokenEligibility",
+    description:
+      "Combines SDP's cluster-aware token registry with each token's on-chain allowed-mint PDA. A token is enabled only when that account belongs to the connected escrow program.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Registered tokens with per-instance eligibility and exclusion reasons.",
+        content: jsonContent(successResponseSchema(privateChannelTokenEligibilityListSchema)),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500, 503]),
     },
   });
 

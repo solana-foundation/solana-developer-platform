@@ -63,6 +63,27 @@ describe("OpenAPI spec", () => {
     ]);
   });
 
+  it("documents Private Channels token eligibility", () => {
+    const doc = createOpenApiDocument();
+    const operation = doc.paths?.["/v1/private-channels/tokens"]?.get;
+    const response = JSON.stringify(operation?.responses?.["200"]);
+
+    expect(operation?.operationId).toBe("listPrivateChannelTokenEligibility");
+    expect(operation?.security).toEqual([{ apiKeyAuth: [] }]);
+    for (const field of [
+      "symbol",
+      "mint",
+      "decimals",
+      "tokenProgram",
+      "enabled",
+      "exclusionReasons",
+      "NOT_ALLOWED_BY_INSTANCE",
+      "ALLOWLIST_UNAVAILABLE",
+    ]) {
+      expect(response).toContain(`"${field}"`);
+    }
+  });
+
   it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
     const internal = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument();
