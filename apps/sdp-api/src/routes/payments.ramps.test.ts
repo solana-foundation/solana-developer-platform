@@ -14,6 +14,7 @@ import {
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
+  TEST_HERCLE_CLIENT_ID,
   TEST_MOONPAY_API_KEY,
   TEST_MOONPAY_OFFRAMP_URL,
   TEST_MOONPAY_ONRAMP_URL,
@@ -959,6 +960,159 @@ describe("Payments routes — ramps", () => {
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("CONFLICT");
+  });
+
+  function hercleOfframpOrderResponse(params: {
+    orderId: string;
+    depositAddress: string;
+    reference: string;
+    expiresAt?: string;
+  }): Response {
+    return new Response(
+      JSON.stringify({
+        orderId: params.orderId,
+        depositAddress: params.depositAddress,
+        reference: params.reference,
+        expiresAt: params.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  async function seedReadyHercleCounterparty(accountId: string): Promise<string> {
+    return await seedCounterparty({
+      externalId: "hercle_customer_1",
+      providerData: {
+        hercle: {
+          accountId,
+          externalReference: "hercle_customer_1",
+          verificationStatus: "ready",
+        },
+      },
+    });
+  }
+
+  it("creates a Hercle off-ramp quote and persists the deposit instruction with it", async () => {
+    const accountId = "4a1d9fcb-cd3d-1e3f-6995-132e3aa13ac5";
+    const counterpartyId = await seedReadyHercleCounterparty(accountId);
+    const depositAddress = TEST_SOLANA_ADDRESSES.wallet2;
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        hercleOfframpOrderResponse({
+          orderId: "e67b1be2-2bba-40db-9571-3a3612b865ef",
+          depositAddress,
+          reference: "HRC-E67B1BE22BBA",
+        })
+      );
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          counterpartyId,
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "EUR",
+          cryptoAmount: "500",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        transferId: string;
+        quote: {
+          id: string;
+          provider: string;
+          deliveryMode: string;
+          paymentInstructions: { kind: string; destinationAddress: string }[];
+        };
+      };
+    };
+
+    expect(body.data.quote.provider).toBe("hercle");
+    expect(body.data.quote.deliveryMode).toBe("manual_instructions");
+    expect(body.data.quote.paymentInstructions[0]).toMatchObject({
+      kind: "crypto_deposit",
+      destinationAddress: depositAddress,
+    });
+
+    // The in-app send is authorised against this stored instruction, not against the
+    // quote response — a transfer created without it can never be funded (it fails as
+    // "Transfer does not match the off-ramp deposit instruction").
+    const stored = await getDb(env)
+      .prepare("SELECT provider, provider_reference, provider_data FROM payment_transfers WHERE id = ?")
+      .bind(body.data.transferId)
+      .first<{ provider: string; provider_reference: string; provider_data: unknown }>();
+
+    expect(stored?.provider).toBe("hercle");
+    expect(stored?.provider_reference).toBe("e67b1be2-2bba-40db-9571-3a3612b865ef");
+
+    const providerData =
+      typeof stored?.provider_data === "string"
+        ? (JSON.parse(stored.provider_data) as Record<string, unknown>)
+        : ((stored?.provider_data ?? {}) as Record<string, unknown>);
+    expect(providerData.cryptoDeposit).toEqual({
+      destinationAddress: depositAddress,
+      amount: "500",
+    });
+
+    // The order is opened on behalf of the sub-account; without it Hercle refuses with
+    // OBO_NOT_LINKED, which is invisible until a real call is made.
+    const [, requestInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(requestInit.headers);
+    expect(headers.get("on-behalf-of")).toBe(accountId);
+    expect(headers.get("X-Hercle-Client")).toBe(TEST_HERCLE_CLIENT_ID);
+    expect(headers.get("X-Hercle-Signature")).toBeTruthy();
+
+    fetchSpy.mockRestore();
+  });
+
+  it("refuses a Hercle off-ramp quote until the counterparty is verified", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "hercle_customer_2",
+      providerData: {
+        hercle: {
+          accountId: "23bd557b-83f8-ec8b-a766-c65894e269f8",
+          externalReference: "hercle_customer_2",
+          verificationStatus: "verifying",
+        },
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          counterpartyId,
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "EUR",
+          cryptoAmount: "500",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   async function seedRampTransfer(input: {
