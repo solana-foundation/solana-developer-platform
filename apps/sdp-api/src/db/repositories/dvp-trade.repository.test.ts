@@ -1,0 +1,174 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { getDb } from "@/db";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
+import { seedTestDatabase } from "@/test/mocks/db";
+import type { DvpTradeInsert, DvpTradeRepository } from "./dvp-trade.repository";
+import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
+
+const TEST_PROJECT_ID = "prj_dvp_repo_test";
+const OTHER_PROJECT_ID = "prj_dvp_repo_other";
+const CUSTODY_CONFIG_ID = "cust_dvp_repo_test";
+const CUSTODY_WALLET_ID = "cwlt_dvp_repo_test";
+
+// Deliberately above Number.MAX_SAFE_INTEGER (9007199254740991). The nonce is a
+// PDA seed, so if anything in the storage path routes it through a JS number it
+// rounds here, and the trade's SwapDvp address stops matching the one the
+// counterparty was told to fund.
+const BIG_NONCE = "18446744073709551610";
+const BIG_AMOUNT = "18446744073709551615";
+
+function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
+  return {
+    id: "dvp_trade_test_1",
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
+    settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
+    userA: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+    userB: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+    mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+    mintB: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+    nonce: BIG_NONCE,
+    tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    amountA: "1000",
+    amountB: "2000",
+    expiryTimestamp: "1800003600",
+    earliestSettlementTimestamp: null,
+    userASettlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+    userBSettlementDestination: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+    refString: null,
+    escrowA: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+    escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+    sdpSide: "a",
+    sdpWalletId: CUSTODY_WALLET_ID,
+    createSignature: null,
+    ...overrides,
+  };
+}
+
+const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+
+describe("DvpTradeRepository (postgres)", () => {
+  let repo: DvpTradeRepository;
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    const db = getDb(env);
+    await db.prepare("DELETE FROM dvp_trades").run();
+    await db.prepare("DELETE FROM custody_wallets").run();
+    await db.prepare("DELETE FROM custody_configs").run();
+    await db.prepare("DELETE FROM projects").run();
+
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+      )
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
+      await db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
+        .run();
+    }
+    await db
+      .prepare(
+        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
+         VALUES (?, ?, 'local', 'x', 'active')`
+      )
+      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, 'w1', '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn', 'active')`
+      )
+      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID)
+      .run();
+
+    repo = createPostgresDvpTradeRepository(db);
+  });
+
+  it("persists a trade and defaults it to created", async () => {
+    const created = await repo.create(tradeInsert());
+
+    expect(created.status).toBe("created");
+    expect(created.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
+    expect(created.sdpSide).toBe("a");
+    expect(created.createdAt).toBeTruthy();
+  });
+
+  // The reason nonce and the amounts are TEXT columns.
+  it("round-trips a u64 nonce above 2^53 without losing a digit", async () => {
+    const created = await repo.create(tradeInsert({ nonce: BIG_NONCE, amountA: BIG_AMOUNT }));
+
+    expect(created.nonce).toBe(BIG_NONCE);
+    expect(created.amountA).toBe(BIG_AMOUNT);
+    // The value survives the trip to a bigint too, which is what actually
+    // derives the PDA.
+    expect(BigInt(created.nonce).toString()).toBe(BIG_NONCE);
+    expect(Number(created.nonce).toString()).not.toBe(BIG_NONCE);
+  });
+
+  it("reads a trade back by id", async () => {
+    const created = await repo.create(tradeInsert());
+
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({ id: created.id });
+  });
+
+  it("reads a trade back by the address a counterparty sees", async () => {
+    const created = await repo.create(tradeInsert());
+
+    await expect(repo.getBySwapDvp(scope, created.swapDvp)).resolves.toMatchObject({
+      id: created.id,
+    });
+  });
+
+  it("does not leak a trade across projects", async () => {
+    const created = await repo.create(tradeInsert());
+    const otherScope = { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID };
+
+    await expect(repo.getById(otherScope, created.id)).resolves.toBeNull();
+    await expect(repo.getBySwapDvp(otherScope, created.swapDvp)).resolves.toBeNull();
+  });
+
+  it("lists a project's trades, newest first", async () => {
+    await repo.create(
+      tradeInsert({ id: "dvp_a", swapDvp: "SwapA11111111111111111111111111111111111111" })
+    );
+    await repo.create(
+      tradeInsert({ id: "dvp_b", swapDvp: "SwapB11111111111111111111111111111111111111" })
+    );
+
+    const listed = await repo.listByProject(scope, 10);
+
+    expect(listed).toHaveLength(2);
+    expect(listed.map((t) => t.id).sort()).toEqual(["dvp_a", "dvp_b"]);
+  });
+
+  // The program's nonce tombstone makes a (seeds, nonce) pair single-use forever,
+  // so two rows for one on-chain trade should be impossible here too.
+  it("refuses a second row for the same on-chain trade", async () => {
+    await repo.create(tradeInsert());
+
+    await expect(repo.create(tradeInsert({ id: "dvp_trade_test_2" }))).rejects.toThrow();
+  });
+});
