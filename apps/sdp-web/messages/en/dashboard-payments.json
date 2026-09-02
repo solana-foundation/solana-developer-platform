@@ -33,7 +33,6 @@
       "rampEventRequestFailed": "{provider} event request failed ({status}).",
       "rampEventMissing": "{provider} event response is missing transfer details.",
       "counterpartyAccountsRequestFailed": "Failed to load accounts ({status}).",
-      "counterpartyProviderAccountsRequestFailed": "Failed to load provider accounts ({status}).",
       "counterpartyProviderAccountsMissing": "Provider accounts response was empty.",
       "sandboxSimulationRequestFailed": "Sandbox simulation failed ({status}).",
       "requirementsRequestFailed": "Requirements request failed ({status}).",
