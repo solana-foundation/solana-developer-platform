@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  getCryptoRailAssetLabel,
   isMuralSandboxPayinCurrency,
   type PaymentOnrampQuoteRequest,
   type PaymentTransferSummary,
@@ -17,7 +18,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { onrampPairs, toRampCryptoToken } from "@/lib/ramps";
+import { onrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
@@ -85,14 +86,14 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       selectedWallet,
       provider,
       selectedRampPair,
-      cryptoToken,
+      assetRail,
       rampsMemo,
     }) =>
       ({
         provider,
         counterpartyId: fields.counterpartyId,
         destinationWallet: selectedWallet.walletId,
-        cryptoToken,
+        assetRail,
         fiatCurrency: selectedRampPair.fiatCurrency,
         fiatAmount: fields.amount.trim(),
         // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
@@ -120,7 +121,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     {
       icon: CoinsIcon,
       label: t("DashboardPayments.onchainReceive.receive"),
-      value: toRampCryptoToken(wizard.selectedRampPair.assetRail),
+      value: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
     },
     ...providerSummaryDetail(t, wizard.fields.provider),
     ...memoSummaryDetails(t, wizard.memoRows),
@@ -195,7 +196,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
               counterpartyId: wizard.fields.counterpartyId,
               amount: Number(wizard.fields.amount.trim()),
               fiatCurrency: wizard.selectedRampPair.fiatCurrency,
-              cryptoToken: toRampCryptoToken(wizard.selectedRampPair.assetRail),
+              assetRail: wizard.selectedRampPair.assetRail,
               destinationWallet: wizard.selectedWallet.walletId,
             },
           },

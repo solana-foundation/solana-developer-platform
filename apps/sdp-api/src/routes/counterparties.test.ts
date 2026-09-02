@@ -406,7 +406,7 @@ describe("Counterparties Routes", () => {
       const cp = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&cryptoToken=USDC&fiatCurrency=USD`,
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -506,7 +506,7 @@ describe("Counterparties Routes", () => {
       );
 
       const response = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -589,7 +589,7 @@ describe("Counterparties Routes", () => {
       );
 
       const response = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCountry=US`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -619,7 +619,7 @@ describe("Counterparties Routes", () => {
 
     it("rejects an invalid Lightspark off-ramp destination country", async () => {
       const response = await app.request(
-        "/v1/counterparties/cp_invalid_country/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=USA",
+        "/v1/counterparties/cp_invalid_country/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCountry=USA",
         { headers: { Authorization: authHeader } },
         env
       );
@@ -629,7 +629,7 @@ describe("Counterparties Routes", () => {
 
     it("rejects destinationCountry for non-Lightspark off-ramp requirements", async () => {
       const response = await app.request(
-        "/v1/counterparties/cp_bvnk_country/requirements?provider=bvnk&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US",
+        "/v1/counterparties/cp_bvnk_country/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCountry=US",
         { headers: { Authorization: authHeader } },
         env
       );
@@ -690,7 +690,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "lightspark",
             direction: "offramp",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             collectedData: { destinationCountry: "US", purposeOfPayment: "SELF" },
           }),
@@ -743,7 +743,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "lightspark",
             direction: "offramp",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             collectedData: {
               destinationCountry: "US",
@@ -806,7 +806,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "lightspark",
             direction: "offramp",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             providerAccountId: "provider_account_foreign_owned",
             collectedData: { destinationCountry: "US", purposeOfPayment: "SELF" },
@@ -939,7 +939,7 @@ describe("Counterparties Routes", () => {
       const counterparty = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
         {
           headers: { "Content-Type": "application/json", Authorization: authHeader },
         },
@@ -1020,7 +1020,7 @@ describe("Counterparties Routes", () => {
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
-              cryptoToken: "USDC_SOLANA",
+              assetRail: "usdc.solana",
               destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
               fiatCurrency: "USD",
               collectedData,
@@ -1144,7 +1144,7 @@ describe("Counterparties Routes", () => {
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
-              cryptoToken: "USDC_SOLANA",
+              assetRail: "usdc.solana",
               destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
               fiatCurrency: "USD",
               collectedData,
@@ -1302,7 +1302,7 @@ describe("Counterparties Routes", () => {
         ).toBe(200);
 
         const requirements = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );
@@ -1318,7 +1318,7 @@ describe("Counterparties Routes", () => {
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
-              cryptoToken: "USDC_SOLANA",
+              assetRail: "usdc.solana",
               destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
               fiatCurrency: "USD",
               collectedData,
@@ -1407,7 +1407,7 @@ describe("Counterparties Routes", () => {
           ).status
         ).toBe(200);
         const response = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );
@@ -1428,7 +1428,7 @@ describe("Counterparties Routes", () => {
           ).status
         ).toBe(200);
         const rejected = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );

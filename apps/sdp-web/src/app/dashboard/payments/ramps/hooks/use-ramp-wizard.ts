@@ -2,6 +2,7 @@
 
 import type {
   Counterparty,
+  CryptoRailId,
   PaymentRampQuote,
   PaymentsDashboardWallet,
   RampProviderId,
@@ -26,13 +27,7 @@ import {
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
-import {
-  DEFAULT_RAMP_PAIR,
-  findRampPair,
-  type RampPair,
-  type SelectedRampPair,
-  toRampCryptoToken,
-} from "@/lib/ramps";
+import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useZodForm } from "@/lib/use-zod-form";
 import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
 import { type RampFields, rampSelectionSchema } from "../schema";
@@ -52,7 +47,7 @@ export interface RampQuotePayloadArgs {
   selectedWallet: PaymentsDashboardWallet;
   provider: RampProviderId;
   selectedRampPair: SelectedRampPair;
-  cryptoToken: string;
+  assetRail: CryptoRailId;
   collectedData: CollectedFieldData;
   selectedProviderAccountId: string | null;
   /** Explicitly picked saved payout account; its corridor overrides the collected destination country. */
@@ -198,7 +193,7 @@ export function useRampWizard<TId extends string>(
     counterpartyId: fields.counterpartyId,
     provider: fields.provider,
     direction: requirementsConfig.direction,
-    cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+    assetRail: selectedRampPair.assetRail,
     fiatCurrency: selectedRampPair.fiatCurrency,
     destinationWallet: selectedWallet?.walletId ?? "",
   });
@@ -299,7 +294,7 @@ export function useRampWizard<TId extends string>(
         selectedWallet,
         provider: fields.provider,
         selectedRampPair,
-        cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+        assetRail: selectedRampPair.assetRail,
         collectedData: requirements.collectedData,
         selectedProviderAccountId: providerAccountId,
         selectedPayoutAccount: requirements.selectedPayoutAccount,
@@ -377,7 +372,7 @@ export function useRampWizard<TId extends string>(
     });
     try {
       const result = await requirements.submitRequirements({
-        cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+        assetRail: selectedRampPair.assetRail,
         destinationWallet: selectedWallet.walletId,
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
