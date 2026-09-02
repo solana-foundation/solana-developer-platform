@@ -1,7 +1,13 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { FeePaymentError } from "@sdp/payments/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
-import { type Permission, type PolicyDefaultAction, type PolicyRule, SOL_MINT } from "@sdp/types";
+import {
+  type PaymentTransferStatus,
+  type Permission,
+  type PolicyDefaultAction,
+  type PolicyRule,
+  SOL_MINT,
+} from "@sdp/types";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -3180,6 +3186,131 @@ describe("Payments routes — transfers", () => {
         .first<{ status: string; signature: string | null }>();
       expect(row?.status).toBe("confirmed");
       expect(row?.signature).toBeTruthy();
+    });
+
+    /**
+     * Creates an off-ramp row the way a quote does, so a send can be attempted against it.
+     *
+     * @param overrides - Fields to diverge from a well-formed row, one per guard condition.
+     * @returns The id of the created transfer.
+     */
+    async function seedOfframpAwaitingPayment(overrides?: {
+      providerData?: Record<string, unknown>;
+      amount?: string;
+      status?: PaymentTransferStatus;
+    }): Promise<string> {
+      const transferId = generatePaymentTransferId();
+      const repository = createPostgresPaymentsRepository(
+        getDb(env),
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      );
+      await repository.createTransfer({
+        id: transferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        counterpartyId: null,
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: null,
+        token: SOL_MINT,
+        amount: overrides?.amount ?? "1",
+        memo: null,
+        type: "offramp",
+        direction: "outbound",
+        status: overrides?.status ?? "awaiting_payment",
+        provider: "hercle",
+        providerReference: "e67b1be2-2bba-40db-9571-3a3612b865ef",
+        deliveryMode: "manual_instructions",
+        fiatCurrency: "EUR",
+        fiatAmount: "86.84",
+        providerData: overrides?.providerData ?? {
+          cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+        },
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: TEST_API_KEY.id,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      });
+      return transferId;
+    }
+
+    /**
+     * Attempts the in-app send for an off-ramp row.
+     *
+     * @param input - Transfer id plus the wire fields the guard compares against the row.
+     * @returns The raw response, so each case can assert its own status.
+     */
+    async function sendForOfframp(input: {
+      transferId: string;
+      destination?: string;
+      amount?: string;
+    }): Promise<Response> {
+      return await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            transferId: input.transferId,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            destination: input.destination ?? TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: input.amount ?? "1",
+          }),
+        },
+        env
+      );
+    }
+
+    // "Transfer does not match the off-ramp deposit instruction" covers ten conditions and
+    // names none of them, so each case that can produce it gets its own test. The missing
+    // instruction is the one that actually shipped: a quote created before the deposit
+    // instruction was persisted leaves a transfer that can never be funded.
+    it("refuses the send when the off-ramp row carries no deposit instruction", async () => {
+      const transferId = await seedOfframpAwaitingPayment({ providerData: {} });
+
+      const res = await sendForOfframp({ transferId });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toBe("Transfer does not match the off-ramp deposit instruction");
+    });
+
+    it("refuses the send when the destination differs from the deposit instruction", async () => {
+      const transferId = await seedOfframpAwaitingPayment();
+
+      const res = await sendForOfframp({
+        transferId,
+        destination: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toBe("Transfer does not match the off-ramp deposit instruction");
+    });
+
+    it("refuses the send when the amount differs from the deposit instruction", async () => {
+      const transferId = await seedOfframpAwaitingPayment();
+
+      const res = await sendForOfframp({ transferId, amount: "2" });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toBe("Transfer does not match the off-ramp deposit instruction");
+    });
+
+    it("refuses the send once the off-ramp row is no longer awaiting payment", async () => {
+      const transferId = await seedOfframpAwaitingPayment({ status: "canceled" });
+
+      const res = await sendForOfframp({ transferId });
+
+      expect(res.status).toBe(409);
     });
 
     it("uses the existing off-ramp row for its on-chain deposit", async () => {

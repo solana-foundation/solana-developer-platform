@@ -1077,6 +1077,74 @@ describe("Payments routes — ramps", () => {
     fetchSpy.mockRestore();
   });
 
+  it("creates a Hercle on-ramp quote with the issued funding instructions", async () => {
+    const accountId = "4a1d9fcb-cd3d-1e3f-6995-132e3aa13ac5";
+    const counterpartyId = await seedReadyHercleCounterparty(accountId);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          orderId: "0e936582-c524-4fc4-9927-2fd0667b1bfe",
+          fiatCurrency: "EUR",
+          fiatAmount: "1000.00",
+          bankAccount: {
+            iban: "CH9300762011623852957",
+            bic: "HERCCHZZXXX",
+            bankName: "Hercle (simulated)",
+            accountHolder: "Hercle Financial AG",
+            paymentReference: "HRC-0E936582C524",
+          },
+          expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "EUR",
+          fiatAmount: "1000.00",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        quote: {
+          provider: string;
+          deliveryMode: string;
+          paymentInstructions: { kind: string; bankAccount?: { paymentReference?: string } }[];
+        };
+      };
+    };
+
+    expect(body.data.quote.provider).toBe("hercle");
+    expect(body.data.quote.deliveryMode).toBe("manual_instructions");
+    // Without the reference on the wire Hercle cannot attribute the incoming transfer,
+    // so settlement stalls until someone reconciles by hand.
+    expect(body.data.quote.paymentInstructions[0]).toMatchObject({
+      kind: "fiat_funding",
+      bankAccount: { paymentReference: "HRC-0E936582C524" },
+    });
+
+    const [, requestInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(requestInit.headers).get("on-behalf-of")).toBe(accountId);
+
+    fetchSpy.mockRestore();
+  });
+
   it("refuses a Hercle off-ramp quote until the counterparty is verified", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "hercle_customer_2",
