@@ -742,6 +742,7 @@ export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema,
     destinationCountry: z.enum(COUNTRY_CODES),
+    providerAccountId: z.string().min(1).optional(),
   }),
   z.object({
     provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "coinbase", "stripe"]),

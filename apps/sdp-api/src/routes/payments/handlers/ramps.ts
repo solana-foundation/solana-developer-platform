@@ -56,6 +56,7 @@ import {
   isRampTransferType,
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import {
   generatePaymentTransferId,
   type PaymentTransferRow,
@@ -1092,6 +1093,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   let quote: PaymentRampQuote;
   let precreatedTransferId: string | undefined;
   let pendingTransfer: PaymentTransferRow | undefined;
+  let transferProviderData: Record<string, unknown> | undefined;
   switch (input.provider) {
     case "moonpay": {
       const apiKey = c.get("apiKey");
@@ -1165,22 +1167,43 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       }
       const customerId = await lightsparkProviderCustomerId(c, counterparty, projectId);
       const purposeOfPayment = readLightsparkPurposeOfPayment(counterparty.provider_data);
-      const payoutAccounts = await createPostgresCounterpartyProviderAccountsRepository(
-        getDb(c.env)
-      ).listActiveExternalAccounts({
-        organizationId: scope.auth.organizationId,
-        projectId,
-        counterpartyId: counterparty.id,
-        provider: "lightspark",
-        fiatCurrency: input.fiatCurrency,
-        destinationCountry: input.destinationCountry,
-      });
-      const payoutAccount = selectLightsparkPayoutAccount(
-        payoutAccounts,
-        undefined,
-        input.fiatCurrency,
-        input.destinationCountry
-      );
+      const accountsRepository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+      let payoutAccount: CounterpartyProviderAccountRow | null;
+      if (input.providerAccountId === undefined) {
+        const payoutAccounts = await accountsRepository.listActiveExternalAccounts({
+          organizationId: scope.auth.organizationId,
+          projectId,
+          counterpartyId: counterparty.id,
+          provider: "lightspark",
+          fiatCurrency: input.fiatCurrency,
+          destinationCountry: input.destinationCountry,
+        });
+        payoutAccount = selectLightsparkPayoutAccount(
+          payoutAccounts,
+          undefined,
+          input.fiatCurrency,
+          input.destinationCountry
+        );
+      } else {
+        const selected = await accountsRepository.getExternalAccountById({
+          organizationId: scope.auth.organizationId,
+          projectId,
+          counterpartyId: counterparty.id,
+          provider: "lightspark",
+          id: input.providerAccountId,
+        });
+        if (
+          selected === null ||
+          selected.status !== "active" ||
+          selected.fiat_currency !== input.fiatCurrency ||
+          selected.destination_country !== input.destinationCountry
+        ) {
+          throw badRequest(
+            "providerAccountId does not reference an active lightspark payout account for this corridor."
+          );
+        }
+        payoutAccount = selected;
+      }
       if (
         customerId === null ||
         purposeOfPayment === null ||
@@ -1191,6 +1214,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       ) {
         throw counterpartyNotProvisioned("lightspark", "offramp");
       }
+      transferProviderData = { payoutProviderAccountId: payoutAccount.id };
       quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOfframpQuote(rampRuntime(c), {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -1304,6 +1328,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
       fiatAmount: null,
       rampsMemo: input.rampsMemo,
+      providerData: transferProviderData,
     });
   }
 
