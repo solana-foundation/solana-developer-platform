@@ -228,21 +228,92 @@ test("the orchestrator grants every permission the prod workflow requests", () =
 });
 
 test("candidate verification accepts the signed index digest or its child manifests, nothing else", () => {
-  assert.match(
-    workflow,
-    /accepted_digests="\$\{expected_digest\}"/
-  );
-  assert.match(
-    workflow,
-    /crane manifest "\$\{IMAGE\}"/
-  );
-  assert.match(
-    workflow,
-    /vnd\.oci\.image\.index\.v1\+json/
-  );
+  assert.match(workflow, /accepted_digests="\$\{expected_digest\}"/);
+  assert.match(workflow, /crane manifest "\$\{IMAGE\}"/);
   assert.match(
     workflow,
     /grep -qxF "\$\{revision_digest##\*@\}" <<<"\$\{accepted_digests\}"/
   );
+});
+
+// Execute the actual digest-selection block from the workflow against stubbed
+// registries, so CI fails when the shell behavior breaks even if the text
+// fragments above still match.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const blockMatch = workflow.match(
+  /(accepted_digests="\$\{expected_digest\}"[\s\S]*?or a manifest of that signed index\." >&2\n\s*exit 1\n\s*fi)/
+);
+assert.ok(blockMatch, "digest-selection block not found in workflow");
+const digestBlock = blockMatch[1];
+
+const INDEX_DIGEST = "sha256:aaaa000000000000000000000000000000000000000000000000000000000000";
+const CHILD_DIGEST = "sha256:bbbb000000000000000000000000000000000000000000000000000000000000";
+const OTHER_DIGEST = "sha256:cccc000000000000000000000000000000000000000000000000000000000000";
+const INDEX_JSON = JSON.stringify({
+  mediaType: "application/vnd.oci.image.index.v1+json",
+  manifests: [{ digest: CHILD_DIGEST }, { digest: "sha256:dddd000000000000000000000000000000000000000000000000000000000000" }],
+});
+const BARE_JSON = JSON.stringify({ mediaType: "application/vnd.oci.image.manifest.v1+json" });
+
+function runDigestBlock({ craneScript, revisionDigest }) {
+  const dir = mkdtempSync(join(tmpdir(), "digest-guard-"));
+  const cranePath = join(dir, "crane");
+  writeFileSync(cranePath, craneScript);
+  chmodSync(cranePath, 0o755);
+  const script = [
+    "set -euo pipefail",
+    `expected_digest="${INDEX_DIGEST}"`,
+    `IMAGE="registry.example/repo@${INDEX_DIGEST}"`,
+    'candidate_revision="rev-test"',
+    `revision_digest="registry.example/repo@${revisionDigest}"`,
+    digestBlock,
+    'echo GUARD_PASSED',
+  ].join("\n");
+  try {
+    const out = execFileSync("bash", ["-c", script], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      encoding: "utf8",
+    });
+    return { code: 0, out };
+  } catch (err) {
+    return { code: err.status, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+  }
+}
+
+const craneOk = `#!/usr/bin/env bash\nprintf '%s' '${INDEX_JSON}'\n`;
+const craneBare = `#!/usr/bin/env bash\nprintf '%s' '${BARE_JSON}'\n`;
+const craneFail = "#!/usr/bin/env bash\necho 'UNAUTHORIZED' >&2\nexit 1\n";
+
+test("digest guard passes for the signed index's child manifest", () => {
+  const r = runDigestBlock({ craneScript: craneOk, revisionDigest: CHILD_DIGEST });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /GUARD_PASSED/);
+});
+
+test("digest guard passes for the pinned index digest itself", () => {
+  const r = runDigestBlock({ craneScript: craneOk, revisionDigest: INDEX_DIGEST });
+  assert.equal(r.code, 0, r.out);
+});
+
+test("digest guard rejects a digest outside the signed index", () => {
+  const r = runDigestBlock({ craneScript: craneOk, revisionDigest: OTHER_DIGEST });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /or a manifest of that signed index/);
+});
+
+test("digest guard fails loudly, not with a mismatch, when the registry fetch fails", () => {
+  const r = runDigestBlock({ craneScript: craneFail, revisionDigest: CHILD_DIGEST });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Failed to fetch the pinned manifest/);
+  assert.doesNotMatch(r.out, /or a manifest of that signed index/);
+});
+
+test("digest guard still accepts an exact match on a bare (non-index) manifest", () => {
+  const r = runDigestBlock({ craneScript: craneBare, revisionDigest: INDEX_DIGEST });
+  assert.equal(r.code, 0, r.out);
 });
 

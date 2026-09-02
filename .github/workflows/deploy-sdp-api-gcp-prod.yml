@@ -388,12 +388,18 @@ jobs:
           # content-addressed by the index, so this extends the trust chain
           # without widening it; anything else still fails closed.
           accepted_digests="${expected_digest}"
-          index_children="$(
-            crane manifest "${IMAGE}" 2>/dev/null |
-              jq -r 'select(.mediaType == "application/vnd.oci.image.index.v1+json"
-                       or .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json")
-                     | .manifests[]?.digest' || true
-          )"
+          if ! pinned_manifest="$(crane manifest "${IMAGE}")"; then
+            echo "Failed to fetch the pinned manifest for ${expected_digest}; cannot enumerate signed-index children." >&2
+            exit 1
+          fi
+          if ! index_children="$(
+            jq -r 'select(.mediaType == "application/vnd.oci.image.index.v1+json"
+                     or .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json")
+                   | .manifests[]?.digest' <<<"${pinned_manifest}"
+          )"; then
+            echo "Failed to parse the pinned manifest for ${expected_digest}; cannot enumerate signed-index children." >&2
+            exit 1
+          fi
           if [[ -n "${index_children}" ]]; then
             accepted_digests+=$'\n'"${index_children}"
           fi
