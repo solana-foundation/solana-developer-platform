@@ -25,7 +25,7 @@ import {
   type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import { getSolanaConfig } from "./config";
+import { getSolanaConfig, resolveSolanaRpcProviderUrls } from "./config";
 import { solanaRpcError } from "./errors";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
@@ -149,24 +149,82 @@ function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTran
   };
 }
 
+const lastGoodTransportIndex = new Map<string, number>();
+
+/**
+ * Wrap an ordered set of provider transports in per-request failover: a
+ * transient failure (429/5xx/transport error) advances to the next provider,
+ * and the last index that answered is remembered per `stickyKey` so later
+ * requests start on the healthy provider instead of rediscovering the outage.
+ *
+ * `sendTransaction` never fails over: a transient-looking failure can arrive
+ * after the transaction reached the leader, and resubmitting through another
+ * provider risks a double-send. It runs once, against the sticky provider.
+ */
+export function createFailoverTransport(
+  transports: readonly RpcTransport[],
+  options: { stickyKey?: string } = {}
+): RpcTransport {
+  if (transports.length === 1) {
+    return transports[0];
+  }
+  const key = options.stickyKey;
+  return async <TResponse>(request: Parameters<RpcTransport>[0]): Promise<TResponse> => {
+    const payload = request.payload as { method?: unknown } | null | undefined;
+    const method = payload && typeof payload.method === "string" ? payload.method : undefined;
+    const start = (key ? lastGoodTransportIndex.get(key) : undefined) ?? 0;
+    const attempts = method === "sendTransaction" ? 1 : transports.length;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const index = (start + attempt) % transports.length;
+      try {
+        const result = await transports[index]<TResponse>(request);
+        if (key !== undefined && index !== start) {
+          lastGoodTransportIndex.set(key, index);
+        }
+        return result;
+      } catch (error) {
+        lastError = error;
+        if (attempt === attempts - 1 || !isTransientRpcError(error)) {
+          throw error;
+        }
+      }
+    }
+    throw lastError;
+  };
+}
+
 /**
  * Create a configured Solana RPC client from environment
  */
 export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
+  const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
+
+  const buildTransport = (url: string): RpcTransport => {
+    if (options?.headers && Object.keys(options.headers).length > 0) {
+      assertAllowedRpcHeaders(options.headers);
+      return createDefaultRpcTransport({ headers: options.headers, url });
+    }
+    return createDefaultRpcTransport({ url });
+  };
+
   // An explicit URL is already the complete endpoint selection. Do not force
   // callers with a per-request/per-cluster URL to also configure the legacy
   // process default merely to construct a client for that explicit endpoint.
-  const rpcUrl = options?.rpcUrl ?? getSolanaConfig(env).rpcUrl;
-  const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
-
-  let transport: RpcTransport;
-  if (options?.headers && Object.keys(options.headers).length > 0) {
-    assertAllowedRpcHeaders(options.headers);
-    transport = createDefaultRpcTransport({ headers: options.headers, url: rpcUrl });
-  } else {
-    transport = createDefaultRpcTransport({ url: rpcUrl });
+  if (options?.rpcUrl) {
+    return createRpcFromTransport(buildTransport(options.rpcUrl), {
+      requestTimeoutMs: timeoutMs,
+    });
   }
 
+  const urls = resolveSolanaRpcProviderUrls(env);
+  if (urls.length === 0) {
+    // Preserves the single-URL error message callers have always seen.
+    getSolanaConfig(env);
+  }
+  const transport = createFailoverTransport(urls.map(buildTransport), {
+    stickyKey: urls.join("|"),
+  });
   return createRpcFromTransport(transport, { requestTimeoutMs: timeoutMs });
 }
 
