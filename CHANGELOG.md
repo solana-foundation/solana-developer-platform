@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.70.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.69.0...v0.70.0) (2026-09-02)
+
+### Features
+
+* **web:** streamline counterparty creation and section ramp requirement forms ([#1580](https://github.com/solana-foundation/solana-developer-platform/pull/1580)) ([c6d27ac](https://github.com/solana-foundation/solana-developer-platform/commit/c6d27ac39987be1599a3cbf9e953544dc7cf849a))
+* **earn:** surface Veda and confirm its devnet Test Vault deployment ([#1564](https://github.com/solana-foundation/solana-developer-platform/pull/1564)) ([1d26c81](https://github.com/solana-foundation/solana-developer-platform/commit/1d26c8129c09a3a26c08f18f66d8e5e4b59d437b))
+* **earn:** curated V1 Kamino shelf, TVL ranking, liquidity/provider columns ([#1562](https://github.com/solana-foundation/solana-developer-platform/pull/1562)) ([07e7063](https://github.com/solana-foundation/solana-developer-platform/commit/07e706358289874fd21b9d6ac09810051c4d080e))
+* **payments:** Lightspark per-corridor payouts and Grid settlement webhooks ([#1577](https://github.com/solana-foundation/solana-developer-platform/pull/1577)) ([8e0597d](https://github.com/solana-foundation/solana-developer-platform/commit/8e0597d191ee170a0a05c1da7156dbe29f4def12))
+* **api:** per-call vendor telemetry at every client boundary ([#1530](https://github.com/solana-foundation/solana-developer-platform/pull/1530)) ([d4e6f30](https://github.com/solana-foundation/solana-developer-platform/commit/d4e6f304e43a169e3115ebaddc096aeabd367d78))
+* **payments:** add a compile-checked surfacing gate for ramp providers ([#1493](https://github.com/solana-foundation/solana-developer-platform/pull/1493)) ([1f6051e](https://github.com/solana-foundation/solana-developer-platform/commit/1f6051eb6e0ec913d4987f5e3e47393b02c04fb6))
+* **web:** polish Embedded Yield portfolio ([#1563](https://github.com/solana-foundation/solana-developer-platform/pull/1563)) ([829d1dd](https://github.com/solana-foundation/solana-developer-platform/commit/829d1dddd8e7dcfeccb17545df7f28ea57711722))
+* **earn:** swap-funded deposits — pay in USDC/USDG/PYUSD/USDT, Jupit… ([#1559](https://github.com/solana-foundation/solana-developer-platform/pull/1559)) ([2058445](https://github.com/solana-foundation/solana-developer-platform/commit/20584452156abb36261163784e935daafa3f9b5a))
+* **payments:** collect Lightspark purpose-of-payment in counterparty requirements ([#1572](https://github.com/solana-foundation/solana-developer-platform/pull/1572)) ([96c90cd](https://github.com/solana-foundation/solana-developer-platform/commit/96c90cde56d0f118e713194125f7ff75281e8601))
+* **payments:** create Lightspark customers from JIT identity collection ([#1570](https://github.com/solana-foundation/solana-developer-platform/pull/1570)) ([25cbe4f](https://github.com/solana-foundation/solana-developer-platform/commit/25cbe4f4de3a6c4bd5dbb13833976fc369a471c3))
+* **private-channels:** replace invitations with project identities ([#1558](https://github.com/solana-foundation/solana-developer-platform/pull/1558)) ([989f43f](https://github.com/solana-foundation/solana-developer-platform/commit/989f43f873d6a7015100ef2e4705fe8dc12551bc))
+* **ramps:** rework rail discovery into ramp-support generation script ([#1568](https://github.com/solana-foundation/solana-developer-platform/pull/1568)) ([8304d46](https://github.com/solana-foundation/solana-developer-platform/commit/8304d4644bf0b59225c033f72c62dfe7868be641))
+* **ci:** continuous prod deploy via a single path-filtered deploy orchestrator ([#1544](https://github.com/solana-foundation/solana-developer-platform/pull/1544)) ([35be4cf](https://github.com/solana-foundation/solana-developer-platform/commit/35be4cf973b13c1324bfb6b389e91a095e9fb573))
+* **web:** compact asset header + sidebar account menu ([#1567](https://github.com/solana-foundation/solana-developer-platform/pull/1567)) ([df638e7](https://github.com/solana-foundation/solana-developer-platform/commit/df638e7b094b299e9559055083685f0b22ebe876))
+* **earn:** remove the Embedded Yield UI builder for a direct integration guide ([#1557](https://github.com/solana-foundation/solana-developer-platform/pull/1557)) ([a1aa522](https://github.com/solana-foundation/solana-developer-platform/commit/a1aa522de37d102759f5a6d5903a2162df686961))
+* **earn:** external-wallet activity + earnings reads, full-loop embedded-yield integration ([#1556](https://github.com/solana-foundation/solana-developer-platform/pull/1556)) ([1fbc813](https://github.com/solana-foundation/solana-developer-platform/commit/1fbc8131b79783b65c40be15cebd2d7d06769db9))
+* **helius:** support simplified shield, withdraw and private transfers ([#1534](https://github.com/solana-foundation/solana-developer-platform/pull/1534)) ([2fb220d](https://github.com/solana-foundation/solana-developer-platform/commit/2fb220db432126d4d3ef8ef3dc15b11574ef44cb))
+* **markets:** align Treasury workspace with Figma ([#1553](https://github.com/solana-foundation/solana-developer-platform/pull/1553)) ([762707c](https://github.com/solana-foundation/solana-developer-platform/commit/762707cf1c753ad57c9841e732eeddf2868d4a3e))
+* **payments:** use exact SDP wallet IDs for execution ([#1509](https://github.com/solana-foundation/solana-developer-platform/pull/1509)) ([9099e50](https://github.com/solana-foundation/solana-developer-platform/commit/9099e506ef81184021884a3306cf03db12819613))
+* **ci:** deploy the signed, attested release image instead of rebuilding it ([#1519](https://github.com/solana-foundation/solana-developer-platform/pull/1519)) ([0e40cf6](https://github.com/solana-foundation/solana-developer-platform/commit/0e40cf6488ad920222396e6f5b6f6f63bcb6fa8a))
+* **api:** add exact runtime execution admission ([#1473](https://github.com/solana-foundation/solana-developer-platform/pull/1473)) ([6f6ba12](https://github.com/solana-foundation/solana-developer-platform/commit/6f6ba12e3e0a1cdcfda30b750a6a7bad333a688f))
+
+### Bug Fixes
+
+* **ci:** grant packages read to the prod deploy lane so the orchestrator can start ([#1578](https://github.com/solana-foundation/solana-developer-platform/pull/1578)) ([28aa763](https://github.com/solana-foundation/solana-developer-platform/commit/28aa763bbec1fb72fe0fce7d798013223d7d8d2e))
+* **ci:** route vendor drift to the alerts webhook, not the deploy channel ([#1566](https://github.com/solana-foundation/solana-developer-platform/pull/1566)) ([23e22fd](https://github.com/solana-foundation/solana-developer-platform/commit/23e22fd89ba54e5dcd4fcee9cfc6af127cacbb74))
+* **cron:** emit sdp_cron_run proof-of-life for feature-gated ticks ([#1561](https://github.com/solana-foundation/solana-developer-platform/pull/1561)) ([9cf0de7](https://github.com/solana-foundation/solana-developer-platform/commit/9cf0de7c8d66f8e80b125575b350292ebf16e92b))
+* **api:** run tsx through node so dev:local starts on Windows ([#1525](https://github.com/solana-foundation/solana-developer-platform/pull/1525)) ([891ac0b](https://github.com/solana-foundation/solana-developer-platform/commit/891ac0b405ae74d3103c8784bb795463b4f3bba9))
+* **private-channels:** verify project RPC deployment ([#1550](https://github.com/solana-foundation/solana-developer-platform/pull/1550)) ([ca2a84c](https://github.com/solana-foundation/solana-developer-platform/commit/ca2a84c874c0348f27e02dd743f482e638999ce4))
+* **web:** finish private channels connection setup ([#1549](https://github.com/solana-foundation/solana-developer-platform/pull/1549)) ([16fa412](https://github.com/solana-foundation/solana-developer-platform/commit/16fa412d49bb26dccc809b9c39a25e5bbf7f2169))
+* **payments:** complete MoonPay off-ramp settlement flow ([#1528](https://github.com/solana-foundation/solana-developer-platform/pull/1528)) ([9f28d2a](https://github.com/solana-foundation/solana-developer-platform/commit/9f28d2a2638c07586614a3d2efee7283af5d519c))
+
+### Maintenance
+
+* **earn:** stop pinning surfaced-shelf size in workspace tests ([#1581](https://github.com/solana-foundation/solana-developer-platform/pull/1581)) ([a7ced02](https://github.com/solana-foundation/solana-developer-platform/commit/a7ced02e613368da00cbc3e7b75decfac2796153))
+* authenticate CI and deploy workflows to Doppler via OIDC ([#1571](https://github.com/solana-foundation/solana-developer-platform/pull/1571)) ([3cfe807](https://github.com/solana-foundation/solana-developer-platform/commit/3cfe807daedf758b449c47bc221f1821b3ee35d2))
+* UI flow matrix with dashboard route audit ([#1551](https://github.com/solana-foundation/solana-developer-platform/pull/1551)) ([7d00728](https://github.com/solana-foundation/solana-developer-platform/commit/7d00728ee02a27725aa0c0f329b63d4758e538e9))
+* **ramps:** remove dead redirectUrl / RAMP_REDIRECT_ALLOWED_HOSTS stack ([#1565](https://github.com/solana-foundation/solana-developer-platform/pull/1565)) ([ad1969b](https://github.com/solana-foundation/solana-developer-platform/commit/ad1969bf76805288b47b8f6fa9a65069d1a745a9))
+* **veda:** reach the private @vedatech npm scope, and make Veda key… ([#1412](https://github.com/solana-foundation/solana-developer-platform/pull/1412)) ([1f7e7af](https://github.com/solana-foundation/solana-developer-platform/commit/1f7e7afa41834b669e54c40c174ba6338e6432e8))
+* **deps:** upgrade @solana/kit 7.1.1 ([#1490](https://github.com/solana-foundation/solana-developer-platform/pull/1490)) ([e1c9f44](https://github.com/solana-foundation/solana-developer-platform/commit/e1c9f441daefd76c499e20a3b8b8fc0eea71fd75))
+
+### Other Changes
+
+* **helius:** remove the Rust Rings gateway sidecar ([#1576](https://github.com/solana-foundation/solana-developer-platform/pull/1576)) ([36a6dc6](https://github.com/solana-foundation/solana-developer-platform/commit/36a6dc626d9533376a2f5925e2a6ae8b1d4c6753))
+
 ## [0.69.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.68.0...v0.69.0) (2026-08-31)
 
 ### Features

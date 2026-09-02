@@ -38,7 +38,7 @@ import {
   KaminoEarnClient,
   kaminoTvlUsd,
 } from "@sdp/earn/providers/kamino/client";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { EARN_DEPOSIT_TOKEN_SYMBOLS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { z } from "zod";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");
@@ -260,8 +260,9 @@ the line first.
 ${renderNearMissTable(inventory.rows)}
 ## The whole registry by deposit token
 
-Earn V1 is a stablecoin facility (\`EARN_DEPOSIT_TOKEN_SYMBOLS\` = USDC, USDG,
-USDT). Everything else here is what widening that union would put in reach.
+Earn V1 is a stablecoin facility (\`EARN_DEPOSIT_TOKEN_SYMBOLS\` =
+${EARN_DEPOSIT_TOKEN_SYMBOLS.join(", ")}). Everything else here is what widening
+that union would put in reach.
 
 ${renderTokenCensus(inventory.rows)}`;
 }

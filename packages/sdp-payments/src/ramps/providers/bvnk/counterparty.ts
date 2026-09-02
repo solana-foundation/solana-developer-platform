@@ -6,12 +6,16 @@ import {
   COUNTERPARTY_PEP_STATUSES,
   COUNTERPARTY_SOURCE_OF_FUNDS,
   COUNTERPARTY_YEARLY_INCOME,
-  COUNTRIES,
-  US_STATES,
 } from "@sdp/types";
 import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
 import { badRequest, unsupportedCounterparty } from "../../../errors";
-import { enumOptions, readyCounterparty, selectField, textField } from "../../requirements";
+import {
+  countryField,
+  enumOptions,
+  readyCounterparty,
+  selectField,
+  textField,
+} from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
   bvnkOnrampStatusFromProviderData,
@@ -20,9 +24,6 @@ import {
   readBvnkCustomer,
   readBvnkOfframpWallet,
 } from "./provider-data";
-
-const COUNTRY_OPTIONS = COUNTRIES.map((country) => ({ value: country.code, label: country.name }));
-const US_STATE_OPTIONS = US_STATES.map((state) => ({ value: state.code, label: state.name }));
 
 const BVNK_ONRAMP_BASE_FIELDS: RequirementField[] = [
   // TODO: US-centric SSN/ITIN mask + format; branch per-country for non-US tax IDs.
@@ -34,23 +35,20 @@ const BVNK_ONRAMP_BASE_FIELDS: RequirementField[] = [
     placeholder: "123-45-6789",
     mask: "###-##-####",
   }),
-  selectField({
+  countryField({
     key: "taxIdentification.taxResidenceCountryCode",
     label: "Tax residence country",
     required: true,
-    options: COUNTRY_OPTIONS,
   }),
-  selectField({
+  countryField({
     key: "nationality",
     label: "Nationality",
     required: true,
-    options: COUNTRY_OPTIONS,
   }),
-  selectField({
+  countryField({
     key: "birthCountryCode",
     label: "Country of birth",
     required: true,
-    options: COUNTRY_OPTIONS,
   }),
   selectField({
     key: "cdd.employmentStatus",
@@ -98,11 +96,12 @@ const BVNK_ONRAMP_US_FIELDS: RequirementField[] = [
     required: true,
     options: enumOptions(COUNTERPARTY_INDUSTRY_SECTORS),
   }),
-  selectField({
+  textField({
     key: "address.stateCode",
     label: "State",
     required: true,
-    options: US_STATE_OPTIONS,
+    pattern: "^([A-Za-z]{2}-)?[A-Za-z0-9]{2}$",
+    placeholder: "CA",
   }),
 ];
 

@@ -12,47 +12,48 @@ import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
  * it never calls — a workspace cycle `scripts/check-module-boundaries.mjs`
  * rejects outright. Same argument as `./kamino-programs`, and the same home.
  *
- * ── Why every entry is `null` today ─────────────────────────────────────────
- * SDP DOES NOT YET KNOW VEDA'S CANONICAL ADDRESSES, and this file is where that
- * is recorded rather than guessed.
+ * ── What is filled in, and why mainnet is still `null` ──────────────────────
+ * DEVNET is confirmed (2026-08-31), from two independent sources that agree:
  *
- * Two candidate sets exist and they disagree:
+ * - Veda's integration docs — the deployment-configuration table an
+ *   integration passes to `createVedaClient()` — name the three programs, the
+ *   Test Vault's vault-state address, and devnet USDC, per cluster.
+ * - SDP's own on-chain audit (2026-08-17, veda-svm-sdk-audit harness; reports
+ *   committed at `docs/earn/veda-svm-audit/`) measured the same addresses
+ *   against genesis-proved endpoints: all three programs exist and are
+ *   executable, the vault state is owned by the vault program, its asset
+ *   config references THIS cluster's USDC (`4zMMC9srt…`, exactly the
+ *   well-known devnet USDC mint) and not mainnet's, and a full signed
+ *   deposit → queued-withdrawal → cancel lifecycle landed on devnet.
  *
- * - The `address` field baked into each Anchor IDL that ships inside
- *   `@vedatech/svm-sdk` (`5J76xGGXn5op…` vault, `Cchro8d7bN5X…` queue,
- *   `FSZPGBfPWb6f…` hook). MEASURED 2026-08-19 with `getAccountInfo` against
- *   `api.devnet.solana.com` and `api.mainnet-beta.solana.com`: **none of the
- *   three exists on either cluster.** They are the source repository's
- *   `declare_id!` defaults, not a deployment.
- * - Three different addresses in Veda's integration document, which SDP has
- *   only as truncated prefixes.
+ * That answers the three questions this file used to hold open: the program
+ * addresses, the vault-state allowlist, and the docs' unusual claim that
+ * devnet and mainnet share addresses (they do — measured, not inferred; the
+ * genesis proof in `@sdp/earn` is what keeps the shared address from ever
+ * being read on the wrong chain).
  *
- * The SDK is built for exactly this situation — `createVedaClient` takes every
- * program address at runtime and, per its README, "does not include default
- * addresses or infer one program from another". So the addresses are
- * deployment CONFIGURATION that Veda supplies, and the honest state until they
- * do is the one below: no deployment, every read and build failing closed with
- * `PROVIDER_NOT_CONFIGURED` rather than aiming a transaction at an address
- * nobody verified.
+ * MAINNET stays `null` deliberately, and not for lack of addresses: the same
+ * docs table names the same programs and the SAME vault state for mainnet, and
+ * the audit found them live there too. But that vault is Veda's shared TEST
+ * vault (share supply was ~4 USDC when measured), and a mainnet entry here
+ * puts its row on the PRODUCTION catalogue for every customer. Fill mainnet
+ * only when Veda names the production vault(s) SDP should actually offer —
+ * and note a wrong address is not a loud failure: a program that does not
+ * exist reads as an empty shelf, while one that exists but is not Veda's would
+ * take a `deposit` instruction and do something else with the money.
  *
- * A wrong address here is not a loud failure. A vault program that does not
- * exist yields "account not found", which reads exactly like an empty shelf;
- * one that exists but is not Veda's would take a `deposit` instruction and do
- * something else with the money. That asymmetry is why this stays empty until
- * Veda confirms, per cluster, in writing.
+ * Historical note, kept because it explains why nothing is inferred from the
+ * SDK: the `address` fields baked into `@vedatech/svm-sdk`'s Anchor IDLs
+ * (`5J76xGGXn5op…` vault, `Cchro8d7bN5X…` queue, `FSZPGBfPWb6f…` hook) are the
+ * source repository's `declare_id!` defaults — measured 2026-08-19, none of
+ * the three exists on either cluster. `createVedaClient` takes every address
+ * at runtime and "does not include default addresses or infer one program
+ * from another"; this table is that configuration.
  *
- * **Filling it in is a pure data change**: replace a `null` with a
+ * **Filling mainnet in is a pure data change**: replace the `null` with a
  * `VedaDeployment`. Nothing else in the stack needs to move — the catalogue
  * read, the instruction builder, the cluster guard and their tests all already
- * work against a deployment and are exercised with fixtures.
- *
- * Before filling one in, confirm with Veda, per cluster:
- *   1. the three program addresses (vault, queue, hook), and
- *   2. the vault-state address(es) SDP should catalogue, and
- *   3. whether devnet and mainnet really share addresses — the integration
- *      document implies they do, which is unusual enough to state explicitly
- *      rather than infer. `assertVedaCluster`-style genesis proof in `@sdp/earn`
- *      is what keeps a shared address from being read on the wrong chain.
+ * work against a deployment.
  */
 export interface VedaDeployment {
   /**
@@ -115,8 +116,22 @@ export const VEDA_DEPOSIT_TOKEN_SYMBOLS = [
  * those paths work.
  */
 export const VEDA_DEPLOYMENTS: Readonly<Record<SolanaCluster, VedaDeployment | null>> = {
+  // The production vault set is an offering decision Veda has not made yet —
+  // the published mainnet addresses point at their shared Test Vault. See the
+  // header before filling this in.
   "mainnet-beta": null,
-  devnet: null,
+  // Veda's devnet Test Vault deployment, from their integration docs and
+  // measured on chain (see header). Addresses are identical on mainnet.
+  devnet: {
+    // biome-ignore lint/security/noSecrets: on-chain program address, not a secret.
+    vaultProgramAddress: "ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J",
+    // biome-ignore lint/security/noSecrets: on-chain program address, not a secret.
+    queueProgramAddress: "fh8uapqMe4GWhep9rt9qZ56Pxi9SYszkuDKXckYMQTT",
+    // biome-ignore lint/security/noSecrets: on-chain program address, not a secret.
+    hookProgramAddress: "BmTjMtZGcvx5XB7LwRaGq3x9hdHG1SziYikjP9BAgoE2",
+    // biome-ignore lint/security/noSecrets: on-chain account address, not a secret.
+    vaultStateAddresses: ["3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU"],
+  },
 };
 
 /**

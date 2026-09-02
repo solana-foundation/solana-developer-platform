@@ -6,6 +6,7 @@ import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { OnrampStepContent } from "./components/onramp-step-content";
+import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
 import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OnrampWizard, useOnrampWizard } from "./hooks/use-onramp-wizard";
@@ -48,6 +49,7 @@ function onrampPrimaryAction(
 export function OnrampRail({
   wallets,
   walletsError,
+  enabledRampProviders,
   rampProviderAccess,
   counterpartiesResult,
   selectedCounterparty,
@@ -61,6 +63,7 @@ export function OnrampRail({
   const wizard = useOnrampWizard({
     wallets,
     walletsError,
+    enabledRampProviders,
     rampProviderAccess,
     counterpartiesResult,
     selectedCounterparty,
@@ -84,6 +87,7 @@ export function OnrampRail({
     ...wizard.summaryDetails,
   ];
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
+  const showInlineStatus = wizard.onTransactionStage && Boolean(wizard.quote);
   const transferState = getRampTransferState(wizard.transferStatus?.status);
   return (
     <RampWizardShell
@@ -107,10 +111,21 @@ export function OnrampRail({
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
-      summary={<WizardSummaryList details={summaryDetails} />}
+      summary={
+        wizard.fields.provider === null ? undefined : <WizardSummaryList details={summaryDetails} />
+      }
+      summaryTrigger={
+        wizard.fields.provider === null ? undefined : (
+          <ProviderSummaryTrigger provider={wizard.fields.provider} />
+        )
+      }
       header={
-        hostedStage ? (
-          <RampStatusInline direction="onramp" hosted transfer={wizard.transferStatus} />
+        showInlineStatus ? (
+          <RampStatusInline
+            direction="onramp"
+            hosted={hostedStage}
+            transfer={wizard.transferStatus}
+          />
         ) : undefined
       }
       secondaryLabel={

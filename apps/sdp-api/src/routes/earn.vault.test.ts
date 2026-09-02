@@ -3,14 +3,14 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Surfacing is real by default here (Kamino is offered, so the happy paths need
- * no help) and forced ON only for the Veda block below.
+ * Surfacing is real by default here — Kamino AND Veda are offered, so both
+ * providers' happy paths run against the shipped map with no help.
  *
- * Veda is registered and executable but NOT offered — `EARN_PROVIDER_SURFACING`
- * keeps it at `false` until deposits are proven end to end in sandbox. That is
- * business config, not a property of the dispatch this file tests, so the Veda
- * cases flip this flag rather than editing the map, and the gate keeps its own
- * test that runs against the real one. Same pattern as `earn-program.test.ts`.
+ * `forceOn` remains for exactly one case: the unknown-provider dispatch test,
+ * which must get PAST the surfacing gate to measure the gate behind it. The
+ * surfacing gate itself keeps its own tests, pinned against the real map with
+ * upshift — registered and `vault_direct` but not offered. Same pattern as
+ * `earn-program.test.ts` (Ground plays that role for the program routes).
  */
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
 
@@ -815,23 +815,30 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
   }
 
   /**
-   * THE GATE THAT IS REAL TODAY, run against the unmocked map: Veda is
-   * registered and executable but not OFFERED, so a deposit is refused before
-   * the provider is ever called. Flipping `EARN_PROVIDER_SURFACING.veda` is its
-   * own change, made only once deposits are proven end to end in sandbox.
+   * THE GATE, run against the unmocked map. Veda was this case's fixture until
+   * it was surfaced (2026-08-31); upshift inherits the role as the remaining
+   * un-surfaced `vault_direct` provider — registered, so it clears the id and
+   * style checks and fails on surfacing alone, before the provider is ever
+   * called. If upshift ever flips, move this to whichever provider is off
+   * rather than deleting it (same rule as the catalogue-visibility test in
+   * earn.test.ts).
    */
-  it("is refused as not currently offered while it stays un-surfaced", async () => {
+  it("is refused for a provider that is not currently offered (upshift)", async () => {
     await seedAuth();
-    const strategy = await seedVedaStrategy();
+    const strategy = await seedStrategy({
+      provider: "upshift",
+      name: "Upshift USDC vault",
+      underlyingSource: undefined,
+    });
     await seedWallet({
-      configId: "cfg_earn_vault_veda_gate",
-      custodyWalletId: "cwlt_earn_vault_veda_gate",
-      providerWalletId: "privy_earn_vault_veda_gate",
+      configId: "cfg_earn_vault_unsurfaced_gate",
+      custodyWalletId: "cwlt_earn_vault_unsurfaced_gate",
+      providerWalletId: "privy_earn_vault_unsurfaced_gate",
     });
 
     const res = await postVaultDeposit({
       strategyId: strategy.id,
-      custodyWalletId: "cwlt_earn_vault_veda_gate",
+      custodyWalletId: "cwlt_earn_vault_unsurfaced_gate",
       amount: "10",
       minSharesOut: "9.5",
       requestId: crypto.randomUUID(),
@@ -842,7 +849,6 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
   });
 
   it("dispatches a surfaced Veda row with the catalogue's own asset identity", async () => {
-    surfacing.forceOn = true;
     await seedAuth();
     const strategy = await seedVedaStrategy();
     await seedWallet({
@@ -940,7 +946,6 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
   }
 
   it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
-    surfacing.forceOn = true;
     await seedAuth();
     const strategy = await seedStrategy({ provider: "veda" });
     const client = quoteCapableClient({
@@ -968,7 +973,9 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
 
   it("refuses an un-surfaced provider before quoting anything", async () => {
     await seedAuth();
-    const strategy = await seedStrategy({ provider: "veda" });
+    // Upshift: registered and `vault_direct`, so it reaches the surfacing gate
+    // and stops there (Veda held this role until it was surfaced).
+    const strategy = await seedStrategy({ provider: "upshift" });
     const client = quoteCapableClient({ sharesOut: "1", shareDecimals: 6, blockingIssues: [] });
     vaultDirectClientOverride.current = client;
 

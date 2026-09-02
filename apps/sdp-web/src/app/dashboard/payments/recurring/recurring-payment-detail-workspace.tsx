@@ -5,6 +5,7 @@ import type {
   PaymentRecurringPayment,
   PaymentRecurringPaymentStatus,
   PaymentSubscriptionCollectionAttempt,
+  UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
 import {
   AlertCircleIcon,
@@ -47,6 +48,7 @@ import {
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
+import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
 import {
   type RecurringPaymentAction,
   runRecurringPaymentAction,
@@ -351,10 +353,6 @@ function RecurringPaymentLifecycleBand({
   return null;
 }
 
-function canEditRecurringPayment(status: PaymentRecurringPaymentStatus): boolean {
-  return status === "pending_activation" || status === "active";
-}
-
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
   wallet,
@@ -375,7 +373,9 @@ export function RecurringPaymentDetailWorkspace({
   const [editingPayment, setEditingPayment] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentValidationError, setPaymentValidationError] = useState<string | null>(null);
-  const [selectedWalletId, setSelectedWalletId] = useState(recurringPayment.sourceWalletId);
+  const [selectedCustodyWalletId, setSelectedCustodyWalletId] = useState(
+    recurringPayment.sourceCustodyWalletId ?? ""
+  );
   const [selectedReceivingAccountId, setSelectedReceivingAccountId] = useState(
     recurringPayment.counterpartyAccountId
   );
@@ -389,7 +389,7 @@ export function RecurringPaymentDetailWorkspace({
   const [selectedAmount, setSelectedAmount] = useState(recurringPayment.amount);
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
-  const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceWalletId);
+  const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
   const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
   const receivingAccount =
     counterpartyAccounts.find((account) => account.id === recurringPayment.counterpartyAccountId) ??
@@ -399,10 +399,14 @@ export function RecurringPaymentDetailWorkspace({
     recurringPayment.counterpartyAccountId
   );
   const receivingAccountAddress = accountAddress(receivingAccount);
+  const { sourceWalletUnresolved, isEditable, controlsDisabled } = getRecurringPaymentDetailState({
+    sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId,
+    status: recurringPayment.status,
+    hasPendingAction: pendingAction !== null,
+    savingPayment,
+  });
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
-  const isEditable = canEditRecurringPayment(recurringPayment.status);
-  const controlsDisabled = Boolean(pendingAction) || savingPayment;
 
   const submitAction = async (action: RecurringPaymentAction) => {
     if (pendingAction) {
@@ -437,7 +441,7 @@ export function RecurringPaymentDetailWorkspace({
     setSelectedToken(recurringPayment.token);
     setSelectedSchedulePreset(schedulePresetForPeriodHours(recurringPayment.periodHours));
     setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-    setSelectedWalletId(recurringPayment.sourceWalletId);
+    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId ?? "");
     setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
     setPaymentValidationError(null);
     setEditingPayment(true);
@@ -466,7 +470,7 @@ export function RecurringPaymentDetailWorkspace({
       setPaymentValidationError(t("DashboardPayments.recurring.selectCurrency"));
       return;
     }
-    if (!selectedWalletId) {
+    if (!selectedCustodyWalletId) {
       setPaymentValidationError(t("DashboardPayments.recurring.selectFundingWallet"));
       return;
     }
@@ -475,13 +479,7 @@ export function RecurringPaymentDetailWorkspace({
       return;
     }
 
-    const updates: {
-      amount?: string;
-      token?: string;
-      periodHours?: number;
-      sourceWalletId?: string;
-      counterpartyAccountId?: string;
-    } = {};
+    const updates: UpdatePaymentRecurringPaymentRequest = {};
     if (amount !== recurringPayment.amount) {
       updates.amount = amount;
     }
@@ -491,8 +489,8 @@ export function RecurringPaymentDetailWorkspace({
     if (periodHours !== recurringPayment.periodHours) {
       updates.periodHours = periodHours;
     }
-    if (selectedWalletId !== recurringPayment.sourceWalletId) {
-      updates.sourceWalletId = selectedWalletId;
+    if (selectedCustodyWalletId !== recurringPayment.sourceCustodyWalletId) {
+      updates.sourceCustodyWalletId = selectedCustodyWalletId;
     }
     if (selectedReceivingAccountId !== recurringPayment.counterpartyAccountId) {
       updates.counterpartyAccountId = selectedReceivingAccountId;
@@ -576,13 +574,25 @@ export function RecurringPaymentDetailWorkspace({
             actionError={actionError}
             editable={isEditable}
             onEdit={openPaymentEditor}
-            disabled={savingPayment}
+            disabled={controlsDisabled}
             onAction={(action) => void submitAction(action)}
             onCancel={() => setCancelConfirmOpen(true)}
           />
         </div>
 
-        <RecurringPaymentLifecycleBand status={recurringPayment.status} actionError={actionError} />
+        {sourceWalletUnresolved ? (
+          <ActionBand
+            variant="warning"
+            title={t("DashboardPayments.recurring.sourceWalletUnresolved")}
+          >
+            {t("DashboardPayments.recurring.sourceWalletUnresolvedDescription")}
+          </ActionBand>
+        ) : (
+          <RecurringPaymentLifecycleBand
+            status={recurringPayment.status}
+            actionError={actionError}
+          />
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="flex flex-col gap-3">
@@ -687,12 +697,10 @@ export function RecurringPaymentDetailWorkspace({
                     ) : (
                       <span className="min-w-0 truncate">{sourceWalletLabel}</span>
                     )}
-                    {wallet ? (
-                      <CopyableValue
-                        value={wallet.publicKey}
-                        label={shortenAddress(wallet.publicKey)}
-                      />
-                    ) : null}
+                    <CopyableValue
+                      value={wallet?.publicKey ?? recurringPayment.sourceAddress}
+                      label={shortenAddress(wallet?.publicKey ?? recurringPayment.sourceAddress)}
+                    />
                   </span>
                 </div>
                 <div className="group flex min-h-12 items-center justify-between gap-4 py-3">
@@ -789,13 +797,13 @@ export function RecurringPaymentDetailWorkspace({
             </div>
             <Combobox
               label={t("DashboardPayments.recurring.fundingWallet")}
-              value={selectedWalletId}
+              value={selectedCustodyWalletId}
               onChange={(value) => {
-                setSelectedWalletId(value);
+                setSelectedCustodyWalletId(value);
                 setPaymentValidationError(null);
               }}
               options={wallets.map((entry) => ({
-                value: entry.walletId,
+                value: entry.id,
                 label: walletLabel(entry, entry.walletId),
                 description: shortenAddress(entry.publicKey),
               }))}

@@ -19,6 +19,7 @@ import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 
@@ -187,12 +188,12 @@ export function resolveEarnExecutionClient(
   if (provider === "kamino") {
     const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);
     assertNotPortfolioProvider(client);
-    return client;
+    return instrumentVendorPort("kamino", client);
   }
   if (provider === "veda") {
     const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);
     assertVedaNotPortfolioProvider(client);
-    return client;
+    return instrumentVendorPort("veda", client);
   }
   return null;
 }

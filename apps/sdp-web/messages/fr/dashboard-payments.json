@@ -248,7 +248,25 @@
         "waitingForPayment": "En attente de paiement",
         "waitingForPaymentHostedDescription": "Terminez le paiement dans la fenêtre du fournisseur ci-dessus. Ce dépôt se met à jour automatiquement dès que le fournisseur le confirme."
       },
-      "untrustedProviderUrl": "Le fournisseur a renvoyé une URL non fiable, elle n'a donc pas été chargée. Créez un nouveau devis ou contactez le support."
+      "untrustedProviderUrl": "Le fournisseur a renvoyé une URL non fiable, elle n'a donc pas été chargée. Créez un nouveau devis ou contactez le support.",
+      "destinationCountry": "Pays de destination",
+      "paymentRail": "Rail de paiement",
+      "requirementGroupDestinationTitle": "Destination",
+      "requirementGroupDestinationDescription": "Choisissez où le paiement arrive et le rail de paiement local utilisé pour l'acheminer.",
+      "requirementGroupBankAccountTitle": "Compte bancaire",
+      "requirementGroupBankAccountDescription": "Les coordonnées bancaires du destinataire pour ce rail. Elles sont transmises au fournisseur lors de l'exécution du paiement et ne sont jamais stockées.",
+      "requirementGroupCustomerTitle": "Détails du destinataire",
+      "requirementGroupCustomerDescription": "Lightspark utilise ces informations pour vérifier l'identité du destinataire. Elles sont transmises lors de la soumission et ne sont jamais stockées.",
+      "checkoutPoweredBy": "Propulsé par",
+      "addressRequirementDescription": "Recherchez pour pré-remplir automatiquement les champs d'adresse, ou saisissez-les manuellement.",
+      "useExistingAccount": "Utiliser le compte existant",
+      "useExistingAccountDescription": "Un compte de paiement actif est déjà enregistré pour cette destination. Nous l'utiliserons pour ce paiement.",
+      "success": "Succès",
+      "depositTransaction": "Transaction de dépôt",
+      "onchainTransaction": "Transaction on-chain",
+      "addressSearchPlaceholder": "Rechercher une adresse",
+      "addressAutocompleteFailed": "Impossible de rechercher des adresses. Réessayez.",
+      "addressDetailsFailed": "Impossible de charger cette adresse. Essayez une autre recherche."
     },
     "onchainSend": {
       "noAssets": "Ce Wallet n'a aucun élément disponible à envoyer.",
@@ -621,7 +639,9 @@
       "details": "Détails",
       "transactions": "Opérations",
       "copyAddress": "Copier l'adresse",
-      "addressCopied": "Adresse copiée"
+      "addressCopied": "Adresse copiée",
+      "addAnyway": "Ajouter quand même",
+      "addAnywayTitle": "Ajouter l'adresse signalée ?"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -693,7 +713,8 @@
       "lastUpdated": "Dernière mise à jour",
       "copy": "Copier {label}",
       "viewReceipt": "Afficher le reçu",
-      "receipt": "Reçu"
+      "receipt": "Reçu",
+      "failureReason": "Raison de l'échec"
     },
     "requestFailed": "La demande a échoué.",
     "submitting": "Envoi...",

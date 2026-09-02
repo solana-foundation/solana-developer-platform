@@ -210,9 +210,9 @@ describe("payments destination schema", () => {
 });
 
 describe("recurring payment schema", () => {
-  it("accepts a custody source wallet and counterparty crypto wallet account target", () => {
+  it("accepts an exact custody source wallet and rejects the removed Provider selector", () => {
     const result = createRecurringPaymentSchema.safeParse({
-      sourceWalletId: "wal_source",
+      sourceCustodyWalletId: "cwlt_source",
       counterpartyId: "cp_test",
       counterpartyAccountId: "cpa_test",
       token: USDC_MINT,
@@ -222,11 +222,25 @@ describe("recurring payment schema", () => {
     });
 
     expect(result.success).toBe(true);
+    expect(
+      createRecurringPaymentSchema.safeParse({
+        sourceCustodyWalletId: "cwlt_source",
+        sourceWalletId: "provider_source",
+        counterpartyId: "cp_test",
+        counterpartyAccountId: "cpa_test",
+        token: USDC_MINT,
+        amount: "25.00",
+        periodHours: 24,
+      }).success
+    ).toBe(false);
+    expect(
+      updateRecurringPaymentSchema.safeParse({ sourceWalletId: "provider_source" }).success
+    ).toBe(false);
   });
 
   it("rejects a past firstCollectionAt timestamp", () => {
     const result = createRecurringPaymentSchema.safeParse({
-      sourceWalletId: "wal_source",
+      sourceCustodyWalletId: "cwlt_source",
       counterpartyId: "cp_test",
       counterpartyAccountId: "cpa_test",
       token: USDC_MINT,

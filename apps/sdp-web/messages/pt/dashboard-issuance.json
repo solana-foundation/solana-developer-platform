@@ -140,7 +140,9 @@
       "onchainAddress": "Endereço on-chain",
       "internalTokenId": "ID interno do Token",
       "ticker": "Ticker",
-      "statusLabel": "Status"
+      "statusLabel": "Status",
+      "mint": "Mint",
+      "deployedOn": "Deploy em {date}"
     },
     "create": {
       "title": "Criar novo rascunho de Token",

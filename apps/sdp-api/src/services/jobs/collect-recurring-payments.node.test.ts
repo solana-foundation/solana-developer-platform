@@ -4,17 +4,24 @@ import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
+type StaleUpdateRow = PaymentRecurringPaymentRow & {
+  oldest_updated_at: string;
+  stale_count: number;
+};
+
 const mocks = vi.hoisted(() => ({
   activateRecurringPayment: vi.fn(),
   cancelRecurringPayment: vi.fn(),
   collectRecurringPayment: vi.fn(),
+  journalAutomatedCollectionFailure: vi.fn(),
   resumeRecurringPayment: vi.fn(),
-  findOperationalWallet: vi.fn(),
+  findOperationalWalletById: vi.fn(),
   queryCalls: [] as Array<{ query: string; bindings: Array<string | number> }>,
   rows: {
     due: [] as PaymentRecurringPaymentRow[],
     lifecycle: [] as PaymentRecurringPaymentRow[],
     staleCollection: [] as PaymentRecurringPaymentRow[],
+    staleUpdate: [] as StaleUpdateRow[],
   },
 }));
 
@@ -30,6 +37,9 @@ vi.mock("@/db", () => ({
           if (query.includes("JOIN payment_subscription_collection_attempts")) {
             return Promise.resolve({ rows: mocks.rows.staleCollection });
           }
+          if (query.includes("status = 'updating'")) {
+            return Promise.resolve({ rows: mocks.rows.staleUpdate });
+          }
           return Promise.resolve({ rows: mocks.rows.due });
         },
       }),
@@ -39,7 +49,7 @@ vi.mock("@/db", () => ({
 
 vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
   CustodyRuntimeTargets: class {
-    findOperationalWallet = mocks.findOperationalWallet;
+    findOperationalWalletById = mocks.findOperationalWalletById;
   },
 }));
 
@@ -47,6 +57,7 @@ vi.mock("@/services/payments/recurring-payments", () => ({
   activateRecurringPayment: mocks.activateRecurringPayment,
   cancelRecurringPayment: mocks.cancelRecurringPayment,
   collectRecurringPayment: mocks.collectRecurringPayment,
+  journalAutomatedCollectionFailure: mocks.journalAutomatedCollectionFailure,
   resumeRecurringPayment: mocks.resumeRecurringPayment,
 }));
 
@@ -64,6 +75,7 @@ function recurringRow(
     id: `prp_${status}`,
     organization_id: "org_1",
     project_id: "proj_1",
+    source_custody_wallet_id: "cwlt_1",
     source_wallet_id: "wallet_1",
     source_address: "source_address",
     counterparty_id: "cpty_1",
@@ -107,13 +119,16 @@ describe("collectDueRecurringPayments", () => {
     mocks.activateRecurringPayment.mockReset();
     mocks.cancelRecurringPayment.mockReset();
     mocks.collectRecurringPayment.mockReset();
+    mocks.journalAutomatedCollectionFailure.mockReset();
     mocks.resumeRecurringPayment.mockReset();
-    mocks.findOperationalWallet.mockReset();
+    mocks.findOperationalWalletById.mockReset();
     mocks.queryCalls.length = 0;
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
     mocks.rows.staleCollection = [];
-    mocks.findOperationalWallet.mockResolvedValue({
+    mocks.rows.staleUpdate = [];
+    mocks.findOperationalWalletById.mockResolvedValue({
+      id: "cwlt_1",
       walletId: "wallet_1",
       publicKey: "source_address",
     });
@@ -222,25 +237,114 @@ describe("collectDueRecurringPayments", () => {
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
   });
 
-  it("skips an ambiguous recurring source wallet and emits redacted telemetry", async () => {
+  it("fails closed when a recurring payment has no exact source wallet", async () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-    mocks.rows.due = [recurringRow("active")];
-    mocks.findOperationalWallet.mockRejectedValue(
-      new AppError("CONFLICT", "Custody wallet ownership is ambiguous")
-    );
+    mocks.rows.due = [recurringRow("active", { source_custody_wallet_id: null })];
 
     const result = await collectDueRecurringPayments({} as Env);
 
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
+    expect(mocks.journalAutomatedCollectionFailure).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       {
         organization_id: "org_1",
         project_id: "proj_1",
         recurring_payment_id: "prp_active",
-        reason: "ambiguous_source_wallet",
+        reason: "unresolved_source_wallet",
       },
-      "collectDueRecurringPayments: skipped ambiguous recurring payment source wallet"
+      "collectDueRecurringPayments: recurring payment has no exact source wallet"
+    );
+    warn.mockRestore();
+  });
+
+  it.each([
+    ["provider wallet ID", { id: "cwlt_1", walletId: "wallet_other", publicKey: "source_address" }],
+    ["public key", { id: "cwlt_1", walletId: "wallet_1", publicKey: "other_address" }],
+  ])("fails closed when the exact source wallet %s does not match its pin", async (_, wallet) => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    mocks.rows.due = [recurringRow("active")];
+    mocks.findOperationalWalletById.mockResolvedValue(wallet);
+
+    const result = await collectDueRecurringPayments({} as Env);
+
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
+    expect(mocks.findOperationalWalletById).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      projectId: "proj_1",
+      custodyWalletId: "cwlt_1",
+    });
+    expect(collectRecurringPayment).not.toHaveBeenCalled();
+    expect(mocks.journalAutomatedCollectionFailure).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organization_id: "org_1",
+        project_id: "proj_1",
+        recurring_payment_id: "prp_active",
+        custody_wallet_id: "cwlt_1",
+        reason: "source_wallet_mismatch",
+      },
+      "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
+    );
+    warn.mockRestore();
+  });
+
+  it("summarizes stale recurring payment updates without changing them", async () => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    mocks.rows.staleUpdate = [
+      {
+        ...recurringRow("updating", {
+          id: "prp_newer_update",
+          updated_at: "2026-07-01T11:05:00.000Z",
+        }),
+        oldest_updated_at: "2026-07-01T11:00:00.000Z",
+        stale_count: 27,
+      },
+      {
+        ...recurringRow("updating", { id: "prp_older_update" }),
+        oldest_updated_at: "2026-07-01T11:00:00.000Z",
+        stale_count: 27,
+      },
+    ];
+
+    const result = await collectDueRecurringPayments(
+      { PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "2" } as Env,
+      new Date("2026-07-01T12:30:00Z")
+    );
+
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
+    expect(collectRecurringPayment).not.toHaveBeenCalled();
+    expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
+    const staleUpdateQuery = mocks.queryCalls.find((call) =>
+      call.query.includes("status = 'updating'")
+    );
+    expect(staleUpdateQuery?.query).toContain("COUNT(*) OVER () AS stale_count");
+    expect(staleUpdateQuery?.query).toContain("MIN(updated_at) OVER () AS oldest_updated_at");
+    expect(staleUpdateQuery?.query).toContain("ORDER BY updated_at DESC, id DESC");
+    expect(staleUpdateQuery?.bindings).toEqual(["2026-07-01T12:15:00.000Z", 2]);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        oldest_updated_at: "2026-07-01T11:00:00.000Z",
+        reason: "stale_recurring_payment_updates",
+        recurring_payments: [
+          {
+            organization_id: "org_1",
+            project_id: "proj_1",
+            recurring_payment_id: "prp_newer_update",
+            updated_at: "2026-07-01T11:05:00.000Z",
+          },
+          {
+            organization_id: "org_1",
+            project_id: "proj_1",
+            recurring_payment_id: "prp_older_update",
+            updated_at: "2026-07-01T11:00:00.000Z",
+          },
+        ],
+        stale_count: 27,
+        truncated: true,
+      },
+      "collectDueRecurringPayments: recurring payment updates are stale; collections stay paused until callers retry the same updates"
     );
     warn.mockRestore();
   });

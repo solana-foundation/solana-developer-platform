@@ -1,6 +1,28 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Most tests here bypass the per-vault CURATED_VAULTS allowlists: the shipped
+ * shelf changes with BD decisions, and the seeds use random references that no
+ * real allowlist could carry — the same reason earn-program.test.ts bypasses
+ * `isEarnProviderSurfaced`. The real config gets its own describe below
+ * ("shipped V1 curation"), which flips this off and runs against the real
+ * lists. HIDDEN_STRATEGY_TERMS stays real everywhere: seeds control their own
+ * names.
+ */
+const curation = vi.hoisted(() => ({ bypassCuratedVaults: true }));
+
+vi.mock("@/routes/earn/handlers/curation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/routes/earn/handlers/curation")>();
+  return {
+    ...actual,
+    get CURATED_VAULTS() {
+      return curation.bypassCuratedVaults ? {} : actual.CURATED_VAULTS;
+    },
+  };
+});
+
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
@@ -237,6 +259,7 @@ beforeEach(async () => {
   // Earn is a Markets sub-module, so both gates have to be on to reach a route.
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
+  curation.bypassCuratedVaults = true;
   await seedTestDatabase(env);
 });
 
@@ -678,5 +701,87 @@ describe("Earn routes — strategy catalogue", () => {
 
     const detail = await getEarn(`/v1/earn/strategies/${unsurfaced.id}`);
     expect(detail.status).toBe(404);
+  });
+});
+
+/**
+ * The REAL shipped curation (PRO-1727) — the one describe that runs against the
+ * actual CURATED_VAULTS/HIDDEN_STRATEGY_TERMS config rather than the bypass.
+ * Addresses are read from the config itself so a BD re-pick moves these tests
+ * with it instead of breaking them on a literal.
+ */
+describe("Earn strategy reads — shipped V1 curation", () => {
+  async function shippedCuratedVaults() {
+    const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
+      "@/routes/earn/handlers/curation"
+    );
+    return actual.CURATED_VAULTS;
+  }
+
+  it("shows only the curated mainnet shelf on the mirrored view", async () => {
+    curation.bypassCuratedVaults = false;
+    await seedAuth();
+    const shelf = (await shippedCuratedVaults())["mainnet-beta"]?.kamino ?? [];
+    expect(shelf.length).toBeGreaterThan(0);
+
+    const curated = await seedStrategy({
+      providerReference: shelf[0],
+      hostCluster: "mainnet-beta",
+    });
+    const uncurated = await seedStrategy({
+      providerReference: "some-vault-bd-did-not-pick",
+      hostCluster: "mainnet-beta",
+    });
+
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number };
+    };
+    expect(body.data.strategies.map((s) => s.id)).toEqual([curated.id]);
+    expect(body.data.total).toBe(1);
+
+    expect((await getEarn(`/v1/earn/strategies/${uncurated.id}`)).status).toBe(404);
+    expect((await getEarn(`/v1/earn/strategies/${curated.id}`)).status).toBe(200);
+  });
+
+  it("shows only the curated devnet shelf on the sandbox default view", async () => {
+    curation.bypassCuratedVaults = false;
+    await seedAuth();
+    const shelf = (await shippedCuratedVaults()).devnet?.kamino ?? [];
+    expect(shelf.length).toBeGreaterThan(0);
+
+    const curated = await seedStrategy({ providerReference: shelf[0] });
+    await seedStrategy({ providerReference: "devnet-vault-not-picked" });
+
+    const list = await getEarn("/v1/earn/strategies");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number };
+    };
+    expect(body.data.strategies.map((s) => s.id)).toEqual([curated.id]);
+    expect(body.data.total).toBe(1);
+  });
+
+  /**
+   * The Jupiter Lend exclusion is a name TERM, so it must hold even in the
+   * worst case: a row squatting a curated address. Terms can exclusively
+   * REMOVE rows, which is what makes stacking them on the allowlist safe.
+   */
+  it("hides a Jupiter Lend row even when it carries a curated address", async () => {
+    curation.bypassCuratedVaults = false;
+    await seedAuth();
+    const shelf = (await shippedCuratedVaults()).devnet?.kamino ?? [];
+
+    const jupiter = await seedStrategy({
+      providerReference: shelf[0],
+      name: "Jupiter Lend USDC",
+    });
+
+    const list = await getEarn("/v1/earn/strategies");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
+    expect(body.data.strategies).toEqual([]);
+    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(404);
   });
 });

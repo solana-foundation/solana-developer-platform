@@ -198,5 +198,6 @@ When working on design or frontend changes:
 
 - Reuse existing templates and typography styles from the codebase rather than creating new ones when something suitable already exists.
 - When adding images, download and store a local copy in the project. Never reference external URLs directly.
+- Raw `<img>` srcs (JSX/TSX or inline `<img>` in MDX) must point at `/docs/images/...`, not `/images/...`. Production traffic arrives through sdp-web's `/docs/:path*` proxy, which never forwards root-level `/images` requests; a rewrite in `next.config.mjs` maps `/docs/images/*` back onto `public/images/*`. Markdown-syntax images (`![](/images/...)`) are exempt: fumadocs-mdx compiles them to static imports that already resolve correctly.
 - Use proper image sizes relative to their container — do not use oversized images (e.g., 1024px for a 32px container). Use at most 2x the container size for retina support.
 - Run `npm run build` and check for errors before pushing to staging.

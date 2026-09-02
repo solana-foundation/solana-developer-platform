@@ -1,6 +1,10 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import { asTransactionalClient, getDb } from "@/db";
-import type { PaymentTransferStatus } from "@/db/repositories";
+import type {
+  PaymentsRepository,
+  PaymentTransferRow,
+  PaymentTransferStatus,
+} from "@/db/repositories";
 import {
   createPostgresCounterpartyProviderAccountsRepository,
   createSystemPaymentsRepository,
@@ -53,7 +57,9 @@ const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
     "settling",
     "expired",
   ],
-  expired: ["pending", "awaiting_payment", "settling"],
+  // `settling` is deliberately absent: a stale redelivered EXPIRED event must
+  // not regress a transfer another event already revived into processing.
+  expired: ["pending", "awaiting_payment"],
 } as const satisfies Record<
   Exclude<RampSettlementEvent["kind"], "ignore">,
   readonly PaymentTransferStatus[]
@@ -63,29 +69,18 @@ function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
   return (TERMINAL_RAMP_TRANSFER_STATUSES as readonly PaymentTransferStatus[]).includes(status);
 }
 
-export async function applyRampSettlementEvent(env: Env, event: RampSettlementEvent) {
-  if (event.kind === "ignore") {
-    return;
-  }
-
-  const repo = createSystemPaymentsRepository(env);
-  const transfer = await repo.getTransferByProviderReference({
-    provider: event.provider,
-    providerReference: event.reference,
-  });
-  if (!transfer) {
-    return;
-  }
-  if (!isRampTransferType(transfer.type)) {
-    return;
-  }
-  // Out-of-order or redelivered events must not regress a settled transfer
-  // (e.g. a retried PENDING arriving after COMPLETED).
-  if (isTerminalRampTransferStatus(transfer.status)) {
-    return;
-  }
-
-  const update: Parameters<typeof repo.updateTransferStatusGuarded>[0] = {
+/**
+ * Builds the guarded transfer update one settlement event produces.
+ *
+ * @param transfer - The matched ramp transfer row.
+ * @param event - The provider settlement event.
+ * @returns The guarded status update to apply.
+ */
+function buildRampSettlementUpdate(
+  transfer: PaymentTransferRow,
+  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
+): Parameters<PaymentsRepository["updateTransferStatusGuarded"]>[0] {
+  const update: Parameters<PaymentsRepository["updateTransferStatusGuarded"]>[0] = {
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
@@ -117,7 +112,7 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
   // the customer's behalf; each event replaces the previous instruction, and
   // `null` withdraws it (requote pending) until the provider issues a new one.
   if (event.kind === "awaiting_payment" && event.cryptoDeposit !== undefined) {
-    update.providerData = { cryptoDeposit: event.cryptoDeposit };
+    update.providerData = { ...update.providerData, cryptoDeposit: event.cryptoDeposit };
   }
   // Economics are captured only here, at the terminal settlement webhook — they are not
   // backfilled for transfers that settled before this shipped.
@@ -125,8 +120,47 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
     (event.kind === "settled" || event.kind === "failed" || event.kind === "expired") &&
     event.settlement
   ) {
-    update.providerData = { settlement: event.settlement };
+    update.providerData = { ...update.providerData, settlement: event.settlement };
   }
+  return update;
+}
+
+export async function applyRampSettlementEvent(env: Env, event: RampSettlementEvent) {
+  if (event.kind === "ignore") {
+    return;
+  }
+
+  // Reconciliation key: the provider-issued quote/session reference the row
+  // was created with. provider_reference is never rewritten, so the lookup is
+  // exact for the row's whole life; an event whose reference matches no row
+  // is acknowledged and logged, never guessed at.
+  const repo = createSystemPaymentsRepository(env);
+  const transfer = await repo.getTransferByProviderReference({
+    provider: event.provider,
+    providerReference: event.reference,
+  });
+  if (!transfer) {
+    logEvent("info", {
+      event: "sdp_api_ramp_settlement_unmatched",
+      flow: "ramp-settlement",
+      provider: event.provider,
+      provider_reference: event.reference,
+    });
+    return;
+  }
+  if (transfer.provider !== event.provider) {
+    return;
+  }
+  if (!isRampTransferType(transfer.type)) {
+    return;
+  }
+  // Out-of-order or redelivered events must not regress a settled transfer
+  // (e.g. a retried PENDING arriving after COMPLETED).
+  if (isTerminalRampTransferStatus(transfer.status)) {
+    return;
+  }
+
+  const update = buildRampSettlementUpdate(transfer, event);
 
   // The status transition and the provider-customer link derive from one
   // provider event, so they land or roll back together — and an event whose
@@ -174,6 +208,20 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
       provider: event.provider,
       canonical_reference: linkedReference,
       mismatched_reference: event.providerCustomerId,
+    });
+  }
+
+  if (applied) {
+    logEvent("info", {
+      event: "sdp_api_ramp_settlement_applied",
+      flow: "ramp-settlement",
+      organization_id: transfer.organization_id,
+      project_id: transfer.project_id,
+      transfer_id: transfer.id,
+      provider: transfer.provider,
+      provider_reference: event.reference,
+      from_status: transfer.status,
+      to_status: RAMP_SETTLEMENT_STATUS[event.kind],
     });
   }
 

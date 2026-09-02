@@ -175,9 +175,9 @@ export class VedaEarnClient extends StubEarnClient {
    * The read and the mapping, with the deployment already resolved.
    *
    * Split out so tests can exercise the mapping against a deployment SDP does
-   * not yet have — `VEDA_DEPLOYMENTS` is empty until Veda confirms addresses,
-   * and the mapping is the half that must already be right when they do. Same
-   * shape as Kamino's `_listDevnetStrategies`.
+   * not yet have (mainnet's, until Veda names a production vault under
+   * PRO-1777), and the mapping is the half that must already be right when
+   * they do. Same shape as Kamino's `_listDevnetStrategies`.
    */
   async _listVaultStrategies(
     rpcUrl: string,

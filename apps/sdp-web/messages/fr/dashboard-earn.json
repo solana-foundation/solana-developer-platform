@@ -69,7 +69,14 @@
       "walletDescription": "Wallets actifs et soldes de Tokens lus depuis le projet sélectionné.",
       "liveBalances": "Soldes en direct",
       "balanceUnavailable": "Solde indisponible",
-      "noTokenBalances": "Aucun solde de liquidités"
+      "noTokenBalances": "Aucun solde de liquidités",
+      "summaryDeposited": "Déposé",
+      "summaryApy": "APY estimé",
+      "summaryApyCaption": "Taux en direct pondéré par la valeur sur les positions ouvertes",
+      "summaryApyUnavailable": "Indisponible tant que chaque position ouverte n'a pas de valeur et de taux en direct",
+      "viewAll": "Tout afficher",
+      "liquidity": "Liquidité",
+      "yourPosition": "Votre position"
     },
     "earnProgram": {
       "eyebrow": "Yield intégré",
@@ -198,7 +205,26 @@
       "mainnetPreviewDescription": "Cette vault fonctionne sur Mainnet. Vous pouvez y consulter l'expérience client et l'intégration, mais passez à un projet de Production pour l'enregistrer ou soumettre des dépôts.",
       "mainnetPreviewFooter": "Aperçu Mainnet uniquement. Un projet de Production est requis pour enregistrer ou activer cette intégration.",
       "mainnetHandoffDescription": "Les liens publics de transfert sont créés depuis un projet de Production. Vous pouvez tout de même consulter et copier l'exemple serveur ci-dessous.",
-      "mainnetHandoffUnavailable": "Ouvrez cette vault depuis un projet de Production pour créer un transfert ingénierie partageable."
+      "mainnetHandoffUnavailable": "Ouvrez cette vault depuis un projet de Production pour créer un transfert ingénierie partageable.",
+      "dashboardTitle": "Portfolio client",
+      "configureShort": "Configurer",
+      "portfolioRefreshError": "La dernière actualisation a échoué. Affichage du dernier portfolio complet pendant que nous réessayons automatiquement.",
+      "flowPreview": "Aperçu UI",
+      "getStarted": "Commencer",
+      "liquidity": "Liquidité",
+      "provider": "Fournisseur",
+      "integrateEyebrow": "Intégration Embedded Yield · Étape 2 sur 2",
+      "integrateTitle": "Intégrer Embedded Yield",
+      "integrateDescription": "Intégrez la stratégie sélectionnée à votre produit avec l'API SDP pour Wallet externe : dépôts que vos clients signent, soldes et activité en direct, et retraits. SDP vérifie chaque signature et enregistre chaque mouvement avant diffusion.",
+      "apiKeyNoteTitle": "Conservez la clé API côté serveur",
+      "guideClientTitle": "1 · Configurer le client serveur",
+      "guideClientDescription": "Chaque appel part de votre backend avec la clé API de votre projet, stockée dans l'environnement serveur sous le nom SDP_API_KEY. Le helper partagé ajoute la clé et déballe l'enveloppe de réponse SDP.",
+      "guideDepositTitle": "2 · Accepter les dépôts",
+      "guideDepositDescription": "Construisez une transaction non signée pour le Wallet de votre client, faites-la signer par le Wallet dans votre application, puis soumettez les octets signés avec une clé d'idempotence. Interrogez le mouvement enregistré jusqu'à ce qu'il soit finalisé ou en échec ; les nouvelles tentatives avec la même clé rejouent le dépôt d'origine au lieu de déplacer deux fois les fonds.",
+      "guidePortfolioTitle": "3 · Afficher le solde, les gains et l'activité",
+      "guidePortfolioDescription": "Lisez le solde et le total gagné par Token de dépôt, listez l'activité du client et chargez les positions en direct pour le flux de retrait. Le montant gagné n'est indiqué que lorsqu'il est exact ; affichez un tiret quand il est absent, jamais $0.",
+      "guideWithdrawTitle": "4 · Retirer",
+      "guideWithdrawDescription": "La sortie reflète le dépôt : construisez le retrait non signé pour une position, le client signe, et vous soumettez avec le même contrat d'idempotence. Les retraits continuent de fonctionner même lorsque les nouveaux dépôts sont suspendus."
     },
     "landing": {
       "eyebrow": "Choisissez une option",
@@ -207,6 +233,12 @@
       "treasuryDescription": "Déposez depuis vos Wallets de custody dans les stratégies des fournisseurs, et suivez positions et rendements au même endroit.",
       "programAudience": "Pour les plateformes de paiement",
       "programDescription": "Laissez vos clients gagner au sein de votre produit. Choisissez une stratégie, personnalisez le bouton, intégrez l'API."
+    },
+    "liquidity": {
+      "instant": "Instant",
+      "delayed": "Différé",
+      "delayedDay": "Différé · 1 jour",
+      "delayedDays": "Différé · {days} jours"
     }
   },
   "DashboardEarn": {
@@ -481,7 +513,22 @@
       "vaultAbsorbedNote": "Les détails ci-dessous correspondent au dépôt approuvé. Si vous souhaitiez un second dépôt du même montant, soumettez à nouveau.",
       "vaultHeldKeyUnavailable": "SDP n'a pas pu vérifier si votre dépôt approuvé précédemment avait déjà été effectué, donc rien n'a été soumis. Réessayez dans un instant.",
       "vaultOutcomeConfirmed": "Dépôt de vault confirmé on-chain — votre position est active.",
-      "vaultOutcomeFailed": "Échec du dépôt de vault — aucun fonds n'a quitté votre Wallet."
+      "vaultOutcomeFailed": "Échec du dépôt de vault — aucun fonds n'a quitté votre Wallet.",
+      "vaultPayWith": "Payer avec",
+      "vaultSwapNotice": "Votre {source} est échangé contre {target} via Jupiter dans la même transaction : l'échange et le dépôt aboutissent ensemble, ou pas du tout. Le dépôt est calibré sur le minimum garanti de l'échange (tolérance de {pct} %) ; tout excédent reste dans votre Wallet sous forme de {target}.",
+      "vaultSwapRow": "Échange",
+      "vaultSwapVia": "{source} → {target} via Jupiter",
+      "vaultMinShares": "Parts minimales reçues",
+      "vaultExpectedShares": "Parts attendues",
+      "vaultQuoteLoading": "Récupération du devis de parts en direct…",
+      "vaultQuoteUnavailable": "Le devis de parts en direct est indisponible pour le moment, ce dépôt ne peut donc pas être dimensionné en toute sécurité. Réessayez dans un instant.",
+      "vaultQuoteBlocked": "Le vault n'accepte pas ce dépôt pour le moment : {message}",
+      "vaultQuoteZeroShares": "Ce montant est trop faible pour minter des parts au taux actuel : aucun plancher de slippage ne pourrait donc le protéger. Augmentez le montant.",
+      "vaultSlippageToggle": "Tolérance de slippage : {percent}",
+      "vaultSlippageLabel": "Tolérance de slippage (points de base)",
+      "vaultSlippageHelp": "Le dépôt refuse de s'exécuter si le vault doit minter moins de parts que ne le permet cette tolérance. 10 points de base valent 0,1 %.",
+      "vaultSlippageInvalid": "Saisissez un nombre entier de points de base compris entre 1 et {max}.",
+      "vaultSlippageExceeded": "Le vault renverrait moins de parts que ne le permet votre tolérance de slippage pour ce montant. Augmentez la tolérance ci-dessous et réessayez."
     },
     "vaultWithdraw": {
       "title": "Retirer de {position}",
@@ -514,7 +561,15 @@
       "settlingNote": "La position et les soldes du Wallet se mettent à jour une fois que la chaîne finalise le retrait.",
       "transaction": "Transaction",
       "outcomeFinalized": "Retrait de vault finalisé — les produits sont dans le Wallet de custody.",
-      "outcomeFailed": "Une transaction de retrait de vault a échoué. Les parts qu'elle n'a pas rachetées restent dans la position."
+      "outcomeFailed": "Une transaction de retrait de vault a échoué. Les parts qu'elle n'a pas rachetées restent dans la position.",
+      "expectedAmount": "Montant attendu",
+      "minAmount": "Montant minimal reçu",
+      "quoteLoading": "Récupération du devis de paiement en direct…",
+      "quoteUnavailable": "Le devis de paiement en direct est indisponible pour le moment, ce retrait ne peut donc pas être dimensionné en toute sécurité. Réessayez dans un instant.",
+      "quoteBlocked": "Le vault ne verse pas ce retrait pour le moment : {message}",
+      "quoteZeroAssets": "Ces parts sont trop peu nombreuses pour racheter la moindre unité du Token de dépôt au taux actuel : aucun seuil de slippage ne peut donc protéger la sortie.",
+      "slippageHelp": "Le retrait ne s'exécute pas si le vault paie moins que ce que permet cette tolérance. 10 points de base correspondent à 0,1 %.",
+      "slippageExceeded": "Le vault paierait moins que ce que votre tolérance de slippage autorise pour ces parts. Augmentez la tolérance ci-dessous et réessayez."
     }
   }
 }

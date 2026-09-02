@@ -6,6 +6,7 @@ import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { earnProviderLabel } from "./earn-format";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
 export interface EarnStrategyAsset {
@@ -116,7 +117,7 @@ export function EarnStrategyIdentity({
           {strategy.name}
         </p>
         <p className="mt-0.5 truncate text-xs text-tertiary">
-          {[asset?.symbol, strategy.provider].filter(Boolean).join(" · ")}
+          {[asset?.symbol, earnProviderLabel(strategy.provider)].filter(Boolean).join(" · ")}
         </p>
       </div>
     </div>

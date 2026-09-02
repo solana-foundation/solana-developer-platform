@@ -1,7 +1,6 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
-  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
@@ -19,7 +18,10 @@ import {
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import type {
+  CounterpartyRequirements,
+  PayoutRequirementAccount,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
 import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
@@ -167,7 +169,7 @@ export interface RampOnchainTransfer {
 
 interface BaseRampSettlementEvent {
   provider: RampProviderId;
-  /** Provider-owned transaction/session identifier. */
+  /** Provider-issued quote/session reference the transfer row was created with — the reconciliation key. */
   reference: string;
   /** Provider-side customer identifier observed on the event, when the provider reports one. */
   providerCustomerId?: string;
@@ -208,6 +210,14 @@ export type RampSettlementEvent =
 export interface RampRuntimeContext {
   env: Record<string, string | undefined>;
   mode: SdpEnvironment;
+}
+
+export interface RampExternalAccountDetails {
+  platformAccountId: string;
+  providerStatus: string;
+  bankName?: string;
+  accountNumberLast4?: string;
+  paymentRails: string[];
 }
 
 export interface RampEstimateOnrampInput {
@@ -279,7 +289,8 @@ export type ValidateCounterpartyOptions =
       providerData: CounterpartyProviderData;
       cryptoToken?: string;
       fiatCurrency?: RampFiatCurrency;
-      destinationCountry?: CountryCode;
+      cryptoRail?: CryptoRailId;
+      payoutAccounts?: readonly PayoutRequirementAccount[];
       providerCustomerReference?: string;
     };
 
@@ -314,6 +325,10 @@ export interface RampProvider {
     ctx: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote>;
+  listExternalAccountDetails?(
+    ctx: RampRuntimeContext,
+    input: { providerCustomerReference: string; fiatCurrency: string }
+  ): Promise<RampExternalAccountDetails[]>;
   validateCounterparty(
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions

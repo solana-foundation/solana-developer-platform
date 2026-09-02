@@ -1008,7 +1008,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_1" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_pending" }),
       },
       env
     );
@@ -1040,7 +1040,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_2" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_settling" }),
       },
       env
     );
@@ -1531,6 +1531,294 @@ describe("Payments routes — ramps", () => {
       expect(res.status).toBe(409);
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).toContain("expired");
+    });
+  });
+
+  describe("lightspark offramp quote account selection", () => {
+    /**
+     * Inserts one counterparty provider-account row with explicit values.
+     *
+     * @param input - Row values for the fixture.
+     * @returns The inserted row id.
+     */
+    async function seedLightsparkProviderAccount(input: {
+      id: string;
+      counterpartyId: string;
+      providerCustomerReference: string;
+      externalAccountReference: string | null;
+      fiatCurrency: string | null;
+      destinationCountry: string | null;
+      paymentRail: string | null;
+      providerStatus: string | null;
+    }): Promise<string> {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, external_account_reference, fiat_currency,
+             destination_country, payment_rail, provider_status, status, metadata
+           ) VALUES (?, ?, ?, ?, 'lightspark', ?, ?, ?, ?, ?, ?, 'active', '{}')`
+        )
+        .bind(
+          input.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          input.counterpartyId,
+          input.providerCustomerReference,
+          input.externalAccountReference,
+          input.fiatCurrency,
+          input.destinationCountry,
+          input.paymentRail,
+          input.providerStatus
+        )
+        .run();
+      return input.id;
+    }
+
+    /**
+     * Seeds a lightspark counterparty with a Grid customer link and payout accounts.
+     *
+     * @param accounts - Corridor account fixtures to insert for the counterparty.
+     * @returns The counterparty id.
+     */
+    async function seedLightsparkCounterparty(
+      accounts: readonly {
+        id: string;
+        externalAccountReference: string;
+        paymentRail: string;
+      }[]
+    ): Promise<string> {
+      const counterpartyId = await seedCounterparty({
+        providerData: { lightspark: { purposeOfPayment: "SELF" } },
+      });
+      await seedLightsparkProviderAccount({
+        id: `${counterpartyId}_customer_link`,
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: null,
+        fiatCurrency: null,
+        destinationCountry: null,
+        paymentRail: null,
+        providerStatus: null,
+      });
+      for (const account of accounts) {
+        await seedLightsparkProviderAccount({
+          id: account.id,
+          counterpartyId,
+          providerCustomerReference: "Customer:cus_quote_test",
+          externalAccountReference: account.externalAccountReference,
+          fiatCurrency: "USD",
+          destinationCountry: "MY",
+          paymentRail: account.paymentRail,
+          providerStatus: "ACTIVE",
+        });
+      }
+      return counterpartyId;
+    }
+
+    /**
+     * Mocks the Grid quote endpoint with a valid locked-sending quote.
+     *
+     * @returns The installed fetch spy.
+     */
+    function mockGridQuote() {
+      const quotePage = JSON.stringify({
+        id: "Quote:qt_selection_test",
+        quoteStatus: "CREATED",
+        exchangeRate: 4.2,
+        totalSendingAmount: 25000000,
+        sendingCurrency: { code: "USDC", decimals: 6 },
+        totalReceivingAmount: 105,
+        receivingCurrency: { code: "USD", decimals: 2 },
+        feesIncluded: 0,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      });
+      return vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+        Promise.resolve(
+          new Response(quotePage, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+      );
+    }
+
+    const quoteRequest = (body: Record<string, unknown>) =>
+      app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "lightspark",
+            sourceWallet: TEST_WALLET_ID,
+            cryptoToken: "USDC",
+            cryptoAmount: "25",
+            fiatCurrency: "USD",
+            destinationCountry: "MY",
+            ...body,
+          }),
+        },
+        env
+      );
+
+    it("resolves an explicit providerAccountId and records it on the transfer", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_ach",
+          externalAccountReference: "ExternalAccount:ach",
+          paymentRail: "ACH",
+        },
+        {
+          id: "cpa_quote_swift",
+          externalAccountReference: "ExternalAccount:swift",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      const fetchSpy = mockGridQuote();
+
+      const res = await quoteRequest({ counterpartyId, providerAccountId: "cpa_quote_swift" });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { quote: { id: string }; transferId: string } };
+      expect(body.data.quote.id).toBe("Quote:qt_selection_test");
+      const gridBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+        destination: { accountId: string };
+      };
+      expect(gridBody.destination.accountId).toBe("ExternalAccount:swift");
+
+      const transfer = await getDb(env)
+        .prepare("SELECT provider_data FROM payment_transfers WHERE id = ?")
+        .bind(body.data.transferId)
+        .first<{ provider_data: unknown }>();
+      expect(transfer).not.toBeNull();
+      const providerData =
+        typeof transfer?.provider_data === "string"
+          ? (JSON.parse(transfer.provider_data) as Record<string, unknown>)
+          : (transfer?.provider_data as Record<string, unknown>);
+      expect(providerData.payoutProviderAccountId).toBe("cpa_quote_swift");
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects a providerAccountId owned by another counterparty", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_own",
+          externalAccountReference: "ExternalAccount:own",
+          paymentRail: "ACH",
+        },
+      ]);
+      const otherCounterpartyId = await seedCounterparty({
+        providerData: { lightspark: { purposeOfPayment: "SELF" } },
+      });
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_foreign",
+        counterpartyId: otherCounterpartyId,
+        providerCustomerReference: "Customer:cus_other",
+        externalAccountReference: "ExternalAccount:foreign",
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "SWIFT",
+        providerStatus: "ACTIVE",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await quoteRequest({ counterpartyId, providerAccountId: "cpa_quote_foreign" });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("BAD_REQUEST");
+      expect(body.error.message).toContain("providerAccountId");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects an explicitly selected account that is pending or provider-inactive", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_active",
+          externalAccountReference: "ExternalAccount:active",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_pending",
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: null,
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "ACH",
+        providerStatus: null,
+      });
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_created",
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: "ExternalAccount:created",
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "ACH",
+        providerStatus: "CREATED",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      for (const providerAccountId of ["cpa_quote_pending", "cpa_quote_created"]) {
+        const res = await quoteRequest({ counterpartyId, providerAccountId });
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("BAD_REQUEST");
+        expect(body.error.message).toContain("providerAccountId");
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects an ambiguous corridor when no providerAccountId is given", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_multi_a",
+          externalAccountReference: "ExternalAccount:multi_a",
+          paymentRail: "ACH",
+        },
+        {
+          id: "cpa_quote_multi_b",
+          externalAccountReference: "ExternalAccount:multi_b",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await quoteRequest({ counterpartyId });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("explicit external-account selection is required");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("keeps implicit resolution for a single-account corridor", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_single",
+          externalAccountReference: "ExternalAccount:single",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      const fetchSpy = mockGridQuote();
+
+      const res = await quoteRequest({ counterpartyId });
+
+      expect(res.status).toBe(200);
+      const gridBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+        destination: { accountId: string };
+      };
+      expect(gridBody.destination.accountId).toBe("ExternalAccount:single");
+      fetchSpy.mockRestore();
     });
   });
 });

@@ -183,6 +183,26 @@ vi.mock("../earn/earn-program-data", () => ({
               createdAt: "2026-08-18T00:00:00.000Z",
               updatedAt: "2026-08-18T00:00:00.000Z",
             },
+            // A delayed-liquidity fund with no observed APY yet: liquidity must
+            // name its redemption delay and the APY cell must stay a
+            // placeholder, never a fabricated rate.
+            {
+              id: "earn_strategy_delayed_fund",
+              provider: "veda",
+              providerReference: "VedaFund1111111111111111111111111111111111",
+              name: "Veda Treasury Fund",
+              sourceKind: "rwa",
+              depositMints: [USDC_MINT],
+              shareMint: "ShareDelayed11111111111111111111111111111111",
+              apyType: "fixed",
+              liquidityTerm: "delayed",
+              redemptionDelayDays: 7,
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
           ],
     };
   },
@@ -429,6 +449,27 @@ describe("TreasurySolutionsWorkspace", () => {
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!legacyRow) throw new Error("Expected existing Ground program row");
     expect(legacyRow.textContent).toContain("900.50 USD");
+  });
+
+  it("renders liquidity and provider on the strategy table (PRO-1721)", () => {
+    renderWorkspace();
+
+    const instantRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("6.2%"));
+    if (!instantRow) throw new Error("Expected the instant strategy row");
+    expect(within(instantRow).getByText("Instant")).toBeTruthy();
+    // The human provider label, never the raw id.
+    expect(within(instantRow).getByText("Kamino")).toBeTruthy();
+
+    const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
+    if (!delayedRow) throw new Error("Expected the delayed strategy row");
+    expect(within(delayedRow).getByText("Delayed · 7 days")).toBeTruthy();
+    expect(within(delayedRow).getByText("Veda")).toBeTruthy();
+    // No observed APY renders the placeholder, never a fabricated rate.
+    expect(within(delayedRow).getByText("—")).toBeTruthy();
+    expect(delayedRow.textContent).not.toMatch(/\d%/);
   });
 
   it("reads an unreadable wallet balance as unavailable across every figure, never zero", () => {

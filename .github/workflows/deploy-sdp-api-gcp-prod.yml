@@ -18,9 +18,6 @@ on:
         type: string
         required: false
         default: ""
-    secrets:
-      DOPPLER_TOKEN_CI:
-        required: true
   workflow_dispatch:
     inputs:
       image_sha:
@@ -53,10 +50,15 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Notify Slack — deploy started
         env:
           GH_TOKEN: ${{ github.token }}
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
           SERVICE: sdp-api
@@ -80,10 +82,9 @@ jobs:
       github.event_name != 'workflow_dispatch' &&
       inputs.image_sha == ''
     uses: ./.github/workflows/sdp-dev-smoke.yml
-    secrets:
-      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
     permissions:
       contents: read
+      id-token: write
 
   deploy:
     name: Deploy production image
@@ -296,10 +297,24 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
-          cosign verify "${IMAGE}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@(refs/tags/v.+|refs/heads/main)$" \
+          # Modern cosign stores signatures as OCI referrer bundles, which
+          # `cosign copy` does not yet carry into Artifact Registry, so the AR
+          # copy can hold the image without a findable signature. Trust follows
+          # the content-addressed digest, not the registry: verify AR first,
+          # and when AR has no signature, verify the signing origin (GHCR) at
+          # the exact same digest the deploy is pinned to. Anything else still
+          # fails closed.
+          verify_flags=(
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release-images\.yml@(refs/tags/v.+|refs/heads/main)$"
             --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"
+          )
+          if cosign verify "${IMAGE}" "${verify_flags[@]}"; then
+            exit 0
+          fi
+          echo "No verifiable signature on the AR copy; verifying the signing origin at the pinned digest." >&2
+          ORIGIN_IMAGE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api@${IMAGE##*@}"
+          cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
       - name: Run database migrations
         if: ${{ inputs.release_sha != '' }}
@@ -380,8 +395,30 @@ jobs:
               --format='value(status.imageDigest)'
           )"
           expected_digest="${IMAGE##*@}"
-          if [[ "${revision_digest##*@}" != "${expected_digest}" ]]; then
-            echo "Candidate ${candidate_revision} resolved to ${revision_digest}, expected ${expected_digest}." >&2
+          # The pinned digest may be an OCI image index (buildx provenance/SBOM
+          # builds). Cloud Run resolves the index and records the platform
+          # manifest's digest on the revision, so accept the pinned digest or
+          # any manifest listed inside that exact signed index. Children are
+          # content-addressed by the index, so this extends the trust chain
+          # without widening it; anything else still fails closed.
+          accepted_digests="${expected_digest}"
+          if ! pinned_manifest="$(crane manifest "${IMAGE}")"; then
+            echo "Failed to fetch the pinned manifest for ${expected_digest}; cannot enumerate signed-index children." >&2
+            exit 1
+          fi
+          if ! index_children="$(
+            jq -r 'select(.mediaType == "application/vnd.oci.image.index.v1+json"
+                     or .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json")
+                   | .manifests[]?.digest' <<<"${pinned_manifest}"
+          )"; then
+            echo "Failed to parse the pinned manifest for ${expected_digest}; cannot enumerate signed-index children." >&2
+            exit 1
+          fi
+          if [[ -n "${index_children}" ]]; then
+            accepted_digests+=$'\n'"${index_children}"
+          fi
+          if ! grep -qxF "${revision_digest##*@}" <<<"${accepted_digests}"; then
+            echo "Candidate ${candidate_revision} resolved to ${revision_digest}, expected ${expected_digest} or a manifest of that signed index." >&2
             exit 1
           fi
           echo "CANDIDATE_REVISION=${candidate_revision}" >> "${GITHUB_ENV}"
@@ -533,10 +570,15 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Notify Slack — deploy result
         env:
           GH_TOKEN: ${{ github.token }}
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
           SERVICE: sdp-api

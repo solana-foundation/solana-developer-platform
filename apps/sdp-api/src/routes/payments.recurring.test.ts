@@ -16,7 +16,10 @@ import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import app from "@/index";
+import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
+import { SigningService } from "@/services/domain/signing.service";
+import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -39,6 +42,7 @@ import {
   sendTransactionMock,
   sendTransactionPreflightError,
   TEST_API_KEY,
+  TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
@@ -124,14 +128,15 @@ async function seedIssuedTokenMint(params: {
   projectId: string;
   mintAddress: string;
   status: TokenStatus;
-}): Promise<void> {
+}): Promise<string> {
+  const tokenId = `tok_${crypto.randomUUID()}`;
   await getDb(env)
     .prepare(
       `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, name, symbol, decimals, status, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
-      `tok_${crypto.randomUUID()}`,
+      tokenId,
       params.projectId,
       TEST_ORG.id,
       params.mintAddress,
@@ -142,6 +147,7 @@ async function seedIssuedTokenMint(params: {
       TEST_USER.id
     )
     .run();
+  return tokenId;
 }
 
 function expectPreparedSubscriptionTransaction(
@@ -186,7 +192,7 @@ async function createRecurringPaymentForActivation(headers: Record<string, strin
       method: "POST",
       headers,
       body: JSON.stringify({
-        sourceWalletId: TEST_WALLET_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
         counterpartyId,
         counterpartyAccountId,
         token: DEVNET_USDC_MINT,
@@ -231,6 +237,239 @@ async function activateRecurringPaymentForTest(headers: Record<string, string>) 
   return activateBody.data.recurringPayment;
 }
 
+async function activateRecurringPaymentForRuntimeDenialTest(headers: Record<string, string>) {
+  const sourceSigner = await generateKeyPairSigner();
+  await updateSeededWalletPublicKey(sourceSigner.address);
+  createOrgSignerMock.mockResolvedValue(sourceSigner);
+  mockRecurringActivationRpc();
+  return activateRecurringPaymentForTest(headers);
+}
+
+function recurringExecutionCallCounts() {
+  return {
+    feePaymentAdapter: createFeePaymentAdapterMock.mock.calls.length,
+    custodySigner: createOrgSignerForCustodyWalletMock.mock.calls.length,
+    providerSigner: createOrgSignerMock.mock.calls.length,
+    accountInfo: getAccountInfoMock.mock.calls.length,
+    blockhash: getRecentBlockhashMock.mock.calls.length,
+    confirmation: confirmTransactionMock.mock.calls.length,
+    transaction: getTransactionMock.mock.calls.length,
+    send: sendTransactionMock.mock.calls.length,
+    delegation: fetchMaybeSubscriptionDelegationMock.mock.calls.length,
+  };
+}
+
+function denyRecurringRuntimeExecution() {
+  return vi.spyOn(SigningService.prototype, "admitRuntimeExecution").mockRejectedValue(
+    new AppError("CONFLICT", "Custody wallet is unavailable", {
+      reason: "runtime_execution_unavailable",
+    })
+  );
+}
+
+async function recurringExecutionSnapshot(recurringPaymentId: string) {
+  return getDb(env)
+    .prepare(
+      `SELECT to_jsonb(rp) AS recurring_payment,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payments) AS recurring_payments,
+              (SELECT to_jsonb(ps)
+                 FROM payment_subscriptions ps
+                WHERE ps.id = rp.subscription_id) AS subscription,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_activation_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS activation_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_update_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS update_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_lifecycle_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS lifecycle_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_update_events e
+                WHERE e.recurring_payment_id = rp.id) AS update_events,
+              (SELECT COUNT(*)::int
+                 FROM payment_subscription_collection_attempts a
+                WHERE a.subscription_id = rp.subscription_id) AS collection_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_transfers t
+                WHERE t.provider_data->>'recurringPaymentId' = rp.id) AS collection_transfers,
+              (SELECT COUNT(*)::int
+                 FROM policy_evaluations) AS policy_evaluations,
+              (SELECT COUNT(*)::int
+                 FROM approval_requests) AS approval_requests,
+              (SELECT COUNT(*)::int
+                 FROM wallet_operations) AS all_wallet_operations,
+              (SELECT COUNT(*)::int
+                 FROM wallet_operations wo
+                WHERE wo.organization_id = rp.organization_id
+                  AND wo.project_id = rp.project_id
+                  AND wo.raw_payload->>'recurringPaymentId' = rp.id) AS wallet_operations
+         FROM payment_recurring_payments rp
+        WHERE rp.id = ?`
+    )
+    .bind(recurringPaymentId)
+    .first();
+}
+
+async function expectRuntimeAdmissionDenialWithoutWrites(input: {
+  recurringPaymentId: string;
+  path: string;
+  method: "PATCH" | "POST";
+  headers: Record<string, string>;
+  body: string;
+}) {
+  const before = await recurringExecutionSnapshot(input.recurringPaymentId);
+  const executionCalls = recurringExecutionCallCounts();
+  const admission = denyRecurringRuntimeExecution();
+
+  try {
+    const response = await app.request(
+      input.path,
+      { method: input.method, headers: input.headers, body: input.body },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(admission).toHaveBeenCalledOnce();
+    expect(admission).toHaveBeenCalledWith(TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID);
+  } finally {
+    admission.mockRestore();
+  }
+
+  expect(await recurringExecutionSnapshot(input.recurringPaymentId)).toEqual(before);
+  expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+}
+
+const UNBOUND_CUSTODY_WALLET_ID = "cwlt_recurring_unbound";
+const UNBOUND_WALLET_ID = "wal_recurring_unbound";
+const RECURRING_HEADERS = {
+  Authorization: `Bearer ${TEST_API_KEY.raw}`,
+  "Content-Type": "application/json",
+};
+
+interface SeededPendingRecurringPayment {
+  id: string;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+}
+
+async function seedUnboundWallet(): Promise<void> {
+  const unboundWallet = await generateKeyPairSigner();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO custody_wallets
+         (id, custody_config_id, wallet_id, public_key, status)
+       VALUES (?, ?, ?, ?, 'active')`
+    )
+    .bind(UNBOUND_CUSTODY_WALLET_ID, TEST_CONFIG_ID, UNBOUND_WALLET_ID, unboundWallet.address)
+    .run();
+}
+
+async function bindApiKeyToWallet(walletId: string, custodyWalletId: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+       VALUES (?, ?, ?, '["*"]')`
+    )
+    .bind(`akw_${custodyWalletId}`, TEST_API_KEY.id, walletId)
+    .run();
+  await seedCachedKey({
+    walletScope: "selected",
+    signingWalletId: walletId,
+    signingWalletIds: [walletId],
+    walletBindings: [{ walletId, custodyWalletId, permissions: ["*"] }],
+  });
+}
+
+async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPayment> {
+  const recurringPaymentId = await createRecurringPaymentForActivation(RECURRING_HEADERS);
+  const response = await app.request(
+    `/v1/payments/recurring-payments/${recurringPaymentId}`,
+    { headers: RECURRING_HEADERS },
+    env
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    data: { recurringPayment: SeededPendingRecurringPayment };
+  };
+  return body.data.recurringPayment;
+}
+
+const unboundWalletCases: Array<{
+  route: string;
+  expectedStatus: number;
+  expectedMessage: string;
+  request: (payment: SeededPendingRecurringPayment) => {
+    path: string;
+    method?: string;
+    body: Record<string, unknown>;
+  };
+}> = [
+  {
+    route: "create",
+    expectedStatus: 403,
+    expectedMessage: "API key is not authorized for the requested wallet",
+    request: (payment) => ({
+      path: "/v1/payments/recurring-payments",
+      body: {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        counterpartyId: payment.counterpartyId,
+        counterpartyAccountId: payment.counterpartyAccountId,
+        token: DEVNET_USDC_MINT,
+        amount: "25.00",
+        periodHours: 24,
+      },
+    }),
+  },
+  {
+    route: "update",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}`,
+      method: "PATCH",
+      body: { amount: "26.00" },
+    }),
+  },
+  {
+    route: "activate",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/activate`,
+      body: {},
+    }),
+  },
+  {
+    route: "cancel",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/cancel`,
+      body: {},
+    }),
+  },
+  {
+    route: "collect",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/collect`,
+      body: {},
+    }),
+  },
+  {
+    route: "resume",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/resume`,
+      body: {},
+    }),
+  },
+];
+
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
 
@@ -240,7 +479,7 @@ describe("Payments routes — recurring", () => {
     );
   });
 
-  it("rejects an ambiguous Provider wallet ID before creating recurring work", async () => {
+  it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "ambiguous_recurring_wallet",
     });
@@ -276,7 +515,7 @@ describe("Payments routes — recurring", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -287,13 +526,12 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(response.status).toBe(201);
     expect(
       await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_recurring_payments")
-        .first<{ count: number }>()
-    ).toEqual({ count: 0 });
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments")
+        .first<{ source_custody_wallet_id: string }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
   });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
@@ -313,7 +551,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -329,7 +567,8 @@ describe("Payments routes — recurring", () => {
       data: {
         recurringPayment: {
           id: string;
-          sourceWalletId: string;
+          sourceCustodyWalletId: string;
+          sourceProviderWalletId: string;
           counterpartyId: string;
           counterpartyAccountId: string;
           destinationAddress: string;
@@ -340,7 +579,8 @@ describe("Payments routes — recurring", () => {
       };
     };
     expect(createBody.data.recurringPayment.id).toMatch(/^prp_/);
-    expect(createBody.data.recurringPayment.sourceWalletId).toBe(TEST_WALLET_ID);
+    expect(createBody.data.recurringPayment.sourceCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(createBody.data.recurringPayment.sourceProviderWalletId).toBe(TEST_WALLET_ID);
     expect(createBody.data.recurringPayment.counterpartyId).toBe(counterpartyId);
     expect(createBody.data.recurringPayment.counterpartyAccountId).toBe(counterpartyAccountId);
     expect(createBody.data.recurringPayment.destinationAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
@@ -373,6 +613,98 @@ describe("Payments routes — recurring", () => {
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
   });
 
+  it("fails closed before signing when a recurring payment has no exact wallet pin", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL WHERE id = ?")
+      .bind(recurringPaymentId)
+      .run();
+    const signerCalls = createOrgSignerForCustodyWalletMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
+  });
+
+  it("does not claim activation when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId,
+      path: `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
+  it("does not claim an active update when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}`,
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ metadataUri: "https://example.com/recurring/blocked.json" }),
+    });
+  });
+
+  it("does not claim cancellation when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
+  it("does not claim resume when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+    const cancelResponse = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(cancelResponse.status).toBe(200);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}/resume`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
   it("restricts recurring payment tokens to USD stablecoins and project-issued tokens", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -391,7 +723,7 @@ describe("Payments routes — recurring", () => {
           method: "POST",
           headers,
           body: JSON.stringify({
-            sourceWalletId: TEST_WALLET_ID,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             counterpartyId,
             counterpartyAccountId,
             token,
@@ -506,7 +838,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -663,7 +995,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -833,6 +1165,25 @@ describe("Payments routes — recurring", () => {
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
+    const replacementCustodyWalletId = "cwlt_recurring_replacement";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_replacement', ?, ?, 'active')`
+        )
+        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
+    ]);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
     const replacementPlanSignature =
@@ -870,12 +1221,107 @@ describe("Payments routes — recurring", () => {
       .bind(firstCollectionAt, activated.id)
       .run();
 
+    const approvalOperationId = "wop_recurring_source_change_fence";
+    const approvalRequestId = "appr_recurring_source_change_fence";
+    const policyEvaluationId = "peval_recurring_source_change_fence";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO wallet_operations
+             (id, organization_id, project_id, custody_wallet_id, wallet_id, source,
+              operation_family, operation_type, raw_payload, status)
+           VALUES (?, ?, ?, ?, ?, 'api', 'payment', 'recurring_payment_collection',
+                   ?::jsonb, 'pending_approval')`
+        )
+        .bind(
+          approvalOperationId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_CUSTODY_WALLET_ID,
+          TEST_WALLET_ID,
+          JSON.stringify({
+            recurringPaymentId: activated.id,
+            collectionDueAt: activated.nextCollectionDueAt,
+          })
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_requests
+             (id, organization_id, project_id, wallet_operation_id, status)
+           VALUES (?, ?, ?, ?, 'pending')`
+        )
+        .bind(approvalRequestId, TEST_ORG.id, TEST_PROJECT.id, approvalOperationId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO policy_evaluations
+             (id, wallet_operation_id, decision, reason_code, requires_approval,
+              approval_request_id)
+           VALUES (?, ?, 'approval_required', 'test_source_change_fence', true, ?)`
+        )
+        .bind(policyEvaluationId, approvalOperationId, approvalRequestId),
+    ]);
+
+    const replacementRequest = {
+      sourceCustodyWalletId: replacementCustodyWalletId,
+      amount: "35.00",
+      periodHours: 48,
+      nextCollectionDueAt: null,
+    };
+    const signerCallsBeforeFence = createOrgSignerForCustodyWalletMock.mock.calls.length;
+    const providerCallsBeforeFence = signAndSendMock.mock.calls.length;
+    const blockedUpdateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(replacementRequest),
+      },
+      env
+    );
+    expect(blockedUpdateRes.status).toBe(409);
+    const blockedUpdateBody = (await blockedUpdateRes.json()) as {
+      error: {
+        details: {
+          walletOperationId: string;
+          policyEvaluationId: string;
+          approvalRequestId: string;
+        };
+      };
+    };
+    expect(blockedUpdateBody.error.details).toEqual({
+      walletOperationId: approvalOperationId,
+      policyEvaluationId,
+      approvalRequestId,
+    });
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCallsBeforeFence);
+    expect(signAndSendMock).toHaveBeenCalledTimes(providerCallsBeforeFence);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT COUNT(*)::int AS count
+             FROM wallet_operations
+            WHERE operation_type = 'recurring_payment_update'`
+        )
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    expect(
+      await getDb(env)
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ source_custody_wallet_id: string | null }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
+
+    await getDb(env)
+      .prepare("UPDATE approval_requests SET status = 'rejected' WHERE id = ?")
+      .bind(approvalRequestId)
+      .run();
+
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
       {
         method: "PATCH",
         headers,
-        body: JSON.stringify({ amount: "35.00", periodHours: 48, nextCollectionDueAt: null }),
+        body: JSON.stringify(replacementRequest),
       },
       env
     );
@@ -885,6 +1331,7 @@ describe("Payments routes — recurring", () => {
       data: {
         recurringPayment: {
           status: string;
+          sourceCustodyWalletId: string;
           amount: string;
           periodHours: number;
           planId: string;
@@ -896,6 +1343,7 @@ describe("Payments routes — recurring", () => {
     };
     expect(updateBody.data.recurringPayment).toMatchObject({
       status: "active",
+      sourceCustodyWalletId: replacementCustodyWalletId,
       amount: "35.00",
       periodHours: 48,
       authorizationSignature: replacementAuthSignature,
@@ -915,7 +1363,8 @@ describe("Payments routes — recurring", () => {
       .first<{ status: string }>();
     const attempt = await getDb(env)
       .prepare(
-        `SELECT mode, status, stage, plan_creation_signature, authorization_signature, old_cancel_signature
+        `SELECT mode, status, stage, new_source_custody_wallet_id,
+                plan_creation_signature, authorization_signature, old_cancel_signature
            FROM payment_recurring_payment_update_attempts
           WHERE recurring_payment_id = ?`
       )
@@ -924,6 +1373,7 @@ describe("Payments routes — recurring", () => {
         mode: string;
         status: string;
         stage: string;
+        new_source_custody_wallet_id: string | null;
         plan_creation_signature: string | null;
         authorization_signature: string | null;
         old_cancel_signature: string | null;
@@ -934,6 +1384,7 @@ describe("Payments routes — recurring", () => {
       mode: "replacement",
       status: "confirmed",
       stage: "finalize",
+      new_source_custody_wallet_id: replacementCustodyWalletId,
       plan_creation_signature: replacementPlanSignature,
       authorization_signature: replacementAuthSignature,
       old_cancel_signature: oldCancelSignature,
@@ -957,6 +1408,168 @@ describe("Payments routes — recurring", () => {
     expect(event?.after_values.nextCollectionDueAt).toBe(
       updateBody.data.recurringPayment.nextCollectionDueAt
     );
+  });
+
+  it("lets a collection claim win over a concurrent source-wallet change", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    const replacementCustodyWalletId = "cwlt_recurring_race_replacement";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_race_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_race_replacement', ?, ?, 'active')`
+        )
+        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
+    ]);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(
+        "4hVxsReplac3Plan11111111111111111111111111111111111111111111" as Signature
+      )
+      .mockResolvedValueOnce(
+        "4hVxsReplac3Auth11111111111111111111111111111111111111111111" as Signature
+      )
+      .mockResolvedValueOnce(
+        "4hVxsOldCanc3l111111111111111111111111111111111111111111111" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, activated.id),
+      getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, activated.subscriptionId),
+    ]);
+
+    let releaseUpdate: (() => void) | undefined;
+    let signalUpdatePaused: (() => void) | undefined;
+    const updatePaused = new Promise<void>((resolve) => {
+      signalUpdatePaused = resolve;
+    });
+    const updateReleased = new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    });
+    const admission = vi
+      .spyOn(SigningService.prototype, "admitRuntimeExecution")
+      .mockImplementationOnce(async () => {
+        signalUpdatePaused?.();
+        await updateReleased;
+      });
+    const pendingRequests: Array<Promise<Response>> = [];
+    let updateRes: Response | undefined;
+    let collectRes: Response | undefined;
+    let releaseCollection: (() => void) | undefined;
+    try {
+      const updatePromise = Promise.resolve(
+        app.request(
+          `/v1/payments/recurring-payments/${activated.id}`,
+          {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({
+              sourceCustodyWalletId: replacementCustodyWalletId,
+              nextCollectionDueAt: null,
+            }),
+          },
+          env
+        )
+      );
+      pendingRequests.push(updatePromise);
+      await updatePaused;
+
+      let signalCollectionClaimed: (() => void) | undefined;
+      const collectionClaimed = new Promise<void>((resolve) => {
+        signalCollectionClaimed = resolve;
+      });
+      const collectionReleased = new Promise<void>((resolve) => {
+        releaseCollection = resolve;
+      });
+      createOrgSignerForCustodyWalletMock.mockImplementationOnce(async () => {
+        signalCollectionClaimed?.();
+        await collectionReleased;
+        return sourceSigner;
+      });
+      const collectPromise = Promise.resolve(
+        app.request(
+          `/v1/payments/recurring-payments/${activated.id}/collect`,
+          { method: "POST", headers, body: "{}" },
+          env
+        )
+      );
+      pendingRequests.push(collectPromise);
+      await collectionClaimed;
+
+      releaseUpdate?.();
+      updateRes = await updatePromise;
+      releaseCollection?.();
+      collectRes = await collectPromise;
+    } finally {
+      releaseUpdate?.();
+      releaseCollection?.();
+      admission.mockRestore();
+      await Promise.allSettled(pendingRequests);
+    }
+
+    expect(updateRes?.status).toBe(409);
+    expect(collectRes?.status).toBe(200);
+    expect(
+      await getDb(env)
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ source_custody_wallet_id: string | null }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT status
+             FROM payment_subscription_collection_attempts
+            WHERE subscription_id = ? AND due_at = ?`
+        )
+        .bind(activated.subscriptionId, dueAt)
+        .first<{ status: string }>()
+    ).toEqual({ status: "confirmed" });
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+        )
+        .bind(activated.id)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
   });
 
   it("rejects active replacement next due dates before replacement transactions are submitted", async () => {
@@ -4195,6 +4808,246 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("journals an unresolved automated collection once per cooldown", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPayment = await activateRecurringPaymentForTest(headers);
+    const now = new Date();
+    const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET source_custody_wallet_id = NULL, next_collection_due_at = ?
+            WHERE id = ?`
+        )
+        .bind(dueAt, recurringPayment.id),
+      getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPayment.subscriptionId),
+    ]);
+
+    expect(await collectDueRecurringPayments(env, now)).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 1,
+      skipped: 0,
+    });
+    expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 0,
+      skipped: 0,
+    });
+
+    const attempts = await getDb(env)
+      .prepare(
+        `SELECT status, error, metadata, transfer_id
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?`
+      )
+      .bind(recurringPayment.subscriptionId)
+      .all<{
+        status: string;
+        error: string | null;
+        metadata: { collectionSource?: string; retryAfterAt?: string };
+        transfer_id: string | null;
+      }>();
+    expect(attempts.results).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        transfer_id: null,
+        metadata: expect.objectContaining({
+          collectionSource: "automated",
+          retryAfterAt: expect.any(String),
+        }),
+      }),
+    ]);
+    expect(attempts.results[0]?.error).toContain("source wallet is unresolved");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("journals one automated collection attempt when runtime admission denies the wallet", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPayment = await activateRecurringPaymentForTest(headers);
+    const workflowTokenId = await seedIssuedTokenMint({
+      projectId: TEST_PROJECT.id,
+      mintAddress: sourceSigner.address,
+      status: "active",
+    });
+    const workflowId = `awf_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare(
+        `INSERT INTO asset_workflows
+           (id, organization_id, project_id, token_id, trigger_type, action_type,
+            definition, review_mode, created_by)
+         VALUES (?, ?, ?, ?, 'recurring_payment_failed', 'record', ?::jsonb, 'auto', ?)`
+      )
+      .bind(
+        workflowId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        workflowTokenId,
+        JSON.stringify({
+          condition: null,
+          action: { type: "record", params: {} },
+          retryPolicy: { maxAttempts: 1, retryAfterMinutes: 1 },
+        }),
+        TEST_USER.id
+      )
+      .run();
+    const now = new Date();
+    const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPayment.id),
+      getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPayment.subscriptionId),
+    ]);
+
+    let admissionCalls = 0;
+    let releaseAdmission!: () => void;
+    const bothCollectorsReady = new Promise<void>((resolve) => {
+      releaseAdmission = resolve;
+    });
+    const admission = vi
+      .spyOn(SigningService.prototype, "admitRuntimeExecution")
+      .mockImplementation(async () => {
+        admissionCalls += 1;
+        if (admissionCalls === 2) releaseAdmission();
+        await bothCollectorsReady;
+        throw new AppError("CONFLICT", "Custody wallet is unavailable", {
+          reason: "runtime_execution_unavailable",
+        });
+      });
+    try {
+      const runs = await Promise.all([
+        collectDueRecurringPayments(env, now),
+        collectDueRecurringPayments(env, now),
+      ]);
+      expect(runs).toEqual([
+        { recovered: 0, collected: 0, failed: 0, skipped: 1 },
+        { recovered: 0, collected: 0, failed: 0, skipped: 1 },
+      ]);
+      expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 0,
+      });
+      expect(admission).toHaveBeenCalledTimes(2);
+    } finally {
+      admission.mockRestore();
+    }
+
+    const attempts = await getDb(env)
+      .prepare(
+        `SELECT id, status, error, metadata, transfer_id
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?`
+      )
+      .bind(recurringPayment.subscriptionId)
+      .all<{
+        id: string;
+        status: string;
+        error: string | null;
+        metadata: { collectionSource?: string; retryAfterAt?: string };
+        transfer_id: string | null;
+      }>();
+    expect(attempts.results).toHaveLength(1);
+    expect(attempts.results[0]).toMatchObject({
+      status: "failed",
+      transfer_id: null,
+      metadata: { collectionSource: "automated" },
+    });
+    expect(attempts.results[0]?.error).toContain("Custody wallet is unavailable");
+    expect(attempts.results[0]?.metadata.retryAfterAt).toBeTruthy();
+
+    const collectionOperations = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM wallet_operations
+          WHERE operation_type = 'recurring_payment_collection'`
+      )
+      .first<{ count: number }>();
+    const collectionTransfers = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM payment_transfers
+          WHERE provider_data->>'recurringPaymentId' = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ count: number }>();
+    expect(collectionOperations).toEqual({ count: 0 });
+    expect(collectionTransfers).toEqual({ count: 0 });
+    const workflowExecutions = await getDb(env)
+      .prepare(
+        `SELECT trigger_type, idempotency_key, trigger_payload
+           FROM workflow_executions
+          WHERE workflow_id = ?`
+      )
+      .bind(workflowId)
+      .all<{
+        trigger_type: string;
+        idempotency_key: string;
+        trigger_payload: { recurringPaymentId?: string; attemptId?: string };
+      }>();
+    expect(workflowExecutions.results).toHaveLength(1);
+    expect(workflowExecutions.results[0]).toMatchObject({
+      trigger_type: "recurring_payment_failed",
+      trigger_payload: { recurringPaymentId: recurringPayment.id },
+    });
+    expect(workflowExecutions.results[0]?.idempotency_key).toBe(
+      `recurring_payment_failed:${attempts.results[0]?.id}`
+    );
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
   it("journals failed activation attempts and allows activation retry", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -4235,7 +5088,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4330,7 +5183,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4518,7 +5371,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4701,7 +5554,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4820,7 +5673,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -5641,5 +6494,64 @@ describe("Payments routes — recurring", () => {
     };
     expect(attemptsBody.data.collectionAttempts).toEqual([]);
     expect(attemptsBody.data.total).toBe(0);
+  });
+
+  it.each(unboundWalletCases)(
+    "rejects a selected-wallet API key bound to another wallet on $route",
+    async ({ expectedStatus, expectedMessage, request }) => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(UNBOUND_WALLET_ID, UNBOUND_CUSTODY_WALLET_ID);
+      const before = await recurringExecutionSnapshot(payment.id);
+      const executionCalls = recurringExecutionCallCounts();
+
+      const { path, method = "POST", body } = request(payment);
+      const response = await app.request(
+        path,
+        { method, headers: RECURRING_HEADERS, body: JSON.stringify(body) },
+        env
+      );
+
+      expect(response.status).toBe(expectedStatus);
+      const responseBody = (await response.json()) as { error: { message: string } };
+      expect(responseBody.error.message).toBe(expectedMessage);
+      expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+      expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+    }
+  );
+
+  it("rejects a source change to a wallet outside the API key bindings", async () => {
+    await seedUnboundWallet();
+    const payment = await seedPendingRecurringPayment();
+    await bindApiKeyToWallet(TEST_WALLET_ID, TEST_CUSTODY_WALLET_ID);
+
+    const allowedResponse = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ amount: "26.00" }),
+      },
+      env
+    );
+    expect(allowedResponse.status).toBe(200);
+    const before = await recurringExecutionSnapshot(payment.id);
+    const executionCalls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    const responseBody = (await response.json()) as { error: { message: string } };
+    expect(responseBody.error.message).toBe("API key is not authorized for the requested wallet");
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
   });
 });

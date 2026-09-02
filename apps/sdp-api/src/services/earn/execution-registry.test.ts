@@ -184,21 +184,23 @@ describe("resolveVaultDirectClient", () => {
   });
 
   /**
-   * SDP has no confirmed Veda deployment, so a deposit fails on THAT rather
+   * SDP has no confirmed PRODUCTION Veda deployment (devnet is deployed;
+   * mainnet waits on PRO-1777), so a production deposit fails on THAT rather
    * than on an RPC — and it fails before any endpoint work, because an
    * unconfigured deployment is a fact about SDP that should not depend on a
    * node being reachable.
    */
-  it("refuses Veda work on the missing deployment, before any RPC", async () => {
+  it("refuses Veda work on the missing mainnet deployment, before any RPC", async () => {
     const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const productionRuntime = { env: {}, environment: "production" } as const;
     const client = resolveVaultDirectClient(executionEnv, "veda", createVaultDeadline());
     if (!client) throw new Error("expected a Veda vault-direct client");
 
     await expect(
-      client.buildVaultDeposit(runtime, { ...depositInput, minSharesOut: "1" })
+      client.buildVaultDeposit(productionRuntime, { ...depositInput, minSharesOut: "1" })
     ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
     await expect(
-      client.readVaultPositions(runtime, {
+      client.readVaultPositions(productionRuntime, {
         owner: depositInput.owner,
         providerReferences: [depositInput.providerReference],
       })

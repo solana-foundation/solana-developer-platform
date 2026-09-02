@@ -597,7 +597,12 @@ export function useEarnExternalWalletPositionSummary() {
     () => fetchEarnExternalWalletPositionSummary(),
     { refreshInterval: 60_000 }
   );
-  return { summary: data, error, isLoading, refresh: () => void mutate() };
+  return {
+    summary: data,
+    error,
+    isInitialLoading: isLoading && data === undefined,
+    refresh: () => void mutate(),
+  };
 }
 
 /**

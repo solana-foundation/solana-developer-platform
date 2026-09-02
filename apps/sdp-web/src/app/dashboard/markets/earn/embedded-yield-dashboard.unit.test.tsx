@@ -12,13 +12,14 @@ const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const mocks = vi.hoisted(() => ({
   summary: undefined as EarnExternalWalletPositionSummary | undefined,
   error: undefined as Error | undefined,
+  isInitialLoading: false,
 }));
 
 vi.mock("./earn-program-data", () => ({
   useEarnExternalWalletPositionSummary: () => ({
     summary: mocks.summary,
     error: mocks.error,
-    isLoading: false,
+    isInitialLoading: mocks.isInitialLoading,
   }),
 }));
 
@@ -34,6 +35,7 @@ afterEach(() => {
   cleanup();
   mocks.summary = undefined;
   mocks.error = undefined;
+  mocks.isInitialLoading = false;
 });
 
 describe("EmbeddedYieldDashboard", () => {
@@ -111,5 +113,65 @@ describe("EmbeddedYieldDashboard", () => {
     expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
     expect(document.body.textContent).not.toContain("0 USDC");
+  });
+
+  it("renders settled portfolio data without the initial skeleton", () => {
+    mocks.summary = {
+      walletCount: 3,
+      positionCount: 4,
+      unavailablePositionCount: 0,
+      totalsByToken: [
+        {
+          tokenMint: USDC,
+          walletCount: 3,
+          positionCount: 4,
+          unavailablePositionCount: 0,
+          tokenValue: "1250.42",
+        },
+      ],
+      totalsByStrategy: [],
+    };
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+
+    expect(screen.getByText("Customer Portfolio")).toBeTruthy();
+    expect(document.querySelector("[aria-busy='true']")).toBeNull();
+  });
+
+  it("keeps the refresh status region mounted before an error occurs", () => {
+    mocks.summary = {
+      walletCount: 0,
+      positionCount: 0,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+      totalsByStrategy: [],
+    };
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("keeps the last complete portfolio visible when a background refresh fails", () => {
+    mocks.summary = {
+      walletCount: 3,
+      positionCount: 0,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+      totalsByStrategy: [],
+    };
+    mocks.error = new Error("refresh failed");
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+
+    expect(screen.getByText("Choose a yield strategy your customers will see")).toBeTruthy();
+    expect(screen.getByText(/Showing the last complete portfolio/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Showing the last complete portfolio");
+    expect(screen.queryByText("Customer portfolio unavailable")).toBeNull();
   });
 });

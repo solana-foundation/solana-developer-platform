@@ -1,15 +1,20 @@
-import { COUNTRIES, type Counterparty, type CountryCode, isCountryCode } from "@sdp/types";
+import { type Counterparty, type CountryCode, isCountryCode } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
-import { OFFRAMP_PAYOUT_ACCOUNTS, OFFRAMP_SWIFT_SUPPORT } from "@sdp/types/generated/ramp";
-import type { RampPayoutAccountSpec, RampPayoutFieldSpec } from "@sdp/types/payment-rails";
+import { RAMP_PROVIDER_SUPPORT_DETAILS } from "@sdp/types/generated/ramp";
+import type { CryptoRailId, RampPayoutFieldSpec } from "@sdp/types/payment-rails";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
+  PayoutRequirementAccount,
+  PayoutRequirementTree,
   RequirementField,
+  RequirementOption,
 } from "@sdp/types/ramp-requirements";
+import { resolveOfframpDestination } from "@sdp/types/ramp-resolution";
 import type { CounterpartyRow } from "../../../counterparty";
 import { badRequest, providerUnavailable, unsupportedCounterparty } from "../../../errors";
 import {
+  countryField,
   dateField,
   parseCollectedFields,
   readyCounterparty,
@@ -19,7 +24,6 @@ import {
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
   LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
-  latestLightsparkPayoutAccount,
   readLightsparkPurposeOfPayment,
 } from "./provider-data";
 
@@ -44,10 +48,6 @@ const LIGHTSPARK_RAIL_LABELS = {
 } as const satisfies Record<string, string>;
 
 export type LightsparkPaymentRail = keyof typeof LIGHTSPARK_RAIL_LABELS;
-
-const LIGHTSPARK_PAYOUT_ACCOUNTS: Readonly<Record<string, RampPayoutAccountSpec>> =
-  OFFRAMP_PAYOUT_ACCOUNTS.lightspark;
-const LIGHTSPARK_SWIFT_ACCOUNT: RampPayoutAccountSpec = OFFRAMP_SWIFT_SUPPORT.lightspark.account;
 
 /** UI copy for every field key the generated payout accounts can carry. */
 const LIGHTSPARK_FIELD_COPY = {
@@ -116,12 +116,13 @@ function lightsparkValueLabel(fieldKey: string, value: string): string {
 }
 
 /**
- * Maps one generated payout field spec onto a requirement field.
+ * Maps one generated payout field spec onto a requirement field. Fields are
+ * keyed under the `bankAccount.` group so clients can section the collect
+ * form by the key's top-level dotted segment.
  *
  * @param key - Field key within the account schema.
  * @param spec - Generated validation spec for the field.
- * @param required - Requiredness in the rendering context (relaxed in the
- * cross-rail union, exact when validating one rail).
+ * @param required - Requiredness in the rendering context.
  * @returns Requirement field ready for collection or validation.
  */
 function lightsparkRequirementField(
@@ -136,7 +137,7 @@ function lightsparkRequirementField(
   }
   if (spec.values !== undefined) {
     return selectField({
-      key,
+      key: `bankAccount.${key}`,
       label: copy.label,
       required,
       options: spec.values.map((value) => ({
@@ -146,7 +147,7 @@ function lightsparkRequirementField(
     });
   }
   return textField({
-    key,
+    key: `bankAccount.${key}`,
     label: copy.label,
     required,
     ...(spec.pattern !== undefined ? { pattern: spec.pattern } : {}),
@@ -157,47 +158,12 @@ function lightsparkRequirementField(
   });
 }
 
-interface LightsparkPayoutRail {
-  accountType: string;
-  fields: Readonly<Record<string, RampPayoutFieldSpec>>;
-}
-
 /**
- * All rails a payout in the currency can go over: the currency account's own
- * rails plus SWIFT, which is available for every supported currency.
+ * Resolves the display label for one generated Lightspark payout rail.
  *
- * @param fiatCurrency - Off-ramp payout currency.
- * @returns Rail table keyed by rail id, or undefined for unsupported currencies.
+ * @param rail - Generated payout rail identifier.
+ * @returns The public rail label.
  */
-export function lightsparkPayoutRails(
-  fiatCurrency: string
-): Readonly<Record<string, LightsparkPayoutRail>> | undefined {
-  const account = LIGHTSPARK_PAYOUT_ACCOUNTS[fiatCurrency];
-  if (account === undefined) {
-    return undefined;
-  }
-  const rails: Record<string, LightsparkPayoutRail> = {};
-  for (const [rail, fields] of Object.entries(account.rails)) {
-    rails[rail] = { accountType: account.accountType, fields };
-  }
-  const swiftFields = LIGHTSPARK_SWIFT_ACCOUNT.rails.SWIFT;
-  if (swiftFields === undefined) {
-    throw providerUnavailable("Lightspark SWIFT account spec is missing its SWIFT rail.");
-  }
-  rails.SWIFT = { accountType: LIGHTSPARK_SWIFT_ACCOUNT.accountType, fields: swiftFields };
-  return rails;
-}
-
-function requireLightsparkPayoutRails(
-  fiatCurrency: string
-): Readonly<Record<string, LightsparkPayoutRail>> {
-  const rails = lightsparkPayoutRails(fiatCurrency);
-  if (rails === undefined) {
-    throw badRequest(`Lightspark off-ramp does not support payouts in ${fiatCurrency}.`);
-  }
-  return rails;
-}
-
 function lightsparkRailLabel(rail: string): string {
   const label: string | undefined =
     LIGHTSPARK_RAIL_LABELS[rail as keyof typeof LIGHTSPARK_RAIL_LABELS];
@@ -315,77 +281,58 @@ export function buildLightsparkBusinessInfo(
 }
 
 /**
- * Narrows collected data to the payout-spec fields so business onboarding
- * fields don't leak into the external-account payload or its content hash.
- * Returns undefined when no payout fields were collected.
+ * Reads and validates the countries in Lightspark's generated support map.
+ *
+ * @returns Supported Lightspark destination countries.
  */
-export function lightsparkPayoutCollectedData(
-  fiatCurrency: string,
-  collectedData: CollectedFieldData
-): CollectedFieldData | undefined {
-  const rails = requireLightsparkPayoutRails(fiatCurrency);
-  const payoutKeys = new Set(["paymentRails"]);
-  for (const rail of Object.values(rails)) {
-    for (const key of Object.keys(rail.fields)) {
-      payoutKeys.add(key);
+function lightsparkCountryCodes(): CountryCode[] {
+  const countrySupport = RAMP_PROVIDER_SUPPORT_DETAILS.lightspark.offramp.countrySupport;
+  const countryCodes: CountryCode[] = [];
+  for (const countryCode of Object.keys(countrySupport.countries)) {
+    if (!isCountryCode(countryCode)) {
+      throw providerUnavailable(`Lightspark country support has invalid country ${countryCode}.`);
     }
+    countryCodes.push(countryCode);
   }
-  const payoutData = Object.fromEntries(
-    Object.entries(collectedData).filter(([key]) => payoutKeys.has(key))
-  );
-  return Object.keys(payoutData).length > 0 ? payoutData : undefined;
+  return countryCodes;
 }
 
 /**
- * Collection fields for a payout in the currency: a rail selector plus the
- * union of every rail's fields. A field is only marked required when every
- * rail demands it; exact per-rail requiredness is enforced when the external
- * account is built from the chosen rail.
+ * Builds the destination-first payout requirements from the canonical resolver.
  *
- * @param fiatCurrency - Off-ramp payout currency.
- * @returns Requirement fields for the collect step.
+ * @param cryptoRail - Crypto rail being sold.
+ * @param fiatCurrency - Fiat currency being delivered.
+ * @param accounts - Existing active corridor accounts.
+ * @returns Country-to-rail options and exact per-rail fields.
  */
-export function lightsparkPayoutFields(fiatCurrency: string): RequirementField[] {
-  const rails = requireLightsparkPayoutRails(fiatCurrency);
-  const railEntries = Object.entries(rails);
-  const railField = selectField({
-    key: "paymentRails",
-    label: "Payment rail",
-    required: true,
-    options: railEntries.map(([rail]) => ({ value: rail, label: lightsparkRailLabel(rail) })),
-  });
-  const union = new Map<
-    string,
-    { spec: RampPayoutFieldSpec; presentIn: number; requiredIn: number }
-  >();
-  for (const [, rail] of railEntries) {
-    for (const [key, spec] of Object.entries(rail.fields)) {
-      const existing = union.get(key);
-      if (existing === undefined) {
-        union.set(key, { spec, presentIn: 1, requiredIn: spec.required ? 1 : 0 });
-        continue;
-      }
-      existing.presentIn += 1;
-      if (spec.required) {
-        existing.requiredIn += 1;
-      }
+function lightsparkPayoutRequirementTree(
+  cryptoRail: CryptoRailId,
+  fiatCurrency: string,
+  accounts: readonly PayoutRequirementAccount[]
+): PayoutRequirementTree {
+  const countryRails: Partial<Record<CountryCode, RequirementOption[]>> = {};
+  const railFields: Record<string, RequirementField[]> = {};
+  for (const countryCode of lightsparkCountryCodes()) {
+    const resolution = resolveOfframpDestination({
+      provider: "lightspark",
+      cryptoRail,
+      fiatCurrency,
+      countryCode,
+    });
+    if (resolution === null) {
+      continue;
+    }
+    countryRails[countryCode] = Object.keys(resolution.rails).map((rail) => ({
+      value: rail,
+      label: lightsparkRailLabel(rail),
+    }));
+    for (const [rail, railResolution] of Object.entries(resolution.rails)) {
+      railFields[rail] = Object.entries(railResolution.fields).map(([key, spec]) =>
+        lightsparkRequirementField(key, spec, spec.required)
+      );
     }
   }
-  return [
-    railField,
-    ...[...union.entries()].map(([key, entry]) =>
-      lightsparkRequirementField(key, entry.spec, entry.requiredIn === railEntries.length)
-    ),
-  ];
-}
-
-function lightsparkCountrySelect(key: string, label: string): RequirementField {
-  return selectField({
-    key,
-    label,
-    required: true,
-    options: COUNTRIES.map((country) => ({ value: country.code, label: country.name })),
-  });
+  return { countryRails, railFields, accounts: [...accounts] };
 }
 
 /**
@@ -404,8 +351,8 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
       required: true,
       before: new Date().toISOString().slice(0, 10),
     }),
-    lightsparkCountrySelect("customer.nationality", "Nationality"),
-    lightsparkCountrySelect("customer.region", "Region"),
+    countryField({ key: "customer.nationality", label: "Nationality", required: true }),
+    countryField({ key: "customer.region", label: "Region", required: true }),
     textField({
       key: "customer.email",
       label: "Email",
@@ -414,7 +361,6 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
       pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
       placeholder: "name@example.com",
     }),
-    lightsparkPurposeOfPaymentField(),
     {
       kind: "address",
       key: "customer.address",
@@ -429,9 +375,10 @@ export function lightsparkIndividualInfoFields(): RequirementField[] {
           required: false,
         }),
         textField({ key: "customer.address.postalCode", label: "Postal code", required: true }),
-        lightsparkCountrySelect("customer.address.countryCode", "Country"),
+        countryField({ key: "customer.address.countryCode", label: "Country", required: true }),
       ],
     },
+    lightsparkPurposeOfPaymentField(),
   ];
 }
 
@@ -543,25 +490,46 @@ export function lightsparkCounterpartyRequirements(
   if (options.direction === "onramp") {
     return readyCounterparty("lightspark", "onramp");
   }
-  const { providerData, fiatCurrency } = options;
-  if (!fiatCurrency) {
+  if (options.fiatCurrency === undefined) {
     throw badRequest("fiatCurrency is required for Lightspark off-ramp requirements.");
   }
-  if (lightsparkPayoutRails(fiatCurrency) === undefined) {
+  if (options.cryptoRail === undefined) {
+    throw badRequest("cryptoRail is required for Lightspark off-ramp requirements.");
+  }
+  const accounts: PayoutRequirementAccount[] = [];
+  if (options.payoutAccounts !== undefined) {
+    accounts.push(...options.payoutAccounts);
+  }
+  return lightsparkCollectAccountRequirements(options.cryptoRail, options.fiatCurrency, accounts);
+}
+
+/**
+ * The collect_account requirements for one payout corridor: the destination
+ * country/rail tree, or unsupported when no country can receive the currency.
+ *
+ * @param cryptoRail - Crypto rail being sold.
+ * @param fiatCurrency - Fiat currency being delivered.
+ * @param accounts - Existing active corridor accounts.
+ * @returns collect_account requirements carrying the payout tree.
+ */
+export function lightsparkCollectAccountRequirements(
+  cryptoRail: CryptoRailId,
+  fiatCurrency: string,
+  accounts: readonly PayoutRequirementAccount[]
+): CounterpartyRequirements {
+  const payout = lightsparkPayoutRequirementTree(cryptoRail, fiatCurrency, accounts);
+  if (Object.keys(payout.countryRails).length === 0) {
     return unsupportedCounterparty(
       "lightspark",
       "offramp",
       `Lightspark off-ramp does not support payouts in ${fiatCurrency}.`
     );
   }
-  if (latestLightsparkPayoutAccount(providerData, fiatCurrency)) {
-    return readyCounterparty("lightspark", "offramp");
-  }
   return {
     provider: "lightspark",
     direction: "offramp",
     status: "collect_account",
-    fields: lightsparkPayoutFields(fiatCurrency),
+    payout,
   };
 }
 
@@ -577,20 +545,37 @@ function lightsparkBeneficiary(counterparty: CounterpartyRow): Record<string, un
 
 export function buildLightsparkAccountInfo(
   counterparty: CounterpartyRow,
+  cryptoRail: CryptoRailId,
   fiatCurrency: RampFiatCurrency,
   collectedData: CollectedFieldData | undefined
 ): Record<string, unknown> {
-  const rails = requireLightsparkPayoutRails(fiatCurrency);
-  if (!collectedData) {
+  if (collectedData === undefined) {
     throw badRequest("collectedData with payout bank details is required for Lightspark off-ramp.");
+  }
+  const destinationCountryValue = collectedData.destinationCountry;
+  if (destinationCountryValue === undefined || !isCountryCode(destinationCountryValue)) {
+    throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
   }
   const railKey = collectedData.paymentRails;
   if (typeof railKey !== "string") {
     throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
   }
-  const rail = rails[railKey];
+  const resolution = resolveOfframpDestination({
+    provider: "lightspark",
+    cryptoRail,
+    fiatCurrency,
+    countryCode: destinationCountryValue,
+  });
+  if (resolution === null) {
+    throw badRequest(
+      `Lightspark cannot pay out ${fiatCurrency} to destination country ${destinationCountryValue}.`
+    );
+  }
+  const rail = resolution.rails[railKey];
   if (rail === undefined) {
-    throw badRequest(`Lightspark cannot pay out ${fiatCurrency} over rail ${railKey}.`);
+    throw badRequest(
+      `Lightspark cannot pay out ${fiatCurrency} to ${destinationCountryValue} over rail ${railKey}.`
+    );
   }
 
   const railFields = Object.entries(rail.fields).map(([key, spec]) =>
@@ -607,7 +592,7 @@ export function buildLightsparkAccountInfo(
     paymentRails: [railKey],
   };
   for (const key of Object.keys(rail.fields)) {
-    const value = supplied[key];
+    const value = supplied[`bankAccount.${key}`];
     if (value === undefined) continue;
     accountInfo[key] = value;
   }

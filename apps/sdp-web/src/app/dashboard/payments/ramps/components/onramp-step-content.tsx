@@ -19,7 +19,6 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -34,6 +33,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const t = useTranslations();
   const {
     currentStepId,
+    enabledRampProviders,
     rampProviderAccess,
     selectedCounterparty,
     fields,
@@ -79,6 +79,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       <div className="space-y-4">
         <RampPairProviderSelector
           direction="onramp"
+          enabledRampProviders={enabledRampProviders}
           rampProviderAccess={rampProviderAccess}
           selectedCounterparty={selectedCounterparty}
           wallets={liveWallets}
@@ -106,6 +107,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "REQUIREMENTS") {
     return (
       <RequirementsFields
+        provider={fields.provider}
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}
@@ -141,15 +143,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
 
   if (currentStepId === "PROVIDER" && quote?.provider === "stripe") {
     return (
-      <div className="space-y-6">
-        <StripeOnrampFrame
-          clientSecret={quote.clientSecret}
-          publishableKey={quote.publishableKey}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
-      </div>
+      <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
     );
   }
 
@@ -158,23 +152,18 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       return <RampQuoteSkeleton />;
     }
     return (
-      <div className="space-y-6">
-        <MoneygramRampWidget
-          direction="onramp"
-          quote={quote}
-          sourceWalletId={selectedWallet.id}
-          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-          sourceWalletAddress={selectedWallet.publicKey}
-          sourceTokenMint={null}
-          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-          cryptoAmount={fields.amount.trim()}
-          fiatCurrency={selectedRampPair.fiatCurrency}
-          onSessionExpiring={refreshQuote}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
-      </div>
+      <MoneygramRampWidget
+        direction="onramp"
+        quote={quote}
+        sourceWalletId={selectedWallet.id}
+        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+        sourceWalletAddress={selectedWallet.publicKey}
+        sourceTokenMint={null}
+        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+        cryptoAmount={fields.amount.trim()}
+        fiatCurrency={selectedRampPair.fiatCurrency}
+        onSessionExpiring={refreshQuote}
+      />
     );
   }
 
@@ -221,19 +210,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         }
       : undefined;
     return (
-      <div className="space-y-6">
-        <ManualInstructionsQuote
-          amount={fields.amount.trim()}
-          quote={quote}
-          fiatCurrency={selectedRampPair.fiatCurrency}
-          cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
-          instructions={quote.paymentInstructions}
-          action={simulateAction}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
-      </div>
+      <ManualInstructionsQuote
+        amount={fields.amount.trim()}
+        quote={quote}
+        fiatCurrency={selectedRampPair.fiatCurrency}
+        cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
+        instructions={quote.paymentInstructions}
+        action={simulateAction}
+      />
     );
   }
 

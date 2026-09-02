@@ -6,6 +6,7 @@ import {
   validateOuterTransaction as validateSdkOuterTransaction,
 } from "@sdp/helius-rings-sdk";
 import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
@@ -79,7 +80,7 @@ export function resolveRingsGateway(
   // bring-up with a config_error while everything else keeps working.
   const ringRpcUrl = (env.HELIUS_RINGS_RING_RPC_URL ?? "").trim();
 
-  return create({
+  const gateway = create({
     ...configured.upstreams,
     ...(ringRpcUrl === "" ? {} : { ringRpcUrl }),
     ...(recordRingLookupTable ? { recordRingLookupTable } : {}),
@@ -109,6 +110,7 @@ export function resolveRingsGateway(
     submitTransaction: (signedTxBase64) =>
       asDomainFailure(() => submitOuterTransaction({ env, signedTxBase64 })),
   });
+  return instrumentVendorPort("helius-rings", gateway);
 }
 
 const ADAPTER_FAILURE_MESSAGES = {

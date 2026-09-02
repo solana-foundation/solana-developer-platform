@@ -266,7 +266,22 @@
       "vaultAbsorbedNote": "Chi tiết bên dưới là giao dịch nạp đã được phê duyệt. Nếu bạn muốn nạp lần thứ hai cùng số tiền, hãy gửi lại.",
       "vaultHeldKeyUnavailable": "SDP không kiểm tra được giao dịch nạp đã phê duyệt trước đó đã hoàn tất chưa, nên không có gì được gửi. Hãy thử lại sau giây lát.",
       "vaultOutcomeConfirmed": "Giao dịch nạp vault đã xác nhận on-chain — vị thế của bạn đang hoạt động.",
-      "vaultOutcomeFailed": "Giao dịch nạp vault thất bại — không có tiền rời khỏi Wallet."
+      "vaultOutcomeFailed": "Giao dịch nạp vault thất bại — không có tiền rời khỏi Wallet.",
+      "vaultPayWith": "Thanh toán bằng",
+      "vaultSwapNotice": "{source} của bạn được swap sang {target} qua Jupiter ngay trong cùng một giao dịch, nên swap và khoản nạp sẽ cùng hoàn tất hoặc cùng không xảy ra. Khoản nạp được tính theo mức tối thiểu đảm bảo của swap (dung sai {pct}%); phần tốt hơn sẽ nằm lại trong Wallet của bạn dưới dạng {target}.",
+      "vaultSwapRow": "Swap",
+      "vaultSwapVia": "{source} → {target} qua Jupiter",
+      "vaultMinShares": "Số shares tối thiểu nhận được",
+      "vaultExpectedShares": "Số shares dự kiến",
+      "vaultQuoteLoading": "Đang lấy báo giá shares trực tiếp…",
+      "vaultQuoteUnavailable": "Báo giá shares trực tiếp hiện không khả dụng, nên không thể định lượng khoản nạp này một cách an toàn. Hãy thử lại sau.",
+      "vaultQuoteBlocked": "Vault hiện không chấp nhận khoản nạp này: {message}",
+      "vaultQuoteZeroShares": "Số tiền này quá nhỏ để mint bất kỳ shares nào theo tỷ lệ hiện tại, nên không có mức trần slippage để bảo vệ. Hãy tăng số tiền lên.",
+      "vaultSlippageToggle": "Dung sai slippage: {percent}",
+      "vaultSlippageLabel": "Dung sai slippage (basis points)",
+      "vaultSlippageHelp": "Khoản nạp sẽ không thực thi nếu vault mint ít shares hơn mức dung sai cho phép. 10 basis points tương đương 0,1%.",
+      "vaultSlippageInvalid": "Nhập một số nguyên basis points từ 1 đến {max}.",
+      "vaultSlippageExceeded": "Vault sẽ trả về ít shares hơn mức dung sai slippage cho phép với số tiền này. Hãy tăng dung sai bên dưới và thử lại."
     },
     "tabs": {
       "opportunities": "Cơ hội",
@@ -326,7 +341,15 @@
       "settlingNote": "Số dư vị thế và Wallet được làm mới khi chuỗi hoàn tất lệnh rút.",
       "transaction": "Giao dịch",
       "outcomeFinalized": "Đã hoàn tất lệnh rút Vault — số tiền thu được nằm trong custody wallet.",
-      "outcomeFailed": "Một giao dịch rút Vault đã thất bại. Mọi cổ phần chưa được quy đổi vẫn còn trong vị thế."
+      "outcomeFailed": "Một giao dịch rút Vault đã thất bại. Mọi cổ phần chưa được quy đổi vẫn còn trong vị thế.",
+      "expectedAmount": "Số tiền dự kiến",
+      "minAmount": "Số tiền tối thiểu nhận được",
+      "quoteLoading": "Đang lấy báo giá thanh toán trực tiếp…",
+      "quoteUnavailable": "Báo giá thanh toán trực tiếp hiện không khả dụng, nên không thể định lượng khoản rút này một cách an toàn. Hãy thử lại sau.",
+      "quoteBlocked": "Vault hiện không thanh toán khoản rút này: {message}",
+      "quoteZeroAssets": "Số shares này quá ít để quy đổi sang Token tiền gửi theo tỷ giá hiện tại, nên không có mức sàn slippage nào bảo vệ được giao dịch rút.",
+      "slippageHelp": "Giao dịch rút sẽ không thực thi nếu vault trả ít hơn mức tolerance này cho phép. 10 basis point tương đương 0,1%.",
+      "slippageExceeded": "Vault sẽ trả ít hơn mức slippage tolerance bạn đặt cho các shares này. Hãy tăng tolerance bên dưới rồi thử lại."
     }
   },
   "DashboardMarkets": {
@@ -407,7 +430,14 @@
       "withdrawalApprovalUnavailable": "Nhà cung cấp có thể đánh dấu một khoản rút là Đang chờ phê duyệt. SDP chưa thể xử lý phê duyệt đó; người phê duyệt có thẩm quyền của nhà cung cấp phải hoàn tất việc này bên ngoài Dashboard, và bạn không nên gửi lại khoản rút đó.",
       "provider": "Nhà cung cấp",
       "unnamedProgram": "Chiến lược chưa đặt tên",
-      "usdSymbol": "USD"
+      "usdSymbol": "USD",
+      "summaryDeposited": "Đã nạp",
+      "summaryApy": "APY ước tính",
+      "summaryApyCaption": "Lãi suất trực tiếp theo tỷ trọng giá trị trên các vị thế đang mở",
+      "summaryApyUnavailable": "Không khả dụng cho đến khi mọi vị thế đang mở có giá trị và lãi suất trực tiếp",
+      "viewAll": "Xem tất cả",
+      "liquidity": "Thanh khoản",
+      "yourPosition": "Vị thế của bạn"
     },
     "earnProgram": {
       "eyebrow": "Yield nhúng",
@@ -536,7 +566,32 @@
       "mainnetPreviewDescription": "Vault này chạy trên Mainnet. Bạn có thể xem trải nghiệm khách hàng và tích hợp tại đây, nhưng hãy chuyển sang dự án Production để lưu hoặc gửi khoản nạp.",
       "mainnetPreviewFooter": "Chỉ xem trước trên Mainnet. Cần dự án Production để lưu hoặc kích hoạt tích hợp này.",
       "mainnetHandoffDescription": "Liên kết bàn giao công khai được tạo từ dự án Production. Bạn vẫn có thể xem và sao chép ví dụ máy chủ bên dưới.",
-      "mainnetHandoffUnavailable": "Mở vault này từ dự án Production để tạo bàn giao kỹ thuật có thể chia sẻ."
+      "mainnetHandoffUnavailable": "Mở vault này từ dự án Production để tạo bàn giao kỹ thuật có thể chia sẻ.",
+      "dashboardTitle": "Danh mục khách hàng",
+      "configureShort": "Cấu hình",
+      "portfolioRefreshError": "Lần làm mới gần nhất thất bại. Đang hiển thị danh mục hoàn chỉnh gần nhất trong khi tự động thử lại.",
+      "flowPreview": "Xem trước UI",
+      "getStarted": "Bắt đầu",
+      "liquidity": "Thanh khoản",
+      "provider": "Provider",
+      "integrateEyebrow": "Tích hợp Yield nhúng · Bước 2/2",
+      "integrateTitle": "Tích hợp Yield nhúng",
+      "integrateDescription": "Kết nối chiến lược đã chọn vào sản phẩm của bạn qua SDP external-wallet API: khoản nạp khách hàng ký, số dư và hoạt động trực tiếp, cùng các khoản rút. SDP xác minh từng chữ ký và ghi lại mọi giao dịch trước khi phát tán.",
+      "apiKeyNoteTitle": "Giữ API key ở phía máy chủ",
+      "guideClientTitle": "1 · Thiết lập server client",
+      "guideClientDescription": "Mọi lệnh gọi chạy từ backend của bạn với API key của project, được lưu trong môi trường máy chủ với tên SDP_API_KEY. Helper dùng chung sẽ gắn key và mở phong bì phản hồi SDP.",
+      "guideDepositTitle": "2 · Nhận khoản nạp",
+      "guideDepositDescription": "Tạo giao dịch chưa ký cho Wallet của khách hàng, để Wallet ký trong ứng dụng của bạn, rồi gửi dữ liệu đã ký kèm idempotency key. Theo dõi giao dịch đã ghi nhận cho đến khi hoàn tất hoặc thất bại; thử lại với cùng key sẽ phát lại khoản nạp ban đầu thay vì chuyển tiền hai lần.",
+      "guidePortfolioTitle": "3 · Hiển thị số dư, thu nhập và hoạt động",
+      "guidePortfolioDescription": "Đọc số dư và tổng thu nhập theo từng Token nạp, liệt kê hoạt động của khách hàng và tải vị thế trực tiếp cho luồng rút. Thu nhập chỉ được hiển thị khi chính xác; khi không có thì hiển thị dấu gạch ngang, không bao giờ hiển thị $0.",
+      "guideWithdrawTitle": "4 · Rút tiền",
+      "guideWithdrawDescription": "Quy trình rút tương tự quy trình nạp: tạo giao dịch rút chưa ký cho một vị thế, khách hàng ký và bạn gửi theo cùng cơ chế idempotency. Rút tiền vẫn hoạt động ngay cả khi khoản nạp mới đang bị tạm dừng."
+    },
+    "liquidity": {
+      "instant": "Tức thì",
+      "delayed": "Trì hoãn",
+      "delayedDay": "Trì hoãn · 1 ngày",
+      "delayedDays": "Trì hoãn · {days} ngày"
     }
   }
 }

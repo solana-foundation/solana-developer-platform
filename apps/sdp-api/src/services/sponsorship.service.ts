@@ -2,6 +2,7 @@ import {
   createFeePaymentAdapter,
   FeePaymentError,
   type FeePaymentPort,
+  resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
@@ -12,6 +13,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
@@ -111,7 +113,10 @@ export function createSponsorshipFeePayment(
   env: Env,
   scope: SponsorshipScope
 ): SponsorshipFeePayment {
-  const provider = createFeePaymentAdapter(env, buildKoraUserId(scope));
+  const provider = instrumentVendorPort(
+    resolveFeePaymentProvider(env),
+    createFeePaymentAdapter(env, buildKoraUserId(scope))
+  );
   return isSelfHostedDeployment(env)
     ? withOwnedSubmissionLifecycle(provider)
     : new BudgetedFeePayment(env, scope, provider);
@@ -121,7 +126,10 @@ export function createSponsorshipFeePayment(
 export async function getManagedSponsorshipProviderConfiguration(
   env: Env
 ): Promise<SponsorshipProviderConfiguration> {
-  const provider = createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation");
+  const provider = instrumentVendorPort(
+    resolveFeePaymentProvider(env),
+    createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation")
+  );
   if (!provider.getSponsorshipConfiguration) {
     throw new FeePaymentError(
       "Managed sponsorship provider does not expose fail-closed configuration",
@@ -139,7 +147,7 @@ export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
       "Managed sponsorship requires a trusted organization or project scope"
     );
   }
-  return createFeePaymentAdapter(env);
+  return instrumentVendorPort(resolveFeePaymentProvider(env), createFeePaymentAdapter(env));
 }
 
 /** Resolve a scope exclusively from trusted request middleware state. */

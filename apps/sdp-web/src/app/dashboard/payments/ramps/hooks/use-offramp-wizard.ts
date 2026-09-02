@@ -6,6 +6,7 @@ import type {
   PaymentTransferSummary,
   RampCryptoDeposit,
 } from "@sdp/types";
+import { isCountryCode } from "@sdp/types";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -18,9 +19,10 @@ import {
   createTransfer,
   fetchTransferById,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { offrampPairs, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
@@ -77,6 +79,7 @@ function getOfframpRequirementsStep(t: Translate): RampWizardStep<OfframpStepId>
 }
 
 export function useOfframpWizard(props: UseRampWizardProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteExpired, setQuoteExpired] = useState(false);
@@ -91,14 +94,14 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
-    pairs: OFFRAMP_PAIRS,
+    pairs: offrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOfframpSteps(t),
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {
       step: getOfframpRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "WITHDRAW",
       direction: "offramp",
     },
     selectionSchema: withdrawSelectionSchema,
@@ -109,17 +112,36 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       provider,
       selectedRampPair,
       cryptoToken,
+      collectedData,
       rampsMemo,
-    }) =>
-      ({
-        provider,
+    }) => {
+      const base = {
         counterpartyId: fields.counterpartyId,
         sourceWallet: selectedWallet.walletId,
         cryptoToken,
-        fiatCurrency: selectedRampPair.fiatCurrency,
         cryptoAmount: fields.amount.trim(),
         rampsMemo,
-      }) satisfies PaymentOfframpQuoteRequest,
+      };
+      if (provider !== "lightspark") {
+        return {
+          ...base,
+          provider,
+          fiatCurrency: selectedRampPair.fiatCurrency,
+        } satisfies PaymentOfframpQuoteRequest;
+      }
+      const destinationCountry = collectedData.destinationCountry;
+      if (destinationCountry === undefined || !isCountryCode(destinationCountry)) {
+        throw new Error(
+          "Select a payout destination country in the requirements step before requesting a Lightspark quote."
+        );
+      }
+      return {
+        ...base,
+        provider,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+        destinationCountry,
+      } satisfies PaymentOfframpQuoteRequest;
+    },
     onQuoteCreated: () => {
       resetCreateTransfer();
       setQuoteExpired(false);

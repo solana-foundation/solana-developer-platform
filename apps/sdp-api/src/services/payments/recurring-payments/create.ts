@@ -68,6 +68,7 @@ export async function createRecurringPayment(input: {
     id: `prp_${crypto.randomUUID()}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    sourceCustodyWalletId: input.sourceWallet.id,
     sourceWalletId: input.sourceWallet.walletId,
     sourceAddress: input.sourceWallet.publicKey,
     counterpartyId: input.counterpartyId,

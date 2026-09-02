@@ -80,17 +80,23 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
 
 /**
  * Shared count+page read for the earn list methods (same shape as the
- * payments-family where-builder idiom). Ordering is fixed at newest-first with
- * id as the deterministic tiebreaker — bulk catalogue syncs write many rows in
- * the same instant, so created_at alone would make pages unstable.
+ * payments-family where-builder idiom).
+ *
+ * `ordering` is a literal ORDER BY body (never caller input) and every value
+ * passed must be TOTAL: end it with an `id` tiebreaker, because bulk catalogue
+ * syncs write many rows in the same sdp_iso_now() instant and any prefix of the
+ * sort can tie — a non-total order makes OFFSET pages repeat and skip rows.
+ *
+ * REQUIRED rather than defaulted, so a new list states its own order instead of
+ * inheriting one silently: the two existing callers want genuinely different
+ * orders (strategies rank by TVL, programs oldest-first so the head of that
+ * list cannot move when a program is created — migration 0056's header explains
+ * what breaks if it does), which is exactly the situation where an invisible
+ * default is the wrong answer. `NEWEST_FIRST` stays as the shared tail every
+ * total ordering can end with.
  */
-/**
- * `order` picks the direction of the (created_at, id) sort — id is always the
- * tiebreaker because bulk rows share sdp_iso_now(). DESC (newest first) is the
- * default every history list wants. Programs pass ASC deliberately: the head of
- * that list must not move when a new program is created (migration 0056's
- * header explains what breaks if it does).
- */
+const NEWEST_FIRST = "created_at DESC, id DESC";
+
 async function selectPage<Row>(
   db: AppDb,
   table: "earn_strategies" | "earn_provider_wallets",
@@ -98,7 +104,7 @@ async function selectPage<Row>(
   bindings: unknown[],
   window: { limit: number; offset: number },
   mapRow: (row: Record<string, unknown>) => Row,
-  order: "ASC" | "DESC" = "DESC"
+  ordering: string
 ): Promise<{ rows: Row[]; total: number }> {
   const where = conditions.join(" AND ");
 
@@ -107,7 +113,7 @@ async function selectPage<Row>(
       .prepare(
         `SELECT * FROM ${table}
            WHERE ${where}
-           ORDER BY created_at ${order}, id ${order}
+           ORDER BY ${ordering}
            LIMIT ? OFFSET ?`
       )
       .bind(...bindings, window.limit, window.offset)
@@ -346,7 +352,33 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(pattern, pattern, pattern);
       }
 
-      return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);
+      // The PRD ranks the shelf by deposit size (PRO-1732): TVL descending,
+      // rows with no TVL last — devnet rows carry none by design (the metrics
+      // endpoint is mainnet's), so the sandbox default view falls through to
+      // newest-first. TVL lives in the `riskMetadata` JSON (`tvlUsd`); at a
+      // ~25-row shelf per cluster the cast costs nothing, so it does not earn
+      // its own column. The trailing (created_at, id) keeps the order TOTAL —
+      // equal-TVL and no-TVL rows would otherwise make OFFSET pages repeat and
+      // skip rows.
+      //
+      // The `jsonb_typeof` guard is load-bearing, not belt-and-braces: the
+      // column is an open bag (`EarnStrategyRiskMetadata` allows any key, and
+      // the schema only CHECKs that the whole value is an object), so "always a
+      // JSON number or absent" is a convention two provider clients keep, NOT
+      // something the database enforces. A bare `::numeric` cast would turn one
+      // malformed row — a string `"12M"`, a bool — into a 500 on EVERY
+      // `GET /strategies` for that environment, an outage far from the write
+      // that caused it. Guarded, such a row reads as unsized and sorts last.
+      return selectPage(
+        db,
+        "earn_strategies",
+        conditions,
+        bindings,
+        input,
+        mapStrategyRow,
+        `CASE WHEN jsonb_typeof(risk_metadata->'tvlUsd') = 'number'
+              THEN (risk_metadata->>'tvlUsd')::numeric END DESC NULLS LAST, ${NEWEST_FIRST}`
+      );
     },
 
     async getProviderWalletById(params) {
@@ -371,7 +403,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(input.provider);
       }
 
-      // ASC: oldest first, so the head of the list is stable for a program's
+      // Oldest first, so the head of the list is stable for a program's
       // whole life (migration 0056).
       return selectPage(
         db,
@@ -380,7 +412,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings,
         input,
         mapProviderWalletRow,
-        "ASC"
+        "created_at ASC, id ASC"
       );
     },
 

@@ -7,6 +7,7 @@ import {
   EARN_PROVIDERS,
   type EarnProviderId,
   isEarnProviderSurfaced,
+  isRampProviderSurfaced,
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
@@ -19,6 +20,7 @@ import {
   RAMP_PROVIDERS,
   type RampProviderId,
   resolveOrganizationProviderEntitlements,
+  type SdpEnvironment,
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
@@ -766,6 +768,18 @@ export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
     throw new AppError(
       "FORBIDDEN",
       `${PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId].label} is not currently offered.`
+    );
+  }
+}
+
+export function assertRampProviderSurfaced(
+  providerId: RampProviderId,
+  environment: SdpEnvironment
+): void {
+  if (!isRampProviderSurfaced(providerId, environment)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `${PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId].label} is not currently offered.`
     );
   }
 }
