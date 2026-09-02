@@ -381,8 +381,24 @@ jobs:
               --format='value(status.imageDigest)'
           )"
           expected_digest="${IMAGE##*@}"
-          if [[ "${revision_digest##*@}" != "${expected_digest}" ]]; then
-            echo "Candidate ${candidate_revision} resolved to ${revision_digest}, expected ${expected_digest}." >&2
+          # The pinned digest may be an OCI image index (buildx provenance/SBOM
+          # builds). Cloud Run resolves the index and records the platform
+          # manifest's digest on the revision, so accept the pinned digest or
+          # any manifest listed inside that exact signed index. Children are
+          # content-addressed by the index, so this extends the trust chain
+          # without widening it; anything else still fails closed.
+          accepted_digests="${expected_digest}"
+          index_children="$(
+            crane manifest "${IMAGE}" 2>/dev/null |
+              jq -r 'select(.mediaType == "application/vnd.oci.image.index.v1+json"
+                       or .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json")
+                     | .manifests[]?.digest' || true
+          )"
+          if [[ -n "${index_children}" ]]; then
+            accepted_digests+=$'\n'"${index_children}"
+          fi
+          if ! grep -qxF "${revision_digest##*@}" <<<"${accepted_digests}"; then
+            echo "Candidate ${candidate_revision} resolved to ${revision_digest}, expected ${expected_digest} or a manifest of that signed index." >&2
             exit 1
           fi
           echo "CANDIDATE_REVISION=${candidate_revision}" >> "${GITHUB_ENV}"

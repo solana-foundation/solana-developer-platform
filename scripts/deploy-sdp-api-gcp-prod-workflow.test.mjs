@@ -226,3 +226,23 @@ test("the orchestrator grants every permission the prod workflow requests", () =
     );
   }
 });
+
+test("candidate verification accepts the signed index digest or its child manifests, nothing else", () => {
+  assert.match(
+    workflow,
+    /accepted_digests="\$\{expected_digest\}"/
+  );
+  assert.match(
+    workflow,
+    /crane manifest "\$\{IMAGE\}"/
+  );
+  assert.match(
+    workflow,
+    /vnd\.oci\.image\.index\.v1\+json/
+  );
+  assert.match(
+    workflow,
+    /grep -qxF "\$\{revision_digest##\*@\}" <<<"\$\{accepted_digests\}"/
+  );
+});
+
