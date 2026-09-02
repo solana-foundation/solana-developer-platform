@@ -1,7 +1,7 @@
-import type { SdpEnvironment } from "@sdp/types";
+import type { RampProviderId, SdpEnvironment } from "@sdp/types";
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
-import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
+import { isRampProviderSurfaced } from "@sdp/types/provider-access";
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -51,13 +51,39 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "stripe", title: "Stripe" },
 ];
 
-export function surfacedRampProviderOptions(environment: SdpEnvironment): RampProviderOption[] {
-  return RAMP_PROVIDER_OPTIONS.filter((option) => isRampProviderSurfaced(option.id, environment));
+/**
+ * Returns the ramp providers surfaced for an environment and enabled by feature flags.
+ *
+ * @param environment - The dashboard environment.
+ * @param enabledProviders - The providers enabled for the current request.
+ * @returns The selectable provider options.
+ */
+export function surfacedRampProviderOptions(
+  environment: SdpEnvironment,
+  enabledProviders: readonly RampProviderId[]
+): RampProviderOption[] {
+  return RAMP_PROVIDER_OPTIONS.filter(
+    (option) =>
+      isRampProviderSurfaced(option.id, environment) && enabledProviders.includes(option.id)
+  );
 }
 
-export function onrampPairs(environment: SdpEnvironment): RampPair[] {
+/**
+ * Returns on-ramp currency pairs with only surfaced and enabled providers.
+ *
+ * @param environment - The dashboard environment.
+ * @param enabledProviders - The providers enabled for the current request.
+ * @returns The available on-ramp pairs.
+ */
+export function onrampPairs(
+  environment: SdpEnvironment,
+  enabledProviders: readonly RampProviderId[]
+): RampPair[] {
   return ONRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
-    const surfaced = providers.filter((p) => isRampProviderSurfaced(p, environment));
+    const surfaced = providers.filter(
+      (provider) =>
+        isRampProviderSurfaced(provider, environment) && enabledProviders.includes(provider)
+    );
     if (surfaced.length === 0) return [];
     return [{ fiatCurrency: source, assetRail: dest, providers: surfaced }];
   });
@@ -65,9 +91,22 @@ export function onrampPairs(environment: SdpEnvironment): RampPair[] {
 
 // Offramp support is keyed crypto -> fiat (source is the asset rail, dest is the fiat
 // currency), the reverse of onramp. Normalize into the same RampPair shape.
-export function offrampPairs(environment: SdpEnvironment): RampPair[] {
+/**
+ * Returns off-ramp currency pairs with only surfaced and enabled providers.
+ *
+ * @param environment - The dashboard environment.
+ * @param enabledProviders - The providers enabled for the current request.
+ * @returns The available off-ramp pairs.
+ */
+export function offrampPairs(
+  environment: SdpEnvironment,
+  enabledProviders: readonly RampProviderId[]
+): RampPair[] {
   return OFFRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
-    const surfaced = providers.filter((p) => isRampProviderSurfaced(p, environment));
+    const surfaced = providers.filter(
+      (provider) =>
+        isRampProviderSurfaced(provider, environment) && enabledProviders.includes(provider)
+    );
     if (surfaced.length === 0) return [];
     return [{ fiatCurrency: dest, assetRail: source, providers: surfaced }];
   });

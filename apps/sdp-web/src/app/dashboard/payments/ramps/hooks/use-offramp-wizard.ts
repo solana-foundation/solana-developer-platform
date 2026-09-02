@@ -94,7 +94,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
-    pairs: offrampPairs(sdpEnvironment),
+    pairs: offrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOfframpSteps(t),
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "MEMO",

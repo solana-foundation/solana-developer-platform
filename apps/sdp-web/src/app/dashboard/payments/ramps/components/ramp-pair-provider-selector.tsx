@@ -4,6 +4,7 @@ import type {
   Counterparty,
   CounterpartyEntityType,
   PaymentsDashboardWallet,
+  RampProviderId,
   SdpEnvironment,
 } from "@sdp/types";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
@@ -12,7 +13,7 @@ import {
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
+import type { ProviderAvailabilityEntry } from "@sdp/types/provider-access";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
@@ -39,6 +40,7 @@ import { RampSelectionProvider } from "./ramp-selection-context";
 
 interface RampPairProviderSelectorProps {
   direction: RampDirection;
+  enabledRampProviders: readonly RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   selectedCounterparty: Counterparty | null;
   wallets: readonly PaymentsDashboardWallet[];
@@ -72,15 +74,24 @@ function getDirectionSupport(
   return RAMP_PROVIDER_SUPPORT_DETAILS[provider][direction];
 }
 
+/**
+ * Returns the available ramp pairs for a direction.
+ *
+ * @param direction - The ramp direction.
+ * @param environment - The dashboard environment.
+ * @param enabledRampProviders - The providers enabled for the current request.
+ * @returns The available ramp pairs.
+ */
 function pairsForDirection(
   direction: RampDirection,
-  environment: SdpEnvironment
+  environment: SdpEnvironment,
+  enabledRampProviders: readonly RampProviderId[]
 ): readonly RampPair[] {
   switch (direction) {
     case "onramp":
-      return onrampPairs(environment);
+      return onrampPairs(environment, enabledRampProviders);
     case "offramp":
-      return offrampPairs(environment);
+      return offrampPairs(environment, enabledRampProviders);
     default: {
       const exhaustive: never = direction;
       return exhaustive;
@@ -208,6 +219,7 @@ function buildProviderExclusion(args: {
 
 export function RampPairProviderSelector({
   direction,
+  enabledRampProviders,
   rampProviderAccess,
   selectedCounterparty,
   wallets,
@@ -226,17 +238,17 @@ export function RampPairProviderSelector({
   const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
-  const pairs = pairsForDirection(direction, sdpEnvironment);
+  const pairs = pairsForDirection(direction, sdpEnvironment, enabledRampProviders);
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]
   );
   const directionProviderOptions = useMemo(
     () =>
-      surfacedRampProviderOptions(sdpEnvironment).filter(
+      surfacedRampProviderOptions(sdpEnvironment, enabledRampProviders).filter(
         (option) => Object.keys(getDirectionSupport(option.id, direction).currencies).length > 0
       ),
-    [direction, sdpEnvironment]
+    [direction, enabledRampProviders, sdpEnvironment]
   );
   const providerExclusions = useMemo(
     () =>

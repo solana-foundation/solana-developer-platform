@@ -1,6 +1,11 @@
 "use client";
 
-import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from "@sdp/types";
+import type {
+  ComplianceProviderId,
+  Counterparty,
+  PaymentsDashboardWallet,
+  RampProviderId,
+} from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
@@ -34,6 +39,7 @@ interface PaymentsActionPageProps {
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   enabledComplianceProviders: ComplianceProviderId[];
+  enabledRampProviders: RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
 }
@@ -44,6 +50,7 @@ export interface RailProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
+  enabledRampProviders: RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
   selectedCounterparty: Counterparty | null;
@@ -147,6 +154,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       wallets: props.wallets,
       walletsError: props.walletsError,
       issuedTokenSymbolsByMint: props.issuedTokenSymbolsByMint,
+      enabledRampProviders: props.enabledRampProviders,
       rampProviderAccess,
       counterpartiesResult: liveCounterparties,
       selectedCounterparty,

@@ -33,6 +33,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const t = useTranslations();
   const {
     currentStepId,
+    enabledRampProviders,
     rampProviderAccess,
     selectedCounterparty,
     fields,
@@ -78,6 +79,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       <div className="space-y-4">
         <RampPairProviderSelector
           direction="onramp"
+          enabledRampProviders={enabledRampProviders}
           rampProviderAccess={rampProviderAccess}
           selectedCounterparty={selectedCounterparty}
           wallets={liveWallets}

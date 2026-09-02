@@ -114,6 +114,7 @@ async function createRampQuote(
 export interface UseRampWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
+  enabledRampProviders: RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
   selectedCounterparty: Counterparty | null;
@@ -127,6 +128,7 @@ export function useRampWizard<TId extends string>(
   {
     wallets,
     walletsError,
+    enabledRampProviders,
     rampProviderAccess,
     counterpartiesResult,
     selectedCounterparty,
@@ -475,6 +477,7 @@ export function useRampWizard<TId extends string>(
   };
 
   return {
+    enabledRampProviders,
     rampProviderAccess,
     selectedCounterparty,
     stepIndex,

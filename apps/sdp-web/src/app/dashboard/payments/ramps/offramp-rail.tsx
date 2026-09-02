@@ -30,6 +30,7 @@ function offrampPrimaryLabel(wizard: OfframpWizard, t: ReturnType<typeof useTran
 export function OfframpRail({
   wallets,
   walletsError,
+  enabledRampProviders,
   rampProviderAccess,
   counterpartiesResult,
   selectedCounterparty,
@@ -43,6 +44,7 @@ export function OfframpRail({
   const wizard = useOfframpWizard({
     wallets,
     walletsError,
+    enabledRampProviders,
     rampProviderAccess,
     counterpartiesResult,
     selectedCounterparty,
