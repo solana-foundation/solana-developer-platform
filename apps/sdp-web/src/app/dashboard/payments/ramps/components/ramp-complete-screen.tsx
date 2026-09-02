@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
@@ -44,6 +44,7 @@ function completionDetailRows(
       label: t("DashboardPayments.ramps.provider"),
       value: getRampProviderLabel(quote.provider),
       iconSrc: RAMP_PROVIDER_LOGOS[quote.provider],
+      href: RAMP_PROVIDER_WEBSITES[quote.provider],
     },
   ];
   if (transfer.providerReference) {
