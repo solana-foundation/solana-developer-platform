@@ -22,6 +22,7 @@ export type {
   RampDiscoveryContext,
   RampDiscoveryResponseDump,
   RampDumpWriter,
+  RampExternalAccountDetails,
   RampFetchJson,
   RampProvider,
   RampRawDumpReader,

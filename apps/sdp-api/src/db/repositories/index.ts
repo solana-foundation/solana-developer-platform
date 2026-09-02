@@ -51,6 +51,7 @@ export type {
   InsertPendingExternalAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
+  ListProviderAccountsInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";

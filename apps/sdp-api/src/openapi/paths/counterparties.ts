@@ -10,6 +10,7 @@ import {
   errorResponseSchema,
   listCounterpartiesQuerySchema,
   listCounterpartyAccountsQuerySchema,
+  listCounterpartyProviderAccountsQuerySchema,
   updateCounterpartyAccountRequestSchema,
   updateCounterpartyRequestSchema,
 } from "../schemas";
@@ -21,6 +22,7 @@ import {
   counterpartyResponse,
   listCounterpartiesResponse,
   listCounterpartyAccountsResponse,
+  listCounterpartyProviderAccountsResponse,
 } from "./responses";
 
 export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
@@ -211,6 +213,31 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         content: jsonContent(listCounterpartyAccountsResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/counterparties/{counterpartyId}/provider-accounts",
+    tags: ["Counterparties"],
+    summary: "List counterparty provider accounts",
+    operationId: "listCounterpartyProviderAccounts",
+    description:
+      "Lists provider-owned fiat payout accounts for a counterparty. Provider details are fetched just in time and account numbers are returned only as last-four digits.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        counterpartyId: counterpartyIdParamSchema,
+      }),
+      query: listCounterpartyProviderAccountsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Counterparty provider-account list",
+        content: jsonContent(listCounterpartyProviderAccountsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
     },
   });
 

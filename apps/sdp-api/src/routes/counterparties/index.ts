@@ -5,6 +5,7 @@ import { validateBody } from "@/middleware/validate";
 import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import type { Env } from "@/types/env";
 import counterpartyAccounts from "../counterparty-accounts";
+import counterpartyProviderAccounts from "../counterparty-provider-accounts";
 import {
   archiveCounterparty,
   createCounterparty,
@@ -65,5 +66,6 @@ counterparties.delete(
 );
 
 counterparties.route("/:counterpartyId/accounts", counterpartyAccounts);
+counterparties.route("/:counterpartyId/provider-accounts", counterpartyProviderAccounts);
 
 export default counterparties;

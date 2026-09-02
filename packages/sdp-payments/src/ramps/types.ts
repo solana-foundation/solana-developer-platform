@@ -212,6 +212,14 @@ export interface RampRuntimeContext {
   mode: SdpEnvironment;
 }
 
+export interface RampExternalAccountDetails {
+  platformAccountId: string;
+  providerStatus: string;
+  bankName?: string;
+  accountNumberLast4?: string;
+  paymentRails: string[];
+}
+
 export interface RampEstimateOnrampInput {
   assetRail: CryptoRailId;
   fiatCurrency: RampFiatCurrency;
@@ -317,6 +325,10 @@ export interface RampProvider {
     ctx: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote>;
+  listExternalAccountDetails?(
+    ctx: RampRuntimeContext,
+    input: { providerCustomerReference: string; fiatCurrency: string }
+  ): Promise<RampExternalAccountDetails[]>;
   validateCounterparty(
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions

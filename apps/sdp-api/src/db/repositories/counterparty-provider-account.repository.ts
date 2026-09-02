@@ -49,6 +49,15 @@ export interface ListExternalAccountsInput extends GetCounterpartyProviderAccoun
   fiatCurrency: string;
 }
 
+export interface ListProviderAccountsInput {
+  organizationId: string;
+  projectId: string;
+  counterpartyId: string;
+  provider?: RampProviderId;
+  fiatCurrency?: string;
+  destinationCountry?: CountryCode;
+}
+
 export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAccountInput {
   id: string;
 }
@@ -125,6 +134,14 @@ export interface CounterpartyProviderAccountsRepository {
    * @returns Active corridor rows with provider statuses.
    */
   listExternalAccounts(input: ListExternalAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
+
+  /**
+   * Lists all external provider-account rows for one counterparty.
+   *
+   * @param input - Tenant, project, counterparty, and optional corridor filters.
+   * @returns Active and archived external-account rows in creation order.
+   */
+  listProviderAccounts(input: ListProviderAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
 
   /**
    * Inserts an active corridor row before provider account creation.

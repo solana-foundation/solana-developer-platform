@@ -1,4 +1,5 @@
-import type { Country } from "./countries";
+import type { Country, CountryCode } from "./countries";
+import type { RampProviderId } from "./provider-access";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
@@ -189,4 +190,22 @@ export interface ListCounterpartyAccountsResponse {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface CounterpartyProviderAccount {
+  id: string;
+  provider: RampProviderId;
+  fiatCurrency: string;
+  destinationCountry: CountryCode;
+  paymentRail: string | null;
+  status: CounterpartyAccountStatus;
+  providerStatus: string | null;
+  createdAt: string;
+  bankName?: string;
+  accountNumberLast4?: string;
+  paymentRails?: string[];
+}
+
+export interface ListCounterpartyProviderAccountsResponse {
+  accounts: CounterpartyProviderAccount[];
 }

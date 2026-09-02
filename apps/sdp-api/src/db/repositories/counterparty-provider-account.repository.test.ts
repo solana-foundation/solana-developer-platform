@@ -312,4 +312,74 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
 
     expect(replacement.id).not.toBe(first.id);
   });
+
+  it("lists active and archived external rows with parent and tenant filters", async () => {
+    const counterparty = await seedCounterparty("cpacc_list_provider_accounts");
+    const otherCounterparty = await seedCounterparty("cpacc_list_provider_accounts_other");
+    const customer = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: "Customer:list_provider_accounts",
+    });
+    const usd = await repository.insertPendingExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: customer.provider_customer_reference,
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+    });
+    const gbp = await repository.insertPendingExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: customer.provider_customer_reference,
+      fiatCurrency: "GBP",
+      destinationCountry: "GB",
+      paymentRail: "FPS",
+    });
+    await repository.archiveExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: gbp.id,
+    });
+
+    expect(
+      await repository.listProviderAccounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+      })
+    ).toEqual([usd, expect.objectContaining({ id: gbp.id, status: "archived" })]);
+    expect(
+      await repository.listProviderAccounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+      })
+    ).toEqual([usd]);
+    expect(
+      await repository.listProviderAccounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: otherCounterparty.id,
+      })
+    ).toEqual([]);
+    expect(
+      await repository.listProviderAccounts({
+        organizationId: "org_not_owned",
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+      })
+    ).toEqual([]);
+  });
 });

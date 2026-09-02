@@ -9,6 +9,7 @@ import type {
   InsertPendingExternalAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
+  ListProviderAccountsInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
@@ -147,6 +148,41 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           input.provider,
           input.fiatCurrency
         )
+        .all<Record<string, unknown>>();
+
+      return result.results.map((row) => counterpartyProviderAccountRowSchema.parse(row));
+    },
+
+    async listProviderAccounts(input: ListProviderAccountsInput) {
+      const conditions = [
+        "organization_id = ?",
+        "project_id = ?",
+        "counterparty_id = ?",
+        "fiat_currency IS NOT NULL",
+      ];
+      const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];
+
+      if (input.provider !== undefined) {
+        conditions.push("provider = ?");
+        bindings.push(input.provider);
+      }
+      if (input.fiatCurrency !== undefined) {
+        conditions.push("fiat_currency = ?");
+        bindings.push(input.fiatCurrency);
+      }
+      if (input.destinationCountry !== undefined) {
+        conditions.push("destination_country = ?");
+        bindings.push(input.destinationCountry);
+      }
+
+      const result = await db
+        .prepare(
+          `SELECT *
+           FROM counterparty_provider_accounts
+           WHERE ${conditions.join(" AND ")}
+           ORDER BY created_at ASC`
+        )
+        .bind(...bindings)
         .all<Record<string, unknown>>();
 
       return result.results.map((row) => counterpartyProviderAccountRowSchema.parse(row));
