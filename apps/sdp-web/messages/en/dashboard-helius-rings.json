@@ -28,8 +28,8 @@
     },
     "ring": {
       "title": "Custom rings",
-      "description": "Named custom rings for this project. Ops deploys each ring program and hands over its id; recording a name and id here completes bring-up (auditor key, ring config, pool registration, lookup table) through custody. Once active, any operation can target the ring by name — default-pool operations are never blocked by it.",
-      "none": "No custom rings recorded. All operations use the default public pool.",
+      "description": "Named custom rings for this project. Ops deploys each ring program and hands over its id; recording a name and id here completes bring-up (auditor key, ring config, read access, lookup table) through custody. Once active, any operation can target the ring by name — default-ring operations are never blocked by it.",
+      "none": "No custom rings recorded. All operations use the default ring.",
       "openList": "View custom rings",
       "dialogDescription": "Select a ring to see its program, auditor key, and lookup table.",
       "nameLabel": "Ring name",
@@ -47,8 +47,8 @@
       "status_pending": "Pending",
       "status_active": "Active",
       "status_failed": "Failed",
-      "explain_pending": "Bring-up has not completed. Operations cannot target this ring yet; default-pool operations are unaffected.",
-      "explain_failed": "Bring-up failed; operations cannot target this ring until a retry succeeds. Default-pool operations are unaffected."
+      "explain_pending": "Bring-up has not completed. Operations cannot target this ring yet; default-ring operations are unaffected.",
+      "explain_failed": "Bring-up failed; operations cannot target this ring until a retry succeeds. Default-ring operations are unaffected."
     },
     "wallets": {
       "title": "Private wallets",
@@ -113,7 +113,7 @@
       "state": "State",
       "amount": "Amount",
       "ring": "Ring",
-      "ringDefault": "Default pool",
+      "ringDefault": "Default ring",
       "created": "Created",
       "action": "Action",
       "working": "Still settling",
@@ -167,7 +167,7 @@
       "summaryRecipient": "Recipient",
       "gatewayRedNotice": "One or more Rings upstreams are unavailable. You can still compose and confirm — the operation will run through policy and record an honest upstream failure.",
       "ring": "Ring",
-      "ringDefault": "Default pool",
+      "ringDefault": "Default ring",
       "ringShieldHint": "The ring the shielded notes land in.",
       "ringSpendHint": "The source of funds: only notes bound to the chosen ring can be spent by it.",
       "ringNoneActive": "No ring is active yet; complete bring-up in the Custom rings card before targeting one.",

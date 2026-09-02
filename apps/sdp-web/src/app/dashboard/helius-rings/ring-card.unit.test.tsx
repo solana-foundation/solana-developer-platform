@@ -72,7 +72,7 @@ describe("RingCard", () => {
   it("offers the add form while no ring is recorded", () => {
     renderCard([]);
 
-    expect(screen.getByText(/default public pool/)).toBeTruthy();
+    expect(screen.getByText(/default ring/)).toBeTruthy();
     expect(screen.getByLabelText("Ring name")).toBeTruthy();
     expect(screen.getByLabelText("Ring program id")).toBeTruthy();
     expect(mocks.createProjectRing).not.toHaveBeenCalled();
@@ -127,7 +127,7 @@ describe("RingCard", () => {
     await user.type(screen.getByLabelText("Ring name"), "default");
     await user.type(screen.getByLabelText("Ring program id"), RING_PROGRAM);
 
-    // "default" names the default pool; the button never arms.
+    // "default" names the default ring; the button never arms.
     expect(
       (screen.getByRole("button", { name: "Record and bring up" }) as HTMLButtonElement).disabled
     ).toBe(true);
@@ -170,13 +170,14 @@ describe("RingCard", () => {
 
   it("surfaces the server's own reason when bring-up refuses", async () => {
     mocks.createProjectRing.mockResolvedValue({
-      error: "ring bring-up needs a ring RPC URL and a custody message signer",
+      error:
+        "ring bring-up needs HELIUS_RINGS_RING_RPC_URL; every other rings operation runs without it",
     });
     renderCard([]);
 
     await fillForm("treasury", RING_PROGRAM);
 
-    expect(await screen.findByText(/custody message signer/)).toBeTruthy();
+    expect(await screen.findByText(/HELIUS_RINGS_RING_RPC_URL/)).toBeTruthy();
   });
 
   it("answers, and re-enables the control, when the request never returns a reply", async () => {

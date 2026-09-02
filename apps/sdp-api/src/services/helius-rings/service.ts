@@ -323,7 +323,7 @@ export class HeliusRingsService {
     if (!RING_NAME_PATTERN.test(input.name) || input.name === DEFAULT_RING_NAME) {
       throw new HeliusRingsError(
         "invalid_input",
-        'a ring name is a 1-32 character lowercase slug, and "default" names the default pool'
+        'a ring name is a 1-32 character lowercase slug, and "default" names the default ring'
       );
     }
 

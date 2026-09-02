@@ -16,13 +16,13 @@ export const createRingsWalletSchema = z.object({
 export const createProjectRingSchema = z.object({
   /**
    * Operator-chosen handle operations select the ring by. A slug because it
-   * appears in request bodies and logs; "default" names the default pool and
+   * appears in request bodies and logs; "default" names the default ring and
    * can never name a ring.
    */
   name: z
     .string()
     .regex(RING_NAME_PATTERN, "name must be a 1-32 character lowercase slug")
-    .refine((value) => value !== DEFAULT_RING_NAME, '"default" names the default pool'),
+    .refine((value) => value !== DEFAULT_RING_NAME, '"default" names the default ring'),
   /** Base58 program id of the pre-deployed custom ring program. */
   ringProgramId: solanaAddressSchema("ringProgramId"),
 });
@@ -81,7 +81,7 @@ const assetAmount = z.strictObject({ mint, amountRaw });
 
 /**
  * Ring NAME the operation targets; the server resolves and pins the program id
- * at prepare time. Omitted or "default" = the default public pool. For spends
+ * at prepare time. Omitted or "default" = the default ring. For spends
  * the named ring is the SOURCE of funds. Existence and bring-up state are the
  * service's checks, not the schema's.
  */

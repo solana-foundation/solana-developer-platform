@@ -60,10 +60,10 @@ describe("OperationDetailDrawer", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("names the default pool when the operation pinned no ring", async () => {
+  it("names the default ring when the operation pinned no ring", async () => {
     renderDrawer();
 
-    expect(await screen.findByText("Default pool")).toBeTruthy();
+    expect(await screen.findByText("Default ring")).toBeTruthy();
     expect(screen.getByText("hro_1")).toBeTruthy();
     expect(screen.getByText("Withdraw")).toBeTruthy();
   });
@@ -74,7 +74,7 @@ describe("OperationDetailDrawer", () => {
     renderDrawer({ ringProgramId: RING_PROGRAM });
 
     expect(await screen.findByText(RING_PROGRAM)).toBeTruthy();
-    expect(screen.queryByText("Default pool")).toBeNull();
+    expect(screen.queryByText("Default ring")).toBeNull();
   });
 
   it("shows the failure code and message verbatim, and whether a retry can win", async () => {
