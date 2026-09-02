@@ -490,6 +490,11 @@ export function useCounterpartyRequirements(
   // advance answered for: a corridor change changes the key, so a tick that
   // resolves for an abandoned corridor lands in a cache entry nothing reads.
   // Polling stops itself once its own data reports a non-pending status.
+  // The advanceId in the key is what guarantees freshness: SWR has no per-hook
+  // no-cache or TTL option (https://github.com/vercel/swr/discussions/1642,
+  // https://github.com/vercel/swr/discussions/2293) and cache.delete cannot
+  // stop an in-flight tick from repopulating a shared key, so no two advances
+  // ever share a key.
   const pollKey =
     advance !== null && params?.provider && isOnboardingPending(advance.result.status)
       ? paymentsQueryKeys.requirementsStatusPoll({
