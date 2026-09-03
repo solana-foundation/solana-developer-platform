@@ -190,7 +190,10 @@ function ProviderAccountTable({ accounts }: { accounts: CounterpartyProviderAcco
         </thead>
         <tbody>
           {accounts.map((account) => {
-            const flag = regionFlagEmoji(account.destinationCountry);
+            const flag =
+              account.destinationCountry === null
+                ? null
+                : regionFlagEmoji(account.destinationCountry);
             const status = providerAccountStatus(account);
             return (
               <tr key={account.id} className="border-b border-border-default last:border-b-0">
