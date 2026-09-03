@@ -1,7 +1,8 @@
 import type { CounterpartyRow } from "@sdp/payments";
 import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import type { CounterpartyEntityType, CounterpartyProviderData } from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyProviderData, RampProviderId } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
+import type { BvnkCustomerProviderAccountMetadata } from "./counterparty-provider-account.repository";
 
 export type { CounterpartyRow } from "@sdp/payments";
 export { generateCounterpartyId } from "@sdp/payments";
@@ -49,7 +50,12 @@ export interface UpsertBvnkCustomerProviderDataInput {
   counterpartyId: string;
   organizationId: string;
   projectId: string;
-  customer: Partial<BvnkCustomerResolution>;
+  customer: Partial<
+    Pick<BvnkCustomerResolution, "customerReference" | "status" | "verificationStatus">
+  > & {
+    contactId?: string;
+    agreements?: BvnkCustomerProviderAccountMetadata["agreements"];
+  };
 }
 
 export interface MutateCounterpartyProviderDataInput {
@@ -78,9 +84,10 @@ export interface CounterpartiesRepository {
     projectId: string;
   }): Promise<CounterpartyRow | null>;
   findActiveCounterpartyById(counterpartyId: string): Promise<CounterpartyRow | null>;
-  findActiveCounterpartyByBvnkCustomerReference(
-    customerReference: string
-  ): Promise<CounterpartyRow | null>;
+  findActiveCounterpartyByProviderCustomerReference(params: {
+    provider: RampProviderId;
+    providerCustomerReference: string;
+  }): Promise<CounterpartyRow | null>;
   findCounterpartyByMuralOrganizationId(organizationId: string): Promise<CounterpartyRow | null>;
   findCounterpartyByHercleAccountId(accountId: string): Promise<CounterpartyRow | null>;
   mutateProviderData(params: MutateCounterpartyProviderDataInput): Promise<CounterpartyRow | null>;

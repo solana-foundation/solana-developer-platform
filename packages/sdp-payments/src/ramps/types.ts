@@ -1,6 +1,7 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
+  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
@@ -19,6 +20,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
+  CollectedFieldData,
   CounterpartyRequirements,
   PayoutRequirementAccount,
 } from "@sdp/types/ramp-requirements";
@@ -212,6 +214,14 @@ export interface RampRuntimeContext {
   mode: SdpEnvironment;
 }
 
+export interface RampExternalAccountDetails {
+  platformAccountId: string;
+  providerStatus: string;
+  bankName?: string;
+  accountNumberLast4?: string;
+  paymentRails: string[];
+}
+
 export interface RampEstimateOnrampInput {
   assetRail: CryptoRailId;
   fiatCurrency: RampFiatCurrency;
@@ -275,6 +285,7 @@ export type ValidateCounterpartyOptions =
       fiatCurrency?: RampFiatCurrency;
       destinationWalletAddress?: string;
       providerCustomerReference?: string;
+      collectedData?: CollectedFieldData;
     }
   | {
       direction: "offramp";
@@ -283,7 +294,9 @@ export type ValidateCounterpartyOptions =
       fiatCurrency?: RampFiatCurrency;
       cryptoRail?: CryptoRailId;
       payoutAccounts?: readonly PayoutRequirementAccount[];
+      destinationCountry?: CountryCode;
       providerCustomerReference?: string;
+      collectedData?: CollectedFieldData;
     };
 
 /**
@@ -317,6 +330,10 @@ export interface RampProvider {
     ctx: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote>;
+  listExternalAccountDetails?(
+    ctx: RampRuntimeContext,
+    input: { providerCustomerReference: string; fiatCurrency: string }
+  ): Promise<RampExternalAccountDetails[]>;
   validateCounterparty(
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions

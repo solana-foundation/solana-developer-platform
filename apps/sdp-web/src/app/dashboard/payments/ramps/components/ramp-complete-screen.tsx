@@ -3,6 +3,7 @@
 import type { PaymentRampQuote, PaymentTransferSummary, SolanaCluster } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import Image from "next/image";
 import {
   formatDisplayAmount,
   formatMinorCurrencyAmount,
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { getRampProviderLabel } from "@/lib/ramps";
+import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
@@ -26,6 +27,8 @@ interface CompletionDetailRow {
   value: string;
   href?: string;
   copyValue?: string;
+  /** Logo rendered before the value (e.g. the provider mark). */
+  iconSrc?: string;
 }
 
 function completionDetailRows(
@@ -40,6 +43,8 @@ function completionDetailRows(
     {
       label: t("DashboardPayments.ramps.provider"),
       value: getRampProviderLabel(quote.provider),
+      iconSrc: RAMP_PROVIDER_LOGOS[quote.provider],
+      href: RAMP_PROVIDER_WEBSITES[quote.provider],
     },
   ];
   if (transfer.providerReference) {
@@ -152,11 +157,13 @@ function TransferDetailRow({
   value,
   href,
   copyValue,
+  iconSrc,
 }: {
   label: string;
   value: string;
   href?: string;
   copyValue?: string;
+  iconSrc?: string;
 }) {
   const t = useTranslations();
   const { copy, copied } = useCopy(1200);
@@ -164,6 +171,15 @@ function TransferDetailRow({
     <div className="flex items-center justify-between gap-4">
       <span className="shrink-0 text-sm text-tertiary">{label}</span>
       <span className="inline-flex min-w-0 items-center gap-1.5">
+        {iconSrc ? (
+          <Image
+            src={iconSrc}
+            alt=""
+            width={16}
+            height={16}
+            className="size-4 shrink-0 rounded object-contain"
+          />
+        ) : null}
         {href ? (
           <a
             href={href}
@@ -239,6 +255,7 @@ export function RampCompleteScreen({
             value={detail.value}
             href={detail.href}
             copyValue={detail.copyValue}
+            iconSrc={detail.iconSrc}
           />
         ))}
       </div>

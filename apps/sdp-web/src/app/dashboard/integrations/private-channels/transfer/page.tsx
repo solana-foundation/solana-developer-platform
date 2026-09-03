@@ -4,6 +4,7 @@ import { getTranslations } from "@/i18n/server";
 import {
   fetchPrivateChannelPrincipals,
   fetchPrivateChannels,
+  fetchPrivateChannelTokenEligibility,
   fetchSignableCustodyWallets,
   fetchVerifiedWallets,
 } from "@/lib/private-channels";
@@ -37,16 +38,20 @@ export default async function PrivateChannelsTransferPage() {
   let loadError: string | undefined;
   let channels = intersectEligibleTransferChannels([], []);
   let sourceWallets = intersectVerifiedSourceWallets([], []);
+  let tokens = [] as Awaited<ReturnType<typeof fetchPrivateChannelTokenEligibility>>;
   try {
-    const [principals, activeChannels, signableWallets, verifiedWallets] = await Promise.all([
-      fetchPrivateChannelPrincipals(client),
-      fetchPrivateChannels(client),
-      fetchSignableCustodyWallets(client),
-      fetchVerifiedWallets(client),
-    ]);
+    const [principals, activeChannels, signableWallets, verifiedWallets, tokenEligibility] =
+      await Promise.all([
+        fetchPrivateChannelPrincipals(client),
+        fetchPrivateChannels(client),
+        fetchSignableCustodyWallets(client),
+        fetchVerifiedWallets(client),
+        fetchPrivateChannelTokenEligibility(client),
+      ]);
     const defaultPrincipal = principals.find((principal) => principal.isDefault);
     channels = intersectEligibleTransferChannels(defaultPrincipal?.channels ?? [], activeChannels);
     sourceWallets = intersectVerifiedSourceWallets(signableWallets, verifiedWallets);
+    tokens = tokenEligibility.filter((token) => token.enabled);
   } catch (error) {
     loadError = extractSdpApiErrorMessage(error);
   }
@@ -68,7 +73,12 @@ export default async function PrivateChannelsTransferPage() {
           {loadError ? (
             <PrivateChannelsLoadError message={loadError} />
           ) : (
-            <TransferForm channels={channels} scopeKey={scopeKey} sourceWallets={sourceWallets} />
+            <TransferForm
+              channels={channels}
+              scopeKey={scopeKey}
+              sourceWallets={sourceWallets}
+              tokens={tokens}
+            />
           )}
         </CardContent>
       </Card>

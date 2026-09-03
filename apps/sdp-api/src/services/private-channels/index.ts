@@ -18,6 +18,11 @@ export {
   provisionPrincipal,
 } from "./members";
 export {
+  readPrivateChannelTokenEligibility,
+  resolveChannelToken,
+  resolveRegisteredChannelToken,
+} from "./mint";
+export {
   getInstanceOverview,
   probeInstanceHealth,
   verifyInstanceConnection,

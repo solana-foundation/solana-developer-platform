@@ -19,7 +19,7 @@ const payout = {
     ACH: [
       {
         kind: "text",
-        key: "accountNumber",
+        key: "bankAccount.accountNumber",
         label: "Account number",
         required: true,
       },
@@ -27,7 +27,7 @@ const payout = {
     SEPA: [
       {
         kind: "text",
-        key: "iban",
+        key: "bankAccount.iban",
         label: "IBAN",
         required: true,
       },
@@ -35,24 +35,31 @@ const payout = {
     SWIFT: [
       {
         kind: "text",
-        key: "accountNumber",
+        key: "bankAccount.accountNumber",
         label: "Account number",
         required: false,
       },
       {
         kind: "text",
-        key: "swiftCode",
+        key: "bankAccount.swiftCode",
         label: "SWIFT / BIC code",
         required: true,
       },
     ],
   },
-  accounts: [{ destinationCountry: "CA", status: "ACTIVE" }],
+  accounts: [
+    {
+      id: "account_ca",
+      destinationCountry: "CA",
+      paymentRail: "SWIFT",
+      status: "ACTIVE",
+    },
+  ],
 } satisfies PayoutRequirementTree;
 
 describe("derivePayoutRequirementFields", () => {
   it("builds the country select from payout country keys", () => {
-    const fields = derivePayoutRequirementFields(payout, {}, labels);
+    const fields = derivePayoutRequirementFields(payout, {}, labels, false);
 
     expect(fields).toEqual([
       {
@@ -68,14 +75,24 @@ describe("derivePayoutRequirementFields", () => {
     ] satisfies RequirementField[]);
   });
 
-  it("uses the existing active account without revealing rail fields", () => {
-    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "CA" }, labels);
+  it("collapses to the country select when the corridor is resolved", () => {
+    const fields = derivePayoutRequirementFields(
+      payout,
+      { destinationCountry: "CA" },
+      labels,
+      true
+    );
 
     expect(fields.map((field) => field.key)).toEqual(["destinationCountry"]);
   });
 
   it("reveals the selected country's rail options verbatim", () => {
-    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "US" }, labels);
+    const fields = derivePayoutRequirementFields(
+      payout,
+      { destinationCountry: "US" },
+      labels,
+      false
+    );
 
     expect(fields[1]).toEqual({
       kind: "select",
@@ -90,13 +107,14 @@ describe("derivePayoutRequirementFields", () => {
     const fields = derivePayoutRequirementFields(
       payout,
       { destinationCountry: "US", paymentRails: "ACH" },
-      labels
+      labels,
+      false
     );
 
     expect(fields.map((field) => field.key)).toEqual([
       "destinationCountry",
       "paymentRails",
-      "accountNumber",
+      "bankAccount.accountNumber",
     ]);
     expect(fields[2]).toMatchObject({ required: true });
   });

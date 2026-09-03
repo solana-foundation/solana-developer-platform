@@ -14,6 +14,7 @@ import {
 import { type CryptoAssetSymbol, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isAddress } from "@solana/addresses";
+import { z } from "zod";
 import { divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
@@ -29,6 +30,7 @@ import type {
   RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
+  RampExternalAccountDetails,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
@@ -158,16 +160,72 @@ function readRequiredGridString(
   return value.trim();
 }
 
-interface LightsparkExternalAccount {
-  id?: string;
-  status?: string;
-  platformAccountId?: string;
-  accountInfo?: { accountType?: string; address?: string };
-}
+const lightsparkExternalAccountInfoSchema = z.object({
+  accountType: z.string().min(1).optional(),
+  address: z.string().optional(),
+  paymentRails: z.array(z.string().min(1)).optional(),
+});
+
+const lightsparkExternalAccountSchema = z.object({
+  id: z.string().min(1).optional(),
+  status: z.string().min(1).optional(),
+  platformAccountId: z.string().min(1).optional(),
+  accountInfo: lightsparkExternalAccountInfoSchema.optional(),
+});
+
+export type LightsparkExternalAccountInfo = z.infer<typeof lightsparkExternalAccountInfoSchema>;
+type LightsparkExternalAccount = z.infer<typeof lightsparkExternalAccountSchema>;
+
+const lightsparkExternalAccountInfoDetailsSchema = z.preprocess(
+  (value) => {
+    if (!isGridRecord(value) || typeof value.accountType !== "string") {
+      return value;
+    }
+    return {
+      ...value,
+      variant: value.accountType.toUpperCase() === "SOLANA_WALLET" ? "solana" : "bank",
+    };
+  },
+  z.discriminatedUnion("variant", [
+    z.object({
+      variant: z.literal("solana"),
+      accountType: z.string().min(1),
+      paymentRails: z.array(z.string().min(1)),
+      address: z.string().optional(),
+    }),
+    z.object({
+      variant: z.literal("bank"),
+      accountType: z.string().min(1),
+      paymentRails: z.array(z.string().min(1)),
+      bankName: z.string().min(1).optional(),
+      accountNumber: z.string().min(1).optional(),
+    }),
+  ])
+);
+
+const lightsparkExternalAccountDetailsPageSchema = z.object({
+  data: z.array(
+    z.object({
+      platformAccountId: z.string().min(1),
+      status: z.string().min(1),
+      accountInfo: lightsparkExternalAccountInfoDetailsSchema,
+    })
+  ),
+  hasMore: z.boolean(),
+  nextCursor: z.string().min(1).optional(),
+});
+
+type LightsparkExternalAccountInfoDetails = z.infer<
+  typeof lightsparkExternalAccountInfoDetailsSchema
+>;
+type LightsparkExternalAccountDetailsPage = z.infer<
+  typeof lightsparkExternalAccountDetailsPageSchema
+>;
 
 export interface LightsparkExternalAccountResolution {
   id: string;
   status: string;
+  accountInfo?: LightsparkExternalAccountInfo;
 }
 
 function parseLightsparkExternalAccountResolution(
@@ -176,39 +234,19 @@ function parseLightsparkExternalAccountResolution(
   if (!isGridRecord(payload)) {
     throw badRequest("Lightspark external account response must be an object");
   }
-  return {
+  const resolution = {
     id: readRequiredGridString(payload, "id", "Lightspark external account"),
     status: readRequiredGridString(payload, "status", "Lightspark external account"),
   };
+  const account = parseLightsparkExternalAccount(payload);
+  if (account.accountInfo === undefined) {
+    return resolution;
+  }
+  return { ...resolution, accountInfo: account.accountInfo };
 }
 
 function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAccount {
-  if (typeof payload !== "object" || payload === null) {
-    return {};
-  }
-  const raw = payload as {
-    id?: unknown;
-    status?: unknown;
-    platformAccountId?: unknown;
-    accountInfo?: { accountType?: unknown; address?: unknown };
-  };
-  return {
-    id: typeof raw.id === "string" ? raw.id : undefined,
-    status: typeof raw.status === "string" ? raw.status : undefined,
-    platformAccountId:
-      typeof raw.platformAccountId === "string" ? raw.platformAccountId : undefined,
-    accountInfo:
-      raw.accountInfo && typeof raw.accountInfo === "object"
-        ? {
-            accountType:
-              typeof raw.accountInfo.accountType === "string"
-                ? raw.accountInfo.accountType
-                : undefined,
-            address:
-              typeof raw.accountInfo.address === "string" ? raw.accountInfo.address : undefined,
-          }
-        : undefined,
-  };
+  return lightsparkExternalAccountSchema.parse(payload);
 }
 
 /** Connection details for live Grid API calls. */
@@ -489,6 +527,51 @@ export class LightsparkRampClient implements RampProvider {
     context: RampDiscoveryContext
   ): Promise<ProviderRailSupportDistillation> {
     return discoverLightsparkCurrencyAndRails(context);
+  }
+
+  /**
+   * Lists and sanitizes all Grid external accounts for one customer and fiat currency.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - Grid customer reference and fiat currency.
+   * @returns Sanitized external account details keyed by SDP platform account id.
+   */
+  async listExternalAccountDetails(
+    { env, mode }: RampRuntimeContext,
+    input: { providerCustomerReference: string; fiatCurrency: string }
+  ): Promise<RampExternalAccountDetails[]> {
+    const config = readLightsparkConfig(env, mode);
+    let cursor: string | undefined;
+    const details: RampExternalAccountDetails[] = [];
+
+    for (let page = 0; page < 10; page += 1) {
+      const query = new URLSearchParams();
+      query.set("customerId", input.providerCustomerReference);
+      query.set("currency", input.fiatCurrency);
+      query.set("limit", "100");
+      if (cursor !== undefined) {
+        query.set("cursor", cursor);
+      }
+
+      const response = await this.request<unknown>(
+        config,
+        `customers/external-accounts?${query.toString()}`,
+        { method: "GET" }
+      );
+      const pageResponse: LightsparkExternalAccountDetailsPage =
+        lightsparkExternalAccountDetailsPageSchema.parse(response);
+      details.push(...pageResponse.data.map(mapLightsparkExternalAccountDetails));
+
+      if (!pageResponse.hasMore) {
+        return details;
+      }
+      if (pageResponse.nextCursor === undefined) {
+        throw providerUnavailable("Lightspark external-account pagination is missing nextCursor.");
+      }
+      cursor = pageResponse.nextCursor;
+    }
+
+    throw providerUnavailable("Lightspark external-account pagination exceeded the page limit.");
   }
 
   private async request<TResponse, TBody = never>(
@@ -1042,6 +1125,37 @@ export class LightsparkRampClient implements RampProvider {
       body: payload,
     });
   }
+}
+
+/**
+ * Converts one validated Grid account into the sanitized provider contract.
+ *
+ * @param account - Validated Grid external account payload.
+ * @returns Provider account details with only the account-number last four digits.
+ */
+function mapLightsparkExternalAccountDetails(
+  account: LightsparkExternalAccountDetailsPage["data"][number]
+): RampExternalAccountDetails {
+  const result: RampExternalAccountDetails = {
+    platformAccountId: account.platformAccountId,
+    providerStatus: account.status,
+    paymentRails: account.accountInfo.paymentRails,
+  };
+  const accountInfo: LightsparkExternalAccountInfoDetails = account.accountInfo;
+  if (accountInfo.variant === "solana") {
+    return result;
+  }
+
+  if (accountInfo.bankName !== undefined) {
+    result.bankName = accountInfo.bankName;
+  }
+  if (accountInfo.accountNumber !== undefined) {
+    if (accountInfo.accountNumber.length < 4) {
+      throw providerUnavailable("Lightspark external account number is too short.");
+    }
+    result.accountNumberLast4 = accountInfo.accountNumber.slice(-4);
+  }
+  return result;
 }
 
 function parseLightsparkQuote(raw: GridQuoteResponse): LightsparkQuote {

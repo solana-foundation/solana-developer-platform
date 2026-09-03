@@ -185,6 +185,13 @@ export interface EarnStrategyRiskMetadata {
   [key: string]: unknown;
 }
 
+export interface EarnStrategySlippagePolicy {
+  /** Live quote endpoint must be called before building this direction. */
+  quoteRequired: true;
+  /** Suggested starting tolerance; the customer may choose another accepted value. */
+  defaultToleranceBps: number;
+}
+
 export interface EarnStrategy {
   id: string;
   /**
@@ -212,6 +219,10 @@ export interface EarnStrategy {
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /** Null when this provider's deposit builder needs no quote-derived floor. */
+  depositSlippage: EarnStrategySlippagePolicy | null;
+  /** Null when this provider's withdrawal builder needs no quote-derived floor. */
+  withdrawalSlippage: EarnStrategySlippagePolicy | null;
   /**
    * The cluster the strategy's INSTRUMENT actually lives on — not the cluster
    * of the environment that catalogued it, and the two can differ.
@@ -324,6 +335,8 @@ export interface EarnExternalWalletStrategyTotal {
   provider: string;
   providerReference: string;
   label: string;
+  /** Exact project-scoped owners contributing to this strategy total. */
+  ownerAddresses: string[];
   walletCount: number;
   positionCount: number;
   totalsByToken: EarnExternalWalletTokenTotal[];
@@ -434,7 +447,7 @@ export interface EarnVaultDepositRecord {
   amount: string;
   failureReason: string | null;
   createdAt: string;
-  /** Set only once the sweep observed the transaction on chain. */
+  /** Set only once SDP observed the transaction on chain — the detail read's chain read-through or the reconciliation sweep. */
   confirmedAt: string | null;
 }
 
@@ -522,13 +535,22 @@ export interface EarnExternalWalletTransaction {
   transactionId: string;
   /**
    * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
-   * exactly these bytes (fee payer is the owner) and the partner returns the
+   * exactly these bytes — the fee payer is the owner, or the partner's
+   * `feePayer` when one was named on the build — and the partner returns the
    * signed encoding on the submit call; any other change is refused there.
    */
   transaction: string;
   /** Block height after which these exact bytes can no longer land. */
   lastValidBlockHeight: string;
   ownerAddress: string;
+  /**
+   * The partner fee payer compiled into the transaction, echoed from the
+   * build request. Present, the transaction requires this wallet's signature
+   * IN ADDITION to the owner's — co-sign server-side before submitting — and
+   * this wallet pays the network fee plus any account rent the transaction
+   * creates. Absent, the owner pays everything and signs alone.
+   */
+  feePayer?: string;
   provider: string;
   /** The vault's on-chain address — the instrument. */
   providerReference: string;
@@ -573,9 +595,10 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
   requiresSeparateSwap: true;
   swap: EarnDepositSwap & {
     /**
-     * Base64 wire bytes of the UNSIGNED swap transaction (fee payer is the
-     * owner). The owner signs and broadcasts it itself — it moves only the
-     * owner's own funds between the owner's own token accounts, so SDP
+     * Base64 wire bytes of the UNSIGNED swap transaction. The fee payer is
+     * the owner, or the original request's `feePayer` (which then co-signs
+     * this transaction too). The partner broadcasts it itself — it moves only
+     * the owner's own funds between the owner's own token accounts, so SDP
      * records nothing for it.
      */
     transaction: string;
@@ -595,6 +618,12 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
      * carried none.
      */
     minSharesOut?: string;
+    /**
+     * The fee payer from the ORIGINAL request, carried through for the same
+     * reason as the floor: a follow-up build that dropped it would bill the
+     * customer's wallet. Absent when the original request named none.
+     */
+    feePayer?: string;
   };
 }
 
@@ -605,6 +634,8 @@ export interface EarnExternalWalletWithdrawalTransactionResponse {
     positionId: string;
     /** Shares encoded in the transaction, share units. */
     shares: string;
+    /** Minimum deposit-token amount encoded in the transaction, or null. */
+    minAmountOut: string | null;
   };
 }
 
@@ -702,7 +733,7 @@ export interface EarnExternalWalletEarnings {
   totalsByToken: EarnExternalWalletTokenEarnings[];
 }
 
-/** Response body of GET /v1/earn/external-wallet/earnings/:ownerAddress. */
+/** Response body of GET /v1/earn/external-wallet/earnings?ownerAddress=…. */
 export interface EarnExternalWalletEarningsResponse {
   earnings: EarnExternalWalletEarnings;
 }

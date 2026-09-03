@@ -1,3 +1,4 @@
+import { isCountryCode } from "@sdp/types/countries";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -154,6 +155,9 @@ export function requirementFieldError(
     return field.options.some((option) => option.value === value)
       ? null
       : `Select a valid ${field.label.toLowerCase()}.`;
+  }
+  if (field.kind === "country") {
+    return isCountryCode(value) ? null : `Select a valid ${field.label.toLowerCase()}.`;
   }
   if (field.kind === "date") {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {

@@ -59,13 +59,17 @@ const OPENAPI_TAG = {
     name: "Asset Profiles",
     description: "Issued-asset identity and metadata profiles, plus the public token metadata URI.",
   },
+  // NOTE: tag descriptions land UNQUOTED in generated MDX frontmatter
+  // (sdp-docs generate-api-docs.mjs), so a colon here breaks that YAML.
   PUBLIC_EARN: {
     name: "Earn",
-    description: "Caller-signed external-wallet vault deposit and exit transactions.",
+    description:
+      "The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.",
   },
   EARN: {
     name: "Earn",
-    description: "Caller-signed external-wallet vault deposit and exit transactions.",
+    description:
+      "The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.",
   },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },

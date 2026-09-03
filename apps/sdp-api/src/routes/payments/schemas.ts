@@ -301,8 +301,8 @@ export const paymentRecurringPaymentStatusSchema = z.enum([
   "expired",
 ]);
 
-export const createRecurringPaymentSchema = z.object({
-  sourceWalletId: z.string().min(1),
+export const createRecurringPaymentSchema = z.strictObject({
+  sourceCustodyWalletId: z.string().min(1),
   counterpartyId: z.string().min(1),
   counterpartyAccountId: z.string().min(1),
   token: paymentTokenSchema,
@@ -321,8 +321,8 @@ export const createRecurringPaymentSchema = z.object({
 });
 
 export const updateRecurringPaymentSchema = z
-  .object({
-    sourceWalletId: z.string().min(1).optional(),
+  .strictObject({
+    sourceCustodyWalletId: z.string().min(1).optional(),
     counterpartyId: z.string().min(1).optional(),
     counterpartyAccountId: z.string().min(1).optional(),
     token: paymentTokenSchema.optional(),
@@ -676,6 +676,8 @@ export const createOnrampQuoteSchema = z.object({
 
 const collectedDataSchema = z.record(z.string(), z.string()).optional();
 
+export const rampDestinationCountrySchema = z.enum(COUNTRY_CODES);
+
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
   z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
@@ -687,6 +689,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
     z.object({
       provider: z.literal("bvnk"),
@@ -694,6 +697,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
   ]),
   z.discriminatedUnion("direction", [
@@ -708,6 +712,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      providerAccountId: z.string().min(1).optional(),
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
@@ -747,7 +752,8 @@ export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
     provider: z.literal("lightspark"),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema,
-    destinationCountry: z.enum(COUNTRY_CODES),
+    destinationCountry: rampDestinationCountrySchema,
+    providerAccountId: z.string().min(1).optional(),
   }),
   z.object({
     provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "coinbase", "stripe"]),

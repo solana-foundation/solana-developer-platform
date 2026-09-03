@@ -799,7 +799,7 @@ export async function runComplianceCheck(
   return {
     address,
     checkedAt: result.checkedAt,
-    providers: result.providers,
+    providers: result.providers.filter((provider) => provider.provider !== "chainalysis"),
   };
 }
 

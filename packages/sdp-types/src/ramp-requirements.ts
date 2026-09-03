@@ -29,6 +29,12 @@ export type RequirementField =
       options: RequirementOption[];
     }
   | {
+      kind: "country";
+      key: string;
+      label: string;
+      required: boolean;
+    }
+  | {
       kind: "date";
       key: string;
       label: string;
@@ -66,9 +72,13 @@ export type CollectedFieldData = Record<string, string>;
 
 /** An existing payout external account for the corridor's fiat currency. */
 export interface PayoutRequirementAccount {
+  id: string;
   destinationCountry: CountryCode;
+  paymentRail: string | null;
   /** Provider-reported external-account status (e.g. Grid's CREATED/ACTIVE). */
   status: string;
+  bankName?: string;
+  accountNumberLast4?: string;
 }
 
 /**
@@ -86,18 +96,44 @@ export interface PayoutRequirementTree {
 
 // TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
 export type CounterpartyRequirements = { direction: RampDirection } & (
-  | { provider: RampProviderId; status: "ready" }
+  | { provider: Exclude<RampProviderId, "lightspark">; status: "ready" }
+  | { provider: "lightspark"; direction: "onramp"; status: "ready" }
+  | {
+      provider: "lightspark";
+      direction: "offramp";
+      status: "ready";
+      /** Payout account resolved for the corridor, for explicit quote selection. */
+      providerAccountId: string;
+      /** Corridor tree for destination re-selection; present on requirements GET answers, omitted by advances. */
+      payout?: PayoutRequirementTree;
+    }
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }
   | { provider: "lightspark"; status: "onboarding_not_started" }
   | { provider: "lightspark"; status: "collect_counterparty"; fields: RequirementField[] }
   | { provider: "lightspark"; status: "collect_account"; payout: PayoutRequirementTree }
-  | { provider: "bvnk"; status: "onboarding_not_started" }
-  | { provider: "bvnk"; status: "customer_verification_required"; verificationUrl: string }
+  | { provider: "bvnk"; status: "collect_counterparty"; fields: RequirementField[] }
+  | {
+      provider: "bvnk";
+      status: "customer_agreement_required";
+      /** Agreements are minted JIT per response and their URLs are never persisted. */
+      agreements: {
+        id: string;
+        filename: string;
+        downloadUrl: string;
+      }[];
+    }
+  | { provider: "bvnk"; status: "customer_pending_agreement_acceptance" }
+  | {
+      provider: "bvnk";
+      status: "customer_verification_required";
+      /** The authenticated verification link is minted JIT per response. */
+      verificationUrl: string;
+    }
   | { provider: "bvnk"; status: "customer_verifying" }
   | { provider: "bvnk"; status: "customer_verification_failed" }
-  | { provider: "bvnk"; status: "funding_account_provisioning" }
-  | { provider: "bvnk"; status: "provisioning_failed" }
+  | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
+  | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
   | { provider: "mural"; status: "onboarding_not_started" }
   | { provider: "mural"; status: "terms_of_service_required"; termsOfServiceUrl: string }
   | { provider: "mural"; status: "customer_verification_required"; verificationUrl: string }

@@ -57,7 +57,7 @@ import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { isSentryEnabled, type Observability } from "@/runtime/observability";
+import type { Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
@@ -522,13 +522,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       }),
       "Unexpected error"
     );
-    // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
-    // shouldn't pay the cost of building a scope when no observability backend
-    // is wired up. Kept at this seam (rather than inside captureUnexpectedError)
-    // so the helper stays a pure scope-builder against the injected Observability.
-    if (isSentryEnabled(c.env)) {
-      captureUnexpectedError(deps.observability, err, c);
-    }
+    captureUnexpectedError(deps.observability, err, c);
 
     c.header("X-SDP-Trace-ID", traceId);
     return c.json(

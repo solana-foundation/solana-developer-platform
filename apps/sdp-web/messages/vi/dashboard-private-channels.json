@@ -153,7 +153,39 @@
       "removeDescription": "Xóa {email} khỏi không gian và mọi kênh họ thuộc về. Thông tin đăng nhập SPC được giữ (SPC không có Endpoint xóa người dùng) nhưng bị tách khỏi SDP.",
       "removing": "Đang xóa…",
       "remove": "Xóa",
-      "removeSuccess": "Đã xóa thành viên."
+      "removeSuccess": "Đã xóa thành viên.",
+      "addPrincipal": "Thêm danh tính",
+      "columnPrincipal": "Danh tính",
+      "columnType": "Loại",
+      "principalActionsFor": "Thao tác cho {principal}",
+      "defaultPrincipal": "Mặc định",
+      "additionalPrincipal": "Bổ sung",
+      "disabledPrincipal": "Đã vô hiệu hóa",
+      "createAria": "Thêm danh tính Private Channels",
+      "createTitle": "Thêm danh tính",
+      "createDescription": "Chỉ tạo thêm danh tính khác khi dự án này cần ranh giới pháp lý, quỹ, khách hàng hoặc vận hành riêng.",
+      "createStepLabel": "Chi tiết",
+      "createStepProgress": "Bước 1/1",
+      "principalName": "Tên danh tính",
+      "principalNamePlaceholder": "Ví dụ: EU treasury",
+      "wallet": "Wallet",
+      "walletPlaceholder": "Chọn Wallet lưu ký",
+      "walletDescription": "Chọn Wallet chưa liên kết với danh tính khác. SDP ký một thử thách SPC để xác minh Wallet.",
+      "noWalletsBefore": "Không có Wallet lưu ký nào khả dụng.",
+      "noWalletsLink": "Tạo Wallet",
+      "noWalletsAfter": " trước, sau đó quay lại để thêm danh tính này.",
+      "creating": "Đang tạo…",
+      "verifyingWallet": "Đang xác minh Wallet…",
+      "retryWallet": "Thử lại xác minh",
+      "create": "Tạo danh tính",
+      "createSuccess": "Danh tính “{name}” đã được tạo.",
+      "createSuccessWithWallet": "Danh tính “{name}” đã được tạo và Wallet đã được xác minh.",
+      "disableAria": "Tắt định danh Private Channels",
+      "disableTitle": "Tắt định danh",
+      "disableDescription": "Tắt “{name}”. Lịch sử hoạt động của nó vẫn được giữ lại.",
+      "disabling": "Đang tắt…",
+      "disable": "Tắt định danh",
+      "disableSuccess": "Đã tắt định danh."
     },
     "deposit": {
       "title": "Nạp",
@@ -396,7 +428,8 @@
       "setupDetailsDescription": "Nhập endpoint Private Channels và địa chỉ program đã deploy cho project này. SDP tự động dùng RPC đã cấu hình của project.",
       "gatewayNotReady": "Gateway đã phản hồi nhưng chưa sẵn sàng",
       "connectionTestFailed": "Một số endpoint không kết nối được. Kiểm tra chi tiết kết nối được tô sáng và thử lại.",
-      "connectionRequestFailed": "Không thể kiểm tra kết nối. Kiểm tra chi tiết kết nối và thử lại."
+      "connectionRequestFailed": "Không thể kiểm tra kết nối. Kiểm tra chi tiết kết nối và thử lại.",
+      "projectRpcTestFailed": "RPC của dự án không thể xác minh lần deployment escrow. Hãy sửa tích hợp RPC hoặc địa chỉ deployment của dự án rồi thử lại."
     }
   }
 }

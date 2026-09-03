@@ -99,14 +99,14 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
-    pairs: offrampPairs(sdpEnvironment),
+    pairs: offrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOfframpSteps(t),
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {
       step: getOfframpRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "WITHDRAW",
       direction: "offramp",
     },
     selectionSchema: withdrawSelectionSchema,
@@ -118,6 +118,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       selectedRampPair,
       cryptoToken,
       collectedData,
+      selectedProviderAccountId,
       rampsMemo,
     }) => {
       const base = {
@@ -145,6 +146,9 @@ export function useOfframpWizard(props: UseRampWizardProps) {
         provider,
         fiatCurrency: selectedRampPair.fiatCurrency,
         destinationCountry,
+        ...(selectedProviderAccountId === null
+          ? {}
+          : { providerAccountId: selectedProviderAccountId }),
       } satisfies PaymentOfframpQuoteRequest;
     },
     onQuoteCreated: () => {

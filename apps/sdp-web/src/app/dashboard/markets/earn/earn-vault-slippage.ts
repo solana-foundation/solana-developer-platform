@@ -92,7 +92,7 @@ export type VaultQuoteState<T> =
   | { kind: "unavailable" }
   | { kind: "quoted"; key: string; preview: T };
 
-const QUOTE_DEBOUNCE_MS = 400;
+export const VAULT_QUOTE_DEBOUNCE_MS = 400;
 
 /**
  * The live quote a floor is derived from. Debounced behind typing, aborted on
@@ -143,7 +143,7 @@ export function useDebouncedVaultQuote<T>(
           if (!controller.signal.aborted) setState({ kind: "unavailable" });
         }
       );
-    }, QUOTE_DEBOUNCE_MS);
+    }, VAULT_QUOTE_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       controller.abort();

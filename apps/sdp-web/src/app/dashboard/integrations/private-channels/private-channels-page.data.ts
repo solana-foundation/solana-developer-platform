@@ -5,6 +5,7 @@ import type {
   PrivateChannelInstance,
   PrivateChannelInstanceOverview,
   PrivateChannelPrincipalDto,
+  PrivateChannelTokenEligibility,
   PrivateChannelVerifiedWalletDto,
 } from "@sdp/types";
 import {
@@ -16,6 +17,7 @@ import {
   fetchPrivateChannelOverview,
   fetchPrivateChannelPrincipals,
   fetchPrivateChannels,
+  fetchPrivateChannelTokenEligibility,
   fetchVerifiedSignableWallets,
   fetchVerifiedWallets,
 } from "@/lib/private-channels";
@@ -80,6 +82,12 @@ export function loadChannels(
   client: SdpApiClient
 ): Promise<PrivateChannelsResult<PrivateChannelDto[]>> {
   return toResult(() => fetchPrivateChannels(client), []);
+}
+
+export function loadTokenEligibility(
+  client: SdpApiClient
+): Promise<PrivateChannelsResult<PrivateChannelTokenEligibility[]>> {
+  return toResult(() => fetchPrivateChannelTokenEligibility(client), []);
 }
 
 /**

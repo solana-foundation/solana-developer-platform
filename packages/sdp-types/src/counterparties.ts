@@ -1,4 +1,5 @@
-import type { Country } from "./countries";
+import type { Country, CountryCode } from "./countries";
+import type { RampProviderId } from "./provider-access";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
@@ -131,7 +132,6 @@ export interface CounterpartyResponse {
 export interface CounterpartyFieldOptions {
   entityTypes: readonly CounterpartyEntityType[];
   countries: readonly Country[];
-  usStates: readonly { code: string; name: string }[];
 }
 
 export interface CounterpartyFieldOptionsResponse {
@@ -190,4 +190,38 @@ export interface ListCounterpartyAccountsResponse {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface CounterpartyProviderAccount {
+  id: string;
+  provider: RampProviderId;
+  kind: CounterpartyProviderAccountKind;
+  fiatCurrency: string | null;
+  destinationCountry: CountryCode | null;
+  paymentRail: string | null;
+  status: CounterpartyAccountStatus;
+  providerStatus: string | null;
+  createdAt: string;
+  bankName?: string;
+  accountNumberLast4?: string;
+  paymentRails?: string[];
+  customerLink?: CounterpartyProviderCustomerLink;
+}
+
+export interface CounterpartyProviderCustomerLink {
+  id: string;
+  providerCustomerReference: string;
+  status: CounterpartyAccountStatus;
+  providerStatus: string | null;
+  createdAt: string;
+}
+
+export type CounterpartyProviderAccountKind =
+  | "customer_link"
+  | "payout_account"
+  | "funding_wallet"
+  | "merchant_wallet";
+
+export interface ListCounterpartyProviderAccountsResponse {
+  accounts: CounterpartyProviderAccount[];
 }

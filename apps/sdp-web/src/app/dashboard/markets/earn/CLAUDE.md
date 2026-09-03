@@ -75,12 +75,18 @@ program create still sends the body `requestId` form.
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
-  `GET …/movements/:movementId`, read `GET …/earnings/:ownerAddress`
+  `GET …/movements/:movementId`, read `GET …/earnings?ownerAddress=`
   (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
-  render a dash, never $0), list `GET …/movements?ownerAddress=`, and exit via
+  render a dash, never $0), list `GET …/movements?ownerAddress=` and
+  `GET …/positions?ownerAddress=` (the owner rides the query on every
+  per-owner read), and exit via
   `…/withdrawal-transactions` + `…/withdrawals`. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
-  snippets — a B2B2C partner cannot name a custody wallet. The guide is
+  snippets — a B2B2C partner cannot name a custody wallet. The optional
+  partner `feePayer` (the implementor sponsoring its customers' fees) is
+  documented in the public docs guide
+  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`), which mirrors
+  these snippets — update both together. The guide is
   entirely derived from the strategy catalogue: nothing is persisted, there is
   no styling to save, and no public handoff token exists. (The UI builder that
   used to hold those — styled previews, saved per-project configuration, the
@@ -284,6 +290,9 @@ program create still sends the body `requestId` form.
   (`fetchEarnVaultWithdrawalsByRequestId`) and the absorbed-by-approval
   outcome. The result screen links the withdrawal transaction in Explorer.
   Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
+  Its five-second detail poll reports the terminal movement back to Treasury;
+  Treasury keeps the latest state in the Active positions status column rather
+  than announcing a long-running chain result with a toast.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
   (fingerprint: project, position, shares, minAmountOut — the derived exit
   floor is in there for the same reason the deposit's is) under its own
@@ -312,8 +321,8 @@ program create still sends the body `requestId` form.
 
 `useEarnPrograms`, `useEarnVaultPositions`, `useEarnVaultDeposits`,
 `useEarnVaultWithdrawals`, `createEarnVaultDeposit`,
-`createEarnVaultWithdrawal`, `useEarnVaultDepositOutcomeToast`,
-`useEarnVaultWithdrawalOutcomeToast`, `isEarnVaultDepositInFlight`,
+`createEarnVaultWithdrawal`, `useEarnVaultDepositOutcome`,
+`useEarnVaultWithdrawalOutcome`, `isEarnVaultDepositInFlight`,
 `isEarnVaultWithdrawalInFlight`, `earn-vault-deposit-tracking.ts`,
 `earn-vault-withdraw-tracking.ts`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
 `EarnVaultWithdrawModal`, `EarnVaultDepositOutcomeTracker` and
@@ -339,11 +348,13 @@ outcome (an approval is not a failure, and not a submitted deposit either) and
 is accepted ONLY on a 202: created-and-held is a contradiction, and this must
 not resolve it in the customer's favour.
 
-`useEarnVaultDepositOutcomeToast` is the deposit half of the same pattern
-`useEarnWithdrawalOutcomeToast` established: SWR whose `refreshInterval`
-returns `0` once the status is terminal so the poll SELF-STOPS, a ref guard so
-the announcement fires exactly once, `onSettled` right after so the caller can
-refresh balances and retire the watch, and `undefined` args issuing no requests.
+`useEarnVaultDepositOutcome` keeps the deposit half of the polling pattern
+`useEarnWithdrawalOutcomeToast` established, but owns no toast. It polls at 1s
+for the first 15s, 2.5s through the first minute, then 5s until terminal, when
+the interval becomes `0`. A ref guard makes `onSettled` fire exactly once, and
+`undefined` args issue no requests. `onUpdated` projects every changed status
+into Treasury's Active positions table without replacing settled content with
+a skeleton; `onSettled` refreshes balances once the movement is done.
 Terminal for a vault movement is `confirmed | failed`
 (`EARN_TERMINAL_VAULT_MOVEMENT_STATUSES`) — note `pending` is NOT terminal: it
 reads like a failure and is not one, it means SDP could not establish that the
@@ -361,11 +372,12 @@ Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
 server read that only decides WHICH deposits are worth watching, and the reason
 a deposit signed before a reload, in another tab, or unblocked by an approval
-minutes later becomes visible again. `useEarnVaultDepositOutcomeToast` is the
-**outcome** tier at 5s per watched deposit, self-stopping on terminal. Do not
-collapse them: one fast poll over the whole list would hammer a list read that
-exists only to seed watches, and one slow poll per deposit would make a
-settlement the customer is waiting on take up to half a minute to appear.
+minutes later becomes visible again. `useEarnVaultDepositOutcome` is the
+adaptive **outcome** tier per watched deposit, self-stopping on terminal. Each
+detail read is a scoped, fail-soft chain observation that advances the guarded
+ledger row immediately; the scheduled reconciler remains the recovery path.
+Do not collapse the tiers: one fast poll over the whole list would hammer a list
+read that exists only to seed watches.
 
 ## Availability is the whole design
 

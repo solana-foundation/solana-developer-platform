@@ -37,6 +37,7 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -44,9 +45,13 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
 import { recoverOrBlockLifecycleCollection } from "./collection";
-import { enforceRecurringPaymentPolicy } from "./policy";
+import {
+  assertNoPendingRecurringCollectionApproval,
+  enforceRecurringPaymentPolicy,
+} from "./policy";
 import {
   activationErrorMessage,
+  assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   generateProgramPlanId,
@@ -54,7 +59,7 @@ import {
 } from "./shared";
 
 type RecurringPaymentUpdateSnapshot = {
-  sourceWalletId: string;
+  sourceCustodyWalletId: string | null;
   counterpartyId: string;
   counterpartyAccountId: string;
   token: string;
@@ -82,7 +87,7 @@ type ResolvedRecurringPaymentUpdate = {
 };
 
 const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>([
-  "sourceWalletId",
+  "sourceCustodyWalletId",
   "counterpartyId",
   "counterpartyAccountId",
   "token",
@@ -99,7 +104,7 @@ function tenantScope(input: { organizationId: string; projectId: string }) {
 
 function recurringPaymentSnapshot(row: PaymentRecurringPaymentRow): RecurringPaymentUpdateSnapshot {
   return {
-    sourceWalletId: row.source_wallet_id,
+    sourceCustodyWalletId: row.source_custody_wallet_id,
     counterpartyId: row.counterparty_id,
     counterpartyAccountId: row.counterparty_account_id,
     token: row.token,
@@ -202,9 +207,9 @@ async function resolveRecurringPaymentUpdate(input: {
   actor: WalletOperationActor | null;
 }): Promise<ResolvedRecurringPaymentUpdate> {
   const finalSourceWallet = input.nextSourceWallet ?? input.sourceWallet;
-  const requestedSourceWalletId =
-    input.request.sourceWalletId ?? input.recurringPayment.source_wallet_id;
-  if (finalSourceWallet.walletId !== requestedSourceWalletId) {
+  const requestedSourceCustodyWalletId =
+    input.request.sourceCustodyWalletId ?? input.recurringPayment.source_custody_wallet_id;
+  if (finalSourceWallet.id !== requestedSourceCustodyWalletId) {
     throw badRequest("Recurring payment source wallet does not match request");
   }
 
@@ -248,28 +253,9 @@ async function resolveRecurringPaymentUpdate(input: {
       ? input.request.metadataUri
       : input.recurringPayment.metadata_uri;
 
-  await enforceRecurringPaymentPolicy({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWallet: finalSourceWallet,
-    operationType: "recurring_payment_update",
-    token,
-    amount,
-    destination: destination.destinationAddress,
-    apiKeyId: input.apiKeyId,
-    actor: input.actor,
-    rawPayload: {
-      recurringPaymentId: input.recurringPayment.id,
-      counterpartyId,
-      counterpartyAccountId,
-      periodHours,
-    },
-  });
-
   const before = recurringPaymentSnapshot(input.recurringPayment);
   const after: RecurringPaymentUpdateSnapshot = {
-    sourceWalletId: finalSourceWallet.walletId,
+    sourceCustodyWalletId: finalSourceWallet.id,
     counterpartyId,
     counterpartyAccountId,
     token,
@@ -294,6 +280,35 @@ async function resolveRecurringPaymentUpdate(input: {
     metadataUri,
     ...diff,
   };
+}
+
+async function enforceResolvedRecurringPaymentUpdatePolicy(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  resolved: ResolvedRecurringPaymentUpdate;
+  apiKeyId: string | null;
+  actor: WalletOperationActor | null;
+}): Promise<void> {
+  await enforceRecurringPaymentPolicy({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    sourceWallet: input.resolved.sourceWallet,
+    operationType: "recurring_payment_update",
+    token: input.resolved.token,
+    amount: input.resolved.amount,
+    destination: input.resolved.destinationAddress,
+    apiKeyId: input.apiKeyId,
+    actor: input.actor,
+    rawPayload: {
+      recurringPaymentId: input.recurringPaymentId,
+      counterpartyId: input.resolved.counterpartyId,
+      counterpartyAccountId: input.resolved.counterpartyAccountId,
+      periodHours: input.resolved.periodHours,
+    },
+  });
 }
 
 async function recordRecurringPaymentUpdateEvent(input: {
@@ -347,6 +362,7 @@ async function updatePendingRecurringPayment(input: {
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    sourceCustodyWalletId: input.resolved.sourceWallet.id,
     sourceWalletId: input.resolved.sourceWallet.walletId,
     sourceAddress: input.resolved.sourceWallet.publicKey,
     counterpartyId: input.resolved.counterpartyId,
@@ -395,6 +411,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   changedFields: string[];
   beforeValues: Record<string, unknown>;
   afterValues: Record<string, unknown>;
+  newSourceCustodyWalletId: string | null;
   createdBy: string | null;
   nowIso: string;
   recoveringStaleUpdate: boolean;
@@ -409,6 +426,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     if (existing) {
       if (
         existing.mode !== input.mode ||
+        existing.new_source_custody_wallet_id !== input.newSourceCustodyWalletId ||
         !updateAttemptMatchesRequest(existing, {
           changedFields: input.changedFields,
           beforeValues: input.beforeValues,
@@ -442,6 +460,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     oldSubscriptionId: input.claimed.subscription_id,
     newPlanId: null,
     newSubscriptionId: null,
+    newSourceCustodyWalletId: input.newSourceCustodyWalletId,
     planUpdateSignature: null,
     planCreationSignature: null,
     authorizationSetupSignature: null,
@@ -655,11 +674,11 @@ async function runMetadataScheduleUpdate(input: {
     }
 
     const planPda = assertValidAddress(input.claimed.plan_pda, "planPda") as Address;
-    const sourceSigner = await solanaServices.createOrgSigner(
+    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.walletId
+      input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -972,6 +991,7 @@ async function finalizeReplacementUpdate(input: {
       recurringPaymentId: input.claimed.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      sourceCustodyWalletId: input.resolved.sourceWallet.id,
       sourceWalletId: input.resolved.sourceWallet.walletId,
       sourceAddress: input.resolved.sourceWallet.publicKey,
       counterpartyId: input.resolved.counterpartyId,
@@ -1093,11 +1113,11 @@ async function runReplacementUpdate(input: {
     clampToMinimum: Boolean(planCreationSignature || authorizationSignature || oldCancelSignature),
   });
 
-  const sourceSigner = await solanaServices.createOrgSigner(
+  const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
     input.env,
     input.organizationId,
     input.projectId,
-    input.resolved.sourceWallet.walletId
+    input.resolved.sourceWallet.id
   );
   if (sourceSigner.address !== input.resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1314,11 +1334,11 @@ async function runReplacementUpdate(input: {
       stage: "cancel_old_subscription",
       updatedAt: new Date().toISOString(),
     });
-    const oldSourceSigner = await solanaServices.createOrgSigner(
+    const oldSourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
-      input.oldSourceWallet.walletId
+      input.oldSourceWallet.id
     );
     if (oldSourceSigner.address !== input.oldSourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1414,6 +1434,79 @@ async function recordRecurringPaymentUpdateFailure(input: {
   }
 }
 
+async function claimSourceChangingRecurringPaymentUpdate(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  sourceWallet: CustodyWallet;
+  updatedAt: string;
+  staleBefore: string;
+}): Promise<PaymentRecurringPaymentRow | null> {
+  return getDb(input.env).transaction(async (tx) => {
+    const locked = await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+            AND status = ?
+            AND updated_at = ?
+            AND source_custody_wallet_id = ?
+            AND source_wallet_id = ?
+            AND source_address = ?
+            AND subscription_id IS NOT DISTINCT FROM ?
+            AND next_collection_due_at IS NOT DISTINCT FROM ?
+          FOR UPDATE`
+      )
+      .bind(
+        input.recurringPayment.id,
+        input.organizationId,
+        input.projectId,
+        input.recurringPayment.status,
+        input.recurringPayment.updated_at,
+        input.sourceWallet.id,
+        input.sourceWallet.walletId,
+        input.sourceWallet.publicKey,
+        input.recurringPayment.subscription_id,
+        input.recurringPayment.next_collection_due_at
+      )
+      .first<{ id: string }>();
+    if (!locked) return null;
+
+    if (input.recurringPayment.subscription_id && input.recurringPayment.next_collection_due_at) {
+      const activeAttempt = await createPostgresPaymentSubscriptionsRepository(
+        tx
+      ).getCollectionAttemptByDue({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        subscriptionId: input.recurringPayment.subscription_id,
+        dueAt: input.recurringPayment.next_collection_due_at,
+        statuses: ["pending", "processing", "confirmed"],
+      });
+      if (activeAttempt) return null;
+    }
+
+    await assertNoPendingRecurringCollectionApproval({
+      db: tx,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      custodyWalletId: input.sourceWallet.id,
+      recurringPaymentId: input.recurringPayment.id,
+      collectionDueAt: input.recurringPayment.next_collection_due_at,
+    });
+
+    return createPostgresPaymentRecurringPaymentsRepository(tx).claimRecurringPaymentUpdate({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      updatedAt: input.updatedAt,
+      staleBefore: input.staleBefore,
+    });
+  });
+}
+
 export async function updateRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -1426,12 +1519,7 @@ export async function updateRecurringPayment(input: {
   apiKeyId: string | null;
   actor: WalletOperationActor | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
-    throw badRequest("Recurring payment source wallet does not match request");
-  }
-  if (input.recurringPayment.source_address !== input.sourceWallet.publicKey) {
-    throw badRequest("Recurring payment source address does not match wallet");
-  }
+  assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
   const nowIso = new Date().toISOString();
   assertRecurringPaymentUpdateStatus(input.recurringPayment, nowIso);
@@ -1441,6 +1529,11 @@ export async function updateRecurringPayment(input: {
       throw badRequest("nextCollectionDueAt can only be updated after activation");
     }
     const resolved = await resolveRecurringPaymentUpdate(input);
+    await enforceResolvedRecurringPaymentUpdatePolicy({
+      ...input,
+      recurringPaymentId: input.recurringPayment.id,
+      resolved,
+    });
     return updatePendingRecurringPayment({
       env: input.env,
       organizationId: input.organizationId,
@@ -1468,24 +1561,72 @@ export async function updateRecurringPayment(input: {
     recurringPayment: input.recurringPayment,
   });
   assertRecurringPaymentUpdateStatus(settled.recurringPayment, new Date().toISOString());
+  assertRecurringPaymentSourceWallet(settled.recurringPayment, input.sourceWallet);
 
   const resolved = await resolveRecurringPaymentUpdate({
     ...input,
     recurringPayment: settled.recurringPayment,
   });
+  const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
+  if (sourceChanged) {
+    await assertNoPendingRecurringCollectionApproval({
+      db: getDb(input.env),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      custodyWalletId: input.sourceWallet.id,
+      recurringPaymentId: settled.recurringPayment.id,
+      collectionDueAt: settled.recurringPayment.next_collection_due_at,
+    });
+  }
+
+  const mode = requestedActiveUpdateMode(resolved.changedFields);
+  const requiresRuntimeExecution =
+    mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;
+  if (requiresRuntimeExecution) {
+    const signingService = createSigningService(input.env);
+    await signingService.admitRuntimeExecution(
+      input.organizationId,
+      input.projectId,
+      input.sourceWallet.id
+    );
+    if (sourceChanged) {
+      await signingService.admitRuntimeExecution(
+        input.organizationId,
+        input.projectId,
+        resolved.sourceWallet.id
+      );
+    }
+  }
+
+  await enforceResolvedRecurringPaymentUpdatePolicy({
+    ...input,
+    recurringPaymentId: settled.recurringPayment.id,
+    resolved,
+  });
   if (resolved.changedFields.length === 0) {
     return settled.recurringPayment;
   }
 
-  const mode = requestedActiveUpdateMode(resolved.changedFields);
   const recoveringStaleUpdate = settled.recurringPayment.status === "updating";
-  const claimed = await recurringRepo.claimRecurringPaymentUpdate({
-    recurringPaymentId: settled.recurringPayment.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    updatedAt: new Date().toISOString(),
-    staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
-  });
+  const claimUpdatedAt = new Date().toISOString();
+  const staleBefore = getRecurringPaymentOperationStaleBefore(nowIso);
+  const claimed = sourceChanged
+    ? await claimSourceChangingRecurringPaymentUpdate({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment: settled.recurringPayment,
+        sourceWallet: input.sourceWallet,
+        updatedAt: claimUpdatedAt,
+        staleBefore,
+      })
+    : await recurringRepo.claimRecurringPaymentUpdate({
+        recurringPaymentId: settled.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        updatedAt: claimUpdatedAt,
+        staleBefore,
+      });
   if (!claimed) {
     throw new AppError("CONFLICT", "Recurring payment update is already processing");
   }
@@ -1499,6 +1640,7 @@ export async function updateRecurringPayment(input: {
     changedFields: resolved.changedFields.map(String),
     beforeValues: resolved.beforeValues,
     afterValues: resolved.afterValues,
+    newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
     createdBy: input.createdBy,
     nowIso,
     recoveringStaleUpdate,

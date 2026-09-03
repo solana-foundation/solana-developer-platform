@@ -39,6 +39,7 @@ import {
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import { createSigningService } from "@/services/domain/signing.service";
 import {
   createTransferSignedSubmissionStore,
   isDefiniteSubmissionError,
@@ -56,6 +57,7 @@ import {
 import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   activationErrorMessage,
+  assertRecurringPaymentSourceWallet,
   confirmSubscriptionSignature,
   sendSubscriptionInstructions,
 } from "./shared";
@@ -265,6 +267,8 @@ async function verifyRecurringPaymentCollection(input: {
     input.attempt.token === input.recurringPayment.token &&
     input.attempt.amount === input.recurringPayment.amount &&
     attemptMetadata.recurringPaymentId === input.recurringPayment.id &&
+    (input.transfer.custody_wallet_id === null ||
+      input.transfer.custody_wallet_id === input.recurringPayment.source_custody_wallet_id) &&
     input.transfer.wallet_id === input.recurringPayment.source_wallet_id &&
     input.transfer.counterparty_id === input.recurringPayment.counterparty_id &&
     input.transfer.source_address === input.recurringPayment.source_address &&
@@ -359,6 +363,140 @@ function collectionRetryMetadata(env: Env, error: unknown): Record<string, unkno
     error: activationErrorMessage(error),
     retryAfterAt: new Date(Date.now() + retryAfterMinutes * 60 * 1000).toISOString(),
   };
+}
+
+async function createCollectionAttemptUnderRecurringLock(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  attemptedAt: string;
+  status: "processing" | "failed";
+  error: string | null;
+  metadata: Record<string, unknown>;
+  enforceCooldown: boolean;
+}): Promise<PaymentSubscriptionCollectionAttemptRow | null> {
+  const subscriptionId = input.recurringPayment.subscription_id;
+  const dueAt = input.recurringPayment.next_collection_due_at;
+  if (!subscriptionId || !dueAt) return null;
+
+  return getDb(input.env).transaction(async (tx) => {
+    const locked = await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+            AND status = 'active'
+            AND source_custody_wallet_id IS NOT DISTINCT FROM ?
+            AND source_wallet_id = ?
+            AND source_address = ?
+            AND subscription_id = ?
+            AND next_collection_due_at = ?
+            AND next_collection_due_at <= ?
+          FOR UPDATE`
+      )
+      .bind(
+        input.recurringPayment.id,
+        input.organizationId,
+        input.projectId,
+        input.recurringPayment.source_custody_wallet_id,
+        input.recurringPayment.source_wallet_id,
+        input.recurringPayment.source_address,
+        subscriptionId,
+        dueAt,
+        input.attemptedAt
+      )
+      .first<{ id: string }>();
+    if (!locked) return null;
+
+    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const activeAttempt = await subscriptionsRepo.getCollectionAttemptByDue({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId,
+      dueAt,
+      statuses: ["pending", "processing", "confirmed"],
+    });
+    if (activeAttempt) return null;
+
+    if (input.enforceCooldown) {
+      const retryAfterMinutes = parsePositiveIntegerConfig(
+        input.env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
+        DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES
+      );
+      const retryBefore = new Date(
+        new Date(input.attemptedAt).getTime() - retryAfterMinutes * 60 * 1000
+      ).toISOString();
+      const recentFailure = await subscriptionsRepo.getCollectionAttemptByDue({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        subscriptionId,
+        dueAt,
+        statuses: ["failed"],
+      });
+      if (recentFailure && recentFailure.updated_at > retryBefore) return null;
+    }
+
+    return subscriptionsRepo.createCollectionAttempt({
+      id: `psca_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId,
+      transferId: null,
+      token: input.recurringPayment.token,
+      amount: input.recurringPayment.amount,
+      dueAt,
+      attemptedAt: input.attemptedAt,
+      status: input.status,
+      signature: null,
+      error: input.error,
+      metadata: input.metadata,
+      createdAt: input.attemptedAt,
+      updatedAt: input.attemptedAt,
+    });
+  });
+}
+
+export async function journalAutomatedCollectionFailure(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  initiatedByKeyId: string | null;
+  error: unknown;
+}): Promise<void> {
+  const subscriptionId = input.recurringPayment.subscription_id;
+  const dueAt = input.recurringPayment.next_collection_due_at;
+  if (!subscriptionId || !dueAt) return;
+
+  const attemptedAt = new Date().toISOString();
+  const message = activationErrorMessage(input.error);
+  const attempt = await createCollectionAttemptUnderRecurringLock({
+    ...input,
+    attemptedAt,
+    status: "failed",
+    error: message,
+    metadata: recurringCollectionMetadata({
+      recurringPaymentId: input.recurringPayment.id,
+      collectionSource: "automated",
+      initiatedByKeyId: input.initiatedByKeyId,
+      extra: collectionRetryMetadata(input.env, input.error),
+    }),
+    enforceCooldown: true,
+  });
+
+  if (!attempt) return;
+  await emitRecurringPaymentFailed(input.env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+    subscriptionId,
+    dueAt,
+    attemptId: attempt.id,
+    error: message,
+  });
 }
 
 /**
@@ -1100,12 +1238,7 @@ export async function collectRecurringPayment(input: {
   initiatedByKeyId: string | null;
   collectionSource?: RecurringCollectionSource;
 }): Promise<RecurringPaymentCollectionResult> {
-  if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
-    throw badRequest("Recurring payment source wallet does not match request");
-  }
-  if (input.recurringPayment.source_address !== input.sourceWallet.publicKey) {
-    throw badRequest("Recurring payment source address does not match wallet");
-  }
+  assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   if (!input.recurringPayment.plan_id || !input.recurringPayment.subscription_id) {
     throw new AppError("CONFLICT", "Recurring payment is missing subscription records");
   }
@@ -1151,6 +1284,26 @@ export async function collectRecurringPayment(input: {
       return recovered;
     }
 
+    try {
+      await createSigningService(input.env).admitRuntimeExecution(
+        input.organizationId,
+        input.projectId,
+        input.sourceWallet.id
+      );
+    } catch (error) {
+      if (input.collectionSource === "automated") {
+        await journalAutomatedCollectionFailure({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPayment: input.recurringPayment,
+          initiatedByKeyId: input.initiatedByKeyId,
+          error,
+        });
+      }
+      throw error;
+    }
+
     if (input.recurringPayment.status !== "active") {
       throw new AppError("CONFLICT", "Recurring payment must be active before collection");
     }
@@ -1173,26 +1326,20 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Subscription must be active before collection");
     }
 
-    attempt = await subscriptionsRepo.createCollectionAttempt({
-      id: `psca_${crypto.randomUUID()}`,
+    attempt = await createCollectionAttemptUnderRecurringLock({
+      env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      subscriptionId: subscription.id,
-      transferId: null,
-      token: input.recurringPayment.token,
-      amount: input.recurringPayment.amount,
-      dueAt,
+      recurringPayment: input.recurringPayment,
       attemptedAt: nowIso,
       status: "processing",
-      signature: null,
       error: null,
       metadata: recurringCollectionMetadata({
         recurringPaymentId: input.recurringPayment.id,
         collectionSource: input.collectionSource,
         initiatedByKeyId: input.initiatedByKeyId,
       }),
-      createdAt: nowIso,
-      updatedAt: nowIso,
+      enforceCooldown: input.collectionSource === "automated",
     });
     if (!attempt) {
       const recoveredAfterConflict = await recoverRecurringPaymentCollection({

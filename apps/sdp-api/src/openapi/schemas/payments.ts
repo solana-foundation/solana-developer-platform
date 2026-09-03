@@ -1063,10 +1063,14 @@ export const paymentSubscriptionIdParamsSchema = subscriptionIdParamsSchemaBase
 
 export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaBase
   .extend({
-    sourceWalletId: withOpenApi(createRecurringPaymentSchemaBase.shape.sourceWalletId, {
-      description: `SDP custody wallet that will fund the recurring payment — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
-    }),
+    sourceCustodyWalletId: withOpenApi(
+      createRecurringPaymentSchemaBase.shape.sourceCustodyWalletId,
+      {
+        description:
+          "Exact SDP Wallet ID (`id` from `GET /v1/wallets`) that will fund the recurring payment. Provider `walletId`, wallet addresses, and the legacy `sourceWalletId` selector are not accepted.",
+        example: "cwlt_example",
+      }
+    ),
     counterpartyId: withOpenApi(createRecurringPaymentSchemaBase.shape.counterpartyId, {
       description: "Counterparty receiving the recurring payment.",
       example: "cpty_example",
@@ -1107,10 +1111,14 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
 
 export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaBase
   .safeExtend({
-    sourceWalletId: withOpenApi(updateRecurringPaymentSchemaBase.shape.sourceWalletId, {
-      description: `Optional replacement SDP custody wallet — ${WALLET_ID_INPUT_NOTE} Active replacements require write access to both the old and new source wallets.`,
-      example: "privy_wallet_123",
-    }),
+    sourceCustodyWalletId: withOpenApi(
+      updateRecurringPaymentSchemaBase.shape.sourceCustodyWalletId,
+      {
+        description:
+          "Optional exact replacement SDP Wallet ID (`id` from `GET /v1/wallets`). Provider `walletId`, wallet addresses, and the legacy `sourceWalletId` selector are not accepted. Active replacements require write access to both the old and new source wallets.",
+        example: "cwlt_example",
+      }
+    ),
     counterpartyId: withOpenApi(updateRecurringPaymentSchemaBase.shape.counterpartyId, {
       description:
         "Optional replacement counterparty. When provided, counterpartyAccountId is also required.",
@@ -1174,8 +1182,12 @@ export const paymentRecurringPaymentSchema = z
     id: z.string().openapi({ description: "SDP recurring payment ID.", example: "prp_example" }),
     organizationId: orgIdParamSchema,
     projectId: projectIdParamSchema,
-    sourceWalletId: walletIdParamSchema.openapi({
-      description: "SDP custody wallet that funds the recurring payment.",
+    sourceCustodyWalletId: z.string().nullable().openapi({
+      description: "Exact source SDP Wallet ID, or null for unresolved legacy records.",
+      example: "cwlt_example",
+    }),
+    sourceProviderWalletId: walletIdParamSchema.openapi({
+      description: "Source Provider wallet ID retained as evidence.",
     }),
     sourceAddress: solanaAddressSchema.openapi({
       description: "Source wallet address.",

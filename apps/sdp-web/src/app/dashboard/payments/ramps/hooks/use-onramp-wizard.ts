@@ -68,14 +68,14 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: onrampPairs(sdpEnvironment),
+    pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositAmountSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {
       step: getOnrampRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "DEPOSIT",
       direction: "onramp",
     },
     selectionSchema: depositSelectionSchema,

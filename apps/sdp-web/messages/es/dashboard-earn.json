@@ -77,7 +77,14 @@
       "withdrawalApprovalUnavailable": "Un proveedor puede marcar un retiro como En espera de aprobación. SDP aún no puede gestionar esa aprobación; un aprobador autorizado del proveedor debe completarla fuera de este Dashboard, y no debes reenviarla.",
       "provider": "Proveedor",
       "unnamedProgram": "Estrategia sin nombre",
-      "usdSymbol": "USD"
+      "usdSymbol": "USD",
+      "summaryDeposited": "Depositado",
+      "summaryApy": "APY est.",
+      "summaryApyCaption": "Tasa en vivo ponderada por valor en todas las posiciones abiertas",
+      "summaryApyUnavailable": "No disponible hasta que cada posición abierta tenga un valor y una tasa en vivo",
+      "viewAll": "Ver todo",
+      "liquidity": "Liquidez",
+      "yourPosition": "Tu posición"
     },
     "earnProgram": {
       "eyebrow": "Yield integrado",
@@ -206,7 +213,32 @@
       "mainnetPreviewDescription": "Este vault funciona en Mainnet. Puedes revisar aquí la experiencia del cliente y la integración, pero cambia a un proyecto de Producción para guardarla o enviar depósitos.",
       "mainnetPreviewFooter": "Solo vista previa de Mainnet. Se requiere un proyecto de Producción para guardar o activar esta integración.",
       "mainnetHandoffDescription": "Los enlaces públicos de entrega se crean desde un proyecto de Producción. Aun así, puedes revisar y copiar el ejemplo del servidor a continuación.",
-      "mainnetHandoffUnavailable": "Abre este vault desde un proyecto de Producción para crear una entrega de ingeniería que se pueda compartir."
+      "mainnetHandoffUnavailable": "Abre este vault desde un proyecto de Producción para crear una entrega de ingeniería que se pueda compartir.",
+      "dashboardTitle": "Portafolio de clientes",
+      "configureShort": "Configurar",
+      "portfolioRefreshError": "La última actualización falló. Mostramos el último portafolio completo mientras reintentamos automáticamente.",
+      "flowPreview": "Previsualiza la UI",
+      "getStarted": "Empezar",
+      "liquidity": "Liquidez",
+      "provider": "Proveedor",
+      "integrateEyebrow": "Integración del Yield integrado · Paso 2 de 2",
+      "integrateTitle": "Integra el Yield integrado",
+      "integrateDescription": "Conecta la estrategia seleccionada a tu producto mediante la API de Wallet externa de SDP: depósitos que firman tus clientes, saldos y actividad en vivo, y retiros. SDP verifica cada firma y registra cada movimiento antes de transmitirlo.",
+      "apiKeyNoteTitle": "Mantén la API key del lado del servidor",
+      "guideClientTitle": "1 · Configura el cliente del servidor",
+      "guideClientDescription": "Cada llamada se ejecuta desde tu backend con la API key de tu proyecto, almacenada en el entorno del servidor como SDP_API_KEY. El helper compartido adjunta la key y desempaqueta el sobre de respuesta de SDP.",
+      "guideDepositTitle": "2 · Acepta depósitos",
+      "guideDepositDescription": "Crea una transacción sin firmar para la Wallet de tu cliente, haz que la firme en tu app y luego envía los bytes firmados con una clave de idempotencia. Consulta el movimiento registrado hasta que se finalice o falle; los reintentos con la misma clave reproducen el depósito original en lugar de mover el dinero dos veces.",
+      "guidePortfolioTitle": "3 · Muestra saldo, ganancias y actividad",
+      "guidePortfolioDescription": "Lee el saldo y el total ganado por cada Token de depósito, lista la actividad del cliente y carga las posiciones en vivo para el flujo de retiro. Lo ganado solo se indica cuando es exacto; muestra un guion cuando no esté disponible, nunca $0.",
+      "guideWithdrawTitle": "4 · Retira",
+      "guideWithdrawDescription": "La salida replica el depósito: crea el retiro sin firmar para una posición, el cliente firma y tú lo envías con el mismo contrato de idempotencia. Los retiros siguen funcionando incluso cuando los nuevos depósitos están en pausa."
+    },
+    "liquidity": {
+      "instant": "Instantánea",
+      "delayed": "Diferida",
+      "delayedDay": "Diferida · 1 día",
+      "delayedDays": "Diferida · {days} días"
     }
   },
   "DashboardEarn": {
@@ -481,7 +513,22 @@
       "vaultAbsorbedNote": "Los detalles a continuación son el depósito aprobado. Si tenías la intención de hacer un segundo depósito del mismo monto, envía de nuevo.",
       "vaultHeldKeyUnavailable": "SDP no pudo verificar si tu depósito aprobado anterior ya se procesó, así que no se envió nada. Intenta de nuevo en un momento.",
       "vaultOutcomeConfirmed": "Depósito del Vault confirmado on-chain; tu posición está activa.",
-      "vaultOutcomeFailed": "El depósito del Vault falló; no salieron fondos de tu Wallet."
+      "vaultOutcomeFailed": "El depósito del Vault falló; no salieron fondos de tu Wallet.",
+      "vaultPayWith": "Pagar con",
+      "vaultSwapNotice": "Tu {source} se intercambia por {target} mediante Jupiter dentro de la misma transacción, así que el swap y el depósito se ejecutan juntos o no se ejecutan. El depósito se dimensiona con el mínimo garantizado del swap (tolerancia del {pct}%); cualquier mejora se queda en tu Wallet como {target}.",
+      "vaultSwapRow": "Swap",
+      "vaultSwapVia": "{source} → {target} vía Jupiter",
+      "vaultMinShares": "Mínimo de participaciones recibidas",
+      "vaultExpectedShares": "Participaciones esperadas",
+      "vaultQuoteLoading": "Obteniendo la cotización de participaciones en vivo…",
+      "vaultQuoteUnavailable": "La cotización en vivo de participaciones no está disponible en este momento, así que este depósito no se puede dimensionar de forma segura. Inténtalo de nuevo en un momento.",
+      "vaultQuoteBlocked": "El Vault no está aceptando este depósito en este momento: {message}",
+      "vaultQuoteZeroShares": "Este monto es demasiado pequeño para hacer mint de participaciones a la tasa actual, así que no hay ningún piso de slippage que pueda protegerlo. Aumenta el monto.",
+      "vaultSlippageToggle": "Tolerancia de slippage: {percent}",
+      "vaultSlippageLabel": "Tolerancia de slippage (puntos base)",
+      "vaultSlippageHelp": "El depósito no se ejecuta si el Vault hiciera mint de menos participaciones de las que permite esta tolerancia. 10 puntos base equivalen a 0.1%.",
+      "vaultSlippageInvalid": "Ingresa un número entero de puntos base entre 1 y {max}.",
+      "vaultSlippageExceeded": "El Vault devolvería menos participaciones de las que permite tu tolerancia de slippage para este monto. Aumenta la tolerancia a continuación e inténtalo de nuevo."
     },
     "vaultWithdraw": {
       "title": "Retirar de {position}",
@@ -514,7 +561,15 @@
       "settlingNote": "Los saldos de la posición y de la Wallet se actualizan cuando la cadena finaliza el retiro.",
       "transaction": "Transacción",
       "outcomeFinalized": "Retiro del vault finalizado: los fondos están en la Wallet de custodia.",
-      "outcomeFailed": "Falló una transacción de retiro del vault. Los shares que no canjeó permanecen en la posición."
+      "outcomeFailed": "Falló una transacción de retiro del vault. Los shares que no canjeó permanecen en la posición.",
+      "expectedAmount": "Monto esperado",
+      "minAmount": "Monto mínimo recibido",
+      "quoteLoading": "Obteniendo la cotización del pago saliente en vivo…",
+      "quoteUnavailable": "La cotización del pago saliente en vivo no está disponible en este momento, así que este retiro no se puede dimensionar de forma segura. Inténtalo de nuevo en un momento.",
+      "quoteBlocked": "El Vault no está pagando este retiro en este momento: {message}",
+      "quoteZeroAssets": "Estas participaciones son demasiado pocas para canjear parte del Token de depósito a la tasa actual, por lo que no hay un piso de deslizamiento que pueda proteger la salida.",
+      "slippageHelp": "El retiro no se ejecutará si el vault paga menos de lo que permite esta tolerancia. 10 puntos base equivalen a 0.1%.",
+      "slippageExceeded": "El vault pagaría menos de lo que permite tu tolerancia de deslizamiento para estas participaciones. Aumenta la tolerancia abajo e inténtalo de nuevo."
     }
   }
 }

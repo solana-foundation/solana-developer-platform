@@ -7,7 +7,6 @@ import { Combobox } from "@/components/ui/combobox";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import { toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -45,7 +44,7 @@ function OfframpManualQuoteStep({
     );
   }
 
-  const cryptoToken = toRampCryptoToken(selectedRampPair.assetRail);
+  const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
 
   // A cancelled, failed or expired payout can never settle, so the instructions are withdrawn
   // rather than left on screen — the status panel alone explains where the transfer stands.
@@ -62,7 +61,7 @@ function OfframpManualQuoteStep({
       instructions={quote.paymentInstructions}
       description={t("DashboardPayments.ramps.offrampManualDescription", {
         amount: fields.amount.trim(),
-        token: cryptoToken.toUpperCase(),
+        token: cryptoToken,
       })}
     />
   );
@@ -72,6 +71,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
   const {
     currentStepId,
+    enabledRampProviders,
     rampProviderAccess,
     selectedCounterparty,
     liveWallets,
@@ -84,7 +84,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     setField,
     handlePairChange,
     requirementFields,
-    existingPayoutAccount,
+    selectedProviderAccountId,
+    resolvedAccount,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -94,6 +95,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     quoteCreationRetrying,
     retryQuoteCreation,
     onboarding,
+    isAdvancing,
     retryOnboarding,
     memoRows,
     setMemoRows,
@@ -103,7 +105,12 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const destinationCountry =
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
   const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
-  const requirementsKey = ["offramp-requirements", destinationCountry, paymentRails].join(":");
+  const requirementsKey = [
+    "offramp-requirements",
+    destinationCountry,
+    paymentRails,
+    selectedProviderAccountId,
+  ].join(":");
 
   if (currentStepId === "WALLET") {
     return (
@@ -136,6 +143,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
       <div className="space-y-4">
         <RampPairProviderSelector
           direction="offramp"
+          enabledRampProviders={enabledRampProviders}
           rampProviderAccess={rampProviderAccess}
           selectedCounterparty={selectedCounterparty}
           wallets={liveWallets}
@@ -165,14 +173,29 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   }
 
   if (currentStepId === "REQUIREMENTS") {
+    // Native fieldset[disabled] freezes every nested input, combobox trigger and
+    // account-chooser button while the advance POST is in flight, so mid-flight
+    // edits can't desync the form from what the provider was sent. A corridor
+    // blocker renders above STILL-ENABLED fields: the country select is the only
+    // way out of a blocked corridor, so it must stay interactive.
     return (
-      <RequirementsFields
-        key={requirementsKey}
-        fields={requirementFields}
-        values={collectedData}
-        onChange={setCollectedField}
-        existingPayoutAccount={existingPayoutAccount}
-      />
+      <div className="space-y-4">
+        {requirementsBlocker ? (
+          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+            {requirementsBlocker}
+          </div>
+        ) : null}
+        <fieldset disabled={isAdvancing} className="min-w-0">
+          <RequirementsFields
+            key={requirementsKey}
+            provider={fields.provider}
+            fields={requirementFields}
+            values={collectedData}
+            onChange={setCollectedField}
+            resolvedAccount={resolvedAccount}
+          />
+        </fieldset>
+      </div>
     );
   }
 
@@ -191,7 +214,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     onboarding &&
     !quote &&
     hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding.status)
+    isOnboardingPanelStatus(onboarding)
   ) {
     return (
       <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
