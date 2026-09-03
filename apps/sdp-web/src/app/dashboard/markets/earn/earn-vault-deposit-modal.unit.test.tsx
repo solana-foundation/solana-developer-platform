@@ -145,6 +145,8 @@ const strategy: EarnStrategy = {
   currentApy: "0.061",
   liquidityTerm: "instant",
   status: "active",
+  depositSlippage: null,
+  withdrawalSlippage: null,
   hostCluster: "devnet",
   fundable: true,
   createdAt: "2026-08-18T00:00:00.000Z",

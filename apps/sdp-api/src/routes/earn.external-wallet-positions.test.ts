@@ -203,12 +203,14 @@ describe("external-wallet position reads", () => {
       totalsByStrategy: [
         {
           label: "USDC vault",
+          ownerAddresses: [OWNER_A, OWNER_B].sort(),
           walletCount: 2,
           positionCount: 2,
           totalsByToken: [{ tokenMint: USDC, tokenValue: "30.3" }],
         },
         {
           label: "USDT vault",
+          ownerAddresses: [OWNER_B],
           walletCount: 1,
           positionCount: 1,
           totalsByToken: [{ tokenMint: USDT, tokenValue: "5.5" }],

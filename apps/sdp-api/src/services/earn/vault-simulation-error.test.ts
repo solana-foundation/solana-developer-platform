@@ -136,12 +136,94 @@ describe("log-refined instruction failures", () => {
     expect(fault).toBe("caller");
   });
 
-  it("blames the sponsor for a rent shortfall under sponsorship", () => {
-    const { message, fault } = describeVaultSimulationError(custom1, sponsored, rentLogs);
+  it("blames the sponsor for an ATA-create rent shortfall under sponsorship", () => {
+    const { message, fault, sponsorCause } = describeVaultSimulationError(
+      custom1,
+      sponsored,
+      rentLogs
+    );
     expect(message).toContain("SDP's fee sponsor could not fund the rent");
     expect(message).toContain("not with the wallet");
     expect(message).not.toContain("Send SOL to the wallet");
     expect(fault).toBe("sponsor");
+    expect(sponsorCause).toBe("balance");
+  });
+
+  // The tail smoky produced AFTER the ATA swap shipped (2026-09-02): the
+  // vault program itself creating the depositor's AllowedUser record and
+  // charging the zero-SOL SIGNER for it. The sponsor's balance is fine here;
+  // the plan failed to pre-fund the wallet. The two must not share a
+  // verdict, because "sponsor balance" sends operators refilling a healthy
+  // wallet while "retry shortly" promises customers a fix that never comes.
+  const programRentLogs = [
+    "Program ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J invoke [1]",
+    "Program log: Instruction: Deposit",
+    "Program 11111111111111111111111111111111 invoke [2]",
+    "Transfer: insufficient lamports 0, need 1171605",
+    "Program 11111111111111111111111111111111 failed: custom program error: 0x1",
+    "Program ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J failed: custom program error: 0x1",
+  ];
+
+  it("calls an in-program rent shortfall under sponsorship a missing prefund, not sponsor balance", () => {
+    const { message, fault, sponsorCause } = describeVaultSimulationError(
+      custom1,
+      sponsored,
+      programRentLogs
+    );
+    expect(message).toContain("did not pre-fund the wallet");
+    expect(message).toContain("0.001171605 SOL short");
+    expect(message).toContain("not the sponsor's balance");
+    expect(message).not.toContain("fee sponsor could not fund");
+    expect(fault).toBe("sponsor");
+    expect(sponsorCause).toBe("prefund");
+  });
+
+  // The prefund transfer itself is a TOP-LEVEL System instruction whose
+  // source is the SPONSOR. A short sponsor there is a refillable balance
+  // problem: labelling it a plan defect would tell operators the plan is
+  // broken while the actual fix is the same refill as any broke fee payer.
+  it("treats a shortfall in the plan's own prefund transfer as sponsor balance", () => {
+    const prefundLogs = [
+      "Program 11111111111111111111111111111111 invoke [1]",
+      "Transfer: insufficient lamports 500000, need 1287600",
+      "Program 11111111111111111111111111111111 failed: custom program error: 0x1",
+    ];
+    const { message, fault, sponsorCause } = describeVaultSimulationError(
+      custom1,
+      sponsored,
+      prefundLogs
+    );
+    expect(message).toContain("SDP's fee sponsor could not fund the rent");
+    expect(message).not.toContain("did not pre-fund");
+    expect(fault).toBe("sponsor");
+    expect(sponsorCause).toBe("balance");
+  });
+
+  it("tells a wallet-pays caller about the program-created account in its own terms", () => {
+    const { message, fault } = describeVaultSimulationError(custom1, walletPays, programRentLogs);
+    expect(message).toContain(
+      "does not hold enough SOL to fund an account the vault program creates on first use"
+    );
+    expect(message).toContain("Send SOL to the wallet and retry.");
+    expect(fault).toBe("caller");
+  });
+
+  it("stays neutral about the created account when no top-level frame is in the logs", () => {
+    const truncated = ["Transfer: insufficient lamports 0, need 1171605"];
+    const sponsor = describeVaultSimulationError(custom1, sponsored, truncated);
+    expect(sponsor.message).toContain("an account this transaction creates");
+    expect(sponsor.fault).toBe("sponsor");
+    expect(sponsor.sponsorCause).toBe("balance");
+    const wallet = describeVaultSimulationError(custom1, walletPays, truncated);
+    expect(wallet.message).toContain("an account this transaction");
+    expect(wallet.fault).toBe("caller");
+  });
+
+  it("tags a sponsored fee-payer failure as a balance cause", () => {
+    const { sponsorCause } = describeVaultSimulationError("AccountNotFound", sponsored);
+    expect(sponsorCause).toBe("balance");
+    const wallet = describeVaultSimulationError("AccountNotFound", walletPays);
+    expect(wallet.sponsorCause).toBeUndefined();
   });
 
   it("uses neutral rent-payer wording when the fee mode is unknown", () => {

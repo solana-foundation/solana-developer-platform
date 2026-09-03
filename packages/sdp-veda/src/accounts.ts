@@ -27,3 +27,25 @@ export async function accountExists(rpcUrl: string, account: Address): Promise<b
     });
   }
 }
+
+/**
+ * The rent-exempt minimum for an account of `bytes`, read from the chain the
+ * plan targets rather than computed locally: rent parameters are cluster
+ * state, and a hardcoded rate silently under-funds the day they change
+ * (devnet's has already moved once during this integration).
+ */
+export async function minimumBalanceForRentExemption(
+  rpcUrl: string,
+  bytes: number
+): Promise<bigint> {
+  const rpc = createVedaRpc(rpcUrl);
+  try {
+    return BigInt(await rpc.getMinimumBalanceForRentExemption(BigInt(bytes)).send());
+  } catch (cause) {
+    throw new SdpVedaError(
+      "VAULT_UNREADABLE",
+      `Veda could not read the rent-exempt minimum for a ${bytes}-byte account`,
+      { cause }
+    );
+  }
+}

@@ -199,7 +199,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     onboarding &&
     !quote &&
     hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding.status)
+    isOnboardingPanelStatus(onboarding)
   ) {
     return (
       <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />

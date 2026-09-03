@@ -461,12 +461,20 @@ organization's own custody wallets.
     log searches; unrecognized shapes fall back to the capped raw JSON. Callers
     holding simulation LOGS pass them too: a bare `Custom: 1` is refined from
     the failing program's own log line into rent-shortfall prose naming the
-    missing SOL (sponsor-fault under sponsorship) or token-balance prose,
-    because the variant alone is the System program's "insufficient lamports",
-    the Token program's "insufficient funds" and every non-Anchor program's
-    first error code at once. A
-    failure the helper attributes to SDP's fee sponsor surfaces as a retryable
-    5xx (with no sponsor detail in the body), never a caller-fault 400.
+    missing SOL or token-balance prose, because the variant alone is the
+    System program's "insufficient lamports", the Token program's
+    "insufficient funds" and every non-Anchor program's first error code at
+    once. A rent shortfall's ATTRIBUTION follows the failing frame: inside a
+    top-level ATA create or a top-level System transfer the paying account is
+    the plan's own choice (the sponsor under sponsorship, via the provider
+    payer swap and the allowed-user prefund), while a shortfall inside any
+    other program is that program spending the WALLET's lamports, which a
+    sponsored plan should have pre-funded (the Veda allowed-user prefund in
+    `@sdp/veda`). Sponsor faults therefore carry `sponsorCause`: "balance"
+    (broke sponsor wallet) keeps the retryable "retry shortly" 5xx, while
+    "prefund" (a plan defect) gets a 5xx that does not promise a retry will
+    help. Neither leaks sponsor detail in the body, and neither is ever a
+    caller-fault 400.
   - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
     without sending; one transaction stores the signature, base64 wire bytes,
     last-valid block height, movement and activated claim while still `pending`.

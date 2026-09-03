@@ -4,6 +4,8 @@ import {
   type EarnProviderId,
   type EarnStrategy,
   type EarnStrategyResponse,
+  earnDepositSlippageFloor,
+  earnWithdrawSlippageFloor,
   isEarnProviderSurfaced,
   type ListEarnStrategiesResponse,
   type SdpEnvironment,
@@ -60,6 +62,8 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * in both and fundable in one — see `hostCluster` in @sdp/types.
  */
 export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironment): EarnStrategy {
+  const depositSlippage = earnDepositSlippageFloor(row.provider);
+  const withdrawalSlippage = earnWithdrawSlippageFloor(row.provider);
   return {
     id: row.id,
     provider: row.provider,
@@ -75,6 +79,12 @@ export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironm
     redemptionDelayDays: row.redemption_delay_days ?? undefined,
     riskMetadata: row.risk_metadata,
     status: row.status,
+    depositSlippage: depositSlippage
+      ? { quoteRequired: true, defaultToleranceBps: depositSlippage.defaultToleranceBps }
+      : null,
+    withdrawalSlippage: withdrawalSlippage
+      ? { quoteRequired: true, defaultToleranceBps: withdrawalSlippage.defaultToleranceBps }
+      : null,
     hostCluster: row.host_cluster,
     fundable: isClusterFundableInEnvironment(row.host_cluster, environment),
     createdAt: row.created_at,

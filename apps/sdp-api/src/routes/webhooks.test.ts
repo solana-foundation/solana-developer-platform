@@ -896,16 +896,7 @@ describe("BVNK ramp webhook", () => {
         null,
         "individual",
         "Webhook Buyer",
-        {
-          bvnk: {
-            customer: {
-              customerReference: CUSTOMER_REFERENCE,
-              externalReference: CUSTOMER_EXTERNAL_REFERENCE,
-              status: "PENDING",
-            },
-            wallets: { [ONRAMP_PAYMENT_RULE_KEY]: { walletId: WALLET_ID } },
-          },
-        },
+        { bvnk: { wallets: { [ONRAMP_PAYMENT_RULE_KEY]: { walletId: WALLET_ID } } } },
         null
       )
       .run();
@@ -913,10 +904,12 @@ describe("BVNK ramp webhook", () => {
       .prepare(
         `INSERT INTO counterparty_provider_accounts (
            id, organization_id, project_id, counterparty_id, provider,
-           provider_customer_reference, kind
-         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link')`
+           provider_customer_reference, kind, metadata
+         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', ?)`
       )
-      .bind(`cpa_${COUNTERPARTY_ID}`, ORG_ID, PROJECT_ID, COUNTERPARTY_ID, CUSTOMER_REFERENCE)
+      .bind(`cpa_${COUNTERPARTY_ID}`, ORG_ID, PROJECT_ID, COUNTERPARTY_ID, CUSTOMER_REFERENCE, {
+        status: "PENDING",
+      })
       .run();
   }
 
@@ -979,20 +972,7 @@ describe("BVNK ramp webhook", () => {
           };
         };
       }>();
-    const account = await getDb(env)
-      .prepare(
-        `SELECT metadata FROM counterparty_provider_accounts
-         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
-      )
-      .bind(COUNTERPARTY_ID)
-      .first<{ metadata: { status?: string; verificationStatus?: string } }>();
-    const customer = row?.provider_data.bvnk?.customer;
-    return row?.provider_data.bvnk === undefined
-      ? undefined
-      : {
-          ...row.provider_data.bvnk,
-          customer: { ...customer, ...account?.metadata },
-        };
+    return row?.provider_data.bvnk;
   }
 
   it("flips the cached customer status to VERIFIED on a customers:status-change webhook", async () => {
@@ -1006,10 +986,112 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    expect((await readBvnk())?.customer?.status).toBe("VERIFIED");
+    const account = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: { status?: string } }>();
+    expect(account?.metadata.status).toBe("VERIFIED");
   });
 
-  it("provisions the funding wallet and records the pending-JIT rule error after customer verification succeeds", async () => {
+  it("stores agreement status changes idempotently for a confirmed agreement", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE counterparty_id = ?")
+      .bind(
+        {
+          status: "VERIFIED",
+          agreements: {
+            relayedAt: "2026-08-01T00:00:00.000Z",
+            entries: { "agreement-1": { status: "ACCEPTED" } },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+    const payload = {
+      event: "bvnk:customers:agreements:status-change",
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        agreementId: "agreement-1",
+        status: "PENDING",
+        respondedAt: "2026-09-02T00:00:00.000Z",
+      },
+    };
+
+    expect((await sendBvnkWebhook(payload)).status).toBe(200);
+    expect((await sendBvnkWebhook(payload)).status).toBe(200);
+
+    const account = await getDb(env)
+      .prepare("SELECT metadata FROM counterparty_provider_accounts WHERE counterparty_id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        metadata: {
+          agreements?: {
+            relayedAt: string;
+            entries: Record<string, { status: string; respondedAt?: string }>;
+          };
+        };
+      }>();
+    expect(account?.metadata).toEqual({
+      status: "VERIFIED",
+      agreements: {
+        relayedAt: "2026-08-01T00:00:00.000Z",
+        entries: {
+          "agreement-1": {
+            status: "PENDING",
+            respondedAt: "2026-09-02T00:00:00.000Z",
+          },
+        },
+      },
+    });
+  });
+
+  it("acknowledges an agreement status event for an unknown customer", async () => {
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:agreements:status-change",
+      data: {
+        customerId: "unknown-customer",
+        agreementId: "agreement-1",
+        status: "PENDING",
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("ignores an agreement status event outside the persisted working set", async () => {
+    const seeded = {
+      status: "VERIFIED",
+      agreements: {
+        relayedAt: "2026-08-01T00:00:00.000Z",
+        entries: { "agreement-1": { status: "ACCEPTED" } },
+      },
+    };
+    await getDb(env)
+      .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE counterparty_id = ?")
+      .bind(seeded, COUNTERPARTY_ID)
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:agreements:status-change",
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        agreementId: "agreement-foreign",
+        status: "REJECTED",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const account = await getDb(env)
+      .prepare("SELECT metadata FROM counterparty_provider_accounts WHERE counterparty_id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: Record<string, unknown> }>();
+    expect(account?.metadata).toEqual(seeded);
+  });
+
+  it("provisions the funding wallet and rule after customer verification succeeds", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1071,14 +1153,12 @@ describe("BVNK ramp webhook", () => {
       expect.objectContaining({ profileId: "profile_webhook_1" })
     );
     expect(createWallet).toHaveBeenCalledTimes(1);
-    expect(createRule).not.toHaveBeenCalled();
+    expect(createRule).toHaveBeenCalledTimes(1);
 
     const entry = (await readBvnk())?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
     expect(entry?.walletId).toBe(WALLET_ID);
-    expect(entry?.ruleId).toBeUndefined();
-    expect(entry?.provisioningError).toBe(
-      `BVNK onramp requires identity fields for counterparty ${COUNTERPARTY_ID} that are no longer stored; JIT collection is not wired yet`
-    );
+    expect(entry?.ruleId).toBe("rule_webhook_verified_1");
+    expect(entry?.provisioningError).toBeUndefined();
 
     getProfile.mockRestore();
     createWallet.mockRestore();
@@ -1111,9 +1191,16 @@ describe("BVNK ramp webhook", () => {
 
     expect(res.status).toBe(200);
     expect(getCustomer).toHaveBeenCalledWith(expect.anything(), { id: CUSTOMER_REFERENCE });
-    const customer = (await readBvnk())?.customer;
-    expect(customer?.status).toBe("INFO_REQUIRED");
-    expect(customer?.verificationUrl).toBeUndefined();
+    const account = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: Record<string, unknown> }>();
+    expect(account?.metadata.status).toBe("INFO_REQUIRED");
+    expect(account?.metadata).not.toHaveProperty("verificationUrl");
+    expect((await readBvnk())?.customer).toBeUndefined();
 
     getCustomer.mockRestore();
   });
@@ -1140,7 +1227,14 @@ describe("BVNK ramp webhook", () => {
 
     expect(res.status).toBe(200);
     expect(getCustomer).toHaveBeenCalledWith(expect.anything(), { id: CUSTOMER_REFERENCE });
-    expect((await readBvnk())?.customer?.status).toBe("PENDING");
+    const account = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: { status?: string } }>();
+    expect(account?.metadata.status).toBe("PENDING");
 
     getCustomer.mockRestore();
   });
@@ -1227,7 +1321,7 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(createRule).not.toHaveBeenCalled();
+    expect(createRule).toHaveBeenCalledTimes(1);
 
     const row = await getDb(env)
       .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
@@ -1247,10 +1341,8 @@ describe("BVNK ramp webhook", () => {
         };
       }>();
     const entry = row?.provider_data.bvnk?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
-    expect(entry?.ruleId).toBeUndefined();
-    expect(entry?.provisioningError).toBe(
-      `BVNK onramp requires identity fields for counterparty ${COUNTERPARTY_ID} that are no longer stored; JIT collection is not wired yet`
-    );
+    expect(entry?.ruleId).toBe("rule_webhook_1");
+    expect(entry?.provisioningError).toBeUndefined();
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
 
     createRule.mockRestore();

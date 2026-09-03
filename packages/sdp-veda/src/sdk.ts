@@ -1,7 +1,12 @@
 import { isVedaDepositMint } from "@sdp/types/veda-programs";
-import { type Address, address } from "@solana/kit";
+import { type Address, address, type Instruction } from "@solana/kit";
 import { createVedaClient, VedaSdkError } from "@vedatech/svm-sdk";
-import { accountExists } from "./accounts";
+import { accountExists, minimumBalanceForRentExemption } from "./accounts";
+import {
+  allowedUserAccountForDeposit,
+  prefundOwnerRentInstruction,
+  VEDA_ALLOWED_USER_ACCOUNT_SIZE,
+} from "./allowed-user";
 import { acceptPositiveAtMintScale, mintDecimals } from "./amounts";
 import { SdpVedaError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
@@ -302,10 +307,12 @@ export async function buildVedaDepositPlan(
   // reordering anything. The swap is the only way to honour `rentPayer` here:
   // the SDK names the owner as every create's funding payer and offers no
   // alternative (see ./rent.ts).
+  const sponsor =
+    input.rentPayer === undefined || input.rentPayer === input.owner ? undefined : input.rentPayer;
   const instructions =
-    input.rentPayer === undefined || input.rentPayer === input.owner
+    sponsor === undefined
       ? [...plan.instructions]
-      : [...chargeAtaCreationRentTo([...plan.instructions], input.rentPayer)];
+      : [...chargeAtaCreationRentTo([...plan.instructions], sponsor)];
 
   // Whether rent is actually charged is chain state, not plan shape: the
   // create is idempotent, so only this read can say. The caller records the
@@ -315,10 +322,33 @@ export async function buildVedaDepositPlan(
   const createsShareAccount =
     shareAta === undefined ? undefined : !(await accountExists(runtime.rpcUrl, shareAta));
 
+  // The OTHER rent a first deposit owes, which the ATA swap above cannot
+  // reach: the vault program lazily creates the depositor's AllowedUser
+  // record INSIDE the deposit instruction and charges the SIGNER for it:
+  // the payer is fixed by the program's own account table, so no
+  // transaction-level sponsorship can substitute one. A sponsored plan
+  // therefore pre-funds the owner with exactly that account's rent, which
+  // the program's create consumes in the same transaction (mechanism and
+  // residuals in ./allowed-user.ts). Wallet-pays plans change nothing: the
+  // owner funds its own record, as the program intends.
+  const allowedUser = allowedUserAccountForDeposit(instructions, config.vaultProgramAddress);
+  let finalInstructions: readonly Instruction[] = instructions;
+  if (
+    sponsor !== undefined &&
+    allowedUser !== undefined &&
+    !(await accountExists(runtime.rpcUrl, allowedUser))
+  ) {
+    const rent = await minimumBalanceForRentExemption(
+      runtime.rpcUrl,
+      VEDA_ALLOWED_USER_ACCOUNT_SIZE
+    );
+    finalInstructions = [prefundOwnerRentInstruction(sponsor, input.owner, rent), ...instructions];
+  }
+
   return assertPlanTargetsCluster(
     {
       cluster: config.cluster,
-      instructions,
+      instructions: finalInstructions,
       lookupTables: [],
       assetIdentity: {
         depositTokenMint: asset.mint,
