@@ -1061,6 +1061,36 @@ describe("BVNK ramp webhook", () => {
     expect(res.status).toBe(200);
   });
 
+  it("ignores an agreement status event outside the persisted working set", async () => {
+    const seeded = {
+      status: "VERIFIED",
+      agreements: {
+        relayedAt: "2026-08-01T00:00:00.000Z",
+        entries: { "agreement-1": { status: "ACCEPTED" } },
+      },
+    };
+    await getDb(env)
+      .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE counterparty_id = ?")
+      .bind(seeded, COUNTERPARTY_ID)
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:agreements:status-change",
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        agreementId: "agreement-foreign",
+        status: "REJECTED",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const account = await getDb(env)
+      .prepare("SELECT metadata FROM counterparty_provider_accounts WHERE counterparty_id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: Record<string, unknown> }>();
+    expect(account?.metadata).toEqual(seeded);
+  });
+
   it("provisions the funding wallet and rule after customer verification succeeds", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")

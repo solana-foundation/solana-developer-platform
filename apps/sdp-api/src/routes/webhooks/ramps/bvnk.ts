@@ -334,6 +334,12 @@ async function applyBvnkAgreementStatusWebhook(
   if (!account) return;
   const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(account.metadata);
   if (!metadata.agreements) return;
+  if (!(event.agreementId in metadata.agreements.entries)) {
+    getLogger().info(
+      `[bvnk webhook] "${event.kind}" for ${counterparty.id} names agreement ${event.agreementId} outside the persisted working set`
+    );
+    return;
+  }
   const updated = await accounts.patchAccountMetadata({
     organizationId: counterparty.organization_id,
     projectId: counterparty.project_id,

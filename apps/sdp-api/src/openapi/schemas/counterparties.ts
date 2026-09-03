@@ -225,7 +225,6 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
           id: z.string(),
           filename: z.string(),
           downloadUrl: z.url(),
-          declinable: z.boolean(),
         })
       ),
     }),

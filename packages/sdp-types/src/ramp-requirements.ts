@@ -116,7 +116,6 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
         id: string;
         filename: string;
         downloadUrl: string;
-        declinable: boolean;
       }[];
     }
   | { provider: "bvnk"; status: "customer_pending_agreement_acceptance" }

@@ -435,7 +435,6 @@ async function bvnkAgreementDetails(
         id: agreement.id,
         filename: content.filename,
         downloadUrl: content.downloadUrl,
-        declinable: agreement.declinable,
       };
     })
   );
@@ -469,19 +468,6 @@ export async function bvnkCustomerRequirementsFromMetadata(
     return null;
   }
   const entries = Object.entries(agreements.entries);
-  const rejected = entries.find(([, entry]) =>
-    ["REJECTED", "DECLINED", "TERMINATED", "FAILED", "EXPIRED", "REVOKED"].includes(
-      entry.status.toUpperCase()
-    )
-  );
-  if (rejected) {
-    return {
-      provider: "bvnk",
-      direction,
-      status: "unsupported",
-      reason: `BVNK agreement "${rejected[0]}" was rejected.`,
-    };
-  }
   const pending = entries.filter(([, entry]) => entry.status.toUpperCase() !== "ACCEPTED");
   if (pending.length > 0) {
     if (metadata.status === undefined) {
@@ -500,7 +486,6 @@ export async function bvnkCustomerRequirementsFromMetadata(
           id,
           filename: content.filename,
           downloadUrl: content.downloadUrl,
-          declinable: false,
         };
       })
     );
@@ -645,7 +630,7 @@ export async function readBvnkCustomerLink(
  * @param projectId - Project that owns the counterparty.
  * @param direction - Ramp direction used when returning an intermediate requirement.
  * @param collectedData - Flattened PII fields, never persisted.
- * @param agreementConsent - Agreement ids the caller accepts.
+ * @param agreementConsent - Accepts every pending agreement in the working set when true.
  * @returns A refreshed customer or the next agreement requirement.
  */
 export async function ensureBvnkCustomer(
@@ -654,7 +639,7 @@ export async function ensureBvnkCustomer(
   projectId: string,
   direction: RampDirection,
   collectedData?: CollectedFieldData,
-  agreementConsent?: { agreementIds: string[] }
+  agreementConsent?: true
 ): Promise<BvnkCustomerEnsureResult> {
   if (counterparty.entity_type === "business") {
     throw badRequest("BVNK supports individual counterparties only.");
@@ -727,34 +712,11 @@ export async function ensureBvnkCustomer(
   if (pending.length > 0 && agreementConsent === undefined) {
     return { requirements: await bvnkAgreementDetails(c, direction, agreements) };
   }
-  const consentedIds = new Set(agreementConsent?.agreementIds ?? []);
-  const agreementIds = new Set(agreements.agreements.map((agreement) => agreement.id));
-  for (const id of consentedIds) {
-    if (!agreementIds.has(id)) {
-      throw badRequest(`Unknown BVNK agreement "${id}".`);
-    }
-  }
-  const rejectedRequired = pending.find(
-    (agreement) => !consentedIds.has(agreement.id) && !agreement.declinable
-  );
-  if (rejectedRequired) {
-    return {
-      requirements: {
-        provider: "bvnk",
-        direction,
-        status: "unsupported",
-        reason: `BVNK agreement "${rejectedRequired.name ?? rejectedRequired.id}" is required and was not accepted.`,
-      },
-    };
-  }
   if (pending.length > 0) {
     await client.respondAgreementsV2(ctx, {
       idempotencyKey: (await hashString(`bvnk-agreement-response:${counterparty.id}`)).slice(0, 36),
       reference,
-      actions: pending.map((agreement) => ({
-        agreementId: agreement.id,
-        type: consentedIds.has(agreement.id) ? "ACCEPT" : "REJECT",
-      })),
+      actions: pending.map((agreement) => ({ agreementId: agreement.id, type: "ACCEPT" })),
     });
     // Relay responses never confirm acceptance: relayed agreements seed as
     // PENDING and only the agreements status-change webhook (or the PRO-1837

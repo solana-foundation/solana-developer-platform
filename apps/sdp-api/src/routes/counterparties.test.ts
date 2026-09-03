@@ -934,7 +934,6 @@ describe("Counterparties Routes", () => {
               id: agreementId,
               filename: "terms.pdf",
               downloadUrl: "https://example.invalid/terms.pdf",
-              declinable: false,
             },
           ],
         });
@@ -1045,7 +1044,7 @@ describe("Counterparties Routes", () => {
               destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
               fiatCurrency: "USD",
               collectedData,
-              agreementConsent: { agreementIds: ["agreement-pending"] },
+              agreementConsent: true,
             }),
           },
           env
@@ -1333,10 +1332,19 @@ describe("Counterparties Routes", () => {
         expect((await rejected.json()).data).toEqual({
           provider: "bvnk",
           direction: "onramp",
-          status: "unsupported",
-          reason: 'BVNK agreement "agreement-revoked" was rejected.',
+          status: "customer_agreement_required",
+          agreements: [
+            {
+              id: "agreement-revoked",
+              filename: "terms.pdf",
+              downloadUrl: "https://example.invalid/revoked.pdf",
+            },
+          ],
         });
-        expect(paths).toEqual(["/platform/v2/agreements/agreement-revoked/content"]);
+        expect(paths).toEqual([
+          "/platform/v2/agreements/agreement-revoked/content",
+          "/platform/v2/agreements/agreement-revoked/content",
+        ]);
       } finally {
         fetchSpy.mockRestore();
         env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;

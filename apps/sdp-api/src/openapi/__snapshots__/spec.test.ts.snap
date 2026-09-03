@@ -6389,9 +6389,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "agreements": {
                     "items": {
                       "properties": {
-                        "declinable": {
-                          "type": "boolean",
-                        },
                         "downloadUrl": {
                           "format": "uri",
                           "type": "string",
@@ -6407,7 +6404,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         "id",
                         "filename",
                         "downloadUrl",
-                        "declinable",
                       ],
                       "type": "object",
                     },
