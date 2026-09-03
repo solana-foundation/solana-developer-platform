@@ -1,21 +1,21 @@
 *    @solana-foundation/sdp-maintainers
 
 # Custody and signing
-/packages/sdp-custody/                                  @GuiBibeau
-/apps/sdp-api/src/services/adapters/signing/            @GuiBibeau
-/apps/sdp-api/src/services/domain/signing/              @GuiBibeau
+/packages/sdp-custody/                                  @multipletwigs @pashpashkin
+/apps/sdp-api/src/services/adapters/signing/            @multipletwigs @pashpashkin
+/apps/sdp-api/src/services/domain/signing/              @multipletwigs @pashpashkin
 
 # Payments and ramps
-/packages/sdp-payments/                                 @multipletwigs @GuiBibeau
-/apps/sdp-api/src/routes/payments/                      @multipletwigs @GuiBibeau
+/packages/sdp-payments/                                 @multipletwigs @pashpashkin
+/apps/sdp-api/src/routes/payments/                      @multipletwigs @pashpashkin
 
 # Issuance
 /packages/sdp-issuance/                                 @arseniy-nikitochkin @multipletwigs
 /apps/sdp-api/src/routes/issuance/                      @arseniy-nikitochkin @multipletwigs
 
 # Authentication and authorization
-/apps/sdp-api/src/middleware/                           @GuiBibeau
-/apps/sdp-api/src/lib/auth.ts                           @GuiBibeau
+/apps/sdp-api/src/middleware/                           @multipletwigs @pashpashkin
+/apps/sdp-api/src/lib/auth.ts                           @multipletwigs @pashpashkin
 
 # Database migrations
 /apps/sdp-api/src/db/migrations/                        @pashpashkin @multipletwigs
