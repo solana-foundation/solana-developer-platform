@@ -358,7 +358,17 @@
       "fieldRefCount": "{used} of {total} bytes",
       "fieldRefTooLong": "Too long by {over} bytes. Accents and emoji cost more than one byte each.",
       "deliveredLabel": "Delivered in full",
-      "onChainAddressHint": "The trade itself, as an account on Solana. It holds the terms and both escrows, and closes when the trade does. A counterparty can look it up to check the trade is real before paying anything."
+      "onChainAddressHint": "The trade itself, as an account on Solana. It holds the terms and both escrows, and closes when the trade does. A counterparty can look it up to check the trade is real before paying anything.",
+      "legDelivered": "Delivered",
+      "legFrozen": "Escrow frozen, transfers in will bounce",
+      "legOverFunded": "Holds more than the trade needs",
+      "legFunded": "Funded and ready",
+      "legAwaiting": "Waiting on funds",
+      "youDeliver": "You deliver",
+      "youReceive": "You receive",
+      "youDelivered": "You delivered",
+      "youReceived": "You received",
+      "viewOnExplorer": "View on explorer"
     }
   },
   "DashboardEarn": {

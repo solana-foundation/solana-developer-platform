@@ -1,11 +1,25 @@
 "use client";
 
-import { CheckIcon, CopyIcon, SnowflakeIcon, TriangleAlertIcon } from "lucide-react";
+import type { SolanaCluster } from "@sdp/types";
+import {
+  ArrowLeftRightIcon,
+  CheckIcon,
+  CircleCheckIcon,
+  ClockIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  type LucideIcon,
+  SnowflakeIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { explorerAddressUrl } from "@/lib/explorer";
+
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { DvpCloseActions } from "./dvp-close-actions";
@@ -79,6 +93,79 @@ function formatLegAmount(baseUnits: string, decimals: number | null): string {
   return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
 }
 
+/**
+ * The one thing true of this leg right now, as an icon and a label.
+ *
+ * Derived from the condition that actually fired rather than from a single
+ * flag: an icon's accessible name is the whole of what a screen reader gets
+ * from it, and a warning triangle captioned for the wrong reason is worse than
+ * no icon at all.
+ */
+function legStatus(
+  leg: DvpTradeLeg,
+  closed: boolean
+): { Icon: LucideIcon; tone: string; key: MessageKey } {
+  if (closed) {
+    return {
+      Icon: CircleCheckIcon,
+      tone: "text-success",
+      key: "DashboardMarkets.dvp.legDelivered",
+    };
+  }
+  if (leg.funding?.frozen) {
+    return { Icon: SnowflakeIcon, tone: "text-warning", key: "DashboardMarkets.dvp.legFrozen" };
+  }
+  if (leg.funding?.surplus) {
+    return {
+      Icon: TriangleAlertIcon,
+      tone: "text-warning",
+      key: "DashboardMarkets.dvp.legOverFunded",
+    };
+  }
+  if (leg.funding?.funded) {
+    return { Icon: CircleCheckIcon, tone: "text-success", key: "DashboardMarkets.dvp.legFunded" };
+  }
+  return { Icon: ClockIcon, tone: "text-tertiary", key: "DashboardMarkets.dvp.legAwaiting" };
+}
+
+/**
+ * Which way the value moves, stated once, between the two legs.
+ *
+ * A DvP trade IS an exchange, and two cards sitting side by side never said so
+ * — nothing on the page connected them, or named which direction anything went.
+ * This is the one place the page earns its width.
+ */
+function ExchangeBand({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
+  const t = useTranslations();
+  const sdpLegIsA = trade.sdpSide === "a";
+  const given = sdpLegIsA ? trade.legs.a : trade.legs.b;
+  const taken = sdpLegIsA ? trade.legs.b : trade.legs.a;
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+      <span className="flex items-center gap-2">
+        <span className="text-tertiary text-xs">
+          {closed ? t("DashboardMarkets.dvp.youDelivered") : t("DashboardMarkets.dvp.youDeliver")}
+        </span>
+        <span className="font-medium text-primary text-sm tabular-nums">
+          {formatLegAmount(given.amount, given.decimals)}
+          {given.symbol ? ` ${given.symbol}` : ""}
+        </span>
+      </span>
+      <ArrowLeftRightIcon aria-hidden className="h-4 w-4 shrink-0 text-tertiary" />
+      <span className="flex items-center gap-2">
+        <span className="text-tertiary text-xs">
+          {closed ? t("DashboardMarkets.dvp.youReceived") : t("DashboardMarkets.dvp.youReceive")}
+        </span>
+        <span className="font-medium text-primary text-sm tabular-nums">
+          {formatLegAmount(taken.amount, taken.decimals)}
+          {taken.symbol ? ` ${taken.symbol}` : ""}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 /** One leg: what it owes, what the escrow holds, and where to pay it. */
 function LegCard({
   leg,
@@ -103,13 +190,19 @@ function LegCard({
 }) {
   const t = useTranslations();
   const ratio = legFundingRatio(leg);
+  const status = legStatus(leg, closed);
 
   return (
     <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="font-medium text-primary text-sm">{title}</h2>
+        <h2 className="flex items-center gap-1.5 font-medium text-primary text-sm">
+          <status.Icon aria-hidden className={cn("h-4 w-4 shrink-0", status.tone)} />
+          {title}
+        </h2>
         <span className="text-tertiary text-xs">{holder}</span>
       </div>
+      {/* The icon above is decorative; this carries its meaning for everyone. */}
+      <p className={cn("mt-1 text-xs", status.tone)}>{t(status.key)}</p>
 
       {/* One number at full weight; the target is context beneath it. */}
       <p className="mt-3 flex items-baseline gap-1.5 font-semibold text-2xl text-primary">
@@ -174,7 +267,18 @@ function LegCard({
   );
 }
 
-export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
+export function DvpTradeDetailWorkspace({
+  trade,
+  cluster,
+}: {
+  trade: DvpTrade;
+  /**
+   * Passed in rather than read from context, so this stays a pure function of
+   * its props — the same split `dvp-create-client.tsx` already makes, and what
+   * keeps the workspace renderable in a test without a provider around it.
+   */
+  cluster: SolanaCluster;
+}) {
   const tradeClosed = isDvpTradeClosed(trade);
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
@@ -243,7 +347,16 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
                 />
               </dd>
               <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                {t("DashboardMarkets.dvp.onChainAddressHint")}
+                {t("DashboardMarkets.dvp.onChainAddressHint")}{" "}
+                <a
+                  className="inline-flex items-center gap-0.5 text-accent underline-offset-2 hover:underline"
+                  href={explorerAddressUrl(trade.swapDvp, cluster)}
+                  rel="noreferrer noopener"
+                  target="_blank"
+                >
+                  {t("DashboardMarkets.dvp.viewOnExplorer")}
+                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+                </a>
               </p>
             </div>
             <div>
@@ -257,7 +370,16 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
                 />
               </dd>
               <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                {t("DashboardMarkets.dvp.settlementAuthorityHint")}
+                {t("DashboardMarkets.dvp.settlementAuthorityHint")}{" "}
+                <a
+                  className="inline-flex items-center gap-0.5 text-accent underline-offset-2 hover:underline"
+                  href={explorerAddressUrl(trade.settlementAuthority, cluster)}
+                  rel="noreferrer noopener"
+                  target="_blank"
+                >
+                  {t("DashboardMarkets.dvp.viewOnExplorer")}
+                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+                </a>
               </p>
             </div>
           </dl>
@@ -284,6 +406,8 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
             </span>
           </Callout>
         ) : null}
+
+        <ExchangeBand closed={tradeClosed} trade={trade} />
 
         <div className="grid gap-4 md:grid-cols-2">
           <LegCard

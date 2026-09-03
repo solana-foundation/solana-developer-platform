@@ -58,7 +58,7 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
 function renderDetail(value: DvpTrade): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <DvpTradeDetailWorkspace trade={value} />
+      <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
     </I18nProvider>
   );
 }
