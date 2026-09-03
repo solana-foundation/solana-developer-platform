@@ -1,9 +1,15 @@
 import type { RampProviderId } from "@sdp/types";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { LucideIcon } from "lucide-react";
+import type { SandboxTransferSimulationInput } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
-import { getHercleOnboardingCopy, getHercleSimulateLabels } from "./hercle";
+import {
+  getHercleOnboardingCopy,
+  getHercleProvisioningDetail,
+  getHercleSimulateLabels,
+  hercleOfframpSettlementSimulation,
+} from "./hercle";
 import {
   getLightsparkOnboardingCopy,
   getLightsparkProvisioningDetail,
@@ -53,10 +59,10 @@ export type StandardOnboardingPanelStatus = Exclude<
   "terms_of_service_required"
 >;
 export type MuralOnboardingPanelStatus = Exclude<OnboardingPanelStatus, "provisioning_failed">;
-/** Hercle provisions no funding account, so these are the only states it can reach. */
+/** Hercle's only provisioning wait is the bank rail registering the business's payout account. */
 export type HercleOnboardingPanelStatus = Exclude<
   OnboardingPanelStatus,
-  "terms_of_service_required" | "funding_account_provisioning" | "provisioning_failed"
+  "terms_of_service_required" | "provisioning_failed"
 >;
 
 export interface SimulateActionLabels {
@@ -120,6 +126,23 @@ export function onboardingCopy(
   }
 }
 
+/**
+ * Sandbox settlement simulation for an off-ramp order, for providers that expose one; null
+ * otherwise (caller hides the action). Most providers only simulate the pay-in leg, which
+ * belongs to the on-ramp arm.
+ */
+export function offrampSettlementSimulation(
+  provider: RampProviderId,
+  orderId: string
+): SandboxTransferSimulationInput | null {
+  switch (provider) {
+    case "hercle":
+      return hercleOfframpSettlementSimulation(orderId);
+    default:
+      return null;
+  }
+}
+
 /** Sandbox simulate-action labels for providers that support the simulate flow; null otherwise (caller hides the action). */
 export function simulateActionLabels(
   provider: RampProviderId,
@@ -152,6 +175,8 @@ export function provisioningDetail(
       return getLightsparkProvisioningDetail(t)[direction];
     case "mural":
       return getMuralProvisioningDetail(t)[direction];
+    case "hercle":
+      return getHercleProvisioningDetail(t)[direction];
     default:
       throw new Error(`No provisioning detail for ramp provider: ${provider}`);
   }
