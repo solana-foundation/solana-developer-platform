@@ -25,6 +25,8 @@ function leg(escrow: string, overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg 
     party: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
     mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
     tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    decimals: 6,
+    symbol: "ATD",
     amount: "1000",
     escrow,
     settlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
@@ -46,6 +48,10 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
     earliestSettlementTimestamp: null,
     refString: null,
     createSignature: null,
+    closeSignature: null,
+    sdpWallet: null,
+    settlementReadiness: null,
+    fundingSignature: null,
     observedAt: null,
     createdAt: "2026-09-03T00:00:00.000Z",
     updatedAt: "2026-09-03T00:00:00.000Z",
@@ -56,7 +62,7 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
 function renderDetail(value: DvpTrade): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <DvpTradeDetailWorkspace trade={value} />
+      <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
     </I18nProvider>
   );
 }

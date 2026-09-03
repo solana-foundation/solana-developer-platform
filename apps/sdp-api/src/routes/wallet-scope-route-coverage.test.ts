@@ -164,12 +164,18 @@ describe("wallet-scoped route coverage inventory", () => {
     ]);
   });
 
-  // DvP is small enough that every route is wallet-scoped: a trade names the
-  // custody wallet holding SDP's leg, so both the write and the two reads are
-  // bound to it. Behaviour is covered in dvp.test.ts; this list exists so a
-  // fourth route cannot be added without someone deciding which it is.
+  // Every DvP route that touches a TRADE is wallet-scoped: a trade names the
+  // custody wallet holding SDP's leg, so both the write and the reads are bound
+  // to it. Behaviour is covered in dvp.test.ts; this list exists so a new route
+  // cannot be added without someone deciding which it is.
   it("tracks every wallet-scoped DvP route", () => {
-    expect(extractRoutes(dvpRoutes)).toEqual([
+    // Mint inspection is the exception, and deliberately so: it reads public
+    // chain state about an address the caller already has, to answer the create
+    // form BEFORE a wallet is chosen. Scoping it to a wallet would be scoping a
+    // question that has nothing to do with one.
+    const nonWalletScopedRoutes = new Set(["GET /mints/:mint"]);
+
+    expect(extractRoutes(dvpRoutes).filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
       "GET /trades",
       "GET /trades/:tradeId",
       "POST /trades",

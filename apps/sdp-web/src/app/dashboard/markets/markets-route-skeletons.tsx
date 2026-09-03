@@ -153,7 +153,20 @@ export function DvpTradesSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
-        <SkeletonBlock className="h-4 w-[28rem] max-w-full" />
+        {/* Description and the create button share a row. */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <SkeletonBlock className="h-4 w-[28rem] max-w-full" />
+          <SkeletonBlock className="h-8 w-28 shrink-0 rounded-lg" />
+        </div>
+        {/* The toolbar, in its real shape: a pill segmented control on the
+            left and the search field on the right, at the heights and radii
+            those components actually render at. A skeleton that draws two
+            same-sized boxes hands over to something a different shape, which is
+            the jump it exists to prevent. */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <SkeletonBlock className="h-9 w-full max-w-[22rem] rounded-full" />
+          <SkeletonBlock className="h-10 w-full rounded-[10px] md:w-64 md:shrink-0" />
+        </div>
         <div className="overflow-hidden rounded-2xl border border-border-default">
           <SkeletonBlock className="h-11 w-full rounded-none" />
           {DVP_ROW_SKELETON_IDS.map((id) => (
@@ -169,42 +182,52 @@ export function DvpTradeDetailSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
-        <SkeletonBlock className="h-[86px] w-full rounded-2xl" />
-        {/* Two legs side by side, mirroring the detail layout field for field so
-            the page does not jump when it resolves. */}
+        {/* The header carries the badge, both SDP-created addresses with their
+            explanations, the funding wallet and up to three transactions — far
+            more than the 86px this claimed while the page below it grew. */}
+        <SkeletonBlock className="h-[320px] w-full rounded-2xl" />
+        {/* Whose move it is. */}
+        <SkeletonBlock className="h-[92px] w-full rounded-2xl" />
+        {/* The direction band between the legs. */}
+        <SkeletonBlock className="h-[52px] w-full rounded-xl" />
         <div className="grid gap-4 md:grid-cols-2">
           {DVP_LEG_SKELETON_IDS.map((id) => (
-            <SkeletonBlock className="h-[232px] w-full rounded-2xl" key={`leg-${id}`} />
+            <SkeletonBlock className="h-[264px] w-full rounded-2xl" key={`leg-${id}`} />
           ))}
         </div>
-        <SkeletonBlock className="h-[188px] w-full rounded-2xl" />
+        <SkeletonBlock className="h-[152px] w-full rounded-2xl" />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
 }
 
-const DVP_FIELD_SKELETON_IDS = [
-  "wallet",
-  "side",
-  "counterparty",
-  "asset",
-  "cash",
-  "amounts",
-  "expiry",
+/** The three grouped sections the form is actually built from. */
+const DVP_CREATE_SECTION_HEIGHTS = [
+  { id: "your-side", height: "h-[236px]" },
+  { id: "legs", height: "h-[330px]" },
+  { id: "terms", height: "h-[300px]" },
 ];
 
 export function DvpCreateSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
-        <SkeletonBlock className="h-8 w-full max-w-lg" />
-        {DVP_FIELD_SKELETON_IDS.map((id) => (
-          <div className="grid gap-1.5" key={id}>
-            <SkeletonBlock className="h-3 w-32" />
-            <SkeletonBlock className="h-9 w-full rounded-lg" />
+      {/* Mirrors the real form: max-w-5xl, and a two-column split with the
+          summary panel beside it. The old one described a single narrow column
+          of seven flat fields, a layout this form has not had for a while — so
+          it handed over to something a different width AND a different shape. */}
+      <div className="mx-auto w-full max-w-5xl">
+        <SkeletonBlock className="h-10 w-full max-w-2xl" />
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+          <div className="grid gap-5">
+            {DVP_CREATE_SECTION_HEIGHTS.map((section) => (
+              <SkeletonBlock className={`${section.height} w-full rounded-2xl`} key={section.id} />
+            ))}
           </div>
-        ))}
-        <SkeletonBlock className="h-9 w-32 rounded-lg" />
+          <div className="grid gap-4">
+            <SkeletonBlock className="h-[280px] w-full rounded-2xl" />
+            <SkeletonBlock className="h-10 w-full rounded-lg" />
+          </div>
+        </div>
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

@@ -1346,18 +1346,37 @@ export class CustodyRuntimeTargets {
   }
 }
 
+/**
+ * Every purpose a stored wallet may carry.
+ *
+ * Derived from the union rather than restated as switch cases, and that is the
+ * point: this parser THROWS on anything it does not recognise, so a purpose
+ * added to the type and written to a row took the entire wallet list down for
+ * the project with "Unknown custody wallet purpose" — the list, the pickers
+ * that read it, and every screen built on top.
+ *
+ * As a `satisfies` record, adding a purpose to `CustodyWalletPurpose` without
+ * adding it here is a compile error rather than a runtime outage.
+ */
+const KNOWN_WALLET_PURPOSES = {
+  root: true,
+  mint_authority: true,
+  freeze_authority: true,
+  fee_payer: true,
+  transfer: true,
+  dvp_settlement_authority: true,
+} as const satisfies Record<CustodyWalletPurpose, true>;
+
 function parseWalletPurpose(purpose: string | null): CustodyWalletPurpose | null {
-  switch (purpose) {
-    case null:
-    case "root":
-    case "mint_authority":
-    case "freeze_authority":
-    case "fee_payer":
-    case "transfer":
-      return purpose;
-    default:
-      throw internalError("Unknown custody wallet purpose");
+  if (purpose === null) {
+    return null;
   }
+  if (purpose in KNOWN_WALLET_PURPOSES) {
+    return purpose as CustodyWalletPurpose;
+  }
+  // Still a throw: an unrecognised purpose is untrusted data in a signing path,
+  // and guessing at it would let a row nobody wrote decide how a wallet is used.
+  throw internalError("Unknown custody wallet purpose");
 }
 
 function walletBelongsToTarget(

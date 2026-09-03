@@ -1,3 +1,5 @@
+import * as solanaRpc from "@sdp/rpc/solana";
+import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
@@ -13,7 +15,14 @@ import {
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
+import { inspectDvpMint } from "@/services/dvp/inspect-mint";
+import { observeDvpTradeIfStale, observeDvpTradeNow } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
+import {
+  estimateSettlementCostLamports,
+  findSettlementFundingShortfall,
+} from "@/services/dvp/settle-preflight";
+import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import type { Env } from "@/types/env";
 import type { DvpCloseResolved } from "./policy";
 import { type createDvpTradeSchema, listDvpTradesQuerySchema } from "./schemas";
@@ -40,6 +49,8 @@ interface LegInput {
   escrow: string;
   settlementDestination: string;
   observedAmount: string | null;
+  decimals: number | null;
+  symbol: string | null;
   frozen: boolean | null;
 }
 
@@ -77,6 +88,17 @@ function legResponse(leg: LegInput) {
     mint: leg.mint,
     tokenProgram: leg.tokenProgram,
     amount: leg.amount,
+    /**
+     * The mint's decimals, or null when the trade predates them being stored.
+     *
+     * Every amount here is base units. Without the scale a reader has no way to
+     * turn 1000000000 back into the 1,000 somebody typed, which is what every
+     * surface reading a trade was showing. Null rather than a default: a wrong
+     * scale misstates an amount by orders of magnitude.
+     */
+    decimals: leg.decimals,
+    /** The mint's symbol, or null when it carries no metadata. Never invented. */
+    symbol: leg.symbol,
     /** Pay this address to fund the leg. */
     escrow: leg.escrow,
     settlementDestination: leg.settlementDestination,
@@ -92,7 +114,37 @@ function legResponse(leg: LegInput) {
  * their integration. Every 64-bit value stays a string, because a JSON number
  * would round it above 2^53.
  */
-function toTradeResponse(row: DvpTradeRow) {
+/** The custody wallet a trade spends from, as much of it as a reader needs. */
+interface SdpWalletRef {
+  address: string;
+  label: string | null;
+}
+
+/**
+ * Resolves the custody wallets a set of trades funds from.
+ *
+ * One query for the whole page rather than one per row. Missing entries are
+ * simply absent: a wallet deactivated since the trade was created is a real
+ * state, and the surface says the trade's wallet is no longer available rather
+ * than inventing an address for it.
+ */
+async function readSdpWallets(env: Env, walletIds: string[]): Promise<Map<string, SdpWalletRef>> {
+  const unique = [...new Set(walletIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return new Map();
+  }
+  const placeholders = unique.map(() => "?").join(", ");
+  const result = await getDb(env)
+    .prepare(`SELECT id, public_key, label FROM custody_wallets WHERE id IN (${placeholders})`)
+    .bind(...unique)
+    .all<{ id: string; public_key: string; label: string | null }>();
+
+  return new Map(
+    (result.results ?? []).map((row) => [row.id, { address: row.public_key, label: row.label }])
+  );
+}
+
+function toTradeResponse(row: DvpTradeRow, sdpWallet?: SdpWalletRef) {
   return {
     id: row.id,
     status: row.status,
@@ -107,6 +159,8 @@ function toTradeResponse(row: DvpTradeRow) {
         escrow: row.escrowA,
         settlementDestination: row.userASettlementDestination,
         observedAmount: row.escrowAAmount,
+        decimals: row.decimalsA,
+        symbol: row.symbolA,
         frozen: row.escrowAFrozen,
       }),
       b: legResponse({
@@ -117,15 +171,37 @@ function toTradeResponse(row: DvpTradeRow) {
         escrow: row.escrowB,
         settlementDestination: row.userBSettlementDestination,
         observedAmount: row.escrowBAmount,
+        decimals: row.decimalsB,
+        symbol: row.symbolB,
         frozen: row.escrowBFrozen,
       }),
     },
     sdpSide: row.sdpSide,
+    /**
+     * The wallet this organization's leg is funded from.
+     *
+     * Absent from this response until now, which meant the only wallet-shaped
+     * address on a trade page was the settlement authority — a system account
+     * with signing power over the trade, sitting where a reader looks for their
+     * own wallet. It was mistaken for exactly that.
+     */
+    sdpWallet: sdpWallet ?? null,
     nonce: row.nonce,
     expiryTimestamp: row.expiryTimestamp,
     earliestSettlementTimestamp: row.earliestSettlementTimestamp,
     refString: row.refString,
     createSignature: row.createSignature,
+    /** The transaction that closed it, so settlement is verifiable after the fact. */
+    closeSignature: row.closeSignature,
+    /**
+     * What moved SDP's leg into escrow.
+     *
+     * The receipt, falling back to a live claim so a funding still in flight
+     * links to the transaction it is waiting on. Reading the claim ALONE — as
+     * this did — meant the link showed for the minute the claim lived and then
+     * disappeared from a leg that had funded successfully.
+     */
+    fundingSignature: row.sdpLegFundingTx ?? row.sdpLegFundingSignature,
     observedAt: row.observedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -169,7 +245,8 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     idempotencyKey: c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
   });
 
-  return success(c, { trade: toTradeResponse(trade) }, 201);
+  const wallets = await readSdpWallets(c.env, [trade.sdpWalletId]);
+  return success(c, { trade: toTradeResponse(trade, wallets.get(trade.sdpWalletId)) }, 201);
 };
 
 /**
@@ -201,6 +278,19 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 
   const result = await closeDvpTrade(c, resolved.trade, action);
 
+  // We broadcast it, so we know what it was. Left to the sweep this becomes
+  // `closed_unknown` — an honest answer to "the account vanished, why?", but a
+  // silly one to give about a settlement the product just performed itself.
+  await createDvpTradeRepository(c.env).recordClose(
+    resolved.trade.id,
+    action === "settle" ? "settled" : "cancelled",
+    result.signature
+  );
+
+  // Same reason: settling closes both escrows and the trade account, and the
+  // page should show that when it happens rather than a minute later.
+  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
+
   return success(c, {
     tradeId: resolved.trade.id,
     action,
@@ -227,6 +317,11 @@ export const fundTrade = async (c: AppContext) => {
   ]);
 
   const result = await fundDvpTradeLeg(c, resolved.trade);
+
+  // The tokens have moved. Waiting for the once-a-minute sweep to say so left
+  // the page reading "Waiting on funds" straight after a successful transfer,
+  // which is indistinguishable from it having failed.
+  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
 
   return success(c, {
     tradeId: resolved.trade.id,
@@ -257,8 +352,57 @@ export const listTrades = async (c: AppContext) => {
     query.data.limit
   );
 
-  return success(c, { trades: trades.map(toTradeResponse) });
+  const wallets = await readSdpWallets(
+    c.env,
+    trades.map((trade) => trade.sdpWalletId)
+  );
+  return success(c, {
+    trades: trades.map((trade) => toTradeResponse(trade, wallets.get(trade.sdpWalletId))),
+  });
 };
+
+/**
+ * Whether the settlement authority can pay for the close this trade will need.
+ *
+ * Read on the detail view rather than left for the attempt, because the failure
+ * it prevents is silent until it happens: the authority is provisioned empty,
+ * it pays the fee and the rent for every account settlement creates, and the
+ * first settle in a project failed in simulation with an error naming neither
+ * the account nor the amount.
+ *
+ * Never fatal. This is a readiness hint on a page that has to render either
+ * way; an RPC that will not answer must not take the trade with it.
+ */
+async function readSettlementReadiness(
+  c: AppContext,
+  trade: DvpTradeRow
+): Promise<{ address: string; balance: string; required: string; funded: boolean } | null> {
+  try {
+    const settlement = await readDvpSettlementWallet(c.env, {
+      organizationId: trade.organizationId,
+      projectId: trade.projectId,
+    });
+    if (!settlement) {
+      return null;
+    }
+    // Four accounts is settlement's worst case, which is the number worth
+    // quoting: telling somebody they are ready and then asking for more mid-flow
+    // is worse than asking for the ceiling once.
+    const shortfall = await findSettlementFundingShortfall(
+      solanaRpc.createRpc(c.env),
+      settlement.address as Address,
+      4
+    );
+    return {
+      address: settlement.address,
+      balance: shortfall ? shortfall.balance.toString() : "0",
+      required: (shortfall?.required ?? estimateSettlementCostLamports(4)).toString(),
+      funded: shortfall === null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export const getTrade = async (c: AppContext) => {
   const auth = getAuth(c);
@@ -283,5 +427,53 @@ export const getTrade = async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
-  return success(c, { trade: toTradeResponse(trade) });
+  // The sweep runs once a minute. That is the right cadence for a background
+  // job and the wrong one for somebody watching this page wait on a deposit, so
+  // a request for an open trade pays for a fresh reading when the stored one has
+  // aged out. Closed trades are answered from the row: they cannot change.
+  const observed = await observeDvpTradeIfStale(c.env, trade);
+
+  const [wallets, settlementReadiness] = await Promise.all([
+    readSdpWallets(c.env, [observed.sdpWalletId]),
+    readSettlementReadiness(c, observed),
+  ]);
+  return success(c, {
+    trade: {
+      ...toTradeResponse(observed, wallets.get(observed.sdpWalletId)),
+      settlementReadiness,
+    },
+  });
+};
+
+/**
+ * Inspects a mint so the create form can take a human amount for it.
+ *
+ * Read-only and permissionless beyond `payments:read`: it reports public chain
+ * state about an address the caller already has. The value is that it answers
+ * BEFORE a trade is signed — decimals, so the amount field can convert rather
+ * than demand base units, and eligibility, so a mint DvP refuses is named in
+ * the form instead of surfacing as a failed create that already cost a
+ * signature.
+ */
+export const inspectMint = async (c: AppContext) => {
+  const mint = c.req.param("mint");
+  if (!mint) {
+    throw notFound("Mint not found");
+  }
+
+  // Validated here rather than by a schema: the param is an address, and an
+  // unparseable one is the same answer as an address with nothing at it.
+  let parsed: Address;
+  try {
+    parsed = address(mint);
+  } catch {
+    throw notFound("Mint not found");
+  }
+
+  const inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+  if (!inspection) {
+    throw notFound("Mint not found");
+  }
+
+  return success(c, { mint: inspection });
 };

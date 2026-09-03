@@ -12,7 +12,7 @@
 import type { SolanaCluster } from "@sdp/types";
 import { useMemo, useState } from "react";
 import { cashOptionsFor } from "./dvp-cash-options";
-import type { DvpCreateContext, DvpCreateOption } from "./dvp-create.data";
+import type { DvpCreateContext, DvpCreateOption, DvpWalletBalance } from "./dvp-create.data";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
 
@@ -28,10 +28,16 @@ function defaultExpiry(): string {
 
 export interface DvpCreateForm {
   asset: DvpLeg;
+  /** The wallet's balance of the asset mint, when SDP delivers that leg. */
+  assetBalance: DvpWalletBalance | null;
   cash: DvpLeg;
+  /** The wallet's balance of the cash mint, when SDP delivers that leg. */
+  cashBalance: DvpWalletBalance | null;
   cashOptions: DvpCreateOption[];
   counterparty: string;
   counterpartyLooksWrong: boolean;
+  /** The counterparty is the very wallet funding your leg — one party, two sides. */
+  counterpartyIsOwnLegWallet: boolean;
   error: string | null;
   expiry: string;
   ready: boolean;
@@ -67,10 +73,33 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   const counterpartyLooksWrong =
     trimmedCounterparty.length > 0 && !BASE58_ADDRESS.test(trimmedCounterparty);
 
+  /**
+   * The counterparty is the wallet funding your own leg.
+   *
+   * A trade needs two parties; this is one party on both sides of it, and the
+   * program refuses it outright. The API refuses it too — `userA and userB must
+   * differ` — but only after resolving the custody signer, so the round trip
+   * spends a provider call to return a sentence about `userA` to somebody who
+   * has never seen that word. Naming it here, against the address the wallet
+   * picker is already showing, costs nothing and says what is wrong.
+   *
+   * Deliberately only THIS wallet. Trading between two wallets you own is a
+   * real trade with two distinct parties, and blocking it would be wrong.
+   */
+  const counterpartyIsOwnLegWallet =
+    trimmedCounterparty.length > 0 &&
+    trimmedCounterparty === context.wallets.find((candidate) => candidate.id === walletId)?.address;
+
   const ready = Boolean(
-    walletId &&
+    // Never while a leg's scale is still being read. The amount would be
+    // encoded by whatever decimals happen to be around, which during a lookup
+    // is either the previous mint's or none at all.
+    !asset.pendingLookup &&
+      !cash.pendingLookup &&
+      walletId &&
       trimmedCounterparty &&
       !counterpartyLooksWrong &&
+      !counterpartyIsOwnLegWallet &&
       asset.mint &&
       cash.mint &&
       asset.baseUnits &&
@@ -97,11 +126,36 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     });
   }
 
+  // The balance belongs to the leg SDP actually delivers — that is the only one
+  // spent from this wallet. Showing it on the counterparty's leg would claim we
+  // hold what they owe.
+  const selectedWallet = context.wallets.find((wallet) => wallet.id === walletId) ?? null;
+  const sdpLeg = sdpSide === "a" ? asset : cash;
+  const sdpDecimals = sdpLeg.token?.decimals ?? sdpLeg.pasted.mint?.decimals ?? null;
+  // A wallet holding none of the mint has NO entry in `balances`. That is a
+  // balance of zero, not an unknown — and rendering it as unknown would drop the
+  // row and the over-balance guard with it, so switching to a wallet that cannot
+  // deliver the leg would silently look fine. Zero is only knowable once the
+  // wallet and the mint's scale are both settled; before that there is genuinely
+  // nothing to claim.
+  const sdpBalance =
+    selectedWallet && sdpLeg.mint && sdpDecimals !== null
+      ? (selectedWallet.balances.find((balance) => balance.mint === sdpLeg.mint) ?? {
+          mint: sdpLeg.mint,
+          amount: "0",
+          decimals: sdpDecimals,
+          symbol: null,
+        })
+      : null;
+
   return {
     asset,
+    assetBalance: sdpSide === "a" ? sdpBalance : null,
     cash,
+    cashBalance: sdpSide === "b" ? sdpBalance : null,
     cashOptions,
     counterparty,
+    counterpartyIsOwnLegWallet,
     counterpartyLooksWrong,
     error,
     expiry,

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { DvpTradeDetailWorkspace } from "../dvp-trade-detail-workspace";
+import { DvpTradeDetailClient } from "../dvp-trade-detail-client";
 import { DvpTradeLoadError } from "../dvp-trade-load-error";
 import { fetchDvpTrade, isNotFound } from "../dvp-trades.data";
 
@@ -17,7 +17,7 @@ export default async function DvpTradeDetailPage({
     const { trade, error } = result;
 
     if (trade) {
-      return <DvpTradeDetailWorkspace trade={trade} />;
+      return <DvpTradeDetailClient trade={trade} />;
     }
 
     // A trade outside the caller's scope answers 404 upstream by design, so an

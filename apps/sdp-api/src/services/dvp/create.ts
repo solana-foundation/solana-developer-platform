@@ -26,6 +26,7 @@ import {
   getCreateDvpInstruction,
 } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   type Address,
   address,
@@ -50,6 +51,7 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import { dvpCreateFingerprint } from "./fingerprint";
+import { inspectDvpMint } from "./inspect-mint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
@@ -125,6 +127,16 @@ async function insertOrReplay(
   }
 }
 
+/**
+ * The catalogue's symbol for a mint, or null.
+ *
+ * The fallback for mints that carry no metadata of their own, which is every
+ * legacy SPL token including the stablecoins most cash legs use.
+ */
+function wellKnownSymbol(mint: string): string | null {
+  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? null;
+}
+
 /** Derives the per-trade nonce tombstone, seeds `[b"nonce", swap_dvp]`. */
 async function findNonceTombstone(swapDvp: Address): Promise<Address> {
   const [tombstone] = await getProgramDerivedAddress({
@@ -190,6 +202,15 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   if (mintProblems.length > 0) {
     throw badRequest(`Invalid DvP mints: ${mintProblems.join("; ")}`);
   }
+
+  // Carried onto the row so every later surface can show the trade in the units
+  // a person entered. The mints were just read and validated above, so this
+  // costs two cached reads rather than a round trip per view — and a mint's
+  // decimals cannot change, which is what makes storing them safe at all.
+  const [inspectedA, inspectedB] = await Promise.all([
+    inspectDvpMint(rpc, mintA),
+    inspectDvpMint(rpc, mintB),
+  ]);
 
   // Only now, after the payload is known to be sound, do we touch the custody
   // provider. Provisioning happens on first use, so a project's very first
@@ -309,6 +330,14 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     nonce: nonce.toString(),
     tokenProgramA: input.tokenProgramA,
     tokenProgramB: input.tokenProgramB,
+    decimalsA: inspectedA?.decimals ?? null,
+    decimalsB: inspectedB?.decimals ?? null,
+    // Metadata first, catalogue second. A Token-2022 mint carries its own name;
+    // USDC does not — it is legacy SPL with no metadata extension — so reading
+    // only the mint left the cash leg as a bare number on a screen showing two
+    // different tokens.
+    symbolA: inspectedA?.symbol ?? wellKnownSymbol(input.mintA),
+    symbolB: inspectedB?.symbol ?? wellKnownSymbol(input.mintB),
     amountA: input.amountA.toString(),
     amountB: input.amountB.toString(),
     expiryTimestamp: input.expiryTimestamp.toString(),

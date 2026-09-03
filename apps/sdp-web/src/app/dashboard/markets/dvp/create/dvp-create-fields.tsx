@@ -12,29 +12,50 @@ import { TokenMark } from "@/components/token-mark";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { toBaseUnits } from "./dvp-amount";
+import { fromBaseUnits, toBaseUnits } from "./dvp-amount";
 import type { DvpCreateOption } from "./dvp-create.data";
 import { CUSTOM } from "./use-dvp-create-form";
+
+/** Mirrors MAX_REF_STRING_BYTES in `services/dvp/validate.ts`. */
+const MAX_REF_BYTES = 64;
 
 export function Field({
   children,
   hint,
   htmlFor,
   label,
+  labelTrailing,
+  warning,
   tone = "muted",
 }: {
   children: ReactNode;
   hint?: ReactNode;
   htmlFor?: string;
   label: string;
+  /**
+   * Sits opposite the label on the same line — a balance, a "Max". Outside the
+   * `<Label>` so a click lands on the control it is, not on the input.
+   */
+  labelTrailing?: ReactNode;
+  /**
+   * A caution that sits BESIDE the hint rather than replacing it. The hint
+   * usually carries something worth keeping on screen — the base units an
+   * amount resolves to — and a warning that swallowed it would trade one piece
+   * of information for another.
+   */
+  warning?: ReactNode;
   /** `danger` for a hint that is a correction rather than an explanation. */
   tone?: "muted" | "danger";
 }) {
   return (
     <div className="grid gap-1.5">
-      <Label htmlFor={htmlFor}>{label}</Label>
+      <div className="flex items-baseline justify-between gap-3">
+        <Label htmlFor={htmlFor}>{label}</Label>
+        {labelTrailing}
+      </div>
       {children}
       {hint ? (
         <p
@@ -46,6 +67,7 @@ export function Field({
           {hint}
         </p>
       ) : null}
+      {warning ? <p className="text-error text-xs leading-relaxed">{warning}</p> : null}
     </div>
   );
 }
@@ -93,14 +115,18 @@ export function MintField({
         >
           {options.map((option) => (
             <SelectItem key={option.mint} value={option.mint}>
+              {/* The token, and nothing else. This read "ATD (6 decimals)",
+                  which is a fact about how the chain stores the amount and not
+                  a reason to pick one token over another — and with both legs
+                  usually at six it was the same suffix on every option, so the
+                  only varying part was pushed left by a constant. The scale is
+                  already stated where it can act on the number: the amount
+                  field's own hint says how you write it, and the conversion
+                  line under it says what will be sent. It is left over from
+                  when this field took base units. */}
               <span className="flex items-center gap-2">
                 <TokenMark mint={option.mint} size="xs" symbol={option.label} />
-                {option.decimals == null
-                  ? option.label
-                  : t("DashboardMarkets.dvp.mintOption", {
-                      label: option.label,
-                      decimals: String(option.decimals),
-                    })}
+                {option.label}
               </span>
             </SelectItem>
           ))}
@@ -123,6 +149,20 @@ export function MintField({
 }
 
 /**
+ * Compares two u64 base-unit strings. Never `Number`: a u64 exceeds 2^53.
+ *
+ * @returns negative, zero or positive, like any comparator.
+ */
+function compareBaseUnits(left: string, right: string): number {
+  const a = left.replace(/^0+(?=\d)/, "");
+  const b = right.replace(/^0+(?=\d)/, "");
+  if (a.length !== b.length) {
+    return a.length - b.length;
+  }
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
+/**
  * One amount field, in whichever unit the mint allows.
  *
  * Where decimals are known it takes the amount as a person would write it and
@@ -130,7 +170,71 @@ export function MintField({
  * magic. Where they are not, it says so and takes base units, because guessing
  * a scale would move the wrong quantity.
  */
+/**
+ * What the balance line offers: how much you hold, and a way to spend all of it.
+ *
+ * Its own component because it was an inline conditional inside a prop, which
+ * is where a chunk of `AmountField`'s branching lived.
+ */
+function BalanceWithMax({
+  balance,
+  onChange,
+}: {
+  balance: { amount: string; decimals: number };
+  onChange: (next: string) => void;
+}) {
+  const t = useTranslations();
+  const max = fromBaseUnits(balance.amount, balance.decimals);
+
+  return (
+    <span className="flex items-center gap-2">
+      <span className="text-tertiary text-xs tabular-nums">
+        {t("DashboardMarkets.dvp.balanceAvailable", { amount: max })}
+      </span>
+      <button
+        className="rounded text-primary text-xs underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        onClick={() => onChange(max)}
+        type="button"
+      >
+        {t("DashboardMarkets.dvp.balanceUseMax")}
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Which of the four things this field can say about the number you typed.
+ *
+ * They are mutually exclusive and were written as a ternary nested four deep,
+ * which reads as one expression and is four decisions. Early returns say the
+ * same thing in the order the cases actually rank: no scale known, then too
+ * precise to send, then the conversion, then how to write it.
+ */
+function amountHintKey(
+  decimals: number | null,
+  tooPrecise: boolean,
+  converted: ReturnType<typeof toBaseUnits> | null
+): { key: MessageKey; values?: Record<string, string> } {
+  if (decimals === null) {
+    return { key: "DashboardMarkets.dvp.fieldAmountHintRaw" };
+  }
+  if (tooPrecise) {
+    return { key: "DashboardMarkets.dvp.amountTooPrecise" };
+  }
+  if (converted?.ok) {
+    return {
+      key: "DashboardMarkets.dvp.baseUnits",
+      values: { value: converted.baseUnits },
+    };
+  }
+  return {
+    key: "DashboardMarkets.dvp.fieldAmountHintDecimals",
+    values: { decimals: String(decimals) },
+  };
+}
+
 export function AmountField({
+  balance,
   decimals,
   id,
   label,
@@ -138,6 +242,16 @@ export function AmountField({
   symbol,
   value,
 }: {
+  /**
+   * What the spending wallet holds of this mint, in base units. Null when the
+   * leg is not SDP's, or the balance is not known.
+   *
+   * Shown because this field asks someone to commit a quantity, and it used to
+   * ask without ever saying how much they had — so committing more than the
+   * wallet holds looked fine until funding failed for insufficient funds, well
+   * after the trade was on chain and its escrows published.
+   */
+  balance: { amount: string; decimals: number } | null;
   decimals: number | null;
   id: string;
   label: string;
@@ -149,23 +263,23 @@ export function AmountField({
   const converted = decimals === null || value.trim() === "" ? null : toBaseUnits(value, decimals);
   const tooPrecise = converted?.ok === false && converted.reason === "too-precise";
 
+  // Compared in BASE UNITS, as strings of equal length, never as numbers: a
+  // u64 exceeds 2^53 and a float comparison would call an over-commitment fine.
+  const exceedsBalance =
+    balance !== null && converted?.ok === true
+      ? compareBaseUnits(converted.baseUnits, balance.amount) > 0
+      : false;
+
+  const hint = amountHintKey(decimals, tooPrecise, converted);
+
   return (
     <Field
-      hint={
-        decimals === null
-          ? t("DashboardMarkets.dvp.fieldAmountHintRaw")
-          : tooPrecise
-            ? t("DashboardMarkets.dvp.amountTooPrecise", { symbol })
-            : converted?.ok
-              ? t("DashboardMarkets.dvp.baseUnits", { value: converted.baseUnits })
-              : t("DashboardMarkets.dvp.fieldAmountHintDecimals", {
-                  symbol,
-                  decimals: String(decimals),
-                })
-      }
+      hint={t(hint.key, { symbol, ...hint.values })}
       htmlFor={id}
       label={label}
+      labelTrailing={balance ? <BalanceWithMax balance={balance} onChange={onChange} /> : null}
       tone={tooPrecise ? "danger" : "muted"}
+      warning={exceedsBalance ? t("DashboardMarkets.dvp.amountExceedsBalance") : null}
     >
       <div className="relative">
         {/* inputMode, never type="number": these resolve to u64 base units and a
@@ -279,5 +393,60 @@ export function SideChoice({
         })}
       </div>
     </fieldset>
+  );
+}
+
+/**
+ * The on-chain reference, counted in BYTES.
+ *
+ * The program stores `ref_string` zero-padded at a fixed width and the API
+ * refuses anything over 64 BYTES (`services/dvp/validate.ts:19`). A plain
+ * `maxLength={64}` counts UTF-16 code units, so "café" and an emoji both pass
+ * the input and then fail the create — the one place where the limit is
+ * discovered is after a round trip. Counting the encoded length is the only
+ * measure that agrees with the thing enforcing it.
+ */
+export function ReferenceField({
+  id,
+  onChange,
+  value,
+}: {
+  id: string;
+  onChange: (next: string) => void;
+  value: string;
+}) {
+  const t = useTranslations();
+  const used = new TextEncoder().encode(value).length;
+  const over = used - MAX_REF_BYTES;
+
+  return (
+    <Field
+      hint={
+        over > 0
+          ? t("DashboardMarkets.dvp.fieldRefTooLong", { over: String(over) })
+          : t("DashboardMarkets.dvp.fieldRefHint")
+      }
+      htmlFor={id}
+      label={t("DashboardMarkets.dvp.fieldRef")}
+      labelTrailing={
+        value ? (
+          <span className={cn("text-xs tabular-nums", over > 0 ? "text-error" : "text-tertiary")}>
+            {t("DashboardMarkets.dvp.fieldRefCount", {
+              used: String(used),
+              total: String(MAX_REF_BYTES),
+            })}
+          </span>
+        ) : null
+      }
+      tone={over > 0 ? "danger" : "muted"}
+    >
+      <Input
+        aria-invalid={over > 0}
+        id={id}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t("DashboardMarkets.dvp.fieldRefPlaceholder")}
+        value={value}
+      />
+    </Field>
   );
 }

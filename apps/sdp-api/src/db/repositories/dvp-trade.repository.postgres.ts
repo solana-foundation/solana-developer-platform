@@ -32,6 +32,13 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     nonce: assertString(row.nonce, "nonce"),
 
     tokenProgramA: assertString(row.token_program_a, "token_program_a"),
+    decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
+    decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
+    closeSignature: typeof row.close_signature === "string" ? row.close_signature : null,
+    fundingClaimExpiryHeight:
+      typeof row.funding_claim_expiry_height === "string" ? row.funding_claim_expiry_height : null,
+    symbolA: typeof row.symbol_a === "string" ? row.symbol_a : null,
+    symbolB: typeof row.symbol_b === "string" ? row.symbol_b : null,
     tokenProgramB: assertString(row.token_program_b, "token_program_b"),
 
     amountA: assertString(row.amount_a, "amount_a"),
@@ -57,6 +64,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     status: row.status as DvpTradeStatus,
     observedAt: (row.observed_at as string | null) ?? null,
     sdpLegFundingSignature: (row.sdp_leg_funding_signature as string | null) ?? null,
+    sdpLegFundingTx: (row.sdp_leg_funding_tx as string | null) ?? null,
     idempotencyKey: (row.idempotency_key as string | null) ?? null,
     idempotencyFingerprint: (row.idempotency_fingerprint as string | null) ?? null,
     createSignature: (row.create_signature as string | null) ?? null,
@@ -73,12 +81,14 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
 const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
          token_program_a, token_program_b,
+         decimals_a, decimals_b, symbol_a, symbol_b,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
-         status, observed_at, sdp_leg_funding_signature,
+         status, observed_at, sdp_leg_funding_signature, sdp_leg_funding_tx,
          idempotency_key, idempotency_fingerprint,
-         create_signature, create_last_valid_block_height,
+         create_signature, create_last_valid_block_height, close_signature,
+         funding_claim_expiry_height,
          escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
 
@@ -113,6 +123,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               id, organization_id, project_id, swap_dvp,
               settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
               token_program_a, token_program_b,
+              decimals_a, decimals_b, symbol_a, symbol_b,
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
               escrow_a, escrow_b, sdp_side, sdp_wallet_id,
@@ -122,6 +133,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?,
+              ?, ?, ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?,
               ?, ?, ?, ?,
@@ -142,6 +154,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           row.nonce,
           row.tokenProgramA,
           row.tokenProgramB,
+          row.decimalsA,
+          row.decimalsB,
+          row.symbolA,
+          row.symbolB,
           row.amountA,
           row.amountB,
           row.expiryTimestamp,
@@ -166,17 +182,28 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
     },
 
     async resolveCreate(id: string, status: "created" | "create_failed") {
+      // Both escrows are empty the instant the program creates them, so a trade
+      // that has just landed does not need the sweep to tell us that. Without
+      // this the first minute of every trade's life read "Not checked — nothing
+      // has read this escrow", which is true of the reconciler and useless to a
+      // person looking at a trade they created five seconds ago.
       // Compare-and-swap on 'creating'. A reconciler that already read the chain
       // and advanced the row has better information than this caller, so it wins
       // and we match zero rows rather than overwriting an observation.
+      const observed = status === "created";
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET status = ?, updated_at = sdp_iso_now()
+              SET status = ?,
+                  escrow_a_amount = CASE WHEN ? THEN '0' ELSE escrow_a_amount END,
+                  escrow_b_amount = CASE WHEN ? THEN '0' ELSE escrow_b_amount END,
+                  escrow_a_frozen = CASE WHEN ? THEN escrow_a_frozen ELSE escrow_a_frozen END,
+                  observed_at = CASE WHEN ? THEN sdp_iso_now() ELSE observed_at END,
+                  updated_at = sdp_iso_now()
             WHERE id = ? AND status = 'creating'
             RETURNING ${SELECT_COLUMNS}`
         )
-        .bind(status, id)
+        .bind(status, observed, observed, observed, observed, id)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },
@@ -254,18 +281,44 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async claimLegFunding(id: string, signature: string) {
+    async claimLegFunding(id: string, signature: string, expiryHeight: string) {
       // Compare-and-swap: only the request that finds the column NULL may send.
+      // The expiry height rides along so a claim left behind by a failure the
+      // code could not classify has a point at which it is provably dead.
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET sdp_leg_funding_signature = ?, updated_at = sdp_iso_now()
+              SET sdp_leg_funding_signature = ?,
+                  funding_claim_expiry_height = ?,
+                  updated_at = sdp_iso_now()
             WHERE id = ? AND sdp_leg_funding_signature IS NULL
             RETURNING id`
         )
-        .bind(signature, id)
+        .bind(signature, expiryHeight, id)
         .first<{ id: string }>();
       return row !== null;
+    },
+
+    async releaseExpiredFundingClaims(blockHeight: bigint) {
+      // Only claims on trades still open, and only past the height at which the
+      // signed transaction can no longer be accepted. A trade that closed keeps
+      // its record; a claim inside its window is left alone, because the
+      // transfer it belongs to may still land.
+      const result = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET sdp_leg_funding_signature = NULL,
+                  funding_claim_expiry_height = NULL,
+                  updated_at = sdp_iso_now()
+            WHERE sdp_leg_funding_signature IS NOT NULL
+              AND funding_claim_expiry_height IS NOT NULL
+              AND CAST(funding_claim_expiry_height AS NUMERIC) < ?
+              AND status IN ('created', 'partially_funded')
+            RETURNING id`
+        )
+        .bind(blockHeight.toString())
+        .all<{ id: string }>();
+      return (result.results ?? []).length;
     },
 
     async releaseLegFunding(id: string, signature: string) {
@@ -278,6 +331,19 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
             WHERE id = ? AND sdp_leg_funding_signature = ?`
         )
         .bind(id, signature)
+        .run();
+    },
+
+    async recordLegFundingTx(id: string, signature: string) {
+      // Only ever written, never cleared — the claim is what gets released, and
+      // conflating the two is what made a funded leg look unfunded.
+      await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET sdp_leg_funding_tx = ?, updated_at = sdp_iso_now()
+            WHERE id = ?`
+        )
+        .bind(signature, id)
         .run();
     },
 
@@ -308,6 +374,23 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .bind(id)
         .first<Record<string, unknown>>();
       return row !== null && row !== undefined;
+    },
+
+    async recordClose(id: string, status: "settled" | "cancelled", signature: string) {
+      // Only from a status where the trade was still open. A row the reconciler
+      // has already moved to a terminal state was decided by something that read
+      // the chain, and that beats this caller's expectation.
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET status = ?, close_signature = ?, updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
+            RETURNING ${SELECT_COLUMNS}`
+        )
+        .bind(status, signature, id)
+        .first<Record<string, unknown>>();
+      return row ? mapDvpTradeRow(row) : null;
     },
 
     async listByProject(scope: DvpTradeScope, limit: number) {

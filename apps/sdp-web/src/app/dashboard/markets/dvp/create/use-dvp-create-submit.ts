@@ -10,6 +10,8 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
@@ -90,6 +92,7 @@ export interface DvpCreateSubmit {
 
 export function useDvpCreateSubmit(): DvpCreateSubmit {
   const router = useRouter();
+  const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -141,6 +144,11 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
         data?: { trade?: { id?: string } };
       };
       const id = body.data?.trade?.id;
+      // Confirmed before the navigation, so the trade page opens with the
+      // reason it opened already stated. Creating publishes two escrow
+      // addresses and costs rent; arriving on a new page with no acknowledgement
+      // leaves somebody guessing whether they just did that twice.
+      toast.success(t("DashboardMarkets.dvp.toastCreated"), { position: "bottom-right" });
       router.push(
         id ? `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${id}` : DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
       );

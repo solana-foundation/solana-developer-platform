@@ -33,6 +33,10 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     nonce: BIG_NONCE,
     tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    decimalsA: 6,
+    decimalsB: 6,
+    symbolA: "ATD",
+    symbolB: "USDC",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",
@@ -136,6 +140,13 @@ describe("DvpTradeRepository (postgres)", () => {
     const resolved = await repo.resolveCreate(created.id, "created");
 
     expect(resolved?.status).toBe("created");
+    // The program just made both escrows, so they hold nothing. Leaving that to
+    // the once-a-minute sweep made every new trade open on "Not checked —
+    // nothing has read this escrow", which is a statement about the reconciler
+    // rather than about the trade.
+    expect(resolved?.escrowAAmount).toBe("0");
+    expect(resolved?.escrowBAmount).toBe("0");
+    expect(resolved?.observedAt).toBeTruthy();
     await expect(repo.getById(scope, created.id)).resolves.toMatchObject({ status: "created" });
   });
 
@@ -145,6 +156,10 @@ describe("DvpTradeRepository (postgres)", () => {
     const resolved = await repo.resolveCreate(created.id, "create_failed");
 
     expect(resolved?.status).toBe("create_failed");
+    // Nothing was created, so there is no escrow to have observed. Claiming a
+    // zero balance here would describe accounts that do not exist.
+    expect(resolved?.escrowAAmount).toBeNull();
+    expect(resolved?.observedAt).toBeNull();
     // The seed tuple survives a failed create. It is the only durable copy of
     // what RecoverDvp needs, and a preflight rejection is not proof that a
     // retransmission of the same bytes can never land.
@@ -367,6 +382,103 @@ describe("DvpTradeRepository (postgres)", () => {
         repo.getBySwapDvp(bound, "SwapB11111111111111111111111111111111111111")
       ).resolves.toBeNull();
       await expect(repo.getById(bound, "dvp_mine")).resolves.toMatchObject({ id: "dvp_mine" });
+    });
+  });
+
+  /**
+   * A funding claim is kept through an ambiguous failure on purpose: the
+   * transfer may still land, and releasing it could invite a second transfer on
+   * top of a live one. What was missing is the end of "may still land" — past
+   * the signed transaction's last-valid height it provably cannot, and until
+   * this the claim was held forever and the leg was unfundable with a hand-edit
+   * as the only recovery.
+   */
+  describe("releaseExpiredFundingClaims", () => {
+    async function claimedTrade(expiryHeight: string) {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      await repo.claimLegFunding(created.id, "sig_claim", expiryHeight);
+      return created.id;
+    }
+
+    it("releases a claim whose transaction can no longer land", async () => {
+      const id = await claimedTrade("100");
+
+      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(1);
+      await expect(repo.getById(scope, id)).resolves.toMatchObject({
+        sdpLegFundingSignature: null,
+      });
+    });
+
+    // Inside the window the transfer may still be in flight, and clearing the
+    // claim there is what would let a second one go out on top of it.
+    it("leaves a claim alone while its transaction could still land", async () => {
+      const id = await claimedTrade("300");
+
+      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
+      await expect(repo.getById(scope, id)).resolves.toMatchObject({
+        sdpLegFundingSignature: "sig_claim",
+      });
+    });
+
+    // A released claim is fundable again, which is the whole point.
+    it("lets the leg be claimed again once released", async () => {
+      const id = await claimedTrade("100");
+      await repo.releaseExpiredFundingClaims(200n);
+
+      await expect(repo.claimLegFunding(id, "sig_second", "400")).resolves.toBe(true);
+    });
+
+    it("does not touch a claim on a trade that has closed", async () => {
+      const id = await claimedTrade("100");
+      await repo.recordClose(id, "settled", "sig_close");
+
+      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
+    });
+  });
+
+  /**
+   * The receipt for the transfer that funded SDP's leg.
+   *
+   * The claim above cannot serve as this. Its whole purpose is to disappear —
+   * released on a rejected broadcast, swept once its blockhash expires — so a
+   * leg that funded correctly holds no claim at all. Reading it as the funding
+   * record left a funded leg with no transaction to point at, and a leg with no
+   * transaction reads as a leg that never funded.
+   */
+  describe("recordLegFundingTx", () => {
+    it("keeps the transaction after the claim that guarded it is swept", async () => {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      await repo.claimLegFunding(created.id, "sig_fund", "100");
+      await repo.recordLegFundingTx(created.id, "sig_fund");
+
+      await repo.releaseExpiredFundingClaims(200n);
+
+      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+        sdpLegFundingSignature: null,
+        sdpLegFundingTx: "sig_fund",
+      });
+    });
+
+    // The leg has to be fundable again after a sweep, and the receipt must not
+    // be what stops it.
+    it("does not hold the claim open", async () => {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      await repo.claimLegFunding(created.id, "sig_fund", "100");
+      await repo.recordLegFundingTx(created.id, "sig_fund");
+      await repo.releaseExpiredFundingClaims(200n);
+
+      await expect(repo.claimLegFunding(created.id, "sig_retry", "400")).resolves.toBe(true);
+    });
+
+    it("is null on a trade whose leg was never funded", async () => {
+      const created = await repo.create(tradeInsert());
+
+      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+        sdpLegFundingTx: null,
+      });
     });
   });
 });

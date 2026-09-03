@@ -204,7 +204,15 @@ export async function fundDvpTradeLeg(
   // The balance read above and this transfer are not atomic, so two overlapping
   // requests would both see the same shortfall and both send. The claim is what
   // makes exactly one of them broadcast.
-  const claimed = await createDvpTradeRepository(env).claimLegFunding(trade.id, signature);
+  // The expiry height rides with the claim. Past it the signed transaction can
+  // never be accepted, which is what lets the sweep release a claim left behind
+  // by a failure this code could not classify — the alternative was a leg that
+  // stayed unfundable until somebody edited the database.
+  const claimed = await createDvpTradeRepository(env).claimLegFunding(
+    trade.id,
+    signature,
+    lastValidBlockHeight.toString()
+  );
   if (!claimed) {
     throw conflict(`DvP trade ${trade.id}: this leg is already being funded by another request.`);
   }
@@ -237,6 +245,12 @@ export async function fundDvpTradeLeg(
     }
     throw error;
   }
+
+  // On the wire, so the receipt is owed regardless of what the claim does next.
+  // The claim is released on a rejected broadcast and swept once its blockhash
+  // expires; a leg that funded correctly ends up with no claim at all, which is
+  // why this cannot be the same column.
+  await createDvpTradeRepository(env).recordLegFundingTx(trade.id, signature);
 
   return { signature, leg: trade.sdpSide, amount: outstanding.toString() };
 }

@@ -198,4 +198,20 @@ describe("getOrCreateDvpSettlementWallet", () => {
       .all<{ custody_wallet_id: string }>();
     expect(rows.results.map((r) => r.custody_wallet_id)).toEqual(["cwlt_new"]);
   });
+
+  // The authority is not an ordinary transfer wallet: it holds the only key
+  // that can close any trade in the project and is a PDA seed on every one of
+  // them. Marking it lets policy and the wallets list say so.
+  it("marks the wallet as a settlement authority, not a transfer wallet", async () => {
+    await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
+    provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
+
+    await getOrCreateDvpSettlementWallet(env, scope);
+
+    expect(provisionApiKeyWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ purpose: "dvp_settlement_authority" })
+    );
+  });
 });

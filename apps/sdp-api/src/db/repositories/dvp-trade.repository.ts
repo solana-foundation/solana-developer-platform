@@ -43,6 +43,16 @@ export interface DvpTradeRow {
 
   tokenProgramA: string;
   tokenProgramB: string;
+  /** Each leg's mint decimals, or null when unknown. Never guessed. */
+  decimalsA: number | null;
+  decimalsB: number | null;
+  /** Each leg's token symbol from mint metadata, or null when it carries none. */
+  symbolA: string | null;
+  symbolB: string | null;
+  /** Block height past which a held funding claim is provably dead. */
+  fundingClaimExpiryHeight: string | null;
+  /** The transaction that settled or cancelled the trade. Null while open. */
+  closeSignature: string | null;
 
   amountA: string;
   amountB: string;
@@ -60,8 +70,22 @@ export interface DvpTradeRow {
 
   status: DvpTradeStatus;
   observedAt: string | null;
-  /** Signature of the transfer that funded SDP's leg, once one is claimed. */
+  /**
+   * The LOCK held while SDP's leg is being funded, not a record of the funding.
+   *
+   * It is set before broadcasting so two overlapping requests cannot both send,
+   * and cleared on a released or expired claim — so it is NULL on a leg that
+   * funded perfectly. Read `sdpLegFundingTx` for the transaction.
+   */
   sdpLegFundingSignature: string | null;
+  /**
+   * The transfer that funded SDP's leg, kept permanently.
+   *
+   * Separate from the claim above because a receipt and a lock want opposite
+   * lifetimes: the lock has to disappear for the leg to be fundable again, and
+   * the receipt has to survive for the page to show what happened.
+   */
+  sdpLegFundingTx: string | null;
   /** Caller-supplied Idempotency-Key, when one was sent. */
   idempotencyKey: string | null;
   /** Hash of the terms that key was first used with. */
@@ -92,6 +116,8 @@ export interface DvpTradeRow {
  */
 export type DvpTradeInsert = Omit<
   DvpTradeRow,
+  // Written by `recordClose`, never at insert: a trade is not born closed.
+  | "closeSignature"
   | "status"
   | "observedAt"
   | "createdAt"
@@ -101,6 +127,9 @@ export type DvpTradeInsert = Omit<
   | "escrowAFrozen"
   | "escrowBFrozen"
   | "sdpLegFundingSignature"
+  // Written by `recordLegFundingTx` once a leg is actually funded.
+  | "sdpLegFundingTx"
+  | "fundingClaimExpiryHeight"
 >;
 
 export interface DvpTradeScope {
@@ -183,9 +212,29 @@ export interface DvpTradeRepository {
    * requests would both see the shortfall and both send, over-funding the
    * escrow. Returns false when another request already holds the claim.
    */
-  claimLegFunding(id: string, signature: string): Promise<boolean>;
+  claimLegFunding(id: string, signature: string, expiryHeight: string): Promise<boolean>;
   /** Releases a claim whose broadcast was definitively rejected. */
   releaseLegFunding(id: string, signature: string): Promise<void>;
+  /**
+   * Records the transfer that funded SDP's leg, permanently.
+   *
+   * Written once the transaction is on the wire, so it outlives the claim that
+   * guarded the send. Without it a funded leg's only evidence is a changed
+   * number, and nothing on the page points at the transaction that moved it.
+   */
+  recordLegFundingTx(id: string, signature: string): Promise<void>;
+  /**
+   * Releases funding claims that can no longer be live, and reports how many.
+   *
+   * A claim is kept through an ambiguous failure on purpose — the transfer may
+   * still land. But "may still land" has an end: past the signed transaction's
+   * last-valid block height the cluster can never accept it. Before this, a
+   * claim left by an unclassifiable failure was held forever and the leg was
+   * permanently unfundable, recoverable only by editing the table by hand.
+   *
+   * @param blockHeight - Current cluster block height.
+   */
+  releaseExpiredFundingClaims(blockHeight: bigint): Promise<number>;
   /**
    * Frees a `create_failed` row's idempotency key so the same request can be
    * made again.
@@ -205,5 +254,22 @@ export interface DvpTradeRepository {
    *   which case the caller must treat the replay as live.
    */
   releaseIdempotencyKey(id: string): Promise<boolean>;
+  /**
+   * Records the outcome of a close WE performed.
+   *
+   * The reconciler can only ever say `closed_unknown` for a trade whose account
+   * has vanished: settle, cancel and reject all close it and none of them
+   * announce which happened. But when SDP is the one that broadcast the close,
+   * it knows — and leaving the sweep to shrug at a settlement the product just
+   * performed is a worse answer than the one already in hand.
+   *
+   * Compare-and-swap on an OPEN status, so a reconciler that already observed
+   * the chain keeps its reading rather than being walked backwards.
+   */
+  recordClose(
+    id: string,
+    status: "settled" | "cancelled",
+    signature: string
+  ): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
 }

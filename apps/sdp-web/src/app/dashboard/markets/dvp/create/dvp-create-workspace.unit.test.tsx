@@ -21,7 +21,12 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 const context: DvpCreateContext = {
   error: null,
   wallets: [
-    { id: "cwlt_1", address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn", label: "Treasury" },
+    {
+      id: "cwlt_1",
+      address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+      label: "Treasury",
+      balances: [],
+    },
   ],
   tokens: [
     {
@@ -112,5 +117,56 @@ describe("DvpCreateWorkspace", () => {
     renderForm({ error: "Token list failed (500).", tokens: [] });
 
     expect(screen.getByText("Token list failed (500).")).toBeTruthy();
+  });
+
+  // "ATD (6 decimals)" is a fact about how the chain stores the amount, not a
+  // reason to choose one token over another — and with both legs usually at six
+  // it was the same suffix on every option. The scale is stated where it can
+  // act on the number: the amount field's hint and its conversion line.
+  it("names the token in the picker without its decimal count", () => {
+    const { container } = renderForm();
+
+    expect(container.textContent).not.toContain("decimals)");
+  });
+
+  /**
+   * Flipping the direction changes which leg you fund, and the two cards were
+   * written for one direction only: the cash card stayed captioned as the
+   * counterparty's even when you were the one funding it. The moving balance
+   * was the only signal, and a balance is a hint, not a label.
+   */
+  describe("which leg is whose", () => {
+    it("marks the asset leg as yours by default", () => {
+      const { container } = renderForm();
+
+      expect(container.textContent).toContain("You deliver");
+      expect(container.textContent).toContain("They deliver");
+    });
+
+    // The leg you act on should be the one you reach first, by eye and by tab.
+    it("puts your own leg first, whichever side you are on", () => {
+      const { container } = renderForm();
+      const order = () =>
+        Array.from(container.querySelectorAll("label")).map((node) => node.textContent ?? "");
+
+      expect(order().findIndex((text) => /asset you are trading/i.test(text))).toBeLessThan(
+        order().findIndex((text) => /paid in/i.test(text))
+      );
+
+      fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
+
+      expect(order().findIndex((text) => /paid in/i.test(text))).toBeLessThan(
+        order().findIndex((text) => /asset you are trading/i.test(text))
+      );
+    });
+
+    it("does not tell you the other side pays the cash when you do", () => {
+      const { container } = renderForm();
+
+      fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
+
+      expect(container.textContent).toContain("What you pay with");
+      expect(container.textContent).not.toContain("What the other side pays with");
+    });
   });
 });

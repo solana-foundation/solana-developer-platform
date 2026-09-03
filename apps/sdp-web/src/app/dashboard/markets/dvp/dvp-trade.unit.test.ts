@@ -6,6 +6,7 @@ import {
   type DvpTradeLeg,
   frozenLegs,
   legFundingRatio,
+  matchesAddressQuery,
   overFundedLegs,
 } from "./dvp-trade";
 import { isNotFound } from "./dvp-trades.data";
@@ -15,6 +16,8 @@ function leg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
     party: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
     mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
     tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    decimals: 6,
+    symbol: "ATD",
     amount: "1000",
     escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
     settlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
@@ -36,6 +39,10 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
     earliestSettlementTimestamp: null,
     refString: null,
     createSignature: null,
+    closeSignature: null,
+    sdpWallet: null,
+    settlementReadiness: null,
+    fundingSignature: null,
     observedAt: null,
     createdAt: "2026-09-03T00:00:00.000Z",
     updatedAt: "2026-09-03T00:00:00.000Z",
@@ -166,5 +173,44 @@ describe("isNotFound", () => {
   // A transport failure never reached the API, so there is no status at all.
   it("is false when the request never got a response", () => {
     expect(isNotFound({ status: null })).toBe(false);
+  });
+});
+
+/**
+ * Searching for a trade by an address you can see.
+ *
+ * The table renders addresses shortened. Selecting the visible text and pasting
+ * it into the search is the obvious move and it found nothing, because the only
+ * thing being matched was the full forty-four characters.
+ */
+describe("matchesAddressQuery", () => {
+  const ADDRESS = "BMiuAaumaf6XFdmm1SjQfhYo5pXPq92bU3qEaBEUw1eP";
+
+  it("matches a plain substring", () => {
+    expect(matchesAddressQuery(ADDRESS, "bmiuaa")).toBe(true);
+  });
+
+  it("matches the shortened form the table renders", () => {
+    expect(matchesAddressQuery(ADDRESS, "bmiuaa…w1ep")).toBe(true);
+  });
+
+  // Three dots and the ellipsis character are indistinguishable to whoever
+  // pasted them, so both have to work.
+  it("matches three dots as well as an ellipsis", () => {
+    expect(matchesAddressQuery(ADDRESS, "bmiuaa...w1ep")).toBe(true);
+  });
+
+  it("does not match a shortened form belonging to another address", () => {
+    expect(matchesAddressQuery(ADDRESS, "7wlcnn…xnpg")).toBe(false);
+  });
+
+  // A bare ellipsis has no head and no tail. Treating it as "starts with
+  // nothing and ends with nothing" would match every row on the page.
+  it.each(["…", "...", "…w1ep", "bmiuaa…"])("does not match everything for %s", (query) => {
+    expect(matchesAddressQuery(ADDRESS, query)).toBe(false);
+  });
+
+  it("still matches an ordinary symbol query", () => {
+    expect(matchesAddressQuery("USDC", "usd")).toBe(true);
   });
 });

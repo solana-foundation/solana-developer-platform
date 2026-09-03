@@ -57,6 +57,10 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     nonce: "42",
     tokenProgramA: T22,
     tokenProgramB: T22,
+    decimalsA: 6,
+    decimalsB: 6,
+    symbolA: "ATD",
+    symbolB: "USDC",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",
@@ -71,10 +75,13 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     status: "funded",
     observedAt: null,
     sdpLegFundingSignature: null,
+    sdpLegFundingTx: null,
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,
     createLastValidBlockHeight: null,
+    closeSignature: null,
+    fundingClaimExpiryHeight: null,
     escrowAAmount: "1000",
     escrowBAmount: "2000",
     escrowAFrozen: false,
@@ -88,16 +95,22 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 const context = { env } as never;
 
 describe("closeDvpTrade", () => {
+  /** The fee payer, which is what the funding pre-flight actually reads. */
+  let feePayer = "";
+
   beforeEach(async () => {
     vi.clearAllMocks();
     const signer = await generateKeyPairSigner();
+    feePayer = signer.address;
     createOrgSignerForCustodyWallet.mockResolvedValue(signer);
     getOrCreateDvpSettlementWallet.mockResolvedValue({
       custodyWalletId: "cwlt_settlement",
       address: SETTLEMENT_AUTHORITY,
     });
     // Every required account already exists unless a test says otherwise.
-    getAccountInfo.mockResolvedValue({ owner: T22, data: new Uint8Array(165) });
+    getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
+      address === feePayer ? { lamports: 1_000_000_000 } : { owner: T22, data: new Uint8Array(165) }
+    );
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
     sendTransaction.mockResolvedValue("sig");
   });
@@ -163,7 +176,11 @@ describe("closeDvpTrade", () => {
 
   describe("required accounts", () => {
     it("creates the accounts settlement needs when they are missing", async () => {
-      getAccountInfo.mockResolvedValue(null);
+      // Every token account absent, but the fee payer solvent: this test is
+      // about which accounts get created, not about who pays for them.
+      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
+        address === feePayer ? { lamports: 1_000_000_000 } : null
+      );
 
       const result = await closeDvpTrade(context, trade(), "settle");
 
@@ -181,7 +198,11 @@ describe("closeDvpTrade", () => {
     // Cancel delivers nothing, so a missing delivery destination must not block
     // it — that would make the escape hatch depend on an account it never uses.
     it("creates only the refund accounts for a cancel", async () => {
-      getAccountInfo.mockResolvedValue(null);
+      // Every token account absent, but the fee payer solvent: this test is
+      // about which accounts get created, not about who pays for them.
+      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
+        address === feePayer ? { lamports: 1_000_000_000 } : null
+      );
 
       const result = await closeDvpTrade(context, trade(), "cancel");
 
@@ -228,5 +249,59 @@ describe("closeDvpTrade", () => {
     expect(atas.userADestinationAtaB).not.toBe(atas.userBDestinationAtaA);
     expect(atas.userADestinationAtaB).not.toBe(atas.userAAtaA);
     expect(instruction.accounts).toBeDefined();
+  });
+
+  /**
+   * The settlement authority pays the fee and the rent for every account a
+   * close creates, and it is provisioned empty. Nothing funds it, so the first
+   * settle in every project failed in simulation with "Attempt to debit an
+   * account but found no record of a prior credit" — an error naming neither
+   * the account nor the amount, nested two levels inside a SolanaError cause,
+   * and shown to the user as "An internal error occurred".
+   */
+  describe("when the settlement authority cannot pay", () => {
+    beforeEach(() => {
+      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
+        address === feePayer ? { lamports: 0 } : null
+      );
+    });
+
+    it("refuses before spending a signature, naming the account and the shortfall", async () => {
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(
+        /settlement authority .* holds 0 lamports but needs about \d+/
+      );
+      expect(sendTransaction).not.toHaveBeenCalled();
+    });
+
+    it("says how much more it needs, so the answer is actionable", async () => {
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(
+        /Send it at least \d+ more lamports/
+      );
+    });
+
+    // Cancel creates only the two refund accounts, so it needs less. Quoting
+    // settle's figure would over-state what a cancel actually costs.
+    it("asks for less to cancel, which creates fewer accounts", async () => {
+      const settleCost = await closeDvpTrade(context, trade(), "settle").catch(
+        (error: Error) => error.message
+      );
+      const cancelCost = await closeDvpTrade(context, trade(), "cancel").catch(
+        (error: Error) => error.message
+      );
+
+      const figure = (message: string) => Number(/needs about (\d+)/.exec(message)?.[1]);
+      expect(figure(cancelCost as string)).toBeLessThan(figure(settleCost as string));
+    });
+
+    // An unreadable balance is an RPC anomaly, not a balance of zero. Treating
+    // it as zero would refuse a settlement that would have worked.
+    it("does not block when the balance cannot be read", async () => {
+      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
+        address === feePayer ? {} : { owner: T22, data: new Uint8Array(165) }
+      );
+
+      await expect(closeDvpTrade(context, trade(), "settle")).resolves.toBeDefined();
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+    });
   });
 });

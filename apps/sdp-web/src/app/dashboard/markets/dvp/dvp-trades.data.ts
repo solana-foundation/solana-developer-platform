@@ -14,6 +14,37 @@ export interface DvpTradesResult {
 }
 
 /** Never throws: a list page that renders an error beats one that 500s. */
+/**
+ * Whether a decoded body is a trade this UI can actually render.
+ *
+ * `data.trade` was trusted for being present. A 200 carrying `{}` is truthy, so
+ * it sailed past the null check and into a view that dereferences `trade.legs.a`
+ * — turning a malformed response into a render exception and a server error
+ * page, which is the one outcome the surrounding code exists to prevent. The
+ * page's own comment says a 200 with no usable trade in it must reach the
+ * retryable load error; this is what makes "no usable trade" mean something.
+ *
+ * Checks the fields the views actually reach for, not the whole schema. A
+ * stricter check would reject responses that render perfectly well the day a
+ * new optional field appears.
+ */
+function isRenderableTrade(value: unknown): value is DvpTrade {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const trade = value as Partial<DvpTrade>;
+  return (
+    typeof trade.id === "string" &&
+    typeof trade.status === "string" &&
+    typeof trade.legs === "object" &&
+    trade.legs !== null &&
+    typeof trade.legs.a === "object" &&
+    trade.legs.a !== null &&
+    typeof trade.legs.b === "object" &&
+    trade.legs.b !== null
+  );
+}
+
 export async function fetchDvpTrades(request: SdpApiClient["request"]): Promise<DvpTradesResult> {
   try {
     const response = await request(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
@@ -29,7 +60,10 @@ export async function fetchDvpTrades(request: SdpApiClient["request"]): Promise<
       };
     }
 
-    return { trades: body.data?.trades ?? [], error: null };
+    // A malformed row would throw in the table the same way a malformed trade
+    // throws on the detail page, taking the whole list down with it. Dropping
+    // the row keeps every readable trade visible.
+    return { trades: (body.data?.trades ?? []).filter(isRenderableTrade), error: null };
   } catch (error) {
     return {
       trades: [],
@@ -75,7 +109,18 @@ export async function fetchDvpTrade(
       };
     }
 
-    return { trade: body.data?.trade ?? null, error: null, status: response.status };
+    const trade = body.data?.trade;
+    if (!isRenderableTrade(trade)) {
+      return {
+        trade: null,
+        // No upstream message exists for this — the request succeeded. Saying
+        // what happened is better than the empty error a malformed 200 carries.
+        error: "The trade came back in a shape this page cannot read.",
+        status: response.status,
+      };
+    }
+
+    return { trade, error: null, status: response.status };
   } catch (error) {
     // A transport failure never reached the API, so there is no status and it
     // must never be read as absence.

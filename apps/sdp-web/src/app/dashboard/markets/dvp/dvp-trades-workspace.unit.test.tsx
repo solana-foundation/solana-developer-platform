@@ -19,7 +19,9 @@ function leg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
     party: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
     mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
     tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-    amount: "1000",
+    decimals: 6,
+    symbol: "ATD",
+    amount: "1000000000",
     escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
     settlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
     funding: null,
@@ -40,6 +42,10 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
     earliestSettlementTimestamp: null,
     refString: null,
     createSignature: null,
+    closeSignature: null,
+    sdpWallet: null,
+    settlementReadiness: null,
+    fundingSignature: null,
     observedAt: null,
     createdAt: "2026-09-03T00:00:00.000Z",
     updatedAt: "2026-09-03T00:00:00.000Z",
@@ -78,6 +84,72 @@ describe("DvpTradesWorkspace", () => {
     expect(renderList([]).match(/dvp\/create/g)?.length).toBe(1);
   });
 
+  // The filter bar earns its space only when there is something to sift; and
+  // once it is there, "2 of 2" beside an untouched filter is a number that
+  // answers nothing.
+  it("does not show a filter bar over a single trade", () => {
+    expect(renderList([trade()])).not.toContain("Search trades");
+  });
+
+  it("offers filters once there is more than one trade", () => {
+    expect(renderList([trade(), trade({ id: "dvp_2" })])).toContain("Search trades");
+  });
+
+  // Four short labels behind a chevron is a dropdown charging you a click to
+  // read what it could have shown.
+  it("shows every status choice rather than hiding them in a dropdown", () => {
+    const html = renderList([trade(), trade({ id: "dvp_2" })]);
+
+    for (const label of ["All", "Awaiting funding", "Ready to settle", "Finished"]) {
+      expect(html).toContain(label);
+    }
+  });
+
+  // A finished trade's escrows are closed and empty, so the stored reading is a
+  // leftover from before settlement. Rendering it as observed-over-target
+  // claimed a balance that no longer exists — and a trade settled before any
+  // reading was taken showed a bare number, so two finished trades rendered
+  // two different ways.
+  it("shows what a finished trade delivered, not a funding fraction", () => {
+    const funded = leg({
+      funding: { funded: true, observedAmount: "1000000000", frozen: false, surplus: null },
+    });
+    const html = renderList([trade({ status: "settled", legs: { a: funded, b: funded } })]);
+
+    expect(html).not.toContain("/ 1,000");
+  });
+
+  /**
+   * A row where you delivered the cash and a row where you delivered the asset
+   * rendered identically: the columns name the legs — Asset leg, Cash leg — and
+   * never say who gave what. Two rows meaning opposite things looked the same,
+   * and the only way to find out was to open the trade.
+   */
+  describe("which side you were on", () => {
+    it("says you delivered the asset leg when that is your side", () => {
+      const html = renderList([trade({ status: "settled", sdpSide: "a" })]);
+
+      expect(html).toContain("You delivered");
+      expect(html).toContain("You received");
+    });
+
+    it("says the same for a trade where you delivered the cash leg", () => {
+      const html = renderList([trade({ status: "settled", sdpSide: "b" })]);
+
+      expect(html).toContain("You delivered");
+      expect(html).toContain("You received");
+    });
+
+    // An open trade has not delivered anything yet, so it says what will happen
+    // rather than what did.
+    it("speaks in the future tense while the trade is still open", () => {
+      const html = renderList([trade({ status: "partially_funded" })]);
+
+      expect(html).toContain("You deliver");
+      expect(html).not.toContain("You delivered");
+    });
+  });
+
   it("keeps create reachable once trades exist", () => {
     const html = renderList([trade()]);
 
@@ -90,17 +162,21 @@ describe("DvpTradesWorkspace", () => {
   it("shows only the target for a leg nothing has read yet", () => {
     const html = renderList([trade()]);
 
-    expect(html).toContain("1000");
-    expect(html).not.toContain("0 / 1000");
+    // In the units somebody entered, with the token named. 1000000000 base
+    // units at 6 decimals is 1,000 ATD, and showing the integer is how this
+    // list read for its whole life before decimals reached the payload.
+    expect(html).toContain("1,000");
+    expect(html).toContain("ATD");
+    expect(html).not.toContain("1000000000");
   });
 
   it("shows observed over target once the escrow has been read", () => {
     const funded = leg({
-      funding: { observedAmount: "400", funded: false, surplus: null, frozen: false },
+      funding: { observedAmount: "400000000", funded: false, surplus: null, frozen: false },
     });
     const html = renderList([trade({ legs: { a: funded, b: leg() } })]);
 
-    expect(html).toContain("400 / 1000");
+    expect(html).toContain("400 / 1,000");
   });
 
   // Marked on the row rather than announced in a banner: a warning that does

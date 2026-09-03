@@ -100,3 +100,60 @@ export async function findMissingSettleAtas(
 export function describeMissingSettleAta(key: keyof DvpSettleAtas, atas: DvpSettleAtas): string {
   return `${atas[key]} does not exist and must be created before settling: it is ${SETTLE_ATA_DESCRIPTIONS[key]}`;
 }
+
+/**
+ * Rent-exempt minimum for a token account, plus a fee allowance.
+ *
+ * Settling can create up to four token accounts and always pays a signature
+ * fee, and all of it comes from the settlement authority. The figure is a floor
+ * rather than a quote: it exists to catch an authority holding nothing, which is
+ * the state every freshly provisioned one is in.
+ */
+const TOKEN_ACCOUNT_RENT_LAMPORTS = 2_040_000n;
+const FEE_ALLOWANCE_LAMPORTS = 50_000n;
+
+/**
+ * What settling will cost the settlement authority, in lamports.
+ *
+ * @param accountsToCreate - How many token accounts this close must open.
+ */
+export function estimateSettlementCostLamports(accountsToCreate: number): bigint {
+  return BigInt(accountsToCreate) * TOKEN_ACCOUNT_RENT_LAMPORTS + FEE_ALLOWANCE_LAMPORTS;
+}
+
+/**
+ * Whether the settlement authority can pay for the close it is about to sign.
+ *
+ * The authority is provisioned on a project's first trade and starts empty.
+ * Nothing funds it, so without this the first settle in every project failed in
+ * simulation with "Attempt to debit an account but found no record of a prior
+ * credit" — an error that names neither the account nor the reason, arrives
+ * nested two levels inside a SolanaError cause, and reached the dashboard as
+ * "An internal error occurred".
+ *
+ * @param rpc - Solana RPC for the trade's cluster.
+ * @param authority - The settlement authority that signs and pays.
+ * @param accountsToCreate - Token accounts this close has to open.
+ * @returns The shortfall in lamports, or null when the balance is sufficient.
+ */
+export async function findSettlementFundingShortfall(
+  rpc: SolanaRpc,
+  authority: Address,
+  accountsToCreate: number
+): Promise<{ balance: bigint; required: bigint; shortfall: bigint } | null> {
+  const required = estimateSettlementCostLamports(accountsToCreate);
+  const account = await getAccountInfo(rpc, authority);
+
+  // An account that is not there holds nothing, and that is the case this
+  // exists for. But a response that HAS an account and no readable lamports is
+  // an RPC anomaly, not a balance of zero — reading it as zero would refuse a
+  // settlement that would have worked. Unknown means "do not block"; the chain
+  // still enforces the real thing.
+  const lamports = account?.lamports;
+  if (account && typeof lamports !== "number" && typeof lamports !== "bigint") {
+    return null;
+  }
+
+  const balance = account ? BigInt(lamports as number | bigint) : 0n;
+  return balance >= required ? null : { balance, required, shortfall: required - balance };
+}

@@ -9,9 +9,10 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import type { DvpCreateContext } from "./dvp-create.data";
-import { AmountField, Field, MintField, SideChoice } from "./dvp-create-fields";
+import { AmountField, Field, MintField, ReferenceField, SideChoice } from "./dvp-create-fields";
 import { DvpCreateSummary } from "./dvp-create-summary";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
@@ -54,6 +55,128 @@ function Section({
  * form is a pure function of its inputs: it can be rendered, and asserted on,
  * without standing up the whole dashboard workspace context.
  */
+/**
+ * Whose leg this card is.
+ *
+ * The two cards are written for one direction — "Asset you are trading", "What
+ * the other side pays with" — and they did not change when the direction did.
+ * Choosing "You deliver the cash" left the cash card still captioned as the
+ * counterparty's, which is the opposite of the truth, and left nothing on
+ * either card saying which one you were filling in for yourself. The moving
+ * balance was the only signal, and a balance is a hint, not a label.
+ */
+function LegOwner({ mine }: { mine: boolean }) {
+  const t = useTranslations();
+  return (
+    <p
+      className={cn(
+        "font-medium text-[11px] uppercase tracking-wide",
+        mine ? "text-primary" : "text-tertiary"
+      )}
+    >
+      {mine ? t("DashboardMarkets.dvp.legYouDeliver") : t("DashboardMarkets.dvp.legTheyDeliver")}
+    </p>
+  );
+}
+
+/**
+ * The two legs, in the order that matches the trade.
+ *
+ * Its own component because the workspace was carrying the whole form's
+ * branching in one function. What lives here is one decision — which leg is
+ * yours — and the markup that decision reorders.
+ *
+ * The cards are held as values and ordered, rather than duplicated into two
+ * branches: writing the markup twice makes the direction check inside each copy
+ * provably constant, which is exactly what the compiler said about the first
+ * attempt.
+ */
+function LegCards({
+  context,
+  form,
+}: {
+  context: DvpCreateContext;
+  form: ReturnType<typeof useDvpCreateForm>;
+}) {
+  const t = useTranslations();
+
+  const assetLegCard = (
+    <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
+      <LegOwner mine={form.sdpSide === "a"} />
+      <MintField
+        choice={form.asset.choice}
+        custom={form.asset.custom}
+        emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
+        hint={t(
+          form.sdpSide === "a"
+            ? "DashboardMarkets.dvp.fieldAssetMintHint"
+            : "DashboardMarkets.dvp.fieldAssetMintHintTheirs"
+        )}
+        id="dvp-asset-mint"
+        label={t("DashboardMarkets.dvp.fieldAssetMint")}
+        onChoiceChange={form.asset.setChoice}
+        onCustomChange={form.asset.setCustom}
+        options={context.tokens}
+        placeholder={PLACEHOLDER_ASSET_MINT}
+      />
+      <AmountField
+        balance={form.assetBalance}
+        decimals={
+          form.asset.decimalsKnown
+            ? (form.asset.token?.decimals ?? form.asset.pasted.mint?.decimals ?? null)
+            : null
+        }
+        id="dvp-amount-a"
+        label={t("DashboardMarkets.dvp.fieldAmountA")}
+        onChange={form.asset.setAmount}
+        symbol={form.asset.symbol}
+        value={form.asset.amount}
+      />
+    </div>
+  );
+
+  const cashLegCard = (
+    <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
+      <LegOwner mine={form.sdpSide === "b"} />
+      <MintField
+        choice={form.cash.choice}
+        custom={form.cash.custom}
+        hint={t(
+          form.sdpSide === "b"
+            ? "DashboardMarkets.dvp.fieldCashMintHintMine"
+            : "DashboardMarkets.dvp.fieldCashMintHint"
+        )}
+        id="dvp-cash-mint"
+        label={t("DashboardMarkets.dvp.fieldCashMint")}
+        onChoiceChange={form.cash.setChoice}
+        onCustomChange={form.cash.setCustom}
+        options={form.cashOptions}
+        placeholder={PLACEHOLDER_CASH_MINT}
+      />
+      <AmountField
+        balance={form.cashBalance}
+        decimals={
+          form.cash.decimalsKnown
+            ? (form.cash.token?.decimals ?? form.cash.pasted.mint?.decimals ?? null)
+            : null
+        }
+        id="dvp-amount-b"
+        label={t("DashboardMarkets.dvp.fieldAmountB")}
+        onChange={form.cash.setAmount}
+        symbol={form.cash.symbol}
+        value={form.cash.amount}
+      />
+    </div>
+  );
+
+  return (
+    <>
+      {form.sdpSide === "a" ? assetLegCard : cashLegCard}
+      {form.sdpSide === "a" ? cashLegCard : assetLegCard}
+    </>
+  );
+}
+
 export function DvpCreateWorkspace({
   cluster,
   context,
@@ -129,50 +252,7 @@ export function DvpCreateWorkspace({
               title={t("DashboardMarkets.dvp.groupLegs")}
             >
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-                  <MintField
-                    choice={form.asset.choice}
-                    custom={form.asset.custom}
-                    emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
-                    hint={t("DashboardMarkets.dvp.fieldAssetMintHint")}
-                    id="dvp-asset-mint"
-                    label={t("DashboardMarkets.dvp.fieldAssetMint")}
-                    onChoiceChange={form.asset.setChoice}
-                    onCustomChange={form.asset.setCustom}
-                    options={context.tokens}
-                    placeholder={PLACEHOLDER_ASSET_MINT}
-                  />
-                  <AmountField
-                    decimals={form.asset.token?.decimals ?? null}
-                    id="dvp-amount-a"
-                    label={t("DashboardMarkets.dvp.fieldAmountA")}
-                    onChange={form.asset.setAmount}
-                    symbol={form.asset.symbol}
-                    value={form.asset.amount}
-                  />
-                </div>
-
-                <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-                  <MintField
-                    choice={form.cash.choice}
-                    custom={form.cash.custom}
-                    hint={t("DashboardMarkets.dvp.fieldCashMintHint")}
-                    id="dvp-cash-mint"
-                    label={t("DashboardMarkets.dvp.fieldCashMint")}
-                    onChoiceChange={form.cash.setChoice}
-                    onCustomChange={form.cash.setCustom}
-                    options={form.cashOptions}
-                    placeholder={PLACEHOLDER_CASH_MINT}
-                  />
-                  <AmountField
-                    decimals={form.cash.token?.decimals ?? null}
-                    id="dvp-amount-b"
-                    label={t("DashboardMarkets.dvp.fieldAmountB")}
-                    onChange={form.cash.setAmount}
-                    symbol={form.cash.symbol}
-                    value={form.cash.amount}
-                  />
-                </div>
+                <LegCards context={context} form={form} />
               </div>
             </Section>
 
@@ -182,16 +262,22 @@ export function DvpCreateWorkspace({
             >
               <Field
                 hint={
-                  form.counterpartyLooksWrong
-                    ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
-                    : t("DashboardMarkets.dvp.fieldCounterpartyHint")
+                  form.counterpartyIsOwnLegWallet
+                    ? t("DashboardMarkets.dvp.fieldCounterpartyIsOwnWallet")
+                    : form.counterpartyLooksWrong
+                      ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
+                      : t("DashboardMarkets.dvp.fieldCounterpartyHint")
                 }
                 htmlFor="dvp-counterparty"
                 label={t("DashboardMarkets.dvp.fieldCounterparty")}
-                tone={form.counterpartyLooksWrong ? "danger" : "muted"}
+                tone={
+                  form.counterpartyLooksWrong || form.counterpartyIsOwnLegWallet
+                    ? "danger"
+                    : "muted"
+                }
               >
                 <Input
-                  aria-invalid={form.counterpartyLooksWrong}
+                  aria-invalid={form.counterpartyLooksWrong || form.counterpartyIsOwnLegWallet}
                   className="font-mono text-xs"
                   id="dvp-counterparty"
                   onChange={(event) => form.setCounterparty(event.target.value)}
@@ -218,19 +304,7 @@ export function DvpCreateWorkspace({
                   />
                 </Field>
 
-                <Field
-                  hint={t("DashboardMarkets.dvp.fieldRefHint")}
-                  htmlFor="dvp-ref"
-                  label={t("DashboardMarkets.dvp.fieldRef")}
-                >
-                  <Input
-                    id="dvp-ref"
-                    maxLength={64}
-                    onChange={(event) => form.setRefString(event.target.value)}
-                    placeholder={t("DashboardMarkets.dvp.fieldRefPlaceholder")}
-                    value={form.refString}
-                  />
-                </Field>
+                <ReferenceField id="dvp-ref" onChange={form.setRefString} value={form.refString} />
               </div>
             </Section>
           </div>

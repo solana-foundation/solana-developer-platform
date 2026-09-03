@@ -13,7 +13,7 @@
  * what was observed rather than what is true.
  */
 
-import { HourglassIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
+import { ClockIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -27,9 +27,18 @@ const TONE_STYLES: Record<Tone, { box: string; icon: string }> = {
   attention: { box: "border-warning-border bg-warning-bg", icon: "text-warning" },
 };
 
+/**
+ * One mark per meaning, and the same mark this page already uses for it.
+ *
+ * Waiting was an hourglass here and a clock on the leg card directly below —
+ * two different marks for one idea, on one screen. The hourglass was also the
+ * odd one optically: its glyph is drawn narrow inside the same 16px box the
+ * circle and triangle fill, so it sat in a pocket of empty space and read as
+ * misplaced rather than as small.
+ */
 const TONE_ICONS: Record<Tone, typeof InfoIcon> = {
   info: InfoIcon,
-  waiting: HourglassIcon,
+  waiting: ClockIcon,
   attention: TriangleAlertIcon,
 };
 
