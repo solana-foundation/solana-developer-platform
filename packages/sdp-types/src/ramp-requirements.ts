@@ -96,11 +96,16 @@ export interface PayoutRequirementTree {
 
 // TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
 export type CounterpartyRequirements = { direction: RampDirection } & (
+  | { provider: Exclude<RampProviderId, "lightspark">; status: "ready" }
+  | { provider: "lightspark"; direction: "onramp"; status: "ready" }
   | {
-      provider: RampProviderId;
+      provider: "lightspark";
+      direction: "offramp";
       status: "ready";
-      /** Payout account resolved by an offramp requirements advance, for explicit quote selection. */
-      providerAccountId?: string;
+      /** Payout account resolved for the corridor, for explicit quote selection. */
+      providerAccountId: string;
+      /** Corridor tree for destination re-selection; present on requirements GET answers, omitted by advances. */
+      payout?: PayoutRequirementTree;
     }
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }

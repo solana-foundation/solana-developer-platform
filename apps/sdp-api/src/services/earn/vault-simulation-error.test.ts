@@ -3,6 +3,8 @@ import { describeVaultSimulationError } from "./vault-simulation-error";
 
 const walletPays = { kind: "wallet-pays" } as const;
 const sponsored = { kind: "sponsored" } as const;
+const partnerFeePayer = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+const callerProvided = { kind: "caller-provided", feePayer: partnerFeePayer } as const;
 
 describe("describeVaultSimulationError", () => {
   it("tells a wallet-pays customer their wallet has no SOL on AccountNotFound", () => {
@@ -25,6 +27,16 @@ describe("describeVaultSimulationError", () => {
   it("uses neutral fee-payer wording when the fee mode is unknown", () => {
     const { message, fault } = describeVaultSimulationError("AccountNotFound");
     expect(message).toContain("the fee payer holds no SOL");
+    expect(fault).toBe("caller");
+  });
+
+  it("names the caller-provided fee payer and keeps the fault with the caller", () => {
+    const { message, fault } = describeVaultSimulationError("AccountNotFound", callerProvided);
+    // The partner's wallet is short, and the prose must say WHICH wallet:
+    // "send SOL to the wallet" would misdirect the end user.
+    expect(message).toContain(`the provided fee payer (${partnerFeePayer}) holds no SOL`);
+    expect(message).toContain("Fund the fee payer and retry.");
+    expect(message).not.toContain("Send SOL to the wallet");
     expect(fault).toBe("caller");
   });
 
@@ -229,6 +241,14 @@ describe("log-refined instruction failures", () => {
   it("uses neutral rent-payer wording when the fee mode is unknown", () => {
     const { message, fault } = describeVaultSimulationError(custom1, undefined, rentLogs);
     expect(message).toContain("the rent payer does not hold enough SOL");
+    expect(fault).toBe("caller");
+  });
+
+  it("names the caller-provided fee payer for a rent shortfall it funds", () => {
+    const { message, fault } = describeVaultSimulationError(custom1, callerProvided, rentLogs);
+    expect(message).toContain(`the provided fee payer (${partnerFeePayer})`);
+    expect(message).toContain("0.001918899 more");
+    expect(message).toContain("Fund the fee payer and retry.");
     expect(fault).toBe("caller");
   });
 

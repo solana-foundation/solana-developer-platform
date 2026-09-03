@@ -345,7 +345,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         "organization_id = ?",
         "project_id = ?",
         "counterparty_id = ?",
-        "kind = 'payout_account'",
+        "kind IN ('payout_account', 'customer_link')",
       ];
       const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];
 
@@ -354,11 +354,11 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         bindings.push(input.provider);
       }
       if (input.fiatCurrency !== undefined) {
-        conditions.push("fiat_currency = ?");
+        conditions.push("(kind = 'customer_link' OR fiat_currency = ?)");
         bindings.push(input.fiatCurrency);
       }
       if (input.destinationCountry !== undefined) {
-        conditions.push("destination_country = ?");
+        conditions.push("(kind = 'customer_link' OR destination_country = ?)");
         bindings.push(input.destinationCountry);
       }
 

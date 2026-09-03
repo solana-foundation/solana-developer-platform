@@ -7513,6 +7513,7 @@
               {
                 "id": "counterparty_provider_account_example",
                 "provider": "lightspark",
+                "kind": "payout_account",
                 "fiatCurrency": "USD",
                 "destinationCountry": "US",
                 "paymentRail": "ACH",

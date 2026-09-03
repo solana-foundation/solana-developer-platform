@@ -197,8 +197,24 @@ export function useRampWizard<TId extends string>(
     }
   );
 
+  // Once inserted, the requirements step is pinned for the provider's lifetime in
+  // this wizard: a corridor GET answering `ready` flips needsCollection off, but the
+  // step the user is standing on must not vanish under them.
+  const [requirementsPin, setRequirementsPin] = useState<{
+    provider: RampProviderId | null;
+    pinned: boolean;
+  }>({ provider: fields.provider, pinned: false });
+  if (requirementsPin.provider !== fields.provider) {
+    setRequirementsPin({ provider: fields.provider, pinned: false });
+  } else if (requirements.needsCollection && !requirementsPin.pinned) {
+    setRequirementsPin({ provider: fields.provider, pinned: true });
+  }
+  const includeRequirementsStep =
+    requirements.needsCollection ||
+    (requirementsPin.provider === fields.provider && requirementsPin.pinned);
+
   const steps = useMemo<readonly RampWizardStep<TId>[]>(() => {
-    if (!requirements.needsCollection) {
+    if (!includeRequirementsStep) {
       return config.steps;
     }
     const insertIndex = config.steps.findIndex(
@@ -209,17 +225,21 @@ export function useRampWizard<TId extends string>(
       requirementsConfig.step,
       ...config.steps.slice(insertIndex + 1),
     ];
-  }, [config.steps, requirementsConfig, requirements.needsCollection]);
+  }, [config.steps, requirementsConfig, includeRequirementsStep]);
 
   const currentStepId = steps[stepIndex].id;
   const isRequirementsStep = currentStepId === requirementsConfig.step.id;
-  const quoteStepId: TId = requirements.needsCollection
+  const quoteStepId: TId = includeRequirementsStep
     ? requirementsConfig.step.id
     : config.quoteStepId;
   const stepSchema = config.stepSchemas[currentStepId];
   const canProceed = useMemo(() => {
     if (isRequirementsStep) {
-      return requirements.isComplete;
+      return (
+        requirements.isComplete &&
+        !requirements.isCorridorLoading &&
+        requirements.blockReason === null
+      );
     }
     // Block leaving the step that precedes the requirements insertion until the
     // requirements answer has resolved AND isn't a blocker (fetch error, or an
@@ -243,6 +263,7 @@ export function useRampWizard<TId extends string>(
     config.memoStepId,
     memoRows,
     requirements.isComplete,
+    requirements.isCorridorLoading,
     requirements.isResolved,
     requirements.blockReason,
     requirementsConfig,
@@ -484,11 +505,8 @@ export function useRampWizard<TId extends string>(
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
-    existingPayoutAccounts: requirements.existingPayoutAccounts,
-    payoutAccountSelection: requirements.payoutAccountSelection,
     selectedProviderAccountId: requirements.selectedProviderAccountId,
-    addingNewAccount: requirements.addingNewAccount,
-    selectPayoutAccount: requirements.selectPayoutAccount,
+    resolvedAccount: requirements.resolvedAccount,
     requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,

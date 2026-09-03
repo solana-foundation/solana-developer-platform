@@ -101,6 +101,10 @@ balance with a live one.
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
+  Published in BOTH OpenAPI documents (public included) since the embedded
+  guide shipped: partners need the `strategyId` every deposit build takes and
+  the live APY their own UI shows (`openapi/paths/earn.ts`,
+  `registerEarnStrategyPaths`).
   - **The list is ranked by deposit size** (PRO-1732): TVL descending, read from
     `riskMetadata.tvlUsd` in SQL, no-TVL rows last (devnet rows carry none by
     design), with (created_at, id) keeping the order total so paging cannot
@@ -743,20 +747,43 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
 `services/earn/vault-external-wallet.service.ts`):
 
 - `POST /external-wallet/deposit-transactions` — **build + simulate + compile,
-  never sign.** Body `{strategyId, ownerAddress, amount, minSharesOut?}`. Runs
+  never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
+  minSharesOut?}`. Runs
   the FULL money-in stack in the custody deposit's order (environment
   capability, production floor, surfacing, entitlement, admission), builds the
-  provider plan for the OWNER, simulates with the owner as fee payer (which is
+  provider plan for the OWNER, simulates with the resolved fee payer (which is
   also the funds check), compiles one unsigned transaction and persists it
   (`earn_external_wallet_transactions`), returning
   `{transactionId, transaction}` for the external wallet to sign. The memo
   binds the TRANSACTION id (the submit's key does not exist yet at build time).
   No idempotency key: a build moves no money and expires with its blockhash.
+- **`feePayer` — the partner pays (both builds).** Optional; committed at
+  BUILD time (it lives in the message bytes, so the submit's message equality
+  makes a swapped fee payer a refused submit, never a substitution). One
+  `caller-provided` fee mode then drives all three places that must agree
+  (`vault-sponsorship.ts` rule): the compiled fee-payer seat (slot 0, one
+  extra required signature the partner adds outside SDP), the SIMULATION fee
+  payer (the funds check moves to the partner wallet — the zero-SOL owners
+  this exists for must not fail it; a broke partner 400s naming the fee
+  payer), and the provider's `rentPayer`, so a first deposit's share-ATA rent
+  is partner-funded and `share_ata_rent_funder` records the partner (build
+  row → movement → position projection), making the exit refund the PARTNER.
+  `feePayer === ownerAddress` normalizes to absent (route and service both).
+  Compile asserts the signer set ORDERED AND EXACT — `[feePayer, owner]`, or
+  `[owner]` without one — which both refuses a plan smuggling an extra signer
+  and refuses a fee-payer build whose plan never names the owner as a signer
+  (money must not move on the partner's signature alone). The split-swap
+  answer carries `feePayer` through `followUp` and compiles the standalone
+  swap with the same payer. This is the CALLER's wallet co-signing, not Kora:
+  SDP-side sponsorship for caller-signed movements stays PRO-1744.
 - `POST /external-wallet/deposits` — **verify + record + broadcast.** Body
   `{transactionId, signedTransaction}` plus a REQUIRED `Idempotency-Key`
   (body `requestId` rejected). The submit proves the bytes are a transaction
-  SDP built — MESSAGE bytes compared against the stored build, owner's ed25519
-  signature verified — and takes nothing but signatures from the wire. The
+  SDP built — MESSAGE bytes compared against the stored build, EVERY
+  signature ed25519-verified (owner and fee payer alike, each failure naming
+  its slot) — and takes nothing but signatures from the wire. The recorded
+  ledger `signature` is slot zero: the fee payer's when one was named, which
+  is the on-chain txid either way. The
   movement is recorded durably, THEN broadcast: record-before-broadcast
   unchanged, the signature merely became knowable at submit instead of at
   SDP's signer. Two composed idempotency protections: the key anchors the
@@ -764,12 +791,25 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   consumable at most once under a row lock (a second key against the same
   build is a 409, never a second row for one on-chain transaction). The
   fingerprint includes the build id, so a key reused against a REBUILT
-  transaction conflicts rather than silently replaying.
+  transaction conflicts rather than silently replaying (and a rebuilt
+  transaction is also how a different `feePayer` conflicts).
+- `POST /external-wallet/withdrawal-previews` — the exit QUOTE
+  (`supportsVaultWithdrawQuote`, 501 without it): what redeeming the shares
+  would pay from the vault's live accounting, from which the partner derives
+  a truthful `minAmountOut`. Read-only, no idempotency key, and it takes the
+  exit's own gates only (position 404-scoping; no surfacing, no entitlement,
+  no admission) — the external mirror of `POST /vault-withdrawal-previews`.
 - `POST /external-wallet/withdrawal-transactions` — the exit build, ADR 0002
   exit safety in its strongest form: 404-scoping (org, environment, EXACT
   project, owner shape — a custody position 404s here) and capability (501)
   only. Works while the provider is disabled for new deposits; pinned by the
-  exit-safety describe in `../earn.external-wallet.test.ts`.
+  exit-safety describe in `../earn.external-wallet.test.ts`. Takes the same
+  optional `feePayer` as the deposit build (an exit consolidation can create
+  an account, so the partner funds that rent too); `rentRefundTo` stays the
+  position's RECORDED funder, never the fee mode of the day. `minAmountOut`
+  (optional; providers with a `withdrawalSlippage` policy refuse its absence)
+  is persisted through the build table's shared `min_shares_out` column —
+  direction disambiguates the unit.
 - `POST /external-wallet/withdrawals` — the submit, mirrored.
 - **NO policyGate and no `wallets:read`, deliberately** — this is not the
   vault-deposit cautionary tale repeating. Wallet policy governs the org's own
@@ -782,10 +822,12 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   (`idx_earn_positions_external_wallet_claim` includes `project_id`), so a
   sibling project can neither see nor exit its positions. Position reads for
   partners are PRO-1724, not here.
-- The owner pays fee and rent (Kora sponsorship for this surface is PRO-1744 —
-  see the ADR addendum for why co-signing a stranger's transaction is its own
-  decision, not a default), and the rent funder is recorded NULL so the exit's
-  refund defaults back to the owner.
+- Who pays: the owner by default, or the partner's `feePayer` when the build
+  names one (fee and rent alike — the one-identity rule). The rent funder is
+  recorded NULL for owner-paid rent (the exit's refund defaults back to the
+  owner) and as the partner's address for partner-funded rent (the exit
+  refunds the partner). Kora sponsorship for this surface — SDP paying —
+  stays PRO-1744, a separate decision.
 
 The per-owner READS (PRO-1772) close the loop the money routes open. All three
 take `earn:read` only — no `wallets:read` (end-user wallets carry no custody
@@ -798,18 +840,31 @@ owner-signed row can never satisfy
 (`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
 three).
 
+The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
+(movements, positions, earnings) — one addressing style for one concept, no
+literal segment (`positions/summary`) can collide with a path parameter, and
+the movements collection keeps its `:movementId` detail route unambiguous. The
+retired path-addressed shapes (`positions/:ownerAddress`,
+`earnings/:ownerAddress`) are pinned 404 in
+`../earn.external-wallet-positions.test.ts`.
+
 - `GET /external-wallet/movements?ownerAddress=…` — **DB ledger list**, one
   owner's activity newest first in ledger vocabulary, keyset-paged, with
-  `direction`/`status` equality filters. The owner is a REQUIRED query filter
-  rather than a path segment so the collection keeps its `:movementId` detail
-  route unambiguous.
-- `GET /external-wallet/movements/:movementId` — **DB**, the poll that makes
-  the submit's record-before-broadcast answerable on this surface. Scoping
-  answers 404 across the board: organization, EXACT project, environment, and
+  `direction`/`status` equality filters.
+- `GET /external-wallet/movements/:movementId` — the poll that makes the
+  submit's record-before-broadcast answerable on this surface: a scoped,
+  fail-soft read-through of the movement's exact Solana signature (the same
+  `reconcileEarnVaultMovementReadThrough` the treasury detail reads adopted).
+  Chain truth advances the guarded ledger row immediately; an RPC failure
+  returns the last durable row and leaves recovery to the scheduled
+  reconciler; the read never rebroadcasts or expires an unknown signature.
+  Scoping answers 404 across the board BEFORE the chain read (a guessed id
+  must not use RPC timing as an existence oracle): organization, EXACT
+  project, environment, and
   the external-wallet shape itself (`owner_address IS NOT NULL` — a
   custody-signed movement guessed by id reads as missing). `replayed` is
   POST-only and never appears on reads.
-- `GET /external-wallet/earnings/:ownerAddress` — **DB ledger + live chain**,
+- `GET /external-wallet/earnings?ownerAddress=…` — **DB ledger + live chain**,
   balance and total earned per deposit token. `earned` = live `currentValue`
   minus `totalDeposited` (Σ finalized SDP deposits), stated ONLY when exact and
   never coerced to zero; otherwise absent with a named

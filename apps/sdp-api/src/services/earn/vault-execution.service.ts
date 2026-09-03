@@ -218,15 +218,18 @@ const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
 export class VaultTransactionTooLargeError extends Error {
   constructor(
     public readonly bytes: number,
-    sponsored: boolean
+    extraSigner: "sponsored" | "caller-provided" | false
   ) {
     super(
       `Vault transaction is ${bytes} bytes; Solana allows at most ` +
         `${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}` +
-        (sponsored
+        (extraSigner === "sponsored"
           ? ". Sponsorship adds 96 bytes (one signature slot plus one account key) " +
             "that the provider did not know about when it sized this plan."
-          : "")
+          : extraSigner === "caller-provided"
+            ? ". The caller-provided fee payer adds 96 bytes (one signature slot plus one " +
+              "account key) that the provider did not know about when it sized this plan."
+            : "")
     );
     this.name = "VaultTransactionTooLargeError";
   }
@@ -243,9 +246,12 @@ export class VaultTransactionTooLargeError extends Error {
  * would spend a budget reservation (`signAsFeePayer` admits before it signs, and
  * nothing after that releases it) on a plan that can never be sent.
  */
-function assertVaultTransactionFits(bytes: Uint8Array, sponsored: boolean): void {
+function assertVaultTransactionFits(
+  bytes: Uint8Array,
+  extraSigner: "sponsored" | "caller-provided" | false
+): void {
   if (bytes.length <= SOLANA_TRANSACTION_SIZE_LIMIT_BYTES) return;
-  throw new VaultTransactionTooLargeError(bytes.length, sponsored);
+  throw new VaultTransactionTooLargeError(bytes.length, extraSigner);
 }
 
 /** Sign exactly one complete vault transaction without broadcasting it. */
@@ -291,7 +297,7 @@ export async function signVaultPlan(
       partiallySignTransactionMessageWithSigners(message)
     );
     const ownerSignedBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
-    assertVaultTransactionFits(ownerSignedBytes, true);
+    assertVaultTransactionFits(ownerSignedBytes, "sponsored");
     signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
       feePayment.signAsFeePayer(ownerSignedBytes)
     );
@@ -318,6 +324,14 @@ export async function signVaultPlan(
     ) {
       throw new Error("Vault transaction is missing the sponsor fee-payer signature");
     }
+  } else if (input.fee.kind === "caller-provided") {
+    // Unreachable from the custody paths by construction; asserted so a new
+    // caller cannot silently fall through to wallet-pays and sign the custody
+    // wallet as the fee payer. A caller-provided fee payer signs OUTSIDE SDP —
+    // that flow compiles unsigned bytes via compileUnsignedVaultTransaction.
+    throw new Error(
+      "Caller-provided fee payers cannot be signed by SDP; compile the transaction unsigned instead"
+    );
   } else {
     const message = pipe(
       createTransactionMessage({ version: 0 }),
@@ -333,7 +347,7 @@ export async function signVaultPlan(
     signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
   }
 
-  assertVaultTransactionFits(signedBytes, input.fee.kind === "sponsored");
+  assertVaultTransactionFits(signedBytes, input.fee.kind === "sponsored" ? "sponsored" : false);
   const signed = getTransactionDecoder().decode(signedBytes);
   if (
     signed.signatures[input.owner.address] === null ||
@@ -351,11 +365,18 @@ export async function signVaultPlan(
 export interface CompileUnsignedVaultTransactionInput extends VaultPlanExecutionScope {
   plan: EarnVaultTransactionPlan;
   /**
-   * The external wallet: fee payer and required signer of the compiled
-   * message. A plain address on purpose — SDP holds no signer for it, which is
-   * the whole point of the caller-signed flow (PRO-1722).
+   * The external wallet: required signer of the compiled message, and its fee
+   * payer unless `feePayer` names someone else. A plain address on purpose —
+   * SDP holds no signer for it, which is the whole point of the caller-signed
+   * flow (PRO-1722).
    */
   owner: Address;
+  /**
+   * Optional caller-provided fee payer (the partner's wallet). When present
+   * the compiled message requires ITS signature in slot zero alongside the
+   * owner's, and whoever holds its key co-signs outside SDP before submit.
+   */
+  feePayer?: Address;
   /**
    * The successful simulation's preparation, REQUIRED rather than optional:
    * the caller-signed flow always simulates before handing bytes out, and
@@ -381,7 +402,9 @@ export interface UnsignedVaultTransaction {
  * `signVaultPlan` (fee payer, lifetime, instructions, lookup-table
  * compression, in that order): the submit step later proves a signed
  * transaction is one SDP built by comparing MESSAGE bytes, so any divergence
- * here is a refused submit, not a subtle drift. Signature slots encode as
+ * here is a refused submit, not a subtle drift. A caller-provided `feePayer`
+ * changes only who sits in the fee-payer seat (adding its signature slot); the
+ * pipeline order is unchanged. Signature slots encode as
  * zeroed 64-byte runs, which means the unsigned encoding and the signed one
  * are the same length and the size check below is exact.
  */
@@ -392,22 +415,38 @@ export function compileUnsignedVaultTransaction(
   if (input.prepared.plan !== input.plan) {
     throw new Error("Vault execution preparation belongs to a different plan");
   }
+  // A fee payer equal to the owner IS the owner paying: Solana deduplicates
+  // account keys, so the compiled message would carry one signer slot and the
+  // two-slot assertion below would refuse a legitimate build. Normalized here
+  // so the invariant cannot depend on every caller pre-normalizing.
+  const feePayer = input.feePayer === input.owner ? undefined : input.feePayer;
   const { lookupTables, blockhash, lastValidBlockHeight } = input.prepared;
   const instructions = planInstructions(input.plan).map(toKitInstruction);
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(input.owner, m),
+    (m) => setTransactionMessageFeePayer(feePayer ?? input.owner, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions(instructions, m),
     (m) => applyLookupTables(m, lookupTables)
   );
   const transaction = compileTransaction(message);
+  // Ordered and exact, never a bare set: kit places the fee payer at static
+  // slot zero, and this assertion is what refuses a provider plan that
+  // smuggles an extra signer — with or without a caller-provided fee payer.
   const requiredSignerAddresses = Object.keys(transaction.signatures);
-  if (requiredSignerAddresses.length !== 1 || requiredSignerAddresses[0] !== input.owner) {
-    throw new Error("External-wallet vault transactions must require only the owner signature");
+  const expectedSignerAddresses = feePayer === undefined ? [input.owner] : [feePayer, input.owner];
+  if (
+    requiredSignerAddresses.length !== expectedSignerAddresses.length ||
+    expectedSignerAddresses.some((address, index) => requiredSignerAddresses[index] !== address)
+  ) {
+    throw new Error(
+      feePayer === undefined
+        ? "External-wallet vault transactions must require only the owner signature"
+        : "External-wallet vault transactions must require exactly the fee-payer and owner signatures"
+    );
   }
   const bytes = new Uint8Array(getTransactionEncoder().encode(transaction));
-  assertVaultTransactionFits(bytes, false);
+  assertVaultTransactionFits(bytes, feePayer === undefined ? false : "caller-provided");
   return { bytes, lastValidBlockHeight: String(lastValidBlockHeight) };
 }
 
@@ -506,7 +545,16 @@ export async function simulateVaultPlan(
   // accounts either way, so the sponsored shape simulates as it will be sent:
   // funded sponsor as fee payer, owner unfunded, both signature slots still
   // empty (`sigVerify: false` is what makes that legal).
-  const feePayer = input.fee.kind === "sponsored" ? input.fee.sponsor : input.owner;
+  // The SAME fee payer the transaction will carry: sponsorship's sponsor, a
+  // caller-provided partner wallet, or the owner. Simulating any other payer
+  // would check the wrong wallet's lamports AND produce a message that differs
+  // from the compiled one.
+  const feePayer =
+    input.fee.kind === "sponsored"
+      ? input.fee.sponsor
+      : input.fee.kind === "caller-provided"
+        ? input.fee.feePayer
+        : input.owner;
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(feePayer, m),
