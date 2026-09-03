@@ -43,6 +43,7 @@ import {
   assertRampProviderAvailable,
   requireCryptoRail,
 } from "@/routes/payments/handlers/ramps";
+import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/handlers/ramps/bvnk";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
@@ -311,6 +312,18 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     | { customer: BvnkCustomerResolution; verificationUrl: string }
     | undefined;
   if (query.data.provider === "bvnk" && providerAccount !== null) {
+    const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata);
+    const storedRequirements = await bvnkCustomerRequirementsFromMetadata(
+      c,
+      query.data.direction,
+      metadata
+    );
+    if (storedRequirements) {
+      return success(c, storedRequirements);
+    }
+    if (metadata.status === undefined) {
+      throw internalError("BVNK customer-link metadata is missing customer state.");
+    }
     refreshedBvnkCustomer = await refreshBvnkCustomerAccount(
       c,
       counterparty,

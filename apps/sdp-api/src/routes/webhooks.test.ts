@@ -994,6 +994,71 @@ describe("BVNK ramp webhook", () => {
     expect(account?.metadata.status).toBe("VERIFIED");
   });
 
+  it("stores agreement status changes idempotently for a confirmed agreement", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE counterparty_id = ?")
+      .bind(
+        {
+          status: "VERIFIED",
+          agreements: {
+            relayedAt: "2026-08-01T00:00:00.000Z",
+            entries: { "agreement-1": { status: "ACCEPTED" } },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+    const payload = {
+      event: "bvnk:customers:agreements:status-change",
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        agreementId: "agreement-1",
+        status: "PENDING",
+        respondedAt: "2026-09-02T00:00:00.000Z",
+      },
+    };
+
+    expect((await sendBvnkWebhook(payload)).status).toBe(200);
+    expect((await sendBvnkWebhook(payload)).status).toBe(200);
+
+    const account = await getDb(env)
+      .prepare("SELECT metadata FROM counterparty_provider_accounts WHERE counterparty_id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        metadata: {
+          agreements?: {
+            relayedAt: string;
+            entries: Record<string, { status: string; respondedAt?: string }>;
+          };
+        };
+      }>();
+    expect(account?.metadata).toEqual({
+      status: "VERIFIED",
+      agreements: {
+        relayedAt: "2026-08-01T00:00:00.000Z",
+        entries: {
+          "agreement-1": {
+            status: "PENDING",
+            respondedAt: "2026-09-02T00:00:00.000Z",
+          },
+        },
+      },
+    });
+  });
+
+  it("acknowledges an agreement status event for an unknown customer", async () => {
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:agreements:status-change",
+      data: {
+        customerId: "unknown-customer",
+        agreementId: "agreement-1",
+        status: "PENDING",
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
   it("provisions the funding wallet and rule after customer verification succeeds", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")

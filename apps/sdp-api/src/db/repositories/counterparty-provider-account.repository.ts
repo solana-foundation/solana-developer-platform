@@ -55,8 +55,14 @@ export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   contactId: z.string().optional(),
   agreements: z
     .object({
-      acceptedAt: z.string(),
-      agreementIds: z.array(z.string()),
+      relayedAt: z.string().datetime(),
+      entries: z.record(
+        z.string().min(1),
+        z.object({
+          status: z.string().min(1),
+          respondedAt: z.string().datetime().optional(),
+        })
+      ),
     })
     .optional(),
 });

@@ -231,6 +231,11 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("pending_agreement_acceptance"),
+    }),
+    z.object({
+      ...requirementBase,
       provider: z.enum(["bvnk", "mural"]),
       status: z.literal("customer_verification_required"),
       verificationUrl: z.url(),

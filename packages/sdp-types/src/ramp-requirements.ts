@@ -120,6 +120,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
         declinable: boolean;
       }[];
     }
+  | { provider: "bvnk"; status: "pending_agreement_acceptance" }
   | {
       provider: "bvnk";
       status: "customer_verification_required";
