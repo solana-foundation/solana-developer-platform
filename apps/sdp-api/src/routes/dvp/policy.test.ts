@@ -13,16 +13,40 @@ import type { DvpTradeRow } from "@/db/repositories";
 import { env } from "@/test/helpers/env";
 
 const getAuth = vi.hoisted(() => vi.fn());
+const requireProjectId = vi.hoisted(() => vi.fn(() => "prj_x"));
+const readDvpLegShortfall = vi.hoisted(() => vi.fn());
+const approvedWalletOperationId = vi.hoisted(() => vi.fn());
+const getWalletOperationById = vi.hoisted(() => vi.fn());
+const getById = vi.hoisted(() => vi.fn());
+const assertFreshApiKeyCustodyWalletAccess = vi.hoisted(() => vi.fn());
+const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
   getAuth,
+  requireProjectId,
 }));
 vi.mock("@/services/policy/enforcement.service", () => ({
   walletOperationActorFromAuth: () => ({ kind: "api_key", id: "ak_1" }),
 }));
+vi.mock("@/services/dvp/fund", () => ({ readDvpLegShortfall }));
+vi.mock("@/services/policy/approved-operation-replay", () => ({ approvedWalletOperationId }));
+vi.mock("@/lib/tenant-scope", () => ({ getRequestTenantScope: () => ({}) }));
+vi.mock("@/db", () => ({ getDb: () => ({}) }));
+vi.mock("@/services/dvp/settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
+vi.mock("@/services/api-key-scope.service", () => ({
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyCustodyWalletIdsForPermissions: () => null,
+}));
+vi.mock("@/db/repositories", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories")>()),
+  createDvpTradeRepository: () => ({ getById }),
+  createPolicyRepository: () => ({ getWalletOperationById }),
+}));
 
-const { buildDvpTradeActionPolicyCandidate } = await import("./policy");
+const { buildDvpTradeActionPolicyCandidate, extractDvpTradeActionPolicyCandidate } = await import(
+  "./policy"
+);
 
 const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
@@ -156,5 +180,74 @@ describe("buildDvpTradeActionPolicyCandidate", () => {
     );
 
     expect(candidate.destination).toBe(trade().escrowA);
+  });
+});
+
+/**
+ * Which amount the extractor puts on a funding candidate.
+ *
+ * The subtlety is the approved REPLAY. `resumeApprovedOperation` compares the
+ * replayed candidate to the stored row field by field, with `amount` matched for
+ * exact equality (`services/policy/enforcement.service.ts:113`). A deposit
+ * landing between approval and execution shrinks a freshly-read shortfall, so
+ * recomputing on replay fails that match and strands an approved top-up behind a
+ * second approval it should never have needed.
+ */
+describe("extractDvpTradeActionPolicyCandidate funding amount", () => {
+  const extractContext = {
+    env,
+    req: { param: () => "dvp_policy_test" },
+  } as never;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAuth.mockReturnValue({ organizationId: "org_x", apiKeyId: "ak_1" });
+    requireProjectId.mockReturnValue("prj_x");
+    getById.mockResolvedValue(trade());
+    getOrCreateDvpSettlementWallet.mockResolvedValue(settlement);
+    assertFreshApiKeyCustodyWalletAccess.mockResolvedValue(undefined);
+    approvedWalletOperationId.mockReturnValue(undefined);
+    getWalletOperationById.mockResolvedValue(null);
+    readDvpLegShortfall.mockResolvedValue(600n);
+  });
+
+  it("uses the live shortfall on a first request", async () => {
+    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, "fund");
+
+    expect(candidate?.amount).toBe("600");
+  });
+
+  // The case that would have stranded the top-up: approved at 600, another
+  // deposit lands, a fresh read would now say 400, and 400 !== 600 fails the
+  // replay match.
+  it("keeps the approved amount on a replay even though the live shortfall shrank", async () => {
+    approvedWalletOperationId.mockReturnValue("wop_1");
+    getWalletOperationById.mockResolvedValue({ amount: "600" });
+    readDvpLegShortfall.mockResolvedValue(400n);
+
+    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, "fund");
+
+    expect(candidate?.amount).toBe("600");
+    expect(readDvpLegShortfall).not.toHaveBeenCalled();
+  });
+
+  // A stored row with no amount is not the operation we think it is. Falling
+  // back to a live read lets the field-by-field match downstream fail loudly
+  // rather than this inventing a number to satisfy it.
+  it("falls back to the live shortfall when the stored operation carries no amount", async () => {
+    approvedWalletOperationId.mockReturnValue("wop_1");
+    getWalletOperationById.mockResolvedValue({ amount: null });
+
+    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, "fund");
+
+    expect(candidate?.amount).toBe("600");
+  });
+
+  // Settle and cancel move whole legs, so neither reads the chain at all.
+  it.each(["settle", "cancel"] as const)("does not read a shortfall for %s", async (action) => {
+    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, action);
+
+    expect(candidate?.amount).toBe("1000");
+    expect(readDvpLegShortfall).not.toHaveBeenCalled();
   });
 });

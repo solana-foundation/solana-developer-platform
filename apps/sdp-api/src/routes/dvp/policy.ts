@@ -18,6 +18,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import {
   assertFreshApiKeyCustodyWalletAccess,
@@ -28,8 +29,10 @@ import type { DvpCloseAction } from "@/services/dvp/settle";
 /** Every trade action that spends from a custody wallet. */
 export type DvpTradeAction = DvpCloseAction | "fund";
 
+import { createPolicyRepository } from "@/db/repositories";
 import { readDvpLegShortfall } from "@/services/dvp/fund";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
+import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 
@@ -149,6 +152,34 @@ export function buildDvpTradeActionPolicyCandidate(
 }
 
 /**
+ * What funding should be evaluated at: the approved amount on a replay, the
+ * live shortfall otherwise.
+ *
+ * @param c - Request context, which carries the approved operation on a replay.
+ * @param trade - The trade whose SDP leg is being funded.
+ * @returns The base-unit amount to put on the policy candidate.
+ */
+async function approvedOrLiveFundingAmount(
+  c: Context<{ Bindings: Env }>,
+  trade: DvpTradeRow
+): Promise<bigint> {
+  const operationId = approvedWalletOperationId(c);
+  if (operationId) {
+    const operation = await createPolicyRepository(
+      c.env,
+      getRequestTenantScope(c)
+    ).getWalletOperationById(operationId);
+    // Only when the stored row actually carries an amount. A missing one means
+    // this is not the operation we think it is, and the field-by-field match
+    // downstream is the right place for that to fail loudly.
+    if (operation?.amount) {
+      return BigInt(operation.amount);
+    }
+  }
+  return readDvpLegShortfall(c.env, trade);
+}
+
+/**
  * The policy-gate extractor for `POST /trades/:tradeId/{settle,cancel}`.
  *
  * Resolves the trade and the project's settlement wallet before the gate runs,
@@ -207,7 +238,19 @@ export async function extractDvpTradeActionPolicyCandidate(
   // Funding tops SDP's leg up to its target, so what policy is shown has to be
   // the shortfall rather than the target. Read here, at extraction, because
   // this is the value the approval request stores and a human reads later.
-  const fundingAmount = action === "fund" ? await readDvpLegShortfall(c.env, trade) : null;
+  //
+  // On an approved REPLAY the stored amount wins over a fresh read. The replay
+  // is checked field-by-field against the approved row with `amount` compared
+  // for exact equality (`services/policy/enforcement.service.ts:113`), and a
+  // deposit landing between approval and execution would make a fresh read
+  // smaller — so recomputing here would fail the match and strand an approved
+  // top-up behind a second approval it should never have needed.
+  //
+  // Pinning is safe in the direction that matters: an escrow only gains tokens
+  // while its trade is open, so the live shortfall funding actually sends is
+  // always at or below the amount that was approved. Policy approved a ceiling
+  // and the transfer stays under it.
+  const fundingAmount = action === "fund" ? await approvedOrLiveFundingAmount(c, trade) : null;
 
   const { candidate, legs } = buildDvpTradeActionPolicyCandidate(
     c,
