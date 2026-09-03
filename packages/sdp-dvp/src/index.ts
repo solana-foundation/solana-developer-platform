@@ -77,4 +77,5 @@ export {
   SWAP_DVP_SEED,
   SwapDvpVerificationError,
   verifySwapDvp,
+  verifySwapDvpAccount,
 } from "./verify";
