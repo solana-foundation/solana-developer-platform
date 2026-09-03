@@ -113,7 +113,7 @@ describe("connectPrivateChannelAction", () => {
     });
     await expect(testConnectionAction(SANDBOX_DEFAULTS)).resolves.toEqual({
       kind: "request-error",
-      message: "sensitive body",
+      message: "The SDP API could not be reached. Check the server logs.",
     });
   });
 
@@ -201,26 +201,45 @@ describe("connectPrivateChannelAction", () => {
     });
   });
 
-  // Each of these used to collapse to one of two fixed strings, which left the
-  // thrown value unrecoverable: a connect failure that never reached the API
-  // rendered identically to one the API rejected. The last case is the one that
-  // motivated this — a non-Error throw now names itself.
+  // These used to collapse to one of two fixed strings, so a failure that never
+  // reached the API rendered identically to one the API rejected. Each class is
+  // now distinguishable without echoing upstream text: raw exception bodies and
+  // infrastructure pages stay in the log, and only the class and HTTP status
+  // reach the form.
   it.each([
-    { thrown: null, message: "Request failed." },
-    { thrown: new Error("network down"), message: "network down" },
+    { label: "non-Error throw", thrown: null },
+    { label: "framework digest object", thrown: { digest: "NEXT_REDIRECT;replace;/x;307;" } },
+  ])("reports a $label without echoing it", async ({ thrown }) => {
+    fetchMock.mockRejectedValue(thrown);
+
+    await expect(connectPrivateChannelAction(SANDBOX_DEFAULTS)).resolves.toEqual({
+      ok: false,
+      kind: "server",
+      message:
+        "The dashboard hit an unexpected error before the request was sent. Check the server logs.",
+    });
+  });
+
+  it.each([
     {
-      thrown: new Error("SDP API request failed (500): not-json"),
-      message: "not-json",
+      thrown: new Error("network down"),
+      message: "The SDP API could not be reached. Check the server logs.",
+    },
+    {
+      thrown: new Error("SDP API request failed (502): <html>gateway</html>"),
+      message: "The SDP API returned an unexpected response (HTTP 502). Check the server logs.",
     },
     {
       thrown: new Error("SDP API request failed (500): {}"),
-      message: "{}",
+      message: "The SDP API rejected the request (HTTP 500). Check the server logs.",
     },
     {
-      thrown: { digest: "NEXT_REDIRECT;replace;/dashboard;307;" },
-      message: '{"digest":"NEXT_REDIRECT;replace;/dashboard;307;"}',
+      thrown: new Error(
+        `SDP API request failed (400): ${JSON.stringify({ error: { message: "Escrow program ID is required." } })}`
+      ),
+      message: "Escrow program ID is required.",
     },
-  ])("reports an unsafe API failure as '$message'", async ({ thrown, message }) => {
+  ])("reports an API failure as '$message'", async ({ thrown, message }) => {
     fetchMock.mockRejectedValue(thrown);
 
     await expect(connectPrivateChannelAction(SANDBOX_DEFAULTS)).resolves.toEqual({

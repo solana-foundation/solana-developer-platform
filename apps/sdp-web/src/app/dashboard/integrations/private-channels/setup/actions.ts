@@ -95,12 +95,11 @@ export async function testConnectionAction(input: {
     });
     return { kind: "probe", probe };
   } catch (error) {
-    logActionFailure("testConnection", error);
     // The API client's diagnostic includes status codes, request IDs, and the
-    // serialized response body. Keep that raw detail out of the product form,
-    // but carry the API's own message so the alert names its cause instead of
-    // rendering identically for every failure.
-    return { kind: "request-error", message: describeFailure(error) };
+    // serialized response body. That detail goes to the log; the form gets the
+    // classified message so the alert still names its cause.
+    logActionFailure("testConnection", error);
+    return { kind: "request-error", message: toDisplayMessage(error) };
   }
 }
 
@@ -243,28 +242,28 @@ function flattenFieldErrors(error: import("zod").ZodError): FieldErrors {
 function interpretApiError(action: string, error: unknown): ConnectPrivateChannelResult {
   logActionFailure(action, error);
   if (!(error instanceof Error)) {
-    // Not an Error at all. Collapsing this into a generic string hid the only
-    // evidence of what was thrown, so name the value instead.
-    return { ok: false, kind: "server", message: describeFailure(error) };
+    return { ok: false, kind: "server", message: UNEXPECTED_THROW_MESSAGE };
   }
-  const match = /^SDP API request failed \(\d+\):\s*([\s\S]*)$/.exec(error.message);
+  const match = SDP_API_ERROR_RE.exec(error.message);
   if (!match) {
     // The API was never reached, or the client threw before the request went
-    // out. "Unable to reach the SDP API" asserted the former for both.
-    return { ok: false, kind: "server", message: describeFailure(error) };
+    // out. Either way there is no response to classify.
+    return { ok: false, kind: "server", message: NO_RESPONSE_MESSAGE };
   }
+  const status = match[1] ?? "";
   let payload: unknown;
   try {
-    payload = JSON.parse(match[1] ?? "");
+    payload = JSON.parse(match[2] ?? "");
   } catch {
-    // A non-JSON error body is usually an infrastructure page rather than the
-    // API's own envelope. Keep a bounded excerpt: it identifies the responder.
-    return { ok: false, kind: "server", message: describeFailure(error) };
+    // A non-JSON body is an infrastructure page, not the API's envelope. The
+    // status identifies the responder; the body itself stays in the log.
+    return { ok: false, kind: "server", message: unexpectedResponseMessage(status) };
   }
 
   const { details, message } = extractError(payload);
-  // A parsed envelope with no `error.message` still carries the status and body.
-  const displayMessage = message ?? describeFailure(error);
+  // The API writes `error.message` for operators, so it is already product
+  // copy. An envelope without one falls back to the status alone.
+  const displayMessage = message ?? rejectedMessage(status);
 
   const existingInstance = privateChannelInstanceSchema.safeParse(details?.existingInstance);
   if (details?.requiresReactivateConfirmation === true && existingInstance.success) {
@@ -323,11 +322,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Upper bound on error text rendered in the form; HTML error pages are long. */
+const SDP_API_ERROR_RE = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/;
+
+/** Upper bound on logged error text; HTML error pages are long. */
 const MAX_FAILURE_DETAIL = 200;
 
+// Product copy for failures the API did not describe itself. These stay fixed
+// on purpose: the underlying text is a raw exception, an infrastructure error
+// page, or a serialized framework object, and can carry request identifiers or
+// upstream internals. `logActionFailure` records the real value instead.
+const UNEXPECTED_THROW_MESSAGE =
+  "The dashboard hit an unexpected error before the request was sent. Check the server logs.";
+const NO_RESPONSE_MESSAGE = "The SDP API could not be reached. Check the server logs.";
+
+function unexpectedResponseMessage(status: string): string {
+  return `The SDP API returned an unexpected response (HTTP ${status}). Check the server logs.`;
+}
+
+function rejectedMessage(status: string): string {
+  return `The SDP API rejected the request (HTTP ${status}). Check the server logs.`;
+}
+
 /**
- * A short, human-readable description of a thrown value.
+ * Classified, non-echoing copy for a caught failure. Never returns upstream
+ * text: the API's own `error.message` reaches the operator through
+ * `interpretApiError`, and everything else is named by class and status only.
+ */
+function toDisplayMessage(error: unknown): string {
+  if (!(error instanceof Error)) return UNEXPECTED_THROW_MESSAGE;
+  const match = SDP_API_ERROR_RE.exec(error.message);
+  if (!match) return NO_RESPONSE_MESSAGE;
+  const status = match[1] ?? "";
+  try {
+    const { message } = extractError(JSON.parse(match[2] ?? ""));
+    return message ?? rejectedMessage(status);
+  } catch {
+    return unexpectedResponseMessage(status);
+  }
+}
+
+/**
+ * A short description of a thrown value, for the server log only.
  *
  * Every branch that produced a fixed string used to discard the only record of
  * what failed: these actions catch, and a caught throw reaches no server log.
