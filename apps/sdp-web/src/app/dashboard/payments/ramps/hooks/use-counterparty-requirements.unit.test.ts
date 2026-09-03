@@ -59,7 +59,7 @@ const payout = {
 
 describe("derivePayoutRequirementFields", () => {
   it("builds the country select from payout country keys", () => {
-    const fields = derivePayoutRequirementFields(payout, {}, labels, false);
+    const fields = derivePayoutRequirementFields(payout, {}, labels);
 
     expect(fields).toEqual([
       {
@@ -75,24 +75,14 @@ describe("derivePayoutRequirementFields", () => {
     ] satisfies RequirementField[]);
   });
 
-  it("collapses to the country select when the corridor is resolved", () => {
-    const fields = derivePayoutRequirementFields(
-      payout,
-      { destinationCountry: "CA" },
-      labels,
-      true
-    );
+  it("keeps the collection form fully derivable when the corridor has a saved account", () => {
+    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "CA" }, labels);
 
-    expect(fields.map((field) => field.key)).toEqual(["destinationCountry"]);
+    expect(fields.map((field) => field.key)).toEqual(["destinationCountry", "paymentRails"]);
   });
 
   it("reveals the selected country's rail options verbatim", () => {
-    const fields = derivePayoutRequirementFields(
-      payout,
-      { destinationCountry: "US" },
-      labels,
-      false
-    );
+    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "US" }, labels);
 
     expect(fields[1]).toEqual({
       kind: "select",
@@ -107,8 +97,7 @@ describe("derivePayoutRequirementFields", () => {
     const fields = derivePayoutRequirementFields(
       payout,
       { destinationCountry: "US", paymentRails: "ACH" },
-      labels,
-      false
+      labels
     );
 
     expect(fields.map((field) => field.key)).toEqual([

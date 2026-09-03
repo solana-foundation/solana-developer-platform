@@ -20,7 +20,6 @@ export const paymentsQueryKeys = {
     cryptoToken,
     fiatCurrency,
     destinationWallet,
-    destinationCountry,
   }: {
     counterpartyId: string;
     provider: RampProviderId;
@@ -28,7 +27,6 @@ export const paymentsQueryKeys = {
     cryptoToken: string;
     fiatCurrency: RampFiatCurrency;
     destinationWallet: string;
-    destinationCountry: string;
   }) =>
     [
       "counterparty-requirements",
@@ -38,7 +36,6 @@ export const paymentsQueryKeys = {
       cryptoToken,
       fiatCurrency,
       destinationWallet,
-      destinationCountry,
     ] as const,
   rampEstimate: ({
     direction,

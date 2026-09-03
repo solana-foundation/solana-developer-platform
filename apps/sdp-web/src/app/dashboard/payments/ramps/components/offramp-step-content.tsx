@@ -79,7 +79,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     handlePairChange,
     requirementFields,
     selectedProviderAccountId,
-    resolvedAccount,
+    payoutAccounts,
+    selectPayoutAccount,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -186,7 +187,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
             fields={requirementFields}
             values={collectedData}
             onChange={setCollectedField}
-            resolvedAccount={resolvedAccount}
+            payoutAccountPicker={{
+              accounts: payoutAccounts,
+              selectedProviderAccountId,
+              onSelect: selectPayoutAccount,
+            }}
           />
         </fieldset>
       </div>
