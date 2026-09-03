@@ -1,4 +1,11 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  bvnkOnboardingRequirements,
+  bvnkOnrampPaymentRuleResolutionFromProviderData,
+  bvnkUnverifiedOnboardingStatus,
+  isBvnkCustomerVerified,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import {
   COUNTERPARTY_ENTITY_TYPES,
@@ -15,6 +22,8 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {
@@ -34,6 +43,7 @@ import {
   assertRampProviderAvailable,
   requireCryptoRail,
 } from "@/routes/payments/handlers/ramps";
+import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/handlers/ramps/bvnk";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
@@ -71,6 +81,35 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
 }
 
 type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
+
+async function refreshBvnkCustomerAccount(
+  c: AppContext,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  providerAccount: CounterpartyProviderAccountRow
+): Promise<{ customer: BvnkCustomerResolution; verificationUrl: string }> {
+  const detail = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(rampRuntime(c), {
+    id: providerAccount.provider_customer_reference,
+  });
+  const updated = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).patchAccountMetadata({
+    organizationId: counterparty.organization_id,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+    id: providerAccount.id,
+    set: { status: detail.status },
+    unset: [],
+  });
+  if (updated === null) {
+    throw internalError("BVNK customer status update escaped its tenant scope.");
+  }
+  return {
+    customer: { customerReference: detail.id, status: detail.status },
+    verificationUrl: detail.authenticatedLink.link,
+  };
+}
 
 /**
  * Checks whether a Lightspark payout submission still needs account data.
@@ -269,6 +308,47 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     provider: query.data.provider,
   });
 
+  let refreshedBvnkCustomer:
+    | { customer: BvnkCustomerResolution; verificationUrl: string }
+    | undefined;
+  if (query.data.provider === "bvnk" && providerAccount !== null) {
+    const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata);
+    const storedRequirements = await bvnkCustomerRequirementsFromMetadata(
+      c,
+      query.data.direction,
+      metadata
+    );
+    if (storedRequirements) {
+      return success(c, storedRequirements);
+    }
+    if (metadata.status === undefined) {
+      throw internalError("BVNK customer-link metadata is missing customer state.");
+    }
+    refreshedBvnkCustomer = await refreshBvnkCustomerAccount(
+      c,
+      counterparty,
+      projectId,
+      providerAccount
+    );
+    if (!isBvnkCustomerVerified(refreshedBvnkCustomer.customer.status)) {
+      const onboardingStatus = bvnkUnverifiedOnboardingStatus(
+        refreshedBvnkCustomer.customer.status
+      );
+      return success(
+        c,
+        bvnkOnboardingRequirements(
+          {
+            customer: refreshedBvnkCustomer.customer,
+            entry: {},
+            onboardingStatus,
+          },
+          query.data.direction,
+          refreshedBvnkCustomer.verificationUrl
+        )
+      );
+    }
+  }
+
   let payoutAccounts: PayoutRequirementAccount[] | undefined;
   if (query.data.provider === "lightspark" && query.data.direction === "offramp") {
     const rows = await createPostgresCounterpartyProviderAccountsRepository(
@@ -291,6 +371,25 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       query.data.destinationWallet,
       "destinationWallet"
     );
+    if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
+      const resolution = bvnkOnrampPaymentRuleResolutionFromProviderData(
+        counterparty.provider_data,
+        {
+          cryptoToken: query.data.cryptoToken,
+          fiatCurrency: query.data.fiatCurrency,
+          destinationWalletAddress,
+        },
+        refreshedBvnkCustomer.customer
+      );
+      return success(
+        c,
+        bvnkOnboardingRequirements(
+          resolution,
+          query.data.direction,
+          refreshedBvnkCustomer.verificationUrl
+        )
+      );
+    }
     const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
       mapToCounterparty(counterparty),
       {
@@ -385,6 +484,7 @@ export const submitCounterpartyRequirements = async (
       ...(providerAccount === null
         ? {}
         : { providerCustomerReference: providerAccount.provider_customer_reference }),
+      ...("collectedData" in input ? { collectedData: input.collectedData } : {}),
     }
   );
 

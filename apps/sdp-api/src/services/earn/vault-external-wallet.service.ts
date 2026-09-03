@@ -1,6 +1,5 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { SdpKaminoError } from "@sdp/kamino";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
@@ -57,6 +56,7 @@ import {
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
 import { broadcastRecordedVaultMovement } from "./vault-intent-execution.service";
+import { refusedBuildMessage } from "./vault-refusals";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
 
@@ -125,10 +125,26 @@ export interface ExternalWalletDepositBuildInput {
  */
 function rethrowProviderBuildFailure(error: unknown, operation: string): never {
   getLogger().error({ error }, `${operation}: build failed`);
-  if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-    throw badRequest(error.message);
-  }
+  const refusal = refusedBuildMessage(error);
+  if (refusal) throw badRequest(refusal);
   throw error;
+}
+
+/**
+ * Map a failed simulation verdict to HTTP, shared by every build simulation
+ * on this surface: a caller fault (broke owner or fee payer, program refusal)
+ * is a 400 the caller can act on, while a sponsor fault is SDP's own problem
+ * (a plan that under-prefunded rent — see VaultSimulationVerdict.sponsorCause)
+ * and surfaces as a 5xx so a client never treats it as a permanent request
+ * error to stop retrying differently.
+ */
+function throwSimulationRefusal(
+  prefix: string,
+  simulation: { error: string; fault: "caller" | "sponsor" }
+): never {
+  const message = `${prefix}: ${simulation.error}`;
+  if (simulation.fault === "sponsor") throw internalError(message);
+  throw badRequest(message);
 }
 
 export type ExternalWalletDepositBuildResult =
@@ -290,7 +306,7 @@ export async function buildExternalWalletDepositTransaction(
         { error: simulation.error, logs: simulation.logs.slice(-5) },
         "external-wallet deposit: simulation failed"
       );
-      throw badRequest(`Vault deposit simulation failed: ${simulation.error}`);
+      throwSimulationRefusal("Vault deposit simulation failed", simulation);
     }
 
     try {
@@ -419,7 +435,7 @@ async function pinProbedComputeUnitLimit(
   });
   if (!probe.ok) {
     getLogger().error({ error: probe.error, logs: probe.logs.slice(-5) }, input.probeLabel);
-    throw badRequest(`${input.refusalNoun} simulation failed: ${probe.error}`);
+    throwSimulationRefusal(`${input.refusalNoun} simulation failed`, probe);
   }
   return withComputeUnitLimit(input.plan, bufferedComputeUnitLimit(probe.unitsConsumed));
 }
@@ -482,7 +498,7 @@ async function compileStandaloneSwapTransaction(
       { error: simulation.error, logs: simulation.logs.slice(-5) },
       "external-wallet deposit: standalone swap simulation failed"
     );
-    throw badRequest(`Swap simulation failed: ${simulation.error}`);
+    throwSimulationRefusal("Swap simulation failed", simulation);
   }
   return compileUnsignedVaultTransaction({
     cluster: input.cluster,
@@ -517,6 +533,8 @@ export interface ExternalWalletWithdrawalBuildInput {
   shareAtaRentFunder: string | null;
   /** Decimal string in share units. */
   shares: string;
+  /** Minimum deposit-token amount the exit may return. */
+  minAmountOut?: string;
   userId?: string | null;
   apiKeyId?: string | null;
 }
@@ -561,6 +579,7 @@ export async function buildExternalWalletWithdrawalTransaction(
       providerReference: input.vaultAddress,
       owner: input.ownerAddress,
       shares: input.shares,
+      ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
       ...(rentPayer === undefined ? {} : { rentPayer }),
       ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
     });
@@ -590,7 +609,7 @@ export async function buildExternalWalletWithdrawalTransaction(
       { error: simulation.error, logs: simulation.logs.slice(-5) },
       "external-wallet withdrawal: simulation failed"
     );
-    throw badRequest(`Vault withdrawal simulation failed: ${simulation.error}`);
+    throwSimulationRefusal("Vault withdrawal simulation failed", simulation);
   }
 
   const unsigned = compileUnsignedVaultTransaction({
@@ -620,6 +639,9 @@ export async function buildExternalWalletWithdrawalTransaction(
     // same denomination rule the custody exit follows.
     denomination: input.shareMint,
     amountRequested: input.shares,
+    // The build table predates withdrawal floors and names its shared
+    // protection column `min_shares_out`; direction disambiguates the unit.
+    minSharesOut: input.minAmountOut ?? null,
     createsShareAccount: plan.createsShareAccount === true,
     feePayer: feePayer ?? null,
     // Same recording rule as the deposit build: an exit consolidation that

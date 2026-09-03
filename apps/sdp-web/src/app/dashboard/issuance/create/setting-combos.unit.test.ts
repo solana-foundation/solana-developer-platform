@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, translate } from "@/i18n/messages";
+import { getRecommendedAdvancedSettings } from "./draft-mapping";
 import { createInitialCapacities } from "./issuance-draft-wizard.types";
 import {
   applyCombo,
@@ -31,6 +32,37 @@ describe("getDefaultCombo", () => {
 
   it("leaves generic without a default so it starts blank", () => {
     expect(getDefaultCombo("generic")).toBeUndefined();
+  });
+
+  // The capability registry no longer recommends scaledUiAmount for securities,
+  // but that alone is not enough: picking a security type also auto-applies this
+  // preset (steps/step-classification.tsx), which used to add the setting straight
+  // back. A mint carrying scaledUiAmount is rejected by the DvP settlement program
+  // with BlockedMintExtension, so the default flow must not produce one.
+  it("does not turn on scaledUiAmount anywhere in the default security flow", () => {
+    const combo = getDefaultCombo("tokenized_security");
+    const applied = applyCombo(
+      combo as SettingCombo,
+      getRecommendedAdvancedSettings("tokenized_security", "equity"),
+      createInitialCapacities(),
+      "allowlist"
+    );
+
+    expect(Object.keys(applied.settings)).not.toContain("scaledUiAmount");
+  });
+
+  // Iterates SETTING_COMBOS directly rather than getCombosForCategory, which
+  // filters the default combo out — and the default is exactly the one that has
+  // to be checked here.
+  it("keeps scaledUiAmount out of every tokenized-security preset", () => {
+    const securityCombos = SETTING_COMBOS.filter(
+      (combo) => combo.category === "tokenized_security"
+    );
+
+    expect(securityCombos.length).toBeGreaterThan(1);
+    for (const combo of securityCombos) {
+      expect(combo.settings, `combo "${combo.key}"`).not.toContain("scaledUiAmount");
+    }
   });
 });
 
@@ -161,11 +193,14 @@ describe("getComboConflict", () => {
     expect(() => translate(messages, conflict?.reasonKey as MessageKey)).not.toThrow();
   });
 
+  // Driven from the interestBearing side because no security preset bundles
+  // scaledUiAmount any more (it blocks DvP settlement, so it is opt-in only).
+  // Same pair, detected from the other direction.
   it("detects the balance-display conflict (interestBearing ↔ scaledUiAmount)", () => {
-    const conflict = getComboConflict(comboByKey("regulatedSecurity"), {
-      interestBearing: {},
+    const conflict = getComboConflict(comboByKey("yieldNote"), {
+      scaledUiAmount: {},
     });
-    expect(conflict?.withLabelKey).toBe("DashboardIssuance.config.interestBearing");
+    expect(conflict?.withLabelKey).toBe("DashboardIssuance.config.scaledUiAmount");
     expect(conflict?.reasonKey).toBe("DashboardIssuance.config.comboConflictReasonBalanceDisplay");
   });
 

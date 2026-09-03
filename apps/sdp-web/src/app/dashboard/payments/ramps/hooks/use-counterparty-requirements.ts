@@ -284,8 +284,10 @@ interface AdvanceRecord {
 function isOnboardingPending(status: CounterpartyRequirements["status"]): boolean {
   return (
     status === "terms_of_service_required" ||
+    status === "customer_pending_agreement_acceptance" ||
     status === "customer_verification_required" ||
     status === "customer_verifying" ||
+    status === "customer_funding_account_provisioning" ||
     status === "funding_account_provisioning"
   );
 }
@@ -333,7 +335,7 @@ export interface CounterpartyRequirementsState {
   submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
   /** An advance request is in flight (initial submit or a poll tick). */
   isAdvancing: boolean;
-  /** Re-runs the advance (POST) to retry — used by the provisioning_failed "Try again" action. */
+  /** Re-runs the advance (POST) to retry — used by the customer funding provisioning failure action. */
   retryOnboarding: () => void;
 }
 

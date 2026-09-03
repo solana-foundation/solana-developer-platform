@@ -10,6 +10,7 @@ import {
   createEarnExternalWalletDeposit,
   createEarnExternalWalletDepositTransaction,
   createEarnExternalWalletWithdrawal,
+  createEarnExternalWalletWithdrawalPreview,
   createEarnExternalWalletWithdrawalTransaction,
   getEarnExternalWalletEarnings,
   getEarnExternalWalletMovement,
@@ -250,6 +251,12 @@ earn.post(
   requirePermissions("earn:write"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletDeposit
+);
+earn.post(
+  "/external-wallet/withdrawal-previews",
+  requirePermissions("earn:read"),
+  validateBody(earnVaultWithdrawalPreviewSchema),
+  createEarnExternalWalletWithdrawalPreview
 );
 earn.post(
   "/external-wallet/withdrawal-transactions",

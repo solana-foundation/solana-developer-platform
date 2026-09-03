@@ -1135,7 +1135,7 @@ Decisions that hold it together:
 - **Committed at build, unforgeable at submit.** The fee payer lives inside
   the message bytes, so the existing message-equality check makes a swapped
   fee payer a refused submit. It is persisted on the build row
-  (migration 0078) so the submit can name the right slot in its errors.
+  (migration 0079) so the submit can name the right slot in its errors.
 - **One identity, three places** (the PRO-1736 rule restated for a caller's
   wallet): the same resolved value drives the compiled fee-payer seat, the
   simulation fee payer (the funds check moves to the partner wallet, which is

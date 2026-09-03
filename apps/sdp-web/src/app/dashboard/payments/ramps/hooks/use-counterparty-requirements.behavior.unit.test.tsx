@@ -257,7 +257,7 @@ describe("useCounterpartyRequirements — corridor-addressed responses", () => {
     const provisioning: CounterpartyRequirements = {
       provider: "bvnk",
       direction: "onramp",
-      status: "funding_account_provisioning",
+      status: "customer_funding_account_provisioning",
     };
     const rendered = renderHook(
       (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),
@@ -285,7 +285,8 @@ describe("useCounterpartyRequirements — corridor-addressed responses", () => {
     await release("GET", {
       provider: "bvnk",
       direction: "onramp",
-      status: "onboarding_not_started",
+      status: "collect_counterparty",
+      fields: [],
     });
 
     // The parked USD poll tick resolves ready AFTER the corridor moved to EUR:
@@ -313,7 +314,7 @@ describe("useCounterpartyRequirements — corridor-addressed responses", () => {
     const provisioning: CounterpartyRequirements = {
       provider: "bvnk",
       direction: "onramp",
-      status: "funding_account_provisioning",
+      status: "customer_funding_account_provisioning",
     };
     const rendered = renderHook(
       (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),

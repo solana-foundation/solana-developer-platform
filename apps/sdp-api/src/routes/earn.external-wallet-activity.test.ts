@@ -21,18 +21,17 @@ const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
     })),
   };
 });
-
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  resolveVaultDirectClient,
-}));
-
 // The movement detail's chain read-through, mocked as identity: these tests
 // prove the ROUTE calls it for scoped rows and never for a 404, not the
 // service's own RPC behavior (that lives with the reconciler's suite).
 const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
   vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
 );
+
+vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
+  resolveVaultDirectClient,
+}));
 vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
   reconcileEarnVaultMovementReadThrough,
 }));

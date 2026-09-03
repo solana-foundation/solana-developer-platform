@@ -89,16 +89,32 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     });
     if (!simulation.ok) {
       getLogger().error(
-        { error: simulation.error, fault: simulation.fault, logs: simulation.logs.slice(-5) },
+        {
+          error: simulation.error,
+          fault: simulation.fault,
+          ...(simulation.sponsorCause === undefined
+            ? {}
+            : { sponsorCause: simulation.sponsorCause }),
+          logs: simulation.logs.slice(-5),
+        },
         `vault ${operation}: simulation failed before signing`
       );
-      // A broke sponsor is SDP's operational problem: a 400 would tell client
+      // A sponsor fault is SDP's operational problem: a 400 would tell client
       // retry middleware the caller is at fault (permanent), and would leak
       // SDP's sponsor funding state as a pollable signal. The detail is in the
-      // log line above; the caller gets a retryable 5xx with no internals.
-      // "Network costs" rather than "fee": the sponsor also funds the rent of
-      // accounts a sponsored movement creates, and both shortfalls land here.
+      // log line above; the caller gets a 5xx with no internals. The two
+      // flavours part on the RETRY HINT only: a broke sponsor genuinely
+      // clears with a refill, while a missing prefund is a plan defect and
+      // "retry shortly" would be a false promise.
       if (simulation.fault === "sponsor") {
+        if (simulation.sponsorCause === "prefund") {
+          throw internalError(
+            `Vault ${operation} simulation failed: SDP did not fund an account this ` +
+              `${operation} creates. This needs an SDP-side fix; retrying will not clear it`
+          );
+        }
+        // "Network costs" rather than "fee": the sponsor also funds the rent
+        // of accounts a sponsored movement creates, and both land here.
         throw internalError(
           `Vault ${operation} simulation failed: SDP could not sponsor the network costs. Retry shortly`
         );

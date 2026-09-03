@@ -171,6 +171,26 @@ The deposit build also reads the share ATA's existence (`src/accounts.ts`) and
 reports `createsShareAccount`, so the API's `share_ata_rent_funder` records
 the party that truly paid — which is what the eventual exit refunds.
 
+There is a SECOND rent the swap cannot reach (found on smoky 2026-09-02 right
+after the swap shipped): the vault program itself lazily creates the
+depositor's `AllowedUser` PDA inside the `deposit` instruction on a wallet's
+first deposit into a vault, with the SIGNER hardcoded as the lamport source
+(one signer in the account table, no payer knob, emitted even with compliance
+mode off). `src/allowed-user.ts` therefore PREPENDS one System transfer of
+exactly that account's rent-exempt minimum from `rentPayer` to the owner when
+the plan is sponsored and the PDA does not exist yet; the program's create
+consumes it in the same transaction, so the owner nets zero. The amount comes
+from a live `getMinimumBalanceForRentExemption(57)` read, never a hardcoded
+lamport figure: rent parameters are cluster state, and devnet's have already
+moved once during this integration. The ABI facts behind it (the deposit
+discriminator, `allowed_user` at account index 14, the 57-byte size) are
+pinned to the committed IDL by `allowed-user.test.ts`, in the same falsifiable
+style as `idl-layout.test.ts`.
+
+Withdrawals deliberately skip the prefund: the withdraw instruction reads the
+same PDA, but a wallet can only redeem shares it deposited, so the record
+always exists by exit time.
+
 ## Positions are read in base units, and the valuation may be absent
 
 `getUserPosition` returns an exact atomic `bigint` for the share balance —

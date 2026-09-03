@@ -12,7 +12,7 @@ catalog:
   '@solana/instructions': 7.1.1
   '@solana/keys': 7.1.1
   '@solana/kit': 7.1.1
-  '@solana/mosaic-sdk': 0.1.1
+  '@solana/mosaic-sdk': 0.2.0
   '@solana/programs': 7.1.1
   '@solana/rpc': 7.1.1
   '@solana/signers': 7.1.1
