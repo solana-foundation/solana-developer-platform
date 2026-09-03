@@ -40,6 +40,9 @@ minimumReleaseAgeExclude:
   # dependency, and its regex admits prerelease tags. A new publish therefore
   # cannot reach this repo without a lockfile change under review.
   - '@vedatech/svm-sdk'
+  - '@solana-program/system'
+  - '@solana-program/token'
+  - '@solana-program/token-2022'
   - '@solana/accounts'
   - '@solana/addresses'
   - '@solana/assertions'
