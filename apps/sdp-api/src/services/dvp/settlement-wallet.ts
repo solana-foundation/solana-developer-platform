@@ -26,6 +26,15 @@ export interface DvpSettlementWallet {
   custodyWalletId: string;
   /** The on-chain address, which is what the PDA seeds use. */
   address: string;
+  /**
+   * `custody_wallets.wallet_id` — the PROVIDER's id for this wallet.
+   *
+   * A third identifier for the same wallet, and the one a policy candidate's
+   * `walletId` means: the wallet-operations ownership check matches on
+   * `w.wallet_id` (`policy.repository.postgres.ts:1044`), so passing the
+   * address there finds no row and the operation is refused as un-owned.
+   */
+  providerWalletId: string;
 }
 
 interface Scope {
@@ -153,13 +162,19 @@ async function readMappedWalletId(env: Env, scope: Scope): Promise<string | null
 async function readSettlementWallet(env: Env, scope: Scope): Promise<DvpSettlementWallet | null> {
   const row = await getDb(env)
     .prepare(
-      `SELECT w.id AS custody_wallet_id, w.public_key
+      `SELECT w.id AS custody_wallet_id, w.public_key, w.wallet_id
          FROM dvp_settlement_wallets s
          JOIN custody_wallets w ON w.id = s.custody_wallet_id
         WHERE s.project_id = ? AND s.organization_id = ? AND w.status = 'active'`
     )
     .bind(scope.projectId, scope.organizationId)
-    .first<{ custody_wallet_id: string; public_key: string }>();
+    .first<{ custody_wallet_id: string; public_key: string; wallet_id: string }>();
 
-  return row ? { custodyWalletId: row.custody_wallet_id, address: row.public_key } : null;
+  return row
+    ? {
+        custodyWalletId: row.custody_wallet_id,
+        address: row.public_key,
+        providerWalletId: row.wallet_id,
+      }
+    : null;
 }
