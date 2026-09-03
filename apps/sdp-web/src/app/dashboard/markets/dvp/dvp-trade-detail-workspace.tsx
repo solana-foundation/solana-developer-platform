@@ -21,13 +21,14 @@ import { useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 
 import { cn } from "@/lib/utils";
-import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
+import { formatTimestamp } from "../../payments/payments-overview.utils";
 import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpTrade,
   type DvpTradeLeg,
+  formatLegAmount,
   frozenLegs,
   isDvpTradeClosed,
   legFundingRatio,
@@ -48,7 +49,7 @@ function CopyableAddress({ address, label }: { address: string; label: string })
 
   return (
     <button
-      className="inline-flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 font-mono text-xs text-secondary transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
+      className="inline-flex max-w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left font-mono text-secondary text-xs transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(address);
@@ -62,7 +63,12 @@ function CopyableAddress({ address, label }: { address: string; label: string })
       title={address}
       type="button"
     >
-      <span className="truncate">{shortenAddress(address)}</span>
+      {/* In full. These are the addresses a counterparty pays into and the
+          accounts a trade is verified against — a shortened one cannot be
+          checked against anything, and reading half of it is how somebody
+          confirms the wrong account. `break-all` because base58 has no spaces
+          to wrap at. */}
+      <span className="break-all">{address}</span>
       {copied ? (
         <CheckIcon aria-hidden className="h-3 w-3 shrink-0 text-success" />
       ) : (
@@ -71,26 +77,6 @@ function CopyableAddress({ address, label }: { address: string; label: string })
       <span className="sr-only">{label}</span>
     </button>
   );
-}
-
-/**
- * A leg amount in the units a person entered it in.
- *
- * Falls back to the raw base units when the scale is unknown, which is honest:
- * a trade created before decimals were stored has no scale, and inventing one
- * would misstate the amount by orders of magnitude. Grouped so a long integer
- * stays readable either way.
- */
-function formatLegAmount(baseUnits: string, decimals: number | null): string {
-  if (decimals === null) {
-    return baseUnits;
-  }
-  const negative = baseUnits.startsWith("-");
-  const digits = (negative ? baseUnits.slice(1) : baseUnits).padStart(decimals + 1, "0");
-  const whole = digits.slice(0, digits.length - decimals);
-  const fraction = decimals === 0 ? "" : digits.slice(digits.length - decimals).replace(/0+$/, "");
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
 }
 
 /**

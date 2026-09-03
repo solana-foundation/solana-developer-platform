@@ -21,7 +21,7 @@ function leg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
     tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     decimals: 6,
     symbol: "ATD",
-    amount: "1000",
+    amount: "1000000000",
     escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
     settlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
     funding: null,
@@ -92,17 +92,21 @@ describe("DvpTradesWorkspace", () => {
   it("shows only the target for a leg nothing has read yet", () => {
     const html = renderList([trade()]);
 
-    expect(html).toContain("1000");
-    expect(html).not.toContain("0 / 1000");
+    // In the units somebody entered, with the token named. 1000000000 base
+    // units at 6 decimals is 1,000 ATD, and showing the integer is how this
+    // list read for its whole life before decimals reached the payload.
+    expect(html).toContain("1,000");
+    expect(html).toContain("ATD");
+    expect(html).not.toContain("1000000000");
   });
 
   it("shows observed over target once the escrow has been read", () => {
     const funded = leg({
-      funding: { observedAmount: "400", funded: false, surplus: null, frozen: false },
+      funding: { observedAmount: "400000000", funded: false, surplus: null, frozen: false },
     });
     const html = renderList([trade({ legs: { a: funded, b: leg() } })]);
 
-    expect(html).toContain("400 / 1000");
+    expect(html).toContain("400 / 1,000");
   });
 
   // Marked on the row rather than announced in a banner: a warning that does

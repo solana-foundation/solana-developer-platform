@@ -368,7 +368,14 @@
       "youReceive": "You receive",
       "youDelivered": "You delivered",
       "youReceived": "You received",
-      "viewOnExplorer": "View on explorer"
+      "viewOnExplorer": "View on explorer",
+      "toastSettled": "Trade settled. Both legs delivered.",
+      "toastCancelled": "Trade cancelled. Both legs refunded.",
+      "toastFunded": "Your leg is funded.",
+      "toastSettleHeld": "Settlement sent for approval.",
+      "toastCancelHeld": "Cancellation sent for approval.",
+      "toastFundHeld": "Funding sent for approval.",
+      "toastCreated": "Trade created. Escrow addresses are published below."
     }
   },
   "DashboardEarn": {

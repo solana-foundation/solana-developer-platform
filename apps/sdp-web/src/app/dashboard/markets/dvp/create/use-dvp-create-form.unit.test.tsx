@@ -10,11 +10,22 @@
  */
 
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+function withI18n({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      {children}
+    </I18nProvider>
+  );
+}
 
 const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const COUNTERPARTY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
@@ -40,7 +51,7 @@ const context: DvpCreateContext = {
 };
 
 function setup(ctx: DvpCreateContext = context) {
-  return renderHook(() => useDvpCreateForm("devnet", ctx));
+  return renderHook(() => useDvpCreateForm("devnet", ctx), { wrapper: withI18n });
 }
 
 describe("useDvpCreateForm", () => {
@@ -151,13 +162,15 @@ describe("useDvpCreateForm", () => {
     };
 
     it("reports what the wallet holds of the asset leg", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", held));
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held), { wrapper: withI18n });
 
       expect(result.current.assetBalance).toMatchObject({ amount: "25000000000", decimals: 6 });
     });
 
     it("reports zero, not unknown, when the wallet holds none of it", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", context));
+      const { result } = renderHook(() => useDvpCreateForm("devnet", context), {
+        wrapper: withI18n,
+      });
 
       expect(result.current.assetBalance).toMatchObject({ amount: "0", decimals: 6 });
     });
@@ -165,13 +178,13 @@ describe("useDvpCreateForm", () => {
     // The counterparty's leg is funded by them. Showing our balance against it
     // would claim we hold what they owe.
     it("reports nothing for the leg SDP does not deliver", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", held));
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held), { wrapper: withI18n });
 
       expect(result.current.cashBalance).toBeNull();
     });
 
     it("follows the side SDP takes", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", held));
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held), { wrapper: withI18n });
 
       act(() => {
         result.current.setSdpSide("b");

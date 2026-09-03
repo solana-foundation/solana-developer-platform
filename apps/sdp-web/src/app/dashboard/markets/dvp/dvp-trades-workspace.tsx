@@ -19,7 +19,13 @@ import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { DvpStatusBadge } from "./dvp-status";
-import { type DvpTrade, type DvpTradeLeg, frozenLegs, overFundedLegs } from "./dvp-trade";
+import {
+  type DvpTrade,
+  type DvpTradeLeg,
+  formatLegAmount,
+  frozenLegs,
+  overFundedLegs,
+} from "./dvp-trade";
 import { DVP_TRADES_PAGE_SIZE } from "./dvp-trades.data";
 
 /**
@@ -40,9 +46,16 @@ function LegCell({ leg }: { leg: DvpTradeLeg }) {
             only the target is shown, with the status column carrying "not
             checked" so the two are never confused. */}
         <div className="truncate font-medium text-primary text-sm tabular-nums">
-          {leg.funding ? `${leg.funding.observedAmount} / ${leg.amount}` : leg.amount}
+          {leg.funding
+            ? `${formatLegAmount(leg.funding.observedAmount, leg.decimals)} / ${formatLegAmount(leg.amount, leg.decimals)}`
+            : formatLegAmount(leg.amount, leg.decimals)}
+          {leg.symbol ? <span className="ml-1 text-secondary">{leg.symbol}</span> : null}
         </div>
-        <div className="truncate text-tertiary text-xs">{shortenAddress(leg.mint)}</div>
+        {/* The mint only when it has no symbol to stand in for it — a row
+            showing both reads as a name followed by a second, longer name. */}
+        {leg.symbol ? null : (
+          <div className="truncate text-tertiary text-xs">{shortenAddress(leg.mint)}</div>
+        )}
       </div>
     </div>
   );

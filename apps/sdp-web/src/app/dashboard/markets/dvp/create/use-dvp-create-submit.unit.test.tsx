@@ -12,9 +12,21 @@
  */
 
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
 import type { DvpCreateRequest } from "./use-dvp-create-submit";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
+
+// Submitting confirms in words, so the hook needs the catalog they come from.
+function withI18n({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      {children}
+    </I18nProvider>
+  );
+}
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -48,7 +60,7 @@ async function keyFor(overrides: Partial<DvpCreateRequest> = {}): Promise<string
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  const { result } = renderHook(() => useDvpCreateSubmit());
+  const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
   await act(async () => {
     await result.current.submit(request(overrides));
   });

@@ -139,3 +139,27 @@ export function legFundingRatio(leg: DvpTradeLeg): number | null {
   // Scale before converting so the ratio survives values above 2^53.
   return Number((observed * 10_000n) / target) / 10_000;
 }
+
+/**
+ * A leg amount in the units a person entered it in.
+ *
+ * Shared by the list and the detail view. It lived in the detail view first,
+ * which is how the list went on showing 1000000000 after the detail view
+ * stopped: one formatter, or the next surface gets it wrong too.
+ *
+ * Falls back to the raw base units when the scale is unknown, which is honest:
+ * a trade created before decimals were stored has no scale, and inventing one
+ * would misstate the amount by orders of magnitude. Grouped so a long integer
+ * stays readable either way.
+ */
+export function formatLegAmount(baseUnits: string, decimals: number | null): string {
+  if (decimals === null) {
+    return baseUnits;
+  }
+  const negative = baseUnits.startsWith("-");
+  const digits = (negative ? baseUnits.slice(1) : baseUnits).padStart(decimals + 1, "0");
+  const whole = digits.slice(0, digits.length - decimals);
+  const fraction = decimals === 0 ? "" : digits.slice(digits.length - decimals).replace(/0+$/, "");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
+}

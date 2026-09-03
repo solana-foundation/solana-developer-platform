@@ -45,13 +45,18 @@ async function runPreflight(): Promise<void> {
   // existing Kora/on-chain shards keep working unchanged.
   const requested = getRequestedSuites();
   const koraInScope = requested ? requested.has("kora") : !!env.KORA_RPC_URL;
+  // DvP needs a cluster and a custody signer and nothing else — no Kora fee
+  // payer, no Private Channels gateway. Requiring either would make the suite
+  // unreachable without standing up a harness it never calls, which is the
+  // same reasoning that already keeps Kora and SPC independent of each other.
+  const dvpInScope = requested?.has("dvp") ?? false;
   const spcInScope = requested
     ? requested.has("spc")
     : !env.KORA_RPC_URL && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
 
-  if (!koraInScope && !spcInScope) {
+  if (!koraInScope && !spcInScope && !dvpInScope) {
     throw new Error(
-      "Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with SDP_INTEGRATION_SUITE=kora|spc."
+      "Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with SDP_INTEGRATION_SUITE=kora|spc|dvp."
     );
   }
 
@@ -63,6 +68,30 @@ async function runPreflight(): Promise<void> {
   }
   if (spcInScope) {
     await preflightSpcSuite();
+  }
+  if (dvpInScope) {
+    await preflightDvpSuite();
+  }
+}
+
+/**
+ * What a DvP run actually needs: a cluster, and a custody signer to be the
+ * organization's side of a trade.
+ *
+ * Deliberately short. Everything else DvP touches — the settlement authority,
+ * the escrows, the policy rows — is created by the code under test, and a
+ * pre-flight that provisioned them would be checking its own fixture rather
+ * than the product.
+ */
+async function preflightDvpSuite(): Promise<void> {
+  const integrationCustodyProvider = getIntegrationCustodyProvider();
+  const missing: string[] = [];
+  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+  if (integrationCustodyProvider === "local" && !env.CUSTODY_PRIVATE_KEY) {
+    missing.push("CUSTODY_PRIVATE_KEY");
+  }
+  if (missing.length > 0) {
+    throw new Error(`Integration preflight (dvp): missing ${missing.join(", ")}.`);
   }
 }
 
