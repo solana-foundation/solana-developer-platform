@@ -31,6 +31,8 @@ import type { Env } from "@/types/env";
 interface SettlementWalletRef {
   custodyWalletId: string;
   address: string;
+  /** The provider's id for the wallet, which is what `walletId` below means. */
+  providerWalletId: string;
 }
 
 /**
@@ -55,7 +57,13 @@ export function buildDvpClosePolicyCandidate(
     organizationId: auth.organizationId,
     projectId: trade.projectId,
     custodyWalletId: settlement.custodyWalletId,
-    walletId: settlement.address,
+    // The PROVIDER's wallet id, not the on-chain address. The wallet-operations
+    // ownership check matches `custody_wallets.wallet_id`
+    // (`policy.repository.postgres.ts:1044`), so an address finds no row and the
+    // operation is refused as belonging to nobody — which surfaced as
+    // "Failed to record wallet operation" on every settle, cancel and fund.
+    // `payments/handlers/ramps.ts:405-406` is the convention this now matches.
+    walletId: settlement.providerWalletId,
     apiKeyId: auth.apiKeyId,
     actor: walletOperationActorFromAuth(auth),
     source: "api",

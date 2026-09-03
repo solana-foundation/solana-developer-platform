@@ -24,13 +24,22 @@ const CUSTODY_CONFIG_ID = "cust_dvp_settlement";
 const scope = { organizationId: TEST_ORG.id, projectId: PROJECT_ID };
 
 /** Registers a custody wallet the provisioner can pretend it just minted. */
+/**
+ * Seeds a wallet whose THREE identifiers are all different.
+ *
+ * Deliberate: `id` (cwlt_...), `wallet_id` (the provider's) and `public_key`
+ * are distinct things that a caller can confuse for one another, and a fixture
+ * that sets them equal cannot catch that confusion. One did exactly that, and
+ * a candidate passing the address where the provider id belonged went unnoticed
+ * until it failed against a real project.
+ */
 async function seedCustodyWallet(id: string, publicKey: string): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
        VALUES (?, ?, ?, ?, 'active')`
     )
-    .bind(id, CUSTODY_CONFIG_ID, id, publicKey)
+    .bind(id, CUSTODY_CONFIG_ID, `provider_${id}`, publicKey)
     .run();
 }
 
@@ -128,6 +137,11 @@ describe("getOrCreateDvpSettlementWallet", () => {
     const reread = await getOrCreateDvpSettlementWallet(env, scope);
 
     expect(reread.address).toBe("AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
+    // All three, and all different. `providerWalletId` is what a policy
+    // candidate's `walletId` means — the wallet-operations ownership check
+    // matches on it, so handing it the address refuses the operation.
+    expect(reread.custodyWalletId).toBe("cwlt_first");
+    expect(reread.providerWalletId).toBe("provider_cwlt_first");
   });
 
   // The race. Both callers mint a wallet; the database decides which one is the
