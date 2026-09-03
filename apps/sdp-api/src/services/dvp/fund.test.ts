@@ -214,6 +214,18 @@ describe("fundDvpTradeLeg", () => {
     expect(releaseLegFunding).not.toHaveBeenCalled();
   });
 
+  // The fence runs after the claim and before any broadcast. If it throws, no
+  // bytes left this process, so holding the claim would make the leg
+  // permanently unfundable over a failure that changed nothing.
+  it("releases the claim when the approval fence fails, since nothing was sent", async () => {
+    beginApprovedWalletOperationEffect.mockRejectedValue(new Error("fence unavailable"));
+
+    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow("fence unavailable");
+
+    expect(releaseLegFunding).toHaveBeenCalledTimes(1);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
   it("refuses when the mint cannot be read", async () => {
     readMintDecimals.mockResolvedValue(null);
 

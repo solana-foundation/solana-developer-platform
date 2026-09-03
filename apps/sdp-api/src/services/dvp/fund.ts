@@ -146,7 +146,16 @@ export async function fundDvpTradeLeg(
   // Past this the tokens may have moved, so an approved operation that dies
   // here needs reconciling by hand rather than replaying: a blind retry would
   // over-fund.
-  await beginApprovedWalletOperationEffect(c);
+  //
+  // The fence itself is the exception. It runs before anything is broadcast, so
+  // a failure here changed nothing on chain, and keeping the claim would leave
+  // the leg permanently unfundable over an error that cost nothing.
+  try {
+    await beginApprovedWalletOperationEffect(c);
+  } catch (error) {
+    await createDvpTradeRepository(env).releaseLegFunding(trade.id, signature);
+    throw error;
+  }
 
   try {
     await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
