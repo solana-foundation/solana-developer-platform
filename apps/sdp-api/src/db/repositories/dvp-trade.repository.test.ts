@@ -45,6 +45,7 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     sdpSide: "a",
     sdpWalletId: CUSTODY_WALLET_ID,
     createSignature: null,
+    createLastValidBlockHeight: null,
     ...overrides,
   };
 }

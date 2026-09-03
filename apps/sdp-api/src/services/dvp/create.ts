@@ -49,6 +49,7 @@ import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeSide } from "@
 import { badRequest } from "@/lib/errors";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
+import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
 import { validateDvpTerms } from "./validate";
 
@@ -102,6 +103,26 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     throw badRequest("DvP settlement authority is not configured");
   }
 
+  const mintA = address(input.mintA);
+  const mintB = address(input.mintB);
+  const tokenProgramA = address(input.tokenProgramA);
+  const tokenProgramB = address(input.tokenProgramB);
+
+  // Mints first, because this needs nothing but the caller's payload. The terms
+  // check below cannot run until the signer's address is known, and resolving
+  // that signer is a call out to the custody provider — so checking the mints
+  // here means a request naming a mint the program refuses costs one batched
+  // account read and nothing else. These are the rules `validateDvpTerms`
+  // excludes as needing chain state, "handled where the trade is built".
+  const rpc = solanaRpc.createRpc(env);
+  const mintProblems = await validateDvpMints(rpc, [
+    { label: "mintA", mint: mintA, tokenProgram: tokenProgramA },
+    { label: "mintB", mint: mintB, tokenProgram: tokenProgramB },
+  ]);
+  if (mintProblems.length > 0) {
+    throw badRequest(`Invalid DvP mints: ${mintProblems.join("; ")}`);
+  }
+
   // The custody wallet is SDP's party, the create payer and the fee payer. It
   // signs once for all three.
   const signer = await createOrgSignerForCustodyWallet(
@@ -136,14 +157,8 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   }
 
   // Cryptographically random, and a bigint throughout. A predictable nonce lets
-  // a third party squat the address before the real parties reach it, and a
-  // value routed through a JS number rounds above 2^53 and derives a different
-  // PDA than the one we would publish.
+  // a third party squat the address before the real parties reach it.
   const nonce = randomDvpNonce();
-  const mintA = address(input.mintA);
-  const mintB = address(input.mintB);
-  const tokenProgramA = address(input.tokenProgramA);
-  const tokenProgramB = address(input.tokenProgramB);
 
   const [swapDvp] = await findSwapDvpPda({
     settlementAuthority: address(settlementAuthority),
@@ -186,7 +201,6 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
       input.earliestSettlementTimestamp === null ? none() : some(input.earliestSettlementTimestamp),
   });
 
-  const rpc = solanaRpc.createRpc(env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -232,6 +246,9 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     sdpSide: input.sdpSide,
     sdpWalletId: input.sdpWalletId,
     createSignature: signature,
+    // Stored so the reconciler can tell a create that is still in flight from
+    // one that can never land, rather than inferring it from elapsed time.
+    createLastValidBlockHeight: lastValidBlockHeight.toString(),
   });
 
   try {

@@ -61,6 +61,19 @@ export interface DvpTradeRow {
   status: DvpTradeStatus;
   observedAt: string | null;
   createSignature: string | null;
+  /**
+   * Block height past which the create transaction can no longer land.
+   *
+   * The only sound basis for calling a `creating` trade dead. Elapsed time is a
+   * guess about the network; this is a fact about the transaction.
+   */
+  createLastValidBlockHeight: string | null;
+
+  // Last observed escrow state. Null until the reconciler has looked.
+  escrowAAmount: string | null;
+  escrowBAmount: string | null;
+  escrowAFrozen: boolean | null;
+  escrowBFrozen: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -71,7 +84,17 @@ export interface DvpTradeRow {
  * The row lands at `creating`. Callers do not choose the status: the point of
  * this insert is that it happens while the outcome is still unknown.
  */
-export type DvpTradeInsert = Omit<DvpTradeRow, "status" | "observedAt" | "createdAt" | "updatedAt">;
+export type DvpTradeInsert = Omit<
+  DvpTradeRow,
+  | "status"
+  | "observedAt"
+  | "createdAt"
+  | "updatedAt"
+  | "escrowAAmount"
+  | "escrowBAmount"
+  | "escrowAFrozen"
+  | "escrowBFrozen"
+>;
 
 export interface DvpTradeScope {
   organizationId: string;
@@ -86,6 +109,18 @@ export interface DvpTradeScope {
    * a key with no usable bindings into a key that reads the whole project.
    */
   sdpWalletIds?: string[] | null;
+}
+
+export interface DvpTradeObservationUpdate {
+  id: string;
+  /** The status the row must still hold for this write to apply. */
+  expectedStatus: DvpTradeStatus;
+  status: DvpTradeStatus;
+  escrowAAmount: string | null;
+  escrowBAmount: string | null;
+  escrowAFrozen: boolean | null;
+  escrowBFrozen: boolean | null;
+  observedAt: string;
 }
 
 export interface DvpTradeRepositoryContext {
@@ -111,5 +146,21 @@ export interface DvpTradeRepository {
   getById(scope: DvpTradeScope, id: string): Promise<DvpTradeRow | null>;
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
   getBySwapDvp(scope: DvpTradeScope, swapDvp: string): Promise<DvpTradeRow | null>;
+  /**
+   * Open trades across every project, stalest observation first.
+   *
+   * Deliberately UNSCOPED, unlike every read above. The reconciler is not acting
+   * for a caller — it is a background sweep, and scoping it to a project would
+   * mean a trade only advances while someone happens to be looking at it.
+   */
+  listOpenForReconciliation(limit: number): Promise<DvpTradeRow[]>;
+  /**
+   * Writes an observation and the status derived from it.
+   *
+   * Compare-and-swap on the status the derivation was computed FROM, so a sweep
+   * working from a stale read cannot overwrite a newer one. Returns null when it
+   * lost that race, which is the same answer a vanished row gives.
+   */
+  recordObservation(input: DvpTradeObservationUpdate): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
 }

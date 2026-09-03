@@ -3,6 +3,7 @@ import * as solanaRpc from "@sdp/rpc/solana";
 
 import * as Sentry from "@sentry/node";
 import { parse as parseCron, validate as validateCron } from "node-cron";
+import { DVP_TRADES_MONITOR } from "@/cron/dvp-trades";
 import { EARN_CATALOGUE_SYNC_MONITOR, runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import {
   EARN_METRICS_REFRESH_MONITOR,
@@ -38,6 +39,7 @@ import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
+import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
@@ -165,6 +167,7 @@ export async function runCronJob(): Promise<void> {
     PENDING_WITHDRAWALS_MONITOR,
     RINGS_INDEXING_MONITOR,
     EARN_VAULT_MOVEMENTS_MONITOR,
+    DVP_TRADES_MONITOR,
     WORKFLOW_EXECUTIONS_MONITOR,
     WORKFLOW_SECRET_RETIREMENTS_MONITOR,
     EARN_METRICS_REFRESH_MONITOR,
@@ -213,6 +216,9 @@ export async function runCronJob(): Promise<void> {
     }
     await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
     await collect(monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env)));
+    // Non-fatal: a DvP sweep that cannot reach the RPC must not fail the whole
+    // tick and starve the money-moving reconcilers that run after it.
+    await monitored(DVP_TRADES_MONITOR, () => reconcileDvpTrades(env)).catch(() => undefined);
     if (assetProfilesEnabled) {
       await collect(monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env)));
     } else {
