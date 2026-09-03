@@ -5,13 +5,16 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import { getPolicyGateContext } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
+import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import type { Env } from "@/types/env";
+import type { DvpCloseResolved } from "./policy";
 import { type createDvpTradeSchema, listDvpTradesQuerySchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -112,6 +115,48 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
 
   return success(c, { trade: toTradeResponse(trade) }, 201);
 };
+
+/**
+ * Settles or cancels a trade.
+ *
+ * The policy gate has already run by the time this executes: a denied close is
+ * a 403 and one needing approval is a 202, neither of which reaches here. On an
+ * approved replay it runs again with the same resolved trade, which is why the
+ * gate resolves it rather than the handler.
+ */
+const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
+  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
+  if (!resolved.trade) {
+    throw notFound("DvP trade not found");
+  }
+
+  // Re-read the binding from the database before anything irreversible.
+  //
+  // The scope used by the gate came from the request's auth context, which can
+  // be up to an hour of cached KV. A binding revoked inside that window would
+  // still resolve the trade and still settle it — and settle moves both legs at
+  // once and closes the trade permanently, so a stale read here is not a
+  // read-authorization slip, it is an irreversible spend by a revoked key.
+  // Same guard Payments uses before a money-moving write, and the same one
+  // create already runs.
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), resolved.trade.sdpWalletId, [
+    "payments:write",
+  ]);
+
+  const result = await closeDvpTrade(c, resolved.trade, action);
+
+  return success(c, {
+    tradeId: resolved.trade.id,
+    action,
+    signature: result.signature,
+    // Named because they cost rent from the settlement wallet, and because a
+    // caller seeing accounts appear should know why.
+    createdAccounts: result.createdAccounts,
+  });
+};
+
+export const settleTrade = closeTrade("settle");
+export const cancelTrade = closeTrade("cancel");
 
 export const listTrades = async (c: AppContext) => {
   const auth = getAuth(c);

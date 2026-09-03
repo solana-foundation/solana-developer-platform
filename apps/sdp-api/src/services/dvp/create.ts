@@ -52,6 +52,7 @@ import type { Env } from "@/types/env";
 import { dvpCreateFingerprint } from "./fingerprint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
+import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
 
 /** Seed prefix of the per-trade nonce tombstone (`NONCE_TOMBSTONE_SEED`). */
@@ -170,14 +171,6 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     }
   }
 
-  const settlementAuthority = env.DVP_SETTLEMENT_AUTHORITY;
-  if (!settlementAuthority) {
-    // Not a user error: the deployment is missing configuration. Only this key
-    // can ever settle or cancel, so creating trades without one would produce
-    // trades nobody can complete.
-    throw badRequest("DvP settlement authority is not configured");
-  }
-
   const mintA = address(input.mintA);
   const mintB = address(input.mintB);
   const tokenProgramA = address(input.tokenProgramA);
@@ -197,6 +190,16 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   if (mintProblems.length > 0) {
     throw badRequest(`Invalid DvP mints: ${mintProblems.join("; ")}`);
   }
+
+  // Only now, after the payload is known to be sound, do we touch the custody
+  // provider. Provisioning happens on first use, so a project's very first
+  // trade mints this wallet — and doing that for a request that was going to
+  // 400 anyway would leave an unused provider key behind every time.
+  const settlement = await getOrCreateDvpSettlementWallet(env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  const settlementAuthority = settlement.address;
 
   // The custody wallet is SDP's party, the create payer and the fee payer. It
   // signs once for all three.

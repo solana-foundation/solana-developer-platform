@@ -173,6 +173,8 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /trades",
       "GET /trades/:tradeId",
       "POST /trades",
+      "POST /trades/:tradeId/cancel",
+      "POST /trades/:tradeId/settle",
     ]);
   });
 });

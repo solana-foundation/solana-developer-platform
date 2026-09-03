@@ -3,6 +3,12 @@ export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "revi
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
 export const WALLET_OPERATION_TYPES = [
+  // Settling a DvP trade moves BOTH legs in one transaction and closes the
+  // trade permanently; cancelling refunds both. They are the only two actions
+  // the settlement authority can take, and both are irreversible, which is
+  // exactly the shape an org should be able to require approval on.
+  "dvp_cancel",
+  "dvp_settle",
   "earn_vault_deposit",
   "earn_vault_withdrawal",
   "issuance_burn_execute",

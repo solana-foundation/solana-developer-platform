@@ -26,7 +26,7 @@ import {
   projectScopeHeaders,
   projectScopeWithIdempotencyHeaders,
 } from "./helpers";
-import { dvpTradeResponse, listDvpTradesResponse } from "./responses";
+import { dvpCloseResponse, dvpTradeResponse, listDvpTradesResponse } from "./responses";
 
 const DVP_TAG = "DvP";
 
@@ -89,4 +89,28 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
+
+  for (const action of ["settle", "cancel"] as const) {
+    registry.registerPath({
+      method: "post",
+      path: `/v1/dvp/trades/{tradeId}/${action}`,
+      tags: [DVP_TAG],
+      summary: action === "settle" ? "Settle a DvP trade" : "Cancel a DvP trade",
+      operationId: action === "settle" ? "settleDvpTrade" : "cancelDvpTrade",
+      description:
+        action === "settle"
+          ? "Delivers each leg to the other party, refunds any surplus to its depositor, and closes the trade. Requires both legs funded. Only the project's settlement authority can do this, and the action is irreversible. Creates any token accounts settlement requires that do not yet exist — including the surplus-refund accounts, which the program demands even when there is no surplus, because anyone can send tokens to an escrow. Subject to wallet policy: a trade needing approval returns 202 with an approval request rather than settling."
+          : "Refunds each leg to whoever deposited it and closes the trade. Unlike settlement this does not require the trade to be funded — unwinding a half-funded or abandoned trade is what it is for. Only the project's settlement authority can do this, and the action is irreversible. Subject to wallet policy: a cancel needing approval returns 202 rather than executing.",
+      security: [{ apiKeyAuth: [] }],
+      request: { headers: projectScopeHeaders, params: tradeIdPathParams },
+      responses: {
+        200: { description: "Trade closed", content: jsonContent(dvpCloseResponse) },
+        202: {
+          description: "Awaiting policy approval",
+          content: jsonContent(errorResponseSchema),
+        },
+        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      },
+    });
+  }
 }
