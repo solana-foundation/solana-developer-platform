@@ -1,20 +1,26 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
-  earnButtonConfigurationPublicParamsSchema,
-  earnButtonConfigurationSchema,
+  earnExternalWalletEarningsParamsSchema,
+  earnExternalWalletMovementParamsSchema,
+  earnExternalWalletMovementsQuerySchema,
+  earnExternalWalletPositionParamsSchema,
+  earnExternalWalletPositionsQuerySchema,
 } from "@/routes/earn/schemas";
 import { errorResponseSchema } from "../schemas/base";
 import {
-  earnButtonConfigurationResponse,
   earnExternalWalletDepositResponse,
   earnExternalWalletDepositTransactionRequest,
   earnExternalWalletDepositTransactionResponse,
+  earnExternalWalletEarningsResponse,
+  earnExternalWalletMovementDetailResponse,
+  earnExternalWalletMovementsResponse,
+  earnExternalWalletPositionSummaryResponse,
+  earnExternalWalletPositionsResponse,
   earnExternalWalletSubmitRequest,
   earnExternalWalletWithdrawalResponse,
   earnExternalWalletWithdrawalTransactionRequest,
   earnExternalWalletWithdrawalTransactionResponse,
-  publicEarnButtonConfigurationResponse,
 } from "../schemas/earn";
 import {
   errorResponses,
@@ -32,81 +38,12 @@ const earnConfigurationSecurity: Array<Record<string, string[]>> = [
 const earnPublicSecurity: Array<Record<string, string[]>> = [{ apiKeyAuth: [] }];
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
-  registerEarnButtonConfigurationPaths(registry);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
 }
 
 /** Only the partner-facing caller-signed money routes belong in the public document. */
 export function registerPublicEarnPaths(registry: OpenAPIRegistry) {
   registerEarnExternalWalletPaths(registry, earnPublicSecurity);
-}
-
-function registerEarnButtonConfigurationPaths(registry: OpenAPIRegistry) {
-  registry.registerPath({
-    method: "get",
-    path: "/v1/earn/button-configurations/public/{publicToken}",
-    tags: ["Earn"],
-    summary: "Get a public Earn button handoff",
-    operationId: "getPublicEarnButtonConfiguration",
-    description:
-      "Resolves the style and strategy for an engineering handoff token without exposing tenant metadata or credentials.",
-    request: {
-      params: earnButtonConfigurationPublicParamsSchema,
-    },
-    responses: {
-      200: {
-        description: "Public Earn button handoff",
-        content: jsonContent(publicEarnButtonConfigurationResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 403, 404, 429, 500, 503]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/earn/button-configurations/current",
-    tags: ["Earn"],
-    summary: "Get the current Earn button configuration",
-    operationId: "getEarnButtonConfiguration",
-    description:
-      "Gets the saved Earn button configuration for the active organization and project.",
-    security: earnConfigurationSecurity,
-    request: {
-      headers: projectScopeHeaders,
-    },
-    responses: {
-      200: {
-        description: "Earn button configuration",
-        content: jsonContent(earnButtonConfigurationResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "put",
-    path: "/v1/earn/button-configurations/current",
-    tags: ["Earn"],
-    summary: "Save the current Earn button configuration",
-    operationId: "upsertEarnButtonConfiguration",
-    description:
-      "Validates deposit availability before saving the selected strategy and appearance for the active organization and project.",
-    security: earnConfigurationSecurity,
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(earnButtonConfigurationSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Earn button configuration saved",
-        content: jsonContent(earnButtonConfigurationResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
-    },
-  });
 }
 
 function registerEarnExternalWalletPaths(
@@ -117,6 +54,130 @@ function registerEarnExternalWalletPaths(
   // path. Each direction is a BUILD (returns an unsigned transaction for the
   // customer's own wallet to sign) and a SUBMIT (verifies the signature over
   // the exact built message, records the movement, then broadcasts).
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/positions/summary",
+    tags: ["Earn"],
+    summary: "Get external-wallet position totals",
+    operationId: "getEarnExternalWalletPositionSummary",
+    description:
+      "Returns a complete live aggregate across the active partner project's end-user wallets, " +
+      "grouped by strategy and token. The service pages every stored claim before hydration. " +
+      "A total is omitted when any contributing live value is unavailable, never reported as zero or partial.",
+    security,
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Complete external-wallet position aggregate",
+        content: jsonContent(earnExternalWalletPositionSummaryResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/positions/{ownerAddress}",
+    tags: ["Earn"],
+    summary: "List one external wallet's positions",
+    operationId: "listEarnExternalWalletPositions",
+    description:
+      "Returns one strict keyset page of live positions for an end-user wallet in the active " +
+      "partner project. A wallet outside that scope answers 404. Live fields are absent when " +
+      "provider hydration is unavailable, never replaced with zero.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      params: earnExternalWalletPositionParamsSchema,
+      query: earnExternalWalletPositionsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "External-wallet position page",
+        content: jsonContent(earnExternalWalletPositionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/movements",
+    tags: ["Earn"],
+    summary: "List one external wallet's activity",
+    operationId: "listEarnExternalWalletMovements",
+    description:
+      "Returns one keyset page of the wallet's recorded deposits and withdrawals, newest " +
+      "first, in ledger vocabulary (`requested`, `submitted`, `confirmed`, `finalized`, " +
+      "`failed`; only `finalized` and `failed` are terminal). `ownerAddress` is required; a " +
+      "wallet outside the active partner project answers 404. Reports on money that already " +
+      "moved, so no provider gate applies.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      query: earnExternalWalletMovementsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "External-wallet movement page",
+        content: jsonContent(earnExternalWalletMovementsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/movements/{movementId}",
+    tags: ["Earn"],
+    summary: "Get one external-wallet movement",
+    operationId: "getEarnExternalWalletMovement",
+    description:
+      "Polls one recorded movement to a terminal state — the read that settles a submit whose " +
+      "outcome the caller never learned. The reconciliation sweep drives every movement " +
+      "terminal within about ninety seconds; keep polling until `finalized` or `failed`.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      params: earnExternalWalletMovementParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recorded movement",
+        content: jsonContent(earnExternalWalletMovementDetailResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/earnings/{ownerAddress}",
+    tags: ["Earn"],
+    summary: "Get one external wallet's balance and earnings",
+    operationId: "getEarnExternalWalletEarnings",
+    description:
+      "Returns live balance and total earned per deposit token: `earned` is live value minus " +
+      "finalized SDP deposits, stated only when exact. When it cannot be stated — live value " +
+      "unavailable, movements still settling, or a finalized withdrawal on a held position — " +
+      "the figure is absent with a named reason, never zero. Figures cover currently held " +
+      "positions: a fully exited position's history drops out (it stays on the movements " +
+      "list). Live value reads the owner's whole vault balance, so shares acquired outside " +
+      "SDP inflate it.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      params: earnExternalWalletEarningsParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "External-wallet earnings",
+        content: jsonContent(earnExternalWalletEarningsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
   registry.registerPath({
     method: "post",
     path: "/v1/earn/external-wallet/deposit-transactions",

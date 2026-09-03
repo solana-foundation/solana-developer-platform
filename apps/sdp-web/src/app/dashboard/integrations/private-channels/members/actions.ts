@@ -1,65 +1,65 @@
 "use server";
 
-import type { PrivateChannelUserDto } from "@sdp/types";
+import type { PrivateChannelPrincipalDto } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import {
-  addChannelMembership as addChannelMembershipCall,
-  deletePrivateChannelUser as deletePrivateChannelUserCall,
-  invitePrivateChannelUser as inviteCall,
-  removeChannelMembership as removeChannelMembershipCall,
+  addPrincipalChannelMembership,
+  createPrivateChannelPrincipal,
+  disablePrivateChannelPrincipal,
+  removePrincipalChannelMembership,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
 
-const MEMBERS_PATH = "/dashboard/integrations/private-channels/members";
+const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
 
 export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; message: string };
 
-export async function inviteMemberAction(
-  userId: string
-): Promise<ActionResult<{ user: PrivateChannelUserDto; inviteUrl: string }>> {
+export async function createPrincipalAction(
+  name: string
+): Promise<ActionResult<PrivateChannelPrincipalDto>> {
   try {
     const client = await createSdpApiClient();
-    const value = await inviteCall(client, { userId });
-    revalidatePath(MEMBERS_PATH);
-    return { ok: true, value };
+    const { principal } = await createPrivateChannelPrincipal(client, { name });
+    revalidatePath(PRINCIPALS_PATH);
+    return { ok: true, value: principal };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
   }
 }
 
-export async function deleteMemberAction(id: string): Promise<ActionResult> {
+export async function disablePrincipalAction(id: string): Promise<ActionResult> {
   try {
     const client = await createSdpApiClient();
-    await deletePrivateChannelUserCall(client, id);
-    revalidatePath(MEMBERS_PATH);
+    await disablePrivateChannelPrincipal(client, id);
+    revalidatePath(PRINCIPALS_PATH);
     return { ok: true, value: undefined };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
   }
 }
 
-export async function addToChannelAction(
+export async function addPrincipalToChannelAction(
   channelId: string,
-  privateChannelUserId: string
+  principalId: string
 ): Promise<ActionResult> {
   try {
     const client = await createSdpApiClient();
-    await addChannelMembershipCall(client, channelId, privateChannelUserId);
-    revalidatePath(MEMBERS_PATH);
+    await addPrincipalChannelMembership(client, channelId, principalId);
+    revalidatePath(PRINCIPALS_PATH);
     return { ok: true, value: undefined };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
   }
 }
 
-export async function removeFromChannelAction(
+export async function removePrincipalFromChannelAction(
   channelId: string,
-  privateChannelUserId: string
+  principalId: string
 ): Promise<ActionResult> {
   try {
     const client = await createSdpApiClient();
-    await removeChannelMembershipCall(client, channelId, privateChannelUserId);
-    revalidatePath(MEMBERS_PATH);
+    await removePrincipalChannelMembership(client, channelId, principalId);
+    revalidatePath(PRINCIPALS_PATH);
     return { ok: true, value: undefined };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };

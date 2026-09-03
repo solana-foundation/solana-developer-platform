@@ -1,12 +1,7 @@
-import { HeliusRingsError, type RingsGatewayPort } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings";
 import { describe, expect, it } from "vitest";
 import { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
 
-/**
- * Unreachable on purpose: these tests assert that the gateway fails closed and
- * that a dead upstream becomes a red status rather than a thrown error, so
- * nothing leaves the host.
- */
 const CONFIG: RingsGatewayConfig = {
   solanaRpcUrl: "http://127.0.0.1:1/rpc",
   indexerUrl: "http://127.0.0.1:1",
@@ -19,7 +14,7 @@ const CONFIG: RingsGatewayConfig = {
   healthTimeoutMs: 50,
 };
 
-const SYNC_INPUT = { walletId: "hrw_1", owner: "addr", cursor: null };
+const SYNC_INPUT = { walletId: "hrw_1", owner: "addr" };
 
 describe("createRingsGateway", () => {
   it("reports health instead of throwing when every upstream is unreachable", async () => {
@@ -33,17 +28,15 @@ describe("createRingsGateway", () => {
   it("refuses non-loopback plain http unless it is explicitly allowed", async () => {
     const health = await createRingsGateway({
       ...CONFIG,
-      // The public devnet endpoints are plain http on a real host, which is the
-      // case the flag exists for. Loopback http is always permitted.
       indexerUrl: "http://indexer.example",
       proverUrl: "http://prover.example",
       allowInsecureHttp: false,
     }).probeHealth();
 
-    // The client cannot be built at all, so the gateway itself is the failure,
-    // and the SDK's own code names which of the two URLs it objected to.
-    expect(health.gateway).toBe("red");
-    expect(health.detail?.gateway).toContain("CLIENT_INVALID_CONFIG");
+    // Client-init failure surfaces on each component tile so the reason
+    // reaches the operator whichever they look at.
+    expect(health.rpc).toBe("red");
+    expect(health.detail?.rpc).toContain("CLIENT_INVALID_CONFIG");
   });
 
   it("classifies an invalid configured tree without exposing its value", async () => {
@@ -63,39 +56,27 @@ describe("createRingsGateway", () => {
     expect((error as Error).message).not.toContain(configuredTree);
   });
 
-  // Refused rather than stubbed, so a spend cannot be mistaken for a deposit.
-  const unimplementedFlows: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
-    [
-      "buildOperation for a spend",
-      (g) => g.buildOperation({ operation: { opType: "withdraw" } as never, keyRefs: [] }),
-    ],
-    [
-      "requestProof for a spend",
-      (g) => g.requestProof({ operationId: "hro_1", ringsMetadata: {} as never }),
-    ],
-  ];
-
-  it.each(unimplementedFlows)("%s refuses to run at all", async (_method, call) => {
-    const error = await call(createRingsGateway(CONFIG)).then(
-      () => null,
-      (thrown: unknown) => thrown
-    );
+  it("refuses unsupported operation types at build time", async () => {
+    const error = await createRingsGateway(CONFIG)
+      .buildOperation({
+        operation: { opType: "merge", walletId: "hrw_1", input: {} } as never,
+        owner: "11111111111111111111111111111111",
+      })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
 
     expect(error).toBeInstanceOf(HeliusRingsError);
-    expect((error as HeliusRingsError).code).toBe("gateway_unavailable");
-    expect((error as HeliusRingsError).message).toContain("money flows are not implemented");
+    expect((error as HeliusRingsError).code).toBe("invalid_input");
   });
 
-  // Null is how the port says "Photon has not indexed it yet", so a build that
-  // cannot verify has to throw rather than leave an operation waiting forever.
   it("never answers not-indexed instead of refusing", async () => {
     await expect(createRingsGateway(CONFIG).verifyIndexed("sig")).rejects.toBeInstanceOf(
       HeliusRingsError
     );
   });
 
-  // Loopback rather than the real Helius host: this asserts the gateway's own
-  // redaction, not a third party's uptime.
   const WITH_KEY = "http://127.0.0.1:1/?api-key=super-secret-key";
 
   it("never leaks the RPC URL into a health response", async () => {
@@ -112,10 +93,8 @@ describe("createRingsGateway", () => {
       allowInsecureHttp: false,
     }).probeHealth();
 
-    expect(health.detail?.gateway).toMatch(/^client unavailable: .+/);
-    // "client unavailable" alone left operators with nothing to look at, so the
-    // cause has to survive the redaction.
-    expect(health.detail?.gateway).not.toBe("client unavailable: unknown error");
+    expect(health.detail?.rpc).toMatch(/^client unavailable: .+/);
+    expect(health.detail?.rpc).not.toBe("client unavailable: unknown error");
     expect(JSON.stringify(health)).not.toContain("super-secret-key");
   });
 });

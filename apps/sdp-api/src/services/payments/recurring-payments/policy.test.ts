@@ -8,7 +8,10 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { enforceRecurringPaymentPolicy } from "./policy";
+import {
+  assertNoPendingRecurringCollectionApproval,
+  enforceRecurringPaymentPolicy,
+} from "./policy";
 
 const TEST_SCOPE = createTenantScope({
   organizationId: TEST_ORG.id,
@@ -185,6 +188,38 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
     expect(operations[0]).toMatchObject({ status: "pending_approval" });
   });
 
+  it("blocks a source change while a legacy collection approval is pending", async () => {
+    const pending = await expectSigningPending(
+      enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
+    );
+    const operationId = pending.details?.walletOperationId as string;
+
+    await getDb(env)
+      .prepare("UPDATE wallet_operations SET custody_wallet_id = NULL WHERE id = ?")
+      .bind(operationId)
+      .run();
+
+    await expect(
+      assertNoPendingRecurringCollectionApproval({
+        db: getDb(env),
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
+        recurringPaymentId: "prp_collection_policy",
+        collectionDueAt: FIRST_DUE_AT,
+      })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      message: "Recurring payment source cannot change while a collection approval is pending",
+      details: {
+        walletOperationId: operationId,
+        policyEvaluationId: pending.details?.policyEvaluationId,
+        approvalRequestId: pending.details?.approvalRequestId,
+      },
+    });
+  });
+
   it("does not file a second approval once the cycle's approval is granted", async () => {
     const first = await expectSigningPending(
       enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
@@ -214,6 +249,49 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
       .prepare("SELECT id FROM approval_requests")
       .all<{ id: string }>();
     expect(allApprovals.results).toHaveLength(1);
+  });
+
+  it("fails closed when an approved legacy collection has no exact wallet identity", async () => {
+    const first = await expectSigningPending(
+      enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
+    );
+    const operationId = first.details?.walletOperationId as string;
+    const approvalId = first.details?.approvalRequestId as string;
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE approval_requests SET status = 'approved' WHERE id = ?")
+        .bind(approvalId),
+      getDb(env)
+        .prepare(
+          "UPDATE wallet_operations SET status = 'executing', custody_wallet_id = NULL WHERE id = ?"
+        )
+        .bind(operationId),
+    ]);
+
+    await expect(
+      enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      message: "Recurring payment collection approval wallet identity is unresolved",
+      details: {
+        walletOperationId: operationId,
+        policyEvaluationId: first.details?.policyEvaluationId,
+        approvalRequestId: approvalId,
+      },
+    });
+
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+        .first<{ count: number }>()
+    ).toEqual({ count: 1 });
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM approval_requests")
+        .first<{ count: number }>()
+    ).toEqual({ count: 1 });
   });
 
   it("still files a new approval for a new due cycle", async () => {

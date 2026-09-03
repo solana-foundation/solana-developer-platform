@@ -5,6 +5,7 @@ import type {
   PaymentsDashboardWallet,
   PaymentTransferSummary,
 } from "@sdp/types";
+import { address } from "@solana/kit";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -113,7 +114,7 @@ export function useOnchainSendWizard({
   );
 
   const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null,
+    () => liveWallets.find((wallet) => wallet.id === fields.walletId) ?? null,
     [liveWallets, fields.walletId]
   );
   const selectedAccount = useMemo(
@@ -133,7 +134,7 @@ export function useOnchainSendWizard({
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
-    const nextWallet = liveWallets.find((wallet) => wallet.walletId === walletId) ?? null;
+    const nextWallet = liveWallets.find((wallet) => wallet.id === walletId) ?? null;
     const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
     if (!nextAssets.some((asset) => asset.value === fields.asset)) {
       setField("asset", nextAssets[0]?.value ?? "");
@@ -191,9 +192,9 @@ export function useOnchainSendWizard({
     try {
       const transfer = await createTransfer(
         {
-          source: fields.walletId,
+          sourceCustodyWalletId: fields.walletId,
           destination: destinationAddress,
-          token: selectedAssetBalance.mint,
+          token: address(selectedAssetBalance.mint),
           amount: fields.amount,
           ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
         },

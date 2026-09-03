@@ -24,6 +24,7 @@ import {
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { cn } from "@/lib/utils";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
@@ -231,12 +232,20 @@ export interface InstructionAction {
   doneLabel: string;
 }
 
-function InstructionActionButton({ action }: { action: InstructionAction }) {
+export function InstructionActionButton({
+  action,
+  variant = "secondary",
+  size = "xs",
+}: {
+  action: InstructionAction;
+  variant?: "default" | "secondary";
+  size?: "default" | "xs";
+}) {
   return (
     <Button
       type="button"
-      variant="secondary"
-      size="xs"
+      variant={variant}
+      size={size}
       iconLeft={action.succeeded ? <CheckCircle2Icon /> : action.icon}
       onClick={action.onClick}
       disabled={action.disabled || action.loading || action.succeeded}
@@ -413,7 +422,7 @@ function BvnkInstruction({
                   variant="secondary"
                   size="xs"
                   className="shrink-0"
-                  onClick={() => window.open(verificationUrl, "_blank", "noopener")}
+                  onClick={() => openExternalRampUrl(verificationUrl)}
                 >
                   {t("DashboardPayments.manualInstructions.completeVerification")}
                 </Button>
@@ -527,7 +536,7 @@ export function ManualInstructionsQuote({
   fiatCurrency: string;
   cryptoToken: string;
   instructions: PaymentRampInstruction[];
-  /** Button rendered in the instruction header (e.g. simulate for onramp, send for offramp). */
+  /** Button rendered in the instruction header (for example, an on-ramp simulation action). */
   action?: InstructionAction;
   /** Overrides the default fiat-deposit copy (e.g. for crypto-funded off-ramp quotes). */
   description?: string;

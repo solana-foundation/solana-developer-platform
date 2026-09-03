@@ -493,7 +493,7 @@ function DetailRow({
 }) {
   const t = useTranslations();
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
+    <div className="flex h-12 items-center justify-between gap-4">
       <span className="shrink-0 text-sm text-tertiary">{label}</span>
       <div className="flex min-w-0 items-center gap-1.5">
         <span className={cn("truncate text-sm text-primary", mono && "font-mono text-xs")}>
@@ -597,8 +597,8 @@ function TransferDetailModal({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border-default px-4">
-          <div className="divide-y divide-border-default">
+        <div className="rounded-2xl border border-border-default px-4 py-1">
+          <div>
             {isInbound ? (
               <>
                 {walletRow}
@@ -630,6 +630,12 @@ function TransferDetailModal({
                 copyValue={transfer.providerReference}
               />
             ) : null}
+            {transfer.status === "failed" && transfer.error ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.failureReason")}
+                value={transfer.error}
+              />
+            ) : null}
             {transfer.memo ? (
               <DetailRow
                 label={t("DashboardPayments.transferDetails.memo")}
@@ -648,7 +654,7 @@ function TransferDetailModal({
             ) : null}
             {providerTransferDetailRows(transfer, { cluster }, t).map((row) => (
               <DetailRow
-                key={row.label}
+                key={row.key}
                 label={row.label}
                 value={
                   row.href ? (

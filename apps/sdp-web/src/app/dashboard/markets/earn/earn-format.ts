@@ -1,5 +1,6 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { type EarnProviderId, type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 /**
  * Pure display formatters shared by every Earn surface.
@@ -103,4 +104,46 @@ function formatIsoDuration(duration: string): string {
   if (totalSeconds < 3_600) return `${Math.round(totalSeconds / 60)}m`;
   if (totalSeconds < 86_400) return `${Math.round(totalSeconds / 3_600)}h`;
   return `${Math.round(totalSeconds / 86_400)}d`;
+}
+
+/**
+ * Display labels for vault-infra provider ids. Exhaustive over the registry so
+ * a newly registered provider must state its label, but `strategy.provider` is
+ * an open read-model string, so an unknown id renders as-is rather than being
+ * hidden or renamed.
+ */
+const EARN_PROVIDER_LABELS = {
+  ground: "Ground",
+  kamino: "Kamino",
+  perena: "Perena",
+  upshift: "Upshift",
+  veda: "Veda",
+} as const satisfies Record<EarnProviderId, string>;
+
+export function earnProviderLabel(provider: string): string {
+  return Object.hasOwn(EARN_PROVIDER_LABELS, provider)
+    ? EARN_PROVIDER_LABELS[provider as EarnProviderId]
+    : provider;
+}
+
+/**
+ * Liquidity term for a catalogue row. `liquidityTerm` is typed closed but the
+ * read model is open wire data, so a value outside the vocabulary returns
+ * undefined and the caller renders its placeholder: a term is never invented.
+ * A delayed row without a usable day count still says "Delayed"; the day count
+ * renders only when it is a positive integer.
+ */
+export function earnStrategyLiquidityLabel(
+  strategy: EarnStrategy,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string | undefined {
+  if (strategy.liquidityTerm === "instant") return t("DashboardMarkets.liquidity.instant");
+  if (strategy.liquidityTerm !== "delayed") return undefined;
+  const days = strategy.redemptionDelayDays;
+  if (days === undefined || !Number.isInteger(days) || days <= 0) {
+    return t("DashboardMarkets.liquidity.delayed");
+  }
+  return days === 1
+    ? t("DashboardMarkets.liquidity.delayedDay")
+    : t("DashboardMarkets.liquidity.delayedDays", { days });
 }

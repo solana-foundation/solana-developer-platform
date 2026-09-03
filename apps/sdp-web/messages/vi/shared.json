@@ -225,7 +225,10 @@
     "treasurySolutions": "Treasury",
     "earnProgram": "Earn",
     "configureEarnButton": "Tích hợp Earn",
-    "connections": "Kết nối"
+    "connections": "Kết nối",
+    "manageAccount": "Quản lý tài khoản",
+    "signOut": "Đăng xuất",
+    "accountMenu": "Menu tài khoản"
   },
   "validation": {
     "allowlistValueRequired": "Giá trị Allowlist là bắt buộc",

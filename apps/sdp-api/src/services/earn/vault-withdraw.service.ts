@@ -1,6 +1,5 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { SdpKaminoError } from "@sdp/kamino";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { type AppDb, getDb } from "@/db";
@@ -22,6 +21,7 @@ import {
 import { createVaultDeadline } from "./vault-deadline";
 import { appendVaultRequestMemo } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
+import { refusedBuildMessage } from "./vault-refusals";
 import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
 
 /**
@@ -43,6 +43,8 @@ export interface VaultWithdrawalInput {
   shareMint: string;
   wallet: { id: string; walletId: string; publicKey: string };
   shares: string;
+  /** Exit slippage floor in the deposit token's units; provider-dependent. */
+  minAmountOut?: string;
   requestId: string;
   userId?: string | null;
   apiKeyId?: string | null;
@@ -60,10 +62,19 @@ export interface VaultWithdrawalExecutionOptions {
   runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
 }
 
-/** Shared with the external-wallet withdrawal build, whose plan must pass the same bar. */
+/**
+ * Shared with the external-wallet withdrawal build, whose plan must pass the
+ * same bar.
+ *
+ * The accepted floor is checked here but deliberately NOT persisted yet: the
+ * deposit's `min_shares_out` column is documented as SHARE units, so a
+ * token-unit exit floor needs its own column and migration. Until that
+ * follow-up lands, the signed transaction bytes remain the durable record of
+ * what floor was actually encoded.
+ */
 export function requireAcceptedWithdrawalPlan(
   plan: EarnVaultTransactionPlan,
-  input: Pick<VaultWithdrawalInput, "tokenMint" | "shareMint" | "shares">
+  input: Pick<VaultWithdrawalInput, "tokenMint" | "shareMint" | "shares" | "minAmountOut">
 ): void {
   if (plan.assetIdentity.depositTokenMint !== input.tokenMint) {
     throw internalError(
@@ -79,6 +90,22 @@ export function requireAcceptedWithdrawalPlan(
   }
   if (compareDecimalAmounts(shares, input.shares) !== 0) {
     throw internalError("Vault builder shares do not match the requested withdrawal");
+  }
+  // Same rule as the deposit's floor: what the instructions ENCODE must match
+  // what policy approved, in both directions of disagreement.
+  const minAmountOut = plan.accepted?.minAmountOut ?? null;
+  if (input.minAmountOut !== undefined && minAmountOut === null) {
+    throw internalError("Vault builder omitted the canonical minAmountOut encoded on chain");
+  }
+  if (
+    (input.minAmountOut === undefined && minAmountOut !== null) ||
+    (input.minAmountOut !== undefined &&
+      minAmountOut !== null &&
+      compareDecimalAmounts(minAmountOut, input.minAmountOut) !== 0)
+  ) {
+    throw internalError(
+      "Vault builder minAmountOut does not match the policy-approved slippage floor"
+    );
   }
 }
 
@@ -112,6 +139,7 @@ export async function withdrawFromVault(
     provider: input.provider,
     positionId: input.positionId,
     shares: input.shares,
+    minAmountOut: input.minAmountOut ?? null,
   });
 
   const prior = await resolveIdempotencyReplay(
@@ -191,13 +219,13 @@ export async function withdrawFromVault(
       shares: input.shares,
       ...(rentPayer === undefined ? {} : { rentPayer }),
       ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
+      minAmountOut: input.minAmountOut,
     });
     plan = appendVaultRequestMemo(built, "vault-withdrawal", input.requestId);
   } catch (error) {
     getLogger().error({ error }, "vault withdrawal: build failed before signing");
-    if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-      throw badRequest(error.message);
-    }
+    const refusal = refusedBuildMessage(error);
+    if (refusal) throw badRequest(refusal);
     throw error;
   }
 

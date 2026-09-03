@@ -18,6 +18,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
+const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
 const overviewMock = vi.spyOn(pcServices, "getInstanceOverview");
 
 function unreachableOverview(error = "gateway down") {
@@ -151,6 +152,13 @@ describe("Private Channels — event routes", () => {
     originalEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";
     probeConnectionMock.mockReset();
+    spcRegisterMock.mockReset();
+    spcRegisterMock.mockResolvedValue({
+      id: "spc_default_principal",
+      username: "default-test",
+      role: "user",
+      createdAt: "2026-08-31T12:00:00.000Z",
+    });
     overviewMock.mockReset();
     await seedTestDatabase(env);
     await seedAuth();
@@ -377,6 +385,7 @@ describe("Private Channels — event routes", () => {
     const verifyMock = vi.spyOn(pcServices, "verifyPrivateChannelWallet").mockResolvedValueOnce({
       row: {
         id: "pcvw_event_test",
+        user_id: "pcu_event_test",
         wallet_id: "wallet_event_test",
         pubkey,
         verified_at: "2026-07-30T12:00:00.000Z",
@@ -403,8 +412,22 @@ describe("Private Channels — event routes", () => {
     const event = await getDb(env)
       .prepare("SELECT payload FROM private_channel_events WHERE type = ?")
       .bind(PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED)
-      .first<{ payload: { walletId: string; pubkey: string } }>();
-    expect(event?.payload).toEqual({ walletId: "wallet_event_test", pubkey });
+      .first<{
+        payload: {
+          walletId: string;
+          pubkey: string;
+          principalId: string;
+          actorId: string;
+          actorType: string;
+        };
+      }>();
+    expect(event?.payload).toEqual({
+      walletId: "wallet_event_test",
+      pubkey,
+      principalId: "pcu_event_test",
+      actorId: TEST_API_KEY.id,
+      actorType: "api_key",
+    });
   });
 
   it("wallet revocation events keep the revoked pubkey in the payload", async () => {
@@ -433,8 +456,12 @@ describe("Private Channels — event routes", () => {
     const event = await getDb(env)
       .prepare("SELECT payload FROM private_channel_events WHERE type = ?")
       .bind(PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED)
-      .first<{ payload: { pubkey: string } }>();
-    expect(event?.payload).toEqual({ pubkey });
+      .first<{ payload: { pubkey: string; actorId: string; actorType: string } }>();
+    expect(event?.payload).toEqual({
+      pubkey,
+      actorId: TEST_API_KEY.id,
+      actorType: "api_key",
+    });
   });
 
   it("does not emit a wallet revocation event when no verification was deleted", async () => {

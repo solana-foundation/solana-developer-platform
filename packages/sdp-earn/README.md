@@ -269,6 +269,8 @@ the flow:
 | Who holds the funds | an org custody wallet | the end user's own wallet; SDP holds no key |
 | Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (build), then `/external-wallet/deposits` (submit) |
 | Exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-transactions`, then `/external-wallet/withdrawals` |
+| Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
+| Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions/:ownerAddress`, `/positions/summary`, `/earnings/:ownerAddress` |
 | Authorization | wallet policy, then `createOrgSigner` | the owner's own ed25519 signature |
 | Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
 
@@ -299,9 +301,10 @@ The external-wallet flow in one pass (PRO-1722):
    `failed`; the exit mirrors the deposit and takes only 404-scoping plus
    capability (ADR 0002 exit safety), so it works while deposits are closed.
 
-The button builder's engineering handoff (`/earn/integrate/:token`) emits this
-exact contract as its server snippet; the treasury dashboard flows use the
-SDP-signed routes. Deeper docs: gates and scoping in
+The dashboard's Embedded Yield integration guide
+(`/dashboard/markets/embedded-yield/integrate`) emits this exact contract as
+its server snippets. The treasury dashboard flows use the SDP-signed routes.
+Deeper docs: gates and scoping in
 `apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
 `packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002
 (2026-08-26 addendum, "External wallets: caller-signed vault movements").
@@ -316,7 +319,7 @@ a deployed environment stays dark until it is switched on. `sdp-api` and
 API-side the hierarchy is owned by `isEarnEnabled`
 (`apps/sdp-api/src/lib/feature-flags.ts`); web-side the two flags declared in
 `apps/sdp-web/src/flags.ts` gate the nested route segments
-(`dashboard/markets/layout.tsx` → `markets/earn/layout.tsx`). The flags are
+(`dashboard/markets/layout.tsx`). The flags are
 module visibility, not the provider on/off lever — see the ADR 0002 addendum.
 
 ## Architecture: where everything lives
@@ -397,12 +400,13 @@ apps/sdp-api/src/
                                    invariants below).
 
 apps/sdp-web/src/app/
-  dashboard/markets/earn/          The dashboard module: earn-workspace
+  dashboard/markets/embedded-yield/ Canonical customer-facing route files.
+  dashboard/markets/earn/          Shared internal dashboard module: earn-workspace
                                    (overview), deposit/ (wizard + funding),
                                    earn-withdraw-modal, earn-program-data
                                    (SWR seam over the BFF), presentation
                                    helpers. All live data — no mocks.
-  api/dashboard/markets/earn/      BFF proxies to /v1/earn/*.
+  api/dashboard/markets/earn/      Internal BFF proxies to /v1/earn/*; unchanged.
 ```
 
 ## Catalogue data: the sync cron and metrics refresh
@@ -532,6 +536,10 @@ walk with the Ground integration as the worked example:
    capability guard, no route changes.
 5. Tests are no-network by design: stub `fetch` per the canonical pattern in
    `src/fetch.test.ts` / `providers/ground/client.test.ts`.
+6. If SDP executes for the provider (vault-direct): the executing client in
+   its own package (`packages/sdp-<id>`), the per-cluster deployment registry
+   in `@sdp/types`, both API registry entries, and the three Kora sponsorship
+   allowlists (playbook §4d and step 9, including the sdp-infra pair).
 
 Curators and vault/category changes require **no code at all** — they are
 catalogue data (see the playbook).
@@ -544,5 +552,6 @@ pnpm --filter @sdp/earn typecheck
 ```
 
 API-layer earn tests (routes, repository, availability) live in
-`apps/sdp-api` and run under vitest + testcontainers; web module tests live in
-`apps/sdp-web/src/app/dashboard/markets/earn`.
+`apps/sdp-api` and run under vitest + testcontainers. Canonical web route files
+live in `apps/sdp-web/src/app/dashboard/markets/embedded-yield`; shared internal
+module tests remain in `apps/sdp-web/src/app/dashboard/markets/earn`.

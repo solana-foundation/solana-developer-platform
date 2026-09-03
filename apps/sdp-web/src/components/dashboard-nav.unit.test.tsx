@@ -14,6 +14,10 @@ vi.mock("@/components/workspace-switcher", () => ({
   WorkspaceSwitcher: () => <div data-workspace-switcher="true" />,
 }));
 
+vi.mock("@/components/sidebar-user-menu", () => ({
+  SidebarUserMenu: () => <div data-sidebar-user-menu="true" />,
+}));
+
 import { DashboardBottomNav } from "./dashboard-bottom-nav";
 import { DashboardMoreSheet } from "./dashboard-more-sheet";
 import { getNavSections, withSubnavOpen, withSubnavToggled } from "./dashboard-nav";
@@ -61,7 +65,7 @@ describe("Markets dashboard navigation", () => {
   const findMarketsItem = (options: ReturnType<typeof navOptions>) =>
     findManageItem(options, "Shared.dashboardShell.markets");
 
-  it("adds the ordered Treasury Solutions and Earn Program destinations when enabled", () => {
+  it("adds the ordered Treasury and Embedded Yield destinations when enabled", () => {
     const markets = findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: true }));
 
     expect(markets?.href).toBe("/dashboard/markets");
@@ -73,7 +77,7 @@ describe("Markets dashboard navigation", () => {
       },
       {
         label: "Shared.dashboardShell.earnProgram",
-        href: "/dashboard/markets/earn",
+        href: "/dashboard/markets/embedded-yield",
       },
     ]);
   });

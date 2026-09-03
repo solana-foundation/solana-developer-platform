@@ -30,6 +30,16 @@ describe("privateChannelInstanceInputSchema", () => {
     expect(result.data.chainRpcUrl).toBe("");
   });
 
+  it("accepts an explicitly empty legacy chain RPC URL from persisted instances", () => {
+    const result = privateChannelInstanceInputSchema.safeParse({
+      ...SANDBOX_DEFAULTS,
+      chainRpcUrl: "",
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.chainRpcUrl).toBe("");
+  });
+
   it("rejects a non-http legacy chain RPC URL", () => {
     const result = privateChannelInstanceInputSchema.safeParse({
       ...SANDBOX_DEFAULTS,

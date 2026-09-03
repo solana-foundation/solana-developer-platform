@@ -6,12 +6,14 @@ import {
   type Counterparty,
   type CounterpartyFieldOptionsResponse,
   type CounterpartyResponse,
+  isCountryCode,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
-  US_STATES,
 } from "@sdp/types";
+import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -24,15 +26,21 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { rampRuntime } from "@/routes/payments/context";
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
+  requireCryptoRail,
 } from "@/routes/payments/handlers/ramps";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
+import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
+import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
+import { assertRampProviderSurfaced } from "@/services/provider-availability.service";
 import {
   type AppContext,
   getCounterpartiesRepository,
@@ -62,12 +70,56 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
   };
 }
 
+type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
+
+/**
+ * Checks whether a Lightspark payout submission still needs account data.
+ *
+ * @param c - Request context for database access.
+ * @param input - Submitted provider requirements.
+ * @param counterparty - Counterparty receiving the payout.
+ * @param organizationId - Authenticated organization scope.
+ * @param projectId - Project that owns the counterparty.
+ * @returns True when the caller should return the payout tree unchanged.
+ */
+async function lightsparkPayoutSubmissionNeedsRequirements(
+  c: AppContext,
+  input: SubmitCounterpartyRequirementsInput,
+  counterparty: CounterpartyRow,
+  organizationId: string,
+  projectId: string
+): Promise<boolean> {
+  if (input.provider !== "lightspark" || input.direction !== "offramp") {
+    throw internalError("Only Lightspark off-ramps can collect payout account requirements.");
+  }
+  const collectedData = input.collectedData;
+  if (collectedData === undefined || collectedData.destinationCountry === undefined) {
+    return true;
+  }
+  if (!isCountryCode(collectedData.destinationCountry)) {
+    throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
+  }
+  if (input.providerAccountId !== undefined || collectedData.paymentRails !== undefined) {
+    return false;
+  }
+  const existing = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).listActiveExternalAccounts({
+    organizationId,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "lightspark",
+    fiatCurrency: input.fiatCurrency,
+    destinationCountry: collectedData.destinationCountry,
+  });
+  return existing.length !== 1 || existing[0].external_account_reference === null;
+}
+
 export const getCounterpartyFieldOptions = async (c: AppContext) => {
   const response: CounterpartyFieldOptionsResponse = {
     fields: {
       entityTypes: COUNTERPARTY_ENTITY_TYPES,
       countries: COUNTRIES,
-      usStates: US_STATES,
     },
   };
   return success(c, response);
@@ -188,6 +240,8 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     });
   }
 
+  assertRampProviderSurfaced(query.data.provider, resolveSdpEnvironment(c));
+
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({
     counterpartyId: params.data.counterpartyId,
@@ -206,6 +260,30 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     );
   }
 
+  const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: auth.organizationId,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: query.data.provider,
+  });
+
+  let payoutAccounts: PayoutRequirementAccount[] | undefined;
+  if (query.data.provider === "lightspark" && query.data.direction === "offramp") {
+    const rows = await createPostgresCounterpartyProviderAccountsRepository(
+      getDb(c.env)
+    ).listExternalAccounts({
+      organizationId: auth.organizationId,
+      projectId,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: query.data.fiatCurrency,
+    });
+    const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), rows);
+    payoutAccounts = mapPayoutRequirementAccounts(rows, enriched);
+  }
+
   if (query.data.direction === "onramp") {
     const scope = await resolveScope(c);
     const destinationWalletAddress = resolveWalletAddress(
@@ -221,6 +299,9 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
         cryptoToken: query.data.cryptoToken,
         fiatCurrency: query.data.fiatCurrency,
         destinationWalletAddress,
+        ...(providerAccount === null
+          ? {}
+          : { providerCustomerReference: providerAccount.provider_customer_reference }),
       }
     );
     return success(c, requirements);
@@ -233,6 +314,12 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       providerData: counterparty.provider_data,
       cryptoToken: query.data.cryptoToken,
       fiatCurrency: query.data.fiatCurrency,
+      ...(query.data.provider === "lightspark"
+        ? { cryptoRail: requireCryptoRail(query.data.cryptoToken), payoutAccounts }
+        : {}),
+      ...(providerAccount === null
+        ? {}
+        : { providerCustomerReference: providerAccount.provider_customer_reference }),
     }
   );
   return success(c, requirements);
@@ -251,6 +338,7 @@ export const submitCounterpartyRequirements = async (
 
   const body = c.req.valid("json");
 
+  assertRampProviderSurfaced(body.provider, resolveSdpEnvironment(c));
   await assertRampProviderAvailable(c, body.provider, auth.organizationId);
 
   const repo = getCounterpartiesRepository(c);
@@ -275,6 +363,14 @@ export const submitCounterpartyRequirements = async (
       scope.auth
     );
   }
+  const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: auth.organizationId,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: input.provider,
+  });
   const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
@@ -282,7 +378,13 @@ export const submitCounterpartyRequirements = async (
       providerData: counterparty.provider_data,
       ...("cryptoToken" in input ? { cryptoToken: input.cryptoToken } : {}),
       ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
+      ...(input.provider === "lightspark" && input.direction === "offramp"
+        ? { cryptoRail: requireCryptoRail(input.cryptoToken) }
+        : {}),
       ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
+      ...(providerAccount === null
+        ? {}
+        : { providerCustomerReference: providerAccount.provider_customer_reference }),
     }
   );
 
@@ -290,11 +392,28 @@ export const submitCounterpartyRequirements = async (
     return success(c, requirements);
   }
 
-  if (requirements.status === "collect") {
+  if (requirements.status === "collect_account") {
+    if (
+      await lightsparkPayoutSubmissionNeedsRequirements(
+        c,
+        input,
+        counterparty,
+        auth.organizationId,
+        projectId
+      )
+    ) {
+      return success(c, requirements);
+    }
+  }
+
+  if (requirements.status === "collect" || requirements.status === "collect_counterparty") {
     const collectedData = "collectedData" in input ? input.collectedData : undefined;
-    const missing = requirements.fields.filter(
-      (field) => !collectedData || collectedData[field.key] === undefined
-    );
+    const missing = requirements.fields
+      .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
+      .filter(
+        (field) =>
+          field.required && (collectedData === undefined || collectedData[field.key] === undefined)
+      );
     if (missing.length > 0) {
       return success(c, { ...requirements, fields: missing });
     }

@@ -1,5 +1,6 @@
 import type { OrganizationJSON } from "@clerk/backend";
 import { AppError } from "@/lib/errors";
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { describeClerkFailure } from "./clerk-error";
 
@@ -52,6 +53,8 @@ export class ClerkUsersService {
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const operation = `${options.method ?? "GET"} ${path.split("?")[0]}`;
+    const startedAt = Date.now();
     const res = await fetch(`${this.apiBase}${path}`, {
       ...options,
       headers: {
@@ -59,10 +62,22 @@ export class ClerkUsersService {
         "Content-Type": "application/json",
         ...(options.headers || {}),
       },
+    }).catch((error: unknown) => {
+      logVendorCallFailure("clerk", operation, error, startedAt);
+      throw error;
     });
 
     if (!res.ok) {
-      const body = await res.text();
+      const body = await res.text().catch((error: unknown) => {
+        logVendorCallFailure("clerk", operation, error, startedAt);
+        throw error;
+      });
+      logVendorCallFailure(
+        "clerk",
+        operation,
+        new Error(describeClerkFailure(res.status, body)),
+        startedAt
+      );
       throw new AppError("INTERNAL_ERROR", describeClerkFailure(res.status, body), {
         status: res.status,
         body,
@@ -73,7 +88,10 @@ export class ClerkUsersService {
       return {} as T;
     }
 
-    return (await res.json()) as T;
+    return (await res.json().catch((error: unknown) => {
+      logVendorCallFailure("clerk", operation, error, startedAt);
+      throw error;
+    })) as T;
   }
 
   async getUser(userId: string): Promise<ClerkUser> {

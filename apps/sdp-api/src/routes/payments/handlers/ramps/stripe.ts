@@ -1,6 +1,6 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { type AppContext, rampRuntime } from "../../context";
 

@@ -67,6 +67,7 @@ import {
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
+  type CustodyConfigWallet,
   type CustodyWallet,
   type CustodyWalletLookup,
   SigningRequestStorePg,
@@ -273,10 +274,10 @@ export interface SigningConfigurationsResult {
   defaultConfigId: string | null;
 }
 
-export interface CustodyWalletWithProvider extends CustodyWallet {
+export type CustodyWalletWithProvider = CustodyConfigWallet & {
   provider: SigningConfiguration["provider"];
   isDefaultProvider: boolean;
-}
+};
 
 interface ListWalletsOptions {
   provider?: SigningConfiguration["provider"];
@@ -1283,7 +1284,7 @@ export class SigningService {
       setDefault?: boolean;
       provider?: SigningConfiguration["provider"];
     }
-  ): Promise<CustodyWallet> {
+  ): Promise<CustodyConfigWallet> {
     const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
@@ -1309,7 +1310,7 @@ export class SigningService {
       cipher: this.getCustodyCipher(),
     });
 
-    let wallet: CustodyWallet;
+    let wallet: CustodyConfigWallet;
     try {
       wallet = await this.configStore.createWallet(
         config.id,
@@ -1610,6 +1611,18 @@ export class SigningService {
     );
   }
 
+  async admitRuntimeExecution(
+    orgId: string,
+    projectId: string | undefined,
+    custodyWalletId: string
+  ): Promise<void> {
+    return this.runtimeTargets.admitRuntimeExecution({
+      organizationId: orgId,
+      projectId,
+      custodyWalletId,
+    });
+  }
+
   async getTransactionSignerForWalletRecord(
     orgId: string,
     projectId: string | undefined,
@@ -1905,6 +1918,8 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "getPublicKey",
     "getKeypairSigner",
     "getTransactionSigner",
+    "admitRuntimeExecution",
+    "getTransactionSignerForWalletRecord",
     "sign",
     "getSigningStatus",
     "configureProvider",

@@ -1,6 +1,6 @@
 "use client";
 
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { fiatCurrencyDisplayName, fiatCurrencyFlagEmoji } from "@sdp/types/payment-rails";
 import { type LucideIcon, Plus, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";

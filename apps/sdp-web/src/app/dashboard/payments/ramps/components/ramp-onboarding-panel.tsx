@@ -3,6 +3,7 @@
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { onboardingCopy, provisioningDetail } from "./providers";
 
 export function RampOnboardingPanel({
@@ -16,7 +17,13 @@ export function RampOnboardingPanel({
 }) {
   const t = useTranslations();
   const { provider, status } = onboarding;
-  if (status === "collect" || status === "unsupported" || status === "onboarding_not_started") {
+  if (
+    status === "collect" ||
+    status === "collect_counterparty" ||
+    status === "collect_account" ||
+    status === "unsupported" ||
+    status === "onboarding_not_started"
+  ) {
     throw new Error(`RampOnboardingPanel received non-onboarding status: ${status}`);
   }
   const copy = onboardingCopy(provider, status, t);
@@ -39,7 +46,7 @@ export function RampOnboardingPanel({
         <Button
           type="button"
           variant="secondary"
-          onClick={() => window.open(hostedAction.url, "_blank", "noopener")}
+          onClick={() => openExternalRampUrl(hostedAction.url)}
         >
           {hostedAction.label}
         </Button>
