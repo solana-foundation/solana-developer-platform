@@ -232,6 +232,18 @@ function createToken(overrides: Partial<Token> = {}): Token {
   };
 }
 
+function createRpcAccountInfo(info: unknown) {
+  return {
+    result: {
+      value: {
+        data: {
+          parsed: { info },
+        },
+      },
+    },
+  };
+}
+
 describe("authority-resolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -376,6 +388,66 @@ describe("authority-resolution", () => {
       resolveCurrentAuthorityForRole(env, tokenService as never, token, "mint", AUTHORITY)
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "an invalid mint authority",
+      role: "mint",
+      payload: createRpcAccountInfo({
+        mintAuthority: "not-a-solana-address",
+        freezeAuthority: null,
+        extensions: [],
+      }),
+    },
+    {
+      name: "a response containing both a result and an error",
+      role: "mint",
+      payload: {
+        ...createRpcAccountInfo({
+          mintAuthority: AUTHORITY,
+          freezeAuthority: null,
+          extensions: [],
+        }),
+        error: { message: "RPC rejected the request" },
+      },
+    },
+    {
+      name: "an invalid lower-priority metadata authority",
+      role: "metadata",
+      payload: createRpcAccountInfo({
+        extensions: [
+          {
+            extension: "metadataPointer",
+            state: { authority: "not-a-solana-address" },
+          },
+          {
+            extension: "tokenMetadata",
+            state: { updateAuthority: AUTHORITY },
+          },
+        ],
+      }),
+    },
+  ] as const)("rejects $name returned by Solana RPC", async ({ payload, role }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => payload,
+      })
+    );
+
+    await expect(
+      resolveCurrentAuthorityForRole(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        { updateTokenAuthorities: vi.fn() } as never,
+        createToken(),
+        role
+      )
+    ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
   });
 
   it("resolves a unique authority to its exact custody wallet row", async () => {

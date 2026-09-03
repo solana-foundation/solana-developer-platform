@@ -1,7 +1,9 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
 import { getSolanaConfig } from "@sdp/rpc";
+import { assertValidAddress } from "@sdp/solana/address";
 import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
-import type { Address, TransactionSigner } from "@solana/kit";
+import type { TransactionSigner } from "@solana/kit";
+import { z } from "zod";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
@@ -95,34 +97,46 @@ interface IssuanceWalletRow {
   public_key: string;
 }
 
-interface ParsedMintExtension {
-  extension?: string;
-  state?: {
-    delegate?: string;
-    authority?: string;
-    updateAuthority?: string;
-  };
-}
+const rpcAuthoritySchema = z.string().nullable().optional();
+const parsedMintInfoSchema = z.object({
+  mintAuthority: rpcAuthoritySchema,
+  freezeAuthority: rpcAuthoritySchema,
+  extensions: z
+    .array(
+      z.object({
+        extension: z.string(),
+        state: z
+          .object({
+            delegate: rpcAuthoritySchema,
+            authority: rpcAuthoritySchema,
+            updateAuthority: rpcAuthoritySchema,
+          })
+          .optional(),
+      })
+    )
+    .optional(),
+});
+const accountInfoRpcResponseSchema = z.union([
+  z.object({
+    result: z.object({
+      value: z
+        .object({
+          data: z.object({
+            parsed: z.object({ info: parsedMintInfoSchema }),
+          }),
+        })
+        .nullable(),
+    }),
+    error: z.never().optional(),
+  }),
+  z.object({
+    error: z.object({ message: z.string().optional() }),
+    result: z.never().optional(),
+  }),
+]);
 
-interface ParsedMintInfo {
-  mintAuthority?: string | null;
-  freezeAuthority?: string | null;
-  extensions?: ParsedMintExtension[];
-}
-
-interface AccountInfoRpcResponse {
-  result?: {
-    value?: {
-      data?: {
-        parsed?: {
-          info?: ParsedMintInfo;
-        };
-      };
-    } | null;
-  };
-  error?: {
-    message?: string;
-  };
+function validateRpcAuthority(value: string | null | undefined, fieldName: string): string | null {
+  return value == null ? null : assertValidAddress(value, fieldName);
 }
 
 function tokenMayHavePermanentDelegate(token: TokenRecord): boolean {
@@ -164,42 +178,39 @@ async function fetchMintAuthorities(
     throw new Error(`RPC request failed with status ${rpcResponse.status}`);
   }
 
-  const payload = (await rpcResponse.json()) as AccountInfoRpcResponse;
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "RPC returned an error");
+  const parsedPayload = accountInfoRpcResponseSchema.safeParse(await rpcResponse.json());
+  if (!parsedPayload.success) {
+    throw new Error("RPC returned an unexpected response shape");
+  }
+  const payload = parsedPayload.data;
+  if (!payload.result) {
+    throw new Error(payload.error?.message ?? "RPC returned an error");
   }
 
-  const info = payload.result?.value?.data?.parsed?.info;
-  const extensions = info?.extensions ?? [];
-  const permanentDelegate = extensions.find(
+  const info = payload.result.value?.data.parsed.info;
+  const permanentDelegate = info?.extensions?.find(
     (extension) => extension.extension === "permanentDelegate"
   )?.state?.delegate;
-  const metadataUpdateAuthority = extensions.find(
+  const metadataUpdateAuthority = info?.extensions?.find(
     (extension) => extension.extension === "tokenMetadata"
   )?.state?.updateAuthority;
-  const metadataPointerAuthority = extensions.find(
+  const metadataPointerAuthority = info?.extensions?.find(
     (extension) => extension.extension === "metadataPointer"
   )?.state?.authority;
+  const validatedMetadataUpdateAuthority = validateRpcAuthority(
+    metadataUpdateAuthority,
+    "metadataAuthority"
+  );
+  const validatedMetadataPointerAuthority = validateRpcAuthority(
+    metadataPointerAuthority,
+    "metadataAuthority"
+  );
 
   return {
-    mintAuthority:
-      typeof info?.mintAuthority === "string" && info.mintAuthority.length > 0
-        ? info.mintAuthority
-        : null,
-    freezeAuthority:
-      typeof info?.freezeAuthority === "string" && info.freezeAuthority.length > 0
-        ? info.freezeAuthority
-        : null,
-    permanentDelegate:
-      typeof permanentDelegate === "string" && permanentDelegate.length > 0
-        ? permanentDelegate
-        : null,
-    metadataAuthority:
-      typeof metadataUpdateAuthority === "string" && metadataUpdateAuthority.length > 0
-        ? metadataUpdateAuthority
-        : typeof metadataPointerAuthority === "string" && metadataPointerAuthority.length > 0
-          ? metadataPointerAuthority
-          : null,
+    mintAuthority: validateRpcAuthority(info?.mintAuthority, "mintAuthority"),
+    freezeAuthority: validateRpcAuthority(info?.freezeAuthority, "freezeAuthority"),
+    permanentDelegate: validateRpcAuthority(permanentDelegate, "permanentDelegate"),
+    metadataAuthority: validatedMetadataUpdateAuthority ?? validatedMetadataPointerAuthority,
   };
 }
 
@@ -459,7 +470,7 @@ async function loadResolvedAuthoritySigner(params: {
     params.auth.projectId,
     params.custodyWalletId
   );
-  if (signer.address !== (params.currentAuthority as Address)) {
+  if (signer.address !== params.currentAuthority) {
     throw badRequest("Current authority is not controlled by custody");
   }
   return signer;
@@ -606,7 +617,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     wallet.id
   );
 
-  if (currentAuthority && signer.address !== (currentAuthority as Address)) {
+  if (currentAuthority && signer.address !== currentAuthority) {
     throw badRequest("Current authority is not controlled by custody");
   }
 
