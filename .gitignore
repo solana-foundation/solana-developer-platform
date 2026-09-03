@@ -62,3 +62,4 @@ apps/sdp-web/test-results/
 *.tsbuildinfo
 .vercel
 private/
+infra/kora/terraform/

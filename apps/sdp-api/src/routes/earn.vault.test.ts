@@ -964,6 +964,8 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
       sharesOut: "9.99999",
       shareDecimals: 6,
       blockingIssues: [{ code: "DEPOSIT_CAP_EXCEEDED", message: "Cap exceeded" }],
+      // Sponsorship is unset in this harness, so the intent reads wallet-pays.
+      feeSponsored: false,
     });
     expect(client.quoteVaultDeposit).toHaveBeenCalledWith(expect.anything(), {
       providerReference: strategy.provider_reference,

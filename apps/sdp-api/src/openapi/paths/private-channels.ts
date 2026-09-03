@@ -20,11 +20,13 @@ import {
   privateChannelIdParamSchema,
   privateChannelInstanceInputSchema,
   privateChannelInstanceSchema,
+  privateChannelInstanceUpdateSchema,
   privateChannelListSchema,
   privateChannelOverviewSchema,
   privateChannelProbeBodySchema,
   privateChannelProbeResultSchema,
   privateChannelSchema,
+  privateChannelTokenEligibilityListSchema,
   privateChannelTransferChannelIdParamSchema,
   privateChannelTransferIdParamSchema,
   privateChannelTransferListQuerySchema,
@@ -67,6 +69,30 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         ),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/private-channels/instance",
+    tags: [TAG],
+    summary: "Update the active Private Channels instance",
+    operationId: "updatePrivateChannelInstance",
+    description:
+      "Server-probes the proposed gateway, auth service, and escrow deployment before replacing the active instance configuration.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: { content: jsonContent(privateChannelInstanceUpdateSchema) },
+    },
+    responses: {
+      200: {
+        description: "The updated active instance.",
+        content: jsonContent(
+          successResponseSchema(z.object({ instance: privateChannelInstanceSchema }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -214,6 +240,25 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(successResponseSchema(privateChannelBalanceSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/private-channels/tokens",
+    tags: [TAG],
+    summary: "List token eligibility for the active instance",
+    operationId: "listPrivateChannelTokenEligibility",
+    description:
+      "Combines SDP's token registry with the active instance's on-chain allowed-mint accounts.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Registered tokens and their eligibility for the active instance.",
+        content: jsonContent(successResponseSchema(privateChannelTokenEligibilityListSchema)),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500, 503]),
     },
   });
 

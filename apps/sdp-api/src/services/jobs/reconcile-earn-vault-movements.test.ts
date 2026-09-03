@@ -20,6 +20,9 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
+const { reconcileEarnVaultMovementReadThrough } = await import(
+  "../earn/vault-movement-reconciliation.service"
+);
 
 const ORG = "org_vault_reconcile";
 const PROJECT = "prj_vault_reconcile";
@@ -118,6 +121,101 @@ async function ledgerRow(movementId: string) {
     organizationId: ORG,
   });
 }
+
+describe("reconcileEarnVaultMovementReadThrough", () => {
+  it("records confirmed chain status during an interactive detail read", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({ status: "confirmed", settled_at: null });
+    expect(movement.confirmed_at).not.toBeNull();
+    expect(getSignatureStatuses).toHaveBeenCalledWith(
+      expect.anything(),
+      [seeded.movement.signature],
+      { retryDelaysMs: [], searchTransactionHistory: true }
+    );
+    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("records irreversible finality without waiting for the scheduled sweep", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({ status: "finalized", amount_settled: "1" });
+    expect(movement.confirmed_at).not.toBeNull();
+    expect(movement.settled_at).not.toBeNull();
+  });
+
+  it("leaves an unknown signature for the durable reconciler without rebroadcasting from GET", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([null]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement.status).toBe("requested");
+    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("fails soft to the durable row when the interactive RPC read is unavailable", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(
+      reconcileEarnVaultMovementReadThrough(env, seeded.movement)
+    ).resolves.toMatchObject({ id: seeded.movement.id, status: "requested" });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "requested" });
+  });
+
+  it("coalesces concurrent interactive reads for one movement", async () => {
+    const seeded = await seedWithdrawal();
+    let resolveStatuses: ((statuses: Array<Record<string, unknown>>) => void) | undefined;
+    getSignatureStatuses.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStatuses = resolve;
+        })
+    );
+
+    const first = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const second = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await vi.waitFor(() => expect(getSignatureStatuses).toHaveBeenCalledTimes(1));
+    resolveStatuses?.([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+
+    const movements = await Promise.all([first, second]);
+    expect(movements.map((movement) => movement.status)).toEqual(["confirmed", "confirmed"]);
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds an interactive response while a shared RPC observation remains in flight", async () => {
+    const seeded = await seedWithdrawal();
+    vi.useFakeTimers();
+    try {
+      getSignatureStatuses.mockImplementation(() => new Promise(() => {}));
+      const response = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(response).resolves.toMatchObject({
+        id: seeded.movement.id,
+        status: "requested",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("reconcileEarnVaultMovements", () => {
   it("reconciles withdrawals through the same movement queue", async () => {

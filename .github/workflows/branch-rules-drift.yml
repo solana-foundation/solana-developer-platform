@@ -1,0 +1,77 @@
+name: Branch rules drift
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  pull_request:
+    paths:
+      - '.github/branch-rules-baseline.json'
+      - '.github/workflows/branch-rules-drift.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: branch-rules-drift
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Compare live branch rules against the committed baseline
+        id: drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${{ github.repository }}/rules/branches/main" \
+            | jq -S 'map(del(.ruleset_id, .ruleset_source, .ruleset_source_type)) | sort_by(.type)' > /tmp/live.json
+          jq -S . .github/branch-rules-baseline.json > /tmp/baseline.json
+          if ! diff -u /tmp/baseline.json /tmp/live.json > /tmp/drift.diff; then
+            echo "drifted=true" >> "$GITHUB_OUTPUT"
+            echo "::error::branch protection rules for main diverged from the reviewed baseline"
+            cat /tmp/drift.diff
+            {
+              echo "diff<<__EOF__"
+              head -c 3000 /tmp/drift.diff
+              echo
+              echo "__EOF__"
+            } >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "branch rules match the baseline" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install Doppler CLI
+        if: failure() && steps.drift.outputs.drifted == 'true' && github.event_name != 'pull_request'
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Doppler OIDC login
+        if: failure() && steps.drift.outputs.drifted == 'true' && github.event_name != 'pull_request'
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
+      - name: Notify Slack on drift
+        if: failure() && steps.drift.outputs.drifted == 'true' && github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          DRIFT: ${{ steps.drift.outputs.diff }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SLACK=$(doppler secrets get SLACK_ALERT_WEBHOOK_URL --plain --scope=. --project solana-developer-platform --config dev_ci 2>/dev/null || true)
+          if [ -z "$SLACK" ]; then echo "::warning::SLACK_ALERT_WEBHOOK_URL missing — skipping notification"; exit 0; fi
+          echo "::add-mask::$SLACK"
+          PAYLOAD=$(jq -n --arg drift "$DRIFT" --arg run "$RUN_URL" \
+            '{ text: "*[FIRING] branch-rules-drift [solana-developer-platform]*",
+               attachments: [ { color: "#cc0000", blocks: [
+                 {type: "section", text: {type: "mrkdwn", text: "*Branch protection for main no longer matches the reviewed baseline.*\nEither revert the ruleset change or land a reviewed baseline update.\n```\($drift)```\n<\($run)|drift run>"}} ] } ] }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"

@@ -17,11 +17,14 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { cn } from "@/lib/utils";
 import {
+  type ConnectionState,
+  connectionState,
   type FamilyFilter,
   type FilterableIntegration,
   INTEGRATION_FAMILIES,
   type IntegrationFamily,
   matchesFilters,
+  STATUS_FILTERS,
   type StatusFilter,
 } from "./integrations-filter";
 import type { IntegrationEntry, IntegrationStatus, PrivacyProviderId } from "./integrations-status";
@@ -29,19 +32,36 @@ import type { IntegrationEntry, IntegrationStatus, PrivacyProviderId } from "./i
 type Translate = ReturnType<typeof useTranslations>;
 const EMPTY_PRIVACY: IntegrationEntry<PrivacyProviderId>[] = [];
 
-const STATUS_FILTERS: StatusFilter[] = [
-  "all",
-  "active",
-  "available",
-  "enabled",
-  "request_access",
-  "not_configured",
-];
-
-function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
-  switch (status) {
+/**
+ * What each chip asks for. Deliberately coarser than the pill wording
+ * below: a chip names a group, so "Connected" covers every way a provider can
+ * be on rather than only the one this organization switched on itself.
+ */
+function filterLabel(filter: StatusFilter, t: Translate): string {
+  switch (filter) {
     case "all":
       return t("Shared.integrations.filterAll");
+    case "connected":
+      return t("Shared.integrations.statusActive");
+    case "on_request":
+      return t("Shared.integrations.statusOnRequest");
+    case "not_connected":
+      return t("Shared.integrations.statusNotConnected");
+  }
+}
+
+/**
+ * The pill says precisely what this provider is; the chips group. A chip is a
+ * question ("show me what is on"), a pill is an answer, and the answer for a
+ * deployment-provisioned rail is not the same as for a key this organization
+ * connected itself -- the detail page says so in as many words a click later,
+ * so a card claiming "Connected" would be contradicted by the page it opens.
+ *
+ * Same labels the detail page uses, so a provider never changes its word
+ * between the two surfaces.
+ */
+function statusLabel(status: IntegrationStatus, t: Translate): string {
+  switch (status) {
     case "active":
       return t("Shared.integrations.statusActive");
     case "available":
@@ -57,18 +77,29 @@ function statusLabel(status: IntegrationStatus | "all", t: Translate): string {
   }
 }
 
+/**
+ * Colour, unlike the wording, does track the chips: everything the "Connected"
+ * chip selects is green, so scanning the grid and filtering it answer the same
+ * question. That was the defect worth fixing -- three green cards vanished
+ * behind a chip whose colour they already carried.
+ *
+ * The connected token pair is the shared `Badge` component's `success`, so a
+ * provider looks the same here as its connection does on the detail page.
+ */
+const STATE_CLASS_NAMES: Record<ConnectionState, string> = {
+  connected: "bg-success-bg text-success",
+  not_connected: "bg-fill-subtle text-tertiary",
+  on_request: "bg-fill-subtle text-secondary",
+  unknown: "bg-status-warning-bg text-status-warning-text",
+};
+
 function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate }) {
+  const state = connectionState(status);
   return (
     <span
       className={cn(
         "shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium",
-        status === "active"
-          ? "bg-surface-raised text-secondary ring-1 ring-border-subtle"
-          : status === "not_configured"
-            ? "bg-fill-subtle text-tertiary"
-            : status === "unknown"
-              ? "bg-status-warning-bg text-status-warning-text"
-              : "bg-fill-subtle text-secondary"
+        STATE_CLASS_NAMES[state]
       )}
     >
       {statusLabel(status, t)}
@@ -258,7 +289,7 @@ export function IntegrationsCatalog({
             aria-label={t("Shared.integrations.filterByStatus")}
             items={STATUS_FILTERS.map((option) => ({
               value: option,
-              label: statusLabel(option, t),
+              label: filterLabel(option, t),
             }))}
             value={status}
             // Re-clicking the active segment can emit an empty value from the

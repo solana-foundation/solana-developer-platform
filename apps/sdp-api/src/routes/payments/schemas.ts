@@ -686,6 +686,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
     z.object({
       provider: z.literal("bvnk"),
@@ -693,6 +694,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
   ]),
   z.discriminatedUnion("direction", [
@@ -707,6 +709,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      providerAccountId: z.string().min(1).optional(),
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),

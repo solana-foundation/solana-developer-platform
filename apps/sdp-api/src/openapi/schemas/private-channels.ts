@@ -47,6 +47,35 @@ export const privateChannelInstanceInputSchema = z
   })
   .openapi({ description: "Connect request body." });
 
+export const privateChannelInstanceUpdateSchema = privateChannelInstanceInputSchema
+  .omit({ confirmReactivate: true })
+  .extend({
+    instanceId: z.string().openapi({
+      description:
+        "The active instance being updated. Prevents stale setup pages overwriting a replacement.",
+      example: "pci_01HXYZ",
+    }),
+  })
+  .openapi({ description: "Verified update for the active Private Channels instance." });
+
+export const privateChannelTokenEligibilityListSchema = z.object({
+  tokens: z.array(
+    z.object({
+      symbol: z.string(),
+      mint: solanaAddressSchema,
+      decimals: z.number().int().nonnegative(),
+      tokenProgram: solanaAddressSchema,
+      enabled: z.boolean(),
+      exclusionReasons: z.array(
+        z.object({
+          code: z.enum(["NOT_ALLOWED_BY_INSTANCE", "ALLOWLIST_UNAVAILABLE"]),
+          message: z.string(),
+        })
+      ),
+    })
+  ),
+});
+
 export const privateChannelHealthSchema = z
   .discriminatedUnion("status", [
     z.object({ status: z.literal("ready"), latencyMs: z.number() }),

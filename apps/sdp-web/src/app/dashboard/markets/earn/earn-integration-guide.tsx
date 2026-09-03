@@ -1,20 +1,20 @@
 "use client";
 
 import type { EarnStrategy, SolanaCluster } from "@sdp/types";
-import { ArrowLeftIcon, InfoIcon, KeyRoundIcon } from "lucide-react";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
+import {
+  ArrowLeftIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  InfoIcon,
+  KeyRoundIcon,
+} from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/code-block";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -41,34 +41,35 @@ type EarnIntegrationGuideProps = {
   strategyId?: string;
 };
 
-/**
- * The guide reads top to bottom in the order a partner engineer ships it:
- * client setup, money in, reads, money out. Each section is one card with a
- * short description and its slice of the single server module.
- */
+/** The guide follows the order a partner engineer ships the integration. */
 const GUIDE_SECTIONS = [
   {
     id: "client",
+    navigationKey: "DashboardMarkets.earnProgram.guideClientNavigation",
     titleKey: "DashboardMarkets.earnProgram.guideClientTitle",
     descriptionKey: "DashboardMarkets.earnProgram.guideClientDescription",
   },
   {
     id: "deposit",
+    navigationKey: "DashboardMarkets.earnProgram.guideDepositNavigation",
     titleKey: "DashboardMarkets.earnProgram.guideDepositTitle",
     descriptionKey: "DashboardMarkets.earnProgram.guideDepositDescription",
   },
   {
     id: "portfolio",
+    navigationKey: "DashboardMarkets.earnProgram.guidePortfolioNavigation",
     titleKey: "DashboardMarkets.earnProgram.guidePortfolioTitle",
     descriptionKey: "DashboardMarkets.earnProgram.guidePortfolioDescription",
   },
   {
     id: "withdraw",
+    navigationKey: "DashboardMarkets.earnProgram.guideWithdrawNavigation",
     titleKey: "DashboardMarkets.earnProgram.guideWithdrawTitle",
     descriptionKey: "DashboardMarkets.earnProgram.guideWithdrawDescription",
   },
 ] as const satisfies ReadonlyArray<{
   id: keyof EarnIntegrationSections;
+  navigationKey: MessageKey;
   titleKey: MessageKey;
   descriptionKey: MessageKey;
 }>;
@@ -137,6 +138,9 @@ export function EarnIntegrationGuide({
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
   const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategyCluster });
+  const [activeSectionId, setActiveSectionId] = useState<keyof EarnIntegrationSections>(
+    GUIDE_SECTIONS[0].id
+  );
 
   if (isLoading) return <EarnIntegrationGuideSkeleton />;
 
@@ -176,6 +180,10 @@ export function EarnIntegrationGuide({
 
   if (!strategy) throw new Error("Earn integration strategy invariant failed");
   const sections = buildEarnIntegrationSections(strategy);
+  const activeSectionIndex = GUIDE_SECTIONS.findIndex(({ id }) => id === activeSectionId);
+  const activeSection = GUIDE_SECTIONS[activeSectionIndex] ?? GUIDE_SECTIONS[0];
+  const previousSection = GUIDE_SECTIONS[activeSectionIndex - 1];
+  const nextSection = GUIDE_SECTIONS[activeSectionIndex + 1];
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -202,10 +210,9 @@ export function EarnIntegrationGuide({
           </Callout>
         ) : null}
 
-        <Card>
-          <CardHeader>
+        <Card className="gap-4 py-4">
+          <CardHeader className="px-5">
             <CardTitle>{t("DashboardMarkets.earnProgram.selectedStrategy")}</CardTitle>
-            <CardDescription>{strategy.provider}</CardDescription>
             <CardAction>
               <Button asChild size="sm" variant="ghost">
                 <Link href={strategyPickerHref}>
@@ -214,44 +221,85 @@ export function EarnIntegrationGuide({
               </Button>
             </CardAction>
           </CardHeader>
-          <CardContent>
-            <div className="rounded-xl border border-border-default px-4 py-4">
-              <EarnStrategyIdentity strategy={strategy} />
-            </div>
+          <CardContent className="px-5">
+            <EarnStrategyIdentity strategy={strategy} />
           </CardContent>
         </Card>
 
-        <div className="flex items-start gap-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-4">
-          <KeyRoundIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-secondary" />
-          <div>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-4">
             <p className="text-sm font-medium text-primary">
-              {t("DashboardMarkets.earnProgram.apiKeyNoteTitle")}
+              {t("DashboardMarkets.earnProgram.guideNavigationTitle")}
             </p>
-            <p className="mt-1 text-xs leading-5 text-secondary">
-              {t("DashboardMarkets.earnProgram.secretKeyDisclosure")}
+            <p className="text-xs text-tertiary">
+              {t("DashboardMarkets.earnProgram.guideStepProgress", {
+                current: activeSectionIndex + 1,
+                total: GUIDE_SECTIONS.length,
+              })}
             </p>
           </div>
-        </div>
 
-        {GUIDE_SECTIONS.map(({ id, titleKey, descriptionKey }) => (
-          <Card key={id}>
-            <CardHeader>
-              <CardTitle>{t(titleKey)}</CardTitle>
-              <CardDescription className="max-w-3xl leading-6">{t(descriptionKey)}</CardDescription>
-              <CardAction>
-                <Badge variant="outline">{t("DashboardMarkets.earnProgram.serverOnly")}</Badge>
-              </CardAction>
-            </CardHeader>
-            <CardContent>
-              <CodeBlock
-                code={sections[id]}
-                language="typescript"
-                title={t("DashboardMarkets.earnProgram.serverExample")}
-                viewportClassName="max-h-[28rem]"
-              />
-            </CardContent>
-          </Card>
-        ))}
+          <SegmentedControl
+            aria-label={t("DashboardMarkets.earnProgram.guideNavigationTitle")}
+            items={GUIDE_SECTIONS.map(({ id, navigationKey }) => ({
+              value: id,
+              label: t(navigationKey),
+            }))}
+            onValueChange={(value) =>
+              value && setActiveSectionId(value as keyof EarnIntegrationSections)
+            }
+            value={activeSection.id}
+          />
+
+          <section
+            aria-live="polite"
+            className="flex min-w-0 flex-col gap-4"
+            id={`earn-guide-panel-${activeSection.id}`}
+          >
+            <div className="flex flex-col gap-2">
+              <h3 className="text-[19px] leading-6 font-medium text-primary">
+                {t(activeSection.titleKey)}
+              </h3>
+              <p className="max-w-3xl text-sm leading-6 text-secondary">
+                {t(activeSection.descriptionKey)}
+              </p>
+              <p className="flex items-center gap-2 text-xs text-tertiary">
+                <KeyRoundIcon aria-hidden="true" className="size-4 shrink-0" />
+                {t("DashboardMarkets.earnProgram.secretKeyDisclosure")}
+              </p>
+            </div>
+
+            <CodeBlock
+              code={sections[activeSection.id]}
+              language="typescript"
+              title={t("DashboardMarkets.earnProgram.serverExample")}
+              viewportClassName="max-h-[36rem]"
+            />
+
+            <div className="flex items-center justify-between">
+              <Button
+                disabled={!previousSection}
+                iconLeft={<ChevronLeftIcon />}
+                onClick={() => previousSection && setActiveSectionId(previousSection.id)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                {t("DashboardMarkets.earnProgram.previousGuideStep")}
+              </Button>
+              <Button
+                disabled={!nextSection}
+                iconRight={<ChevronRightIcon />}
+                onClick={() => nextSection && setActiveSectionId(nextSection.id)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {t("DashboardMarkets.earnProgram.nextGuideStep")}
+              </Button>
+            </div>
+          </section>
+        </div>
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
