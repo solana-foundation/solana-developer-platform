@@ -24,11 +24,27 @@ import {
   generateCounterpartyProviderAccountId,
 } from "./counterparty-provider-account.repository";
 
+/**
+ * Validates a provider-account metadata blob against the schema its row
+ * kind requires.
+ *
+ * @param kind - The row's kind discriminator.
+ * @param provider - The row's ramp provider.
+ * @param metadata - The metadata blob to validate.
+ */
+function assertProviderAccountMetadata(
+  kind: CounterpartyProviderAccountRow["kind"],
+  provider: CounterpartyProviderAccountRow["provider"],
+  metadata: Record<string, unknown>
+): void {
+  if (kind === "funding_wallet" && provider === "bvnk") {
+    bvnkFundingWalletMetadataSchema.parse(metadata);
+  }
+}
+
 function parseProviderAccountRow(row: Record<string, unknown>): CounterpartyProviderAccountRow {
   const parsed = counterpartyProviderAccountRowSchema.parse(row);
-  if (parsed.kind === "funding_wallet" && parsed.provider === "bvnk") {
-    bvnkFundingWalletMetadataSchema.parse(parsed.metadata);
-  }
+  assertProviderAccountMetadata(parsed.kind, parsed.provider, parsed.metadata);
   return parsed;
 }
 
@@ -156,12 +172,10 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async insertProviderResourceAccount(input: InsertProviderResourceAccountInput) {
-      if (input.kind === "funding_wallet") {
-        // The onramp-key unique index and lookup are expression-based; a row
-        // missing metadata.onrampKey would commit but be unreachable and
-        // un-deduplicated, so the shape is enforced before the write.
-        bvnkFundingWalletMetadataSchema.parse(input.metadata);
-      }
+      // The onramp-key unique index and lookup are expression-based; a row
+      // missing metadata.onrampKey would commit but be unreachable and
+      // un-deduplicated, so the shape is enforced before the write.
+      assertProviderAccountMetadata(input.kind, input.provider, input.metadata);
       const row = await db
         .prepare(
           `INSERT INTO counterparty_provider_accounts (
@@ -197,11 +211,11 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     async patchAccountMetadata(input: PatchAccountMetadataInput) {
       // Patch semantics (top-level shallow merge + explicit key deletion)
       // keep callers from clobbering sibling keys such as a funding
-      // wallet's onrampKey. The row is locked for the read-merge-write,
-      // and the post-write parse rolls the transaction back if the merged
-      // metadata violates the row's kind schema — an invalid blob would
-      // otherwise persist while escaping the expression-based unique
-      // index and the onramp-key lookup.
+      // wallet's onrampKey. The row is locked for the read-merge-write and
+      // the merged blob is validated against the row kind's schema BEFORE
+      // the UPDATE — an invalid blob would otherwise persist while
+      // escaping the expression-based unique index and the onramp-key
+      // lookup.
       return db.transaction(async (tx) => {
         const current = await tx
           .prepare(
@@ -226,13 +240,15 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           return null;
         }
 
+        const currentRow = parseProviderAccountRow(current);
         const metadata: Record<string, unknown> = {
-          ...parseProviderAccountRow(current).metadata,
+          ...currentRow.metadata,
           ...input.set,
         };
         for (const key of input.unset) {
           delete metadata[key];
         }
+        assertProviderAccountMetadata(currentRow.kind, currentRow.provider, metadata);
 
         const row = await tx
           .prepare(
