@@ -31,6 +31,7 @@ export function HoldToConfirmButton({
   holdMs = 5000,
   disabled,
   className,
+  variant = "destructive",
 }: {
   onConfirm: () => void | Promise<void>;
   label: string;
@@ -38,6 +39,14 @@ export function HoldToConfirmButton({
   holdMs?: number;
   disabled?: boolean;
   className?: string;
+  /**
+   * Hold-to-confirm marks an action as IRREVERSIBLE, which is not the same as
+   * marking it dangerous. Some irreversible actions are the outcome the user
+   * came for — settling a trade, say — and styling those identically to the
+   * destructive escape hatch beside them makes the safe path look like the
+   * risky one. Defaults to destructive so existing callers are unchanged.
+   */
+  variant?: "destructive" | "default";
 }) {
   const reduced = usePrefersReducedMotion();
   const [progress, setProgress] = useState(0);
@@ -114,7 +123,7 @@ export function HoldToConfirmButton({
   const circumference = 2 * Math.PI * radius;
 
   return (
-    <Button asChild variant="destructive" size="sm">
+    <Button asChild variant={variant} size="sm">
       <button
         type="button"
         disabled={disabled}

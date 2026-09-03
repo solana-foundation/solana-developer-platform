@@ -31,6 +31,58 @@ function readableSdpWalletIds(c: AppContext): string[] | null {
   return getAllowedApiKeyCustodyWalletIdsForPermissions(getAuth(c), ["payments:read"]);
 }
 
+interface LegInput {
+  party: string;
+  mint: string;
+  tokenProgram: string;
+  amount: string;
+  escrow: string;
+  settlementDestination: string;
+  observedAmount: string | null;
+  frozen: boolean | null;
+}
+
+/**
+ * One leg, including what the reconciler last saw in its escrow.
+ *
+ * `funding` is derived here rather than left to each client, because getting it
+ * wrong is consequential in both directions and the rules are not obvious:
+ * settlement needs `observed >= target` on BOTH legs, and a surplus is a
+ * settlement RISK rather than a harmless overpayment — settle refunds it, and
+ * on a transfer-hook mint that refund can revert the whole settlement.
+ *
+ * Null until the reconciler has looked. Null is not zero: "nobody has paid" and
+ * "we have not checked" are different answers, and collapsing them would show a
+ * brand-new trade as definitively unfunded.
+ */
+function legResponse(leg: LegInput) {
+  const funding =
+    leg.observedAmount === null
+      ? null
+      : {
+          observedAmount: leg.observedAmount,
+          funded: BigInt(leg.observedAmount) >= BigInt(leg.amount),
+          /** Anyone can send tokens to an escrow, so this is not rare. */
+          surplus: (() => {
+            const over = BigInt(leg.observedAmount) - BigInt(leg.amount);
+            return over > 0n ? over.toString() : null;
+          })(),
+          /** A frozen escrow bounces funding, which no balance can convey. */
+          frozen: leg.frozen ?? false,
+        };
+
+  return {
+    party: leg.party,
+    mint: leg.mint,
+    tokenProgram: leg.tokenProgram,
+    amount: leg.amount,
+    /** Pay this address to fund the leg. */
+    escrow: leg.escrow,
+    settlementDestination: leg.settlementDestination,
+    funding,
+  };
+}
+
 /**
  * Wire shape of a trade.
  *
@@ -46,23 +98,26 @@ function toTradeResponse(row: DvpTradeRow) {
     swapDvp: row.swapDvp,
     settlementAuthority: row.settlementAuthority,
     legs: {
-      a: {
+      a: legResponse({
         party: row.userA,
         mint: row.mintA,
         tokenProgram: row.tokenProgramA,
         amount: row.amountA,
-        /** Pay this address to fund the asset leg. */
         escrow: row.escrowA,
         settlementDestination: row.userASettlementDestination,
-      },
-      b: {
+        observedAmount: row.escrowAAmount,
+        frozen: row.escrowAFrozen,
+      }),
+      b: legResponse({
         party: row.userB,
         mint: row.mintB,
         tokenProgram: row.tokenProgramB,
         amount: row.amountB,
         escrow: row.escrowB,
         settlementDestination: row.userBSettlementDestination,
-      },
+        observedAmount: row.escrowBAmount,
+        frozen: row.escrowBFrozen,
+      }),
     },
     sdpSide: row.sdpSide,
     nonce: row.nonce,

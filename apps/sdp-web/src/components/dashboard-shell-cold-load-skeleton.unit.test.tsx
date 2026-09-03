@@ -45,6 +45,7 @@ function renderColdLoad(pathname: string): string {
     <DashboardShell
       flags={{
         assetProfiles: false,
+        dvp: false,
         earn: false,
         heliusRings: false,
         markets: false,

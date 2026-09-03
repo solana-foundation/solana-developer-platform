@@ -398,7 +398,8 @@ function getCounterpartyRoutePageConfig(
 
 function getMarketsRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  dvpEnabled: boolean
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/markets") {
     return {
@@ -407,9 +408,24 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  // A trade detail page keeps its own centred title beside a back action: it is
+  // the only orientation a detail route has, unlike a top-level list where the
+  // title would just repeat the active sidebar item.
+  if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
+    return {
+      title: t("DashboardMarkets.dvp.detailTitle"),
+      titlePosition: "center",
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+        label: t("DashboardMarkets.dvp.navLabel"),
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
   ) {
     return {
       title: t("Shared.dashboardShell.markets"),
@@ -426,6 +442,14 @@ function getMarketsRoutePageConfig(
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
             label: t("Shared.dashboardShell.earnProgram"),
           },
+          ...(dvpEnabled
+            ? [
+                {
+                  href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+                  label: t("DashboardMarkets.dvp.navLabel"),
+                },
+              ]
+            : []),
         ],
       },
       contentWidthClass: "max-w-none",
@@ -671,7 +695,13 @@ export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  /**
+   * Gates the DvP tab. The sidebar already hides DvP behind this flag, and a
+   * header tab that stays visible when the sidebar entry is gone points at a
+   * workspace the flag exists to keep out of reach.
+   */
+  dvpEnabled = false
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -728,7 +758,7 @@ export function getDashboardPageConfig(
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
-  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
+  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t, dvpEnabled);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
   }

@@ -142,7 +142,11 @@ async function seedWalletScopedKey(walletId: string): Promise<void> {
   });
 }
 
-async function seedTradeFor(sdpWalletId: string, tradeId: string): Promise<void> {
+async function seedTradeFor(
+  sdpWalletId: string,
+  tradeId: string,
+  observation?: { escrowAAmount: string; escrowAFrozen?: boolean }
+): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO dvp_trades (
@@ -151,7 +155,8 @@ async function seedTradeFor(sdpWalletId: string, tradeId: string): Promise<void>
          token_program_a, token_program_b,
          amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, sdp_side, sdp_wallet_id, status
+         escrow_a, escrow_b, sdp_side, sdp_wallet_id, status,
+         escrow_a_amount, escrow_a_frozen
        ) VALUES (
          ?, ?, ?, 'BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po',
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
@@ -167,10 +172,17 @@ async function seedTradeFor(sdpWalletId: string, tradeId: string): Promise<void>
          '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-         'a', ?, 'created'
+         'a', ?, 'created', ?, ?
        )`
     )
-    .bind(tradeId, TEST_ORG.id, TEST_PROJECT.id, sdpWalletId)
+    .bind(
+      tradeId,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      sdpWalletId,
+      observation?.escrowAAmount ?? null,
+      observation?.escrowAFrozen ?? null
+    )
     .run();
 }
 
@@ -287,6 +299,86 @@ describe("DvP routes", () => {
       env
     );
     expect(res.status).toBe(400);
+  });
+
+  // The reconciler's observations are the whole point of the detail view, and
+  // deriving `funded` per client would put the >= threshold in several places.
+  describe("per-leg funding", () => {
+    beforeEach(async () => {
+      await seedCustodyWallets();
+    });
+
+    // Null is not zero. A brand-new trade shown as definitively unfunded would
+    // be a claim nothing has actually checked.
+    it("reports null funding before the reconciler has looked", async () => {
+      await seedTradeFor(BOUND_WALLET.id, "dvp_unobserved");
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_unobserved",
+        { headers: authHeaders() },
+        env
+      );
+      const body = (await res.json()) as { data: { trade: { legs: { a: { funding: unknown } } } } };
+
+      expect(body.data.trade.legs.a.funding).toBeNull();
+    });
+
+    it("reports a leg short of its target as not funded", async () => {
+      await seedTradeFor(BOUND_WALLET.id, "dvp_short", { escrowAAmount: "999" });
+
+      const res = await app.request("/v1/dvp/trades/dvp_short", { headers: authHeaders() }, env);
+      const body = (await res.json()) as {
+        data: { trade: { legs: { a: { funding: { funded: boolean; surplus: string | null } } } } };
+      };
+
+      expect(body.data.trade.legs.a.funding.funded).toBe(false);
+      expect(body.data.trade.legs.a.funding.surplus).toBeNull();
+    });
+
+    // The threshold is >=, matching what settle requires. An over-funded leg IS
+    // funded — the surplus is refunded — so reporting it as unfunded would say
+    // the trade is still waiting for money it already has.
+    it("reports an over-funded leg as funded, and names the surplus", async () => {
+      await seedTradeFor(BOUND_WALLET.id, "dvp_over", { escrowAAmount: "1500" });
+
+      const res = await app.request("/v1/dvp/trades/dvp_over", { headers: authHeaders() }, env);
+      const body = (await res.json()) as {
+        data: { trade: { legs: { a: { funding: { funded: boolean; surplus: string } } } } };
+      };
+
+      expect(body.data.trade.legs.a.funding.funded).toBe(true);
+      expect(body.data.trade.legs.a.funding.surplus).toBe("500");
+    });
+
+    it("surfaces a frozen escrow, which a zero balance cannot convey", async () => {
+      await seedTradeFor(BOUND_WALLET.id, "dvp_frozen", {
+        escrowAAmount: "0",
+        escrowAFrozen: true,
+      });
+
+      const res = await app.request("/v1/dvp/trades/dvp_frozen", { headers: authHeaders() }, env);
+      const body = (await res.json()) as {
+        data: { trade: { legs: { a: { funding: { frozen: boolean } } } } };
+      };
+
+      expect(body.data.trade.legs.a.funding.frozen).toBe(true);
+    });
+
+    // u64 balances exceed 2^53. A float comparison would call a leg millions
+    // short of its target fully funded.
+    it("compares balances above 2^53 exactly", async () => {
+      await seedTradeFor(BOUND_WALLET.id, "dvp_big", {
+        escrowAAmount: "18446744073709551614",
+      });
+
+      const res = await app.request("/v1/dvp/trades/dvp_big", { headers: authHeaders() }, env);
+      const body = (await res.json()) as {
+        data: { trade: { legs: { a: { funding: { surplus: string } } } } };
+      };
+
+      // 18446744073709551614 - 1000
+      expect(body.data.trade.legs.a.funding.surplus).toBe("18446744073709550614");
+    });
   });
 
   // `payments:write` says the key may write. It does not say which wallet, and

@@ -179,6 +179,19 @@ export const markets = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const dvp = flag<boolean, DashboardFlagEntities>({
+  key: "dvp",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("DVP_ENABLED", false),
+  description:
+    "Show the DvP workspace (atomic delivery-versus-payment trades). A sub-module of Markets, so it also requires the markets flag. The swap program is deployed on devnet only, so the API answers 403 everywhere else regardless of this flag.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
 export const earn = flag<boolean, DashboardFlagEntities>({
   key: "earn",
   adapter: vercelAdapter(),
