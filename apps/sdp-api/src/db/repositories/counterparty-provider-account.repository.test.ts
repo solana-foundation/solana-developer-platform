@@ -221,17 +221,48 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       })
     ).toMatchObject({ id: fundingWallet.id, kind: "funding_wallet" });
 
-    const updated = await repository.updateAccountMetadata({
+    const updated = await repository.patchAccountMetadata({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "bvnk",
       id: fundingWallet.id,
-      metadata: { onrampKey: "USD:USDC_SOLANA:dest", ruleStatus: "ACTIVE" },
+      set: { ruleStatus: "ACTIVE" },
+      unset: [],
     });
     expect(updated?.metadata).toEqual({
       onrampKey: "USD:USDC_SOLANA:dest",
       ruleStatus: "ACTIVE",
+      request: {
+        fiatCurrency: "USD",
+        currency: "USDC",
+        network: "SOLANA",
+        destinationWalletAddress: "dest",
+      },
+    });
+
+    await expect(
+      repository.patchAccountMetadata({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: fundingWallet.id,
+        set: {},
+        unset: ["onrampKey"],
+      })
+    ).rejects.toThrow();
+    expect(
+      await repository.getFundingWalletByOnrampKey({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        onrampKey: "USD:USDC_SOLANA:dest",
+      })
+    ).toMatchObject({
+      id: fundingWallet.id,
+      metadata: { onrampKey: "USD:USDC_SOLANA:dest", ruleStatus: "ACTIVE" },
     });
   });
 

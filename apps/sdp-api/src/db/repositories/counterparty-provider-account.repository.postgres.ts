@@ -14,7 +14,7 @@ import type {
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
-  UpdateAccountMetadataInput,
+  PatchAccountMetadataInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
@@ -194,31 +194,61 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return parseProviderAccountRow(row);
     },
 
-    async updateAccountMetadata(input: UpdateAccountMetadataInput) {
-      const row = await db
-        .prepare(
-          `UPDATE counterparty_provider_accounts
-           SET metadata = ?,
-               updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND status = 'active'
-           RETURNING *`
-        )
-        .bind(
-          input.metadata,
-          input.id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.provider
-        )
-        .first<Record<string, unknown>>();
+    async patchAccountMetadata(input: PatchAccountMetadataInput) {
+      // Patch semantics (top-level shallow merge + explicit key deletion)
+      // keep callers from clobbering sibling keys such as a funding
+      // wallet's onrampKey. The row is locked for the read-merge-write,
+      // and the post-write parse rolls the transaction back if the merged
+      // metadata violates the row's kind schema — an invalid blob would
+      // otherwise persist while escaping the expression-based unique
+      // index and the onramp-key lookup.
+      return db.transaction(async (tx) => {
+        const current = await tx
+          .prepare(
+            `SELECT * FROM counterparty_provider_accounts
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND counterparty_id = ?
+               AND provider = ?
+               AND status = 'active'
+             FOR UPDATE`
+          )
+          .bind(
+            input.id,
+            input.organizationId,
+            input.projectId,
+            input.counterpartyId,
+            input.provider
+          )
+          .first<Record<string, unknown>>();
+        if (current === null) {
+          return null;
+        }
 
-      return row === null ? null : parseProviderAccountRow(row);
+        const metadata: Record<string, unknown> = {
+          ...parseProviderAccountRow(current).metadata,
+          ...input.set,
+        };
+        for (const key of input.unset) {
+          delete metadata[key];
+        }
+
+        const row = await tx
+          .prepare(
+            `UPDATE counterparty_provider_accounts
+             SET metadata = ?,
+                 updated_at = sdp_iso_now()
+             WHERE id = ?
+             RETURNING *`
+          )
+          .bind(metadata, input.id)
+          .first<Record<string, unknown>>();
+        if (row === null) {
+          throw internalError("Provider-account metadata patch lost its locked row.");
+        }
+        return parseProviderAccountRow(row);
+      });
     },
 
     async listActiveExternalAccounts(input: ListActiveExternalAccountsInput) {

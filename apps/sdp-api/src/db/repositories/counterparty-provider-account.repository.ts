@@ -122,9 +122,12 @@ export type InsertProviderResourceAccountInput = InsertProviderResourceAccountBa
       }
   );
 
-export interface UpdateAccountMetadataInput extends GetCounterpartyProviderAccountInput {
+export interface PatchAccountMetadataInput extends GetCounterpartyProviderAccountInput {
   id: string;
-  metadata: Record<string, unknown>;
+  /** Top-level keys merged into the current metadata (shallow). */
+  set: Record<string, unknown>;
+  /** Top-level keys removed after the merge. */
+  unset: readonly string[];
 }
 
 export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAccountInput {
@@ -207,13 +210,16 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow>;
 
   /**
-   * Replaces metadata on an active provider-account row within its parent scope.
+   * Patches metadata on an active provider-account row within its parent
+   * scope: shallow-merges `set`, then removes `unset` keys. The merged
+   * result must satisfy the row kind's metadata schema or the write rolls
+   * back.
    *
-   * @param input - Tenant scope, row id, provider, and typed open metadata.
-   * @returns The updated row, or null when it is outside the scope.
+   * @param input - Tenant scope, row id, provider, keys to merge, and keys to remove.
+   * @returns The patched row, or null when it is outside the scope.
    */
-  updateAccountMetadata(
-    input: UpdateAccountMetadataInput
+  patchAccountMetadata(
+    input: PatchAccountMetadataInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
