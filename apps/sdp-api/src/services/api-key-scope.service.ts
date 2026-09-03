@@ -1,5 +1,6 @@
 import {
   type ApiKeyRole,
+  type ApiKeyStatus,
   type ApiKeyWalletBinding,
   type ApiKeyWalletScope,
   getPermissionsForApiKeyRole,
@@ -610,15 +611,29 @@ export async function assertFreshApiKeyCustodyWalletAccess(
 
   const currentKey = await db
     .prepare(
-      `SELECT signing_wallet_id
+      `SELECT signing_wallet_id, status, expires_at
        FROM api_keys
        WHERE id = ?
          AND organization_id = ?
          AND project_id = ?`
     )
     .bind(auth.apiKeyId, auth.organizationId, auth.projectId)
-    .first<{ signing_wallet_id: string | null }>();
+    .first<{
+      signing_wallet_id: string | null;
+      status: ApiKeyStatus;
+      expires_at: string | null;
+    }>();
   if (!currentKey) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+  // Re-reading the key's PERMISSIONS while trusting the snapshot's word that
+  // the key still exists leaves the hour-long cache window open for exactly the
+  // key someone just revoked. Same predicate as `ApiKeyService.verify`: active,
+  // and not past its expiry.
+  if (
+    currentKey.status !== "active" ||
+    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date())
+  ) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 

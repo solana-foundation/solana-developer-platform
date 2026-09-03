@@ -9,7 +9,7 @@
  * and size are checked before a single byte is decoded.
  */
 
-import { SwapDvpVerificationError, verifySwapDvp } from "@sdp/dvp";
+import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { type Address, fetchEncodedAccounts } from "@solana/kit";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
@@ -93,13 +93,18 @@ export async function readEscrowState(
 /**
  * Whether a verifiable trade account is at this address.
  *
+ * Takes an already-fetched account rather than fetching its own, so the trade
+ * and its escrows are read at the same slot.
+ *
  * Throws on a transport failure rather than reporting absence. The distinction
  * decides whether the reconciler writes a terminal status or leaves the row for
  * the next sweep, and only one of those is reversible.
  */
-async function readTradeAccountExists(rpc: SolanaRpc, swapDvp: Address): Promise<boolean> {
+async function readTradeAccountExists(
+  account: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number]
+): Promise<boolean> {
   try {
-    await verifySwapDvp(rpc as never, swapDvp);
+    await verifySwapDvpAccount(account);
     return true;
   } catch (error) {
     if (error instanceof SwapDvpVerificationError) {
@@ -136,14 +141,21 @@ export async function readDvpTradeObservation(
   // canonical-PDA check, so there is no trade we would act on at that address.
   // A transport failure is not, and it propagates so the caller leaves the row
   // untouched and tries again on the next tick.
-  const tradeAccountExists = await readTradeAccountExists(rpc, swapDvp);
-
-  const accounts = await fetchEncodedAccounts(rpc as never, [legs.a.escrow, legs.b.escrow]);
+  //
+  // All three in ONE request. Reading the trade separately from its escrows
+  // reads them at different slots, and a settle landing between the two calls
+  // would show a closed trade beside still-funded escrows: a half-settled state
+  // this program cannot actually produce.
+  const accounts = await fetchEncodedAccounts(rpc as never, [
+    swapDvp,
+    legs.a.escrow,
+    legs.b.escrow,
+  ]);
 
   return {
-    tradeAccountExists,
-    legA: readLeg(accounts[0], legs.a),
-    legB: readLeg(accounts[1], legs.b),
+    tradeAccountExists: await readTradeAccountExists(accounts[0]),
+    legA: readLeg(accounts[1], legs.a),
+    legB: readLeg(accounts[2], legs.b),
     blockHeight,
   };
 }

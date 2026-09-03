@@ -15,10 +15,14 @@
 
 import type { PolicyCandidate } from "@sdp/types";
 import type { Context } from "hono";
+import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
-import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
+import {
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyCustodyWalletIdsForPermissions,
+} from "@/services/api-key-scope.service";
 import type { DvpCloseAction } from "@/services/dvp/settle";
 
 /** Every trade action that spends from a custody wallet. */
@@ -161,6 +165,16 @@ export async function extractDvpTradeActionPolicyCandidate(
       idempotencyKey: null,
     };
   }
+
+  // Before the gate records anything. The trade was found through the CACHED
+  // auth snapshot, which can be up to an hour stale, so a key revoked inside
+  // that window would otherwise get an approval request filed in its name and
+  // a settlement wallet provisioned on its behalf. The handler checks this
+  // again after approval; both are needed, because only one of them runs on
+  // the approved-replay path.
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, trade.sdpWalletId, [
+    "payments:write",
+  ]);
 
   const settlement = await getOrCreateDvpSettlementWallet(c.env, {
     organizationId: trade.organizationId,
