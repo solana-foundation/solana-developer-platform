@@ -24,7 +24,6 @@ import {
   isBvnkCustomerVerified,
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
-  readBvnkCustomer,
   readBvnkData,
   readBvnkOfframpBeneficiaries,
   readBvnkOfframpBeneficiaryByKey,
@@ -149,7 +148,6 @@ async function persistBvnkOnrampState(
   counterparty: CounterpartyRow,
   projectId: string,
   key: string,
-  customer: BvnkCustomerResolution,
   entry: BvnkOnrampPaymentRuleState,
   repository?: CounterpartiesRepository
 ): Promise<void> {
@@ -166,7 +164,6 @@ async function persistBvnkOnrampState(
         ...providerData,
         bvnk: {
           ...bvnk,
-          customer: { ...readBvnkCustomer(providerData), ...customer },
           wallets: { ...wallets, [key]: { ...wallets[key], ...entry } },
         },
       };
@@ -467,15 +464,7 @@ export async function ensureBvnkPaymentRule(
 
   if (!entry.request) {
     entry = { ...entry, request: params };
-    await persistBvnkOnrampState(
-      c,
-      counterparty,
-      projectId,
-      paymentRuleKey,
-      customer,
-      entry,
-      repository
-    );
+    await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
   }
 
   if (!isBvnkCustomerVerified(customer.status) || !customer.customerReference) {
@@ -515,15 +504,7 @@ export async function ensureBvnkPaymentRule(
       walletStatus: wallet.status,
       bankAccount: wallet.bankAccount,
     };
-    await persistBvnkOnrampState(
-      c,
-      counterparty,
-      projectId,
-      paymentRuleKey,
-      customer,
-      entry,
-      repository
-    );
+    await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
   }
 
   if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
@@ -534,15 +515,7 @@ export async function ensureBvnkPaymentRule(
         walletStatus: wallet.status ?? entry.walletStatus,
         bankAccount: wallet.bankAccount ?? entry.bankAccount,
       };
-      await persistBvnkOnrampState(
-        c,
-        counterparty,
-        projectId,
-        paymentRuleKey,
-        customer,
-        entry,
-        repository
-      );
+      await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
     } catch (error) {
       getLogger().warn(
         {
@@ -567,15 +540,7 @@ export async function ensureBvnkPaymentRule(
       },
     });
     entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
-    await persistBvnkOnrampState(
-      c,
-      counterparty,
-      projectId,
-      paymentRuleKey,
-      customer,
-      entry,
-      repository
-    );
+    await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
   }
 
   return {
@@ -589,6 +554,7 @@ export async function bvnkOnrampQuote(
   c: AppContext,
   input: {
     counterparty: CounterpartyRow;
+    customer: BvnkCustomerResolution;
     paymentRule: BvnkOnrampRequestSpec;
   }
 ): Promise<{
@@ -599,7 +565,7 @@ export async function bvnkOnrampQuote(
 }> {
   const { currency, network, destinationWalletAddress, fiatCurrency } = input.paymentRule;
   const providerData = input.counterparty.provider_data;
-  const customer = readBvnkCustomer(providerData);
+  const customer = input.customer;
   const key = buildBvnkOnrampPaymentRuleKey(
     fiatCurrency,
     currency,

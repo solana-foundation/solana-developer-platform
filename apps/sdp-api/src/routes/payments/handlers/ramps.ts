@@ -122,6 +122,7 @@ import {
   ensureBvnkOfframpBeneficiary,
   ensureBvnkOfframpWallet,
   ensureBvnkPaymentRule,
+  readBvnkCustomerLink,
 } from "./ramps/bvnk";
 import {
   ensureLightsparkCustomer,
@@ -994,8 +995,13 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     case "bvnk": {
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+      const bvnkCustomer = await readBvnkCustomerLink(c, counterparty);
+      if (!bvnkCustomer) {
+        throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: undefined });
+      }
       const bvnkResult = await bvnkOnrampQuote(c, {
         counterparty,
+        customer: bvnkCustomer,
         paymentRule: {
           currency,
           network,
