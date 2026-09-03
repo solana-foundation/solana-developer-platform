@@ -4,6 +4,7 @@ import type {
   EarnExternalWalletPosition,
   EarnExternalWalletPositionSummary,
   EarnExternalWalletStrategyTotal,
+  SolanaCluster,
 } from "@sdp/types";
 import {
   AlertTriangleIcon,
@@ -39,6 +40,8 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerAddressUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
 import {
@@ -139,10 +142,12 @@ function compactAddress(value: string) {
 
 function StrategyWalletDrawer({
   strategy,
+  cluster,
   open,
   onOpenChange,
 }: {
   strategy: EarnExternalWalletStrategyTotal | null;
+  cluster: SolanaCluster;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -205,11 +210,16 @@ function StrategyWalletDrawer({
         <div className="flex items-start justify-between border-b border-border-default px-6 py-5">
           <div>
             <DrawerTitle className="text-lg font-medium text-primary">
-              {strategy?.label ?? "Customer wallets"}
+              {strategy?.label ?? t("DashboardMarkets.earnProgram.customerWallets")}
             </DrawerTitle>
             <p className="mt-1 text-sm text-secondary">
               {strategy
-                ? `${strategy.walletCount} customer wallet${strategy.walletCount === 1 ? "" : "s"}`
+                ? t(
+                    strategy.walletCount === 1
+                      ? "DashboardMarkets.earnProgram.customerWalletCount"
+                      : "DashboardMarkets.earnProgram.customerWalletCountPlural",
+                    { count: strategy.walletCount }
+                  )
                 : ""}
             </p>
           </div>
@@ -226,13 +236,15 @@ function StrategyWalletDrawer({
           {!positions && !error ? (
             <div className="flex min-h-48 items-center justify-center text-secondary">
               <LoaderCircleIcon aria-hidden="true" className="size-5 animate-spin" />
-              <span className="ml-2 text-sm">Loading live wallet values</span>
+              <span className="ml-2 text-sm">
+                {t("DashboardMarkets.earnProgram.walletValuesLoading")}
+              </span>
             </div>
           ) : null}
 
           {error ? (
             <div className="rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning">
-              Wallet details could not be refreshed. The strategy total remains visible.
+              {t("DashboardMarkets.earnProgram.walletRefreshError")}
             </div>
           ) : null}
 
@@ -252,7 +264,9 @@ function StrategyWalletDrawer({
                         </span>
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-primary">
-                            Customer wallet {index + 1}
+                            {t("DashboardMarkets.earnProgram.customerWallet", {
+                              index: index + 1,
+                            })}
                           </p>
                           <p className="mt-0.5 font-mono text-xs text-tertiary">
                             {compactAddress(position.ownerAddress)}
@@ -262,16 +276,16 @@ function StrategyWalletDrawer({
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          aria-label={`Copy ${position.ownerAddress}`}
+                          aria-label={t("DashboardMarkets.earnProgram.copyWalletAddress")}
                           className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
                           onClick={() => void navigator.clipboard.writeText(position.ownerAddress)}
                         >
                           <CopyIcon aria-hidden="true" className="size-3.5" />
                         </button>
                         <a
-                          aria-label={`Open ${position.ownerAddress} in Solana Explorer`}
+                          aria-label={t("DashboardMarkets.earnProgram.openWalletInExplorer")}
                           className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
-                          href={`https://explorer.solana.com/address/${position.ownerAddress}?cluster=devnet`}
+                          href={explorerAddressUrl(position.ownerAddress, cluster)}
                           rel="noreferrer"
                           target="_blank"
                         >
@@ -282,7 +296,9 @@ function StrategyWalletDrawer({
 
                     <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border-subtle pt-4">
                       <div>
-                        <dt className="text-xs text-tertiary">Live value</dt>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.liveValue")}
+                        </dt>
                         <dd className="mt-1 text-sm font-medium text-primary tabular-nums">
                           {position.tokenValue === undefined
                             ? t("DashboardMarkets.earnProgram.valueUnavailable")
@@ -290,20 +306,26 @@ function StrategyWalletDrawer({
                         </dd>
                       </div>
                       <div>
-                        <dt className="text-xs text-tertiary">Asset</dt>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.asset")}
+                        </dt>
                         <dd className="mt-1 flex items-center gap-2 text-sm font-medium text-primary">
                           <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
                           {asset.symbol}
                         </dd>
                       </div>
                       <div>
-                        <dt className="text-xs text-tertiary">Vault shares</dt>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.vaultShares")}
+                        </dt>
                         <dd className="mt-1 text-sm text-primary tabular-nums">
                           {position.shares ?? t("DashboardMarkets.earnProgram.valueUnavailable")}
                         </dd>
                       </div>
                       <div>
-                        <dt className="text-xs text-tertiary">Available shares</dt>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.availableShares")}
+                        </dt>
                         <dd className="mt-1 text-sm text-primary tabular-nums">
                           {position.withdrawableShares ??
                             t("DashboardMarkets.earnProgram.valueUnavailable")}
@@ -356,7 +378,9 @@ function PortfolioByStrategy({
                   return (
                     <TableRow
                       key={`${strategy.provider}:${strategy.providerReference}:${total.tokenMint}`}
-                      aria-label={`View customer wallets for ${strategy.label}`}
+                      aria-label={t("DashboardMarkets.earnProgram.viewCustomerWallets", {
+                        strategy: strategy.label,
+                      })}
                       className="cursor-pointer transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
                       tabIndex={0}
                       onClick={() => onStrategySelect(strategy)}
@@ -411,6 +435,7 @@ function PortfolioByStrategy({
 
 export function EmbeddedYieldDashboard({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary();
   const [selectedStrategy, setSelectedStrategy] = useState<EarnExternalWalletStrategyTotal | null>(
     null
@@ -504,6 +529,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
         )}
       </div>
       <StrategyWalletDrawer
+        cluster={cluster}
         open={selectedStrategy !== null}
         strategy={selectedStrategy}
         onOpenChange={(open) => {
