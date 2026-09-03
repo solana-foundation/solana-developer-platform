@@ -52,24 +52,77 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     counterpartyId: counterparty.id,
     ...query.data,
   });
-  const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), rows);
+  const enriched = await enrichCounterpartyProviderAccounts(
+    rampRuntime(c),
+    rows.filter((row) => row.kind === "payout_account")
+  );
 
-  const response: ListCounterpartyProviderAccountsResponse = {
-    accounts: rows.map((row) => mapProviderAccount(row, enriched)),
-  };
+  const rowsByProvider = new Map<
+    CounterpartyProviderAccountRow["provider"],
+    CounterpartyProviderAccountRow[]
+  >();
+  for (const row of rows) {
+    const providerRows = rowsByProvider.get(row.provider);
+    if (providerRows === undefined) {
+      rowsByProvider.set(row.provider, [row]);
+    } else {
+      providerRows.push(row);
+    }
+  }
+
+  const accounts: CounterpartyProviderAccount[] = [];
+  for (const providerRows of rowsByProvider.values()) {
+    const customerLink = providerRows.find((row) => row.kind === "customer_link");
+    const payoutRows = providerRows.filter((row) => row.kind === "payout_account");
+    if (payoutRows.length === 0 && customerLink !== undefined) {
+      accounts.push(mapCustomerLinkAccount(customerLink));
+    }
+    for (const row of payoutRows) {
+      accounts.push(mapProviderAccount(row, enriched, customerLink));
+    }
+  }
+
+  const response: ListCounterpartyProviderAccountsResponse = { accounts };
   return success(c, response);
 };
 
 /**
+ * Maps a customer-link row into a top-level provider-account response row.
+ * Used only when the provider has no payout accounts to attach the link to,
+ * so the provider customer stays visible. Carries its own customer-link
+ * object so consumers read customer details from one place regardless of
+ * row kind.
+ *
+ * @param row - Parent-scoped customer-link row.
+ * @returns Public provider-account response row without corridor data.
+ */
+function mapCustomerLinkAccount(row: CounterpartyProviderAccountRow): CounterpartyProviderAccount {
+  return {
+    id: row.id,
+    provider: row.provider,
+    kind: row.kind,
+    fiatCurrency: row.fiat_currency,
+    destinationCountry: row.destination_country,
+    paymentRail: row.payment_rail,
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
+    customerLink: mapCustomerLink(row),
+  };
+}
+
+/**
  * Maps a database row and optional JIT details into the public provider-account shape.
  *
- * @param row - Parent-scoped provider-account row.
+ * @param row - Parent-scoped payout-account row.
  * @param enriched - Sanitized provider details indexed by row id.
+ * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
  * @returns Public provider-account response row.
  */
 function mapProviderAccount(
   row: CounterpartyProviderAccountRow,
-  enriched: ReadonlyMap<string, RampExternalAccountDetails>
+  enriched: ReadonlyMap<string, RampExternalAccountDetails>,
+  customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {
   if (row.fiat_currency === null || row.destination_country === null) {
     throw internalError("External provider-account row is missing corridor data.");
@@ -99,5 +152,27 @@ function mapProviderAccount(
     result.paymentRails = detail.paymentRails;
   }
 
+  if (customerLink !== undefined) {
+    result.customerLink = mapCustomerLink(customerLink);
+  }
+
   return result;
+}
+
+/**
+ * Maps a customer-link row into the public customer-link shape.
+ *
+ * @param row - Parent-scoped customer-link row.
+ * @returns Public customer-link object.
+ */
+function mapCustomerLink(
+  row: CounterpartyProviderAccountRow
+): NonNullable<CounterpartyProviderAccount["customerLink"]> {
+  return {
+    id: row.id,
+    providerCustomerReference: row.provider_customer_reference,
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
+  };
 }

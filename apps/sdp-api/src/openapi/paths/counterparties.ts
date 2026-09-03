@@ -151,7 +151,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     summary: "Get counterparty ramp requirements",
     operationId: "getCounterpartyRequirements",
     description:
-      "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required.",
+      "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required. Lightspark off-ramp requests may include destinationCountry to reuse an active payout account for that corridor.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

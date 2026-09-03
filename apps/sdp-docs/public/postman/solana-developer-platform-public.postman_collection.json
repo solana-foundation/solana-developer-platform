@@ -2152,6 +2152,24 @@
       "name": "Earn",
       "item": [
         {
+          "name": "List yield strategies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/strategies",
+            "description": "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL descending). By default the list answers the environment's own cluster — the shelf the caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf (those rows stay `fundable: false`). Catalogued is not the same as fundable: branch on `fundable` and `status` rather than assuming a listed strategy takes deposits."
+          }
+        },
+        {
+          "name": "Get one yield strategy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/strategies/{{strategyId}}",
+            "description": "Returns one catalogue row by id, whatever its cluster; `fundable` still answers whether the instrument exists on the caller's own cluster."
+          }
+        },
+        {
           "name": "Get external-wallet position totals",
           "request": {
             "method": "GET",
@@ -2165,8 +2183,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/external-wallet/positions/{{ownerAddress}}",
-            "description": "Returns one strict keyset page of live positions for an end-user wallet in the active partner project. A wallet outside that scope answers 404. Live fields are absent when provider hydration is unavailable, never replaced with zero."
+            "url": "{{baseUrl}}/v1/earn/external-wallet/positions",
+            "description": "Returns one strict keyset page of live positions for an end-user wallet in the active partner project. `ownerAddress` is required — the same query addressing every per-owner read on this surface uses. A wallet outside the project's scope answers 404. Live fields are absent when provider hydration is unavailable, never replaced with zero."
           }
         },
         {
@@ -2184,7 +2202,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/earn/external-wallet/movements/{{movementId}}",
-            "description": "Polls one recorded movement to a terminal state — the read that settles a submit whose outcome the caller never learned. The reconciliation sweep drives every movement terminal within about ninety seconds; keep polling until `finalized` or `failed`."
+            "description": "Polls one recorded movement to a terminal state — the read that settles a submit whose outcome the caller never learned. Each poll observes the movement's exact signature on chain and advances the recorded status immediately, so state lands as fast as the network decides it; if the chain read is unavailable the last durable status is served and a background reconciler (about every minute) remains the recovery path. Keep polling until `finalized` or `failed` — those are the only terminal states."
           }
         },
         {
@@ -2192,8 +2210,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/external-wallet/earnings/{{ownerAddress}}",
-            "description": "Returns live balance and total earned per deposit token: `earned` is live value minus finalized SDP deposits, stated only when exact. When it cannot be stated — live value unavailable, movements still settling, or a finalized withdrawal on a held position — the figure is absent with a named reason, never zero. Figures cover currently held positions: a fully exited position's history drops out (it stays on the movements list). Live value reads the owner's whole vault balance, so shares acquired outside SDP inflate it."
+            "url": "{{baseUrl}}/v1/earn/external-wallet/earnings",
+            "description": "Returns live balance and total earned per deposit token for the required `ownerAddress`: `earned` is live value minus finalized SDP deposits, stated only when exact. When it cannot be stated — live value unavailable, movements still settling, or a finalized withdrawal on a held position — the figure is absent with a named reason, never zero. Figures cover currently held positions: a fully exited position's history drops out (it stays on the movements list). Live value reads the owner's whole vault balance, so shares acquired outside SDP inflate it."
           }
         },
         {
@@ -2208,10 +2226,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/deposit-transactions",
-            "description": "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The owner is the fee payer and only required signer; the transaction expires with its blockhash, and nothing moves until the signed bytes are submitted.",
+            "description": "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. By default the owner is the fee payer and only required signer; pass `feePayer` to pay the network fee (and any first-deposit account rent) from your own wallet instead — the transaction then also requires that wallet's signature, added server-side before submit. The transaction expires with its blockhash, and nothing moves until the signed bytes are submitted.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\",\n  \"sourceTokenMint\": \"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo\",\n  \"swapSlippageBps\": 2\n}",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\",\n  \"sourceTokenMint\": \"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo\",\n  \"swapSlippageBps\": 2\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2232,10 +2250,34 @@
               }
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/deposits",
-            "description": "Verifies the signed bytes are exactly the built transaction with the owner's genuine signature, records the movement, then broadcasts. Requires the Idempotency-Key header: a retry with the same key resolves the original movement (`replayed: true`), and each built transaction is consumable exactly once.",
+            "description": "Verifies the signed bytes are exactly the built transaction and that every required signature is genuine — the owner's, and the fee payer's when the build named one — records the movement, then broadcasts. Requires the Idempotency-Key header: a retry with the same key resolves the original movement (`replayed: true`), and each built transaction is consumable exactly once.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_example\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA=\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Preview an external-wallet exit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-previews",
+            "description": "Quotes what redeeming the shares would pay right now, from the vault's live accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency key, and it takes the exit's own gates: a delisted strategy or a provider disabled for new deposits stays quotable. POST because the parameters are a body; 501 when the provider cannot quote exits.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2259,7 +2301,7 @@
             "description": "Builds one unsigned exit transaction for an external-wallet position. Takes no surfacing, entitlement, availability, or catalogue gate (ADR 0002 exit safety), so the exit works while the provider is disabled for new deposits.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
+              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\",\n  \"minAmountOut\": \"24.9\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

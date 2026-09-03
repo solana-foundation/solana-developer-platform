@@ -252,7 +252,7 @@ describe("external-wallet position reads", () => {
       }
     );
 
-    const response = await get(`/v1/earn/external-wallet/positions/${OWNER_B}`);
+    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { positions: Array<Record<string, unknown>> } };
     expect(body.data.positions).toHaveLength(1);
@@ -296,10 +296,12 @@ describe("external-wallet position reads", () => {
       projectId: foreignProject,
     });
 
-    expect((await get(`/v1/earn/external-wallet/positions/${OWNER_B}`)).status).toBe(404);
+    expect((await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`)).status).toBe(
+      404
+    );
   });
 
-  it.each(["?limit=0", "?limit=101", "?before=not-a-cursor", "?page=2"])(
+  it.each(["&limit=0", "&limit=101", "&before=not-a-cursor", "&page=2"])(
     "strictly rejects malformed or unknown per-wallet query %s",
     async (query) => {
       await seedPosition({
@@ -308,9 +310,30 @@ describe("external-wallet position reads", () => {
         tokenMint: USDC,
         label: "Query",
       });
-      expect((await get(`/v1/earn/external-wallet/positions/${OWNER_A}${query}`)).status).toBe(400);
+      expect(
+        (await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}${query}`)).status
+      ).toBe(400);
     }
   );
+
+  it("keeps the retired path-addressed shape dead", async () => {
+    // PRO-1722 originally addressed the owner as a path segment; the surface
+    // unified on the movements list's query addressing before GA. A base58
+    // segment must read as an unknown route, never as an owner.
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-retired",
+      tokenMint: USDC,
+      label: "Retired",
+    });
+    expect((await get(`/v1/earn/external-wallet/positions/${OWNER_A}`)).status).toBe(404);
+    expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).status).toBe(404);
+    // The query-addressed replacements answer for the same owner, so the 404s
+    // above assert the SHAPE is gone rather than the data.
+    expect((await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`)).status).toBe(
+      200
+    );
+  });
 
   it("fails loudly when a keyset reader repeats its bound", async () => {
     const row = {

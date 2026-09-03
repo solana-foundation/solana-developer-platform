@@ -17,6 +17,10 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  *
  * The guide renders one section per concern so a partner engineer can read it
  * top to bottom; the sections concatenate into one server module.
+ *
+ * The public docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
+ * documents this same flow, including the optional partner `feePayer` these
+ * snippets keep out of the default path — update both together.
  */
 export interface EarnIntegrationSections {
   /** Shared client setup: base URL, auth headers, response envelope. */
@@ -257,7 +261,7 @@ export async function waitForEarnMovement(
  */
 export async function getEarnEarnings(ownerAddress: string) {
   const data = await sdpFetch(
-    \`/v1/earn/external-wallet/earnings/\${encodeURIComponent(ownerAddress)}\`,
+    \`/v1/earn/external-wallet/earnings?\${new URLSearchParams({ ownerAddress })}\`,
     { headers: sdpHeaders() }
   );
   // { ownerAddress, totalsByToken: [{ currentValue?, totalDeposited, earned?, ... }] }
@@ -281,9 +285,10 @@ export async function listEarnPositions(ownerAddress: string) {
   const positions = [];
   let cursor;
   do {
-    const query = cursor ? \`?before=\${encodeURIComponent(cursor)}\` : "";
+    const query = new URLSearchParams({ ownerAddress });
+    if (cursor) query.set("before", cursor);
     const data = await sdpFetch(
-      \`/v1/earn/external-wallet/positions/\${encodeURIComponent(ownerAddress)}\${query}\`,
+      \`/v1/earn/external-wallet/positions?\${query}\`,
       { headers: sdpHeaders() }
     );
     // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }], hasMore, nextCursor }
