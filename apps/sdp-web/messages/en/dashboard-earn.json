@@ -308,7 +308,8 @@
       "nextExpiredTitle": "Past its expiry",
       "nextExpiredBody": "This trade can no longer settle. Cancelling refunds each leg to whoever deposited it and closes the trade.",
       "nextCreateFailedTitle": "This trade was never created",
-      "nextCreateFailedBody": "The create transaction can no longer land, so nothing was put on chain and nothing is at risk. Create a new trade to try again."
+      "nextCreateFailedBody": "The create transaction can no longer land, so nothing was put on chain and nothing is at risk. Create a new trade to try again.",
+      "loadErrorUnexpected": "The request succeeded but carried no trade."
     }
   },
   "DashboardEarn": {

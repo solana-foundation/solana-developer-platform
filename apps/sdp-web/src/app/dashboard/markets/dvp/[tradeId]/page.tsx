@@ -20,18 +20,21 @@ export default async function DvpTradeDetailPage({
       return <DvpTradeDetailWorkspace trade={trade} />;
     }
 
-    // A missing trade and an unreachable API both arrive here as a null trade,
-    // and they need different answers. Rendering a rate limit or a 500 as "not
-    // found" tells someone their trade is gone when it is sitting there — so
-    // only a genuine 404 becomes one, and everything else says what happened
-    // and can be retried.
-    if (error && !isNotFound(result)) {
-      return <DvpTradeLoadError message={error} />;
+    // A trade outside the caller's scope answers 404 upstream by design, so an
+    // absent trade and an unauthorized one are indistinguishable here, which is
+    // the point: neither should reveal that the other exists.
+    if (isNotFound(result)) {
+      notFound();
     }
 
-    // A trade outside the caller's scope answers 404 upstream by design, so an
-    // absent trade and an unauthorized one are indistinguishable here — which is
-    // the point: neither should reveal that the other exists.
-    notFound();
+    // Everything else is a failure to find out, not an absence. Rendering a
+    // rate limit, a 500, or a 200 whose body had no trade in it as "not found"
+    // tells someone their trade is gone while it sits in escrow holding both
+    // parties' money.
+    //
+    // Tested by exclusion rather than by listing statuses: a malformed 200
+    // carries no error message at all, and an earlier version of this fell
+    // through to notFound() precisely because it keyed off the message.
+    return <DvpTradeLoadError message={error} />;
   });
 }
