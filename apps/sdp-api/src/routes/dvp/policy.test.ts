@@ -93,9 +93,13 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 }
 
 const context = { env } as never;
+// Three identifiers, all different on purpose. A candidate's `walletId` means
+// the PROVIDER's id, and a fixture that set these equal is what let the
+// on-chain address be passed there unnoticed.
 const settlement = {
   custodyWalletId: "cwlt_settle",
   address: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
+  providerWalletId: "privy_settle_authority",
 };
 
 describe("buildDvpTradeActionPolicyCandidate", () => {
@@ -169,6 +173,26 @@ describe("buildDvpTradeActionPolicyCandidate", () => {
     expect(legs).toHaveLength(1);
     expect(legs[0]?.asset).toBe(trade().mintA);
   });
+
+  // The wallet-operations ownership check matches `custody_wallets.wallet_id`
+  // (`policy.repository.postgres.ts:1044`). Passing the address instead found no
+  // row, so every settle, cancel and fund failed with "Failed to record wallet
+  // operation" — on a wallet the organization plainly owns.
+  it.each(["settle", "cancel", "fund"] as const)(
+    "identifies the signing wallet to policy by its provider id on %s",
+    (action) => {
+      const { candidate } = buildDvpTradeActionPolicyCandidate(
+        context,
+        trade(),
+        settlement,
+        action,
+        action === "fund" ? 600n : null
+      );
+
+      expect(candidate.walletId).toBe("privy_settle_authority");
+      expect(candidate.custodyWalletId).toBe("cwlt_settle");
+    }
+  );
 
   it("sends a funding leg's tokens to the escrow, not to a settlement destination", () => {
     const { candidate } = buildDvpTradeActionPolicyCandidate(
