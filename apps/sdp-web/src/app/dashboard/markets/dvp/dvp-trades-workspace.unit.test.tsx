@@ -95,8 +95,14 @@ describe("DvpTradesWorkspace", () => {
     expect(renderList([trade(), trade({ id: "dvp_2" })])).toContain("Search trades");
   });
 
-  it("counts nothing while every trade is shown", () => {
-    expect(renderList([trade(), trade({ id: "dvp_2" })])).not.toContain("2 of 2");
+  // Four short labels behind a chevron is a dropdown charging you a click to
+  // read what it could have shown.
+  it("shows every status choice rather than hiding them in a dropdown", () => {
+    const html = renderList([trade(), trade({ id: "dvp_2" })]);
+
+    for (const label of ["All", "Awaiting funding", "Ready to settle", "Finished"]) {
+      expect(html).toContain(label);
+    }
   });
 
   it("keeps create reachable once trades exist", () => {

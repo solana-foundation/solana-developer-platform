@@ -1,21 +1,15 @@
 "use client";
 
-import {
-  ArrowLeftRightIcon,
-  ChevronRightIcon,
-  PlusIcon,
-  SearchIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
+import { ArrowLeftRightIcon, ChevronRightIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { Input } from "@/components/ui/input";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Select, SelectItem } from "@/components/ui/select";
+import { SearchInput } from "@/components/ui/search-input";
 import {
   Table,
   TableBody,
@@ -24,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
@@ -87,6 +82,21 @@ const STATUS_FILTERS = {
 } as const satisfies Record<string, readonly DvpTradeStatus[] | null>;
 
 type StatusFilter = keyof typeof STATUS_FILTERS;
+
+/**
+ * Their labels, in the order the segmented control shows them — which is the
+ * order a trade moves through, so the control reads as a lifecycle rather than
+ * as an arbitrary set. `satisfies` keeps it exhaustive: a fifth filter is a
+ * compile error here rather than a missing segment at runtime.
+ */
+const STATUS_FILTER_LABELS = {
+  all: "DashboardMarkets.dvp.filterAll",
+  open: "DashboardMarkets.dvp.filterOpen",
+  ready: "DashboardMarkets.dvp.filterReady",
+  closed: "DashboardMarkets.dvp.filterClosed",
+} as const satisfies Record<StatusFilter, MessageKey>;
+
+const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
 
 export function DvpTradesWorkspace({
   trades,
@@ -175,43 +185,45 @@ export function DvpTradesWorkspace({
             {/* Only once there is enough to sift. A filter bar over three rows
                 is furniture. */}
             {trades.length > 1 ? (
-              /* One row, not three stacked blocks. `Select`'s trigger is w-full
-                 by design, so dropping it into a wrapping flex row made a
-                 two-word status filter span the page and pushed everything else
-                 onto its own line — while the search sat in a max-w-xs box too
-                 narrow to finish its own placeholder. The search is the field
-                 that wants the room, so it takes what is left and the other two
-                 are sized to their content. */
-              <div className="flex flex-wrap items-center gap-3">
-                <Input
-                  aria-label={t("DashboardMarkets.dvp.filterSearchLabel")}
-                  className="min-w-0 flex-1 basis-64"
-                  iconLeft={<SearchIcon />}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("DashboardMarkets.dvp.filterSearchPlaceholder")}
-                  value={query}
-                />
-                <Select
-                  ariaLabel={t("DashboardMarkets.dvp.filterStatusLabel")}
-                  className="w-44 shrink-0"
-                  onValueChange={(next) => setStatus((next as StatusFilter) ?? "all")}
-                  value={status}
-                >
-                  <SelectItem value="all">{t("DashboardMarkets.dvp.filterAll")}</SelectItem>
-                  <SelectItem value="open">{t("DashboardMarkets.dvp.filterOpen")}</SelectItem>
-                  <SelectItem value="ready">{t("DashboardMarkets.dvp.filterReady")}</SelectItem>
-                  <SelectItem value="closed">{t("DashboardMarkets.dvp.filterClosed")}</SelectItem>
-                </Select>
-                {/* Only while it is telling you something. "2 of 2" next to an
-                    untouched filter is a number that answers nothing. */}
-                {visible.length === trades.length ? null : (
-                  <span className="shrink-0 text-tertiary text-xs tabular-nums">
-                    {t("DashboardMarkets.dvp.filterCount", {
-                      shown: String(visible.length),
-                      total: String(trades.length),
-                    })}
-                  </span>
-                )}
+              /* The toolbar every other workspace uses: the shared SearchInput
+                 on the right, the status choices as one segmented control on
+                 the left. This was a bare Input beside a Select, and Select's
+                 trigger is w-full by design — so a two-word status filter
+                 claimed the whole row and shoved the search onto a line of its
+                 own, in a box too narrow to finish its own placeholder.
+
+                 A segmented control also shows the four choices instead of
+                 hiding them behind a chevron, which for four short labels is
+                 what a dropdown costs you. Contained, so it can never shed an
+                 orphaned pill onto a wrap line; on a narrow viewport it scrolls
+                 inside its own strip. Matches the integrations catalog. */
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="overflow-x-auto [scrollbar-width:none]">
+                  <SegmentedControl
+                    aria-label={t("DashboardMarkets.dvp.filterStatusLabel")}
+                    items={STATUS_FILTER_ORDER.map((option) => ({
+                      value: option,
+                      label: t(STATUS_FILTER_LABELS[option]),
+                    }))}
+                    // Re-clicking the active segment can emit an empty value
+                    // from the underlying toggle group, and a status filter
+                    // always has a selection.
+                    onValueChange={(next) => next && setStatus(next as StatusFilter)}
+                    value={status}
+                  />
+                </div>
+                <div className="w-full md:w-64 md:shrink-0">
+                  <SearchInput
+                    aria-label={t("DashboardMarkets.dvp.filterSearchLabel")}
+                    clear={{
+                      label: t("DashboardMarkets.dvp.filterClearSearch"),
+                      onClear: () => setQuery(""),
+                    }}
+                    onChange={(event) => setQuery(event.currentTarget.value)}
+                    placeholder={t("DashboardMarkets.dvp.filterSearchPlaceholder")}
+                    value={query}
+                  />
+                </div>
               </div>
             ) : null}
 
