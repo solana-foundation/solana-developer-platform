@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { RingsHealth } from "./helius-rings.data";
 import {
+  formatAssetAmount,
   formatBaseUnits,
   healthAlerts,
   healthReason,
-  readShieldedAmount,
+  parseDecimalToBaseUnits,
   shortenShieldedAddress,
 } from "./helius-rings.utils";
+
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
 /**
  * A shielded amount is a uint64 count of base units, so each expectation below
@@ -63,38 +67,51 @@ describe("formatBaseUnits", () => {
   });
 });
 
-describe("readShieldedAmount", () => {
-  it("renders at the mint's scale when the API reported one", () => {
-    expect(readShieldedAmount("1500000", 6)).toEqual({ scale: "exact", text: "1.5" });
-    expect(readShieldedAmount("18446744073709551615", 9)).toEqual({
-      scale: "exact",
-      text: "18446744073.709551615",
-    });
+describe("parseDecimalToBaseUnits", () => {
+  it("scales integer amounts by the mint's decimals", () => {
+    expect(parseDecimalToBaseUnits("1", 9)).toBe("1000000000");
+    expect(parseDecimalToBaseUnits("0", 9)).toBe("0");
+    expect(parseDecimalToBaseUnits("42", 6)).toBe("42000000");
   });
 
-  it("keeps a real zero scale apart from an unknown one", () => {
-    // Identical digits, different claims: only the first says this mint has no
-    // fraction. Collapsing them makes 1.50 USDC read as 1500000 whole tokens.
-    expect(readShieldedAmount("1500000", 0)).toEqual({ scale: "exact", text: "1500000" });
-    expect(readShieldedAmount("1500000", null)).toEqual({ scale: "baseUnits", text: "1500000" });
+  it("preserves the fraction exactly up to the mint's precision", () => {
+    expect(parseDecimalToBaseUnits("1.01", 9)).toBe("1010000000");
+    expect(parseDecimalToBaseUnits("0.000000001", 9)).toBe("1");
+    expect(parseDecimalToBaseUnits("1.5", 6)).toBe("1500000");
   });
 
-  it("carries an unknown scale's digits through exactly", () => {
-    expect(readShieldedAmount("18446744073709551615", null)).toEqual({
-      scale: "baseUnits",
-      text: "18446744073709551615",
-    });
+  it("refuses more precision than the mint carries", () => {
+    // Truncating silently would send a smaller amount than the operator typed.
+    expect(parseDecimalToBaseUnits("1.0000000001", 9)).toBeNull();
+    expect(parseDecimalToBaseUnits("0.0000001", 6)).toBeNull();
   });
 
-  it("renders nothing for an amount that is not a count of base units", () => {
-    expect(readShieldedAmount("1.5", null)).toEqual({ scale: "unrenderable" });
-    expect(readShieldedAmount("-1", 6)).toEqual({ scale: "unrenderable" });
-    expect(readShieldedAmount("1000000", 256)).toEqual({ scale: "unrenderable" });
+  it("refuses shapes that are not a decimal number", () => {
+    for (const s of ["", ".", ".5", "1.", "-1", "1e9", "0x1", "1,5", " 1", "1 ", "abc"]) {
+      expect(parseDecimalToBaseUnits(s, 9)).toBeNull();
+    }
+  });
+});
+
+describe("formatAssetAmount", () => {
+  it("renders the amount at the mint's scale, suffixed with the symbol", () => {
+    expect(formatAssetAmount("1010000000", SOL_MINT)).toBe("1.01 SOL");
+    expect(formatAssetAmount("1", SOL_MINT)).toBe("0.000000001 SOL");
+    expect(formatAssetAmount("1500000", USDC_MINT)).toBe("1.5 USDC");
+  });
+
+  it("falls back to raw digits for an unknown mint", () => {
+    expect(formatAssetAmount("123", "unknown-mint")).toBe("123");
+  });
+
+  it("reads a missing amount as an em dash", () => {
+    expect(formatAssetAmount(null, SOL_MINT)).toBe("—");
+    expect(formatAssetAmount("", SOL_MINT)).toBe("—");
   });
 });
 
 function health(overrides: Partial<RingsHealth> = {}): RingsHealth {
-  return { rpc: "green", prover: "green", photon: "green", gateway: "green", ...overrides };
+  return { rpc: "green", prover: "green", photon: "green", ...overrides };
 }
 
 describe("healthReason", () => {
@@ -120,16 +137,14 @@ describe("healthAlerts", () => {
           rpc: "red",
           prover: "red",
           photon: "red",
-          gateway: "red",
           detail: {
             "rpc.reason": reason,
             "prover.reason": reason,
             "photon.reason": reason,
-            "gateway.reason": reason,
           },
         })
       )
-    ).toEqual([{ components: ["rpc", "prover", "photon", "gateway"], reason }]);
+    ).toEqual([{ components: ["rpc", "prover", "photon"], reason }]);
   });
 
   it("keeps distinct reasons apart, in component order", () => {
@@ -151,7 +166,7 @@ describe("healthAlerts", () => {
     expect(
       healthAlerts(health({ detail: { "rpc.reason": "stale note on a healthy probe" } }))
     ).toEqual([]);
-    expect(healthAlerts(health({ gateway: "red" }))).toEqual([]);
+    expect(healthAlerts(health({ rpc: "red" }))).toEqual([]);
     expect(healthAlerts(null)).toEqual([]);
   });
 });

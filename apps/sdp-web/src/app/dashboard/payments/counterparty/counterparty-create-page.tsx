@@ -1,34 +1,13 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
+import { Loader2Icon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
-import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { StepContent } from "./components/step-content";
-import { StepFooter } from "./components/step-footer";
 import { useCounterpartyCreate } from "./counterparty-create-context";
-import type { StepId } from "./counterparty-create-schemas";
 import { CryptoAccountsPhase } from "./crypto-accounts-phase";
-
-const stepMeta: Record<StepId, { label: MessageKey; title: MessageKey; description: MessageKey }> =
-  {
-    basics: {
-      label: "DashboardPayments.counterparty.basics",
-      title: "DashboardPayments.counterparty.basicInfo",
-      description: "DashboardPayments.counterparty.basicInfoDescription",
-    },
-    review: {
-      label: "DashboardPayments.counterparty.review",
-      title: "DashboardPayments.counterparty.reviewCreate",
-      description: "DashboardPayments.counterparty.reviewCreateDescription",
-    },
-  };
-
-const variants = {
-  initial: (direction: number) => ({ x: direction * 32, opacity: 0 }),
-  animate: { x: 0, opacity: 1 },
-  exit: (direction: number) => ({ x: direction * -32, opacity: 0 }),
-};
+import { BasicsStep } from "./steps/basics-step";
 
 interface CounterpartyCreatePageProps {
   embedded?: boolean;
@@ -40,44 +19,81 @@ export function CounterpartyCreatePage({
   onCancel,
 }: CounterpartyCreatePageProps) {
   const t = useTranslations();
-  const { step, steps, currentStepId, direction, createdCounterparty } = useCounterpartyCreate();
-  const wizardSteps = steps.map((stepId) => ({
-    label: t(stepMeta[stepId].label),
-    title: t(stepMeta[stepId].title),
-  }));
+  const router = useRouter();
+  const { submit, submitting, submitError, createdCounterparty } = useCounterpartyCreate();
+
+  const wizardSteps = [
+    {
+      label: t("DashboardPayments.counterparty.basics"),
+      title: t("DashboardPayments.counterparty.basicInfo"),
+    },
+    {
+      label: t("DashboardPayments.counterparty.cryptoWallet"),
+      title: t("DashboardPayments.counterparty.addCryptoAccount"),
+    },
+  ];
 
   if (createdCounterparty) {
     return <CryptoAccountsPhase embedded={embedded} steps={wizardSteps} />;
   }
 
+  const cancel = onCancel ?? (() => router.push("/dashboard/payments/counterparty"));
+
+  const content = (
+    <div className="space-y-6">
+      <BasicsStep />
+      {submitError ? <p className="text-sm text-error">{submitError}</p> : null}
+    </div>
+  );
+
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <Button type="button" variant="secondary" onClick={cancel} disabled={submitting}>
+        {t("DashboardPayments.counterparty.cancel")}
+      </Button>
+      <Button
+        type="button"
+        onClick={submit}
+        disabled={submitting}
+        iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
+      >
+        {submitting
+          ? t("DashboardPayments.counterparty.creating")
+          : t("DashboardPayments.counterparty.create")}
+      </Button>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-6">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-medium tracking-tight text-primary">
+            {t("DashboardPayments.counterparty.basicInfo")}
+          </h2>
+          <p className="text-sm text-secondary">
+            {t("DashboardPayments.counterparty.basicInfoDescription")}
+          </p>
+        </div>
+        {content}
+        {footer}
+      </div>
+    );
+  }
+
   return (
     <WizardFrame
       steps={wizardSteps}
-      currentStep={step}
+      currentStep={0}
       progressLabel={t("DashboardPayments.counterparty.stepProgress", {
-        current: step + 1,
-        total: steps.length,
+        current: 1,
+        total: wizardSteps.length,
       })}
-      description={t(stepMeta[currentStepId].description)}
-      footer={<StepFooter onCancel={onCancel} />}
+      description={t("DashboardPayments.counterparty.basicInfoDescription")}
+      footer={footer}
       maxWidthClassName="max-w-xl"
     >
-      <div className="relative min-h-80 overflow-hidden">
-        <AnimatePresence mode="wait" custom={direction}>
-          <motion.div
-            key={currentStepId}
-            custom={direction}
-            variants={variants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="space-y-6 px-1 py-1"
-          >
-            <StepContent stepId={currentStepId} />
-          </motion.div>
-        </AnimatePresence>
-      </div>
+      {content}
     </WizardFrame>
   );
 }

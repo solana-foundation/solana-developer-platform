@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
 import type { PrivateChannelBalance } from "@sdp/types";
 import {
   type Address,
@@ -87,6 +88,8 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     instance: {
       id: INSTANCE_ID,
       gatewayUrl: GATEWAY_URL,
+      escrowProgramId: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
+      escrowInstanceAddr: senderSigner.address,
     },
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -102,7 +105,16 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     },
     amount: "1.25",
     gatewayAuth: auth,
-    cluster: "devnet" as const,
+    projectRpc: {
+      cluster: "devnet" as const,
+      rpc: {
+        getAccountInfo: () => ({
+          send: async () => ({ value: { owner: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } }),
+        }),
+      } as never,
+      target: {} as never,
+      probe: vi.fn(),
+    },
     ...overrides,
   };
 }

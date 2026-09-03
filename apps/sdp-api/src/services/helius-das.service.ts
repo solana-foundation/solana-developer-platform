@@ -6,6 +6,7 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { getDb } from "@/db";
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
 import type { Env } from "@/types/env";
 
@@ -247,12 +248,40 @@ function toTrackedTokenBalance(
   };
 }
 
+async function dasRequest(url: string, init: RequestInit): Promise<unknown> {
+  const startedAt = Date.now();
+  const fail = (error: unknown) => {
+    logVendorCallFailure("helius-das", "rpc", error, startedAt);
+    throw error;
+  };
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    return fail(error);
+  }
+  if (!response.ok) {
+    return fail(new Error(`Helius DAS request failed (${response.status})`));
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    return fail(error);
+  }
+  const rpcError = (payload as { error?: { message?: string } } | null)?.error?.message;
+  if (rpcError) {
+    return fail(new Error(rpcError));
+  }
+  return payload;
+}
+
 async function fetchTrackedBalancesForOwner(
   heliusDasUrl: string,
   ownerAddress: string,
   trackedAssets: Map<string, TrackedAssetDefinition>
 ): Promise<CustodyWalletTokenBalance[]> {
-  const response = await fetch(heliusDasUrl, {
+  const payload = (await dasRequest(heliusDasUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -271,16 +300,7 @@ async function fetchTrackedBalancesForOwner(
         },
       },
     }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Helius DAS request failed (${response.status})`);
-  }
-
-  const payload = (await response.json()) as HeliusSearchAssetsResponse;
-  if (payload.error?.message) {
-    throw new Error(payload.error.message);
-  }
+  })) as HeliusSearchAssetsResponse;
 
   return (payload.result?.items ?? [])
     .map((item) => toTrackedTokenBalance(item, trackedAssets))
@@ -296,7 +316,7 @@ async function fetchFungibleAssetsByMint(
     return [];
   }
 
-  const response = await fetch(heliusDasUrl, {
+  const payload = (await dasRequest(heliusDasUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -312,16 +332,7 @@ async function fetchFungibleAssetsByMint(
         },
       },
     }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Helius DAS request failed (${response.status})`);
-  }
-
-  const payload = (await response.json()) as HeliusGetAssetBatchResponse;
-  if (payload.error?.message) {
-    throw new Error(payload.error.message);
-  }
+  })) as HeliusGetAssetBatchResponse;
 
   return payload.result ?? [];
 }

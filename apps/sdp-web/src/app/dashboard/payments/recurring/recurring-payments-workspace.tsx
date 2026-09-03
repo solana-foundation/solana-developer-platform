@@ -117,7 +117,7 @@ export function RecurringPaymentsWorkspace({
   };
 
   const walletById = useMemo(
-    () => new Map(wallets.map((wallet) => [wallet.walletId, wallet])),
+    () => new Map(wallets.map((wallet) => [wallet.id, wallet])),
     [wallets]
   );
   const counterpartyById = useMemo(
@@ -126,9 +126,12 @@ export function RecurringPaymentsWorkspace({
   );
 
   const getWalletLabel = (recurringPayment: PaymentRecurringPayment) => {
-    const wallet = walletById.get(recurringPayment.sourceWalletId);
+    const wallet = recurringPayment.sourceCustodyWalletId
+      ? walletById.get(recurringPayment.sourceCustodyWalletId)
+      : undefined;
     return (
-      wallet?.label || (wallet ? shortenAddress(wallet.publicKey) : recurringPayment.sourceWalletId)
+      wallet?.label ||
+      (wallet ? shortenAddress(wallet.publicKey) : recurringPayment.sourceProviderWalletId)
     );
   };
   const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) =>
@@ -308,7 +311,9 @@ export function RecurringPaymentsWorkspace({
                 <TableBody>
                   {visibleRecurringPayments.map((recurringPayment) => {
                     const resolvedToken = getResolvedToken(recurringPayment);
-                    const wallet = walletById.get(recurringPayment.sourceWalletId);
+                    const wallet = recurringPayment.sourceCustodyWalletId
+                      ? walletById.get(recurringPayment.sourceCustodyWalletId)
+                      : undefined;
                     return (
                       <TableRow
                         key={recurringPayment.id}

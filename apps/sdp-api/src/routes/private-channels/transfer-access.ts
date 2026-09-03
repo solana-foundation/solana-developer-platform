@@ -69,12 +69,6 @@ async function resolveTransferActor(
   channelId: string
 ): Promise<TransferActorContext> {
   const auth = getAuth(c);
-  if (!auth.userId) {
-    throw forbidden(
-      "Private Channel transfers require a user identity and are not available for API-key auth."
-    );
-  }
-
   const projectId = requireProjectId(c);
   const instanceRow = await requireActiveInstance(c);
   const channel = await getPrivateChannelRepository(c).getChannel({
@@ -87,15 +81,15 @@ async function resolveTransferActor(
 
   const scope = { organizationId: auth.organizationId, projectId };
   const userRepository = getPrivateChannelUserRepository(c);
-  const actor = await userRepository.findByProjectAndUser(scope, auth.userId);
+  const actor = await userRepository.findDefaultPrincipal(scope, instanceRow.id);
   if (!actor) {
-    throw forbidden("You must be a Private Channels member to transfer funds.");
+    throw forbidden("This project has no active Private Channels principal.");
   }
 
   const memberships = await userRepository.listMembershipsForUser(actor.id);
   const membership = memberships.find((item) => item.channel_id === channel.id);
   if (!membership) {
-    throw forbidden("You must be a member of this channel to transfer funds.");
+    throw forbidden("The project's default principal does not have access to this channel.");
   }
 
   const instance = mapPrivateChannelInstanceRow(instanceRow);
@@ -146,7 +140,7 @@ export async function resolveTransferCreateContext(
   );
   if (!verifiedSource) {
     throw forbidden(
-      "The source custody wallet must be verified by the acting Private Channels member."
+      "The source custody wallet must be enrolled under the project's Private Channels principal."
     );
   }
 

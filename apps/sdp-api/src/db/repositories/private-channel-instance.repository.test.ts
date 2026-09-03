@@ -71,6 +71,7 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     if (!inserted) return;
     expect(inserted.id).toMatch(/^pci_/);
     expect(inserted.gateway_url).toBe(SANDBOX_DEFAULTS.gatewayUrl);
+    expect(inserted.chain_rpc_url).toBe("");
     expect(inserted.is_active).toBe(true);
     expect(inserted.auth_url).toBe(SANDBOX_DEFAULTS.authUrl);
 
@@ -101,6 +102,32 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
     });
     expect(active).toBeNull();
+  });
+
+  it("updateActive cannot update an instance outside its project scope", async () => {
+    const created = await repo.createActive({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      ...SANDBOX_DEFAULTS,
+    });
+    if (!created) throw new Error("createActive returned null");
+
+    const updated = await repo.updateActive({
+      id: created.id,
+      organizationId: TEST_ORG.id,
+      projectId: OTHER_PROJECT_ID,
+      ...SANDBOX_DEFAULTS,
+      gatewayUrl: "http://34.71.147.163:9900",
+    });
+
+    expect(updated).toBeNull();
+    expect(
+      await repo.getActiveByProject({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).toMatchObject({ gateway_url: SANDBOX_DEFAULTS.gatewayUrl });
   });
 
   it("findByProjectAndGateway returns inactive rows too", async () => {
@@ -145,7 +172,7 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     });
     expect(reactivated?.id).toBe(created.id);
     expect(reactivated?.is_active).toBe(true);
-    expect(reactivated?.chain_rpc_url).toBe("https://mainnet.helius-rpc.com/?api-key=NEW");
+    expect(reactivated?.chain_rpc_url).toBe("");
     expect(reactivated?.auth_url).toBe("http://auth.example:8903");
     // gateway_url is the identity key and must not change on reactivation.
     expect(reactivated?.gateway_url).toBe(created.gateway_url);

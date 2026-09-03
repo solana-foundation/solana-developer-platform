@@ -45,6 +45,7 @@ type TransferDetailFieldSpec<TSettlement> =
     };
 
 export interface ProviderTransferDetailRow {
+  key: MessageKey;
   label: string;
   value: string;
   /** Renders the value as an external link. */
@@ -58,12 +59,6 @@ function moonpayTrackerUrl(transactionId: string): string {
 }
 
 const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] = [
-  {
-    kind: "link",
-    labelKey: "DashboardPayments.transferDetails.receipt",
-    textKey: "DashboardPayments.transferDetails.viewReceipt",
-    href: (settlement) => moonpayTrackerUrl(settlement.transactionId),
-  },
   {
     kind: "text",
     labelKey: "DashboardPayments.transferDetails.providerFee",
@@ -163,14 +158,19 @@ function rowsFromSpecs<TSettlement>(
       case "text": {
         const text = spec.text(settlement);
         if (text !== null) {
-          rows.push({ label: t(spec.labelKey), value: text });
+          rows.push({ key: spec.labelKey, label: t(spec.labelKey), value: text });
         }
         break;
       }
       case "link": {
         const href = spec.href(settlement, context);
         if (href !== null) {
-          rows.push({ label: t(spec.labelKey), value: t(spec.textKey), href });
+          rows.push({
+            key: spec.labelKey,
+            label: t(spec.labelKey),
+            value: t(spec.textKey),
+            href,
+          });
         }
         break;
       }
@@ -178,6 +178,7 @@ function rowsFromSpecs<TSettlement>(
         const signature = spec.signature(settlement);
         if (signature !== null) {
           rows.push({
+            key: spec.labelKey,
             label: t(spec.labelKey),
             value: shortenAddress(signature),
             href: explorerTxUrl(signature, context.cluster),
@@ -208,9 +209,21 @@ function moonpayBuilder(
   t: Translate
 ): ProviderTransferDetailRow[] {
   const settlement = transfer.settlement;
-  return settlement !== undefined && settlement.provider === "moonpay"
-    ? rowsFromSpecs(MOONPAY_FIELDS, settlement, context, t)
+  const receipt: ProviderTransferDetailRow[] = transfer.providerReference
+    ? [
+        {
+          key: "DashboardPayments.transferDetails.receipt",
+          label: t("DashboardPayments.transferDetails.receipt"),
+          value: t("DashboardPayments.transferDetails.viewReceipt"),
+          href: moonpayTrackerUrl(transfer.providerReference),
+        },
+      ]
     : [];
+  const settlementRows =
+    settlement !== undefined && settlement.provider === "moonpay"
+      ? rowsFromSpecs(MOONPAY_FIELDS, settlement, context, t)
+      : [];
+  return [...receipt, ...settlementRows];
 }
 
 function coinbaseBuilder(

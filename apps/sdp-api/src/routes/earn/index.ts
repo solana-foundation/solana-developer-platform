@@ -7,15 +7,15 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
-  getEarnButtonConfiguration,
-  getPublicEarnButtonConfiguration,
-  upsertEarnButtonConfiguration,
-} from "./handlers/button-configurations";
-import {
   createEarnExternalWalletDeposit,
   createEarnExternalWalletDepositTransaction,
   createEarnExternalWalletWithdrawal,
   createEarnExternalWalletWithdrawalTransaction,
+  getEarnExternalWalletEarnings,
+  getEarnExternalWalletMovement,
+  getEarnExternalWalletPositionSummary,
+  listEarnExternalWalletMovements,
+  listEarnExternalWalletPositions,
 } from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
@@ -32,7 +32,9 @@ import {
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   createEarnVaultDeposit,
+  createEarnVaultDepositPreview,
   createEarnVaultWithdrawal,
+  createEarnVaultWithdrawalPreview,
   extractEarnVaultDepositPolicyCandidate,
   extractEarnVaultWithdrawalPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
@@ -44,7 +46,6 @@ import {
   listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import {
-  earnButtonConfigurationSchema,
   earnExternalWalletDepositTransactionSchema,
   earnExternalWalletSubmitSchema,
   earnExternalWalletWithdrawalTransactionSchema,
@@ -52,7 +53,9 @@ import {
   earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
+  earnVaultDepositPreviewSchema,
   earnVaultDepositSchema,
+  earnVaultWithdrawalPreviewSchema,
   earnVaultWithdrawalSchema,
 } from "./schemas";
 
@@ -71,29 +74,49 @@ async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
 
 earn.use("*", requireEarnFeature);
 
-// Public, read-only engineering handoff. Registered before auth intentionally:
-// possession of the unguessable token grants access to strategy/style only,
-// never tenant metadata or an API key.
-earn.get("/button-configurations/public/:publicToken", getPublicEarnButtonConfiguration);
-
 earn.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 earn.use("*", projectContextMiddleware());
-
-earn.get(
-  "/button-configurations/current",
-  requirePermissions("earn:read"),
-  getEarnButtonConfiguration
-);
-earn.put(
-  "/button-configurations/current",
-  requirePermissions("earn:write"),
-  validateBody(earnButtonConfigurationSchema),
-  upsertEarnButtonConfiguration
-);
 
 // Strategy catalogue (source: DB, admitted only by the sync cron).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
+
+// B2B2C live holdings (PRO-1724). Summary is declared before the owner path so
+// the literal segment can never be captured as a Solana address. No
+// `wallets:read`: these are end-user wallets SDP does not custody.
+earn.get(
+  "/external-wallet/positions/summary",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletPositionSummary
+);
+earn.get(
+  "/external-wallet/positions/:ownerAddress",
+  requirePermissions("earn:read"),
+  listEarnExternalWalletPositions
+);
+
+// B2B2C activity and earnings (PRO-1772): the reads that close the loop the
+// money routes below open. Same posture as the position reads — `earn:read`
+// only, no `wallets:read` (end-user wallets carry no custody bindings), and NO
+// provider gate: these report on money that already moved (ADR 0002). The
+// movements collection is declared before its `:movementId` detail so a
+// literal segment can never be captured as an id; the owner rides the
+// collection as a REQUIRED query filter for the same reason.
+earn.get(
+  "/external-wallet/movements",
+  requirePermissions("earn:read"),
+  listEarnExternalWalletMovements
+);
+earn.get(
+  "/external-wallet/movements/:movementId",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletMovement
+);
+earn.get(
+  "/external-wallet/earnings/:ownerAddress",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletEarnings
+);
 
 // Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
 // from a custody wallet, so unlike /programs there is no provider wallet to
@@ -121,6 +144,16 @@ earn.post(
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
   }),
   createEarnVaultDeposit
+);
+// The deposit QUOTE: a read carrying the deposit's own money-in gates (it
+// exists only to open a new position) but no policy gate, no wallet and no
+// idempotency key — it moves nothing. POST because the parameters are a body,
+// exactly like the custodial withdrawal-preview.
+earn.post(
+  "/vault-deposit-previews",
+  requirePermissions("earn:read"),
+  validateBody(earnVaultDepositPreviewSchema),
+  createEarnVaultDepositPreview
 );
 // The deposit READS take no policy gate and no provider gate — they move no
 // money and report on money that already left the wallet. They are what makes a
@@ -157,6 +190,21 @@ earn.post(
     findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
   }),
   createEarnVaultWithdrawal
+);
+// The exit QUOTE: a read with EXIT gates only — position scoping and the
+// read-side wallet binding (both 404), capability (501), and deliberately
+// nothing money-in-shaped (ADR 0002 exit safety): no surfacing, no
+// entitlement, no admission, no environment capability.
+earn.post(
+  "/vault-withdrawal-previews",
+  // wallets:read is NOT a money-in gate, so ADR 0002 does not argue for
+  // dropping it — and dropping it is load-bearing the wrong way: for a key
+  // with no wallet bindings the binding check is a documented no-op, so
+  // earn:read alone would read any org position's live payout here while
+  // GET /vault-positions answers the same key 403.
+  requirePermissions("earn:read", "wallets:read"),
+  validateBody(earnVaultWithdrawalPreviewSchema),
+  createEarnVaultWithdrawalPreview
 );
 // Withdrawal READS mirror the deposit reads: no policy gate, no provider gate,
 // collection before the `:movementId` route, `?requestId=` finds the whole leg

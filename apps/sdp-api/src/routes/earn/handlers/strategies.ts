@@ -7,7 +7,6 @@ import {
   isEarnProviderSurfaced,
   type ListEarnStrategiesResponse,
   type SdpEnvironment,
-  type SolanaCluster,
   SURFACED_EARN_PROVIDERS,
 } from "@sdp/types";
 import type { EarnStrategyRow } from "@/db/repositories";
@@ -15,85 +14,8 @@ import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AppContext, getEarnRepository, resolveSdpEnvironment } from "../context";
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
+import { CURATED_VAULTS, HIDDEN_STRATEGY_TERMS, HIDDEN_VAULTS } from "./curation";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
-
-/**
- * Indexed for catalogue completeness, intentionally absent from every public
- * strategy read. Keep the terms here at the API policy boundary rather than in
- * Ground's client or the sync, so the DB continues to reflect what Ground
- * reports and pagination can exclude the rows before applying its window.
- *
- * Note this is a different question from `fundable` below, and the two must
- * stay separate: this hides rows SDP has decided not to SHOW, while `fundable`
- * states whether an instrument the caller CAN see exists on their cluster. A
- * hidden row is absent; an un-fundable row is present and honest about itself.
- */
-const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
-
-/**
- * ── CATALOGUE CURATION, PER ENVIRONMENT ─────────────────────────────────────
- * The knob for a more opinionated shelf. Edit the lists below; nothing else
- * needs to change, and both take effect on the next request (no sync, no
- * migration, no cache to bust).
- *
- * **Keyed by CLUSTER, and that is not tidiness — a flat list is a trap.**
- * A vault is identified by its ADDRESS, and addresses are cluster-specific:
- * Kamino's mainnet shelf and its devnet shelf share no references at all. A
- * single `CURATED_VAULTS.kamino` holding mainnet addresses would therefore act
- * as an allowlist that matches NOTHING on devnet and blank the entire devnet
- * shelf — a curation choice about mainnet silently deleting the sandbox one.
- * Keying by the cluster the address lives on makes that impossible to express
- * by accident. (These were environment-keyed until PRO-1742. Now that a
- * non-production environment also carries the mirrored mainnet shelf, cluster
- * keying is also what makes the sandbox mirror inherit exactly the curation
- * production applies — the mirror exists to REVIEW that curation, so the two
- * views must never diverge.)
- *
- * **Always key on the vault ADDRESS, never the name.** Kamino's registry is
- * permissionless and the name is free text chosen by whoever created the vault,
- * so a name-keyed rule can be dodged by renaming and tripped by impersonating a
- * curated vault's name. `HIDDEN_STRATEGY_TERMS` above is name-based on purpose
- * and is safe only because it can exclusively REMOVE rows; the same trick
- * pointed the other way would be an admission hole. Mainnet addresses are in
- * `docs/earn/kamino-catalogue-inventory.md`; devnet ones come from the on-chain
- * read (`packages/sdp-earn/src/providers/kamino/devnet.ts`).
- *
- * Which to reach for:
- * - `HIDDEN_VAULTS` — subtractive. Drop a specific vault (dust, a duplicate, one
- *   we do not want to stand behind) while the rest of that environment's shelf
- *   keeps flowing in as the provider lists it. Start here.
- * - `CURATED_VAULTS` — a hand-picked shelf. An environment/provider pair listed
- *   here shows ONLY those vaults, so a newly created vault does NOT appear until
- *   someone adds it. Maximum editorial control, at the cost of a deploy per
- *   addition. An empty array means that provider shows nothing in that
- *   environment; an ABSENT key means no allowlist at all.
- *
- * Neither list touches what the sync STORES, so a curated-away vault stays in
- * `earn_strategies` and un-curating it is a deploy rather than an hour's wait.
- * Neither is an allocation gate either: `assertKnownYieldSources` reads the
- * stored catalogue, so an existing program pointed at a curated-away vault keeps
- * working — hiding a shelf is a browse decision, and freezing a customer's own
- * position over it would not be.
- */
-const HIDDEN_VAULTS: Partial<Record<SolanaCluster, readonly `${EarnProviderId}:${string}`[]>> = {
-  "mainnet-beta": [
-    // "kamino:8F2mL9wLbYcQ1t2WcTgAsD5nDgQ1XjqK8kY7z4Q9example",
-  ],
-  devnet: [
-    // "kamino:7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-  ],
-};
-
-const CURATED_VAULTS: Partial<
-  Record<SolanaCluster, Partial<Record<EarnProviderId, readonly string[]>>>
-> = {
-  "mainnet-beta": {
-    // kamino: ["<mainnet vault address>"],
-  },
-  devnet: {
-    // kamino: ["<devnet vault address>"],
-  },
-};
 
 /**
  * Rows absent from every public strategy read, for either of TWO independent

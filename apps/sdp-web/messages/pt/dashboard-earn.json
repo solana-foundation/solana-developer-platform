@@ -77,7 +77,14 @@
       "withdrawalApprovalUnavailable": "Um provedor pode marcar uma retirada como Aguardando aprovação. A SDP ainda não consegue executar essa aprovação; um aprovador autorizado do provedor deve concluí-la fora deste Dashboard, e você não deve reenviá-la.",
       "provider": "Provedor",
       "unnamedProgram": "Estratégia sem nome",
-      "usdSymbol": "USD"
+      "usdSymbol": "USD",
+      "summaryDeposited": "Depositado",
+      "summaryApy": "APY est.",
+      "summaryApyCaption": "Taxa ao vivo ponderada pelo valor das posições abertas",
+      "summaryApyUnavailable": "Indisponível até que cada posição aberta tenha valor e taxa ao vivo",
+      "viewAll": "Ver tudo",
+      "liquidity": "Liquidez",
+      "yourPosition": "Sua posição"
     },
     "earnProgram": {
       "eyebrow": "Yield embutido",
@@ -183,7 +190,48 @@
       "unavailableEnvironmentDescription": "Novos depósitos no vault Earn ficam restritos ao sandbox até que as posições do vault apareçam no portfólio de produção.",
       "unavailableAccessDescription": "Não foi possível verificar o acesso do provedor para esta organização, então a estratégia não pode ser configurada com segurança.",
       "unavailableProviderDescription": "Este provedor não está habilitado para a organização e o ambiente de projeto selecionados.",
-      "returnToEarn": "Voltar para Earn"
+      "returnToEarn": "Voltar para Earn",
+      "dashboardTitle": "Portfólio do cliente",
+      "dashboardDescription": "Veja todas as posições de usuários finais neste projeto, agrupadas em uma visão completa ao vivo. Os valores são atualizados a partir do provedor e nunca são estimados.",
+      "configure": "Configurar o Embedded Yield",
+      "configureShort": "Configurar",
+      "customerWallets": "Wallets dos clientes",
+      "livePositions": "Posições ao vivo",
+      "assetsEarning": "Ativos rendendo",
+      "liveValue": "Valor ao vivo",
+      "portfolioTitle": "Portfólio por estratégia",
+      "portfolioDescription": "Valor ao vivo de todos os seus clientes, agrupado por estratégia e Token de depósito.",
+      "portfolioErrorTitle": "Portfólio do cliente indisponível",
+      "portfolioErrorDescription": "O portfólio completo ao vivo não pôde ser carregado. Nenhum saldo é exibido até que cada página seja confirmada.",
+      "portfolioRefreshError": "A atualização mais recente falhou. Exibindo o último portfólio completo enquanto tentamos novamente automaticamente.",
+      "incompletePortfolio": "Os valores ao vivo estão indisponíveis para {count} posição(ões). Os totais afetados são omitidos em vez de serem exibidos como zero ou parcial.",
+      "valueUnavailable": "Indisponível",
+      "flowPreview": "Visualizar a UI",
+      "getStarted": "Começar",
+      "clusterToggleLabel": "Rede de estratégias",
+      "mainnetCatalogueDescription": "Visualize as estratégias da Mainnet para planejar a integração. Este projeto Sandbox não pode financiá-las.",
+      "mainnetPreviewTitle": "Visualização do vault Mainnet",
+      "mainnetPreviewDescription": "Este vault roda na Mainnet. Você pode revisar o guia de integração aqui, mas é necessário um projeto em Produção para enviar depósitos.",
+      "liquidity": "Liquidez",
+      "provider": "Provedor",
+      "integrateEyebrow": "Integração com Embedded Yield · Etapa 2 de 2",
+      "integrateTitle": "Integrar o Embedded Yield",
+      "integrateDescription": "Conecte a estratégia selecionada ao seu produto com a API de external-wallet da SDP: depósitos que seus clientes assinam, saldos e atividade ao vivo, e saques. A SDP verifica cada assinatura e registra cada movimentação antes de transmitir.",
+      "apiKeyNoteTitle": "Mantenha a chave de API no servidor",
+      "guideClientTitle": "1 · Configurar o cliente do servidor",
+      "guideClientDescription": "Todas as chamadas são feitas pelo seu backend com a chave de API do seu projeto, armazenada no ambiente do servidor como SDP_API_KEY. O helper compartilhado anexa a chave e desempacota o envelope de resposta da SDP.",
+      "guideDepositTitle": "2 · Aceitar depósitos",
+      "guideDepositDescription": "Crie uma transação não assinada para a Wallet do seu cliente, faça a Wallet assiná-la no seu aplicativo e envie os bytes assinados com uma chave de idempotência. Consulte a movimentação registrada até ela ser finalizada ou falhar; novas tentativas com a mesma chave repetem o depósito original em vez de movimentar o dinheiro duas vezes.",
+      "guidePortfolioTitle": "3 · Exibir saldo, ganhos e atividade",
+      "guidePortfolioDescription": "Leia o saldo e o total ganho por Token de depósito, liste a atividade do cliente e carregue as posições ao vivo para o fluxo de saque. O valor ganho só é exibido quando é exato; mostre um travessão quando ele não existir, nunca $0.",
+      "guideWithdrawTitle": "4 · Sacar",
+      "guideWithdrawDescription": "A saída espelha o depósito: crie o saque não assinado para uma posição, o cliente assina e você envia com o mesmo contrato de idempotência. Os saques continuam funcionando mesmo quando novos depósitos estão pausados."
+    },
+    "liquidity": {
+      "instant": "Instantânea",
+      "delayed": "Diferida",
+      "delayedDay": "Diferida · 1 dia",
+      "delayedDays": "Diferida · {days} dias"
     }
   },
   "DashboardEarn": {
@@ -458,7 +506,22 @@
       "vaultAbsorbedNote": "Os detalhes abaixo são o depósito aprovado. Se você pretendia fazer um segundo depósito do mesmo valor, envie novamente.",
       "vaultHeldKeyUnavailable": "A SDP não conseguiu verificar se o seu depósito aprovado anteriormente já foi concluído, então nada foi enviado. Tente novamente em instantes.",
       "vaultOutcomeConfirmed": "Depósito no vault confirmado on-chain — sua posição está ativa.",
-      "vaultOutcomeFailed": "O depósito no vault falhou — nenhum fundo saiu da sua Wallet."
+      "vaultOutcomeFailed": "O depósito no vault falhou — nenhum fundo saiu da sua Wallet.",
+      "vaultPayWith": "Pagar com",
+      "vaultSwapNotice": "O seu {source} é convertido em {target} pela Jupiter na mesma transação, então o swap e o depósito são concluídos juntos ou não são concluídos. O depósito é dimensionado pelo mínimo garantido do swap (tolerância de {pct}%); qualquer excedente permanece na sua Wallet como {target}.",
+      "vaultSwapRow": "Swap",
+      "vaultSwapVia": "{source} → {target} via Jupiter",
+      "vaultMinShares": "Mínimo de cotas a receber",
+      "vaultExpectedShares": "Cotas esperadas",
+      "vaultQuoteLoading": "Buscando a cotação das cotas em tempo real…",
+      "vaultQuoteUnavailable": "A cotação das cotas em tempo real está indisponível no momento, então não é possível dimensionar este depósito com segurança. Tente novamente em instantes.",
+      "vaultQuoteBlocked": "O vault não está aceitando este depósito no momento: {message}",
+      "vaultQuoteZeroShares": "Este valor é pequeno demais para fazer mint de cotas à taxa atual, então não há piso de slippage que possa protegê-lo. Aumente o valor.",
+      "vaultSlippageToggle": "Tolerância de slippage: {percent}",
+      "vaultSlippageLabel": "Tolerância de slippage (pontos-base)",
+      "vaultSlippageHelp": "O depósito não é executado se o vault fizer mint de menos cotas do que esta tolerância permite. 10 pontos-base equivalem a 0,1%.",
+      "vaultSlippageInvalid": "Digite um número inteiro de pontos-base entre 1 e {max}.",
+      "vaultSlippageExceeded": "O vault devolveria menos cotas do que a sua tolerância de slippage permite para este valor. Aumente a tolerância abaixo e tente novamente."
     },
     "vaultWithdraw": {
       "title": "Retirar de {position}",
@@ -491,7 +554,15 @@
       "settlingNote": "Os saldos da posição e da Wallet são atualizados assim que a rede finalizar a retirada.",
       "transaction": "Transação",
       "outcomeFinalized": "Retirada do vault finalizada — os valores estão na Wallet de custódia.",
-      "outcomeFailed": "Uma transação de retirada do vault falhou. Quaisquer shares que ela não resgatou permanecem na posição."
+      "outcomeFailed": "Uma transação de retirada do vault falhou. Quaisquer shares que ela não resgatou permanecem na posição.",
+      "expectedAmount": "Valor esperado",
+      "minAmount": "Valor mínimo a receber",
+      "quoteLoading": "Buscando a cotação de pagamento em tempo real…",
+      "quoteUnavailable": "A cotação de pagamento em tempo real está indisponível no momento, então não é possível dimensionar esta retirada com segurança. Tente novamente em instantes.",
+      "quoteBlocked": "O vault não está pagando esta retirada no momento: {message}",
+      "quoteZeroAssets": "Estas cotas são poucas demais para resgatar qualquer quantia do Token de depósito à taxa atual, então não há piso de slippage que possa proteger a saída.",
+      "slippageHelp": "A retirada não é executada se o vault pagar menos do que esta tolerância permite. 10 pontos-base equivalem a 0,1%.",
+      "slippageExceeded": "O vault pagaria menos do que a sua tolerância de slippage permite para estas cotas. Aumente a tolerância abaixo e tente novamente."
     }
   }
 }

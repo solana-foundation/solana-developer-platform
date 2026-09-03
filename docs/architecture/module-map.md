@@ -14,50 +14,48 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
-| `@sdp/helius-gateway` | Rust sidecar over the Helius Rings (zolana) SDK; builds unsigned Solana transactions. Built with cargo, not pnpm. | None |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | None |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
-| `@sdp/kit-augment` | Shared @solana/kit type augmentation for the generated Codama clients. | None |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/policy` | Wallet-operation policy engine: rule evaluation and enforcement orchestration. | `@sdp/solana`, `@sdp/types` |
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/rpc` | Solana RPC clients, errors, and relay helpers. | `@sdp/types` |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
-| `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | `@sdp/kit-augment` |
-| `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | `@sdp/kit-augment` |
+| `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
+| `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
+| `@sdp/veda` | Kit-native Veda SVM vault deposit plans and position reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
 | `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types` |
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`
+- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/types`
 - `@sdp/earn` -> `@sdp/types`
 - `@sdp/env-config` -> None
-- `@sdp/helius-gateway` -> None
 - `@sdp/helius-rings` -> None
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
-- `@sdp/kit-augment` -> None
 - `@sdp/payments` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/policy` -> `@sdp/solana`, `@sdp/types`
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/rpc` -> `@sdp/types`
 - `@sdp/solana` -> `@sdp/rpc`, `@sdp/types`
-- `@sdp/spc-escrow` -> `@sdp/kit-augment`
-- `@sdp/spc-withdraw` -> `@sdp/kit-augment`
+- `@sdp/spc-escrow` -> None
+- `@sdp/spc-withdraw` -> None
 - `@sdp/types` -> None
+- `@sdp/veda` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
 - `bigint-buffer` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
 - `sdp-web` -> `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types`

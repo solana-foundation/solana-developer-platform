@@ -1,5 +1,5 @@
 import type { CounterpartyEntityType } from "./counterparties";
-import type { RampFiatCurrency } from "./generated/ramp-support.generated";
+import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { RampProviderId } from "./provider-access";
 
 export const SOLANA_CRYPTO_RAILS = [
@@ -69,6 +69,24 @@ export function rampProviderServesCountry(
       return exhaustive;
     }
   }
+}
+
+/** One payout-account input field and its provider-declared validation. */
+export interface RampPayoutFieldSpec {
+  required: boolean;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  /** Enumerated values when the provider declares the field as a closed set. */
+  values?: readonly string[];
+  /** UI input mask ("#" per character); presentation-only, stripped before validation. */
+  mask?: string;
+}
+
+/** Payout external-account shape for one fiat currency: rail -> field key -> spec. */
+export interface RampPayoutAccountSpec {
+  accountType: string;
+  rails: Readonly<Record<string, Readonly<Record<string, RampPayoutFieldSpec>>>>;
 }
 
 export interface RampCurrencyLimit {

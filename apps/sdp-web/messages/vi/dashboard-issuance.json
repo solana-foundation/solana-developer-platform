@@ -139,7 +139,9 @@
       "copyTokenId": "Sao chép ID Token",
       "explorer": "Explorer",
       "deploy": "Deploy",
-      "unpause": "Bỏ tạm dừng"
+      "unpause": "Bỏ tạm dừng",
+      "mint": "Mint",
+      "deployedOn": "Đã Deploy {date}"
     },
     "create": {
       "title": "Tạo Draft Token mới",

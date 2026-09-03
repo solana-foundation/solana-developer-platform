@@ -37,7 +37,7 @@ import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type {
@@ -63,9 +63,11 @@ import {
 export async function createPendingBvnkOfframpTransfer(
   c: AppContext,
   input: {
+    transferId: string;
     organizationId: string;
     projectId: string;
     counterpartyId: string;
+    custodyWalletId: string;
     walletId: string;
     walletAddress: string;
     cryptoToken: string;
@@ -76,8 +78,10 @@ export async function createPendingBvnkOfframpTransfer(
 ): Promise<PaymentTransferRow> {
   const apiKey = c.get("apiKey");
   const created = await getPaymentsRepository(c).createTransfer({
+    id: input.transferId,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    custodyWalletId: input.custodyWalletId,
     walletId: input.walletId,
     counterpartyId: input.counterpartyId,
     sourceAddress: input.walletAddress,

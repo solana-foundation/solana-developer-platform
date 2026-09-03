@@ -34,6 +34,21 @@ export function hasEnabledRampProvider(access: RampProviderAccess | null): boole
   return Object.values(access).some((entry) => entry.entitled && entry.configured && entry.enabled);
 }
 
+/**
+ * Restricts a ramp provider access record to the feature-flag-enabled providers.
+ *
+ * @param access - The provider access record reported for the organization.
+ * @param enabledProviders - The ramp providers enabled by feature flags.
+ * @returns The access record without flagged-off providers.
+ */
+export function filterEnabledRampProviderAccess(
+  access: RampProviderAccess,
+  enabledProviders: readonly RampProviderId[]
+): RampProviderAccess {
+  const enabled = new Set<string>(enabledProviders);
+  return Object.fromEntries(Object.entries(access).filter(([provider]) => enabled.has(provider)));
+}
+
 export async function fetchProviderAvailability(
   request: SdpApiClient["request"],
   organizationId: string

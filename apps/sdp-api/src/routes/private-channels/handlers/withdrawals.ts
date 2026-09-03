@@ -84,7 +84,7 @@ export async function createPrivateChannelWithdrawal(
       mint: body.mint,
       destination,
       gatewayAuth,
-      cluster: projectRpc.cluster,
+      projectRpc,
     });
     return success(c, withdrawal);
   } catch (error) {

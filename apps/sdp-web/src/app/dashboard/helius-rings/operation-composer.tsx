@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,75 +10,53 @@ import { useTranslations } from "@/i18n/provider";
 import {
   prepareRingsOperation,
   RINGS_ALLOWLISTED_ASSETS,
-  type RingsOperationDetail,
   type RingsOpType,
   type RingsWallet,
-  type RingsZone,
 } from "./helius-rings.data";
-import { useRingsZones } from "./use-rings-zones";
+import { formatAssetAmount, parseDecimalToBaseUnits } from "./helius-rings.utils";
 
 type Translate = ReturnType<typeof useTranslations>;
 
-const OP_TYPES: RingsOpType[] = ["shield"];
+// UI tab labels map 1:1 to server op types; `transfer_registered` is what the
+// API accepts for shielded → shielded transfers within this project.
+const OP_TABS: readonly RingsOpType[] = ["shield", "withdraw", "transfer_registered"] as const;
 
-const NEEDS_ASSET: ReadonlySet<RingsOpType> = new Set([
-  "shield",
-  "transfer_registered",
-  "transfer_anonymous",
-  "withdraw",
-]);
-const NEEDS_RECIPIENT: ReadonlySet<RingsOpType> = new Set([
-  "transfer_registered",
-  "transfer_anonymous",
-  "withdraw",
-]);
-
-/**
- * A union rather than parallel `step`/`result`/`error` values so "showing a
- * result with no operation" is not representable.
- */
-type Phase =
-  | { name: "compose" }
-  | { name: "review"; error: string | null }
-  | { name: "result"; operation: RingsOperationDetail };
+type Phase = { name: "compose" } | { name: "review"; error: string | null };
 
 interface ComposerDraft {
-  walletId: string | null;
+  walletId: string;
   opType: RingsOpType;
   assetMint: string;
-  amountRaw: string;
+  /** User-typed decimal amount, e.g. "1.01". Converted to base units at submit. */
+  amountDecimal: string;
   recipient: string;
-  zoneId: string | null;
-  unlockAt: string;
-  beneficiary: string;
 }
 
-const EMPTY_DRAFT: ComposerDraft = {
-  walletId: null,
-  opType: "shield",
-  assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
-  amountRaw: "",
-  recipient: "",
-  zoneId: null,
-  unlockAt: "",
-  beneficiary: "",
-};
+function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDraft {
+  return {
+    walletId,
+    opType,
+    assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
+    amountDecimal: "",
+    recipient: "",
+  };
+}
 
-function transferModeFor(opType: RingsOpType): "registered" | "anonymous" | undefined {
-  if (opType === "transfer_registered") return "registered";
-  if (opType === "transfer_anonymous") return "anonymous";
-  return undefined;
+function assetOf(mint: string) {
+  return RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === mint);
+}
+
+function draftAmountRaw(draft: ComposerDraft): string | null {
+  const asset = assetOf(draft.assetMint);
+  return asset ? parseDecimalToBaseUnits(draft.amountDecimal, asset.decimals) : null;
 }
 
 function isDraftComplete(draft: ComposerDraft): boolean {
-  if (draft.walletId === null) return false;
-  if (NEEDS_ASSET.has(draft.opType) && !/^\d+$/.test(draft.amountRaw)) return false;
-  if (NEEDS_RECIPIENT.has(draft.opType) && draft.recipient.trim().length === 0) return false;
-  if (
-    draft.opType === "timelock_create" &&
-    (draft.unlockAt.length === 0 || draft.beneficiary.trim().length === 0)
-  ) {
-    return false;
+  if (draftAmountRaw(draft) === null) return false;
+  // Withdraw's recipient is derived from the wallet's own custody address; only
+  // private transfers still need an explicit recipient choice.
+  if (draft.opType === "transfer_registered") {
+    return draft.recipient.trim().length > 0;
   }
   return true;
 }
@@ -87,98 +64,80 @@ function isDraftComplete(draft: ComposerDraft): boolean {
 function buildSummaryRows(
   t: Translate,
   draft: ComposerDraft,
-  wallets: RingsWallet[],
-  zones: RingsZone[]
+  recipientOptions: readonly RingsWallet[]
 ): Array<[string, string]> {
-  const asset = RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === draft.assetMint);
+  const amountRaw = draftAmountRaw(draft);
   const rows: Array<[string, string]> = [
-    [
-      t("DashboardHeliusRings.composer.summaryWallet"),
-      wallets.find((wallet) => wallet.id === draft.walletId)?.name ?? "—",
-    ],
     [
       t("DashboardHeliusRings.composer.summaryOperation"),
       t(`DashboardHeliusRings.activity.opType_${draft.opType}`),
     ],
-  ];
-  if (NEEDS_ASSET.has(draft.opType)) {
-    rows.push([
+    [
       t("DashboardHeliusRings.composer.summaryAmount"),
-      `${draft.amountRaw} (${asset?.symbol ?? "?"} ${t("DashboardHeliusRings.composer.baseUnits")})`,
-    ]);
-  }
-  if (NEEDS_RECIPIENT.has(draft.opType)) {
-    rows.push([t("DashboardHeliusRings.composer.summaryRecipient"), draft.recipient]);
-  }
-  if (draft.opType === "merge" && draft.zoneId) {
+      formatAssetAmount(amountRaw, draft.assetMint),
+    ],
+  ];
+  if (draft.opType === "transfer_registered") {
+    const recipientWallet = recipientOptions.find((w) => w.shieldedAddress === draft.recipient);
     rows.push([
-      t("DashboardHeliusRings.composer.summaryZone"),
-      zones.find((zone) => zone.id === draft.zoneId)?.name ?? draft.zoneId,
+      t("DashboardHeliusRings.composer.summaryRecipient"),
+      recipientWallet?.name ?? draft.recipient,
     ]);
-  }
-  if (draft.opType === "timelock_create") {
-    rows.push([t("DashboardHeliusRings.composer.summaryUnlockAt"), draft.unlockAt]);
-    rows.push([t("DashboardHeliusRings.composer.summaryBeneficiary"), draft.beneficiary]);
   }
   return rows;
 }
 
-/**
- * One composer for every shielded operation kind. Anonymous transfers require
- * an explicit acknowledgement on the review step before Confirm unlocks.
- */
+/** Compose then review; confirming hands the operation to Activity. */
 export function OperationComposer({
-  wallets,
+  wallet,
+  recipientOptions,
+  custodyPublicKey,
   gatewayRed,
   onPrepared,
 }: {
-  wallets: RingsWallet[];
+  wallet: RingsWallet;
+  /** Other private wallets in the same project the sender can transfer to. */
+  recipientOptions: RingsWallet[];
+  /** Solana pubkey of the custody wallet backing this private wallet. */
+  custodyPublicKey: string | null;
   gatewayRed: boolean;
   onPrepared: () => Promise<void>;
 }) {
   const t = useTranslations();
 
+  // Switching wallet is a fresh session — the workspace passes `key={wallet.id}`
+  // so React remounts this whole subtree, resetting draft/phase/started
+  // without an effect that would let old state paint for a frame.
   const [phase, setPhase] = useState<Phase>({ name: "compose" });
-  const [draft, setDraft] = useState<ComposerDraft>(EMPTY_DRAFT);
-  const [anonymousAcknowledged, setAnonymousAcknowledged] = useState(false);
+  const [draft, setDraft] = useState<ComposerDraft>(() => newDraft(wallet.id));
   const [submitting, setSubmitting] = useState(false);
-
-  const { zones } = useRingsZones(draft.walletId, t("DashboardHeliusRings.errors.loadFailed"));
+  const [started, setStarted] = useState(false);
 
   const patchDraft = useCallback((patch: Partial<ComposerDraft>) => {
+    setStarted(false);
     setDraft((current) => ({ ...current, ...patch }));
   }, []);
 
-  const reset = useCallback(() => {
-    setPhase({ name: "compose" });
-    setDraft((current) => ({ ...EMPTY_DRAFT, walletId: current.walletId }));
-    setAnonymousAcknowledged(false);
-  }, []);
-
   const handleConfirm = useCallback(async () => {
-    if (!draft.walletId) return;
+    const amountRaw = draftAmountRaw(draft);
+    if (amountRaw === null) return;
     setSubmitting(true);
     setPhase({ name: "review", error: null });
-    const asset = RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === draft.assetMint);
     let prepared: Awaited<ReturnType<typeof prepareRingsOperation>>;
     try {
+      // Withdraw always lands in the wallet's own custody address — no free
+      // input. Transfer uses the recipient private wallet's shielded address.
+      const to =
+        draft.opType === "withdraw"
+          ? (custodyPublicKey ?? undefined)
+          : draft.opType === "transfer_registered"
+            ? draft.recipient.trim()
+            : undefined;
       prepared = await prepareRingsOperation({
         walletId: draft.walletId,
         opType: draft.opType,
-        asset:
-          NEEDS_ASSET.has(draft.opType) && asset
-            ? { mint: asset.mint, amountRaw: draft.amountRaw }
-            : undefined,
-        to: NEEDS_RECIPIENT.has(draft.opType) ? draft.recipient.trim() : undefined,
-        zoneId: draft.opType === "merge" && draft.zoneId ? draft.zoneId : undefined,
-        transferMode: transferModeFor(draft.opType),
-        timelock:
-          draft.opType === "timelock_create"
-            ? {
-                unlockAt: new Date(draft.unlockAt).toISOString(),
-                beneficiary: draft.beneficiary.trim(),
-              }
-            : undefined,
+        asset: { mint: draft.assetMint, amountRaw },
+        to,
       });
     } finally {
       setSubmitting(false);
@@ -190,37 +149,53 @@ export function OperationComposer({
       });
       return;
     }
-    setPhase({ name: "result", operation: prepared.operation });
+    setStarted(true);
+    setPhase({ name: "compose" });
+    setDraft(newDraft(draft.walletId, draft.opType));
     await onPrepared();
-  }, [draft, onPrepared, t]);
+  }, [draft, custodyPublicKey, onPrepared, t]);
 
   const summaryRows = useMemo(
-    () => buildSummaryRows(t, draft, wallets, zones),
-    [t, draft, wallets, zones]
+    () => buildSummaryRows(t, draft, recipientOptions),
+    [t, draft, recipientOptions]
   );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>{t("DashboardHeliusRings.composer.title")}</CardTitle>
-        <CardDescription>{t("DashboardHeliusRings.composer.description")}</CardDescription>
+        <CardDescription>
+          {t(`DashboardHeliusRings.composer.description_${draft.opType}`)}
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {phase.name === "compose" ? (
-          <ComposeStep
-            draft={draft}
-            wallets={wallets}
-            zones={zones}
-            onPatch={patchDraft}
-            onReview={() => setPhase({ name: "review", error: null })}
-          />
+        {started && phase.name === "compose" ? (
+          <Callout live variant="success">
+            {t("DashboardHeliusRings.composer.started")}
+          </Callout>
         ) : null}
+
+        {phase.name === "compose" ? (
+          <>
+            <OpTabs
+              value={draft.opType}
+              onSelect={(opType) => {
+                setPhase({ name: "compose" });
+                patchDraft({ opType });
+              }}
+            />
+            <ComposeStep
+              draft={draft}
+              recipientOptions={recipientOptions}
+              onPatch={patchDraft}
+              onReview={() => setPhase({ name: "review", error: null })}
+            />
+          </>
+        ) : null}
+
         {phase.name === "review" ? (
           <ReviewStep
             rows={summaryRows}
-            isAnonymous={draft.opType === "transfer_anonymous"}
-            acknowledged={anonymousAcknowledged}
-            onAcknowledge={setAnonymousAcknowledged}
             gatewayRed={gatewayRed}
             error={phase.error}
             submitting={submitting}
@@ -228,9 +203,40 @@ export function OperationComposer({
             onConfirm={() => void handleConfirm()}
           />
         ) : null}
-        {phase.name === "result" ? <ResultStep result={phase.operation} onReset={reset} /> : null}
       </CardContent>
     </Card>
+  );
+}
+
+// Segmented control: three buttons that read as one connected group.
+function OpTabs({ value, onSelect }: { value: RingsOpType; onSelect: (op: RingsOpType) => void }) {
+  const t = useTranslations();
+  return (
+    <div
+      role="tablist"
+      aria-label={t("DashboardHeliusRings.composer.operation")}
+      className="inline-flex w-fit rounded-md border border-border-default bg-surface p-0.5"
+    >
+      {OP_TABS.map((op) => {
+        const active = op === value;
+        return (
+          <button
+            key={op}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onSelect(op)}
+            className={
+              active
+                ? "rounded-sm bg-primary px-3 py-1.5 text-sm font-medium text-on-primary"
+                : "rounded-sm px-3 py-1.5 text-sm font-medium text-secondary hover:text-primary"
+            }
+          >
+            {t(`DashboardHeliusRings.composer.opTab_${op}`)}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -245,136 +251,76 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ComposeStep({
   draft,
-  wallets,
-  zones,
+  recipientOptions,
   onPatch,
   onReview,
 }: {
   draft: ComposerDraft;
-  wallets: RingsWallet[];
-  zones: RingsZone[];
+  recipientOptions: readonly RingsWallet[];
   onPatch: (patch: Partial<ComposerDraft>) => void;
   onReview: () => void;
 }) {
   const t = useTranslations();
-  const needsAsset = NEEDS_ASSET.has(draft.opType);
-  const needsRecipient = NEEDS_RECIPIENT.has(draft.opType);
-  // Only a `ready` wallet has a shielded identity to deposit into; the rest are
-  // omitted rather than shown disabled, since nothing here would provision one.
-  const readyWallets = wallets.filter((wallet) => wallet.status === "ready");
+
+  if (draft.opType === "transfer_registered" && recipientOptions.length === 0) {
+    return (
+      <Callout variant="info">
+        {t("DashboardHeliusRings.composer.privateTransferNoRecipients")}
+      </Callout>
+    );
+  }
 
   return (
     <>
       <div className="flex flex-wrap gap-3">
-        <Field label={t("DashboardHeliusRings.composer.wallet")}>
+        <Field label={t("DashboardHeliusRings.composer.asset")}>
           <Select
-            ariaLabel={t("DashboardHeliusRings.composer.wallet")}
-            value={draft.walletId}
-            onValueChange={(walletId) => onPatch({ walletId })}
-            placeholder={t("DashboardHeliusRings.composer.walletPlaceholder")}
+            ariaLabel={t("DashboardHeliusRings.composer.asset")}
+            value={draft.assetMint}
+            onValueChange={(value) => {
+              if (value) onPatch({ assetMint: value });
+            }}
           >
-            {readyWallets.map((wallet) => (
-              <SelectItem key={wallet.id} value={wallet.id}>
-                {wallet.name}
+            {RINGS_ALLOWLISTED_ASSETS.map((entry) => (
+              <SelectItem key={entry.mint} value={entry.mint}>
+                {entry.symbol}
               </SelectItem>
             ))}
           </Select>
         </Field>
-        <Field label={t("DashboardHeliusRings.composer.operation")}>
-          <Select
-            ariaLabel={t("DashboardHeliusRings.composer.operation")}
-            value={draft.opType}
-            onValueChange={(value) => {
-              if (value) onPatch({ opType: value as RingsOpType });
-            }}
-          >
-            {OP_TYPES.map((type) => (
-              <SelectItem key={type} value={type}>
-                {t(`DashboardHeliusRings.activity.opType_${type}`)}
-              </SelectItem>
-            ))}
-          </Select>
+        <Field label={t("DashboardHeliusRings.composer.amount")}>
+          <Input
+            inputMode="decimal"
+            value={draft.amountDecimal}
+            placeholder="1.01"
+            onChange={(event) =>
+              onPatch({
+                amountDecimal: event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"),
+              })
+            }
+          />
         </Field>
       </div>
 
-      {needsAsset ? (
-        <div className="flex flex-wrap gap-3">
-          <Field label={t("DashboardHeliusRings.composer.asset")}>
-            <Select
-              ariaLabel={t("DashboardHeliusRings.composer.asset")}
-              value={draft.assetMint}
-              onValueChange={(value) => {
-                if (value) onPatch({ assetMint: value });
-              }}
-            >
-              {RINGS_ALLOWLISTED_ASSETS.map((entry) => (
-                <SelectItem key={entry.mint} value={entry.mint}>
-                  {entry.symbol}
-                </SelectItem>
-              ))}
-            </Select>
-          </Field>
-          <Field label={t("DashboardHeliusRings.composer.amount")}>
-            <Input
-              inputMode="numeric"
-              value={draft.amountRaw}
-              placeholder="1000000"
-              onChange={(event) => onPatch({ amountRaw: event.target.value.replace(/\D/g, "") })}
-            />
-          </Field>
-        </div>
-      ) : null}
-
-      {needsRecipient ? (
-        <Field
-          label={
-            draft.opType === "transfer_anonymous"
-              ? t("DashboardHeliusRings.composer.recipientAnonymous")
-              : t("DashboardHeliusRings.composer.recipient")
-          }
-        >
-          <Input
-            value={draft.recipient}
-            placeholder={t("DashboardHeliusRings.composer.recipientPlaceholder")}
-            onChange={(event) => onPatch({ recipient: event.target.value })}
-          />
-        </Field>
-      ) : null}
-
-      {draft.opType === "merge" && zones.length > 0 ? (
-        <Field label={t("DashboardHeliusRings.composer.zone")}>
+      {draft.opType === "transfer_registered" ? (
+        <Field label={t("DashboardHeliusRings.composer.recipientPrivateWallet")}>
           <Select
-            ariaLabel={t("DashboardHeliusRings.composer.zone")}
-            value={draft.zoneId}
-            onValueChange={(zoneId) => onPatch({ zoneId })}
-            placeholder={t("DashboardHeliusRings.composer.zonePlaceholder")}
+            ariaLabel={t("DashboardHeliusRings.composer.recipientPrivateWallet")}
+            value={draft.recipient || null}
+            onValueChange={(value) => {
+              if (value) onPatch({ recipient: value });
+            }}
+            placeholder={t("DashboardHeliusRings.composer.recipientPrivateWalletPlaceholder")}
           >
-            {zones.map((zone) => (
-              <SelectItem key={zone.id} value={zone.id}>
-                {zone.name}
-              </SelectItem>
-            ))}
+            {recipientOptions.map((option) =>
+              option.shieldedAddress === null ? null : (
+                <SelectItem key={option.id} value={option.shieldedAddress}>
+                  {option.name}
+                </SelectItem>
+              )
+            )}
           </Select>
         </Field>
-      ) : null}
-
-      {draft.opType === "timelock_create" ? (
-        <div className="flex flex-wrap gap-3">
-          <Field label={t("DashboardHeliusRings.composer.unlockAt")}>
-            <Input
-              type="datetime-local"
-              value={draft.unlockAt}
-              onChange={(event) => onPatch({ unlockAt: event.target.value })}
-            />
-          </Field>
-          <Field label={t("DashboardHeliusRings.composer.beneficiary")}>
-            <Input
-              value={draft.beneficiary}
-              placeholder={t("DashboardHeliusRings.composer.recipientPlaceholder")}
-              onChange={(event) => onPatch({ beneficiary: event.target.value })}
-            />
-          </Field>
-        </div>
       ) : null}
 
       <div>
@@ -388,9 +334,6 @@ function ComposeStep({
 
 function ReviewStep({
   rows,
-  isAnonymous,
-  acknowledged,
-  onAcknowledge,
   gatewayRed,
   error,
   submitting,
@@ -398,9 +341,6 @@ function ReviewStep({
   onConfirm,
 }: {
   rows: Array<[string, string]>;
-  isAnonymous: boolean;
-  acknowledged: boolean;
-  onAcknowledge: (acknowledged: boolean) => void;
   gatewayRed: boolean;
   error: string | null;
   submitting: boolean;
@@ -422,55 +362,16 @@ function ReviewStep({
         ))}
       </dl>
 
-      {isAnonymous ? (
-        <Callout variant="warning">
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={acknowledged}
-              onChange={(event) => onAcknowledge(event.target.checked)}
-            />
-            <span>{t("DashboardHeliusRings.composer.anonymousWarning")}</span>
-          </label>
-        </Callout>
-      ) : null}
-
       {error ? <Callout variant="danger">{error}</Callout> : null}
 
       <div className="flex gap-2">
         <Button variant="secondary" onClick={onBack}>
           {t("DashboardHeliusRings.composer.back")}
         </Button>
-        <Button disabled={submitting || (isAnonymous && !acknowledged)} onClick={onConfirm}>
+        <Button disabled={submitting} onClick={onConfirm}>
           {submitting
             ? t("DashboardHeliusRings.composer.preparing")
             : t("DashboardHeliusRings.composer.confirm")}
-        </Button>
-      </div>
-    </>
-  );
-}
-
-function ResultStep({ result, onReset }: { result: RingsOperationDetail; onReset: () => void }) {
-  const t = useTranslations();
-  return (
-    <>
-      <div className="flex items-center gap-2">
-        <Badge variant={result.state === "failed" ? "danger" : "default"}>
-          {t(`DashboardHeliusRings.activity.state_${result.state}`)}
-        </Badge>
-        {result.failure ? (
-          <span className="text-sm text-secondary">
-            {result.failure.code === "gateway_unavailable"
-              ? t("DashboardHeliusRings.errors.gatewayUnavailable")
-              : result.failure.message}
-          </span>
-        ) : null}
-      </div>
-      <div>
-        <Button variant="secondary" onClick={onReset}>
-          {t("DashboardHeliusRings.composer.newOperation")}
         </Button>
       </div>
     </>

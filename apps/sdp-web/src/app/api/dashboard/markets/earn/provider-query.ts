@@ -53,19 +53,22 @@ export function programProxyQuery(
  * malformed or unknown parameter is a caller bug and returns 400 instead of
  * silently changing the requested page.
  */
-export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation {
+function positionsProxyQuery(
+  request: Request,
+  labels: { resource: string; title: string }
+): ProxyQueryValidation {
   const incoming = new URL(request.url).searchParams;
   const allowed = new Set(["limit", "before"]);
 
   for (const key of incoming.keys()) {
     if (!allowed.has(key)) {
-      return { ok: false, message: `Unsupported vault positions query parameter: ${key}` };
+      return { ok: false, message: `Unsupported ${labels.resource} query parameter: ${key}` };
     }
   }
 
   for (const key of allowed) {
     if (incoming.getAll(key).length > 1) {
-      return { ok: false, message: `Vault positions query parameter must be unique: ${key}` };
+      return { ok: false, message: `${labels.title} query parameter must be unique: ${key}` };
     }
   }
 
@@ -73,7 +76,7 @@ export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation
   const limit = incoming.get("limit");
   if (limit !== null) {
     if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
-      return { ok: false, message: "Vault positions limit must be an integer from 1 to 100" };
+      return { ok: false, message: `${labels.title} limit must be an integer from 1 to 100` };
     }
     query.set("limit", limit);
   }
@@ -85,12 +88,26 @@ export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation
       before.length > MAX_CURSOR_LENGTH ||
       !/^[A-Za-z0-9_-]+$/.test(before)
     ) {
-      return { ok: false, message: "Vault positions cursor is invalid" };
+      return { ok: false, message: `${labels.title} cursor is invalid` };
     }
     query.set("before", before);
   }
 
   return { ok: true, query: query.size > 0 ? `?${query}` : "" };
+}
+
+export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation {
+  return positionsProxyQuery(request, {
+    resource: "vault positions",
+    title: "Vault positions",
+  });
+}
+
+export function externalWalletPositionsProxyQuery(request: Request): ProxyQueryValidation {
+  return positionsProxyQuery(request, {
+    resource: "external-wallet positions",
+    title: "External-wallet positions",
+  });
 }
 
 /**
