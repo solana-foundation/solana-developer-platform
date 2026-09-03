@@ -3,20 +3,40 @@ import { internalError } from "@/lib/errors";
 import type {
   ArchiveExternalAccountInput,
   CompleteExternalAccountInput,
+  CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
+  GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
+  InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
+  UpdateAccountMetadataInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
+  bvnkFundingWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
 } from "./counterparty-provider-account.repository";
+
+function parseProviderAccountRow(row: Record<string, unknown>): CounterpartyProviderAccountRow {
+  const parsed = counterpartyProviderAccountRowSchema.parse(row);
+  if (parsed.kind === "funding_wallet" && parsed.provider === "bvnk") {
+    bvnkFundingWalletMetadataSchema.parse(parsed.metadata);
+  }
+  return parsed;
+}
+
+function parseProviderAccountRows(
+  rows: Record<string, unknown>[]
+): CounterpartyProviderAccountRow[] {
+  return rows.map((row) => parseProviderAccountRow(row));
+}
 
 export function createPostgresCounterpartyProviderAccountsRepository(
   db: AppDb
@@ -30,25 +50,28 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
-             AND fiat_currency IS NULL
+             AND kind = 'customer_link'
              AND status = 'active'`
         )
         .bind(input.organizationId, input.projectId, input.counterpartyId, input.provider)
         .first<Record<string, unknown>>();
 
-      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+      return row === null ? null : parseProviderAccountRow(row);
     },
     async upsertProviderAccount(input: UpsertCounterpartyProviderAccountInput) {
+      const metadataColumns = input.metadata === undefined ? "" : ", metadata";
+      const metadataValues = input.metadata === undefined ? "" : ", ?";
+      const metadataUpdate = input.metadata === undefined ? "" : " || EXCLUDED.metadata";
       const row = await db
         .prepare(
           `INSERT INTO counterparty_provider_accounts (
-             id, organization_id, project_id, counterparty_id, provider, provider_customer_reference
-           ) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (counterparty_id, provider) WHERE fiat_currency IS NULL
+             id, organization_id, project_id, counterparty_id, provider, provider_customer_reference, kind${metadataColumns}
+           ) VALUES (?, ?, ?, ?, ?, ?, 'customer_link'${metadataValues})
+           ON CONFLICT (counterparty_id, provider) WHERE kind = 'customer_link'
            DO UPDATE SET
              status = 'active',
              updated_at = sdp_iso_now(),
-             metadata = CASE
+             metadata = (CASE
                WHEN counterparty_provider_accounts.provider_customer_reference
                     = EXCLUDED.provider_customer_reference
                  THEN counterparty_provider_accounts.metadata
@@ -61,7 +84,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
                  coalesce(counterparty_provider_accounts.metadata -> 'mismatchedReferences', '[]'::jsonb)
                    || to_jsonb(EXCLUDED.provider_customer_reference)
                )
-             END
+               END)${metadataUpdate}
            WHERE counterparty_provider_accounts.organization_id = EXCLUDED.organization_id
              AND counterparty_provider_accounts.project_id = EXCLUDED.project_id
            RETURNING *`
@@ -72,14 +95,124 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           input.projectId,
           input.counterpartyId,
           input.provider,
-          input.providerCustomerReference
+          input.providerCustomerReference,
+          ...(input.metadata === undefined ? [] : [input.metadata])
         )
         .first<Record<string, unknown>>();
 
       if (row === null) {
         throw internalError("Counterparty provider-account upsert escaped its tenant scope.");
       }
-      return counterpartyProviderAccountRowSchema.parse(row);
+      return parseProviderAccountRow(row);
+    },
+
+    async getAccountByKindAndCurrency(input: GetAccountByKindAndCurrencyInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = ?
+             AND fiat_currency = ?
+             AND status = 'active'`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.kind,
+          input.fiatCurrency
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async getFundingWalletByOnrampKey(input: GetFundingWalletByOnrampKeyInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'funding_wallet'
+             AND metadata->>'onrampKey' = ?
+             AND status = 'active'`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.onrampKey
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async insertProviderResourceAccount(input: InsertProviderResourceAccountInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, external_account_reference,
+             fiat_currency, destination_country, payment_rail, provider_status, metadata
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           RETURNING *`
+        )
+        .bind(
+          generateCounterpartyProviderAccountId(),
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.providerCustomerReference,
+          input.kind,
+          input.externalAccountReference,
+          input.fiatCurrency,
+          input.destinationCountry === undefined ? null : input.destinationCountry,
+          input.paymentRail === undefined ? null : input.paymentRail,
+          input.providerStatus === undefined ? null : input.providerStatus,
+          input.metadata
+        )
+        .first<Record<string, unknown>>();
+
+      if (row === null) {
+        throw internalError("Provider resource-account insert escaped its tenant scope.");
+      }
+      return parseProviderAccountRow(row);
+    },
+
+    async updateAccountMetadata(input: UpdateAccountMetadataInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET metadata = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND status = 'active'
+           RETURNING *`
+        )
+        .bind(
+          input.metadata,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
     },
 
     async listActiveExternalAccounts(input: ListActiveExternalAccountsInput) {
@@ -91,6 +224,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
+             AND kind = 'payout_account'
              AND fiat_currency = ?
              AND destination_country = ?
              AND status = 'active'
@@ -106,7 +240,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .all<Record<string, unknown>>();
 
-      return result.results.map((row) => counterpartyProviderAccountRowSchema.parse(row));
+      return parseProviderAccountRows(result.results);
     },
 
     async getExternalAccountById(input: GetExternalAccountByIdInput) {
@@ -119,12 +253,12 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
-             AND fiat_currency IS NOT NULL`
+             AND kind = 'payout_account'`
         )
         .bind(input.id, input.organizationId, input.projectId, input.counterpartyId, input.provider)
         .first<Record<string, unknown>>();
 
-      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+      return row === null ? null : parseProviderAccountRow(row);
     },
 
     async listExternalAccounts(input: ListExternalAccountsInput) {
@@ -136,6 +270,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
+             AND kind = 'payout_account'
              AND fiat_currency = ?
              AND status = 'active'
              AND provider_status IS NOT NULL
@@ -150,7 +285,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .all<Record<string, unknown>>();
 
-      return result.results.map((row) => counterpartyProviderAccountRowSchema.parse(row));
+      return parseProviderAccountRows(result.results);
     },
 
     async listProviderAccounts(input: ListProviderAccountsInput) {
@@ -158,7 +293,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         "organization_id = ?",
         "project_id = ?",
         "counterparty_id = ?",
-        "fiat_currency IS NOT NULL",
+        "kind = 'payout_account'",
       ];
       const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];
 
@@ -185,7 +320,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         .bind(...bindings)
         .all<Record<string, unknown>>();
 
-      return result.results.map((row) => counterpartyProviderAccountRowSchema.parse(row));
+      return parseProviderAccountRows(result.results);
     },
 
     async insertPendingExternalAccount(input: InsertPendingExternalAccountInput) {
@@ -198,10 +333,11 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              counterparty_id,
              provider,
              provider_customer_reference,
+             kind,
              fiat_currency,
              destination_country,
              payment_rail
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -211,6 +347,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           input.counterpartyId,
           input.provider,
           input.providerCustomerReference,
+          "payout_account",
           input.fiatCurrency,
           input.destinationCountry,
           input.paymentRail
@@ -220,7 +357,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       if (row === null) {
         throw internalError("External provider-account reservation escaped its tenant scope.");
       }
-      return counterpartyProviderAccountRowSchema.parse(row);
+      return parseProviderAccountRow(row);
     },
 
     async completeExternalAccount(input: CompleteExternalAccountInput) {
@@ -235,7 +372,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
-             AND fiat_currency IS NOT NULL
+             AND kind = 'payout_account'
              AND status = 'active'
            RETURNING *`
         )
@@ -250,7 +387,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .first<Record<string, unknown>>();
 
-      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+      return row === null ? null : parseProviderAccountRow(row);
     },
 
     async updateExternalAccountStatus(input: UpdateExternalAccountStatusInput) {
@@ -265,7 +402,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
-             AND fiat_currency IS NOT NULL
+             AND kind = 'payout_account'
              AND status = 'active'
            RETURNING *`
         )
@@ -280,7 +417,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .first<Record<string, unknown>>();
 
-      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+      return row === null ? null : parseProviderAccountRow(row);
     },
 
     async archiveExternalAccount(input: ArchiveExternalAccountInput) {
@@ -294,14 +431,14 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
-             AND fiat_currency IS NOT NULL
+             AND kind = 'payout_account'
              AND status = 'active'
            RETURNING *`
         )
         .bind(input.id, input.organizationId, input.projectId, input.counterpartyId, input.provider)
         .first<Record<string, unknown>>();
 
-      return row === null ? null : counterpartyProviderAccountRowSchema.parse(row);
+      return row === null ? null : parseProviderAccountRow(row);
     },
   };
 }

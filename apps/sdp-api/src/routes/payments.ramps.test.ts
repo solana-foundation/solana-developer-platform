@@ -1555,9 +1555,9 @@ describe("Payments routes — ramps", () => {
         .prepare(
           `INSERT INTO counterparty_provider_accounts (
              id, organization_id, project_id, counterparty_id, provider,
-             provider_customer_reference, external_account_reference, fiat_currency,
+             provider_customer_reference, kind, external_account_reference, fiat_currency,
              destination_country, payment_rail, provider_status, status, metadata
-           ) VALUES (?, ?, ?, ?, 'lightspark', ?, ?, ?, ?, ?, ?, 'active', '{}')`
+           ) VALUES (?, ?, ?, ?, 'lightspark', ?, ?, ?, ?, ?, ?, ?, 'active', '{}')`
         )
         .bind(
           input.id,
@@ -1565,6 +1565,7 @@ describe("Payments routes — ramps", () => {
           TEST_PROJECT.id,
           input.counterpartyId,
           input.providerCustomerReference,
+          input.fiatCurrency === null ? "customer_link" : "payout_account",
           input.externalAccountReference,
           input.fiatCurrency,
           input.destinationCountry,

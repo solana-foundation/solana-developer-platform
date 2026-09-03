@@ -465,6 +465,13 @@ export const counterpartyProviderAccountSchema = withOpenApi(
       description: "Ramp provider owning the account.",
       example: "lightspark",
     }),
+    kind: withOpenApi(
+      z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
+      {
+        description: "Provider-account resource kind.",
+        example: "payout_account",
+      }
+    ),
     fiatCurrency: withOpenApi(z.string(), {
       description: "Fiat currency for the provider account corridor.",
       example: "USD",

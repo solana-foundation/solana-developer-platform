@@ -295,7 +295,6 @@ describe("Clerk webhooks", () => {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind("usr_verified_email_owner", "victim@example.com")
       .run();
-
     const created = await simulateClerkWebhook({
       type: "user.created",
       data: {
@@ -910,6 +909,15 @@ describe("BVNK ramp webhook", () => {
         null
       )
       .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, kind
+         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link')`
+      )
+      .bind(`cpa_${COUNTERPARTY_ID}`, ORG_ID, PROJECT_ID, COUNTERPARTY_ID, CUSTOMER_REFERENCE)
+      .run();
   }
 
   async function sendBvnkWebhook(payload: unknown, signature?: string) {
@@ -971,7 +979,20 @@ describe("BVNK ramp webhook", () => {
           };
         };
       }>();
-    return row?.provider_data.bvnk;
+    const account = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: { status?: string; verificationStatus?: string } }>();
+    const customer = row?.provider_data.bvnk?.customer;
+    return row?.provider_data.bvnk === undefined
+      ? undefined
+      : {
+          ...row.provider_data.bvnk,
+          customer: { ...customer, ...account?.metadata },
+        };
   }
 
   it("flips the cached customer status to VERIFIED on a customers:status-change webhook", async () => {
@@ -1081,7 +1102,7 @@ describe("BVNK ramp webhook", () => {
     });
     const customer = (await readBvnk())?.customer;
     expect(customer?.status).toBe("INFO_REQUIRED");
-    expect(customer?.verificationUrl).toBe("https://in.sumsub.com/websdk/p/sbx_test");
+    expect(customer?.verificationUrl).toBeUndefined();
 
     getCustomer.mockRestore();
   });

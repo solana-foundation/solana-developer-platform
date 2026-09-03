@@ -1,4 +1,10 @@
+import {
+  BVNK_CRYPTO_CURRENCIES,
+  BVNK_NETWORKS,
+  type BvnkOnrampRequestSpec,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 
@@ -13,6 +19,7 @@ export const counterpartyProviderAccountRowSchema = z.object({
   counterparty_id: z.string(),
   provider: z.enum(RAMP_PROVIDERS),
   provider_customer_reference: z.string(),
+  kind: z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
   external_account_reference: z.string().nullable(),
   fiat_currency: z.string().nullable(),
   destination_country: z.enum(COUNTRY_CODES).nullable(),
@@ -24,6 +31,31 @@ export const counterpartyProviderAccountRowSchema = z.object({
   updated_at: z.string(),
 });
 export type CounterpartyProviderAccountRow = z.infer<typeof counterpartyProviderAccountRowSchema>;
+export type CounterpartyProviderAccountKind = CounterpartyProviderAccountRow["kind"];
+
+const bvnkOnrampRequestSpecSchema = z.object({
+  currency: z.enum(BVNK_CRYPTO_CURRENCIES),
+  network: z.enum(BVNK_NETWORKS),
+  destinationWalletAddress: z.string(),
+  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
+}) satisfies z.ZodType<BvnkOnrampRequestSpec>;
+
+export const bvnkFundingWalletMetadataSchema = z.object({
+  onrampKey: z.string(),
+  ruleId: z.string().optional(),
+  ruleStatus: z.string().optional(),
+  walletName: z.string().optional(),
+  request: bvnkOnrampRequestSpecSchema.optional(),
+});
+export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadataSchema>;
+
+export const bvnkCustomerProviderAccountMetadataSchema = z.object({
+  status: z.string().optional(),
+  verificationStatus: z.string().optional(),
+});
+export type BvnkCustomerProviderAccountMetadata = z.infer<
+  typeof bvnkCustomerProviderAccountMetadataSchema
+>;
 
 export interface UpsertCounterpartyProviderAccountInput {
   organizationId: string;
@@ -31,6 +63,7 @@ export interface UpsertCounterpartyProviderAccountInput {
   counterpartyId: string;
   provider: RampProviderId;
   providerCustomerReference: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface GetCounterpartyProviderAccountInput {
@@ -56,6 +89,42 @@ export interface ListProviderAccountsInput {
   provider?: RampProviderId;
   fiatCurrency?: string;
   destinationCountry?: CountryCode;
+}
+
+export interface GetAccountByKindAndCurrencyInput extends GetCounterpartyProviderAccountInput {
+  kind: Exclude<CounterpartyProviderAccountKind, "customer_link">;
+  fiatCurrency: string;
+}
+
+export interface GetFundingWalletByOnrampKeyInput extends GetCounterpartyProviderAccountInput {
+  onrampKey: string;
+}
+
+interface InsertProviderResourceAccountBase extends GetCounterpartyProviderAccountInput {
+  providerCustomerReference: string;
+  fiatCurrency: string;
+  externalAccountReference: string;
+  providerStatus?: string;
+  metadata: Record<string, unknown>;
+}
+
+export type InsertProviderResourceAccountInput = InsertProviderResourceAccountBase &
+  (
+    | {
+        kind: "payout_account";
+        destinationCountry: CountryCode;
+        paymentRail?: string;
+      }
+    | {
+        kind: "funding_wallet" | "merchant_wallet";
+        destinationCountry?: never;
+        paymentRail?: never;
+      }
+  );
+
+export interface UpdateAccountMetadataInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAccountInput {
@@ -106,6 +175,46 @@ export interface CounterpartyProviderAccountsRepository {
   upsertProviderAccount(
     input: UpsertCounterpartyProviderAccountInput
   ): Promise<CounterpartyProviderAccountRow>;
+
+  /**
+   * Reads an active provider resource by kind and fiat currency.
+   *
+   * @param input - Tenant scope, counterparty, provider, kind, and currency.
+   * @returns The active matching row, or null when none exists.
+   */
+  getAccountByKindAndCurrency(
+    input: GetAccountByKindAndCurrencyInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Reads an active BVNK funding wallet by its on-ramp key.
+   *
+   * @param input - Tenant scope, counterparty, provider, and on-ramp key.
+   * @returns The active funding-wallet row, or null when none exists.
+   */
+  getFundingWalletByOnrampKey(
+    input: GetFundingWalletByOnrampKeyInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Inserts an active non-customer provider resource account.
+   *
+   * @param input - Tenant scope, resource kind, provider references, and metadata.
+   * @returns The inserted provider-account row.
+   */
+  insertProviderResourceAccount(
+    input: InsertProviderResourceAccountInput
+  ): Promise<CounterpartyProviderAccountRow>;
+
+  /**
+   * Replaces metadata on an active provider-account row within its parent scope.
+   *
+   * @param input - Tenant scope, row id, provider, and typed open metadata.
+   * @returns The updated row, or null when it is outside the scope.
+   */
+  updateAccountMetadata(
+    input: UpdateAccountMetadataInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
    * Lists active external accounts for one payout corridor.

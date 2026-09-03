@@ -1,6 +1,7 @@
 import { readRecord } from "@sdp/payments/json";
 import type { CounterpartyProviderData, CounterpartyStatus } from "@sdp/types";
 import type { AppDb, DatabaseExecutor } from "@/db";
+import { asTransactionalClient } from "@/db";
 import { internalError } from "@/lib/errors";
 import type {
   ArchiveCounterpartyInput,
@@ -14,6 +15,11 @@ import type {
   UpsertBvnkCustomerProviderDataInput,
 } from "./counterparty.repository";
 import { generateCounterpartyId } from "./counterparty.repository";
+import {
+  type BvnkCustomerProviderAccountMetadata,
+  bvnkCustomerProviderAccountMetadataSchema,
+} from "./counterparty-provider-account.repository";
+import { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 
 function assertString(value: unknown, field: string): string {
   if (typeof value !== "string") {
@@ -59,18 +65,10 @@ function nestedString(value: unknown, path: readonly string[]): string | null {
   return typeof current === "string" && current.length > 0 ? current : null;
 }
 
-/**
- * Extracts the denormalized provider reverse-lookup columns from provider data.
- *
- * @param providerData - The counterparty provider data JSON.
- * @returns The BVNK customer reference and Mural organization id, or null when absent.
- */
 function providerLookupReferences(providerData: CounterpartyProviderData): {
-  bvnkCustomerReference: string | null;
   muralOrganizationId: string | null;
 } {
   return {
-    bvnkCustomerReference: nestedString(providerData, ["bvnk", "customer", "customerReference"]),
     muralOrganizationId: nestedString(providerData, ["mural", "organization", "id"]),
   };
 }
@@ -105,13 +103,12 @@ async function updateProviderData(
     .prepare(
       `UPDATE counterparties
           SET provider_data = ?,
-              bvnk_customer_reference = ?,
               mural_organization_id = ?,
               updated_at = sdp_iso_now()
         WHERE id = ?
       RETURNING *`
     )
-    .bind(providerData, refs.bvnkCustomerReference, refs.muralOrganizationId, current.id)
+    .bind(providerData, refs.muralOrganizationId, current.id)
     .first<Record<string, unknown>>();
   return row ? mapCounterpartyRow(row) : null;
 }
@@ -151,8 +148,8 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           `INSERT INTO counterparties (
              id, organization_id, project_id, external_id, entity_type,
              display_name, provider_data,
-             bvnk_customer_reference, mural_organization_id, status, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+             mural_organization_id, status, created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
            RETURNING *`
         )
         .bind(
@@ -163,7 +160,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.entityType,
           input.displayName,
           input.providerData,
-          refs.bvnkCustomerReference,
           refs.muralOrganizationId,
           input.createdBy
         )
@@ -199,7 +195,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                     entity_type = ?,
                     display_name = ?,
                     provider_data = ?,
-                    bvnk_customer_reference = ?,
                     mural_organization_id = ?,
                     updated_at = sdp_iso_now()
               WHERE id = ?
@@ -211,7 +206,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
             input.entityType ?? current.entity_type,
             input.displayName ?? current.display_name,
             providerData,
-            refs.bvnkCustomerReference,
             refs.muralOrganizationId,
             current.id
           )
@@ -279,22 +273,24 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
-    async findActiveCounterpartyByBvnkCustomerReference(customerReference: string) {
+    async findActiveCounterpartyByProviderCustomerReference(params) {
       const rows = await db
         .prepare(
-          `SELECT * FROM counterparties
-            WHERE status = 'active'
-              AND (
-                bvnk_customer_reference = ?
-                OR (
-                  bvnk_customer_reference IS NULL
-                  AND provider_data->'bvnk'->'customer'->>'customerReference' = ?
-                )
-              )
-            ORDER BY id
+          `SELECT c.*
+             FROM counterparties c
+             JOIN counterparty_provider_accounts cpa
+               ON cpa.counterparty_id = c.id
+              AND cpa.organization_id = c.organization_id
+              AND cpa.project_id = c.project_id
+            WHERE c.status = 'active'
+              AND cpa.provider = ?
+              AND cpa.provider_customer_reference = ?
+              AND cpa.kind = 'customer_link'
+              AND cpa.status = 'active'
+            ORDER BY c.id
             LIMIT 2`
         )
-        .bind(customerReference, customerReference)
+        .bind(params.provider, params.providerCustomerReference)
         .all<Record<string, unknown>>();
       if (rows.results.length !== 1) {
         return null;
@@ -330,31 +326,57 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
     },
 
     async upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput) {
-      await mutateProviderDataLocked(db, {
-        ...params,
-        mutate(currentProviderData) {
-          const bvnk = readRecord(currentProviderData.bvnk);
-          if (bvnk === undefined) {
+      const providerCustomerReference = params.customer.customerReference;
+      if (providerCustomerReference === undefined) {
+        throw internalError("BVNK customer reference is missing from provider-account state.");
+      }
+      const metadata: BvnkCustomerProviderAccountMetadata = {};
+      if (params.customer.status !== undefined) {
+        metadata.status = params.customer.status;
+      }
+      if (params.customer.verificationStatus !== undefined) {
+        metadata.verificationStatus = params.customer.verificationStatus;
+      }
+      const parsedMetadata = bvnkCustomerProviderAccountMetadataSchema.parse(metadata);
+      await db.transaction(async (tx) => {
+        const client = asTransactionalClient(tx);
+        await createPostgresCounterpartyProviderAccountsRepository(client).upsertProviderAccount({
+          organizationId: params.organizationId,
+          projectId: params.projectId,
+          counterpartyId: params.counterpartyId,
+          provider: "bvnk",
+          providerCustomerReference,
+          metadata: parsedMetadata,
+        });
+        // TODO(PRO-1821): delete this provider_data mirror once BVNK requirement resolution reads provider-account rows.
+        await mutateProviderDataLocked(client, {
+          counterpartyId: params.counterpartyId,
+          organizationId: params.organizationId,
+          projectId: params.projectId,
+          mutate(currentProviderData) {
+            const bvnk = readRecord(currentProviderData.bvnk);
+            if (bvnk === undefined) {
+              return {
+                ...currentProviderData,
+                bvnk: { customer: params.customer },
+              };
+            }
+            const customer = readRecord(bvnk.customer);
+            if (customer === undefined) {
+              return {
+                ...currentProviderData,
+                bvnk: { ...bvnk, customer: params.customer },
+              };
+            }
             return {
               ...currentProviderData,
-              bvnk: { customer: params.customer },
+              bvnk: {
+                ...bvnk,
+                customer: { ...customer, ...params.customer },
+              },
             };
-          }
-          const customer = readRecord(bvnk.customer);
-          if (customer === undefined) {
-            return {
-              ...currentProviderData,
-              bvnk: { ...bvnk, customer: params.customer },
-            };
-          }
-          return {
-            ...currentProviderData,
-            bvnk: {
-              ...bvnk,
-              customer: { ...customer, ...params.customer },
-            },
-          };
-        },
+          },
+        });
       });
     },
 

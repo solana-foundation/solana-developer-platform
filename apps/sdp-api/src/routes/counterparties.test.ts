@@ -147,10 +147,10 @@ describe("Counterparties Routes", () => {
       .prepare(
         `INSERT INTO counterparty_provider_accounts (
            id, organization_id, project_id, counterparty_id, provider,
-           provider_customer_reference, external_account_reference, fiat_currency,
+           provider_customer_reference, kind, external_account_reference, fiat_currency,
            destination_country, payment_rail, provider_status, status, metadata,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING *`
       )
       .bind(
@@ -160,6 +160,7 @@ describe("Counterparties Routes", () => {
         input.counterpartyId,
         input.provider,
         input.providerCustomerReference,
+        "payout_account",
         input.externalAccountReference,
         input.fiatCurrency,
         input.destinationCountry,
@@ -1062,6 +1063,7 @@ describe("Counterparties Routes", () => {
           {
             id: "provider_account_usd_completed",
             provider: "lightspark",
+            kind: "payout_account",
             fiatCurrency: "USD",
             destinationCountry: "US",
             paymentRail: "ACH",
@@ -1075,6 +1077,7 @@ describe("Counterparties Routes", () => {
           {
             id: "provider_account_usd_pending",
             provider: "lightspark",
+            kind: "payout_account",
             fiatCurrency: "USD",
             destinationCountry: "US",
             paymentRail: "WIRE",
@@ -1085,6 +1088,7 @@ describe("Counterparties Routes", () => {
           {
             id: "provider_account_gbp_archived",
             provider: "mural",
+            kind: "payout_account",
             fiatCurrency: "GBP",
             destinationCountry: "GB",
             paymentRail: "FPS",

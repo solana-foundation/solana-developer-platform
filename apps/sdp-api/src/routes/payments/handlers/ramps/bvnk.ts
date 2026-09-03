@@ -151,6 +151,7 @@ async function persistBvnkOnrampState(
   repository?: CounterpartiesRepository
 ): Promise<void> {
   const repo = repository ?? getCounterpartiesRepository(c);
+  // TODO(PRO-1823): Move BVNK on-ramp state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
@@ -179,6 +180,7 @@ async function persistBvnkOfframpWallet(
   wallet: BvnkFiatWallet
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
+  // TODO(PRO-1824): Move BVNK merchant-wallet state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
@@ -252,6 +254,7 @@ async function persistBvnkOfframpBeneficiary(
   beneficiary: BvnkOfframpBeneficiary
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
+  // TODO(PRO-1824): Move BVNK beneficiary state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
