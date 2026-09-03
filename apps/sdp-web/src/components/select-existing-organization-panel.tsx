@@ -2,6 +2,7 @@
 
 import { useOrganizationList } from "@clerk/nextjs";
 import { ChevronRightIcon, LoaderCircleIcon } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
@@ -9,8 +10,15 @@ import { useTranslations } from "@/i18n/provider";
 function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string }) {
   if (imageUrl) {
     return (
-      // biome-ignore lint/performance/noImgElement: Clerk provides external URLs not in next/image config.
-      <img src={imageUrl} alt="" className="size-9 rounded-lg object-cover" aria-hidden="true" />
+      <Image
+        src={imageUrl}
+        alt=""
+        width={36}
+        height={36}
+        unoptimized
+        className="size-9 rounded-lg object-cover"
+        aria-hidden="true"
+      />
     );
   }
 
@@ -73,13 +81,15 @@ export function SelectExistingOrganizationPanel() {
                 key={organization.id}
                 type="button"
                 disabled={!setActive || switchingTo !== null}
-                onClick={() => {
+                onClick={async () => {
                   if (!setActive) return;
                   setSwitchingTo(organization.id);
-                  void setActive({ organization: organization.id }).then(
-                    () => router.refresh(),
-                    () => setSwitchingTo(null)
-                  );
+                  try {
+                    await setActive({ organization: organization.id });
+                    router.refresh();
+                  } catch {
+                    setSwitchingTo(null);
+                  }
                 }}
                 className="flex w-full items-center gap-3 rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
               >
