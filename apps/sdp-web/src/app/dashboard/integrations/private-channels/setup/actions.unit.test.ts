@@ -5,11 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: async () => ({ fetch: fetchMock }),
-  extractSdpApiErrorMessage: (error: unknown) =>
-    error instanceof Error ? error.message : "Request failed.",
-}));
+// Only the client is stubbed. `extractSdpApiErrorMessage` is the real one: it
+// decides how much of a failure reaches the operator, so a hand-written stand-in
+// would assert against a message shape the product never produces.
+vi.mock("@/lib/sdp-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/sdp-api")>("@/lib/sdp-api");
+  return {
+    createSdpApiClient: async () => ({ fetch: fetchMock }),
+    extractSdpApiErrorMessage: actual.extractSdpApiErrorMessage,
+  };
+});
 
 import {
   connectPrivateChannelAction,
@@ -88,7 +93,7 @@ describe("connectPrivateChannelAction", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns both successful and failed probe requests without exposing diagnostics", async () => {
+  it("returns both successful and failed probe requests, naming the failure", async () => {
     const probe = {
       ok: true,
       gateway: {
@@ -108,6 +113,7 @@ describe("connectPrivateChannelAction", () => {
     });
     await expect(testConnectionAction(SANDBOX_DEFAULTS)).resolves.toEqual({
       kind: "request-error",
+      message: "sensitive body",
     });
   });
 
@@ -195,18 +201,26 @@ describe("connectPrivateChannelAction", () => {
     });
   });
 
+  // Each of these used to collapse to one of two fixed strings, which left the
+  // thrown value unrecoverable: a connect failure that never reached the API
+  // rendered identically to one the API rejected. The last case is the one that
+  // motivated this — a non-Error throw now names itself.
   it.each([
     { thrown: null, message: "Request failed." },
-    { thrown: new Error("network down"), message: "Unable to reach the SDP API." },
+    { thrown: new Error("network down"), message: "network down" },
     {
       thrown: new Error("SDP API request failed (500): not-json"),
-      message: "Request failed.",
+      message: "not-json",
     },
     {
       thrown: new Error("SDP API request failed (500): {}"),
-      message: "Request failed.",
+      message: "{}",
     },
-  ])("normalizes an unsafe API failure to '$message'", async ({ thrown, message }) => {
+    {
+      thrown: { digest: "NEXT_REDIRECT;replace;/dashboard;307;" },
+      message: '{"digest":"NEXT_REDIRECT;replace;/dashboard;307;"}',
+    },
+  ])("reports an unsafe API failure as '$message'", async ({ thrown, message }) => {
     fetchMock.mockRejectedValue(thrown);
 
     await expect(connectPrivateChannelAction(SANDBOX_DEFAULTS)).resolves.toEqual({
