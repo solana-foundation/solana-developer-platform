@@ -369,6 +369,42 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
   });
 
+  // DvP is documented internally and deliberately withheld from the public
+  // document: the swap program is devnet-only and the family is flag-gated off,
+  // so every environment a customer can reach answers 403. Publishing it would
+  // document an endpoint nobody can call. Promoting it is a product decision.
+  it("documents the DvP trade routes on the internal document only", () => {
+    const internal = createOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument();
+
+    expect(internal.paths?.["/v1/dvp/trades"]?.post).toBeDefined();
+    expect(internal.paths?.["/v1/dvp/trades"]?.get).toBeDefined();
+    expect(internal.paths?.["/v1/dvp/trades/{tradeId}"]?.get).toBeDefined();
+    expect(internal.components?.schemas?.DvpTrade).toBeDefined();
+
+    expect(Object.keys(publicDocument.paths ?? {}).filter((p) => p.includes("/dvp"))).toEqual([]);
+    expect((publicDocument.tags ?? []).map((tag) => tag.name)).not.toContain("DvP");
+  });
+
+  // Every 64-bit value on this surface is a string. A JSON number rounds above
+  // 2^53, and the nonce is a PDA seed, so a rounded value names an escrow
+  // address that does not exist. Documenting one as a number would hand a
+  // generated client the bug.
+  it("documents DvP u64 fields as strings, never numbers", () => {
+    const doc = createOpenApiDocument();
+    const trade = doc.components?.schemas?.DvpTrade as {
+      properties: Record<string, { type?: string }>;
+    };
+
+    for (const field of ["nonce", "expiryTimestamp"]) {
+      expect(trade.properties[field]?.type).toBe("string");
+    }
+
+    const createBody = JSON.stringify(doc.paths?.["/v1/dvp/trades"]?.post?.requestBody);
+    expect(createBody).not.toContain('"type":"number"');
+    expect(createBody).not.toContain('"type":"integer"');
+  });
+
   it("documents the managed RPC round-robin order", () => {
     const doc = createOpenApiDocument();
     const rpcProviders = JSON.stringify(doc.paths?.["/v1/rpc/providers"]?.get);

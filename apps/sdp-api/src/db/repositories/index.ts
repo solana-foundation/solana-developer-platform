@@ -62,6 +62,15 @@ export type {
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 export type {
+  DvpTradeInsert,
+  DvpTradeRepository,
+  DvpTradeRow,
+  DvpTradeScope,
+  DvpTradeSide,
+  DvpTradeStatus,
+} from "./dvp-trade.repository";
+export { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
+export type {
   DeleteUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
   EarnRepository,
@@ -439,6 +448,7 @@ export {
   createAssetWorkflowsRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
+  createDvpTradeRepository,
   createEarnRepository,
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,

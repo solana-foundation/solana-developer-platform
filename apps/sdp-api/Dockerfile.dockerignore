@@ -18,6 +18,7 @@ apps/sdp-docs
 packages/*
 !packages/sdp-types
 !packages/sdp-env-config
+!packages/sdp-dvp
 !packages/sdp-earn
 !packages/sdp-helius-rings
 !packages/sdp-helius-rings-sdk

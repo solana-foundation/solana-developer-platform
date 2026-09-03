@@ -10,6 +10,8 @@ import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+import type { DvpTradeRepository } from "./dvp-trade.repository";
+import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import type { HeliusRingsAssetRepository } from "./helius-rings-asset.repository";
@@ -282,6 +284,10 @@ export function createPrivateChannelTransferRepository(env: Env): PrivateChannel
 
 export function createPrivateChannelDepositRepository(env: Env): PrivateChannelDepositRepository {
   return createPostgresPrivateChannelDepositRepository(getDb(env));
+}
+
+export function createDvpTradeRepository(env: Env): DvpTradeRepository {
+  return createPostgresDvpTradeRepository(getDb(env));
 }
 
 export function createPrivateChannelVerifiedWalletRepository(

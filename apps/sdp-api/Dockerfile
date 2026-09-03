@@ -21,6 +21,7 @@ COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-helius-rings/package.json ./packages/sdp-helius-rings/
 COPY packages/sdp-helius-rings-sdk/package.json ./packages/sdp-helius-rings-sdk/
+COPY packages/sdp-dvp/package.json ./packages/sdp-dvp/
 COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
@@ -48,6 +49,7 @@ COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-helius-rings ./packages/sdp-helius-rings
 COPY packages/sdp-helius-rings-sdk ./packages/sdp-helius-rings-sdk
+COPY packages/sdp-dvp ./packages/sdp-dvp
 COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc

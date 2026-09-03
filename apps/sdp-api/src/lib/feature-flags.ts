@@ -82,6 +82,14 @@ export function isEarnEnabled(env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED">
   return isMarketsEnabled(env) && isTruthyFlag(env.EARN_ENABLED);
 }
 
+// DvP is a sub-module of Markets, gated the same way as Earn: the parent flag
+// wins, so clearing MARKETS_ENABLED dark-launches this too. Worth knowing that
+// the DvP swap program is deployed on devnet ONLY, so enabling this against a
+// mainnet cluster produces trades that cannot be created at all (PRO-1798).
+export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED" | "DVP_ENABLED">): boolean {
+  return isMarketsEnabled(env) && isTruthyFlag(env.DVP_ENABLED);
+}
+
 /**
  * Clusters on which Kora may pay for Earn vault movements.
  *

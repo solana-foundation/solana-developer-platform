@@ -34,6 +34,7 @@ import compliance from "@/routes/compliance";
 import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
+import dvp from "@/routes/dvp";
 import earn from "@/routes/earn";
 import health from "@/routes/health";
 import heliusRings from "@/routes/helius-rings";
@@ -345,6 +346,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
   v1.route("/earn", earn);
+  v1.route("/dvp", dvp);
   v1.route("/places", places);
   v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
