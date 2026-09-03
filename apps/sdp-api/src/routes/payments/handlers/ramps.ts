@@ -1442,6 +1442,9 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
         externalCustomerId: link.accountId,
       });
+      // The business's own account is the only payout destination Hercle allows, so it is
+      // recorded rather than selected.
+      transferProviderData = { payoutProviderAccountId: link.payoutAccount?.id };
       break;
     }
     default: {
