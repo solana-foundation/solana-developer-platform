@@ -14,6 +14,43 @@ import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loadi
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 
+/**
+ * The idempotency key for one logical create.
+ *
+ * Derived from the WHOLE payload, in the same field order the API fingerprints
+ * (`apps/sdp-api/src/services/dvp/fingerprint.ts`). That order is not cosmetic:
+ * the API compares a replay's fingerprint against the stored one and refuses a
+ * mismatch, so a key covering fewer fields than the fingerprint turns two
+ * genuinely different trades into "Idempotency key already used with different
+ * request payload". Same wallet, counterparty, amounts and expiry but a
+ * different mint is the case that reached a 409 — a valid trade, refused.
+ *
+ * Hashed rather than concatenated only to keep the header short; every field
+ * that distinguishes one trade from another is inside the digest, which is what
+ * makes a double submit a replay and a changed asset a new request.
+ */
+async function createIdempotencyKey(request: DvpCreateRequest): Promise<string> {
+  const material = [
+    request.walletId,
+    request.sdpSide,
+    request.counterparty,
+    request.mintA,
+    request.tokenProgramA ?? TOKEN_2022,
+    request.mintB,
+    request.tokenProgramB ?? TOKEN_2022,
+    request.amountA,
+    request.amountB,
+    request.expiry,
+    request.refString,
+  ].join(" ");
+
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
+  const hex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `dvp-create-${hex}`;
+}
+
 export interface DvpCreateRequest {
   amountA: string;
   amountB: string;
@@ -44,13 +81,14 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
     setSubmitting(true);
     setError(null);
     try {
+      // One logical request: a double submit, or a retry after a dropped
+      // connection, must not create a second trade at a second address.
+      const idempotencyKey = await createIdempotencyKey(request);
       const response = await fetch("/api/dashboard/markets/dvp/trades", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // One logical request: a double submit, or a retry after a dropped
-          // connection, must not create a second trade at a second address.
-          "Idempotency-Key": `dvp-create-${request.walletId}-${request.counterparty}-${request.amountA}-${request.amountB}-${request.expiry}`,
+          "Idempotency-Key": idempotencyKey,
         },
         body: JSON.stringify({
           sdpWalletId: request.walletId,

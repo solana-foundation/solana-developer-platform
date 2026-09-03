@@ -28,6 +28,7 @@ import type { DvpCloseAction } from "@/services/dvp/settle";
 /** Every trade action that spends from a custody wallet. */
 export type DvpTradeAction = DvpCloseAction | "fund";
 
+import { readDvpLegShortfall } from "@/services/dvp/fund";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
@@ -50,10 +51,28 @@ export function buildDvpTradeActionPolicyCandidate(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
   settlement: SettlementWalletRef,
-  action: DvpTradeAction
+  action: DvpTradeAction,
+  /**
+   * What funding will actually move, when it is already known to be less than
+   * the leg's target. Null for settle and cancel, which move whole legs.
+   *
+   * `fundDvpTradeLeg` tops a partly funded leg up to its target rather than
+   * sending the target again (`services/dvp/fund.ts:99`), so the full amount is
+   * the wrong number to put in front of an approver: a top-up well inside an
+   * amount limit would be refused because the TARGET exceeds it, and the queue
+   * would ask a human to approve money that is not going to move.
+   *
+   * Safe as an approval basis despite being read before the transfer: an escrow
+   * only ever gains tokens while its trade is open — settle, cancel and reject
+   * each close the account — so the outstanding balance is monotonically
+   * non-increasing and this is an upper bound on the eventual transfer. Policy
+   * therefore never approves less than what moves.
+   */
+  fundingAmount: bigint | null = null
 ): { candidate: PolicyCandidate; legs: PolicyCandidate[] } {
   const auth = getAuth(c);
   const sdpLegIsA = trade.sdpSide === "a";
+  const sdpAmount = fundingAmount === null ? null : fundingAmount.toString();
 
   const base = {
     organizationId: auth.organizationId,
@@ -104,7 +123,11 @@ export function buildDvpTradeActionPolicyCandidate(
     context: { dvpTradeId: trade.id, dvpLeg: "b", dvpAction: action },
   };
 
-  const sdpLeg = sdpLegIsA ? legA : legB;
+  // Only SDP's leg is ever overridden: the counterparty's leg describes what
+  // THEY owe, which a partial top-up on our side does not change.
+  const sdpLegAtTarget = sdpLegIsA ? legA : legB;
+  const sdpLeg: PolicyCandidate =
+    sdpAmount === null ? sdpLegAtTarget : { ...sdpLegAtTarget, amount: sdpAmount };
 
   // Funding moves ONE leg — SDP's — so the counterparty's leg is not part of
   // the operation and must not be evaluated as though it were.
@@ -180,7 +203,19 @@ export async function extractDvpTradeActionPolicyCandidate(
     organizationId: trade.organizationId,
     projectId: trade.projectId,
   });
-  const { candidate, legs } = buildDvpTradeActionPolicyCandidate(c, trade, settlement, action);
+
+  // Funding tops SDP's leg up to its target, so what policy is shown has to be
+  // the shortfall rather than the target. Read here, at extraction, because
+  // this is the value the approval request stores and a human reads later.
+  const fundingAmount = action === "fund" ? await readDvpLegShortfall(c.env, trade) : null;
+
+  const { candidate, legs } = buildDvpTradeActionPolicyCandidate(
+    c,
+    trade,
+    settlement,
+    action,
+    fundingAmount
+  );
 
   return {
     candidate,

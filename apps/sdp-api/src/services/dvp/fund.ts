@@ -46,6 +46,49 @@ export interface DvpFundResult {
   amount: string;
 }
 
+/** The addresses and target for whichever leg SDP holds. */
+interface DvpSdpLeg {
+  mint: Address;
+  tokenProgram: Address;
+  escrow: Address;
+  amount: bigint;
+}
+
+/**
+ * Resolves SDP's own leg of a trade.
+ *
+ * One place decides which side is ours, because the shortfall the approvals
+ * queue displays and the shortfall the transfer sends have to be the same
+ * number derived the same way.
+ */
+function sdpLegOf(trade: DvpTradeRow): DvpSdpLeg {
+  const sdpLegIsA = trade.sdpSide === "a";
+  return {
+    mint: (sdpLegIsA ? trade.mintA : trade.mintB) as Address,
+    tokenProgram: (sdpLegIsA ? trade.tokenProgramA : trade.tokenProgramB) as Address,
+    escrow: (sdpLegIsA ? trade.escrowA : trade.escrowB) as Address,
+    amount: BigInt(sdpLegIsA ? trade.amountA : trade.amountB),
+  };
+}
+
+/**
+ * How much of SDP's leg is still outstanding, per the chain right now.
+ *
+ * Exported for the policy extractor: an approver has to be shown the amount
+ * that will actually move, and funding sends the shortfall rather than the
+ * target. Returns 0n for a leg that is already at or above its target.
+ *
+ * @param env - API process environment, for the RPC.
+ * @param trade - The trade whose SDP leg is being funded.
+ * @returns The outstanding base-unit amount, never negative.
+ */
+export async function readDvpLegShortfall(env: Env, trade: DvpTradeRow): Promise<bigint> {
+  const leg = sdpLegOf(trade);
+  const state = await readEscrowState(solanaRpc.createRpc(env), leg.escrow, leg.tokenProgram);
+  const held = state?.amount ?? 0n;
+  return held >= leg.amount ? 0n : leg.amount - held;
+}
+
 /**
  * Funds SDP's leg of a trade from the custody wallet that holds it.
  *
@@ -63,11 +106,7 @@ export async function fundDvpTradeLeg(
     throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be funded`);
   }
 
-  const sdpLegIsA = trade.sdpSide === "a";
-  const mint = (sdpLegIsA ? trade.mintA : trade.mintB) as Address;
-  const tokenProgram = (sdpLegIsA ? trade.tokenProgramA : trade.tokenProgramB) as Address;
-  const escrow = (sdpLegIsA ? trade.escrowA : trade.escrowB) as Address;
-  const amount = BigInt(sdpLegIsA ? trade.amountA : trade.amountB);
+  const { mint, tokenProgram, escrow, amount } = sdpLegOf(trade);
 
   const rpc = solanaRpc.createRpc(env);
 
@@ -134,6 +173,33 @@ export async function fundDvpTradeLeg(
   );
   const signed = await signTransactionMessageWithSigners(message);
   const signature = getSignatureFromTransaction(signed);
+
+  // Last look before anything is committed to. Everything between the first
+  // balance read and here — resolving a signer at the custody provider above
+  // all, which is a call out to a third party — is time in which the escrow ATA
+  // could have received a transfer, because it accepts one from anyone. A
+  // deposit inside that window leaves `outstanding` too large, and sending it
+  // anyway over-funds the escrow; settlement then refunds the surplus, which on
+  // a transfer-hook mint can revert the whole Settle. The claim below cannot
+  // help with this one: it serialises OUR requests, not a stranger's transfer.
+  //
+  // Placed BEFORE the claim and the approval fence deliberately, so aborting
+  // costs neither a claim to release nor a consumed approval lease.
+  //
+  // This NARROWS the window to one read; it does not close it, and it cannot be
+  // closed from here. Funding is a bare `TransferChecked` with the program
+  // uninvolved, SPL has no balance precondition, and the DvP program exposes no
+  // deposit instruction that could carry one — only create, settle, cancel,
+  // reject, reclaim and recover. Closing it properly needs a program-side
+  // deposit capped at the target, which is a program change, not an API one.
+  // Aborting is the safe half of the trade-off: a refused top-up is retryable,
+  // an over-funded escrow depends on the surplus-refund path working.
+  const recheck = await readEscrowState(rpc, escrow, tokenProgram);
+  if ((recheck?.amount ?? 0n) !== held) {
+    throw conflict(
+      `DvP trade ${trade.id}: the escrow balance changed while this funding was being prepared, so ${outstanding} is no longer the amount owed. Nothing was sent — retry to fund the current shortfall.`
+    );
+  }
 
   // The balance read above and this transfer are not atomic, so two overlapping
   // requests would both see the same shortfall and both send. The claim is what

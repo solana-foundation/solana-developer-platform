@@ -39,7 +39,7 @@ vi.mock("@sdp/rpc/solana", () => ({
   sendTransaction,
 }));
 
-const { fundDvpTradeLeg } = await import("./fund");
+const { fundDvpTradeLeg, readDvpLegShortfall } = await import("./fund");
 
 const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
@@ -231,5 +231,82 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/could not be read/);
     expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // The escrow ATA takes a transfer from ANYONE, and resolving a signer at the
+  // custody provider sits between the first balance read and the broadcast. A
+  // deposit landing in that window makes the computed shortfall too large, and
+  // sending it anyway over-funds the escrow — the surplus then has to be
+  // refunded at settlement, which a transfer-hook mint can reject outright.
+  //
+  // The claim does not cover this: it serialises OUR requests, not a stranger's
+  // transfer. Only re-reading does.
+  describe("a third-party deposit landing mid-flight", () => {
+    it("aborts rather than over-funding, and sends nothing", async () => {
+      readEscrowState
+        .mockResolvedValueOnce({ amount: 0n, frozen: false })
+        .mockResolvedValueOnce({ amount: 400n, frozen: false });
+
+      await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/no longer the amount owed/);
+      expect(sendTransaction).not.toHaveBeenCalled();
+    });
+
+    // Aborting has to be free. The re-read sits before both the claim and the
+    // approval fence so a refusal leaves no claim to release and does not burn
+    // the approval's execution lease — otherwise the retry this error invites
+    // would need a fresh approval.
+    it("costs neither the funding claim nor the approval lease", async () => {
+      readEscrowState
+        .mockResolvedValueOnce({ amount: 0n, frozen: false })
+        .mockResolvedValueOnce({ amount: 400n, frozen: false });
+
+      await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/no longer the amount owed/);
+
+      expect(claimLegFunding).not.toHaveBeenCalled();
+      expect(beginApprovedWalletOperationEffect).not.toHaveBeenCalled();
+      expect(releaseLegFunding).not.toHaveBeenCalled();
+    });
+
+    it("still funds when the balance is unchanged by the second read", async () => {
+      readEscrowState
+        .mockResolvedValueOnce({ amount: 400n, frozen: false })
+        .mockResolvedValueOnce({ amount: 400n, frozen: false });
+
+      await expect(fundDvpTradeLeg(context, trade())).resolves.toMatchObject({ amount: "600" });
+    });
+  });
+});
+
+// Exported for the policy extractor, which has to put the amount that will
+// actually move in front of an approver rather than the leg's target.
+describe("readDvpLegShortfall", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reports the outstanding balance for a partly funded leg", async () => {
+    readEscrowState.mockResolvedValue({ amount: 400n, frozen: false });
+
+    await expect(readDvpLegShortfall(env, trade())).resolves.toBe(600n);
+  });
+
+  it("reports the full target when nothing has been deposited", async () => {
+    readEscrowState.mockResolvedValue(null);
+
+    await expect(readDvpLegShortfall(env, trade())).resolves.toBe(1000n);
+  });
+
+  it("reads the leg SDP holds, not always leg A", async () => {
+    readEscrowState.mockResolvedValue({ amount: 500n, frozen: false });
+
+    await expect(readDvpLegShortfall(env, trade({ sdpSide: "b" }))).resolves.toBe(1500n);
+  });
+
+  // Never negative. An over-funded leg has nothing outstanding, and a negative
+  // amount reaching a policy rule would compare as under every limit.
+  it("clamps an over-funded leg to zero rather than going negative", async () => {
+    readEscrowState.mockResolvedValue({ amount: 4000n, frozen: false });
+
+    await expect(readDvpLegShortfall(env, trade())).resolves.toBe(0n);
   });
 });
