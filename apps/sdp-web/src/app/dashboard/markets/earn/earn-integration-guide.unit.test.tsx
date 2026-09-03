@@ -139,6 +139,9 @@ describe("EarnIntegrationGuide", () => {
     expect(code).not.toContain("/v1/earn/vault-deposit-previews");
     expect(code).not.toContain("/v1/earn/external-wallet/withdrawal-previews");
     expect(code).toContain("signedTransaction");
+    expect(code).toContain("feePayer?: string");
+    expect(code).toContain("sourceTokenMint: EMBEDDED_YIELD_STRATEGY.directDepositMint");
+    expect(code.match(/return data\.transaction;/g)).toHaveLength(2);
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");

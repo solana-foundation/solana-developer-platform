@@ -46,7 +46,7 @@ Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-nu
 ## 2. Deposit: build, sign, submit, poll
 
 ```ts
-const SDP_API_URL = "https://api.sdp.solana.com";
+const SDP_API_URL = "https://api.solana.com";
 
 function sdpHeaders(extra: Record<string, string> = {}) {
   const apiKey = process.env.SDP_API_KEY;
@@ -62,7 +62,9 @@ async function sdpFetch(path: string, init?: RequestInit) {
   const response = await fetch(`${SDP_API_URL}${path}`, init);
   const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(result?.error?.message ?? `SDP request failed: ${path} (${response.status})`);
+    const code = result?.error?.code ? ` ${result.error.code}` : "";
+    const message = result?.error?.message ?? "Request failed";
+    throw new Error(`SDP ${response.status}${code}: ${message}`);
   }
   return result.data;
 }
@@ -75,10 +77,11 @@ const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transac
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify({
-    strategyId,
+    strategyId: strategy.id,
     ownerAddress, // the customer's wallet
     amount: "25", // decimal string in the vault token's units
-    minSharesOut, // slippage floor; required in production
+    sourceTokenMint: strategy.depositMints[0], // shortest path: no swap
+    ...(minSharesOut ? { minSharesOut } : {}), // required when depositSlippage is non-null
   }),
 });
 // { transactionId, transaction, lastValidBlockHeight, ... }
