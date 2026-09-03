@@ -226,6 +226,7 @@ describe("Integrations dashboard navigation", () => {
       "/dashboard/integrations?tab=compliance",
       "/dashboard/integrations?tab=privacy",
     ]);
+    expect(item?.children?.every((child) => child.icon)).toBe(true);
   });
 
   it("keeps only RPC when every owning module is disabled", () => {

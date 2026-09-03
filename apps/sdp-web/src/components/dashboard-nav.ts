@@ -15,6 +15,7 @@ import {
   ShieldCheckIcon,
   TrendingUpIcon,
   UsersIcon,
+  VenetianMaskIcon,
   WalletIcon,
 } from "lucide-react";
 import type { useTranslations } from "@/i18n/provider";
@@ -208,6 +209,7 @@ export function getIntegrationActions(
           {
             label: t("Shared.integrations.privacyTitle"),
             href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.privacy,
+            icon: VenetianMaskIcon,
           },
         ]
       : []),
