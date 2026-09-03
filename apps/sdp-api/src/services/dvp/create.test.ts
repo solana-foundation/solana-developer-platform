@@ -254,6 +254,87 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
+  // A create that definitively never landed leaves its logical request unmade,
+  // so the key it claimed has nothing to answer for. Replaying it hands back a
+  // dead trade instead — and for a caller whose key is DERIVED from the payload,
+  // as the dashboard's is, that is permanent: there is no other key it can send
+  // for those terms, so one preflight rejection would retire the trade forever.
+  describe("after a create that definitively failed", () => {
+    async function failOnceWith(key: string) {
+      sendTransaction.mockRejectedValueOnce(
+        new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+          accounts: null,
+          fee: null,
+          loadedAccountsDataSize: 0,
+          loadedAddresses: null,
+          logs: [],
+          postBalances: null,
+          postTokenBalances: null,
+          preBalances: null,
+          preTokenBalances: null,
+          replacementBlockhash: null,
+          returnData: null,
+          unitsConsumed: 0n,
+        })
+      );
+      await expect(
+        createDvpTrade(env, { ...tradeInput(), idempotencyKey: key })
+      ).rejects.toThrow();
+    }
+
+    it("lets the same key create the trade on a retry", async () => {
+      await failOnceWith("key-retry");
+      sendTransaction.mockResolvedValue("sig");
+
+      const retried = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+
+      expect(retried.status).toBe("created");
+    });
+
+    it("keeps the failed attempt on the record rather than deleting it", async () => {
+      await failOnceWith("key-retry");
+      sendTransaction.mockResolvedValue("sig");
+
+      await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+
+      const rows = await rowsInDb();
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.status).sort()).toEqual(["create_failed", "created"]);
+    });
+
+    // Freed on the dead row only. Leaving it there would let a second retry
+    // replay the corpse again.
+    it("frees the key from the failed row so only the live trade answers to it", async () => {
+      await failOnceWith("key-retry");
+      sendTransaction.mockResolvedValue("sig");
+      const live = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+
+      const replayed = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+
+      expect(replayed.id).toBe(live.id);
+      await expect(rowsInDb()).resolves.toHaveLength(2);
+    });
+  });
+
+  // An AMBIGUOUS failure is the opposite case: the transaction may still land,
+  // so its key must keep answering or the retry would create a second trade at
+  // a second address while the first sits on chain.
+  it("does not free the key of a trade still stuck at creating", async () => {
+    sendTransaction.mockRejectedValueOnce(new Error("socket hang up"));
+    await expect(
+      createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-ambiguous" })
+    ).rejects.toThrow("socket hang up");
+
+    sendTransaction.mockResolvedValue("sig");
+    const retried = await createDvpTrade(env, {
+      ...tradeInput(),
+      idempotencyKey: "key-ambiguous",
+    });
+
+    expect(retried.status).toBe("creating");
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
   // A key is a claim, not a proof. Reused with different terms it would hand
   // back the earlier trade — and that trade names a custody wallet and
   // publishes escrow addresses, so a wallet-scoped caller would receive a
