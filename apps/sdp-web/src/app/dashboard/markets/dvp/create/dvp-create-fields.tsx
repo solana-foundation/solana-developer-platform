@@ -12,6 +12,7 @@ import { TokenMark } from "@/components/token-mark";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { fromBaseUnits, toBaseUnits } from "./dvp-amount";
@@ -169,6 +170,69 @@ function compareBaseUnits(left: string, right: string): number {
  * magic. Where they are not, it says so and takes base units, because guessing
  * a scale would move the wrong quantity.
  */
+/**
+ * What the balance line offers: how much you hold, and a way to spend all of it.
+ *
+ * Its own component because it was an inline conditional inside a prop, which
+ * is where a chunk of `AmountField`'s branching lived.
+ */
+function BalanceWithMax({
+  balance,
+  onChange,
+}: {
+  balance: { amount: string; decimals: number };
+  onChange: (next: string) => void;
+}) {
+  const t = useTranslations();
+  const max = fromBaseUnits(balance.amount, balance.decimals);
+
+  return (
+    <span className="flex items-center gap-2">
+      <span className="text-tertiary text-xs tabular-nums">
+        {t("DashboardMarkets.dvp.balanceAvailable", { amount: max })}
+      </span>
+      <button
+        className="rounded text-primary text-xs underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        onClick={() => onChange(max)}
+        type="button"
+      >
+        {t("DashboardMarkets.dvp.balanceUseMax")}
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Which of the four things this field can say about the number you typed.
+ *
+ * They are mutually exclusive and were written as a ternary nested four deep,
+ * which reads as one expression and is four decisions. Early returns say the
+ * same thing in the order the cases actually rank: no scale known, then too
+ * precise to send, then the conversion, then how to write it.
+ */
+function amountHintKey(
+  decimals: number | null,
+  tooPrecise: boolean,
+  converted: ReturnType<typeof toBaseUnits> | null
+): { key: MessageKey; values?: Record<string, string> } {
+  if (decimals === null) {
+    return { key: "DashboardMarkets.dvp.fieldAmountHintRaw" };
+  }
+  if (tooPrecise) {
+    return { key: "DashboardMarkets.dvp.amountTooPrecise" };
+  }
+  if (converted?.ok) {
+    return {
+      key: "DashboardMarkets.dvp.baseUnits",
+      values: { value: converted.baseUnits },
+    };
+  }
+  return {
+    key: "DashboardMarkets.dvp.fieldAmountHintDecimals",
+    values: { decimals: String(decimals) },
+  };
+}
+
 export function AmountField({
   balance,
   decimals,
@@ -206,40 +270,14 @@ export function AmountField({
       ? compareBaseUnits(converted.baseUnits, balance.amount) > 0
       : false;
 
+  const hint = amountHintKey(decimals, tooPrecise, converted);
+
   return (
     <Field
-      hint={
-        decimals === null
-          ? t("DashboardMarkets.dvp.fieldAmountHintRaw")
-          : tooPrecise
-            ? t("DashboardMarkets.dvp.amountTooPrecise", { symbol })
-            : converted?.ok
-              ? t("DashboardMarkets.dvp.baseUnits", { value: converted.baseUnits })
-              : t("DashboardMarkets.dvp.fieldAmountHintDecimals", {
-                  symbol,
-                  decimals: String(decimals),
-                })
-      }
+      hint={t(hint.key, { symbol, ...hint.values })}
       htmlFor={id}
       label={label}
-      labelTrailing={
-        balance ? (
-          <span className="flex items-center gap-2">
-            <span className="text-tertiary text-xs tabular-nums">
-              {t("DashboardMarkets.dvp.balanceAvailable", {
-                amount: fromBaseUnits(balance.amount, balance.decimals),
-              })}
-            </span>
-            <button
-              className="rounded text-primary text-xs underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-              onClick={() => onChange(fromBaseUnits(balance.amount, balance.decimals))}
-              type="button"
-            >
-              {t("DashboardMarkets.dvp.balanceUseMax")}
-            </button>
-          </span>
-        ) : null
-      }
+      labelTrailing={balance ? <BalanceWithMax balance={balance} onChange={onChange} /> : null}
       tone={tooPrecise ? "danger" : "muted"}
       warning={exceedsBalance ? t("DashboardMarkets.dvp.amountExceedsBalance") : null}
     >
