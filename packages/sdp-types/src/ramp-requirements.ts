@@ -107,4 +107,5 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "hercle"; status: "customer_verification_required"; verificationUrl: string }
   | { provider: "hercle"; status: "customer_verifying" }
   | { provider: "hercle"; status: "customer_verification_failed" }
+  | { provider: "hercle"; status: "funding_account_provisioning" }
 );

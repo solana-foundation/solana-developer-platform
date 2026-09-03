@@ -1288,6 +1288,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
+        // Makes the order's idempotency key unique per transfer and lets Hercle echo our id back.
+        paymentTransferId: reservedTransferId,
         // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
         externalCustomerId: accountId,
       });

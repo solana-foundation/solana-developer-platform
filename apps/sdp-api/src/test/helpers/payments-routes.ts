@@ -351,6 +351,8 @@ export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
   providerData?: Record<string, unknown>;
+  entityType?: "individual" | "business";
+  displayName?: string;
 }): Promise<string> {
   const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
   const externalId = params?.externalId ?? null;
@@ -374,8 +376,8 @@ export async function seedCounterparty(params?: {
       TEST_ORG.id,
       TEST_PROJECT.id,
       externalId,
-      "individual",
-      "MoonPay Test Counterparty",
+      params?.entityType ?? "individual",
+      params?.displayName ?? "MoonPay Test Counterparty",
       providerData,
       TEST_USER.id
     )

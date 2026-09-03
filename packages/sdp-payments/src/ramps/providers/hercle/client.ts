@@ -163,8 +163,25 @@ const hercleVerificationResponseSchema = z.object({
   verificationUrl: z.string().optional(),
 });
 
+const herclePayoutAccountResponseSchema = z.object({
+  currency: z.string(),
+  iban: z.string(),
+  bic: z.string(),
+  accountHolder: z.string(),
+  status: z.enum(["pending", "active", "refused"]),
+  registeredAt: z.string().optional(),
+});
+
 export type HercleAccountResponse = z.infer<typeof hercleAccountResponseSchema>;
 export type HercleVerificationResponse = z.infer<typeof hercleVerificationResponseSchema>;
+export type HerclePayoutAccountResponse = z.infer<typeof herclePayoutAccountResponseSchema>;
+
+export interface HercleRegisterPayoutAccountRequest {
+  currency: string;
+  iban: string;
+  bic: string;
+  accountHolder: string;
+}
 
 export interface HercleCreateAccountRequest {
   companyName: string;
@@ -299,6 +316,44 @@ export class HercleRampClient implements RampProvider {
         { body: {}, idempotencyKey }
       ),
       "verification"
+    );
+  }
+
+  /**
+   * The business's own bank account, the only payout destination Hercle's first-party rail allows.
+   * Hercle compares the holder with the registered company name and answers 422 on a mismatch, so
+   * a wrong beneficiary surfaces here, in the form, rather than as a payout that never arrives.
+   */
+  async registerPayoutAccount(
+    ctx: RampRuntimeContext,
+    accountId: string,
+    request: HercleRegisterPayoutAccountRequest
+  ): Promise<HerclePayoutAccountResponse> {
+    return this.parseWith(
+      herclePayoutAccountResponseSchema,
+      await this.request(
+        ctx,
+        "POST",
+        `/partner/v1/accounts/${encodeURIComponent(accountId)}/payout-account`,
+        { body: request }
+      ),
+      "payout account"
+    );
+  }
+
+  async getPayoutAccount(
+    ctx: RampRuntimeContext,
+    accountId: string,
+    currency: string
+  ): Promise<HerclePayoutAccountResponse> {
+    return this.parseWith(
+      herclePayoutAccountResponseSchema,
+      await this.request(
+        ctx,
+        "GET",
+        `/partner/v1/accounts/${encodeURIComponent(accountId)}/payout-account?currency=${encodeURIComponent(currency)}`
+      ),
+      "payout account"
     );
   }
 
@@ -484,6 +539,8 @@ export class HercleRampClient implements RampProvider {
           cryptoAmount: input.cryptoAmount,
           cryptoAsset,
           network: railNetwork(assetRail),
+          // Declared source of the on-chain send: Hercle screens it and compares it with the actual sender at deposit time (TS-BANK-10.3).
+          sourceWalletAddress: input.sourceWalletAddress,
           externalReference: input.paymentTransferId,
         },
         onBehalfOf: input.externalCustomerId,

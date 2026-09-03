@@ -1,8 +1,12 @@
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   HERCLE_ADDRESS_CITY_FIELD_KEY,
   HERCLE_ADDRESS_LINE1_FIELD_KEY,
   HERCLE_ADDRESS_POSTAL_CODE_FIELD_KEY,
+  HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
+  HERCLE_PAYOUT_BIC_FIELD_KEY,
+  HERCLE_PAYOUT_IBAN_FIELD_KEY,
   HERCLE_REGISTRATION_COUNTRY_FIELD_KEY,
   HERCLE_REGISTRATION_NUMBER_FIELD_KEY,
   hercleJurisdictionForCountry,
@@ -55,10 +59,14 @@ async function persistHercleData(
   });
 }
 
+/** EUR is the only currency Hercle settles at launch, and the rails snapshot declares nothing else. */
+const HERCLE_PAYOUT_CURRENCY = "EUR";
+
 /**
- * Staged ensure-provisioning for Hercle (TS-SUBACC-03 / TS-KYC-01 lanes):
+ * Staged ensure-provisioning for Hercle (TS-SUBACC-03 / TS-KYC-01 / TS-BANK-10.5 lanes):
  * (1) create the Hercle business sub-account (idempotent by the counterparty-scoped
- * Idempotency-Key, replayed on retry), (2) initiate or refresh the KYB verification.
+ * Idempotency-Key, replayed on retry), (2) register the business's own payout account,
+ * (3) initiate or refresh the KYB verification.
  * Each completed step persists into provider_data.hercle, so a mid-flight failure
  * resumes on the next requirements POST — SDP re-invokes this stage until `ready`.
  */
@@ -125,12 +133,43 @@ export async function advanceHercleCounterparty(
   if (!data.accountId) {
     throw internalError("Hercle account provisioning did not yield an account id.");
   }
+  const accountId = data.accountId;
+
+  if (data.payoutAccountStatus === undefined) {
+    const iban = collectedData?.[HERCLE_PAYOUT_IBAN_FIELD_KEY]?.trim();
+    const bic = collectedData?.[HERCLE_PAYOUT_BIC_FIELD_KEY]?.trim();
+    const accountHolder = collectedData?.[HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY]?.trim();
+
+    if (!iban || !bic || !accountHolder) {
+      throw badRequest(
+        "The business's own bank account (IBAN, BIC and account holder) is required to provision a Hercle account."
+      );
+    }
+
+    const payoutAccountStatus = await registerHerclePayoutAccount(client, runtime, accountId, {
+      currency: HERCLE_PAYOUT_CURRENCY,
+      iban,
+      bic,
+      accountHolder,
+    });
+    data = { ...data, payoutAccountStatus };
+    await persistHercleData(repo, counterparty, projectId, { payoutAccountStatus });
+  } else if (data.payoutAccountStatus === "pending") {
+    // The rail registers the account after KYB approval; poll until it flips.
+    const payoutAccount = await client.getPayoutAccount(runtime, accountId, HERCLE_PAYOUT_CURRENCY);
+    if (payoutAccount.status !== data.payoutAccountStatus) {
+      data = { ...data, payoutAccountStatus: payoutAccount.status };
+      await persistHercleData(repo, counterparty, projectId, {
+        payoutAccountStatus: payoutAccount.status,
+      });
+    }
+  }
 
   if (data.verificationStatus !== "ready") {
     const verification =
       data.verificationStatus === undefined
-        ? await client.createVerification(runtime, data.accountId, `sdp-kyb-${counterparty.id}`)
-        : await client.getVerification(runtime, data.accountId);
+        ? await client.createVerification(runtime, accountId, `sdp-kyb-${counterparty.id}`)
+        : await client.getVerification(runtime, accountId);
     const verificationStatus = mapHercleVerificationStatus(verification.status);
     data = {
       ...data,
@@ -146,12 +185,42 @@ export async function advanceHercleCounterparty(
   return hercleOnboardingRequirements(data, direction);
 }
 
+/**
+ * A repeated provisioning attempt after the first registration succeeded answers 409 from Hercle;
+ * the registered account is then read back instead, so a retry converges rather than fails.
+ * Any other refusal — a holder that is not the business itself — is the user's to fix, with
+ * Hercle's own message.
+ */
+async function registerHerclePayoutAccount(
+  client: typeof RAMP_PROVIDER_CLIENTS.hercle,
+  runtime: RampRuntimeContext,
+  accountId: string,
+  request: { currency: string; iban: string; bic: string; accountHolder: string }
+) {
+  try {
+    return (await client.registerPayoutAccount(runtime, accountId, request)).status;
+  } catch (error) {
+    if (error instanceof SdpPaymentsError && error.code === "CONFLICT") {
+      return (await client.getPayoutAccount(runtime, accountId, request.currency)).status;
+    }
+    if (error instanceof SdpPaymentsError && error.code === "BAD_REQUEST") {
+      throw badRequest(error.message);
+    }
+    throw error;
+  }
+}
+
 /** The `on-behalf-of` account id for scoped Hercle calls; undefined until provisioned. */
 export function hercleAccountId(counterparty: CounterpartyRow): string | undefined {
   return readHercleData(counterparty.provider_data).accountId;
 }
 
-/** True once the Hercle KYB verdict landed and the sub-account can transact. */
+/**
+ * True once the KYB verdict landed and the bank rail holds the business's payout account.
+ * Hercle refuses orders on either count, so gating here turns a provider error into the
+ * provisioning status the wizard already knows how to render.
+ */
 export function isHercleCounterpartyReady(counterparty: CounterpartyRow): boolean {
-  return readHercleData(counterparty.provider_data).verificationStatus === "ready";
+  const data = readHercleData(counterparty.provider_data);
+  return data.verificationStatus === "ready" && data.payoutAccountStatus === "active";
 }

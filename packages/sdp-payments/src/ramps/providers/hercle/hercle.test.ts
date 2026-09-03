@@ -5,6 +5,9 @@ import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { RampDiscoveryContext, ValidateCounterpartyOptions } from "../../types";
 import { buildHercleSignature, HercleRampClient, parseCryptoRail } from "./client";
 import {
+  HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
+  HERCLE_PAYOUT_BIC_FIELD_KEY,
+  HERCLE_PAYOUT_IBAN_FIELD_KEY,
   HERCLE_REGISTRATION_COUNTRY_FIELD_KEY,
   HERCLE_REGISTRATION_NUMBER_FIELD_KEY,
   hercleCounterpartyRequirements,
@@ -76,6 +79,11 @@ describe("hercleCounterpartyRequirements", () => {
     const keys = requirements.fields.map((field) => field.key);
     assert.ok(keys.includes(HERCLE_REGISTRATION_NUMBER_FIELD_KEY));
     assert.ok(keys.includes(HERCLE_REGISTRATION_COUNTRY_FIELD_KEY));
+    // The payout account is collected with the registration data: fiat is first-party only, so it is
+    // the business's own account and there is nothing to choose per order.
+    assert.ok(keys.includes(HERCLE_PAYOUT_IBAN_FIELD_KEY));
+    assert.ok(keys.includes(HERCLE_PAYOUT_BIC_FIELD_KEY));
+    assert.ok(keys.includes(HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY));
     assert.ok(requirements.fields.every((field) => field.required));
 
     // The country field is the jurisdiction discriminator, so it must be a closed CH/EEA list.
@@ -92,6 +100,25 @@ describe("hercleCounterpartyRequirements", () => {
     assert.ok(!countryCodes.includes("US"));
   });
 
+  it("re-collects only the bank details for an account provisioned before the payout account existed", () => {
+    const requirements = hercleCounterpartyRequirements(
+      businessCounterparty(),
+      options({ hercle: { accountId: "acct_1", verificationStatus: "ready" } })
+    );
+    assert.equal(requirements.status, "collect");
+    if (requirements.status !== "collect") {
+      assert.fail("expected collect");
+    }
+    assert.deepEqual(
+      requirements.fields.map((field) => field.key),
+      [
+        HERCLE_PAYOUT_IBAN_FIELD_KEY,
+        HERCLE_PAYOUT_BIC_FIELD_KEY,
+        HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
+      ]
+    );
+  });
+
   it("surfaces the stored verification lifecycle once an account exists", () => {
     const verificationRequired = hercleCounterpartyRequirements(
       businessCounterparty(),
@@ -100,6 +127,7 @@ describe("hercleCounterpartyRequirements", () => {
           accountId: "acct_1",
           verificationStatus: "verification_required",
           verificationUrl: "https://verify.example/x",
+          payoutAccountStatus: "pending",
         },
       })
     );
@@ -107,9 +135,38 @@ describe("hercleCounterpartyRequirements", () => {
 
     const ready = hercleCounterpartyRequirements(
       businessCounterparty(),
-      options({ hercle: { accountId: "acct_1", verificationStatus: "ready" } })
+      options({
+        hercle: { accountId: "acct_1", verificationStatus: "ready", payoutAccountStatus: "active" },
+      })
     );
     assert.equal(ready.status, "ready");
+  });
+
+  it("is not ready while the bank rail is still registering the payout account", () => {
+    // Hercle refuses off-ramp orders until the account is active, so the wizard must keep polling.
+    const provisioning = hercleCounterpartyRequirements(
+      businessCounterparty(),
+      options({
+        hercle: {
+          accountId: "acct_1",
+          verificationStatus: "ready",
+          payoutAccountStatus: "pending",
+        },
+      })
+    );
+    assert.equal(provisioning.status, "funding_account_provisioning");
+
+    const refused = hercleCounterpartyRequirements(
+      businessCounterparty(),
+      options({
+        hercle: {
+          accountId: "acct_1",
+          verificationStatus: "ready",
+          payoutAccountStatus: "refused",
+        },
+      })
+    );
+    assert.equal(refused.status, "unsupported");
   });
 });
 
