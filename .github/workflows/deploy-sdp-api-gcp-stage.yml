@@ -16,7 +16,6 @@ jobs:
   deploy:
     name: Build and deploy
     if: github.repository == 'solana-foundation/solana-developer-platform'
-    continue-on-error: true
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: solana-developer-platform-stg
@@ -105,17 +104,11 @@ jobs:
           fi
 
   smoke:
-    name: Dispatch stage smoke (shadow)
+    name: Post-deploy stage smoke
     needs: deploy
-    if: github.repository == 'solana-foundation/solana-developer-platform'
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    continue-on-error: true
     permissions:
       contents: read
-      actions: write
-    steps:
-      - name: Trigger the stage smoke run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run sdp-dev-smoke.yml --repo "${{ github.repository }}" --ref main -f target=stage
+      id-token: write
+    uses: ./.github/workflows/sdp-dev-smoke.yml
+    with:
+      target: stage
