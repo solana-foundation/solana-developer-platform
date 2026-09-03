@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  dvpBlockReason,
   type GroupedSetting,
   getConflictingSettingKeys,
   listSettingsForType,
@@ -34,6 +35,7 @@ import {
   Snowflake,
   Sun,
   TrendingUp,
+  TriangleAlert,
   Undo2,
   UserCheck,
   UserCog,
@@ -167,9 +169,22 @@ interface AdvancedSettingsEditorProps {
   containerResponsive?: boolean;
 }
 
-function Pill({ children }: { children: ReactNode }) {
+function Pill({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "warning";
+}) {
   return (
-    <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        tone === "warning"
+          ? "border border-warning-border bg-warning-bg text-warning"
+          : "bg-fill-subtle text-secondary"
+      )}
+    >
       {children}
     </span>
   );
@@ -271,6 +286,7 @@ function SettingShell({
   actions,
   trailing,
   description,
+  note,
   children,
 }: {
   icon: LucideIcon;
@@ -287,6 +303,9 @@ function SettingShell({
   // Right-aligned action, outside the label so clicking it doesn't toggle the checkbox.
   trailing?: ReactNode;
   description: string;
+  // A permanent consequence of the choice, under the description. Separate from
+  // `children`, which renders conflict OR params and never both.
+  note?: ReactNode;
   children?: ReactNode;
 }) {
   const t = useTranslations();
@@ -305,6 +324,9 @@ function SettingShell({
         {badges}
       </span>
       <span className="mt-0.5 block text-xs text-tertiary">{description}</span>
+      {note ? (
+        <span className="mt-1 block text-[11px] leading-relaxed text-warning">{note}</span>
+      ) : null}
       {actions ? <span className="mt-2 flex flex-wrap items-center gap-2.5">{actions}</span> : null}
     </span>
   );
@@ -777,6 +799,9 @@ function PermanentRow({
   // Required always locks; a read-only setting locks only when it's actually on.
   const locked = isLocked || Boolean(readOnly && checked);
   const params = setting.params ?? [];
+  // Whether this extension rules the asset out of DvP settlement, and why. A
+  // property of the single extension, so it is not a `conflictWith` pair.
+  const settlementBlock = dvpBlockReason(key);
 
   return (
     <SettingShell
@@ -795,12 +820,33 @@ function PermanentRow({
           : t(setting.labelKey as MessageKey)
       }
       description={t(setting.descriptionKey as MessageKey)}
+      // Shown whether or not the setting is on, because the decision it affects
+      // is made before ticking the box and cannot be revisited afterwards.
+      // Deliberately does not repeat that the choice is permanent — the section
+      // this row sits in is headed "Permanent … cannot change after launch".
+      note={
+        settlementBlock
+          ? t(
+              settlementBlock === "amountMutating"
+                ? "DashboardIssuance.config.settlementBlockedAmount"
+                : "DashboardIssuance.config.settlementBlockedEscrow"
+            )
+          : null
+      }
       badges={
-        isLocked ? (
-          <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill>
-        ) : availability === "recommended" ? (
-          <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
-        ) : null
+        <>
+          {isLocked ? (
+            <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill>
+          ) : availability === "recommended" ? (
+            <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
+          ) : null}
+          {settlementBlock ? (
+            <Pill tone="warning">
+              <TriangleAlert className="h-3 w-3" aria-hidden />
+              {t("DashboardIssuance.config.settlementBlockedBadge")}
+            </Pill>
+          ) : null}
+        </>
       }
       actions={
         showTechnical && setting.actions.length > 0
