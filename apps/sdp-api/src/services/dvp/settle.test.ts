@@ -70,6 +70,7 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     sdpWalletId: "cwlt_leg",
     status: "funded",
     observedAt: null,
+    idempotencyKey: null,
     createSignature: null,
     createLastValidBlockHeight: null,
     escrowAAmount: "1000",

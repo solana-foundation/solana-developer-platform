@@ -9,7 +9,7 @@
  * and size are checked before a single byte is decoded.
  */
 
-import { verifySwapDvp } from "@sdp/dvp";
+import { SwapDvpVerificationError, verifySwapDvp } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { type Address, fetchEncodedAccounts } from "@solana/kit";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
@@ -73,6 +73,27 @@ function readLeg(
 }
 
 /**
+ * Whether a verifiable trade account is at this address.
+ *
+ * Throws on a transport failure rather than reporting absence. The distinction
+ * decides whether the reconciler writes a terminal status or leaves the row for
+ * the next sweep, and only one of those is reversible.
+ */
+async function readTradeAccountExists(rpc: SolanaRpc, swapDvp: Address): Promise<boolean> {
+  try {
+    await verifySwapDvp(rpc as never, swapDvp);
+    return true;
+  } catch (error) {
+    if (error instanceof SwapDvpVerificationError) {
+      // The account is missing, owned by something else, the wrong size, or not
+      // at its canonical PDA. All of those are settled facts about the chain.
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
  * Reads a trade and both its escrows.
  *
  * @param rpc - Solana RPC for the trade's cluster.
@@ -87,14 +108,17 @@ export async function readDvpTradeObservation(
   legs: { a: DvpLegAddress; b: DvpLegAddress },
   blockHeight: bigint
 ): Promise<DvpTradeObservation> {
-  // A trade account that fails verification is treated as absent rather than as
-  // an error. Both mean the same thing to the caller — there is no trade we are
-  // willing to act on at that address — and the alternative is trusting bytes
-  // that failed an owner, size or canonical-PDA check.
-  const tradeAccountExists = await verifySwapDvp(rpc as never, swapDvp).then(
-    () => true,
-    () => false
-  );
+  // "Absent" and "could not be read" are NOT the same answer, and conflating
+  // them is destructive here. `create_failed` and `closed_unknown` are both
+  // terminal and both excluded from later sweeps, so a rate-limited or timed-out
+  // RPC would permanently misclassify a live trade — the one failure this job
+  // can cause that nothing later corrects.
+  //
+  // A verification failure IS absence: the bytes failed an owner, size or
+  // canonical-PDA check, so there is no trade we would act on at that address.
+  // A transport failure is not, and it propagates so the caller leaves the row
+  // untouched and tries again on the next tick.
+  const tradeAccountExists = await readTradeAccountExists(rpc, swapDvp);
 
   const accounts = await fetchEncodedAccounts(rpc as never, [legs.a.escrow, legs.b.escrow]);
 

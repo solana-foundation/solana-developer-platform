@@ -20,7 +20,12 @@ import {
   listDvpTradesQuerySchema,
   z,
 } from "../schemas";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithIdempotencyHeaders,
+} from "./helpers";
 import { dvpCloseResponse, dvpTradeResponse, listDvpTradesResponse } from "./responses";
 
 const DVP_TAG = "DvP";
@@ -35,10 +40,10 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     summary: "Create a DvP trade",
     operationId: "createDvpTrade",
     description:
-      "Creates a delivery-versus-payment trade on chain and returns the escrow addresses to publish. Only the SDP custody wallet signs: the counterparty signs nothing here and needs no integration, so a created trade is a proposal rather than an agreement. It is also permissionless on chain — anyone can create a trade naming anyone, and the economic terms are not part of the account address, so whoever funds a leg must verify the stored terms first. Returns 403 when DvP is not enabled for the environment.",
+      "Creates a delivery-versus-payment trade on chain and returns the escrow addresses to publish. Send an Idempotency-Key: a retry after an ambiguous broadcast returns the original trade, because without one the retry draws a fresh nonce and creates a SECOND trade at a different address while the first sits on chain with a published escrow nobody is watching. Only the SDP custody wallet signs: the counterparty signs nothing here and needs no integration, so a created trade is a proposal rather than an agreement. It is also permissionless on chain — anyone can create a trade naming anyone, and the economic terms are not part of the account address, so whoever funds a leg must verify the stored terms first. Returns 403 when DvP is not enabled for the environment.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithIdempotencyHeaders,
       body: { content: jsonContent(createDvpTradeRequestSchema) },
     },
     responses: {

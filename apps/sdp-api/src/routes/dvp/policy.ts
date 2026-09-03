@@ -120,7 +120,11 @@ export async function extractDvpClosePolicyCandidate(
     {
       organizationId: auth.organizationId,
       projectId,
-      sdpWalletIds: getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:read"]),
+      // `payments:write`, not read. The routes this extractor serves require
+      // write, so filtering by read would hide the trade from a binding that
+      // holds write without read — an authorized settle would come back as
+      // "trade not found", which is both wrong and impossible to diagnose.
+      sdpWalletIds: getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"]),
     },
     tradeId
   );

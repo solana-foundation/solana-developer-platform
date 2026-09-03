@@ -87,6 +87,16 @@ CREATE TABLE IF NOT EXISTS dvp_trades (
         )),
     observed_at TEXT,
 
+    -- Caller-supplied Idempotency-Key, when one was sent.
+    --
+    -- Load-bearing for exactly one case, and it is not a rare one: when the
+    -- broadcast outcome is ambiguous — a timeout, a dropped socket — a client
+    -- that retries would otherwise get a SECOND trade. Create draws a fresh
+    -- nonce every time, so the retry lands at a different address with
+    -- different escrows, and the first trade sits on chain with a published
+    -- escrow nobody is watching. Keyed retries return the original instead.
+    idempotency_key TEXT,
+
     create_signature TEXT,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
@@ -99,6 +109,12 @@ CREATE TABLE IF NOT EXISTS dvp_trades (
     -- (seeds, nonce) pair single-use forever, so this mirrors that guarantee.
     UNIQUE (swap_dvp)
 );
+
+-- One trade per key per project. Partial so the many trades created without a
+-- key do not all collide on NULL.
+CREATE UNIQUE INDEX IF NOT EXISTS dvp_trades_idempotency_key_idx
+    ON dvp_trades(project_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS dvp_trades_project_status_idx
     ON dvp_trades(project_id, status);
