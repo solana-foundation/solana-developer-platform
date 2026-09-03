@@ -277,9 +277,7 @@ describe("createDvpTrade", () => {
           unitsConsumed: 0n,
         })
       );
-      await expect(
-        createDvpTrade(env, { ...tradeInput(), idempotencyKey: key })
-      ).rejects.toThrow();
+      await expect(createDvpTrade(env, { ...tradeInput(), idempotencyKey: key })).rejects.toThrow();
     }
 
     it("lets the same key create the trade on a retry", async () => {

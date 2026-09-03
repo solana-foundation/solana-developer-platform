@@ -162,7 +162,8 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
       // Only `create_failed`. `creating` may still land, and every other status
       // means it already did; replaying those is the entire point of the key.
       const freed =
-        replayed.status === "create_failed" && (await repository.releaseIdempotencyKey(replayed.id));
+        replayed.status === "create_failed" &&
+        (await repository.releaseIdempotencyKey(replayed.id));
       if (!freed) {
         return assertOwnReplay(replayed, fingerprint);
       }
