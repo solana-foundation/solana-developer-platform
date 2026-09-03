@@ -181,17 +181,28 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
     },
 
     async resolveCreate(id: string, status: "created" | "create_failed") {
+      // Both escrows are empty the instant the program creates them, so a trade
+      // that has just landed does not need the sweep to tell us that. Without
+      // this the first minute of every trade's life read "Not checked — nothing
+      // has read this escrow", which is true of the reconciler and useless to a
+      // person looking at a trade they created five seconds ago.
       // Compare-and-swap on 'creating'. A reconciler that already read the chain
       // and advanced the row has better information than this caller, so it wins
       // and we match zero rows rather than overwriting an observation.
+      const observed = status === "created";
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET status = ?, updated_at = sdp_iso_now()
+              SET status = ?,
+                  escrow_a_amount = CASE WHEN ? THEN '0' ELSE escrow_a_amount END,
+                  escrow_b_amount = CASE WHEN ? THEN '0' ELSE escrow_b_amount END,
+                  escrow_a_frozen = CASE WHEN ? THEN escrow_a_frozen ELSE escrow_a_frozen END,
+                  observed_at = CASE WHEN ? THEN sdp_iso_now() ELSE observed_at END,
+                  updated_at = sdp_iso_now()
             WHERE id = ? AND status = 'creating'
             RETURNING ${SELECT_COLUMNS}`
         )
-        .bind(status, id)
+        .bind(status, observed, observed, observed, observed, id)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },

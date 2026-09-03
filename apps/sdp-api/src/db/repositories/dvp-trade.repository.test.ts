@@ -140,6 +140,13 @@ describe("DvpTradeRepository (postgres)", () => {
     const resolved = await repo.resolveCreate(created.id, "created");
 
     expect(resolved?.status).toBe("created");
+    // The program just made both escrows, so they hold nothing. Leaving that to
+    // the once-a-minute sweep made every new trade open on "Not checked —
+    // nothing has read this escrow", which is a statement about the reconciler
+    // rather than about the trade.
+    expect(resolved?.escrowAAmount).toBe("0");
+    expect(resolved?.escrowBAmount).toBe("0");
+    expect(resolved?.observedAt).toBeTruthy();
     await expect(repo.getById(scope, created.id)).resolves.toMatchObject({ status: "created" });
   });
 
@@ -149,6 +156,10 @@ describe("DvpTradeRepository (postgres)", () => {
     const resolved = await repo.resolveCreate(created.id, "create_failed");
 
     expect(resolved?.status).toBe("create_failed");
+    // Nothing was created, so there is no escrow to have observed. Claiming a
+    // zero balance here would describe accounts that do not exist.
+    expect(resolved?.escrowAAmount).toBeNull();
+    expect(resolved?.observedAt).toBeNull();
     // The seed tuple survives a failed create. It is the only durable copy of
     // what RecoverDvp needs, and a preflight rejection is not proof that a
     // retransmission of the same bytes can never land.

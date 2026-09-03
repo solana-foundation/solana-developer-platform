@@ -26,6 +26,7 @@ import {
   getCreateDvpInstruction,
 } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   type Address,
   address,
@@ -124,6 +125,16 @@ async function insertOrReplay(
     }
     return assertOwnReplay(winner, fingerprint);
   }
+}
+
+/**
+ * The catalogue's symbol for a mint, or null.
+ *
+ * The fallback for mints that carry no metadata of their own, which is every
+ * legacy SPL token including the stablecoins most cash legs use.
+ */
+function wellKnownSymbol(mint: string): string | null {
+  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? null;
 }
 
 /** Derives the per-trade nonce tombstone, seeds `[b"nonce", swap_dvp]`. */
@@ -321,8 +332,12 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     tokenProgramB: input.tokenProgramB,
     decimalsA: inspectedA?.decimals ?? null,
     decimalsB: inspectedB?.decimals ?? null,
-    symbolA: inspectedA?.symbol ?? null,
-    symbolB: inspectedB?.symbol ?? null,
+    // Metadata first, catalogue second. A Token-2022 mint carries its own name;
+    // USDC does not — it is legacy SPL with no metadata extension — so reading
+    // only the mint left the cash leg as a bare number on a screen showing two
+    // different tokens.
+    symbolA: inspectedA?.symbol ?? wellKnownSymbol(input.mintA),
+    symbolB: inspectedB?.symbol ?? wellKnownSymbol(input.mintB),
     amountA: input.amountA.toString(),
     amountB: input.amountB.toString(),
     expiryTimestamp: input.expiryTimestamp.toString(),
