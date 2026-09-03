@@ -22,7 +22,6 @@ or with an explicit `GAP`.
 | issuance | issue a token end to end | issuance.e2e.spec.ts |
 | markets | market listings and detail | GAP |
 | members | invite members and manage roles | GAP |
-| onboarding | first-run workspace onboarding | onboarding.e2e.spec.ts |
 | payments | transfer, recurring payments, command center | payments-transfer.e2e.spec.ts, payments-recurring.e2e.spec.ts, payments-command-center.e2e.spec.ts |
 | policies | create and edit policy rules | policies.e2e.spec.ts |
 | settings | workspace settings | GAP |
