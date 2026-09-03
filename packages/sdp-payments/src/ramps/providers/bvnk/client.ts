@@ -7,7 +7,6 @@ import {
   toNumberAmount,
 } from "@sdp/solana/amount";
 import type {
-  BvnkBankFundingDetails,
   Counterparty,
   PaymentRampEstimate,
   PaymentRampEstimateFees,
@@ -58,7 +57,6 @@ import {
   type BvnkEntityType,
   type BvnkNetwork,
   type BvnkRuleEntity,
-  type BvnkVerificationStatus,
   buildBvnkOfframpReference,
   normalizeBvnkCurrencyAndNetwork,
 } from "./provider-data";
@@ -484,29 +482,6 @@ export function distillBvnkRailSupport(
   };
 }
 
-export interface BvnkCustomerState {
-  reference: string;
-  status: string;
-  verificationStatus?: BvnkVerificationStatus;
-  verificationUrl?: string;
-}
-
-export interface BvnkFiatWallet {
-  id: string;
-  name?: string;
-  status?: string;
-  bankAccount?: BvnkBankFundingDetails;
-}
-
-export interface CreateBvnkFiatWalletInput {
-  /** Omit to create a merchant-owned wallet (BVNK off-ramp dedicated wallet). */
-  customerReference?: string;
-  name: string;
-  currencyCode: string;
-  walletProfile: string;
-  idempotencyKey: string;
-}
-
 export interface CreateBvnkOnrampRuleInput {
   reference: string;
   walletId: string;
@@ -515,18 +490,6 @@ export interface CreateBvnkOnrampRuleInput {
   beneficiaryAddress: string;
   entity: BvnkRuleEntity;
 }
-
-const bvnkVerificationStatusSchema = z.enum(["init", "pending", "completed", "failed"]);
-const bvnkLegacyCustomerSchema = z.object({
-  reference: z.string().min(1),
-  status: z.string().min(1),
-  verification: z
-    .object({
-      status: bvnkVerificationStatusSchema.optional(),
-      url: z.string().min(1).optional(),
-    })
-    .optional(),
-});
 
 const bvnkV2CustomerStatusSchema = z.enum([
   "INFO_REQUIRED",
@@ -888,35 +851,6 @@ const bvnkRuleResponseSchema = z.object({
 });
 type BvnkRuleResponse = z.infer<typeof bvnkRuleResponseSchema>;
 
-function parseBvnkCustomerState(payload: unknown): BvnkCustomerState {
-  const customer = bvnkLegacyCustomerSchema.parse(payload);
-  return {
-    reference: customer.reference,
-    status: customer.status,
-    verificationStatus: customer.verification?.status,
-    verificationUrl: customer.verification?.url,
-  };
-}
-
-function toBvnkFiatWallet(wallet: BvnkLedgerWalletV2): BvnkFiatWallet {
-  const instrument = wallet.paymentInstruments?.[0];
-  return {
-    id: wallet.id,
-    name: wallet.name,
-    status: wallet.status,
-    ...(instrument
-      ? {
-          bankAccount: {
-            accountNumber: instrument.accountNumber,
-            code: instrument.bankDetails.bic,
-            paymentReference: instrument.remittanceInformationPrefix,
-            bankName: instrument.bankDetails.name,
-          },
-        }
-      : {}),
-  };
-}
-
 export class BvnkRampClient implements RampProvider {
   readonly id = "bvnk";
   readonly declaredRailSupport = BVNK_DECLARED_RAIL_SUPPORT;
@@ -1126,19 +1060,6 @@ export class BvnkRampClient implements RampProvider {
     return bvnkV2AgreementActionResultsSchema.parse(response);
   }
 
-  async getBvnkCustomer(
-    { env, mode }: RampRuntimeContext,
-    input: { reference: string }
-  ): Promise<BvnkCustomerState> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(
-      config,
-      `/platform/v1/customers/${encodeURIComponent(input.reference)}`,
-      { method: "GET" }
-    );
-    return parseBvnkCustomerState(response);
-  }
-
   /**
    * Lists agreements assigned to a v2 BVNK customer.
    *
@@ -1226,48 +1147,6 @@ export class BvnkRampClient implements RampProvider {
         : `/ledger/v2/wallets/profiles?q=${encodeURIComponent(filters.join(" AND "))}`;
     const response = await this.request(config, path, { method: "GET" });
     return bvnkV2WalletProfilesSchema.parse(response);
-  }
-
-  async getFiatWalletProfile(
-    ctx: RampRuntimeContext,
-    input: { customerReference?: string; currency: string }
-  ): Promise<string> {
-    const profiles = await this.listLedgerWalletProfilesV2(ctx, {
-      customerId: input.customerReference,
-      currency: input.currency,
-    });
-    const profile = profiles.content.find((entry) =>
-      entry.currencies.some((currency) => currency.toUpperCase() === input.currency.toUpperCase())
-    );
-    if (profile === undefined) {
-      throw new SdpPaymentsError(
-        "PROVIDER_UNAVAILABLE",
-        `No BVNK ${input.currency} wallet profile is available for this customer.`
-      );
-    }
-    return profile.id;
-  }
-
-  async getFiatWallet(
-    ctx: RampRuntimeContext,
-    input: { walletId: string }
-  ): Promise<BvnkFiatWallet> {
-    return toBvnkFiatWallet(await this.getLedgerWalletV2(ctx, input));
-  }
-
-  async createFiatWallet(
-    ctx: RampRuntimeContext,
-    input: CreateBvnkFiatWalletInput
-  ): Promise<BvnkFiatWallet> {
-    return toBvnkFiatWallet(
-      await this.createLedgerWalletV2(ctx, {
-        idempotencyKey: input.idempotencyKey,
-        customerId: input.customerReference,
-        currency: input.currencyCode,
-        name: input.name,
-        profileId: input.walletProfile,
-      })
-    );
   }
 
   async createOnrampRule(

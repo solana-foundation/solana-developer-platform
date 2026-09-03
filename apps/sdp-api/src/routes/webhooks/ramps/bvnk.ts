@@ -270,21 +270,18 @@ async function applyBvnkCustomerRequirementWebhook(
     { kind: "bvnk:customers:status-change" | "bvnk:platform:customer:update" }
   >
 ): Promise<void> {
-  const customer: Partial<
-    Pick<BvnkCustomerResolution, "customerReference" | "status" | "verificationStatus">
-  > = {
+  const customer: Partial<Pick<BvnkCustomerResolution, "customerReference" | "status">> = {
     customerReference: event.customerReference,
   };
   if (event.kind === "bvnk:customers:status-change" && event.customerStatus) {
     customer.status = event.customerStatus.toUpperCase();
   }
   if (!isBvnkCustomerVerified(customer.status)) {
-    const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getBvnkCustomer(
+    const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(
       webhookRampContext(c, environment),
-      { reference: event.customerReference }
+      { id: event.customerReference }
     );
     customer.status = latest.status.toUpperCase();
-    customer.verificationStatus = latest.verificationStatus;
   }
   await repo.upsertBvnkCustomerProviderData({
     counterpartyId: counterparty.id,

@@ -1,6 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type { BvnkFiatWallet } from "@sdp/payments/ramps/providers/bvnk/client";
+import type {
+  BvnkLedgerWalletProfilesV2,
+  BvnkLedgerWalletProfileV2,
+  BvnkLedgerWalletV2,
+} from "@sdp/payments/ramps/providers/bvnk/client";
 import {
   bvnkOfframpAccountType,
   bvnkOfframpFields,
@@ -35,7 +39,11 @@ import {
 import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
-import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
+import type {
+  BvnkBankFundingDetails,
+  BvnkPaymentRampInstruction,
+  PaymentRampQuote,
+} from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -143,6 +151,45 @@ type BvnkOnrampQuote = PaymentRampQuote & {
   paymentInstructions: BvnkPaymentRampInstruction[];
 };
 
+/**
+ * Selects the BVNK wallet profile that supports the requested fiat currency.
+ *
+ * @param profiles - Profiles returned by BVNK's v2 ledger API.
+ * @param fiatCurrency - Requested fiat currency code.
+ * @returns The matching wallet profile.
+ */
+function selectBvnkWalletProfile(
+  profiles: BvnkLedgerWalletProfilesV2,
+  fiatCurrency: string
+): BvnkLedgerWalletProfileV2 {
+  const profile = profiles.content.find((entry) =>
+    entry.currencies.some((currency) => currency.toUpperCase() === fiatCurrency.toUpperCase())
+  );
+  if (profile === undefined) {
+    throw internalError(`No BVNK ${fiatCurrency} wallet profile is available.`);
+  }
+  return profile;
+}
+
+/**
+ * Maps the first BVNK fiat payment instrument into the persisted bank-account shape.
+ *
+ * @param wallet - BVNK v2 ledger wallet.
+ * @returns Persistable bank details, or undefined when no instrument is present.
+ */
+function bvnkWalletBankAccount(wallet: BvnkLedgerWalletV2): BvnkBankFundingDetails | undefined {
+  const instrument = wallet.paymentInstruments?.[0];
+  if (instrument === undefined) {
+    return undefined;
+  }
+  return {
+    accountNumber: instrument.accountNumber,
+    code: instrument.bankDetails.bic,
+    paymentReference: instrument.remittanceInformationPrefix,
+    bankName: instrument.bankDetails.name,
+  };
+}
+
 async function persistBvnkOnrampState(
   c: AppContext,
   counterparty: CounterpartyRow,
@@ -177,7 +224,7 @@ async function persistBvnkOfframpWallet(
   counterparty: CounterpartyRow,
   projectId: string,
   fiatCurrency: string,
-  wallet: BvnkFiatWallet
+  wallet: BvnkLedgerWalletV2
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
   // TODO(PRO-1824): Move BVNK merchant-wallet state to counterparty_provider_accounts.
@@ -228,18 +275,21 @@ export async function ensureBvnkOfframpWallet(
     if (isBvnkWalletActive(existing.status)) {
       return existing;
     }
-    const refreshed = await client.getFiatWallet(ctx, { walletId: existing.id });
+    const refreshed = await client.getLedgerWalletV2(ctx, { walletId: existing.id });
     if (refreshed.status !== existing.status) {
       await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, refreshed);
     }
     return { id: refreshed.id, status: refreshed.status };
   }
-  const walletProfile = await client.getFiatWalletProfile(ctx, { currency: fiatCurrency });
+  const walletProfile = selectBvnkWalletProfile(
+    await client.listLedgerWalletProfilesV2(ctx, { currency: fiatCurrency }),
+    fiatCurrency
+  );
   const walletName = buildBvnkOfframpWalletName(fiatCurrency, counterparty.id);
-  const wallet = await client.createFiatWallet(ctx, {
+  const wallet = await client.createLedgerWalletV2(ctx, {
     name: walletName,
-    currencyCode: fiatCurrency,
-    walletProfile,
+    currency: fiatCurrency,
+    profileId: walletProfile.id,
     idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
   });
   await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
@@ -408,13 +458,12 @@ export async function ensureBvnkCustomer(
   }
 
   if (!isBvnkCustomerVerified(customer.status)) {
-    const latest = await client.getBvnkCustomer(ctx, { reference: customer.customerReference });
+    const latest = await client.getCustomerV2(ctx, { id: customer.customerReference });
     customer = {
-      ...customer,
+      customerReference: customer.customerReference,
       status: latest.status,
-      verificationStatus: latest.verificationStatus,
       // Surfaced JIT to callers only — never persisted (store-nothing).
-      verificationUrl: latest.verificationUrl,
+      verificationUrl: latest.authenticatedLink.link,
     };
     await repo.upsertBvnkCustomerProviderData({
       counterpartyId: counterparty.id,
@@ -423,7 +472,6 @@ export async function ensureBvnkCustomer(
       customer: {
         customerReference: customer.customerReference,
         status: customer.status,
-        verificationStatus: customer.verificationStatus,
       },
     });
   }
@@ -481,15 +529,18 @@ export async function ensureBvnkPaymentRule(
 
   if (!entry.walletId) {
     const walletName = buildBvnkOnrampWalletName(counterparty.id, paymentRuleKey);
-    const walletProfile = await client.getFiatWalletProfile(ctx, {
-      customerReference: customer.customerReference,
-      currency: params.fiatCurrency,
-    });
-    const wallet = await client.createFiatWallet(ctx, {
-      customerReference: customer.customerReference,
+    const walletProfile = selectBvnkWalletProfile(
+      await client.listLedgerWalletProfilesV2(ctx, {
+        customerId: customer.customerReference,
+        currency: params.fiatCurrency,
+      }),
+      params.fiatCurrency
+    );
+    const wallet = await client.createLedgerWalletV2(ctx, {
+      customerId: customer.customerReference,
       name: walletName,
-      currencyCode: params.fiatCurrency,
-      walletProfile,
+      currency: params.fiatCurrency,
+      profileId: walletProfile.id,
       idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
     });
     if (wallet.name !== walletName) {
@@ -502,18 +553,18 @@ export async function ensureBvnkPaymentRule(
       walletId: wallet.id,
       walletName: wallet.name,
       walletStatus: wallet.status,
-      bankAccount: wallet.bankAccount,
+      bankAccount: bvnkWalletBankAccount(wallet),
     };
     await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
   }
 
   if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
     try {
-      const wallet = await client.getFiatWallet(ctx, { walletId: entry.walletId });
+      const wallet = await client.getLedgerWalletV2(ctx, { walletId: entry.walletId });
       entry = {
         ...entry,
-        walletStatus: wallet.status ?? entry.walletStatus,
-        bankAccount: wallet.bankAccount ?? entry.bankAccount,
+        walletStatus: wallet.status,
+        bankAccount: bvnkWalletBankAccount(wallet) ?? entry.bankAccount,
       };
       await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
     } catch (error) {

@@ -1037,18 +1037,19 @@ describe("BVNK ramp webhook", () => {
       .run();
 
     const getProfile = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWalletProfile")
-      .mockResolvedValue("profile_webhook_1");
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listLedgerWalletProfilesV2")
+      .mockResolvedValue({
+        totalElements: 1,
+        totalPages: 1,
+        content: [{ id: "profile_webhook_1", currencies: ["USD"], methods: ["ACH"] }],
+        hasNext: false,
+      });
     const createWallet = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createFiatWallet")
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createLedgerWalletV2")
       .mockResolvedValue({
         id: WALLET_ID,
         name: ONRAMP_WALLET_NAME,
         status: "ACTIVE",
-        bankAccount: {
-          accountNumber: "900473221558",
-          bankName: "LEAD BANK",
-        },
       });
     const createRule = vi
       .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
@@ -1065,6 +1066,10 @@ describe("BVNK ramp webhook", () => {
 
     expect(res.status).toBe(200);
     expect(getProfile).toHaveBeenCalledTimes(1);
+    expect(createWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ profileId: "profile_webhook_1" })
+    );
     expect(createWallet).toHaveBeenCalledTimes(1);
     expect(createRule).not.toHaveBeenCalled();
 
@@ -1080,11 +1085,19 @@ describe("BVNK ramp webhook", () => {
     createRule.mockRestore();
   });
 
-  it("fetches and caches the verification URL when a status-change reports an unverified status", async () => {
-    const getCustomer = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getBvnkCustomer").mockResolvedValue({
+  it("refreshes the customer status when a status-change reports an unverified status", async () => {
+    const getCustomer = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomerV2").mockResolvedValue({
+      id: CUSTOMER_REFERENCE,
       reference: CUSTOMER_REFERENCE,
       status: "INFO_REQUIRED",
-      verificationUrl: "https://in.sumsub.com/websdk/p/sbx_test",
+      type: "INDIVIDUAL",
+      model: "EMBEDDED_BVNK_MANAGED",
+      useCase: "STABLECOIN_PAYOUTS",
+      authenticatedLink: {
+        link: "https://in.sumsub.com/websdk/p/sbx_test",
+        expiresAt: "2030-01-01T00:00:00Z",
+      },
+      requiredActions: [],
     });
 
     const res = await sendBvnkWebhook({
@@ -1097,9 +1110,7 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(getCustomer).toHaveBeenCalledWith(expect.anything(), {
-      reference: CUSTOMER_REFERENCE,
-    });
+    expect(getCustomer).toHaveBeenCalledWith(expect.anything(), { id: CUSTOMER_REFERENCE });
     const customer = (await readBvnk())?.customer;
     expect(customer?.status).toBe("INFO_REQUIRED");
     expect(customer?.verificationUrl).toBeUndefined();
@@ -1294,8 +1305,8 @@ describe("BVNK ramp webhook", () => {
       .run();
 
     const getWallet = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWallet")
-      .mockResolvedValue({ id: WALLET_ID, status: "PENDING" });
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
+      .mockResolvedValue({ id: WALLET_ID, name: ONRAMP_WALLET_NAME, status: "INACTIVE" });
 
     const res = await sendBvnkWebhook({
       event: "bvnk:customers:status-change",

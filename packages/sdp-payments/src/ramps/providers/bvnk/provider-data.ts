@@ -115,7 +115,7 @@ export async function buildBvnkWalletIdempotencyKey(walletName: string): Promise
 const BVNK_VERIFIED_STATUSES = new Set(["VERIFIED", "COMPLETED", "APPROVED"]);
 const BVNK_VERIFYING_STATUSES = new Set(["PENDING"]);
 const BVNK_VERIFICATION_REQUIRED_STATUSES = new Set(["ACTIONS_REQUIRED", "INFO_REQUIRED"]);
-const BVNK_VERIFICATION_FAILED_STATUSES = new Set(["REJECTED"]);
+const BVNK_VERIFICATION_FAILED_STATUSES = new Set(["REJECTED", "TERMINATED"]);
 
 /**
  * Whether a cached BVNK customer status counts as fully verified. The customer

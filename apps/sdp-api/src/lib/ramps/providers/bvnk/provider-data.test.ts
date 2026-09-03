@@ -43,6 +43,10 @@ describe("bvnkUnverifiedOnboardingStatus", () => {
     expect(bvnkUnverifiedOnboardingStatus("REJECTED")).toBe("verification_failed");
   });
 
+  it("maps the terminal TERMINATED status to verification_failed", () => {
+    expect(bvnkUnverifiedOnboardingStatus("TERMINATED")).toBe("verification_failed");
+  });
+
   it("is case-insensitive", () => {
     expect(bvnkUnverifiedOnboardingStatus("pending")).toBe("verifying");
   });
