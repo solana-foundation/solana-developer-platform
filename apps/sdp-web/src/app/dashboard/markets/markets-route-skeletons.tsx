@@ -158,12 +158,14 @@ export function DvpTradesSkeleton() {
           <SkeletonBlock className="h-4 w-[28rem] max-w-full" />
           <SkeletonBlock className="h-8 w-28 shrink-0 rounded-lg" />
         </div>
-        {/* The filter bar, which appears once there is more than one trade —
-            and a skeleton showing a table that then gets a row pushed on top of
-            it is the jump this is meant to prevent. */}
-        <div className="flex flex-wrap items-center gap-3">
-          <SkeletonBlock className="h-9 w-full max-w-xs rounded-lg" />
-          <SkeletonBlock className="h-9 w-40 rounded-lg" />
+        {/* The toolbar, in its real shape: a pill segmented control on the
+            left and the search field on the right, at the heights and radii
+            those components actually render at. A skeleton that draws two
+            same-sized boxes hands over to something a different shape, which is
+            the jump it exists to prevent. */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <SkeletonBlock className="h-9 w-full max-w-[22rem] rounded-full" />
+          <SkeletonBlock className="h-10 w-full rounded-[10px] md:w-64 md:shrink-0" />
         </div>
         <div className="overflow-hidden rounded-2xl border border-border-default">
           <SkeletonBlock className="h-11 w-full rounded-none" />
