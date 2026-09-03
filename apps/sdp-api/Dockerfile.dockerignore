@@ -33,6 +33,7 @@ packages/*
 !packages/sdp-kamino
 !packages/bigint-buffer
 !packages/sdp-veda
+!packages/sdp-ondo
 docs
 infra
 scripts

@@ -741,6 +741,103 @@ export async function fetchJupiterSwapLeg(
   };
 }
 
+export interface JupiterSwapQuoteRequest {
+  /** Mint the swap consumes. */
+  inputMint: string;
+  /** Mint the swap yields. */
+  outputMint: string;
+  /** ExactIn amount in the INPUT token's units, decimal string. */
+  sourceAmount: string;
+}
+
+export interface JupiterSwapQuoteResult {
+  /** Output at the live rate, OUTPUT token units, decimal string. */
+  outAmount: string;
+  /** Quoted price impact as a decimal ratio string. */
+  priceImpactPct: string;
+}
+
+/**
+ * Price an ExactIn swap WITHOUT building instructions.
+ *
+ * `GET {base}/order` with `taker` omitted is the v2 quote surface (the old
+ * standalone `/quote` is deprecated): the response carries the routed
+ * `outAmount` and no transaction. Used by the Ondo provider's quote
+ * capabilities, where a slippage floor is later derived from this figure; it
+ * shares the credential, the well-known-mint decimals rule and the error
+ * taxonomy with the build above so the two surfaces cannot drift.
+ */
+export async function fetchJupiterSwapQuote(
+  env: Env,
+  deadline: VaultDeadline,
+  request: JupiterSwapQuoteRequest
+): Promise<JupiterSwapQuoteResult> {
+  const { url, apiKey } = resolveJupiterSwapConfig(env);
+  const sourceDecimals = requireWellKnownMintDecimals(request.inputMint, "funding token");
+  const outputDecimals = requireWellKnownMintDecimals(request.outputMint, "deposit token");
+
+  const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
+  if (amountAtoms <= 0n) {
+    throw badRequest("Swap quote amount must be greater than zero at the token's precision");
+  }
+
+  const query = new URLSearchParams({
+    inputMint: request.inputMint,
+    outputMint: request.outputMint,
+    amount: amountAtoms.toString(),
+    swapMode: "ExactIn",
+  });
+
+  const response = await deadline.run("Quoting the Jupiter swap", () =>
+    fetch(`${url}/order?${query.toString()}`, {
+      headers: { "x-api-key": apiKey, accept: "application/json" },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  );
+
+  if (!response.ok) {
+    const detail = await readJupiterError(response);
+    if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+      throw badRequest(`Jupiter could not quote this swap: ${detail}`);
+    }
+    getLogger().error(
+      { status: response.status, detail },
+      "jupiter swap: quote request failed upstream"
+    );
+    throw earnBadRequest(`Jupiter swap quoting is unavailable (upstream ${response.status})`, {
+      status: response.status,
+    });
+  }
+
+  let body: {
+    inputMint?: string;
+    outputMint?: string;
+    inAmount?: string;
+    outAmount?: string;
+    priceImpactPct?: string | number;
+  };
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {
+    throw earnBadRequest("Jupiter swap quoting returned an unreadable response");
+  }
+  if (!/^\d+$/.test(body.outAmount ?? "")) {
+    throw earnBadRequest("Jupiter swap quoting returned malformed amounts");
+  }
+  if (
+    body.inputMint !== request.inputMint ||
+    body.outputMint !== request.outputMint ||
+    body.inAmount !== amountAtoms.toString()
+  ) {
+    throw providerUnavailable("Jupiter returned a quote outside the requested swap contract");
+  }
+
+  return {
+    outAmount: formatDecimalAmount(BigInt(body.outAmount as string), outputDecimals),
+    priceImpactPct: String(body.priceImpactPct ?? "0"),
+  };
+}
+
 async function readJupiterError(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: unknown };

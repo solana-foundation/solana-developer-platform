@@ -1,4 +1,5 @@
 import { SdpKaminoError } from "@sdp/kamino";
+import { SdpOndoError } from "@sdp/ondo";
 import { SdpVedaError } from "@sdp/veda";
 
 /**
@@ -17,10 +18,12 @@ import { SdpVedaError } from "@sdp/veda";
  *   from the provider's compliance service, which SDP does not implement. A
  *   definite, explainable refusal rather than an internal fault.
  *
- * Matched on the shared `code` shape rather than per provider, so a new
- * vault-direct provider inherits the mapping by using the same vocabulary.
- * Anything else keeps bubbling: an unrecognised build failure is SDP's problem
- * to look at, and telling a customer their request was wrong would be a guess.
+ * Matched on the shared `code` vocabulary so there is ONE list of refusal
+ * codes — but the instanceof guard below is per provider, so a new
+ * vault-direct provider must add its typed error class here (playbook §4
+ * step 10) as well as speak the same codes. Anything else keeps bubbling: an
+ * unrecognised build failure is SDP's problem to look at, and telling a
+ * customer their request was wrong would be a guess.
  *
  * Shared by the vault BUILDS and the deposit QUOTE on purpose: the quote runs
  * the same provider arithmetic, so the two paths refuse in the same words or
@@ -34,6 +37,14 @@ const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
 ]);
 
 export function refusedBuildMessage(error: unknown): string | null {
-  if (!(error instanceof SdpKaminoError || error instanceof SdpVedaError)) return null;
+  if (
+    !(
+      error instanceof SdpKaminoError ||
+      error instanceof SdpVedaError ||
+      error instanceof SdpOndoError
+    )
+  ) {
+    return null;
+  }
   return REFUSED_BUILD_CODES.has(error.code) ? error.message : null;
 }
