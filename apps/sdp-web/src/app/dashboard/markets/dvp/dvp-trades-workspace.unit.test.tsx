@@ -112,7 +112,7 @@ describe("DvpTradesWorkspace", () => {
   // two different ways.
   it("shows what a finished trade delivered, not a funding fraction", () => {
     const funded = leg({
-      funding: { funded: true, observedAmount: "1000000000", frozen: false, surplus: false },
+      funding: { funded: true, observedAmount: "1000000000", frozen: false, surplus: null },
     });
     const html = renderList([trade({ status: "settled", legs: { a: funded, b: funded } })]);
 
