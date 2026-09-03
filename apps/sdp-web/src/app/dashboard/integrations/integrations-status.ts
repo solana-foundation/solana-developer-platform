@@ -149,8 +149,10 @@ export function resolveRpcIntegrations(input: {
 }): IntegrationEntry<OrganizationRpcProvider>[] {
   const activeProvider = input.servingProvider ?? input.selectedProvider;
   const ownKeys = new Set(input.providersWithOwnKey ?? []);
+  const integrations: IntegrationEntry<OrganizationRpcProvider>[] = [];
 
-  return ORGANIZATION_RPC_PROVIDERS.filter((provider) => provider !== "default").map((provider) => {
+  for (const provider of ORGANIZATION_RPC_PROVIDERS) {
+    if (provider === "default") continue;
     const entry = input.entries[provider];
     // Every RPC provider is generally available; an unconfigured one lacks a
     // URL in this deployment *and* a key of the tenant's own, because either
@@ -162,13 +164,15 @@ export function resolveRpcIntegrations(input: {
         : entry?.enabled || ownKeys.has(provider)
           ? "available"
           : "not_configured";
-    return {
+    integrations.push({
       provider,
       label: RPC_PROVIDER_LABELS[provider],
       status,
       descriptionKey: RPC_DESCRIPTION_KEYS[provider],
-    };
-  });
+    });
+  }
+
+  return integrations;
 }
 
 /**

@@ -67,6 +67,7 @@
     "createApiKey": "Create API key",
     "selectApiKey": "Select API key",
     "selectOrganization": "Select organization",
+    "selectExistingOrganizationDescription": "Choose an existing organization to continue.",
     "organizations": "Organizations",
     "projects": "Projects",
     "current": "Current",

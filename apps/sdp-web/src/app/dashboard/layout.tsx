@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { SelectExistingOrganizationPanel } from "@/components/select-existing-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { getDashboardFlags } from "@/flags/dashboard";
@@ -32,7 +33,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
 
   if (!orgId) {
-    redirect("/");
+    return <SelectExistingOrganizationPanel />;
   }
 
   const dashboardAccess = resolveDashboardAccess(orgRole);
