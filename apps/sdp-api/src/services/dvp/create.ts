@@ -153,7 +153,20 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   if (input.idempotencyKey) {
     const replayed = await repository.getByIdempotencyKey(input.projectId, input.idempotencyKey);
     if (replayed) {
-      return assertOwnReplay(replayed, fingerprint);
+      // A create that definitively failed left the request unmade, so its key
+      // has nothing to stand for. Replaying it would hand back a dead trade
+      // forever — and to a caller whose key is DERIVED from the payload, as
+      // the dashboard's is, "forever" is literal: there is no other key it can
+      // send for this trade, so one preflight rejection would retire those
+      // terms permanently. Freeing the key turns that into an ordinary retry.
+      //
+      // Only `create_failed`. `creating` may still land, and every other status
+      // means it already did; replaying those is the entire point of the key.
+      const freed =
+        replayed.status === "create_failed" && (await repository.releaseIdempotencyKey(replayed.id));
+      if (!freed) {
+        return assertOwnReplay(replayed, fingerprint);
+      }
     }
   }
 
