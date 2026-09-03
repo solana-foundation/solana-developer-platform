@@ -8,7 +8,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
-import { CheckIcon, Code2Icon, InfoIcon, Layers3Icon, ListChecksIcon } from "lucide-react";
+import { CheckIcon, Code2Icon, InfoIcon, ListChecksIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -36,11 +36,10 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { EarnProgramConfigureSkeleton } from "../markets-route-skeletons";
-import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
+import { earnStrategyLiquidityLabel } from "./earn-format";
 import {
   EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
-  earnStrategyAsset,
   formatProviderApy,
 } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
@@ -58,36 +57,37 @@ const FLOW_STEPS = [
 function ProgramIntro() {
   const t = useTranslations();
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Layers3Icon aria-hidden="true" className="size-5 text-secondary" />
+    <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <div className="max-w-3xl">
+        <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
+          {t("DashboardMarkets.earnProgram.eyebrow")}
+        </p>
+        <h2 className="mt-2 text-2xl font-medium tracking-tight text-primary">
           {t("DashboardMarkets.earnProgram.introTitle")}
-        </CardTitle>
-        <CardDescription className="max-w-3xl leading-6">
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-secondary">
           {t("DashboardMarkets.earnProgram.introDescription")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ol className="grid overflow-hidden rounded-xl border border-border-default md:grid-cols-2">
-          {FLOW_STEPS.map(({ icon: Icon, key }, index) => (
-            <li
-              className={cn(
-                "flex items-center gap-3 px-4 py-4",
-                index < FLOW_STEPS.length - 1 &&
-                  "border-b border-border-subtle md:border-r md:border-b-0"
-              )}
-              key={key}
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
-                <Icon aria-hidden="true" className="size-4" />
-              </span>
-              <span className="text-sm text-primary">{t(key)}</span>
-            </li>
-          ))}
-        </ol>
-      </CardContent>
-    </Card>
+        </p>
+      </div>
+      <ol
+        aria-label={t("DashboardMarkets.earnProgram.setupProgress")}
+        className="flex shrink-0 rounded-xl bg-fill-subtle p-1"
+      >
+        {FLOW_STEPS.map(({ icon: Icon, key }, index) => (
+          <li
+            aria-current={index === 0 ? "step" : undefined}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3 py-2 text-sm",
+              index === 0 ? "bg-surface-raised text-primary shadow-sm" : "text-tertiary"
+            )}
+            key={key}
+          >
+            <Icon aria-hidden="true" className="size-4" />
+            <span>{t(key)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -124,7 +124,6 @@ function strategyOptionState({
 >) {
   const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
   return {
-    asset: earnStrategyAsset(strategy),
     availability,
     supported:
       availability === "available" || (previewSelectable && availability === "cluster_unavailable"),
@@ -141,36 +140,26 @@ function StrategyRow({
   strategy,
 }: StrategyOptionProps) {
   const t = useTranslations();
-  const { asset, availability, supported } = strategyOptionState({
+  const { availability, supported } = strategyOptionState({
     previewSelectable,
     providerAccess,
     sdpEnvironment,
     strategy,
   });
   const liquidity = earnStrategyLiquidityLabel(strategy, t);
-  const provider = earnProviderLabel(strategy.provider);
 
   return (
     <TableRow className={cn(selected && "bg-fill-subtle")}>
       <TableCell>
         <EarnStrategyIdentity strategy={strategy} />
       </TableCell>
-      <TableCell className="text-sm text-secondary">{asset?.symbol ?? "—"}</TableCell>
-      {/* `cn` has no tailwind-merge, so clamping lives on child spans where
-          nothing competes; a long label truncates with the full string on
-          `title` instead of overflowing the next column under `table-fixed`. */}
-      <TableCell className="text-sm text-secondary">
-        <span className="block truncate" title={liquidity}>
+      <TableCell>
+        <p className="text-base font-medium tracking-tight text-primary tabular-nums">
+          {formatProviderApy(strategy.currentApy, locale)}
+        </p>
+        <p className="mt-0.5 truncate text-xs text-tertiary" title={liquidity}>
           {liquidity ?? "—"}
-        </span>
-      </TableCell>
-      <TableCell className="text-lg font-medium tracking-tight text-primary tabular-nums">
-        {formatProviderApy(strategy.currentApy, locale)}
-      </TableCell>
-      <TableCell className="text-sm text-secondary">
-        <span className="block truncate" title={provider}>
-          {provider}
-        </span>
+        </p>
       </TableCell>
       <TableCell>
         <EarnDepositAvailabilityBadge
@@ -295,12 +284,6 @@ export function EarnProgramWorkspace({
   return (
     <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto w-full max-w-7xl space-y-5">
-        <div className="max-w-3xl">
-          <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
-            {t("DashboardMarkets.earnProgram.eyebrow")}
-          </p>
-        </div>
-
         <ProgramIntro />
 
         <Card className="overflow-hidden">
@@ -356,28 +339,19 @@ export function EarnProgramWorkspace({
                     />
                   ))}
                 </div>
-                <Table className="hidden md:block [&_table]:min-w-[64rem] [&_table]:table-fixed">
+                <Table className="hidden md:block [&_table]:min-w-[44rem] [&_table]:table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[26%]">
+                      <TableHead className="w-[42%]">
                         {t("DashboardMarkets.earnProgram.strategy")}
                       </TableHead>
-                      <TableHead className="w-[10%]">
-                        {t("DashboardMarkets.earnProgram.asset")}
+                      <TableHead className="w-[24%]">
+                        {t("DashboardMarkets.earnProgram.terms")}
                       </TableHead>
-                      <TableHead className="w-[13%]">
-                        {t("DashboardMarkets.earnProgram.liquidity")}
-                      </TableHead>
-                      <TableHead className="w-[13%]">
-                        {t("DashboardMarkets.earnProgram.apy")}
-                      </TableHead>
-                      <TableHead className="w-[12%]">
-                        {t("DashboardMarkets.earnProgram.provider")}
-                      </TableHead>
-                      <TableHead className="w-[14%]">
+                      <TableHead className="w-[20%]">
                         {t("DashboardMarkets.earnProgram.availability")}
                       </TableHead>
-                      <TableHead align="right" className="w-[12%]">
+                      <TableHead align="right" className="w-[14%]">
                         <span className="sr-only">{t("DashboardMarkets.earnProgram.select")}</span>
                       </TableHead>
                     </TableRow>
@@ -413,15 +387,24 @@ export function EarnProgramWorkspace({
               ) : (
                 <div className="flex max-w-2xl items-start gap-2 text-xs leading-5 text-tertiary">
                   <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                  <p>
-                    {t(
-                      providerAccess === null
-                        ? "DashboardMarkets.earnProgram.accessDisclosure"
-                        : depositsEnabled
-                          ? "DashboardMarkets.earnProgram.rateDisclosure"
-                          : "DashboardMarkets.earnProgram.productionDisclosure"
-                    )}
-                  </p>
+                  <div>
+                    {selectedStrategy ? (
+                      <p className="font-medium text-primary">
+                        {t("DashboardMarkets.earnProgram.selectionSummary", {
+                          strategy: selectedStrategy.name,
+                        })}
+                      </p>
+                    ) : null}
+                    <p className={cn(selectedStrategy && "mt-1")}>
+                      {t(
+                        providerAccess === null
+                          ? "DashboardMarkets.earnProgram.accessDisclosure"
+                          : depositsEnabled
+                            ? "DashboardMarkets.earnProgram.rateDisclosure"
+                            : "DashboardMarkets.earnProgram.productionDisclosure"
+                      )}
+                    </p>
+                  </div>
                 </div>
               )}
               <Button disabled={!selectedStrategy} onClick={continueToIntegration} type="button">

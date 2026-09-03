@@ -3,6 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
+  type EarnMovementRow,
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
@@ -20,10 +21,16 @@ const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
     })),
   };
 });
+const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
+  vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
+);
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
+}));
+vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
+  reconcileEarnVaultMovementReadThrough,
 }));
 
 /**
@@ -460,6 +467,10 @@ describe("external-wallet activity", () => {
       direction: "deposit",
       ownerAddress: OWNER_A,
     });
+    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: movementId })
+    );
 
     // A custody-signed vault movement is not an external-wallet movement, and a
     // guessed id answers exactly like a missing row.
@@ -517,6 +528,7 @@ describe("external-wallet activity", () => {
     expect((await get("/v1/earn/external-wallet/movements/earn_movement_missing")).status).toBe(
       404
     );
+    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledTimes(1);
   });
 });
 

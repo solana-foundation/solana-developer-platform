@@ -29,7 +29,10 @@ import {
   loadPrivateChannelProjectRpcClient,
 } from "../context";
 import { emitLifecycle, emitMember } from "../helpers";
-import type { connectPrivateChannelInstanceSchema } from "../schemas";
+import type {
+  connectPrivateChannelInstanceSchema,
+  updatePrivateChannelInstanceSchema,
+} from "../schemas";
 
 export const getPrivateChannelInstance = async (c: AppContext) => {
   const auth = getAuth(c);
@@ -194,6 +197,74 @@ export const connectPrivateChannelInstance = async (
         channelId: defaultChannel.id,
         payload: { principalId: defaultPrincipal.id, membershipId: defaultMembershipId },
       }
+    );
+  }
+
+  const response: PrivateChannelInstanceResponse = {
+    instance: mapPrivateChannelInstanceRow(row),
+  };
+  return success(c, response);
+};
+
+/**
+ * Reconfigure the active instance in place. The instance id is an optimistic
+ * concurrency guard: a setup page cannot overwrite a replacement connection
+ * that became active in another tab.
+ */
+export const updatePrivateChannelInstance = async (
+  c: ValidatedBodyContext<typeof updatePrivateChannelInstanceSchema>
+) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const { instanceId, ...input } = c.req.valid("json");
+  const scope = { organizationId: auth.organizationId, projectId };
+  const repo = getPrivateChannelInstanceRepository(c);
+  const active = await repo.getActiveByProject(scope);
+
+  if (!active) throw notFound("Active private channel instance");
+  if (active.id !== instanceId) {
+    throw new AppError(
+      "CONFLICT",
+      "The active Private Channels instance changed. Refresh this page before saving."
+    );
+  }
+
+  const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+  const probe = await verifyInstanceConnection({
+    gatewayUrl: input.gatewayUrl,
+    authUrl: input.authUrl,
+    probeRpc: () =>
+      projectRpc.probe({
+        escrowProgramId: input.escrowProgramId,
+        escrowInstanceAddr: input.escrowInstanceAddr,
+      }),
+  });
+  if (!probe.ok) {
+    getLogger().warn(
+      redactCredentialSecrets({
+        organizationId: auth.organizationId,
+        projectId,
+        gatewayUrl: input.gatewayUrl,
+        authUrl: input.authUrl,
+        rpcProvider: projectRpc.target.providerId,
+        gateway: probe.gateway,
+        rpc: probe.rpc,
+        auth: probe.auth,
+      }),
+      "updatePrivateChannelInstance: connection probe failed"
+    );
+    throw badRequest("Connection check failed", {
+      gateway: probe.gateway,
+      rpc: probe.rpc,
+      auth: probe.auth,
+    });
+  }
+
+  const row = await repo.updateActive({ id: active.id, ...scope, ...input });
+  if (!row) {
+    throw new AppError(
+      "CONFLICT",
+      "The active Private Channels instance changed. Refresh this page before saving."
     );
   }
 

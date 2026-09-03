@@ -1,6 +1,5 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { SdpKaminoError } from "@sdp/kamino";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
@@ -57,6 +56,7 @@ import {
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
 import { broadcastRecordedVaultMovement } from "./vault-intent-execution.service";
+import { refusedBuildMessage } from "./vault-refusals";
 import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
 
 /**
@@ -206,9 +206,8 @@ export async function buildExternalWalletDepositTransaction(
       );
     } catch (error) {
       getLogger().error({ error }, "external-wallet deposit: build failed");
-      if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-        throw badRequest(error.message);
-      }
+      const refusal = refusedBuildMessage(error);
+      if (refusal) throw badRequest(refusal);
       throw error;
     }
 
@@ -439,6 +438,8 @@ export interface ExternalWalletWithdrawalBuildInput {
   shareAtaRentFunder: string | null;
   /** Decimal string in share units. */
   shares: string;
+  /** Minimum deposit-token amount the exit may return. */
+  minAmountOut?: string;
   userId?: string | null;
   apiKeyId?: string | null;
 }
@@ -476,14 +477,14 @@ export async function buildExternalWalletWithdrawalTransaction(
       providerReference: input.vaultAddress,
       owner: input.ownerAddress,
       shares: input.shares,
+      ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
       ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
     });
     plan = appendVaultRequestMemo(built, "external-withdrawal", transactionId);
   } catch (error) {
     getLogger().error({ error }, "external-wallet withdrawal: build failed");
-    if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-      throw badRequest(error.message);
-    }
+    const refusal = refusedBuildMessage(error);
+    if (refusal) throw badRequest(refusal);
     throw error;
   }
 
@@ -537,6 +538,9 @@ export async function buildExternalWalletWithdrawalTransaction(
     // same denomination rule the custody exit follows.
     denomination: input.shareMint,
     amountRequested: input.shares,
+    // The build table predates withdrawal floors and names its shared
+    // protection column `min_shares_out`; direction disambiguates the unit.
+    minSharesOut: input.minAmountOut ?? null,
     createsShareAccount: plan.createsShareAccount === true,
     unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
     lastValidBlockHeight: unsigned.lastValidBlockHeight,

@@ -27,7 +27,7 @@ const PROJECT_ID = "prj_test";
 const mocks = vi.hoisted(() => ({
   createEarnVaultDeposit: vi.fn(),
   useEarnFundingWallets: vi.fn(),
-  useEarnVaultDepositOutcomeToast: vi.fn(),
+  useEarnVaultDepositOutcome: vi.fn(),
   fetchEarnVaultDepositByRequestId: vi.fn(),
   fetchEarnVaultDepositPreview: vi.fn(),
 }));
@@ -62,20 +62,24 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "This is above the last observed balance; the provider will verify it on submit.",
   "DashboardEarn.deposit.vaultConfirmNote":
     "The selected custody wallet signs the vault deposit transaction.",
+  "DashboardEarn.deposit.vaultConfirmNoteSponsored": "SDP covers the network fee.",
   "DashboardEarn.deposit.vaultSubmit": "Confirm deposit",
   "DashboardEarn.deposit.vaultSubmitting": "Submitting…",
   "DashboardEarn.deposit.vaultSubmitError": "The deposit could not be submitted.",
   "DashboardEarn.deposit.vaultDoneTitle": "Deposit submitted",
-  "DashboardEarn.deposit.vaultDoneBody": "The transaction was submitted to Solana.",
+  "DashboardEarn.deposit.vaultDoneBody": "Signed and sent to Solana.",
+  "DashboardEarn.deposit.vaultDoneStatus": "Awaiting confirmation",
   "DashboardEarn.deposit.vaultSettlingNote":
     "Your vault position will refresh after the chain confirms it.",
   "DashboardEarn.deposit.vaultConfirmedTitle": "Deposit confirmed",
   "DashboardEarn.deposit.vaultConfirmedBody": "The deposit is confirmed on Solana.",
+  "DashboardEarn.deposit.vaultConfirmedStatus": "Confirmed",
   "DashboardEarn.deposit.vaultConfirmedNote":
     "Your live vault position will refresh automatically.",
   "DashboardEarn.deposit.vaultTransaction": "Transaction",
   "DashboardEarn.deposit.vaultPendingTitle": "Deposit pending",
   "DashboardEarn.deposit.vaultPendingBody": "The transaction is waiting to be submitted.",
+  "DashboardEarn.deposit.vaultPendingStatus": "Status unknown",
   "DashboardEarn.deposit.vaultApprovalTitle": "Approval required",
   "DashboardEarn.deposit.vaultApprovalBody":
     "This deposit has not moved funds. It will execute only after wallet-policy approval.",
@@ -83,6 +87,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultAbsorbedTitle": "Deposit already completed by your approval",
   "DashboardEarn.deposit.vaultAbsorbedBody":
     "Your earlier approval for this exact deposit executed just before this submission, so the request was absorbed as a retry of it. Funds moved once, through the approval — this submission moved nothing additional.",
+  "DashboardEarn.deposit.vaultAbsorbedStatus": "Handled by approval",
   "DashboardEarn.deposit.vaultAbsorbedNote":
     "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
   "DashboardEarn.deposit.vaultHeldKeyUnavailable":
@@ -122,7 +127,7 @@ vi.mock("./deposit/earn-funding-wallets", () => ({
 
 vi.mock("./earn-program-data", () => ({
   createEarnVaultDeposit: mocks.createEarnVaultDeposit,
-  useEarnVaultDepositOutcomeToast: mocks.useEarnVaultDepositOutcomeToast,
+  useEarnVaultDepositOutcome: mocks.useEarnVaultDepositOutcome,
   fetchEarnVaultDepositByRequestId: mocks.fetchEarnVaultDepositByRequestId,
   fetchEarnVaultDepositPreview: mocks.fetchEarnVaultDepositPreview,
 }));
@@ -140,6 +145,8 @@ const strategy: EarnStrategy = {
   currentApy: "0.061",
   liquidityTerm: "instant",
   status: "active",
+  depositSlippage: null,
+  withdrawalSlippage: null,
   hostCluster: "devnet",
   fundable: true,
   createdAt: "2026-08-18T00:00:00.000Z",
@@ -649,35 +656,39 @@ describe("EarnVaultDepositModal", () => {
   });
 
   it.each([
-    ["pending", "Deposit pending"],
-    ["submitted", "Deposit submitted"],
-    ["confirmed", "Deposit confirmed"],
-  ] as const)("renders a truthful %s result and refresh callback", async (status, title) => {
-    const deposit = vaultDeposit(status);
-    const onDeposited = vi.fn();
-    mocks.createEarnVaultDeposit.mockResolvedValue({
-      ok: true,
-      status: 201,
-      data: { kind: "submitted", deposit },
-    });
+    ["pending", "Deposit pending", "Status unknown"],
+    ["submitted", "Deposit submitted", "Awaiting confirmation"],
+    ["confirmed", "Deposit confirmed", "Confirmed"],
+  ] as const)(
+    "renders a truthful %s result and refresh callback",
+    async (status, title, statusLabel) => {
+      const deposit = vaultDeposit(status);
+      const onDeposited = vi.fn();
+      mocks.createEarnVaultDeposit.mockResolvedValue({
+        ok: true,
+        status: 201,
+        data: { kind: "submitted", deposit },
+      });
 
-    render(
-      <EarnVaultDepositModal
-        projectId={PROJECT_ID}
-        strategy={strategy}
-        onClose={vi.fn()}
-        onDeposited={onDeposited}
-      />
-    );
-    await enterDepositAmount();
+      render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={strategy}
+          onClose={vi.fn()}
+          onDeposited={onDeposited}
+        />
+      );
+      await enterDepositAmount();
 
-    expect(await screen.findByText(title)).toBeTruthy();
-    const transaction = screen.getByRole("link", { name: /5R3h9G/ });
-    expect(transaction.getAttribute("href")).toBe(
-      `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`
-    );
-    expect(onDeposited).toHaveBeenCalledWith(deposit);
-  });
+      expect(await screen.findByText(title)).toBeTruthy();
+      expect(screen.getByText(statusLabel)).toBeTruthy();
+      const transaction = screen.getByRole("link", { name: /5R3h9G/ });
+      expect(transaction.getAttribute("href")).toBe(
+        `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`
+      );
+      expect(onDeposited).toHaveBeenCalledWith(deposit);
+    }
+  );
 
   it("keeps a failed deposit on the form and reports the provider reason", async () => {
     const onDeposited = vi.fn();
@@ -885,6 +896,48 @@ describe("slippage-floored providers", () => {
     await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
     return user;
   }
+
+  it("switches the confirm note to sponsored copy when the quote says SDP pays", async () => {
+    mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
+      kind: "quoted",
+      preview: {
+        strategyId: vedaStrategy.id,
+        sharesOut: "0.99999",
+        shareDecimals: 6,
+        blockingIssues: [],
+        feeSponsored: true,
+      },
+    });
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+
+    await screen.findByText("SDP covers the network fee.", undefined, { timeout: 3000 });
+    expect(
+      screen.queryByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeNull();
+  });
+
+  it("keeps the wallet-pays note while no quote claims sponsorship", async () => {
+    // `feeSponsored` absent (an older API, or sponsorship off) reads wallet-pays.
+    primeQuote("0.99999");
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    expect(
+      screen.getByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeTruthy();
+  });
 
   it("derives the floor from the LIVE quote, not the amount", async () => {
     // A rate the amount-arithmetic would get wrong: 1 USDC quotes 0.99999

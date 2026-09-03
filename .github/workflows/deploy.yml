@@ -115,8 +115,8 @@ jobs:
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK" || true
 
   notify-end:
-    needs: [changes, deploy-api-dev, deploy-api-prod]
-    if: always() && needs.deploy-api-dev.result != 'skipped' && vars.CONTINUOUS_PROD_DEPLOY == 'true'
+    needs: [changes, deploy-api-stage, deploy-api-prod]
+    if: always() && needs.deploy-api-stage.result != 'skipped' && vars.CONTINUOUS_PROD_DEPLOY == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     continue-on-error: true
@@ -137,8 +137,8 @@ jobs:
         env:
           SERVICES: api
           OUTCOME: >-
-            ${{ (needs.deploy-api-dev.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
-                (needs.deploy-api-dev.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
+            ${{ (needs.deploy-api-stage.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
+                (needs.deploy-api-stage.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
                 'SUCCESS' }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -174,17 +174,8 @@ jobs:
             }')
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK" || true
 
-  deploy-api-dev:
-    name: sdp-api + worker + cron — dev + smoke
-    needs: changes
-    if: needs.changes.outputs.api == 'true'
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/deploy-sdp-api-gcp.yml
-
   deploy-api-stage:
-    name: sdp-api + worker + cron — stage (shadow)
+    name: sdp-api + worker + cron — stage + smoke
     needs: changes
     if: needs.changes.outputs.api == 'true' && vars.STAGE_DEPLOY_WIF_PROVIDER != '' && vars.STAGE_DEPLOY_SA != ''
     permissions:
@@ -194,7 +185,7 @@ jobs:
 
   deploy-api-prod:
     name: sdp-api + worker + cron — prod
-    needs: [changes, deploy-api-dev]
+    needs: [changes, deploy-api-stage]
     if: >-
       needs.changes.outputs.api == 'true' &&
       github.event_name == 'push' &&

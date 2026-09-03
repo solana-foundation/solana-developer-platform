@@ -93,6 +93,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(customer.fiat_currency).toBeNull();
     expect(customer.destination_country).toBeNull();
     expect(customer.payment_rail).toBeNull();
+    expect(customer.kind).toBe("customer_link");
     expect(external.id).toMatch(/^counterparty_provider_account_/);
     expect(external.id).not.toBe(customer.id);
     expect(external).toMatchObject({
@@ -102,6 +103,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       destination_country: "US",
       payment_rail: "ACH",
       provider_status: null,
+      kind: "payout_account",
       status: "active",
     });
     expect(
@@ -114,8 +116,8 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     ).toMatchObject({ id: customer.id });
   });
 
-  it("allows multiple active accounts for the same corridor and rail", async () => {
-    const counterparty = await seedCounterparty("cpacc_multiple_active_accounts");
+  it("allows at most one live reservation per corridor and rail", async () => {
+    const counterparty = await seedCounterparty("cpacc_reservation_unique");
     const customer = await repository.upsertProviderAccount({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -135,19 +137,185 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     } as const;
 
     const first = await repository.insertPendingExternalAccount(input);
-    const second = await repository.insertPendingExternalAccount(input);
+    await expect(repository.insertPendingExternalAccount(input)).rejects.toMatchObject({
+      code: "23505",
+    });
 
-    expect(second.id).not.toBe(first.id);
+    // Archiving the live reservation frees the corridor for a fresh one, and a
+    // COMPLETED account does not block new reservations — only an in-flight one.
+    const archived = await repository.archiveExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: first.id,
+    });
+    expect(archived?.status).toBe("archived");
+    const replacementReservation = await repository.insertPendingExternalAccount(input);
+    const completedReplacement = await repository.completeExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: replacementReservation.id,
+      externalAccountReference: "ExternalAccount:reservation_unique",
+      providerStatus: "ACTIVE",
+    });
+    expect(completedReplacement?.external_account_reference).toBe(
+      "ExternalAccount:reservation_unique"
+    );
+    const afterCompletion = await repository.insertPendingExternalAccount(input);
+    expect(afterCompletion.id).not.toBe(replacementReservation.id);
+  });
+
+  it("reads and updates provider resource accounts by kind", async () => {
+    const counterparty = await seedCounterparty("cpacc_resource_accounts");
+    const fundingWallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_resource",
+      kind: "funding_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_resource_1",
+      metadata: {
+        onrampKey: "USD:USDC_SOLANA:dest",
+        request: {
+          currency: "USDC",
+          network: "SOLANA",
+          destinationWalletAddress: "dest",
+          fiatCurrency: "USD",
+        },
+      },
+    });
+    const merchantWallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_resource",
+      kind: "merchant_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_resource_2",
+      metadata: {},
+    });
+
     expect(
-      await repository.listActiveExternalAccounts({
+      await repository.getAccountByKindAndCurrency({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        provider: "lightspark",
+        provider: "bvnk",
+        kind: "merchant_wallet",
         fiatCurrency: "USD",
-        destinationCountry: "US",
       })
-    ).toHaveLength(2);
+    ).toMatchObject({ id: merchantWallet.id, kind: "merchant_wallet" });
+    expect(
+      await repository.getFundingWalletByOnrampKey({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        onrampKey: "USD:USDC_SOLANA:dest",
+      })
+    ).toMatchObject({ id: fundingWallet.id, kind: "funding_wallet" });
+
+    const updated = await repository.patchAccountMetadata({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: fundingWallet.id,
+      set: { ruleStatus: "ACTIVE" },
+      unset: [],
+    });
+    expect(updated?.metadata).toEqual({
+      onrampKey: "USD:USDC_SOLANA:dest",
+      ruleStatus: "ACTIVE",
+      request: {
+        fiatCurrency: "USD",
+        currency: "USDC",
+        network: "SOLANA",
+        destinationWalletAddress: "dest",
+      },
+    });
+
+    await expect(
+      repository.patchAccountMetadata({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: fundingWallet.id,
+        set: {},
+        unset: ["onrampKey"],
+      })
+    ).rejects.toThrow();
+    expect(
+      await repository.getFundingWalletByOnrampKey({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        onrampKey: "USD:USDC_SOLANA:dest",
+      })
+    ).toMatchObject({
+      id: fundingWallet.id,
+      metadata: { onrampKey: "USD:USDC_SOLANA:dest", ruleStatus: "ACTIVE" },
+    });
+  });
+
+  it("keeps customer links out of payout queries", async () => {
+    const counterparty = await seedCounterparty("cpacc_kind_filters");
+    await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_kind_filter",
+    });
+
+    expect(
+      await repository.listProviderAccounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+      })
+    ).toEqual([]);
+    expect(
+      await repository.getAccountByKindAndCurrency({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        kind: "payout_account",
+        fiatCurrency: "USD",
+      })
+    ).toBeNull();
+
+    const counterparties = createPostgresCounterpartiesRepository(getDb(env));
+    expect(
+      await counterparties.findActiveCounterpartyByProviderCustomerReference({
+        provider: "bvnk",
+        providerCustomerReference: "bvnk_customer_kind_filter",
+      })
+    ).toMatchObject({ id: counterparty.id });
+
+    const duplicateCounterparty = await seedCounterparty("cpacc_kind_filter_duplicate");
+    await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: duplicateCounterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_kind_filter",
+    });
+    expect(
+      await counterparties.findActiveCounterpartyByProviderCustomerReference({
+        provider: "bvnk",
+        providerCustomerReference: "bvnk_customer_kind_filter",
+      })
+    ).toBeNull();
   });
 
   it("scopes external account lookup to the parent counterparty", async () => {

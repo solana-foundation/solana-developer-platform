@@ -43,6 +43,7 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
         ]}
         ramps={[{ provider: "moonpay", label: "MoonPay", status: "enabled" }]}
         compliance={[{ provider: "range", label: "Range", status: "request_access" }]}
+        privacy={overrides.privacy}
       />
     </I18nProvider>
   );
@@ -103,60 +104,100 @@ describe("IntegrationsCatalog filtering", () => {
     expect(visibleRowLabels()).toEqual(["Helius", "Alchemy"]);
   });
 
-  it("narrows by status across families", async () => {
+  it("narrows to everything that is running, however it was switched on", async () => {
     const user = userEvent.setup();
     renderCatalog();
 
     await user.click(screen.getByRole("button", { name: "Connected" }));
 
     const labels = visibleRowLabels();
-    expect(labels).toEqual(["Privy", "Helius"]);
+    // Both ways a provider can be on: connected for this organization, and a
+    // deployment-wide rail that is enabled. They carry the same pill, so the
+    // chip that names that pill has to select both.
+    expect(labels).toContain("Privy");
+    expect(labels).toContain("Helius");
+    expect(labels).toContain("MoonPay");
   });
 
-  it("narrows to what the organization can set up itself", async () => {
+  it("folds both off states into one chip", async () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await user.click(screen.getByRole("button", { name: "Ready to connect" }));
+    await user.click(screen.getByRole("button", { name: "Not connected" }));
 
-    expect(visibleRowLabels()).toEqual(["Para", "Alchemy"]);
+    const labels = visibleRowLabels();
+    // Whether a provider could be switched on (Para, Alchemy, Turnkey) or has
+    // no credentials at all (IBM Haven, gated with no request route wired yet,
+    // HOO-775), the reader is asking one question: is it running. It is not.
+    for (const off of ["Para", "Alchemy", "Turnkey", "IBM Digital Asset Haven"]) {
+      expect(labels).toContain(off);
+    }
+    expect(labels).not.toContain("Privy");
+    expect(labels).not.toContain("MoonPay");
+    expect(labels).not.toContain("Fireblocks");
   });
 
   it("narrows to what still needs an access request", async () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await user.click(screen.getByRole("button", { name: "Request access" }));
+    await user.click(screen.getByRole("button", { name: "Available on request" }));
 
     const labels = visibleRowLabels();
     // Only providers with a real way to ask collect here: the routed gated
     // custody provider and unactivated compliance. A gated custody provider
     // without a request route (IBM Haven, until HOO-775) is not a request
-    // anyone can make, so it holds at not-configured instead.
+    // anyone can make, so it holds at not-connected instead.
     for (const gated of ["Fireblocks", "Range"]) {
       expect(labels).toContain(gated);
     }
     expect(labels).not.toContain("IBM Digital Asset Haven");
-    // Enabled rails and generally available providers are excluded — an
-    // enabled ramp and an uncredentialed general provider are not requests.
     expect(labels).not.toContain("MoonPay");
     expect(labels).not.toContain("Privy");
     expect(labels).not.toContain("Para");
     expect(labels).not.toContain("Turnkey");
   });
 
-  it("narrows to what this deployment has not credentialed", async () => {
+  it("says so plainly when a provider's state could not be read", () => {
+    // A privacy instance whose active flag came back null. It is neither on nor
+    // off, and saying either would be a guess about something the page failed
+    // to load -- so it gets its own wording and the warning treatment rather
+    // than being folded into "Not connected".
+    renderCatalog({
+      privacy: [{ provider: "private-channels", label: "Private Channels", status: "unknown" }],
+    });
+
+    expect(visibleRowLabels()).toContain("Private Channels");
+    expect(screen.getByText("Status unavailable")).toBeTruthy();
+  });
+
+  it("keeps an unreadable state out of every chip", async () => {
     const user = userEvent.setup();
+    renderCatalog({
+      privacy: [{ provider: "private-channels", label: "Private Channels", status: "unknown" }],
+    });
+
+    // Only "All" shows it. Claiming it is connected, not connected, or
+    // requestable would each assert something nobody actually knows.
+    for (const chip of ["Connected", "Not connected", "Available on request"]) {
+      await user.click(screen.getByRole("button", { name: chip }));
+      expect(visibleRowLabels()).not.toContain("Private Channels");
+    }
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(visibleRowLabels()).toContain("Private Channels");
+  });
+
+  it("offers only the four states the catalog can be read in", async () => {
     renderCatalog();
 
-    await user.click(screen.getByRole("button", { name: "Not configured" }));
-
-    const labels = visibleRowLabels();
-    // Turnkey is generally available but has no credentials in this fixture,
-    // and IBM Haven is gated with no request route wired yet (HOO-775).
-    expect(labels).toContain("Turnkey");
-    expect(labels).toContain("IBM Digital Asset Haven");
-    expect(labels).not.toContain("Fireblocks");
+    for (const chip of ["All", "Connected", "Not connected", "Available on request"]) {
+      expect(screen.getByRole("button", { name: chip })).toBeTruthy();
+    }
+    // The finer statuses stay in the data and on the detail page; as chips they
+    // split hairs the catalog never needed to draw.
+    for (const gone of ["Ready to connect", "Enabled", "Request access", "Not configured"]) {
+      expect(screen.queryByRole("button", { name: gone })).toBeNull();
+    }
   });
 
   it("offers no filter that would imply an integration does not exist", () => {

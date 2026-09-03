@@ -7,6 +7,7 @@ import {
   getAssetDetailsErrors,
   getDefaultPublicFields,
   getPublicFieldCandidates,
+  sanitizeAdvancedSettings,
   togglePublicField,
 } from "./draft-mapping";
 import { createInitialDraft, type DraftState } from "./issuance-draft-wizard.types";
@@ -301,5 +302,38 @@ describe("buildIssuanceMetadata visibility", () => {
     expect(buildIssuanceMetadata(draft).visibility).toEqual({
       public: ["asset.pegCurrency", "asset.name", "chain.decimals"],
     });
+  });
+});
+
+describe("sanitizeAdvancedSettings and scaledUiAmount on securities", () => {
+  // Pins the behaviour that forced STORAGE_VERSION to 3 in use-issuance-draft.ts.
+  //
+  // scaledUiAmount is "available" on a tokenized security: still offered, just no
+  // longer pre-selected, because a mint carrying it is rejected by the DvP
+  // settlement program. Available means still ALLOWED, so hydration keeps it —
+  // right for someone who deliberately ticked it, wrong for a draft where the old
+  // default ticked it for them.
+  //
+  // The draft records no provenance, so this function cannot tell those apart.
+  // Teaching it to strip the setting would silently revert a deliberate choice on
+  // every reload. Discarding pre-change drafts via the version bump is the only
+  // fix that does neither. If this starts failing because sanitize learned to drop
+  // it, re-read that before "fixing" the test.
+  it("keeps a deliberately selected scaledUiAmount on a security", () => {
+    const kept = sanitizeAdvancedSettings("tokenized_security", "equity", {
+      scaledUiAmount: { params: { multiplier: "1" } },
+    });
+
+    expect(kept).toHaveProperty("scaledUiAmount");
+  });
+
+  it("still drops settings the asset type genuinely disallows", () => {
+    const kept = sanitizeAdvancedSettings("tokenized_security", "equity", {
+      transferFee: {},
+      scaledUiAmount: {},
+    });
+
+    expect(kept).not.toHaveProperty("transferFee");
+    expect(kept).toHaveProperty("scaledUiAmount");
   });
 });
