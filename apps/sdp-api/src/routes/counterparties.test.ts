@@ -1,4 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
+import { bvnkOnrampFields } from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import { buildBvnkCustomerExternalReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
@@ -798,47 +800,305 @@ describe("Counterparties Routes", () => {
       }
     });
 
-    it("fails loudly at the BVNK identity collection seam", async () => {
+    it("returns BVNK identity requirements for a fresh counterparty", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
         {
-          method: "POST",
           headers: { "Content-Type": "application/json", Authorization: authHeader },
-          body: JSON.stringify({
-            provider: "bvnk",
-            direction: "onramp",
-            cryptoToken: "USDC_SOLANA",
-            destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-            fiatCurrency: "USD",
-            collectedData: {
-              "taxIdentification.number": "123-45-6789",
-              "taxIdentification.taxResidenceCountryCode": "US",
-              nationality: "US",
-              birthCountryCode: "US",
-              "cdd.employmentStatus": "SALARIED",
-              "cdd.sourceOfFunds": "SALARY",
-              "cdd.pepStatus": "NOT_PEP",
-              "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
-              "cdd.expectedMonthlyVolume.amount": "1000",
-              "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
-              "cdd.employmentIndustrySector": "INFORMATION",
-              "address.stateCode": "CA",
-            },
-          }),
         },
         env
       );
 
-      expect(res.status).toBe(400);
-      expect((await res.json()).error).toEqual({
-        code: "BAD_REQUEST",
-        message:
-          "BVNK onramp requires identity fields that are no longer stored; JIT collection is not wired yet",
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "collect_counterparty",
+        fields: bvnkOnrampFields(),
       });
+    });
+
+    it("returns JIT agreement content without creating or persisting a customer", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_agreements" });
+      const counterparty = (await created.json()).data.counterparty;
+      const agreementId = "agreement_required_1";
+      const collectedData = {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        dateOfBirth: "1815-12-10",
+        email: "ada@example.com",
+        "address.addressLine1": "1 Main Street",
+        "address.city": "Austin",
+        "address.postalCode": "78701",
+        "address.countryCode": "US",
+        "address.stateCode": "TX",
+        "taxIdentification.number": "123-45-6789",
+        "taxIdentification.taxResidenceCountryCode": "US",
+        birthCountryCode: "GB",
+        "cdd.employmentStatus": "SALARIED",
+        "cdd.sourceOfFunds": "SALARY",
+        "cdd.pepStatus": "NOT_PEP",
+        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
+        "cdd.expectedMonthlyVolume.amount": "1000",
+        "cdd.expectedMonthlyVolume.currency": "USD",
+        "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
+        "cdd.employmentIndustrySector": "INFORMATION",
+      };
+      const requests: string[] = [];
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const path = new URL(String(input)).pathname;
+        requests.push(path);
+        if (path === "/platform/v2/agreements") {
+          return new Response(
+            JSON.stringify({
+              id: "working-set-1",
+              reference: "reference",
+              agreements: [
+                { id: agreementId, status: "PENDING", declinable: false, name: "Terms" },
+              ],
+              signingUrl: "https://example.invalid/sign",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            downloadUrl: "https://example.invalid/terms.pdf",
+            filename: "terms.pdf",
+            expiresAt: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      try {
+        const response = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              cryptoToken: "USDC_SOLANA",
+              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              fiatCurrency: "USD",
+              collectedData,
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual({
+          provider: "bvnk",
+          direction: "onramp",
+          status: "agreement_required",
+          agreements: [
+            {
+              id: agreementId,
+              filename: "terms.pdf",
+              downloadUrl: "https://example.invalid/terms.pdf",
+              declinable: false,
+            },
+          ],
+        });
+        expect(requests).toEqual([
+          "/platform/v2/agreements",
+          `/platform/v2/agreements/${agreementId}/content`,
+        ]);
+        const row = await getDb(env)
+          .prepare(
+            `SELECT provider_customer_reference, metadata FROM counterparty_provider_accounts
+             WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+          )
+          .bind(counterparty.id)
+          .first();
+        expect(row).toBeNull();
+        const counterpartyRow = await getDb(env)
+          .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+          .bind(counterparty.id)
+          .first<{ provider_data: Record<string, unknown> }>();
+        expect(JSON.stringify(counterpartyRow?.provider_data)).not.toContain("terms.pdf");
+        expect(JSON.stringify(counterpartyRow?.provider_data)).not.toContain("example.invalid");
+      } finally {
+        fetchSpy.mockRestore();
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      }
+    });
+
+    it("accepts agreements, creates the contact and customer, and stores only account metadata", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_consent" });
+      const counterparty = (await created.json()).data.counterparty;
+      const collectedData = {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        dateOfBirth: "1815-12-10",
+        email: "ada@example.com",
+        "address.addressLine1": "1 Main Street",
+        "address.city": "Austin",
+        "address.postalCode": "78701",
+        "address.countryCode": "US",
+        "address.stateCode": "TX",
+        "taxIdentification.number": "123-45-6789",
+        "taxIdentification.taxResidenceCountryCode": "US",
+        birthCountryCode: "GB",
+        "cdd.employmentStatus": "SALARIED",
+        "cdd.sourceOfFunds": "SALARY",
+        "cdd.pepStatus": "NOT_PEP",
+        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
+        "cdd.expectedMonthlyVolume.amount": "1000",
+        "cdd.expectedMonthlyVolume.currency": "USD",
+        "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
+        "cdd.employmentIndustrySector": "INFORMATION",
+      };
+      const requests: { path: string; body: unknown }[] = [];
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        const body = init?.body === undefined ? undefined : JSON.parse(String(init.body));
+        requests.push({ path, body });
+        if (path === "/platform/v2/agreements") {
+          return new Response(
+            JSON.stringify({
+              id: "working-set-2",
+              reference: "reference",
+              agreements: [{ id: "agreement-accept", status: "PENDING", declinable: false }],
+              signingUrl: "https://example.invalid/sign",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (path === "/platform/v2/agreements/actions") {
+          return new Response(
+            JSON.stringify({
+              content: [{ agreementId: "agreement-accept", status: "ACCEPTED" }],
+              totalElements: 1,
+              totalPages: 1,
+              hasNext: false,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (path === "/platform/v3/contacts") {
+          return new Response(JSON.stringify({ contactId: "contact-1" }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/platform/v2/customers") {
+          return new Response(
+            JSON.stringify({
+              id: "customer-1",
+              reference: "reference",
+              status: "PENDING",
+              type: "INDIVIDUAL",
+              model: "EMBEDDED_BVNK_MANAGED",
+              useCase: "FIAT",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            id: "customer-1",
+            reference: "reference",
+            status: "PENDING",
+            type: "INDIVIDUAL",
+            model: "EMBEDDED_BVNK_MANAGED",
+            useCase: "FIAT",
+            authenticatedLink: {
+              link: "https://example.invalid/verify",
+              expiresAt: "2030-01-01T00:00:00Z",
+            },
+            requiredActions: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      try {
+        const response = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              cryptoToken: "USDC_SOLANA",
+              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              fiatCurrency: "USD",
+              collectedData,
+              agreementConsent: { agreementIds: ["agreement-accept"] },
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual({
+          provider: "bvnk",
+          direction: "onramp",
+          status: "customer_verifying",
+        });
+        expect(requests.map((request) => request.path)).toEqual([
+          "/platform/v2/agreements",
+          "/platform/v2/agreements/actions",
+          "/platform/v3/contacts",
+          "/platform/v2/customers",
+          "/platform/v2/customers/customer-1",
+        ]);
+        expect(requests[1]?.body).toEqual({
+          reference: buildBvnkCustomerExternalReference(counterparty.id),
+          actions: [{ agreementId: "agreement-accept", type: "ACCEPT" }],
+        });
+        expect(requests[3]?.body).toMatchObject({
+          useCase: "FIAT",
+          individual: {
+            firstName: "Ada",
+            birthCountryCode: "GB",
+            taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
+            cdd: { expectedMonthlyVolume: { amount: "1000", currency: "USD" } },
+          },
+        });
+        const row = await getDb(env)
+          .prepare(
+            `SELECT provider_customer_reference, metadata FROM counterparty_provider_accounts
+             WHERE counterparty_provider_accounts.counterparty_id = ?
+               AND counterparty_provider_accounts.provider = 'bvnk'
+               AND counterparty_provider_accounts.kind = 'customer_link'`
+          )
+          .bind(counterparty.id)
+          .first<{ provider_customer_reference: string; metadata: Record<string, unknown> }>();
+        expect(row).toEqual({
+          provider_customer_reference: "customer-1",
+          metadata: {
+            status: "PENDING",
+            contactId: "contact-1",
+            agreements: { acceptedAt: expect.any(String), agreementIds: ["agreement-accept"] },
+          },
+        });
+        const counterpartyRow = await getDb(env)
+          .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+          .bind(counterparty.id)
+          .first<{ provider_data: Record<string, unknown> }>();
+        expect(JSON.stringify(counterpartyRow?.provider_data)).not.toContain("123-45-6789");
+        expect(JSON.stringify(counterpartyRow?.provider_data)).not.toContain("example.com");
+      } finally {
+        fetchSpy.mockRestore();
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      }
     });
   });
 

@@ -51,7 +51,10 @@ export interface UpsertBvnkCustomerProviderDataInput {
   projectId: string;
   customer: Partial<
     Pick<BvnkCustomerResolution, "customerReference" | "status" | "verificationStatus">
-  >;
+  > & {
+    contactId?: string;
+    agreements?: { acceptedAt: string; agreementIds: string[] };
+  };
 }
 
 export interface MutateCounterpartyProviderDataInput {

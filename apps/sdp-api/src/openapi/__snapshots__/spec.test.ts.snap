@@ -784,6 +784,365 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "example": "onramp",
                     "type": "string",
                   },
+                  "fields": {
+                    "items": {
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "text",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "mask": {
+                              "type": "string",
+                            },
+                            "maxLength": {
+                              "minimum": 0,
+                              "type": "integer",
+                            },
+                            "minLength": {
+                              "minimum": 0,
+                              "type": "integer",
+                            },
+                            "pattern": {
+                              "type": "string",
+                            },
+                            "placeholder": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "select",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "items": {
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                  },
+                                },
+                                "required": [
+                                  "value",
+                                  "label",
+                                ],
+                                "type": "object",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "options",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "country",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "before": {
+                              "type": "string",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "date",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "fields": {
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "text",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "mask": {
+                                        "type": "string",
+                                      },
+                                      "maxLength": {
+                                        "minimum": 0,
+                                        "type": "integer",
+                                      },
+                                      "minLength": {
+                                        "minimum": 0,
+                                        "type": "integer",
+                                      },
+                                      "pattern": {
+                                        "type": "string",
+                                      },
+                                      "placeholder": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "select",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "options": {
+                                        "items": {
+                                          "properties": {
+                                            "label": {
+                                              "type": "string",
+                                            },
+                                            "value": {
+                                              "type": "string",
+                                            },
+                                          },
+                                          "required": [
+                                            "value",
+                                            "label",
+                                          ],
+                                          "type": "object",
+                                        },
+                                        "type": "array",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                      "options",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "country",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "before": {
+                                        "type": "string",
+                                      },
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "date",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                ],
+                              },
+                              "type": "array",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "address",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "fields",
+                          ],
+                          "type": "object",
+                        },
+                      ],
+                    },
+                    "type": "array",
+                  },
+                  "provider": {
+                    "enum": [
+                      "bvnk",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "collect_counterparty",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "fields",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
                   "payout": {
                     "properties": {
                       "accounts": {
@@ -6023,6 +6382,65 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "provider",
                   "status",
                   "termsOfServiceUrl",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "agreements": {
+                    "items": {
+                      "properties": {
+                        "declinable": {
+                          "type": "boolean",
+                        },
+                        "downloadUrl": {
+                          "format": "uri",
+                          "type": "string",
+                        },
+                        "filename": {
+                          "type": "string",
+                        },
+                        "id": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "id",
+                        "filename",
+                        "downloadUrl",
+                        "declinable",
+                      ],
+                      "type": "object",
+                    },
+                    "type": "array",
+                  },
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "bvnk",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "agreement_required",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "agreements",
                 ],
                 "type": "object",
               },

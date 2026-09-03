@@ -108,7 +108,24 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "lightspark"; status: "collect_counterparty"; fields: RequirementField[] }
   | { provider: "lightspark"; status: "collect_account"; payout: PayoutRequirementTree }
   | { provider: "bvnk"; status: "onboarding_not_started" }
-  | { provider: "bvnk"; status: "customer_verification_required"; verificationUrl: string }
+  | { provider: "bvnk"; status: "collect_counterparty"; fields: RequirementField[] }
+  | {
+      provider: "bvnk";
+      status: "agreement_required";
+      /** Agreements are minted JIT per response and their URLs are never persisted. */
+      agreements: {
+        id: string;
+        filename: string;
+        downloadUrl: string;
+        declinable: boolean;
+      }[];
+    }
+  | {
+      provider: "bvnk";
+      status: "customer_verification_required";
+      /** The authenticated verification link is minted JIT per response. */
+      verificationUrl: string;
+    }
   | { provider: "bvnk"; status: "customer_verifying" }
   | { provider: "bvnk"; status: "customer_verification_failed" }
   | { provider: "bvnk"; status: "funding_account_provisioning" }

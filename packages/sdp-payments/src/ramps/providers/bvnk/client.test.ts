@@ -160,6 +160,48 @@ describe("BvnkRampClient v2 customer surfaces", () => {
       }
     );
   });
+
+  it("creates a v3 contact with PII in the request body and a deterministic key from the caller", async () => {
+    const { requests } = queueFetch(respond({ contactId: "contact-id" }, 201));
+
+    const result = await new BvnkRampClient().createContactV3(runtimeContext, {
+      idempotencyKey: "contact-key",
+      entity: {
+        type: "INDIVIDUAL",
+        relationshipType: "SELF_OWNED",
+        firstName: "Jane",
+        lastName: "Doe",
+        dateOfBirth: "1984-06-30",
+        address: {
+          addressLine1: "1 Main Street",
+          city: "Austin",
+          postalCode: "78701",
+          country: "US",
+          region: "TX",
+        },
+      },
+    });
+
+    assert.deepEqual(result, { contactId: "contact-id" });
+    assert.equal(new URL(requests[0].url).pathname, "/platform/v3/contacts");
+    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "contact-key");
+    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
+      entity: {
+        type: "INDIVIDUAL",
+        relationshipType: "SELF_OWNED",
+        firstName: "Jane",
+        lastName: "Doe",
+        dateOfBirth: "1984-06-30",
+        address: {
+          addressLine1: "1 Main Street",
+          city: "Austin",
+          postalCode: "78701",
+          country: "US",
+          region: "TX",
+        },
+      },
+    });
+  });
 });
 
 describe("BvnkRampClient v2 agreement surfaces", () => {

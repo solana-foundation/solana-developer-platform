@@ -189,6 +189,12 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("collect_counterparty"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
       provider: z.literal("lightspark"),
       status: z.literal("collect_account"),
       payout: payoutRequirementTreeSchema,
@@ -209,6 +215,19 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       provider: z.literal("mural"),
       status: z.literal("terms_of_service_required"),
       termsOfServiceUrl: z.url(),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("agreement_required"),
+      agreements: z.array(
+        z.object({
+          id: z.string(),
+          filename: z.string(),
+          downloadUrl: z.url(),
+          declinable: z.boolean(),
+        })
+      ),
     }),
     z.object({
       ...requirementBase,

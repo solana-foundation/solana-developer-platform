@@ -872,7 +872,7 @@ describe("Payments routes — ramps", () => {
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
 
-  it("fails loudly when a BVNK off-ramp quote reaches the unwired JIT seam", async () => {
+  it("fails loudly when a BVNK off-ramp quote has no customer-link row", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
       providerData: {
@@ -915,12 +915,10 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error).toEqual({
-      code: "BAD_REQUEST",
-      message: `BVNK offramp requires identity fields for counterparty ${counterpartyId} that are no longer stored; JIT collection is not wired yet`,
-    });
+    expect(body.error.code).toBe("CONFLICT");
+    expect(body.error.message).toContain("not provisioned for bvnk offramp");
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });

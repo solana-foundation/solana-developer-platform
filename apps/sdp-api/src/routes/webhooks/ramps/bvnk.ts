@@ -18,6 +18,7 @@ import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/paym
 import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import {
+  createPostgresCounterpartyProviderAccountsRepository,
   createSystemCounterpartiesRepository,
   createSystemPaymentsRepository,
 } from "@/db/repositories";
@@ -25,6 +26,7 @@ import type {
   CounterpartiesRepository,
   CounterpartyRow,
 } from "@/db/repositories/counterparty.repository";
+import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { ensureBvnkPaymentRule, readBvnkCustomerLink } from "@/routes/payments/handlers/ramps/bvnk";

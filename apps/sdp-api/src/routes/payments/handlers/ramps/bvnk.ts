@@ -6,6 +6,8 @@ import type {
   BvnkLedgerWalletV2,
 } from "@sdp/payments/ramps/providers/bvnk/client";
 import {
+  buildBvnkContactRequest,
+  buildBvnkCustomerRequest,
   bvnkOfframpAccountType,
   bvnkOfframpFields,
   isBvnkOfframpCurrency,
@@ -17,11 +19,11 @@ import {
   type BvnkOnrampPaymentRuleState,
   type BvnkOnrampRequestSpec,
   type BvnkPaymentRuleResolution,
+  buildBvnkCustomerExternalReference,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampInstruction,
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
-  buildBvnkRuleEntity,
   buildBvnkWalletIdempotencyKey,
   bvnkRuleReference,
   bvnkUnverifiedOnboardingStatus,
@@ -44,8 +46,13 @@ import type {
   BvnkPaymentRampInstruction,
   PaymentRampQuote,
 } from "@sdp/types";
+import { isCountryCode } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
-import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
+import type {
+  CollectedFieldData,
+  CounterpartyRequirements,
+  RampDirection,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type {
@@ -396,14 +403,20 @@ export async function ensureBvnkOfframpBeneficiary(
   return beneficiary;
 }
 
+export type BvnkCustomerEnsureResult =
+  | { customer: BvnkCustomerResolution }
+  | { requirements: CounterpartyRequirements };
+
 /**
- * Returns and refreshes an existing BVNK customer, rejecting first-time
- * creation until transient identity collection is wired.
+ * Creates or refreshes the BVNK v2 customer using transient collected PII.
  *
  * @param c - Request context used for provider and repository access.
  * @param counterparty - Counterparty whose provider state is resolved.
  * @param projectId - Project that owns the counterparty.
- * @returns The persisted or refreshed BVNK customer resolution.
+ * @param direction - Ramp direction used when returning an intermediate requirement.
+ * @param collectedData - Flattened PII fields, never persisted.
+ * @param agreementConsent - Agreement ids the caller accepts.
+ * @returns A refreshed customer or the next agreement requirement.
  */
 /**
  * Reads the BVNK customer state from the counterparty's customer-link
@@ -439,44 +452,172 @@ export async function readBvnkCustomerLink(
 export async function ensureBvnkCustomer(
   c: AppContext,
   counterparty: CounterpartyRow,
-  projectId: string
-): Promise<BvnkCustomerResolution> {
+  projectId: string,
+  direction: RampDirection,
+  collectedData?: CollectedFieldData,
+  agreementConsent?: { agreementIds: string[] }
+): Promise<BvnkCustomerEnsureResult> {
   if (counterparty.entity_type === "business") {
     throw badRequest("BVNK supports individual counterparties only.");
   }
 
   const ctx = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
-  const repo = getCounterpartiesRepository(c);
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const existing = await accounts.getProviderAccount({
+    organizationId: counterparty.organization_id,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+  });
 
-  let customer = await readBvnkCustomerLink(c, counterparty);
-
-  if (!customer?.customerReference) {
-    throw badRequest(
-      "BVNK customer creation requires identity fields that are no longer stored; JIT collection is not wired yet"
-    );
-  }
-
-  if (!isBvnkCustomerVerified(customer.status)) {
-    const latest = await client.getCustomerV2(ctx, { id: customer.customerReference });
-    customer = {
-      customerReference: customer.customerReference,
+  if (existing) {
+    const latest = await client.getCustomerV2(ctx, { id: existing.provider_customer_reference });
+    const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(existing.metadata);
+    const updatedMetadata = bvnkCustomerProviderAccountMetadataSchema.parse({
+      ...metadata,
       status: latest.status,
-      // Surfaced JIT to callers only — never persisted (store-nothing).
-      verificationUrl: latest.authenticatedLink.link,
-    };
-    await repo.upsertBvnkCustomerProviderData({
-      counterpartyId: counterparty.id,
+    });
+    const updated = await accounts.updateAccountMetadata({
       organizationId: counterparty.organization_id,
       projectId,
-      customer: {
-        customerReference: customer.customerReference,
-        status: customer.status,
-      },
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: existing.id,
+      metadata: updatedMetadata,
     });
+    if (updated === null) {
+      throw internalError("BVNK customer status update escaped its tenant scope.");
+    }
+    return {
+      customer: {
+        customerReference: existing.provider_customer_reference,
+        status: latest.status,
+      },
+    };
   }
 
-  return customer;
+  if (collectedData === undefined) {
+    throw badRequest("collectedData with BVNK individual details is required.");
+  }
+  const individual = buildBvnkCustomerRequest(collectedData);
+  const reference = buildBvnkCustomerExternalReference(counterparty.id);
+  let taxResidenceCountryCode = individual.taxIdentification?.taxResidenceCountryCode;
+  if (taxResidenceCountryCode === undefined) {
+    const collectedResidence = collectedData["taxIdentification.taxResidenceCountryCode"];
+    if (typeof collectedResidence !== "string" || !isCountryCode(collectedResidence)) {
+      throw internalError("BVNK customer request is missing tax residence country.");
+    }
+    taxResidenceCountryCode = collectedResidence;
+  }
+  const agreements = await client.createAgreementsV2(ctx, {
+    idempotencyKey: (await hashString(`bvnk-agreements:${counterparty.id}`)).slice(0, 36),
+    reference,
+    useCase: "FIAT",
+    customerType: "INDIVIDUAL",
+    countryCode: taxResidenceCountryCode,
+  });
+  const pending = agreements.agreements.filter((agreement) => agreement.status === "PENDING");
+  if (pending.length > 0 && agreementConsent === undefined) {
+    const agreementDetails = await Promise.all(
+      pending.map(async (agreement) => {
+        const content = await client.getAgreementContentV2(ctx, { id: agreement.id });
+        return {
+          id: agreement.id,
+          filename: content.filename,
+          downloadUrl: content.downloadUrl,
+          declinable: agreement.declinable,
+        };
+      })
+    );
+    return {
+      requirements: {
+        provider: "bvnk",
+        direction,
+        status: "agreement_required",
+        agreements: agreementDetails,
+      },
+    };
+  }
+
+  const consentedIds = new Set<string>();
+  if (agreementConsent !== undefined) {
+    for (const id of agreementConsent.agreementIds) {
+      consentedIds.add(id);
+    }
+  }
+  const pendingIds = new Set(pending.map((agreement) => agreement.id));
+  for (const id of consentedIds) {
+    if (!pendingIds.has(id)) {
+      throw badRequest(`Unknown or already resolved BVNK agreement "${id}".`);
+    }
+  }
+  const rejectedRequired = pending.find(
+    (agreement) => !consentedIds.has(agreement.id) && !agreement.declinable
+  );
+  if (rejectedRequired) {
+    const agreementName =
+      rejectedRequired.name === undefined ? rejectedRequired.id : rejectedRequired.name;
+    return {
+      requirements: {
+        provider: "bvnk",
+        direction,
+        status: "unsupported",
+        reason: `BVNK agreement "${agreementName}" is required and was not accepted.`,
+      },
+    };
+  }
+  if (pending.length > 0) {
+    const response = await client.respondAgreementsV2(ctx, {
+      idempotencyKey: (await hashString(`bvnk-agreement-response:${counterparty.id}`)).slice(0, 36),
+      reference,
+      actions: pending.map((agreement) => ({
+        agreementId: agreement.id,
+        type: consentedIds.has(agreement.id) ? "ACCEPT" : "REJECT",
+      })),
+    });
+    const rejected = response.content.find(
+      (result) =>
+        result.status === "REJECTED" &&
+        pending.find((agreement) => agreement.id === result.agreementId)?.declinable !== true
+    );
+    if (rejected) {
+      return {
+        requirements: {
+          provider: "bvnk",
+          direction,
+          status: "unsupported",
+          reason: `BVNK rejected required agreement "${rejected.agreementId}".`,
+        },
+      };
+    }
+  }
+
+  const contact = await client.createContactV3(ctx, {
+    idempotencyKey: (await hashString(`bvnk-contact:${counterparty.id}`)).slice(0, 36),
+    entity: buildBvnkContactRequest(collectedData),
+  });
+  const created = await client.createCustomerV2(ctx, {
+    idempotencyKey: (await hashString(`bvnk-customer:${counterparty.id}`)).slice(0, 36),
+    useCase: "FIAT",
+    reference,
+    individual,
+  });
+  const acceptedAgreementIds = pending
+    .filter((agreement) => consentedIds.has(agreement.id))
+    .map((agreement) => agreement.id);
+  await getCounterpartiesRepository(c).upsertBvnkCustomerProviderData({
+    counterpartyId: counterparty.id,
+    organizationId: counterparty.organization_id,
+    projectId,
+    customer: {
+      customerReference: created.id,
+      status: created.status,
+      contactId: contact.contactId,
+      agreements: { acceptedAt: new Date().toISOString(), agreementIds: acceptedAgreementIds },
+    },
+  });
+  return { customer: { customerReference: created.id, status: created.status } };
 }
 
 /**
@@ -586,7 +727,8 @@ export async function ensureBvnkPaymentRule(
       network: params.network,
       beneficiaryAddress: params.destinationWalletAddress,
       entity: {
-        ...buildBvnkRuleEntity(counterparty),
+        type: "INDIVIDUAL",
+        relationshipType: "SELF_OWNED",
         customerIdentifier: customer.customerReference,
       },
     });

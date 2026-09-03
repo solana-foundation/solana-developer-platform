@@ -625,7 +625,7 @@ const bvnkV2ExpectedMonthlyVolumeSchema = z.object({
   amount: z.union([z.string().min(1), z.number().finite()]),
   currency: z.string().min(1),
 });
-const bvnkV2CddSchema = z.object({
+export const bvnkV2CddSchema = z.object({
   employmentStatus: bvnkV2EmploymentStatusSchema,
   sourceOfFunds: bvnkV2SourceOfFundsSchema,
   pepStatus: bvnkV2PepStatusSchema,
@@ -660,6 +660,27 @@ export interface CreateBvnkCustomerV2Input {
   reference?: string;
   model?: "RELIANCE";
   individual: BvnkCustomerV2Individual;
+}
+
+const bvnkV3ContactSchema = z.object({ contactId: z.string().min(1) });
+export type BvnkContactV3 = z.infer<typeof bvnkV3ContactSchema>;
+
+export interface CreateBvnkContactV3Input {
+  idempotencyKey: string;
+  entity: {
+    type: "INDIVIDUAL";
+    relationshipType: "SELF_OWNED";
+    firstName: string;
+    lastName: string;
+    dateOfBirth: string;
+    address: {
+      addressLine1: string;
+      city: string;
+      region?: string;
+      postalCode: string;
+      country: string;
+    };
+  };
 }
 
 const bvnkV2RequiredActionTargetSchema = z.object({
@@ -737,7 +758,7 @@ export interface BvnkAgreementActionV2 {
 export interface CreateBvnkAgreementsV2Input {
   idempotencyKey: string;
   reference: string;
-  useCase: "STABLECOIN_PAYOUTS" | "EMBEDDED_STABLECOIN_WALLETS" | "EMBEDDED_FIAT_ACCOUNTS";
+  useCase: BvnkCustomerV2UseCase;
   customerType: BvnkEntityType;
   countryCode: string;
 }
@@ -973,6 +994,26 @@ export class BvnkRampClient implements RampProvider {
       },
     });
     return bvnkV2CustomerSummarySchema.parse(response);
+  }
+
+  /**
+   * Creates the BVNK v3 travel-rule contact for an individual customer.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - Contact data and a deterministic idempotency key. The entity contains PII and is never logged.
+   * @returns The BVNK contact identifier.
+   */
+  async createContactV3(
+    { env, mode }: RampRuntimeContext,
+    input: CreateBvnkContactV3Input
+  ): Promise<BvnkContactV3> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(config, "/platform/v3/contacts", {
+      method: "POST",
+      headers: { "Idempotency-Key": input.idempotencyKey },
+      body: { entity: input.entity },
+    });
+    return bvnkV3ContactSchema.parse(response);
   }
 
   /**
