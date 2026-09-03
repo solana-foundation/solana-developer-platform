@@ -67,6 +67,12 @@ export interface DvpTradeLeg {
 }
 
 export interface DvpTrade {
+  /** The custody wallet this organization's leg is funded from. */
+  sdpWallet: { address: string; label: string | null } | null;
+  /** The transaction that closed the trade, when it has been closed. */
+  closeSignature: string | null;
+  /** What moved SDP's leg into escrow. */
+  fundingSignature: string | null;
   id: string;
   status: DvpTradeStatus;
   swapDvp: string;

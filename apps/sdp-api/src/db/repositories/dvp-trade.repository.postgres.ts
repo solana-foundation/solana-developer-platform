@@ -34,6 +34,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     tokenProgramA: assertString(row.token_program_a, "token_program_a"),
     decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
     decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
+    closeSignature: typeof row.close_signature === "string" ? row.close_signature : null,
     symbolA: typeof row.symbol_a === "string" ? row.symbol_a : null,
     symbolB: typeof row.symbol_b === "string" ? row.symbol_b : null,
     tokenProgramB: assertString(row.token_program_b, "token_program_b"),
@@ -83,7 +84,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
          status, observed_at, sdp_leg_funding_signature,
          idempotency_key, idempotency_fingerprint,
-         create_signature, create_last_valid_block_height,
+         create_signature, create_last_valid_block_height, close_signature,
          escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
 
@@ -321,19 +322,19 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row !== null && row !== undefined;
     },
 
-    async recordClose(id: string, status: "settled" | "cancelled") {
+    async recordClose(id: string, status: "settled" | "cancelled", signature: string) {
       // Only from a status where the trade was still open. A row the reconciler
       // has already moved to a terminal state was decided by something that read
       // the chain, and that beats this caller's expectation.
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET status = ?, updated_at = sdp_iso_now()
+              SET status = ?, close_signature = ?, updated_at = sdp_iso_now()
             WHERE id = ?
               AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
             RETURNING ${SELECT_COLUMNS}`
         )
-        .bind(status, id)
+        .bind(status, signature, id)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },

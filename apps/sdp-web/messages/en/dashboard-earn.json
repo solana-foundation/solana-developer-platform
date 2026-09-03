@@ -269,7 +269,7 @@
         "cancelled": "Cancelled",
         "rejected": "Rejected",
         "expired": "Expired",
-        "closed_unknown": "Closed"
+        "closed_unknown": "Closed, outcome unknown"
       },
       "statusHint": {
         "creating": "Signed and recorded, but it has not been seen on chain yet.",
@@ -375,7 +375,12 @@
       "toastSettleHeld": "Settlement sent for approval.",
       "toastCancelHeld": "Cancellation sent for approval.",
       "toastFundHeld": "Funding sent for approval.",
-      "toastCreated": "Trade created. Escrow addresses are published below."
+      "toastCreated": "Trade created. Escrow addresses are published below.",
+      "txCreate": "Create transaction",
+      "txFunding": "Funding transaction",
+      "txClose": "Settlement transaction",
+      "sdpWalletLabel": "Funded from",
+      "sdpWalletHint": "Your custody wallet — the one this trade spends from and delivers to."
     }
   },
   "DashboardEarn": {

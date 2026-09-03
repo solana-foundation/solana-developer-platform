@@ -49,6 +49,8 @@ export interface DvpTradeRow {
   /** Each leg's token symbol from mint metadata, or null when it carries none. */
   symbolA: string | null;
   symbolB: string | null;
+  /** The transaction that settled or cancelled the trade. Null while open. */
+  closeSignature: string | null;
 
   amountA: string;
   amountB: string;
@@ -98,6 +100,8 @@ export interface DvpTradeRow {
  */
 export type DvpTradeInsert = Omit<
   DvpTradeRow,
+  // Written by `recordClose`, never at insert: a trade is not born closed.
+  | "closeSignature"
   | "status"
   | "observedAt"
   | "createdAt"
@@ -223,6 +227,10 @@ export interface DvpTradeRepository {
    * Compare-and-swap on an OPEN status, so a reconciler that already observed
    * the chain keeps its reading rather than being walked backwards.
    */
-  recordClose(id: string, status: "settled" | "cancelled"): Promise<DvpTradeRow | null>;
+  recordClose(
+    id: string,
+    status: "settled" | "cancelled",
+    signature: string
+  ): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
 }

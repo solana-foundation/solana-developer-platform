@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { explorerAddressUrl } from "@/lib/explorer";
+import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 
 import { cn } from "@/lib/utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
@@ -76,6 +76,40 @@ function CopyableAddress({ address, label }: { address: string; label: string })
       )}
       <span className="sr-only">{label}</span>
     </button>
+  );
+}
+
+/**
+ * One transaction, linked to an explorer.
+ *
+ * A signature is not something anybody reads — its only use is following it, so
+ * it renders as a link rather than as forty-four characters of base58 the way
+ * the addresses do.
+ */
+function TransactionLink({
+  signature,
+  label,
+  cluster,
+}: {
+  signature: string;
+  label: string;
+  cluster: SolanaCluster;
+}) {
+  return (
+    <div>
+      <dt className="text-tertiary text-xs">{label}</dt>
+      <dd className="mt-0.5">
+        <a
+          className="inline-flex items-center gap-1 text-accent text-xs underline-offset-2 hover:underline"
+          href={explorerTxUrl(signature, cluster)}
+          rel="noreferrer noopener"
+          target="_blank"
+        >
+          <span className="font-mono">{`${signature.slice(0, 8)}…${signature.slice(-8)}`}</span>
+          <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+        </a>
+      </dd>
+    </div>
   );
 }
 
@@ -369,6 +403,58 @@ export function DvpTradeDetailWorkspace({
               </p>
             </div>
           </dl>
+
+          {/* The wallet YOU chose, which the page never showed — so the only
+              wallet-shaped address on it was the settlement authority, a system
+              account with signing power over the trade. It was read as the
+              reader's own, which is exactly the confusion to avoid. */}
+          {trade.sdpWallet ? (
+            <dl className="mt-3 border-border-subtle border-t pt-3">
+              <div>
+                <dt className="text-tertiary text-xs">
+                  {t("DashboardMarkets.dvp.sdpWalletLabel")}
+                  {trade.sdpWallet.label ? ` · ${trade.sdpWallet.label}` : ""}
+                </dt>
+                <dd className="mt-0.5">
+                  <CopyableAddress
+                    address={trade.sdpWallet.address}
+                    label={t("DashboardMarkets.dvp.sdpWalletLabel")}
+                  />
+                </dd>
+                <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+                  {t("DashboardMarkets.dvp.sdpWalletHint")}
+                </p>
+              </div>
+            </dl>
+          ) : null}
+
+          {/* Every transaction this trade produced, in the order it happened.
+              The close is the one that matters and was the one not recorded. */}
+          {trade.createSignature || trade.fundingSignature || trade.closeSignature ? (
+            <dl className="mt-3 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-3">
+              {trade.createSignature ? (
+                <TransactionLink
+                  cluster={cluster}
+                  label={t("DashboardMarkets.dvp.txCreate")}
+                  signature={trade.createSignature}
+                />
+              ) : null}
+              {trade.fundingSignature ? (
+                <TransactionLink
+                  cluster={cluster}
+                  label={t("DashboardMarkets.dvp.txFunding")}
+                  signature={trade.fundingSignature}
+                />
+              ) : null}
+              {trade.closeSignature ? (
+                <TransactionLink
+                  cluster={cluster}
+                  label={t("DashboardMarkets.dvp.txClose")}
+                  signature={trade.closeSignature}
+                />
+              ) : null}
+            </dl>
+          ) : null}
         </section>
 
         {/* Whose move it is. The badge above says what state the trade is in;

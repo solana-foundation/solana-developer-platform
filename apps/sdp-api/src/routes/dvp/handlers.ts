@@ -108,7 +108,37 @@ function legResponse(leg: LegInput) {
  * their integration. Every 64-bit value stays a string, because a JSON number
  * would round it above 2^53.
  */
-function toTradeResponse(row: DvpTradeRow) {
+/** The custody wallet a trade spends from, as much of it as a reader needs. */
+interface SdpWalletRef {
+  address: string;
+  label: string | null;
+}
+
+/**
+ * Resolves the custody wallets a set of trades funds from.
+ *
+ * One query for the whole page rather than one per row. Missing entries are
+ * simply absent: a wallet deactivated since the trade was created is a real
+ * state, and the surface says the trade's wallet is no longer available rather
+ * than inventing an address for it.
+ */
+async function readSdpWallets(env: Env, walletIds: string[]): Promise<Map<string, SdpWalletRef>> {
+  const unique = [...new Set(walletIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return new Map();
+  }
+  const placeholders = unique.map(() => "?").join(", ");
+  const result = await getDb(env)
+    .prepare(`SELECT id, public_key, label FROM custody_wallets WHERE id IN (${placeholders})`)
+    .bind(...unique)
+    .all<{ id: string; public_key: string; label: string | null }>();
+
+  return new Map(
+    (result.results ?? []).map((row) => [row.id, { address: row.public_key, label: row.label }])
+  );
+}
+
+function toTradeResponse(row: DvpTradeRow, sdpWallet?: SdpWalletRef) {
   return {
     id: row.id,
     status: row.status,
@@ -141,11 +171,24 @@ function toTradeResponse(row: DvpTradeRow) {
       }),
     },
     sdpSide: row.sdpSide,
+    /**
+     * The wallet this organization's leg is funded from.
+     *
+     * Absent from this response until now, which meant the only wallet-shaped
+     * address on a trade page was the settlement authority — a system account
+     * with signing power over the trade, sitting where a reader looks for their
+     * own wallet. It was mistaken for exactly that.
+     */
+    sdpWallet: sdpWallet ?? null,
     nonce: row.nonce,
     expiryTimestamp: row.expiryTimestamp,
     earliestSettlementTimestamp: row.earliestSettlementTimestamp,
     refString: row.refString,
     createSignature: row.createSignature,
+    /** The transaction that closed it, so settlement is verifiable after the fact. */
+    closeSignature: row.closeSignature,
+    /** What moved SDP's leg into escrow. */
+    fundingSignature: row.sdpLegFundingSignature,
     observedAt: row.observedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -189,7 +232,8 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     idempotencyKey: c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
   });
 
-  return success(c, { trade: toTradeResponse(trade) }, 201);
+  const wallets = await readSdpWallets(c.env, [trade.sdpWalletId]);
+  return success(c, { trade: toTradeResponse(trade, wallets.get(trade.sdpWalletId)) }, 201);
 };
 
 /**
@@ -226,7 +270,8 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
   // silly one to give about a settlement the product just performed itself.
   await createDvpTradeRepository(c.env).recordClose(
     resolved.trade.id,
-    action === "settle" ? "settled" : "cancelled"
+    action === "settle" ? "settled" : "cancelled",
+    result.signature
   );
 
   return success(c, {
@@ -285,7 +330,13 @@ export const listTrades = async (c: AppContext) => {
     query.data.limit
   );
 
-  return success(c, { trades: trades.map(toTradeResponse) });
+  const wallets = await readSdpWallets(
+    c.env,
+    trades.map((trade) => trade.sdpWalletId)
+  );
+  return success(c, {
+    trades: trades.map((trade) => toTradeResponse(trade, wallets.get(trade.sdpWalletId))),
+  });
 };
 
 export const getTrade = async (c: AppContext) => {
@@ -311,7 +362,8 @@ export const getTrade = async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
-  return success(c, { trade: toTradeResponse(trade) });
+  const wallets = await readSdpWallets(c.env, [trade.sdpWalletId]);
+  return success(c, { trade: toTradeResponse(trade, wallets.get(trade.sdpWalletId)) });
 };
 
 /**
