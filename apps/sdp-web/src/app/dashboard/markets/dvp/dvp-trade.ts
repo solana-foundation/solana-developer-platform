@@ -21,6 +21,27 @@ export const DVP_TRADE_STATUSES = [
 
 export type DvpTradeStatus = (typeof DVP_TRADE_STATUSES)[number];
 
+/**
+ * Statuses where the trade is over and its escrows no longer exist on chain.
+ *
+ * Worth a named set rather than a check at each call site, because the escrow
+ * addresses stay in the record after the accounts are closed and a surface that
+ * keeps presenting them as payable is inviting somebody to send tokens into a
+ * closed account, where they are simply gone.
+ */
+const CLOSED_STATUSES: ReadonlySet<DvpTradeStatus> = new Set([
+  "settled",
+  "cancelled",
+  "rejected",
+  "closed_unknown",
+  "create_failed",
+]);
+
+/** Whether the trade is finished and its escrows can no longer receive funds. */
+export function isDvpTradeClosed(trade: { status: DvpTradeStatus }): boolean {
+  return CLOSED_STATUSES.has(trade.status);
+}
+
 /** What the reconciler last saw in an escrow. Null before it has looked. */
 export interface DvpLegFunding {
   observedAmount: string;
@@ -31,6 +52,8 @@ export interface DvpLegFunding {
 }
 
 export interface DvpTradeLeg {
+  /** The mint's decimals, or null when unknown. Never guessed. */
+  decimals: number | null;
   party: string;
   mint: string;
   tokenProgram: string;

@@ -15,6 +15,7 @@ import {
   type DvpTrade,
   type DvpTradeLeg,
   frozenLegs,
+  isDvpTradeClosed,
   legFundingRatio,
   overFundedLegs,
 } from "./dvp-trade";
@@ -58,17 +59,47 @@ function CopyableAddress({ address, label }: { address: string; label: string })
   );
 }
 
+/**
+ * A leg amount in the units a person entered it in.
+ *
+ * Falls back to the raw base units when the scale is unknown, which is honest:
+ * a trade created before decimals were stored has no scale, and inventing one
+ * would misstate the amount by orders of magnitude. Grouped so a long integer
+ * stays readable either way.
+ */
+function formatLegAmount(baseUnits: string, decimals: number | null): string {
+  if (decimals === null) {
+    return baseUnits;
+  }
+  const negative = baseUnits.startsWith("-");
+  const digits = (negative ? baseUnits.slice(1) : baseUnits).padStart(decimals + 1, "0");
+  const whole = digits.slice(0, digits.length - decimals);
+  const fraction = decimals === 0 ? "" : digits.slice(digits.length - decimals).replace(/0+$/, "");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
+}
+
 /** One leg: what it owes, what the escrow holds, and where to pay it. */
 function LegCard({
   leg,
   title,
   holder,
   action,
+  closed,
 }: {
   leg: DvpTradeLeg;
   title: string;
   holder: string;
   action?: ReactNode;
+  /**
+   * The trade is over and this escrow no longer exists on chain.
+   *
+   * Everything about paying into it has to go: the address stays in the record
+   * after the account is closed, and a page still captioned "send exactly the
+   * target amount here" is instructing someone to transfer tokens into a closed
+   * account, where they are simply gone.
+   */
+  closed: boolean;
 }) {
   const t = useTranslations();
   const ratio = legFundingRatio(leg);
@@ -82,13 +113,19 @@ function LegCard({
 
       {/* One number at full weight; the target is context beneath it. */}
       <p className="mt-3 font-semibold text-2xl text-primary tabular-nums">
-        {leg.funding ? leg.funding.observedAmount : t("DashboardMarkets.dvp.notObserved")}
+        {leg.funding
+          ? formatLegAmount(leg.funding.observedAmount, leg.decimals)
+          : closed
+            ? formatLegAmount(leg.amount, leg.decimals)
+            : t("DashboardMarkets.dvp.notObserved")}
       </p>
       <p className="mt-0.5 text-tertiary text-xs">
-        {t("DashboardMarkets.dvp.targetLabel")} {leg.amount}
+        {closed
+          ? t("DashboardMarkets.dvp.deliveredLabel")
+          : `${t("DashboardMarkets.dvp.targetLabel")} ${formatLegAmount(leg.amount, leg.decimals)}`}
       </p>
 
-      {ratio === null ? (
+      {closed ? null : ratio === null ? (
         <p className="mt-3 text-tertiary text-xs">{t("DashboardMarkets.dvp.notObservedHint")}</p>
       ) : (
         <div
@@ -106,23 +143,31 @@ function LegCard({
         </div>
       )}
 
-      <dl className="mt-4 space-y-2 border-border-subtle border-t pt-3">
-        <div>
-          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.escrowLabel")}</dt>
-          <dd className="mt-0.5">
-            <CopyableAddress address={leg.escrow} label={t("DashboardMarkets.dvp.escrowLabel")} />
-          </dd>
-        </div>
-      </dl>
-      <p className="mt-2 text-tertiary text-[11px] leading-relaxed">
-        {t("DashboardMarkets.dvp.escrowHint")}
-      </p>
+      {closed ? null : (
+        <>
+          <dl className="mt-4 space-y-2 border-border-subtle border-t pt-3">
+            <div>
+              <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.escrowLabel")}</dt>
+              <dd className="mt-0.5">
+                <CopyableAddress
+                  address={leg.escrow}
+                  label={t("DashboardMarkets.dvp.escrowLabel")}
+                />
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-tertiary text-[11px] leading-relaxed">
+            {t("DashboardMarkets.dvp.escrowHint")}
+          </p>
+        </>
+      )}
       {action ? <div className="mt-3 border-border-subtle border-t pt-3">{action}</div> : null}
     </section>
   );
 }
 
 export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
+  const tradeClosed = isDvpTradeClosed(trade);
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
 
@@ -224,6 +269,7 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
         <div className="grid gap-4 md:grid-cols-2">
           <LegCard
             action={sdpLegIsA ? fundAction : undefined}
+            closed={tradeClosed}
             holder={
               sdpLegIsA
                 ? t("DashboardMarkets.dvp.legSdp")
@@ -234,6 +280,7 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
           />
           <LegCard
             action={sdpLegIsA ? undefined : fundAction}
+            closed={tradeClosed}
             holder={
               sdpLegIsA
                 ? t("DashboardMarkets.dvp.legCounterparty")

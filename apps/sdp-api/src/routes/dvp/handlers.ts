@@ -43,6 +43,7 @@ interface LegInput {
   escrow: string;
   settlementDestination: string;
   observedAmount: string | null;
+  decimals: number | null;
   frozen: boolean | null;
 }
 
@@ -80,6 +81,15 @@ function legResponse(leg: LegInput) {
     mint: leg.mint,
     tokenProgram: leg.tokenProgram,
     amount: leg.amount,
+    /**
+     * The mint's decimals, or null when the trade predates them being stored.
+     *
+     * Every amount here is base units. Without the scale a reader has no way to
+     * turn 1000000000 back into the 1,000 somebody typed, which is what every
+     * surface reading a trade was showing. Null rather than a default: a wrong
+     * scale misstates an amount by orders of magnitude.
+     */
+    decimals: leg.decimals,
     /** Pay this address to fund the leg. */
     escrow: leg.escrow,
     settlementDestination: leg.settlementDestination,
@@ -110,6 +120,7 @@ function toTradeResponse(row: DvpTradeRow) {
         escrow: row.escrowA,
         settlementDestination: row.userASettlementDestination,
         observedAmount: row.escrowAAmount,
+        decimals: row.decimalsA,
         frozen: row.escrowAFrozen,
       }),
       b: legResponse({
@@ -120,6 +131,7 @@ function toTradeResponse(row: DvpTradeRow) {
         escrow: row.escrowB,
         settlementDestination: row.userBSettlementDestination,
         observedAmount: row.escrowBAmount,
+        decimals: row.decimalsB,
         frozen: row.escrowBFrozen,
       }),
     },
@@ -203,6 +215,14 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
   ]);
 
   const result = await closeDvpTrade(c, resolved.trade, action);
+
+  // We broadcast it, so we know what it was. Left to the sweep this becomes
+  // `closed_unknown` — an honest answer to "the account vanished, why?", but a
+  // silly one to give about a settlement the product just performed itself.
+  await createDvpTradeRepository(c.env).recordClose(
+    resolved.trade.id,
+    action === "settle" ? "settled" : "cancelled"
+  );
 
   return success(c, {
     tradeId: resolved.trade.id,

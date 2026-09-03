@@ -33,6 +33,8 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     nonce: BIG_NONCE,
     tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    decimalsA: 6,
+    decimalsB: 6,
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",

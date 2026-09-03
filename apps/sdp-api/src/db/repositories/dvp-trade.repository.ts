@@ -43,6 +43,9 @@ export interface DvpTradeRow {
 
   tokenProgramA: string;
   tokenProgramB: string;
+  /** Each leg's mint decimals, or null when unknown. Never guessed. */
+  decimalsA: number | null;
+  decimalsB: number | null;
 
   amountA: string;
   amountB: string;
@@ -205,5 +208,18 @@ export interface DvpTradeRepository {
    *   which case the caller must treat the replay as live.
    */
   releaseIdempotencyKey(id: string): Promise<boolean>;
+  /**
+   * Records the outcome of a close WE performed.
+   *
+   * The reconciler can only ever say `closed_unknown` for a trade whose account
+   * has vanished: settle, cancel and reject all close it and none of them
+   * announce which happened. But when SDP is the one that broadcast the close,
+   * it knows — and leaving the sweep to shrug at a settlement the product just
+   * performed is a worse answer than the one already in hand.
+   *
+   * Compare-and-swap on an OPEN status, so a reconciler that already observed
+   * the chain keeps its reading rather than being walked backwards.
+   */
+  recordClose(id: string, status: "settled" | "cancelled"): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
 }

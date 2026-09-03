@@ -32,6 +32,8 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     nonce: assertString(row.nonce, "nonce"),
 
     tokenProgramA: assertString(row.token_program_a, "token_program_a"),
+    decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
+    decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
     tokenProgramB: assertString(row.token_program_b, "token_program_b"),
 
     amountA: assertString(row.amount_a, "amount_a"),
@@ -73,6 +75,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
 const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
          token_program_a, token_program_b,
+         decimals_a, decimals_b,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
@@ -113,6 +116,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               id, organization_id, project_id, swap_dvp,
               settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
               token_program_a, token_program_b,
+              decimals_a, decimals_b,
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
               escrow_a, escrow_b, sdp_side, sdp_wallet_id,
@@ -121,6 +125,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
             ) VALUES (
               ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
+              ?, ?,
               ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?,
@@ -142,6 +147,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           row.nonce,
           row.tokenProgramA,
           row.tokenProgramB,
+          row.decimalsA,
+          row.decimalsB,
           row.amountA,
           row.amountB,
           row.expiryTimestamp,
@@ -308,6 +315,23 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .bind(id)
         .first<Record<string, unknown>>();
       return row !== null && row !== undefined;
+    },
+
+    async recordClose(id: string, status: "settled" | "cancelled") {
+      // Only from a status where the trade was still open. A row the reconciler
+      // has already moved to a terminal state was decided by something that read
+      // the chain, and that beats this caller's expectation.
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET status = ?, updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
+            RETURNING ${SELECT_COLUMNS}`
+        )
+        .bind(status, id)
+        .first<Record<string, unknown>>();
+      return row ? mapDvpTradeRow(row) : null;
     },
 
     async listByProject(scope: DvpTradeScope, limit: number) {

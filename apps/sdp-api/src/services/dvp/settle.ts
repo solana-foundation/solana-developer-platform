@@ -34,7 +34,12 @@ import {
   buildMissingAtaInstructions,
   buildSettleInstruction,
 } from "./settle-instructions";
-import { type DvpSettleAtas, deriveDvpSettleAtas, findMissingSettleAtas } from "./settle-preflight";
+import {
+  type DvpSettleAtas,
+  deriveDvpSettleAtas,
+  findMissingSettleAtas,
+  findSettlementFundingShortfall,
+} from "./settle-preflight";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 
 /** Statuses from which a trade can still be acted on. */
@@ -116,6 +121,18 @@ export async function closeDvpTrade(
 
   const rpc = solanaRpc.createRpc(env);
   const missing = await resolveMissingAtas(rpc, atas, action);
+
+  // Before a signature is spent. The settlement authority pays the fee and the
+  // rent for every account this close creates, and it is provisioned empty — so
+  // the first settle in a project failed in simulation with an error that named
+  // neither the account nor the amount, and surfaced as "An internal error
+  // occurred". Saying it plainly is the whole fix.
+  const shortfall = await findSettlementFundingShortfall(rpc, signer.address, missing.size);
+  if (shortfall) {
+    throw badRequest(
+      `DvP trade ${trade.id}: the settlement authority ${signer.address} holds ${shortfall.balance} lamports but needs about ${shortfall.required} to ${action} this trade — it pays the network fee and the rent for ${missing.size} token account(s) this close has to create. Send it at least ${shortfall.shortfall} more lamports and try again.`
+    );
+  }
 
   const instructions = [
     ...buildMissingAtaInstructions(trade, atas, signer, missing),

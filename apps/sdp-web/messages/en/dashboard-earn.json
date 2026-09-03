@@ -356,7 +356,8 @@
       "balanceUseMax": "Max",
       "amountExceedsBalance": "More than this wallet holds today. The trade will still be created; funding your leg is what would fail.",
       "fieldRefCount": "{used} of {total} bytes",
-      "fieldRefTooLong": "Too long by {over} bytes. Accents and emoji cost more than one byte each."
+      "fieldRefTooLong": "Too long by {over} bytes. Accents and emoji cost more than one byte each.",
+      "deliveredLabel": "Delivered in full"
     }
   },
   "DashboardEarn": {

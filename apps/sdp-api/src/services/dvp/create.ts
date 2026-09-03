@@ -50,7 +50,7 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import { dvpCreateFingerprint } from "./fingerprint";
-import { validateDvpMints } from "./mints";
+import { readMintDecimals, validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
@@ -191,6 +191,15 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     throw badRequest(`Invalid DvP mints: ${mintProblems.join("; ")}`);
   }
 
+  // Carried onto the row so every later surface can show the trade in the units
+  // a person entered. The mints were just read and validated above, so this
+  // costs two cached reads rather than a round trip per view — and a mint's
+  // decimals cannot change, which is what makes storing them safe at all.
+  const [decimalsA, decimalsB] = await Promise.all([
+    readMintDecimals(rpc, mintA),
+    readMintDecimals(rpc, mintB),
+  ]);
+
   // Only now, after the payload is known to be sound, do we touch the custody
   // provider. Provisioning happens on first use, so a project's very first
   // trade mints this wallet — and doing that for a request that was going to
@@ -309,6 +318,8 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     nonce: nonce.toString(),
     tokenProgramA: input.tokenProgramA,
     tokenProgramB: input.tokenProgramB,
+    decimalsA,
+    decimalsB,
     amountA: input.amountA.toString(),
     amountB: input.amountB.toString(),
     expiryTimestamp: input.expiryTimestamp.toString(),

@@ -1027,6 +1027,34 @@ async function tenantOwnsWallet(
   return Boolean(row);
 }
 
+/** Postgres unique-violation SQLSTATE. */
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string })?.code === "23505";
+}
+
+/**
+ * The operation a previous request with this key created, or null.
+ *
+ * Scoped to the tenant like every other read here: the unique index is on
+ * (organization, project, key), so a lookup that ignored the scope could return
+ * another tenant's operation to a caller who merely guessed a key.
+ */
+async function findWalletOperationByIdempotencyKey(
+  db: DatabaseClient,
+  scope: TenantScope,
+  idempotencyKey: string
+): Promise<WalletOperationRow | null> {
+  const row = await db
+    .prepare(
+      `SELECT id FROM wallet_operations
+        WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?
+        LIMIT 1`
+    )
+    .bind(scope.organizationId, scope.projectId, idempotencyKey)
+    .first<{ id: string }>();
+  return row ? getWalletOperationByIdInternal(db, row.id) : null;
+}
+
 async function tenantOwnsWalletTarget(
   db: DatabaseExecutor,
   scope: TenantScope,
@@ -1991,9 +2019,28 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           input.idempotencyKey ?? null,
           input.status ?? "created"
         )
-        .run();
+        .run()
+        .catch(async (error: unknown) => {
+          // A keyed operation that already exists is the SAME logical operation
+          // being retried, not a new one. `dvp_settle_<tradeId>` is deliberately
+          // stable — a trade settles once — so every retry after a failed
+          // broadcast collides here, and letting the violation escape turned one
+          // failure into a permanent 500 on every subsequent attempt.
+          //
+          // The row records what policy judged, not whether the chain accepted
+          // it, so replaying it is correct: the caller goes on to rebuild and
+          // resend under the operation it was already granted.
+          if (!input.idempotencyKey || !isUniqueViolation(error)) {
+            throw error;
+          }
+          return null;
+        });
 
-      return getWalletOperationByIdInternal(db, id);
+      const existing = input.idempotencyKey
+        ? await findWalletOperationByIdempotencyKey(db, scope, input.idempotencyKey)
+        : null;
+
+      return existing ?? (await getWalletOperationByIdInternal(db, id));
     },
 
     async getWalletOperationById(walletOperationId: string) {

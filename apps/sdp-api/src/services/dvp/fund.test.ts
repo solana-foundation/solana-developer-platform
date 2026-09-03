@@ -57,6 +57,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     nonce: "42",
     tokenProgramA: T22,
     tokenProgramB: T22,
+    decimalsA: 6,
+    decimalsB: 6,
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1900000000",
