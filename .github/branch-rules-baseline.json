@@ -7,10 +7,7 @@
   },
   {
     "parameters": {
-      "allowed_merge_methods": [
-        "squash",
-        "rebase"
-      ],
+      "allowed_merge_methods": ["squash", "rebase"],
       "dismiss_stale_reviews_on_push": true,
       "require_code_owner_review": false,
       "require_extra_approval_for_unattributed_changes": true,

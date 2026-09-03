@@ -33,7 +33,9 @@ jobs:
           set -euo pipefail
           gh api "repos/${{ github.repository }}/rules/branches/main" \
             | jq -S 'map(del(.ruleset_id, .ruleset_source, .ruleset_source_type)) | sort_by(.type)' > /tmp/live.json
-          if ! diff -u .github/branch-rules-baseline.json /tmp/live.json > /tmp/drift.diff; then
+          jq -S . .github/branch-rules-baseline.json > /tmp/baseline.json
+          if ! diff -u /tmp/baseline.json /tmp/live.json > /tmp/drift.diff; then
+            echo "drifted=true" >> "$GITHUB_OUTPUT"
             echo "::error::branch protection rules for main diverged from the reviewed baseline"
             cat /tmp/drift.diff
             {
@@ -47,18 +49,18 @@ jobs:
           echo "branch rules match the baseline" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install Doppler CLI
-        if: failure() && github.event_name != 'pull_request'
+        if: failure() && steps.drift.outputs.drifted == 'true' && github.event_name != 'pull_request'
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Doppler OIDC login
-        if: failure() && github.event_name != 'pull_request'
+        if: failure() && steps.drift.outputs.drifted == 'true' && github.event_name != 'pull_request'
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
 
       - name: Notify Slack on drift
-        if: failure() && github.event_name != 'pull_request'
+        if: failure() && steps.drift.outputs.drifted == 'true' && github.event_name != 'pull_request'
         continue-on-error: true
         env:
           DRIFT: ${{ steps.drift.outputs.diff }}
