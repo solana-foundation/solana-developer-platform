@@ -20,13 +20,32 @@ function respond(status: number, body: unknown) {
 }
 
 describe("detail page routing", () => {
-  // THE regression. Null trade, null error, 200 status.
+  // THE regression: a 200 carrying no trade must not read as "not found".
+  //
+  // The guard is that `isNotFound` keys off the STATUS. It used to key off the
+  // message, and this case has no upstream message — so it fell through to
+  // notFound() and told someone their trade was gone while it sat in escrow
+  // holding both parties' money.
+  //
+  // The error is no longer null here, and that is the improvement rather than a
+  // weakening: the case is now described instead of reaching the error view
+  // with nothing to say. What must not change is the status check below.
   it("a 200 with no trade in it is not an absence", async () => {
     const result = await fetchDvpTrade(respond(200, { data: {} }), "dvp_1");
 
     expect(result.trade).toBeNull();
-    expect(result.error).toBeNull();
-    // Keying the branch off the message would send this to notFound().
+    expect(result.status).toBe(200);
+    expect(isNotFound(result)).toBe(false);
+  });
+
+  // Same shape of failure, one step further in: the body HAS a trade, and it is
+  // not one this UI can render. It must reach the same retryable error rather
+  // than a render exception.
+  it("a 200 with an unusable trade in it is not an absence either", async () => {
+    const result = await fetchDvpTrade(respond(200, { data: { trade: {} } }), "dvp_1");
+
+    expect(result.trade).toBeNull();
+    expect(result.error).toBeTruthy();
     expect(isNotFound(result)).toBe(false);
   });
 
