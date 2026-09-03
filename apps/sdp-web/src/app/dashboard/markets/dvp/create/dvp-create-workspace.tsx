@@ -79,29 +79,27 @@ function LegOwner({ mine }: { mine: boolean }) {
   );
 }
 
-export function DvpCreateWorkspace({
-  cluster,
+/**
+ * The two legs, in the order that matches the trade.
+ *
+ * Its own component because the workspace was carrying the whole form's
+ * branching in one function. What lives here is one decision — which leg is
+ * yours — and the markup that decision reorders.
+ *
+ * The cards are held as values and ordered, rather than duplicated into two
+ * branches: writing the markup twice makes the direction check inside each copy
+ * provably constant, which is exactly what the compiler said about the first
+ * attempt.
+ */
+function LegCards({
   context,
+  form,
 }: {
-  cluster: SolanaCluster;
   context: DvpCreateContext;
+  form: ReturnType<typeof useDvpCreateForm>;
 }) {
   const t = useTranslations();
-  const form = useDvpCreateForm(cluster, context);
-  const wallet = context.wallets.find((entry) => entry.id === form.walletId) ?? null;
 
-  /**
-   * The two leg cards, held as values so the pair can be ORDERED.
-   *
-   * They sat in a fixed asset-then-cash order, so choosing "You deliver the
-   * cash" left the leg you actually act on sitting second, behind the one you
-   * are only recording. Reading order now matches the exchange — what you give,
-   * then what you get — and tab order follows it for the same reason.
-   *
-   * Hoisted rather than duplicated into two branches: writing the markup twice
-   * makes the direction check inside each copy provably constant, which is
-   * exactly what TypeScript said about the first attempt.
-   */
   const assetLegCard = (
     <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
       <LegOwner mine={form.sdpSide === "a"} />
@@ -172,6 +170,25 @@ export function DvpCreateWorkspace({
   );
 
   return (
+    <>
+      {form.sdpSide === "a" ? assetLegCard : cashLegCard}
+      {form.sdpSide === "a" ? cashLegCard : assetLegCard}
+    </>
+  );
+}
+
+export function DvpCreateWorkspace({
+  cluster,
+  context,
+}: {
+  cluster: SolanaCluster;
+  context: DvpCreateContext;
+}) {
+  const t = useTranslations();
+  const form = useDvpCreateForm(cluster, context);
+  const wallet = context.wallets.find((entry) => entry.id === form.walletId) ?? null;
+
+  return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <form className="mx-auto w-full max-w-5xl" onSubmit={form.submit}>
         <p className="max-w-2xl text-secondary text-sm leading-relaxed">
@@ -235,8 +252,7 @@ export function DvpCreateWorkspace({
               title={t("DashboardMarkets.dvp.groupLegs")}
             >
               <div className="grid gap-4 sm:grid-cols-2">
-                {form.sdpSide === "a" ? assetLegCard : cashLegCard}
-                {form.sdpSide === "a" ? cashLegCard : assetLegCard}
+                <LegCards context={context} form={form} />
               </div>
             </Section>
 
