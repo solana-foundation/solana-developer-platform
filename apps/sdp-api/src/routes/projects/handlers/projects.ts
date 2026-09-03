@@ -5,12 +5,41 @@ import { getAuth } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 import type { updateProjectSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+export const PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS = 2_000;
+
+async function withCachePurgeTimeout(operation: Promise<void>): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  // Redis does not expose an AbortSignal seam here. If it settles after the
+  // deadline, keep the abandoned rejection from surfacing as unhandled.
+  void operation.catch(() => undefined);
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `API key cache purge timed out after ${PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS}ms`
+              )
+            ),
+          PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
 
 export const listProjects = async (c: AppContext) => {
   const auth = getAuth(c);
@@ -94,7 +123,31 @@ export const archiveProject = async (c: AppContext) => {
     throw notFound("Project");
   }
 
-  await projectService.archiveProject(projectId);
+  const deactivatedKeyHashes = await projectService.archiveProject(projectId);
+  // The transaction above already revoked the keys; purging their cache
+  // entries makes that effective immediately instead of at TTL expiry.
+  // This post-commit cleanup is best effort: a cache outage must not turn a
+  // successful archive into a false 500 or prevent the audit record below.
+  const purgeResults = await Promise.allSettled(
+    deactivatedKeyHashes.map((keyHash) =>
+      withCachePurgeTimeout(c.var.kv.apiKeys.delete(`key:${keyHash}`))
+    )
+  );
+  const purgeFailures = purgeResults.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (purgeFailures.length > 0) {
+    getLogger().error(
+      {
+        projectId,
+        failedKeyCount: purgeFailures.length,
+        errors: purgeFailures.map(({ reason }) =>
+          reason instanceof Error ? reason.message : String(reason)
+        ),
+      },
+      "Failed to purge archived project API keys from cache"
+    );
+  }
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

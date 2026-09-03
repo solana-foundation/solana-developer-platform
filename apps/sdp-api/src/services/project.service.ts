@@ -212,14 +212,35 @@ export class ProjectService {
   }
 
   /**
-   * Archive a project (soft delete)
+   * Archive a project (terminal). Archival deactivates every active API key
+   * on the project in the same transaction and returns the deactivated key
+   * hashes so callers can purge their KV cache entries. Already-inactive keys
+   * keep their status and are not reported.
    */
-  async archiveProject(projectId: string): Promise<void> {
+  async archiveProject(projectId: string): Promise<string[]> {
     const now = new Date().toISOString();
-    await this.db
-      .prepare("UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ?")
-      .bind(now, projectId)
-      .run();
+    return this.db.transaction(async (tx) => {
+      // Serialize against concurrent archives and any writer that locks the
+      // project row (e.g. key minting) so deactivation cannot interleave.
+      await tx.prepare("SELECT id FROM projects WHERE id = ? FOR UPDATE").bind(projectId).first();
+
+      await tx
+        .prepare("UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ?")
+        .bind(now, projectId)
+        .run();
+
+      const deactivated = await tx
+        .prepare(
+          `UPDATE api_keys
+           SET status = 'deactivated', revoked_at = ?
+           WHERE project_id = ? AND status = 'active'
+           RETURNING key_hash`
+        )
+        .bind(now, projectId)
+        .all<{ key_hash: string }>();
+
+      return deactivated.results.map((row) => row.key_hash);
+    });
   }
 
   /**

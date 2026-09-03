@@ -253,7 +253,8 @@ async function loadActiveApiKey(
               ak.rotation_deadline
        FROM api_keys ak
        INNER JOIN projects p ON p.id = ak.project_id
-       WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id IS NOT DISTINCT FROM ?`
+       WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id IS NOT DISTINCT FROM ?
+         AND p.status = 'active'`
     )
     .bind(apiKeyId, organizationId, projectId)
     .first<Record<string, unknown>>();
@@ -281,10 +282,9 @@ async function loadActiveApiKey(
     organizationId,
     projectId: projectId as string,
     role,
-    permissions: parsePostgresJsonOr<Permission[]>(
-      row.permissions,
-      getPermissionsForApiKeyRole(role)
-    ),
+    permissions: row.permissions
+      ? parsePostgresJsonOr<Permission[]>(row.permissions, getPermissionsForApiKeyRole(role))
+      : getPermissionsForApiKeyRole(role),
     environment: row.environment as "sandbox" | "production",
     walletScope,
     signingWalletId,

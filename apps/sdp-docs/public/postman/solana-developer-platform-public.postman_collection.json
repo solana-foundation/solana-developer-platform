@@ -582,7 +582,7 @@
             "method": "DELETE",
             "header": [],
             "url": "{{baseUrl}}/v1/projects/{{projectId}}",
-            "description": "Archives a project and prevents future writes."
+            "description": "Archives a project, prevents future writes, and revokes all of its API keys. Every active API key on the project is deactivated immediately and can no longer authenticate. Archival is permanent: projects cannot be unarchived."
           }
         },
         {

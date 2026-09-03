@@ -8,6 +8,14 @@ Solana Developer Platform gives organizations project-scoped access to tokenizat
 The team workspace through which every SDP user accesses projects and product capabilities. SDP does not model a separate individual-user product tier.
 _Avoid_: Individual account, enterprise customer, personal workspace
 
+**Project**:
+The organization-scoped boundary that groups product resources and credentials. Every API key and product resource belongs to exactly one Project.
+_Avoid_: Tenant, workspace, environment
+
+**Archival**:
+The terminal decommissioning of a Project. Archival withdraws all API access to the Project — including every API key issued before archival — and is not a suspension.
+_Avoid_: Soft delete, deactivation, suspension
+
 **Generally Available Provider**:
 A **Provider** that any **Organization** may use when it is configured in the current deployment environment.
 _Avoid_: Individual-tier provider, free-tier provider, default entitlement
@@ -122,6 +130,10 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - A **Provider Control Mapping** can make provider-native controls match an SDP policy revision, partially match it, or remain inapplicable.
 - A **Payment Request** may be delivered by email, but the email is not the **Payment Request**.
 - A **Transactional Email** may deliver a **Payment Request**, but does not own payment lifecycle or settlement matching.
+- Every API key belongs to exactly one **Project**.
+- **Archival** withdraws all API access to a **Project**; credentials issued before archival do not survive it.
+- **Archival** freezes every pending **Wallet Operation** on the **Project**; a frozen operation cannot later execute.
+- **Archival** is terminal: it is not a suspension of a **Project** for later resumption.
 - Every managed reconciler in one managed run follows the **Managed Reconciliation Cadence**, while its self-hosted equivalent may run at a different cadence.
 
 ## Example Dialogue
@@ -147,4 +159,5 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - "Approval" can mean an SDP **Approval Request** or a provider-native approval flow; resolved: SDP creates the **Approval Request**, while provider-native approval is reached through **Provider Control Mapping**.
 - "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
 - "Email" can mean Clerk-owned organization invitation delivery or SDP-owned **Transactional Email**; resolved: only **Transactional Email** is owned by SDP.
+- "Archive" can mean hiding data, suspending a **Project**, or decommissioning it; resolved: **Archival** is terminal decommissioning that revokes API credentials. Archived **Project** data stays visible in the dashboard but has no API access.
 - "Reconciliation cadence" previously meant either the deployment's execution schedule or Sentry's expected schedule; resolved: the **Managed Reconciliation Cadence** is deployment-owned, and managed monitoring derives from it.

@@ -98,7 +98,10 @@ export function registerProjectPaths(registry: OpenAPIRegistry) {
     tags: ["Projects"],
     summary: "Archive project",
     operationId: "archiveProject",
-    description: "Archives a project and prevents future writes.",
+    description:
+      "Archives a project, prevents future writes, and revokes all of its API keys. " +
+      "Every active API key on the project is deactivated immediately and can no longer " +
+      "authenticate. Archival is permanent: projects cannot be unarchived.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -107,7 +110,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       204: {
-        description: "Project archived",
+        description: "Project archived and all project API keys revoked",
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

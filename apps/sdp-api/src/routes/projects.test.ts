@@ -3,10 +3,12 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS } from "@/routes/projects/handlers/projects";
+import { createKVStoreSet, RedisKVStore } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -61,11 +63,15 @@ describe("Projects Routes", () => {
     const db = getDb(env);
     const kv = createKVStoreSet(env);
 
-    // Clear rate limit KV to prevent 429 errors between tests
+    // Clear rate limit KV to prevent 429 errors between tests, and reset the
+    // api-key auth cache including negative-cache markers: a key rejected in
+    // one test (e.g. after archival) must not fail the next test's requests.
     const keys = await kv.rateLimits.list();
     for (const key of keys.keys) {
       await kv.rateLimits.delete(key.name);
     }
+    await kv.apiKeys.delete(`key:${apiKeyHash}`);
+    await kv.apiKeys.delete(`invalid:${apiKeyHash}`);
 
     // Delete in FK-safe order: api_keys → project_members → projects.
     // The migration added ON DELETE RESTRICT from api_keys.project_id, so
@@ -325,6 +331,135 @@ describe("Projects Routes", () => {
         .bind(TEST_PROJECT.id)
         .first<{ status: string }>();
       expect(project?.status).toBe("archived");
+    });
+
+    it("deactivates the project API keys and revokes the warm-cached key immediately", async () => {
+      const deleteRes = await app.request(
+        `/v1/projects/${TEST_PROJECT.id}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(deleteRes.status).toBe(204);
+
+      const keyRow = await getDb(env)
+        .prepare("SELECT status, revoked_at FROM api_keys WHERE id = ?")
+        .bind(TEST_API_KEY.id)
+        .first<{ status: string; revoked_at: string | null }>();
+      expect(keyRow).toMatchObject({ status: "deactivated", revoked_at: expect.any(String) });
+
+      // The key was warm in KV before archival (seeded in beforeEach). The
+      // archive response must purge it, so the very next request fails — even
+      // though the request races no cache TTL.
+      const kv = createKVStoreSet(env);
+      const cached = await kv.apiKeys.get(`key:${apiKeyHash}`, "json");
+      expect(cached).toBeNull();
+
+      const followUp = await app.request(
+        `/v1/projects/${TEST_PROJECT.id}`,
+        {
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(followUp.status).toBe(401);
+    });
+
+    it("completes archival and its audit log when one cache purge never settles", async () => {
+      const secondKeyHash = "hash_project_archive_second_key";
+      const db = getDb(env);
+      const kv = createKVStoreSet(env);
+      await db
+        .prepare(
+          `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+           VALUES ('key_project_archive_second', ?, ?, ?, 'Second Key', 'sdp_test_second', ?, 'api_admin', '["*"]', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, secondKeyHash)
+        .run();
+      await kv.apiKeys.put(`key:${secondKeyHash}`, JSON.stringify({ cached: true }));
+
+      const originalDelete = RedisKVStore.prototype.delete;
+      let markPendingDeleteStarted: () => void = () => undefined;
+      const pendingDeleteStarted = new Promise<void>((resolve) => {
+        markPendingDeleteStarted = resolve;
+      });
+      const deleteSpy = vi.spyOn(RedisKVStore.prototype, "delete").mockImplementation(function (
+        this: RedisKVStore,
+        key
+      ) {
+        if (key === `key:${apiKeyHash}`) {
+          markPendingDeleteStarted();
+          return new Promise<void>(() => undefined);
+        }
+        return originalDelete.call(this, key);
+      });
+      const loggerSpy = vi.spyOn(getLogger(), "error").mockImplementation(() => undefined);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+      try {
+        const response = app.request(
+          `/v1/projects/${TEST_PROJECT.id}`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          },
+          env
+        );
+        await pendingDeleteStarted;
+        await vi.advanceTimersByTimeAsync(PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS);
+        const res = await response;
+
+        expect(res.status).toBe(204);
+
+        const project = await db
+          .prepare("SELECT status FROM projects WHERE id = ?")
+          .bind(TEST_PROJECT.id)
+          .first<{ status: string }>();
+        expect(project?.status).toBe("archived");
+
+        const keys = await db
+          .prepare("SELECT status FROM api_keys WHERE project_id = ? ORDER BY id")
+          .bind(TEST_PROJECT.id)
+          .all<{ status: string }>();
+        expect(keys.results).toHaveLength(2);
+        expect(keys.results.every(({ status }) => status === "deactivated")).toBe(true);
+
+        expect(await kv.apiKeys.get(`key:${apiKeyHash}`)).not.toBeNull();
+        expect(await kv.apiKeys.get(`key:${secondKeyHash}`)).toBeNull();
+
+        const auditLog = await db
+          .prepare(
+            `SELECT action, resource_type, resource_id
+             FROM audit_logs
+             WHERE action = 'delete' AND resource_type = 'project' AND resource_id = ?
+             ORDER BY created_at DESC
+             LIMIT 1`
+          )
+          .bind(TEST_PROJECT.id)
+          .first<{ action: string; resource_type: string; resource_id: string }>();
+        expect(auditLog).toEqual({
+          action: "delete",
+          resource_type: "project",
+          resource_id: TEST_PROJECT.id,
+        });
+        expect(loggerSpy).toHaveBeenCalledWith(
+          {
+            projectId: TEST_PROJECT.id,
+            failedKeyCount: 1,
+            errors: [
+              `API key cache purge timed out after ${PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS}ms`,
+            ],
+          },
+          "Failed to purge archived project API keys from cache"
+        );
+      } finally {
+        vi.useRealTimers();
+        loggerSpy.mockRestore();
+        deleteSpy.mockRestore();
+      }
     });
 
     it("returns 404 without archiving another project in the same organization", async () => {
