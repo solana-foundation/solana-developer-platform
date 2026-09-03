@@ -41,6 +41,19 @@ export async function fetchDvpTrades(request: SdpApiClient["request"]): Promise<
 export interface DvpTradeResult {
   trade: DvpTrade | null;
   error: string | null;
+  /** The upstream status, so a caller can tell "absent" from "unavailable". */
+  status: number | null;
+}
+
+/**
+ * Whether a failed read means the trade is genuinely not there.
+ *
+ * Only a 404 does. Every other failure — a rate limit, a 500, a dropped
+ * connection — means we could not find out, and rendering that as "not found"
+ * tells someone their trade is gone when it is sitting there.
+ */
+export function isNotFound(result: Pick<DvpTradeResult, "status">): boolean {
+  return result.status === 404;
 }
 
 export async function fetchDvpTrade(
@@ -58,14 +71,18 @@ export async function fetchDvpTrade(
       return {
         trade: null,
         error: body.error?.message ?? `DvP trade request failed (${response.status}).`,
+        status: response.status,
       };
     }
 
-    return { trade: body.data?.trade ?? null, error: null };
+    return { trade: body.data?.trade ?? null, error: null, status: response.status };
   } catch (error) {
+    // A transport failure never reached the API, so there is no status and it
+    // must never be read as absence.
     return {
       trade: null,
       error: error instanceof Error ? error.message : "DvP trade request failed.",
+      status: null,
     };
   }
 }

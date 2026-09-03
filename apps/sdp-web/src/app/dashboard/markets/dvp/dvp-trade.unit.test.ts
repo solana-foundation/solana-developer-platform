@@ -8,6 +8,7 @@ import {
   legFundingRatio,
   overFundedLegs,
 } from "./dvp-trade";
+import { isNotFound } from "./dvp-trades.data";
 
 function leg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
   return {
@@ -145,5 +146,25 @@ describe("warnings", () => {
   it("reports nothing for a leg nothing has observed", () => {
     expect(overFundedLegs(trade())).toHaveLength(0);
     expect(frozenLegs(trade())).toHaveLength(0);
+  });
+});
+
+// Rendering an outage as "not found" tells someone their trade is gone when it
+// is sitting there — and a DvP trade holds both parties' money in escrow, so
+// that is the worst available wrong answer.
+describe("isNotFound", () => {
+  it("is true only for a genuine 404", () => {
+    expect(isNotFound({ status: 404 })).toBe(true);
+  });
+
+  it("is false for every operational failure", () => {
+    for (const status of [429, 500, 502, 503, 401, 403]) {
+      expect(isNotFound({ status })).toBe(false);
+    }
+  });
+
+  // A transport failure never reached the API, so there is no status at all.
+  it("is false when the request never got a response", () => {
+    expect(isNotFound({ status: null })).toBe(false);
   });
 });
