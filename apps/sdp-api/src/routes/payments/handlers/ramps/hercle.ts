@@ -10,27 +10,40 @@ import {
   HERCLE_REGISTRATION_COUNTRY_FIELD_KEY,
   HERCLE_REGISTRATION_NUMBER_FIELD_KEY,
   hercleJurisdictionForCountry,
+  herclePayoutAccountFields,
 } from "@sdp/payments/ramps/providers/hercle/counterparty";
 import {
-  type HercleCounterpartyData,
+  type HercleCustomerState,
+  type HerclePayoutAccountStatus,
+  type HercleVerificationStatus,
   hercleOnboardingRequirements,
+  isHerclePayoutAccountStatus,
   mapHercleVerificationStatus,
-  readHercleData,
 } from "@sdp/payments/ramps/providers/hercle/provider-data";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
   RampDirection,
 } from "@sdp/types/ramp-requirements";
-import type {
-  CounterpartiesRepository,
-  CounterpartyRow,
-} from "@/db/repositories/counterparty.repository";
+import { getDb } from "@/db";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import {
+  type CounterpartyProviderAccountRow,
+  type CounterpartyProviderAccountsRepository,
+  hercleCustomerLinkMetadataSchema,
+} from "@/db/repositories/counterparty-provider-account.repository";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { badRequest, internalError, unsupportedCounterparty } from "@/lib/errors";
-import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { rampRuntime } from "@/routes/payments/context";
 import type { AppContext } from "@/routes/webhooks/ramps/processor";
+
+/** EUR is the only currency Hercle settles at launch, and the rails snapshot declares nothing else. */
+const HERCLE_PAYOUT_CURRENCY = "EUR";
+
+/** The rail Hercle's EUR payout account is registered on. */
+const HERCLE_PAYOUT_RAIL = "sepa";
 
 interface AdvanceHercleCounterpartyInput {
   counterparty: CounterpartyRow;
@@ -39,36 +52,87 @@ interface AdvanceHercleCounterpartyInput {
   collectedData?: CollectedFieldData;
 }
 
-async function persistHercleData(
-  repo: CounterpartiesRepository,
-  counterparty: CounterpartyRow,
-  projectId: string,
-  patch: Partial<HercleCounterpartyData>
-): Promise<void> {
-  await repo.mutateProviderData({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId,
-    mutate: (current) => {
-      const existing =
-        current.hercle && typeof current.hercle === "object" && !Array.isArray(current.hercle)
-          ? (current.hercle as Record<string, unknown>)
-          : {};
-      return { ...current, hercle: { ...existing, ...patch } };
-    },
-  });
+interface HercleScope {
+  organizationId: string;
+  projectId: string;
+  counterpartyId: string;
+  provider: "hercle";
 }
 
-/** EUR is the only currency Hercle settles at launch, and the rails snapshot declares nothing else. */
-const HERCLE_PAYOUT_CURRENCY = "EUR";
+function scopeOf(counterparty: CounterpartyRow, projectId: string): HercleScope {
+  return {
+    organizationId: counterparty.organization_id,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "hercle",
+  };
+}
+
+function accountsRepository(c: AppContext): CounterpartyProviderAccountsRepository {
+  return createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+}
+
+/**
+ * The counterparty's Hercle state as rows: the `customer_link` carries the sub-account id and the
+ * verification lifecycle in its metadata; the `payout_account` carries the bank rail's status for
+ * the business's own payout account. Bank details live in neither.
+ */
+export interface HercleCounterpartyLink {
+  accountId: string;
+  linkRowId: string;
+  state: HercleCustomerState;
+  payoutAccount: CounterpartyProviderAccountRow | null;
+}
+
+export async function readHercleCounterpartyLink(
+  c: AppContext,
+  counterparty: CounterpartyRow,
+  projectId: string = counterparty.project_id
+): Promise<HercleCounterpartyLink | null> {
+  const accounts = accountsRepository(c);
+  const scope = scopeOf(counterparty, projectId);
+  const link = await accounts.getProviderAccount(scope);
+  if (!link) {
+    return null;
+  }
+
+  const metadata = hercleCustomerLinkMetadataSchema.parse(link.metadata);
+  const payoutAccount = await accounts.getAccountByKindAndCurrency({
+    ...scope,
+    kind: "payout_account",
+    fiatCurrency: HERCLE_PAYOUT_CURRENCY,
+  });
+
+  return {
+    accountId: link.provider_customer_reference,
+    linkRowId: link.id,
+    state: {
+      verificationStatus: metadata.verificationStatus,
+      payoutAccountStatus: readPayoutAccountStatus(payoutAccount),
+    },
+    payoutAccount,
+  };
+}
+
+/** Anything the rail reports that is not in the vocabulary reads as not ready, never as active. */
+function readPayoutAccountStatus(
+  row: CounterpartyProviderAccountRow | null
+): HerclePayoutAccountStatus | undefined {
+  if (row === null) {
+    return undefined;
+  }
+  return row.provider_status !== null && isHerclePayoutAccountStatus(row.provider_status)
+    ? row.provider_status
+    : "pending";
+}
 
 /**
  * Staged ensure-provisioning for Hercle (TS-SUBACC-03 / TS-KYC-01 / TS-BANK-10.5 lanes):
- * (1) create the Hercle business sub-account (idempotent by the counterparty-scoped
- * Idempotency-Key, replayed on retry), (2) register the business's own payout account,
- * (3) initiate or refresh the KYB verification.
- * Each completed step persists into provider_data.hercle, so a mid-flight failure
- * resumes on the next requirements POST — SDP re-invokes this stage until `ready`.
+ * (1) create the Hercle business sub-account (idempotent by the counterparty-scoped Idempotency-Key,
+ * replayed on retry) and link it, (2) register the business's own payout account, (3) initiate or
+ * refresh the KYB verification.
+ * Each completed step persists as a provider-account row, so a mid-flight failure resumes on the
+ * next requirements POST — SDP re-invokes this stage until `ready`.
  */
 export async function advanceHercleCounterparty(
   c: AppContext,
@@ -83,14 +147,15 @@ export async function advanceHercleCounterparty(
     );
   }
 
-  const repo = getCounterpartiesRepository(c);
+  const accounts = accountsRepository(c);
+  const scope = scopeOf(counterparty, projectId);
   const runtime: RampRuntimeContext = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.hercle;
-  let data = readHercleData(counterparty.provider_data);
 
-  if (!data.accountId) {
+  let link = await readHercleCounterpartyLink(c, counterparty, projectId);
+  if (!link) {
     // KYB input is collected per provisioning attempt and passed straight to Hercle; SDP
-    // stores none of it (only the returned account id lands in provider data).
+    // stores none of it (only the returned account id lands in the customer link).
     const registrationNumber = collectedData?.[HERCLE_REGISTRATION_NUMBER_FIELD_KEY]?.trim();
     const countryCode = collectedData?.[HERCLE_REGISTRATION_COUNTRY_FIELD_KEY]?.trim();
     const line1 = collectedData?.[HERCLE_ADDRESS_LINE1_FIELD_KEY]?.trim();
@@ -126,63 +191,147 @@ export async function advanceHercleCounterparty(
       // Content-addressed: a retried POST replays the same Hercle account instead of duplicating it.
       `sdp-account-${counterparty.id}`
     );
-    data = { accountId: account.accountId, externalReference: counterparty.id };
-    await persistHercleData(repo, counterparty, projectId, data);
+    const row = await accounts.upsertProviderAccount({
+      ...scope,
+      providerCustomerReference: account.accountId,
+      metadata: { externalReference: counterparty.id },
+    });
+    link = {
+      accountId: account.accountId,
+      linkRowId: row.id,
+      state: {},
+      payoutAccount: null,
+    };
   }
 
-  if (!data.accountId) {
-    throw internalError("Hercle account provisioning did not yield an account id.");
-  }
-  const accountId = data.accountId;
-
-  if (data.payoutAccountStatus === undefined) {
-    const iban = collectedData?.[HERCLE_PAYOUT_IBAN_FIELD_KEY]?.trim();
+  if (link.payoutAccount === null) {
+    const iban = collectedData?.[HERCLE_PAYOUT_IBAN_FIELD_KEY]?.replace(/\s+/g, "");
     const bic = collectedData?.[HERCLE_PAYOUT_BIC_FIELD_KEY]?.trim();
     const accountHolder = collectedData?.[HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY]?.trim();
 
+    // An account provisioned before the payout account existed re-collects only the bank details.
     if (!iban || !bic || !accountHolder) {
-      throw badRequest(
-        "The business's own bank account (IBAN, BIC and account holder) is required to provision a Hercle account."
-      );
+      return {
+        provider: "hercle",
+        direction,
+        status: "collect",
+        fields: herclePayoutAccountFields(),
+      };
     }
 
-    const payoutAccountStatus = await registerHerclePayoutAccount(client, runtime, accountId, {
+    const destinationCountry = ibanCountry(iban);
+    const registered = await registerHerclePayoutAccount(client, runtime, link.accountId, {
       currency: HERCLE_PAYOUT_CURRENCY,
       iban,
       bic,
       accountHolder,
     });
-    data = { ...data, payoutAccountStatus };
-    await persistHercleData(repo, counterparty, projectId, { payoutAccountStatus });
-  } else if (data.payoutAccountStatus === "pending") {
+    const payoutAccount = await accounts.insertProviderResourceAccount({
+      ...scope,
+      kind: "payout_account",
+      providerCustomerReference: link.accountId,
+      fiatCurrency: HERCLE_PAYOUT_CURRENCY,
+      destinationCountry,
+      paymentRail: HERCLE_PAYOUT_RAIL,
+      externalAccountReference: registered.payoutAccountId,
+      providerStatus: registered.status,
+      // The IBAN went to Hercle and nowhere else; the row is a pointer, not a copy.
+      metadata: {},
+    });
+    link = {
+      ...link,
+      state: { ...link.state, payoutAccountStatus: registered.status },
+      payoutAccount,
+    };
+  } else if (link.state.payoutAccountStatus === "pending") {
     // The rail registers the account after KYB approval; poll until it flips.
-    const payoutAccount = await client.getPayoutAccount(runtime, accountId, HERCLE_PAYOUT_CURRENCY);
-    if (payoutAccount.status !== data.payoutAccountStatus) {
-      data = { ...data, payoutAccountStatus: payoutAccount.status };
-      await persistHercleData(repo, counterparty, projectId, {
-        payoutAccountStatus: payoutAccount.status,
+    const latest = await client.getPayoutAccount(runtime, link.accountId, HERCLE_PAYOUT_CURRENCY);
+    if (latest.status !== link.state.payoutAccountStatus) {
+      await accounts.updateExternalAccountStatus({
+        ...scope,
+        id: link.payoutAccount.id,
+        providerStatus: latest.status,
       });
+      link = { ...link, state: { ...link.state, payoutAccountStatus: latest.status } };
     }
   }
 
-  if (data.verificationStatus !== "ready") {
+  let verificationUrl: string | undefined;
+  if (link.state.verificationStatus !== "ready") {
     const verification =
-      data.verificationStatus === undefined
-        ? await client.createVerification(runtime, accountId, `sdp-kyb-${counterparty.id}`)
-        : await client.getVerification(runtime, accountId);
+      link.state.verificationStatus === undefined
+        ? await client.createVerification(runtime, link.accountId, `sdp-kyb-${counterparty.id}`)
+        : await client.getVerification(runtime, link.accountId);
     const verificationStatus = mapHercleVerificationStatus(verification.status);
-    data = {
-      ...data,
-      verificationStatus,
-      verificationUrl: verification.verificationUrl ?? data.verificationUrl,
-    };
-    await persistHercleData(repo, counterparty, projectId, {
-      verificationStatus,
-      verificationUrl: data.verificationUrl,
-    });
+    verificationUrl = verification.verificationUrl;
+    if (verificationStatus !== link.state.verificationStatus) {
+      await patchVerificationStatus(accounts, scope, link.linkRowId, verificationStatus);
+      link = { ...link, state: { ...link.state, verificationStatus } };
+    }
   }
 
-  return hercleOnboardingRequirements(data, direction);
+  return hercleOnboardingRequirements(link.state, direction, verificationUrl);
+}
+
+/**
+ * Requirements GET once the customer link exists. The hosted verification link is minted per read
+ * (never stored), and the verification status is refreshed from Hercle so a verdict delivered while
+ * the webhook was unreachable still lands.
+ */
+export async function resolveHercleRequirements(
+  c: AppContext,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  direction: RampDirection,
+  link: HercleCounterpartyLink
+): Promise<CounterpartyRequirements> {
+  if (link.payoutAccount === null) {
+    return {
+      provider: "hercle",
+      direction,
+      status: "collect",
+      fields: herclePayoutAccountFields(),
+    };
+  }
+
+  let state = link.state;
+  let verificationUrl: string | undefined;
+  if (state.verificationStatus !== "ready") {
+    const verification = await RAMP_PROVIDER_CLIENTS.hercle.getVerification(
+      rampRuntime(c),
+      link.accountId
+    );
+    const verificationStatus = mapHercleVerificationStatus(verification.status);
+    verificationUrl = verification.verificationUrl;
+    if (verificationStatus !== state.verificationStatus) {
+      await patchVerificationStatus(
+        accountsRepository(c),
+        scopeOf(counterparty, projectId),
+        link.linkRowId,
+        verificationStatus
+      );
+      state = { ...state, verificationStatus };
+    }
+  }
+
+  return hercleOnboardingRequirements(state, direction, verificationUrl);
+}
+
+export async function patchVerificationStatus(
+  accounts: CounterpartyProviderAccountsRepository,
+  scope: HercleScope,
+  linkRowId: string,
+  verificationStatus: HercleVerificationStatus
+): Promise<void> {
+  const updated = await accounts.patchAccountMetadata({
+    ...scope,
+    id: linkRowId,
+    set: { verificationStatus },
+    unset: [],
+  });
+  if (!updated) {
+    throw internalError("Hercle verification status update escaped its tenant scope.");
+  }
 }
 
 /**
@@ -198,10 +347,10 @@ async function registerHerclePayoutAccount(
   request: { currency: string; iban: string; bic: string; accountHolder: string }
 ) {
   try {
-    return (await client.registerPayoutAccount(runtime, accountId, request)).status;
+    return await client.registerPayoutAccount(runtime, accountId, request);
   } catch (error) {
     if (error instanceof SdpPaymentsError && error.code === "CONFLICT") {
-      return (await client.getPayoutAccount(runtime, accountId, request.currency)).status;
+      return await client.getPayoutAccount(runtime, accountId, request.currency);
     }
     if (error instanceof SdpPaymentsError && error.code === "BAD_REQUEST") {
       throw badRequest(error.message);
@@ -210,17 +359,32 @@ async function registerHerclePayoutAccount(
   }
 }
 
-/** The `on-behalf-of` account id for scoped Hercle calls; undefined until provisioned. */
-export function hercleAccountId(counterparty: CounterpartyRow): string | undefined {
-  return readHercleData(counterparty.provider_data).accountId;
+/** The IBAN's country prefix is the payout destination; it is derived, never stored with the IBAN. */
+function ibanCountry(iban: string): CountryCode {
+  const prefix = iban.slice(0, 2).toUpperCase();
+  if (!(COUNTRY_CODES as readonly string[]).includes(prefix)) {
+    throw badRequest(`IBAN country "${prefix}" is not recognised.`);
+  }
+  return prefix as CountryCode;
 }
 
 /**
- * True once the KYB verdict landed and the bank rail holds the business's payout account.
- * Hercle refuses orders on either count, so gating here turns a provider error into the
- * provisioning status the wizard already knows how to render.
+ * The link a quote may act on, or null when the business cannot transact yet: no sub-account, KYB
+ * not approved, or the payout account not yet active on the bank rail. Hercle refuses orders on
+ * each of those counts; gating here turns a provider error into the provisioning status the wizard
+ * already renders.
  */
-export function isHercleCounterpartyReady(counterparty: CounterpartyRow): boolean {
-  const data = readHercleData(counterparty.provider_data);
-  return data.verificationStatus === "ready" && data.payoutAccountStatus === "active";
+export async function readReadyHercleCounterpartyLink(
+  c: AppContext,
+  counterparty: CounterpartyRow
+): Promise<HercleCounterpartyLink | null> {
+  const link = await readHercleCounterpartyLink(c, counterparty);
+  if (
+    link === null ||
+    link.state.verificationStatus !== "ready" ||
+    link.state.payoutAccountStatus !== "active"
+  ) {
+    return null;
+  }
+  return link;
 }

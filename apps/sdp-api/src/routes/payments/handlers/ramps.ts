@@ -136,11 +136,7 @@ import {
   ensureBvnkPaymentRule,
   readBvnkCustomerLink,
 } from "./ramps/bvnk";
-import {
-  advanceHercleCounterparty,
-  hercleAccountId,
-  isHercleCounterpartyReady,
-} from "./ramps/hercle";
+import { advanceHercleCounterparty, readReadyHercleCounterpartyLink } from "./ramps/hercle";
 import {
   ensureLightsparkCustomer,
   ensureLightsparkPayoutAccount,
@@ -1165,8 +1161,8 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       break;
     }
     case "hercle": {
-      const accountId = hercleAccountId(counterparty);
-      if (!accountId || !isHercleCounterpartyReady(counterparty)) {
+      const link = await readReadyHercleCounterpartyLink(c, counterparty);
+      if (!link) {
         throw counterpartyNotProvisioned("hercle", "onramp");
       }
       quote = await RAMP_PROVIDER_CLIENTS.hercle.createOnrampQuote(rampRuntime(c), {
@@ -1175,7 +1171,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
         // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
-        externalCustomerId: accountId,
+        externalCustomerId: link.accountId,
       });
       break;
     }
@@ -1432,8 +1428,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
     case "stripe":
       throw badRequest("Stripe off-ramp is not supported.");
     case "hercle": {
-      const accountId = hercleAccountId(counterparty);
-      if (!accountId || !isHercleCounterpartyReady(counterparty)) {
+      const link = await readReadyHercleCounterpartyLink(c, counterparty);
+      if (!link) {
         throw counterpartyNotProvisioned("hercle", "offramp");
       }
       quote = await RAMP_PROVIDER_CLIENTS.hercle.createOfframpQuote(rampRuntime(c), {
@@ -1444,7 +1440,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         // Makes the order's idempotency key unique per transfer and lets Hercle echo our id back.
         paymentTransferId: reservedTransferId,
         // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
-        externalCustomerId: accountId,
+        externalCustomerId: link.accountId,
       });
       break;
     }

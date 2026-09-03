@@ -320,23 +320,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return mapCounterpartyRow(rows.results[0]);
     },
 
-    async findCounterpartyByHercleAccountId(accountId: string) {
-      const rows = await db
-        .prepare(
-          `SELECT * FROM counterparties
-            WHERE status = 'active'
-              AND provider_data->'hercle'->>'accountId' = ?
-            ORDER BY id
-            LIMIT 2`
-        )
-        .bind(accountId)
-        .all<Record<string, unknown>>();
-      // Ambiguity guard: a Hercle account id must map to exactly one counterparty.
-      return rows.results.length === 1
-        ? mapCounterpartyRow(rows.results[0] as Record<string, unknown>)
-        : null;
-    },
-
     async mutateProviderData(params) {
       return mutateProviderDataLocked(db, params);
     },

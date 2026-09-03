@@ -36,7 +36,7 @@ import type {
   ValidateCounterpartyOptions,
 } from "../../types";
 import { hercleCounterpartyRequirements } from "./counterparty";
-import type { HercleSettlementStatus } from "./provider-data";
+import { HERCLE_PAYOUT_ACCOUNT_STATUSES, type HercleSettlementStatus } from "./provider-data";
 
 /**
  * Hercle — headless fiat on/off-ramp provider (Signed Key v1 lane, /partner/v1).
@@ -164,11 +164,12 @@ const hercleVerificationResponseSchema = z.object({
 });
 
 const herclePayoutAccountResponseSchema = z.object({
+  payoutAccountId: z.string().min(1),
   currency: z.string(),
   iban: z.string(),
   bic: z.string(),
   accountHolder: z.string(),
-  status: z.enum(["pending", "active", "refused"]),
+  status: z.enum(HERCLE_PAYOUT_ACCOUNT_STATUSES),
   registeredAt: z.string().optional(),
 });
 

@@ -13,11 +13,7 @@ import {
   hercleCounterpartyRequirements,
   hercleJurisdictionForCountry,
 } from "./counterparty";
-import {
-  hercleOnboardingRequirements,
-  mapHercleVerificationStatus,
-  readHercleData,
-} from "./provider-data";
+import { hercleOnboardingRequirements, mapHercleVerificationStatus } from "./provider-data";
 
 function businessCounterparty(): Counterparty {
   return {
@@ -34,8 +30,11 @@ function businessCounterparty(): Counterparty {
   };
 }
 
-function options(providerData: CounterpartyProviderData = {}): ValidateCounterpartyOptions {
-  return { direction: "offramp", providerData };
+function options(
+  providerData: CounterpartyProviderData = {},
+  extra: { providerCustomerReference?: string } = {}
+): ValidateCounterpartyOptions {
+  return { direction: "offramp", providerData, ...extra };
 }
 
 describe("buildHercleSignature", () => {
@@ -100,73 +99,69 @@ describe("hercleCounterpartyRequirements", () => {
     assert.ok(!countryCodes.includes("US"));
   });
 
-  it("re-collects only the bank details for an account provisioned before the payout account existed", () => {
-    const requirements = hercleCounterpartyRequirements(
+  it("defers to the handler once the customer link exists", () => {
+    // Verification and payout state live in provider-account rows the API handler resolves; the
+    // pure decision has nothing left to say beyond "collect" versus "linked".
+    const linked = hercleCounterpartyRequirements(
       businessCounterparty(),
-      options({ hercle: { accountId: "acct_1", verificationStatus: "ready" } })
+      options({}, { providerCustomerReference: "acct_1" })
     );
-    assert.equal(requirements.status, "collect");
-    if (requirements.status !== "collect") {
-      assert.fail("expected collect");
-    }
-    assert.deepEqual(
-      requirements.fields.map((field) => field.key),
-      [
-        HERCLE_PAYOUT_IBAN_FIELD_KEY,
-        HERCLE_PAYOUT_BIC_FIELD_KEY,
-        HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
-      ]
-    );
+    assert.equal(linked.status, "ready");
   });
+});
 
-  it("surfaces the stored verification lifecycle once an account exists", () => {
-    const verificationRequired = hercleCounterpartyRequirements(
-      businessCounterparty(),
-      options({
-        hercle: {
-          accountId: "acct_1",
-          verificationStatus: "verification_required",
-          verificationUrl: "https://verify.example/x",
-          payoutAccountStatus: "pending",
-        },
-      })
+describe("hercleOnboardingRequirements", () => {
+  it("surfaces the verification lifecycle with the link minted for this read", () => {
+    const required = hercleOnboardingRequirements(
+      { verificationStatus: "verification_required", payoutAccountStatus: "pending" },
+      "offramp",
+      "https://verify.example/x"
     );
-    assert.equal(verificationRequired.status, "customer_verification_required");
-
-    const ready = hercleCounterpartyRequirements(
-      businessCounterparty(),
-      options({
-        hercle: { accountId: "acct_1", verificationStatus: "ready", payoutAccountStatus: "active" },
-      })
+    assert.deepEqual(required, {
+      provider: "hercle",
+      direction: "offramp",
+      status: "customer_verification_required",
+      verificationUrl: "https://verify.example/x",
+    });
+    assert.equal(
+      hercleOnboardingRequirements({ verificationStatus: "verifying" }, "offramp").status,
+      "customer_verifying"
     );
-    assert.equal(ready.status, "ready");
+    assert.equal(
+      hercleOnboardingRequirements({ verificationStatus: "verification_failed" }, "offramp").status,
+      "customer_verification_failed"
+    );
+    assert.equal(
+      hercleOnboardingRequirements(
+        { verificationStatus: "ready", payoutAccountStatus: "active" },
+        "offramp"
+      ).status,
+      "ready"
+    );
   });
 
   it("is not ready while the bank rail is still registering the payout account", () => {
     // Hercle refuses off-ramp orders until the account is active, so the wizard must keep polling.
-    const provisioning = hercleCounterpartyRequirements(
-      businessCounterparty(),
-      options({
-        hercle: {
-          accountId: "acct_1",
-          verificationStatus: "ready",
-          payoutAccountStatus: "pending",
-        },
-      })
+    assert.equal(
+      hercleOnboardingRequirements(
+        { verificationStatus: "ready", payoutAccountStatus: "pending" },
+        "offramp"
+      ).status,
+      "funding_account_provisioning"
     );
-    assert.equal(provisioning.status, "funding_account_provisioning");
+    assert.equal(
+      hercleOnboardingRequirements(
+        { verificationStatus: "ready", payoutAccountStatus: "refused" },
+        "offramp"
+      ).status,
+      "unsupported"
+    );
+  });
 
-    const refused = hercleCounterpartyRequirements(
-      businessCounterparty(),
-      options({
-        hercle: {
-          accountId: "acct_1",
-          verificationStatus: "ready",
-          payoutAccountStatus: "refused",
-        },
-      })
+  it("never invents a verification URL", () => {
+    assert.throws(() =>
+      hercleOnboardingRequirements({ verificationStatus: "verification_required" }, "offramp")
     );
-    assert.equal(refused.status, "unsupported");
   });
 });
 
@@ -178,26 +173,7 @@ describe("provider-data mapping", () => {
     assert.equal(mapHercleVerificationStatus("rejected"), "verification_failed");
     assert.equal(mapHercleVerificationStatus("VERIFIED"), "ready");
     assert.equal(mapHercleVerificationStatus("approved"), "ready");
-    assert.throws(() => mapHercleVerificationStatus("SOMETHING_NEW"));
-  });
-
-  it("never invents a verification URL", () => {
-    assert.throws(() =>
-      hercleOnboardingRequirements(
-        { accountId: "acct_1", verificationStatus: "verification_required" },
-        "onramp"
-      )
-    );
-  });
-
-  it("reads provider data defensively", () => {
-    assert.deepEqual(readHercleData({}), {});
-    assert.deepEqual(readHercleData({ hercle: "garbage" }), {});
-    const partial = readHercleData({
-      hercle: { accountId: "acct_1", verificationStatus: "not-a-status" },
-    });
-    assert.equal(partial.accountId, "acct_1");
-    assert.equal(partial.verificationStatus, undefined);
+    assert.throws(() => mapHercleVerificationStatus("something-new"));
   });
 });
 

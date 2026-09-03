@@ -1,7 +1,7 @@
 import type { Counterparty } from "@sdp/types/counterparties";
 import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
+import { readyCounterparty } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import { hercleOnboardingRequirements, readHercleData } from "./provider-data";
 
 /**
  * Hercle onboards regulated business customers in its CH/EEA perimeter. The registered
@@ -188,11 +188,18 @@ export function herclePayoutAccountFields(): RequirementField[] {
   ];
 }
 
+/**
+ * The pure decision covers what the counterparty alone can tell: entity type and whether a Hercle
+ * sub-account exists yet. Once the customer link exists the lifecycle lives in provider-account rows
+ * and the hosted verification link is minted per read, so the API handler owns that answer
+ * (`resolveHercleRequirements`); this function defers with `ready` so the submit flow proceeds to
+ * the advance step, which re-derives the real state.
+ */
 export function hercleCounterpartyRequirements(
   counterparty: Counterparty,
   options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  const { direction, providerData } = options;
+  const { direction } = options;
 
   if (counterparty.entityType !== "business") {
     return {
@@ -203,8 +210,7 @@ export function hercleCounterpartyRequirements(
     };
   }
 
-  const data = readHercleData(providerData);
-  if (!data.accountId) {
+  if (options.providerCustomerReference === undefined) {
     return {
       provider: "hercle",
       direction,
@@ -213,15 +219,5 @@ export function hercleCounterpartyRequirements(
     };
   }
 
-  // An account provisioned before the payout account existed re-collects only the bank details.
-  if (data.payoutAccountStatus === undefined) {
-    return {
-      provider: "hercle",
-      direction,
-      status: "collect",
-      fields: herclePayoutAccountFields(),
-    };
-  }
-
-  return hercleOnboardingRequirements(data, direction);
+  return readyCounterparty("hercle", direction);
 }

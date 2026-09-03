@@ -4,9 +4,15 @@ import {
 } from "@sdp/payments/ramps/providers/hercle/provider-data";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
+import { getDb } from "@/db";
 import { createSystemCounterpartiesRepository } from "@/db/repositories";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import {
+  patchVerificationStatus,
+  readHercleCounterpartyLink,
+} from "@/routes/payments/handlers/ramps/hercle";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { AppContext, WebhookProcessor } from "./processor";
@@ -119,32 +125,40 @@ export function parseHercleWebhookEvent(payload: unknown): HercleWebhookEvent {
   }
 }
 
+/**
+ * Moves the customer link's verification state; the hosted link on the event is not stored, since
+ * Hercle mints it per read.
+ */
 async function handleVerificationEvent(
   c: AppContext,
   event: Extract<HercleWebhookEvent, { kind: "verification" }>
 ): Promise<void> {
-  const repo = createSystemCounterpartiesRepository(c.env);
-  const counterparty = await repo.findCounterpartyByHercleAccountId(event.accountId);
+  const counterparty = await createSystemCounterpartiesRepository(
+    c.env
+  ).findActiveCounterpartyByProviderCustomerReference({
+    provider: "hercle",
+    providerCustomerReference: event.accountId,
+  });
   if (!counterparty) {
     getLogger().warn(`[hercle webhook] no counterparty for account ${event.accountId}`);
     return;
   }
-  await repo.mutateProviderData({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId: counterparty.project_id,
-    mutate: (current) => {
-      const existing = readRecord(current.hercle) ?? {};
-      return {
-        ...current,
-        hercle: {
-          ...existing,
-          verificationStatus: event.status,
-          ...(event.verificationUrl ? { verificationUrl: event.verificationUrl } : {}),
-        },
-      };
+  const link = await readHercleCounterpartyLink(c, counterparty);
+  if (!link) {
+    getLogger().warn(`[hercle webhook] no customer link for account ${event.accountId}`);
+    return;
+  }
+  await patchVerificationStatus(
+    createPostgresCounterpartyProviderAccountsRepository(getDb(c.env)),
+    {
+      organizationId: counterparty.organization_id,
+      projectId: counterparty.project_id,
+      counterpartyId: counterparty.id,
+      provider: "hercle",
     },
-  });
+    link.linkRowId,
+    event.status
+  );
 }
 
 export class HercleWebhookProcessor implements WebhookProcessor<unknown, HercleWebhookEvent> {

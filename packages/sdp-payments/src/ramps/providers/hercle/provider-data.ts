@@ -1,7 +1,5 @@
-import type { CounterpartyProviderData } from "@sdp/types/counterparties";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { internalError } from "../../../errors";
-import { readRecord, readString } from "../../../json";
 
 /**
  * Hercle-side verification lifecycle for a counterparty's sub-account, normalized
@@ -26,51 +24,26 @@ export const HERCLE_SETTLEMENT_STATUSES = [
 export type HercleSettlementStatus = (typeof HERCLE_SETTLEMENT_STATUSES)[number];
 
 /**
- * Lifecycle of the business's own payout account on Hercle's bank rail. Fiat is first-party only,
- * so this is the single account every off-ramp pays to; `pending` until the rail registers it after
- * KYB approval, and an off-ramp order is refused until it is `active`.
+ * Lifecycle of the business's own payout account on Hercle's bank rail, stored verbatim as the
+ * `payout_account` row's provider status. Fiat is first-party only, so this is the single account
+ * every off-ramp pays to; `pending` until the rail registers it after KYB approval, and an off-ramp
+ * order is refused until it is `active`.
  */
 export const HERCLE_PAYOUT_ACCOUNT_STATUSES = ["pending", "active", "refused"] as const;
 export type HerclePayoutAccountStatus = (typeof HERCLE_PAYOUT_ACCOUNT_STATUSES)[number];
 
-/**
- * Shape of `counterparty.provider_data.hercle`. Only metadata lands here — ids,
- * statuses and the hosted verification link; collected KYB data is passed to the
- * Hercle API and never persisted.
- */
-export interface HercleCounterpartyData {
-  /** Hercle sub-account id; the `on-behalf-of` value for every scoped call. */
-  accountId?: string;
-  /** SDP-side external reference the sub-account was registered under (the counterparty id). */
-  externalReference?: string;
-  verificationStatus?: HercleVerificationStatus;
-  /** Single-use hosted verification link, present while status is verification_required. */
-  verificationUrl?: string;
-  /** Undefined until the payout account has been registered; bank details themselves are never stored. */
-  payoutAccountStatus?: HerclePayoutAccountStatus;
+export function isHerclePayoutAccountStatus(value: string): value is HerclePayoutAccountStatus {
+  return (HERCLE_PAYOUT_ACCOUNT_STATUSES as readonly string[]).includes(value);
 }
 
-export function readHercleData(providerData: CounterpartyProviderData): HercleCounterpartyData {
-  const hercle = readRecord(providerData.hercle);
-  if (hercle === undefined) {
-    return {};
-  }
-
-  const status = readString(hercle.verificationStatus);
-  const payoutStatus = readString(hercle.payoutAccountStatus);
-  return {
-    accountId: readString(hercle.accountId),
-    externalReference: readString(hercle.externalReference),
-    verificationStatus: (HERCLE_VERIFICATION_STATUSES as readonly string[]).includes(status ?? "")
-      ? (status as HercleVerificationStatus)
-      : undefined,
-    verificationUrl: readString(hercle.verificationUrl),
-    payoutAccountStatus: (HERCLE_PAYOUT_ACCOUNT_STATUSES as readonly string[]).includes(
-      payoutStatus ?? ""
-    )
-      ? (payoutStatus as HerclePayoutAccountStatus)
-      : undefined,
-  };
+/**
+ * What the handler resolves from the counterparty's provider-account rows before asking for the
+ * requirements arm: the customer link's verification state and the payout account's rail status.
+ * Nothing here is PII, and the verification link is never part of it — Hercle mints it per read.
+ */
+export interface HercleCustomerState {
+  verificationStatus?: HercleVerificationStatus;
+  payoutAccountStatus?: HerclePayoutAccountStatus;
 }
 
 /**
@@ -97,21 +70,23 @@ export function mapHercleVerificationStatus(apiStatus: string): HercleVerificati
 }
 
 /**
- * Internal lifecycle → wire requirements arm. `verification_required` without a
- * stored link is a provisioning bug, not a UX state — throw, never invent a URL.
+ * Internal lifecycle → wire requirements arm.
+ * `verification_required` needs the hosted link Hercle minted for this read; without one it is a
+ * provisioning bug, not a UX state — throw, never invent a URL.
  * A verified business whose payout account is still pending on the bank rail is not ready:
  * Hercle refuses off-ramp orders until it is active, so the wizard keeps polling instead.
  */
 export function hercleOnboardingRequirements(
-  data: HercleCounterpartyData,
-  direction: RampDirection
+  state: HercleCustomerState,
+  direction: RampDirection,
+  verificationUrl?: string
 ): CounterpartyRequirements {
-  switch (data.verificationStatus) {
+  switch (state.verificationStatus) {
     case "ready":
-      if (data.payoutAccountStatus === "pending") {
+      if (state.payoutAccountStatus === "pending") {
         return { provider: "hercle", direction, status: "funding_account_provisioning" };
       }
-      if (data.payoutAccountStatus === "refused") {
+      if (state.payoutAccountStatus === "refused") {
         return {
           provider: "hercle",
           direction,
@@ -126,16 +101,16 @@ export function hercleOnboardingRequirements(
       return { provider: "hercle", direction, status: "customer_verification_failed" };
     case "verification_required":
     case undefined: {
-      if (!data.verificationUrl) {
+      if (!verificationUrl) {
         throw internalError(
-          "Hercle counterparty requires verification but no verification URL is stored."
+          "Hercle counterparty requires verification but no verification URL was provided."
         );
       }
       return {
         provider: "hercle",
         direction,
         status: "customer_verification_required",
-        verificationUrl: data.verificationUrl,
+        verificationUrl,
       };
     }
   }
