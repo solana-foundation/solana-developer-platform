@@ -22,7 +22,12 @@ const COUNTERPARTY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const context: DvpCreateContext = {
   error: null,
   wallets: [
-    { id: "cwlt_1", address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn", label: "Treasury" },
+    {
+      id: "cwlt_1",
+      address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+      label: "Treasury",
+      balances: [],
+    },
   ],
   tokens: [
     {
@@ -117,5 +122,63 @@ describe("useDvpCreateForm", () => {
 
     expect(result.current.asset.baseUnits).toBe("1000");
     expect(result.current.ready).toBe(true);
+  });
+
+  /**
+   * The balance the delivering leg spends from.
+   *
+   * The zero case is the one that matters: a wallet holding none of the mint has
+   * no entry in `balances` at all, and reading that as "unknown" would drop the
+   * balance row and the over-balance guard with it — so switching to a wallet
+   * that cannot deliver the leg would look exactly like one that can.
+   */
+  describe("the delivering leg's balance", () => {
+    const held = {
+      ...context,
+      wallets: [
+        {
+          ...context.wallets[0],
+          balances: [
+            {
+              mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+              amount: "25000000000",
+              decimals: 6,
+              symbol: "TBOND",
+            },
+          ],
+        },
+      ],
+    };
+
+    it("reports what the wallet holds of the asset leg", () => {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held));
+
+      expect(result.current.assetBalance).toMatchObject({ amount: "25000000000", decimals: 6 });
+    });
+
+    it("reports zero, not unknown, when the wallet holds none of it", () => {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", context));
+
+      expect(result.current.assetBalance).toMatchObject({ amount: "0", decimals: 6 });
+    });
+
+    // The counterparty's leg is funded by them. Showing our balance against it
+    // would claim we hold what they owe.
+    it("reports nothing for the leg SDP does not deliver", () => {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held));
+
+      expect(result.current.cashBalance).toBeNull();
+    });
+
+    it("follows the side SDP takes", () => {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held));
+
+      act(() => {
+        result.current.setSdpSide("b");
+      });
+
+      expect(result.current.assetBalance).toBeNull();
+      expect(result.current.cashBalance).not.toBeNull();
+    });
   });
 });

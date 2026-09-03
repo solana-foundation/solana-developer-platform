@@ -301,8 +301,8 @@
       "fieldAmountHint": "Base units, as a whole number. Not a decimal amount.",
       "fieldExpiry": "Expires",
       "fieldExpiryHint": "After this the trade can no longer settle. Must be within a year.",
-      "fieldRef": "Reference",
-      "fieldRefHint": "Optional, at most 64 bytes. Anyone can put the same value on their own trade, so treat it as a hint and never as proof.",
+      "fieldRef": "Your reference",
+      "fieldRefHint": "Optional. Ties this trade to your own records, and both sides can read it on chain. Anyone can copy the same value onto their own trade, so treat it as a label and never as proof.",
       "createSubmitting": "Creating…",
       "createEmptyTokens": "No deployed tokens in this project yet. Paste a mint address instead.",
       "fieldCashMintHint": "What the other side pays with.",
@@ -327,7 +327,7 @@
       "groupTermsHint": "Who you are trading with, and how long they have to fund.",
       "fieldWalletHintWithAddress": "{address}. Holds your side of the trade, pays the fees, and pays rent for the escrows.",
       "fieldCounterpartyInvalid": "That does not look like a Solana address. They are 32 to 44 base58 characters.",
-      "fieldRefPlaceholder": "Your reference",
+      "fieldRefPlaceholder": "INV-2026-0042",
       "mintOption": "{label} ({decimals} decimals)",
       "sideAssetTitle": "You deliver the asset",
       "sideAssetDetail": "You fund the {deliver} leg. They fund {receive}.",
@@ -351,7 +351,12 @@
       "nextExpiredBody": "This trade can no longer settle. Cancelling refunds each leg to whoever deposited it and closes the trade.",
       "nextCreateFailedTitle": "This trade was never created",
       "nextCreateFailedBody": "The create transaction can no longer land, so nothing was put on chain and nothing is at risk. Create a new trade to try again.",
-      "loadErrorUnexpected": "The request succeeded but carried no trade."
+      "loadErrorUnexpected": "The request succeeded but carried no trade.",
+      "balanceAvailable": "Balance {amount}",
+      "balanceUseMax": "Max",
+      "amountExceedsBalance": "More than this wallet holds today. The trade will still be created; funding your leg is what would fail.",
+      "fieldRefCount": "{used} of {total} bytes",
+      "fieldRefTooLong": "Too long by {over} bytes. Accents and emoji cost more than one byte each."
     }
   },
   "DashboardEarn": {

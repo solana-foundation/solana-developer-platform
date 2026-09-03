@@ -1,3 +1,5 @@
+import * as solanaRpc from "@sdp/rpc/solana";
+import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
@@ -13,6 +15,7 @@ import {
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
+import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import type { Env } from "@/types/env";
 import type { DvpCloseResolved } from "./policy";
@@ -284,4 +287,37 @@ export const getTrade = async (c: AppContext) => {
   }
 
   return success(c, { trade: toTradeResponse(trade) });
+};
+
+/**
+ * Inspects a mint so the create form can take a human amount for it.
+ *
+ * Read-only and permissionless beyond `payments:read`: it reports public chain
+ * state about an address the caller already has. The value is that it answers
+ * BEFORE a trade is signed — decimals, so the amount field can convert rather
+ * than demand base units, and eligibility, so a mint DvP refuses is named in
+ * the form instead of surfacing as a failed create that already cost a
+ * signature.
+ */
+export const inspectMint = async (c: AppContext) => {
+  const mint = c.req.param("mint");
+  if (!mint) {
+    throw notFound("Mint not found");
+  }
+
+  // Validated here rather than by a schema: the param is an address, and an
+  // unparseable one is the same answer as an address with nothing at it.
+  let parsed: Address;
+  try {
+    parsed = address(mint);
+  } catch {
+    throw notFound("Mint not found");
+  }
+
+  const inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+  if (!inspection) {
+    throw notFound("Mint not found");
+  }
+
+  return success(c, { mint: inspection });
 };

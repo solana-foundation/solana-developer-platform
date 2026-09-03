@@ -33,6 +33,17 @@ export interface DvpCreateWallet {
   id: string;
   address: string;
   label: string | null;
+  /** What this wallet holds, so a leg can show the balance it spends from. */
+  balances: DvpWalletBalance[];
+}
+
+/** One token balance, as much of it as the amount field needs. */
+export interface DvpWalletBalance {
+  mint: string;
+  /** Base units, the same convention the amount converts to. */
+  amount: string;
+  decimals: number;
+  symbol: string | null;
 }
 
 export interface DvpCreateContext {
@@ -58,16 +69,49 @@ interface TokenRow {
   decimals?: number;
 }
 
+interface WalletBalanceRow {
+  mint?: string | null;
+  amount?: string | null;
+  decimals?: number | null;
+  token?: string | null;
+}
+
 interface WalletRow {
   id?: string;
   publicKey?: string;
   label?: string | null;
+  balances?: WalletBalanceRow[] | null;
+}
+
+function mapBalances(rows: WalletBalanceRow[] | null | undefined): DvpWalletBalance[] {
+  return (rows ?? []).flatMap((balance) =>
+    balance.mint && typeof balance.decimals === "number" && balance.amount
+      ? [
+          {
+            mint: balance.mint,
+            amount: balance.amount,
+            decimals: balance.decimals,
+            // The API falls back to the raw mint when it has no symbol, which
+            // is not a label — the field would rather show nothing than repeat
+            // the address it is already displaying.
+            symbol: balance.token && balance.token !== balance.mint ? balance.token : null,
+          },
+        ]
+      : []
+  );
 }
 
 function mapWallets(rows: WalletRow[]): DvpCreateWallet[] {
   return rows.flatMap((wallet) =>
     wallet.id && wallet.publicKey
-      ? [{ id: wallet.id, address: wallet.publicKey, label: wallet.label ?? null }]
+      ? [
+          {
+            id: wallet.id,
+            address: wallet.publicKey,
+            label: wallet.label ?? null,
+            balances: mapBalances(wallet.balances),
+          },
+        ]
       : []
   );
 }
@@ -78,7 +122,11 @@ export async function fetchDvpCreateContext(
 ): Promise<DvpCreateContext> {
   try {
     const [walletsResponse, tokensResponse] = await Promise.all([
-      request("/v1/wallets"),
+      // Balances come along for the ride. The form is asking someone to commit
+      // a quantity of an asset, and it was doing so without ever showing how
+      // much of it they hold — so an over-commitment only surfaced later, as a
+      // funding transfer that failed for insufficient funds.
+      request("/v1/wallets?includeBalances=true"),
       request("/v1/issuance/tokens?pageSize=100"),
     ]);
 

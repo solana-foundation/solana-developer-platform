@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { toBaseUnits } from "./dvp-amount";
 import type { DvpCreateOption } from "./dvp-create.data";
+import { type PastedMintState, usePastedMint } from "./use-pasted-mint";
 
 /** Sentinel for "not one of the listed mints", which opens a paste field. */
 export const CUSTOM = "__custom__";
@@ -32,6 +33,17 @@ export interface DvpLeg {
   setCustom: (next: string) => void;
   symbol: string;
   token: DvpCreateOption | null;
+  /**
+   * What was read off a pasted mint, for the field to report. Idle for a leg
+   * whose mint came from the list, which needed no lookup.
+   */
+  pasted: PastedMintState;
+  /**
+   * Whether the amount is a decimal amount rather than base units. False only
+   * while a pasted mint has not resolved, which is the one case where nothing
+   * knows the scale.
+   */
+  decimalsKnown: boolean;
 }
 
 export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
@@ -41,10 +53,17 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
 
   const token = options.find((option) => option.mint === choice) ?? null;
 
-  // A listed mint carries its decimals, so the field takes a human amount and
-  // converts. A pasted one does not, so the field takes base units directly
-  // rather than guessing a scale and moving the wrong quantity.
-  const resolved = token?.decimals != null ? toBaseUnits(amount, token.decimals) : null;
+  // Only a pasted leg needs the lookup; a listed token already carries its
+  // decimals, so this stays idle on the empty string for one.
+  const pasted = usePastedMint(token ? "" : custom);
+
+  // A listed mint carries its decimals. A pasted one is read from the chain
+  // (`usePastedMint`), because the alternative is asking a person for base
+  // units on the leg carrying the security. Until it resolves the field still
+  // takes base units rather than guessing a scale and moving the wrong
+  // quantity — the fallback is unchanged, it is just far rarer now.
+  const decimals = token?.decimals ?? pasted.mint?.decimals ?? null;
+  const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
   const baseUnits = resolved ? (resolved.ok ? resolved.baseUnits : null) : amount.trim() || null;
 
   return {
@@ -52,11 +71,15 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
     baseUnits,
     choice,
     custom,
+    decimalsKnown: decimals != null,
     mint: token?.mint ?? custom.trim(),
+    pasted,
     setAmount,
     setChoice,
     setCustom,
-    symbol: token?.label ?? "",
+    // A pasted mint's own metadata beats the raw address, so a resolved paste
+    // reads as its symbol everywhere the summary names the leg.
+    symbol: token?.label ?? pasted.mint?.symbol ?? pasted.mint?.name ?? "",
     token,
   };
 }

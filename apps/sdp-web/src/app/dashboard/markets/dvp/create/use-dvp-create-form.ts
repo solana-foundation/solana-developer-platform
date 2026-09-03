@@ -12,7 +12,7 @@
 import type { SolanaCluster } from "@sdp/types";
 import { useMemo, useState } from "react";
 import { cashOptionsFor } from "./dvp-cash-options";
-import type { DvpCreateContext, DvpCreateOption } from "./dvp-create.data";
+import type { DvpCreateContext, DvpCreateOption, DvpWalletBalance } from "./dvp-create.data";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
 
@@ -28,7 +28,11 @@ function defaultExpiry(): string {
 
 export interface DvpCreateForm {
   asset: DvpLeg;
+  /** The wallet's balance of the asset mint, when SDP delivers that leg. */
+  assetBalance: DvpWalletBalance | null;
   cash: DvpLeg;
+  /** The wallet's balance of the cash mint, when SDP delivers that leg. */
+  cashBalance: DvpWalletBalance | null;
   cashOptions: DvpCreateOption[];
   counterparty: string;
   counterpartyLooksWrong: boolean;
@@ -97,9 +101,33 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     });
   }
 
+  // The balance belongs to the leg SDP actually delivers — that is the only one
+  // spent from this wallet. Showing it on the counterparty's leg would claim we
+  // hold what they owe.
+  const selectedWallet = context.wallets.find((wallet) => wallet.id === walletId) ?? null;
+  const sdpLeg = sdpSide === "a" ? asset : cash;
+  const sdpDecimals = sdpLeg.token?.decimals ?? sdpLeg.pasted.mint?.decimals ?? null;
+  // A wallet holding none of the mint has NO entry in `balances`. That is a
+  // balance of zero, not an unknown — and rendering it as unknown would drop the
+  // row and the over-balance guard with it, so switching to a wallet that cannot
+  // deliver the leg would silently look fine. Zero is only knowable once the
+  // wallet and the mint's scale are both settled; before that there is genuinely
+  // nothing to claim.
+  const sdpBalance =
+    selectedWallet && sdpLeg.mint && sdpDecimals !== null
+      ? (selectedWallet.balances.find((balance) => balance.mint === sdpLeg.mint) ?? {
+          mint: sdpLeg.mint,
+          amount: "0",
+          decimals: sdpDecimals,
+          symbol: null,
+        })
+      : null;
+
   return {
     asset,
+    assetBalance: sdpSide === "a" ? sdpBalance : null,
     cash,
+    cashBalance: sdpSide === "b" ? sdpBalance : null,
     cashOptions,
     counterparty,
     counterpartyLooksWrong,

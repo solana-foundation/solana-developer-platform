@@ -11,7 +11,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import type { DvpCreateContext } from "./dvp-create.data";
-import { AmountField, Field, MintField, SideChoice } from "./dvp-create-fields";
+import { AmountField, Field, MintField, ReferenceField, SideChoice } from "./dvp-create-fields";
 import { DvpCreateSummary } from "./dvp-create-summary";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
@@ -143,7 +143,12 @@ export function DvpCreateWorkspace({
                     placeholder={PLACEHOLDER_ASSET_MINT}
                   />
                   <AmountField
-                    decimals={form.asset.token?.decimals ?? null}
+                    balance={form.assetBalance}
+                    decimals={
+                      form.asset.decimalsKnown
+                        ? (form.asset.token?.decimals ?? form.asset.pasted.mint?.decimals ?? null)
+                        : null
+                    }
                     id="dvp-amount-a"
                     label={t("DashboardMarkets.dvp.fieldAmountA")}
                     onChange={form.asset.setAmount}
@@ -165,7 +170,12 @@ export function DvpCreateWorkspace({
                     placeholder={PLACEHOLDER_CASH_MINT}
                   />
                   <AmountField
-                    decimals={form.cash.token?.decimals ?? null}
+                    balance={form.cashBalance}
+                    decimals={
+                      form.cash.decimalsKnown
+                        ? (form.cash.token?.decimals ?? form.cash.pasted.mint?.decimals ?? null)
+                        : null
+                    }
                     id="dvp-amount-b"
                     label={t("DashboardMarkets.dvp.fieldAmountB")}
                     onChange={form.cash.setAmount}
@@ -218,19 +228,7 @@ export function DvpCreateWorkspace({
                   />
                 </Field>
 
-                <Field
-                  hint={t("DashboardMarkets.dvp.fieldRefHint")}
-                  htmlFor="dvp-ref"
-                  label={t("DashboardMarkets.dvp.fieldRef")}
-                >
-                  <Input
-                    id="dvp-ref"
-                    maxLength={64}
-                    onChange={(event) => form.setRefString(event.target.value)}
-                    placeholder={t("DashboardMarkets.dvp.fieldRefPlaceholder")}
-                    value={form.refString}
-                  />
-                </Field>
+                <ReferenceField id="dvp-ref" onChange={form.setRefString} value={form.refString} />
               </div>
             </Section>
           </div>

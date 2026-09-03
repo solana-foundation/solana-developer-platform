@@ -6,7 +6,15 @@ import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import { cancelTrade, createTrade, fundTrade, getTrade, listTrades, settleTrade } from "./handlers";
+import {
+  cancelTrade,
+  createTrade,
+  fundTrade,
+  getTrade,
+  inspectMint,
+  listTrades,
+  settleTrade,
+} from "./handlers";
 import { extractDvpTradeActionPolicyCandidate } from "./policy";
 import { createDvpTradeSchema } from "./schemas";
 
@@ -40,6 +48,10 @@ dvp.post(
   validateBody(createDvpTradeSchema),
   createTrade
 );
+// Reading a mint so the form can convert an amount. Read-only, and public
+// chain state about an address the caller already holds — but still behind
+// `payments:read` so it does not become an unauthenticated RPC proxy.
+dvp.get("/mints/:mint", requirePermissions("payments:read"), inspectMint);
 dvp.get("/trades", requirePermissions("payments:read"), listTrades);
 dvp.get("/trades/:tradeId", requirePermissions("payments:read"), getTrade);
 

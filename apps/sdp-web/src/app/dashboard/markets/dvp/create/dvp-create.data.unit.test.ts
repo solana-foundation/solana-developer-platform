@@ -22,6 +22,28 @@ const WALLET = {
   publicKey: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
   label: "Treasury",
 };
+const WALLET_WITH_BALANCES = {
+  ...WALLET,
+  balances: [
+    {
+      mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+      amount: "25000000000",
+      decimals: 6,
+      token: "ATD",
+    },
+    // The API falls back to the raw mint when it has no symbol. That is an
+    // address, not a label, and repeating it would read as "25,000 ns7Y4h...".
+    {
+      mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+      amount: "50",
+      decimals: 6,
+      token: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+    },
+    // Incomplete rows cannot drive an amount conversion, so they are dropped
+    // rather than defaulted to a scale nothing verified.
+    { mint: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y", amount: "1", token: "X" },
+  ],
+};
 const TOKEN = {
   id: "tok_1",
   mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
@@ -45,7 +67,7 @@ describe("fetchDvpCreateContext", () => {
 
     expect(context.error).toBeNull();
     expect(context.wallets).toEqual([
-      { id: "cwlt_1", address: WALLET.publicKey, label: "Treasury" },
+      { id: "cwlt_1", address: WALLET.publicKey, label: "Treasury", balances: [] },
     ]);
     expect(context.tokens[0]).toMatchObject({
       mint: TOKEN.mintAddress,
@@ -133,5 +155,29 @@ describe("fetchDvpCreateContext", () => {
     );
 
     expect(context.tokens[0].decimals).toBeNull();
+  });
+
+  it("carries wallet balances, so a leg can show what it spends from", async () => {
+    const context = await fetchDvpCreateContext(
+      request({
+        wallets: ok({ data: [WALLET_WITH_BALANCES] }),
+        tokens: ok({ data: [TOKEN] }),
+      })
+    );
+
+    expect(context.wallets[0].balances).toEqual([
+      {
+        mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        amount: "25000000000",
+        decimals: 6,
+        symbol: "ATD",
+      },
+      {
+        mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+        amount: "50",
+        decimals: 6,
+        symbol: null,
+      },
+    ]);
   });
 });

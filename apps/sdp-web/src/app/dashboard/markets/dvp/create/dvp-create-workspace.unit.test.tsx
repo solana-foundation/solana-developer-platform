@@ -21,7 +21,12 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 const context: DvpCreateContext = {
   error: null,
   wallets: [
-    { id: "cwlt_1", address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn", label: "Treasury" },
+    {
+      id: "cwlt_1",
+      address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+      label: "Treasury",
+      balances: [],
+    },
   ],
   tokens: [
     {
