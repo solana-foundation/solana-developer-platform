@@ -192,16 +192,22 @@ export function DvpCreateWorkspace({
             >
               <Field
                 hint={
-                  form.counterpartyLooksWrong
-                    ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
-                    : t("DashboardMarkets.dvp.fieldCounterpartyHint")
+                  form.counterpartyIsOwnLegWallet
+                    ? t("DashboardMarkets.dvp.fieldCounterpartyIsOwnWallet")
+                    : form.counterpartyLooksWrong
+                      ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
+                      : t("DashboardMarkets.dvp.fieldCounterpartyHint")
                 }
                 htmlFor="dvp-counterparty"
                 label={t("DashboardMarkets.dvp.fieldCounterparty")}
-                tone={form.counterpartyLooksWrong ? "danger" : "muted"}
+                tone={
+                  form.counterpartyLooksWrong || form.counterpartyIsOwnLegWallet
+                    ? "danger"
+                    : "muted"
+                }
               >
                 <Input
-                  aria-invalid={form.counterpartyLooksWrong}
+                  aria-invalid={form.counterpartyLooksWrong || form.counterpartyIsOwnLegWallet}
                   className="font-mono text-xs"
                   id="dvp-counterparty"
                   onChange={(event) => form.setCounterparty(event.target.value)}

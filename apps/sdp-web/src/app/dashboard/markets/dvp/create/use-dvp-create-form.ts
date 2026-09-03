@@ -36,6 +36,8 @@ export interface DvpCreateForm {
   cashOptions: DvpCreateOption[];
   counterparty: string;
   counterpartyLooksWrong: boolean;
+  /** The counterparty is the very wallet funding your leg — one party, two sides. */
+  counterpartyIsOwnLegWallet: boolean;
   error: string | null;
   expiry: string;
   ready: boolean;
@@ -71,10 +73,28 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   const counterpartyLooksWrong =
     trimmedCounterparty.length > 0 && !BASE58_ADDRESS.test(trimmedCounterparty);
 
+  /**
+   * The counterparty is the wallet funding your own leg.
+   *
+   * A trade needs two parties; this is one party on both sides of it, and the
+   * program refuses it outright. The API refuses it too — `userA and userB must
+   * differ` — but only after resolving the custody signer, so the round trip
+   * spends a provider call to return a sentence about `userA` to somebody who
+   * has never seen that word. Naming it here, against the address the wallet
+   * picker is already showing, costs nothing and says what is wrong.
+   *
+   * Deliberately only THIS wallet. Trading between two wallets you own is a
+   * real trade with two distinct parties, and blocking it would be wrong.
+   */
+  const counterpartyIsOwnLegWallet =
+    trimmedCounterparty.length > 0 &&
+    trimmedCounterparty === context.wallets.find((candidate) => candidate.id === walletId)?.address;
+
   const ready = Boolean(
     walletId &&
       trimmedCounterparty &&
       !counterpartyLooksWrong &&
+      !counterpartyIsOwnLegWallet &&
       asset.mint &&
       cash.mint &&
       asset.baseUnits &&
@@ -130,6 +150,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     cashBalance: sdpSide === "b" ? sdpBalance : null,
     cashOptions,
     counterparty,
+    counterpartyIsOwnLegWallet,
     counterpartyLooksWrong,
     error,
     expiry,

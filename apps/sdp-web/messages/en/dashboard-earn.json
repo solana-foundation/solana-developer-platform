@@ -381,6 +381,7 @@
       "txClose": "Settlement transaction",
       "sdpWalletLabel": "Funded from",
       "sdpWalletHint": "Your custody wallet — the one this trade spends from and delivers to.",
+      "fieldCounterpartyIsOwnWallet": "This is the wallet funding your own leg. A trade needs two parties, so pick a different address — another of your wallets is fine.",
       "counterpartyLabel": "Counterparty",
       "counterpartyHint": "The other side of this trade. They sign nothing here and hold no account with us.",
       "filterSearchLabel": "Search trades",
