@@ -58,7 +58,10 @@ export function SelectExistingOrganizationPanel() {
           </p>
         </div>
 
-        <div className="mt-6 space-y-2" aria-busy={switchingTo !== null || !isLoaded}>
+        <div
+          className="mt-6 space-y-2"
+          aria-busy={switchingTo !== null || !isLoaded || userMemberships.isFetching}
+        >
           {!isLoaded ? (
             <div className="flex items-center gap-2 rounded-2xl bg-fill-subtle px-4 py-3 text-sm text-tertiary">
               <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
@@ -108,6 +111,20 @@ export function SelectExistingOrganizationPanel() {
               </button>
             );
           })}
+
+          {isLoaded && userMemberships.hasNextPage ? (
+            <button
+              type="button"
+              disabled={switchingTo !== null || userMemberships.isFetching}
+              onClick={() => userMemberships.fetchNext()}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border-default px-4 py-3 text-sm font-medium transition-colors hover:border-border-strong hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
+            >
+              {userMemberships.isFetching ? (
+                <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
+              ) : null}
+              {t("Shared.SharedComponents.loadMore")}
+            </button>
+          ) : null}
         </div>
       </section>
     </main>

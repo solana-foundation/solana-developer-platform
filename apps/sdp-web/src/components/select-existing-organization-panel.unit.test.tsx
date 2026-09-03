@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
       },
     },
   ],
+  fetchNext: vi.fn(),
+  hasNextPage: false,
+  isFetching: false,
   refresh: vi.fn(),
   setActive: vi.fn(),
 }));
@@ -26,7 +29,12 @@ vi.mock("@clerk/nextjs", () => ({
   useOrganizationList: () => ({
     isLoaded: mocks.isLoaded,
     setActive: mocks.setActive,
-    userMemberships: { data: mocks.memberships },
+    userMemberships: {
+      data: mocks.memberships,
+      fetchNext: mocks.fetchNext,
+      hasNextPage: mocks.hasNextPage,
+      isFetching: mocks.isFetching,
+    },
   }),
 }));
 
@@ -55,6 +63,9 @@ describe("SelectExistingOrganizationPanel", () => {
         },
       },
     ];
+    mocks.fetchNext.mockReset();
+    mocks.hasNextPage = false;
+    mocks.isFetching = false;
     mocks.refresh.mockReset();
     mocks.setActive.mockReset();
     mocks.setActive.mockResolvedValue(undefined);
@@ -83,5 +94,15 @@ describe("SelectExistingOrganizationPanel", () => {
 
     expect(screen.getByText("No organizations yet.")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("loads more existing memberships when Clerk has another page", async () => {
+    const user = userEvent.setup();
+    mocks.hasNextPage = true;
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(mocks.fetchNext).toHaveBeenCalledOnce();
   });
 });
