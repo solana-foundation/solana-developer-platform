@@ -101,3 +101,24 @@ test("orders provider urls with the preferred default first and de-duplicates", 
   assert.equal(urls.length, 2);
   assert.ok(urls[1].startsWith("https://triton.example/"));
 });
+
+test("a stalled provider is cut by its per-attempt deadline and the next provider answers", async () => {
+  const { withRequestTimeout } = await import("./solana");
+  let stalledCalls = 0;
+  const stalled = ((request: { signal?: AbortSignal }) =>
+    new Promise((_resolve, reject) => {
+      stalledCalls += 1;
+      request.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    })) as unknown as RpcTransport;
+  const b = makeTransport(["ok"]);
+  const transport = createFailoverTransport(
+    [withRequestTimeout(stalled, 50), withRequestTimeout(b.transport, 50)],
+    { stickyKey: "t6" }
+  );
+
+  const result = await transport(request("getBalance"));
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(stalledCalls, 1);
+  assert.equal(b.calls, 1);
+});

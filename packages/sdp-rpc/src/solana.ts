@@ -125,7 +125,7 @@ export type SolanaRpc = ReturnType<typeof createSolanaRpc>;
  * indefinitely — deadlines like `confirmTransaction`'s `timeoutMs` are only
  * checked between polls, so a single hung fetch defeats them.
  */
-function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
+export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     if (config.signal) {
       // The caller manages cancellation; don't override it.
@@ -222,10 +222,14 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
     // Preserves the single-URL error message callers have always seen.
     getSolanaConfig(env);
   }
-  const transport = createFailoverTransport(urls.map(buildTransport), {
-    stickyKey: urls.join("|"),
-  });
-  return createRpcFromTransport(transport, { requestTimeoutMs: timeoutMs });
+  // The deadline sits on each provider attempt, not around the whole failover:
+  // an outer deadline lets one stalled provider consume the entire budget and
+  // hands every later attempt an already-aborted signal. A stall costs at most
+  // timeoutMs per provider before the hop.
+  const transports = urls.map((url) => withRequestTimeout(buildTransport(url), timeoutMs));
+  return createSolanaRpcFromTransport(
+    createFailoverTransport(transports, { stickyKey: urls.join("|") })
+  );
 }
 
 /** Build the standard SDP Solana client around a caller-owned egress transport. */
