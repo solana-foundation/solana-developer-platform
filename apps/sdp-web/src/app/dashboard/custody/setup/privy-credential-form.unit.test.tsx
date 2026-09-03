@@ -208,7 +208,7 @@ describe("PrivyCredentialForm", () => {
     expect(screen.queryByLabelText("Privy app secret")).toBeNull();
     expect(onLock).toHaveBeenLastCalledWith(false);
 
-    await user.click(screen.getByRole("button", { name: "Check again" }));
+    await user.click(await screen.findByRole("button", { name: "Check again" }));
     await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));
     await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
     await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
