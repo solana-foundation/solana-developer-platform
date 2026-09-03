@@ -91,7 +91,12 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     trimmedCounterparty === context.wallets.find((candidate) => candidate.id === walletId)?.address;
 
   const ready = Boolean(
-    walletId &&
+    // Never while a leg's scale is still being read. The amount would be
+    // encoded by whatever decimals happen to be around, which during a lookup
+    // is either the previous mint's or none at all.
+    !asset.pendingLookup &&
+      !cash.pendingLookup &&
+      walletId &&
       trimmedCounterparty &&
       !counterpartyLooksWrong &&
       !counterpartyIsOwnLegWallet &&

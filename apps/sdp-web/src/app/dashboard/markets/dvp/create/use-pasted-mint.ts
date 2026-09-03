@@ -33,6 +33,16 @@ export interface PastedMint {
 
 export interface PastedMintState {
   mint: PastedMint | null;
+  /**
+   * The address this state describes.
+   *
+   * Carried so a reader can tell whether the metadata belongs to the mint
+   * currently typed. Without it, an answer for a PREVIOUS address is
+   * indistinguishable from an answer for this one — and the difference is the
+   * decimals an amount gets scaled by, which is the difference between sending
+   * 1,000 tokens and sending 1,000,000,000 of them.
+   */
+  address: string;
   loading: boolean;
   /**
    * Set when the address resolved to nothing readable. Distinct from `loading`
@@ -44,6 +54,7 @@ export interface PastedMintState {
 export function usePastedMint(address: string): PastedMintState {
   const [state, setState] = useState<PastedMintState>({
     mint: null,
+    address: "",
     loading: false,
     notFound: false,
   });
@@ -51,15 +62,21 @@ export function usePastedMint(address: string): PastedMintState {
   useEffect(() => {
     const trimmed = address.trim();
     if (trimmed.length < MIN_ADDRESS_LENGTH) {
-      setState({ mint: null, loading: false, notFound: false });
+      setState({ mint: null, address: trimmed, loading: false, notFound: false });
       return;
     }
+
+    // Invalidated HERE, not inside the debounce. The old answer describes a
+    // different mint the instant the address changes, and leaving it in place
+    // for the debounce window left the amount being scaled by the previous
+    // mint's decimals. Debouncing is about not spamming the request; it was
+    // never a reason to keep answering with the wrong token.
+    setState({ mint: null, address: trimmed, loading: true, notFound: false });
 
     // Aborted on every change, so a slow lookup for an address that has since
     // been edited can never land after a newer one and overwrite it.
     const controller = new AbortController();
     const timer = setTimeout(async () => {
-      setState({ mint: null, loading: true, notFound: false });
       try {
         const response = await fetch(
           `/api/dashboard/markets/dvp/mints/${encodeURIComponent(trimmed)}`,
@@ -69,13 +86,19 @@ export function usePastedMint(address: string): PastedMintState {
           // A 404 is the ordinary answer for a mistyped address, not an error
           // worth shouting about. Anything else is also non-fatal here: the
           // field falls back to base units, which is what it did before.
-          setState({ mint: null, loading: false, notFound: response.status === 404 });
+          setState({
+            mint: null,
+            address: trimmed,
+            loading: false,
+            notFound: response.status === 404,
+          });
           return;
         }
         const body = (await response.json()) as { data?: { mint?: PastedMint } };
         const mint = body.data?.mint;
         setState({
           mint: mint ?? null,
+          address: trimmed,
           loading: false,
           notFound: !mint,
         });
@@ -83,7 +106,7 @@ export function usePastedMint(address: string): PastedMintState {
         if ((error as Error)?.name === "AbortError") {
           return;
         }
-        setState({ mint: null, loading: false, notFound: false });
+        setState({ mint: null, address: trimmed, loading: false, notFound: false });
       }
     }, DEBOUNCE_MS);
 

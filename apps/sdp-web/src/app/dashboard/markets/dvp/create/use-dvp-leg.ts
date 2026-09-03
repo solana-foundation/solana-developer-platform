@@ -44,6 +44,16 @@ export interface DvpLeg {
    * knows the scale.
    */
   decimalsKnown: boolean;
+  /**
+   * A lookup is in flight for the address currently typed, so the scale of this
+   * leg is not yet known and no reading of the amount is trustworthy.
+   *
+   * Submit must be blocked on this. Both readings are wrong while it is true:
+   * the old metadata scales by the previous mint's decimals, and no metadata
+   * falls back to treating a human amount as base units. Either sends a
+   * different quantity than the one typed.
+   */
+  pendingLookup: boolean;
 }
 
 export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
@@ -62,7 +72,15 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
   // units on the leg carrying the security. Until it resolves the field still
   // takes base units rather than guessing a scale and moving the wrong
   // quantity — the fallback is unchanged, it is just far rarer now.
-  const decimals = token?.decimals ?? pasted.mint?.decimals ?? null;
+  // Only metadata that belongs to the address currently typed. A resolved
+  // answer for a PREVIOUS address is not a slightly stale answer, it is a
+  // different token, and reading its decimals scales the amount by the wrong
+  // power of ten.
+  const pastedMatchesInput = pasted.address === custom.trim();
+  const pastedMint = pastedMatchesInput ? pasted.mint : null;
+  const pendingLookup = token === null && (pasted.loading || !pastedMatchesInput);
+
+  const decimals = token?.decimals ?? pastedMint?.decimals ?? null;
   const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
   const baseUnits = resolved ? (resolved.ok ? resolved.baseUnits : null) : amount.trim() || null;
 
@@ -72,6 +90,7 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
     choice,
     custom,
     decimalsKnown: decimals != null,
+    pendingLookup,
     mint: token?.mint ?? custom.trim(),
     pasted,
     setAmount,
@@ -79,7 +98,7 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
     setCustom,
     // A pasted mint's own metadata beats the raw address, so a resolved paste
     // reads as its symbol everywhere the summary names the leg.
-    symbol: token?.label ?? pasted.mint?.symbol ?? pasted.mint?.name ?? "",
+    symbol: token?.label ?? pastedMint?.symbol ?? pastedMint?.name ?? "",
     token,
   };
 }
