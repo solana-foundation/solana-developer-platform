@@ -1,8 +1,14 @@
 "use client";
 
 import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
-import { SegmentedControl } from "@solana/design-system/segmented-control";
-import { ChevronRight, VenetianMaskIcon } from "lucide-react";
+import {
+  ArrowLeftRightIcon,
+  ChevronRight,
+  CircleDotDashedIcon,
+  ShieldCheckIcon,
+  VenetianMaskIcon,
+  WalletIcon,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
@@ -19,36 +25,15 @@ import { cn } from "@/lib/utils";
 import {
   type ConnectionState,
   connectionState,
-  type FamilyFilter,
   type FilterableIntegration,
   INTEGRATION_FAMILIES,
   type IntegrationFamily,
-  matchesFilters,
-  STATUS_FILTERS,
-  type StatusFilter,
 } from "./integrations-filter";
 import type { IntegrationEntry, IntegrationStatus, PrivacyProviderId } from "./integrations-status";
+import { DASHBOARD_INTEGRATIONS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 
 type Translate = ReturnType<typeof useTranslations>;
 const EMPTY_PRIVACY: IntegrationEntry<PrivacyProviderId>[] = [];
-
-/**
- * What each chip asks for. Deliberately coarser than the pill wording
- * below: a chip names a group, so "Connected" covers every way a provider can
- * be on rather than only the one this organization switched on itself.
- */
-function filterLabel(filter: StatusFilter, t: Translate): string {
-  switch (filter) {
-    case "all":
-      return t("Shared.integrations.filterAll");
-    case "connected":
-      return t("Shared.integrations.statusActive");
-    case "on_request":
-      return t("Shared.integrations.statusOnRequest");
-    case "not_connected":
-      return t("Shared.integrations.statusNotConnected");
-  }
-}
 
 /**
  * The pill says precisely what this provider is; the chips group. A chip is a
@@ -189,12 +174,63 @@ function familyDescriptionKey(family: IntegrationFamily) {
   )[family];
 }
 
+const FAMILY_ICONS = {
+  custody: WalletIcon,
+  rpc: CircleDotDashedIcon,
+  ramps: ArrowLeftRightIcon,
+  compliance: ShieldCheckIcon,
+  privacy: VenetianMaskIcon,
+} satisfies Record<IntegrationFamily, typeof WalletIcon>;
+
+function IntegrationsHub({
+  families,
+  t,
+}: {
+  families: readonly IntegrationFamily[];
+  t: Translate;
+}) {
+  return (
+    <section
+      className="min-w-0 rounded-lg border border-border-default bg-surface-raised p-4"
+      data-integrations-hub="true"
+    >
+      <h2 className="text-base font-semibold tracking-[-0.01em] text-primary">
+        {t("Shared.integrations.filterAllFamilies")}
+      </h2>
+      <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-3">
+        {families.map((integrationFamily) => {
+          const Icon = FAMILY_ICONS[integrationFamily];
+          return (
+            <Link
+              key={integrationFamily}
+              href={DASHBOARD_INTEGRATIONS_SUBNAV_HREFS[integrationFamily]}
+              data-integration-hub-action={integrationFamily}
+              className="group flex min-h-36 min-w-0 flex-col items-center justify-center rounded-md border border-border-default px-3 py-4 text-center transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none xl:min-h-44"
+            >
+              <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary transition-colors group-hover:bg-fill-strong">
+                <Icon className="size-5" aria-hidden="true" />
+              </span>
+              <span className="mt-3 text-base font-semibold text-primary">
+                {t(familyLabelKey(integrationFamily))}
+              </span>
+              <span className="mt-1 text-sm leading-5 text-secondary">
+                {t(familyDescriptionKey(integrationFamily))}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function IntegrationsCatalog({
   custody,
   rpc,
   ramps,
   compliance,
   privacy = EMPTY_PRIVACY,
+  enabledFamilies = INTEGRATION_FAMILIES,
 }: {
   /** `null` when the connected-provider lookup failed: state unknown, not empty. */
   custody: CustodyProviderAvailability[] | null;
@@ -202,17 +238,20 @@ export function IntegrationsCatalog({
   ramps: IntegrationEntry<RampProviderId>[];
   compliance: IntegrationEntry<ComplianceProviderId>[];
   privacy?: IntegrationEntry<PrivacyProviderId>[];
+  /** Mirrors the sidebar: a disabled module does not get a hub entry or tab. */
+  enabledFamilies?: readonly IntegrationFamily[];
 }) {
   const t = useTranslations();
-  // The family axis lives in the Integrations sidebar submenu (`?tab=`);
-  // unknown tab values fall back to every family. Status and search stay
-  // in-page as the secondary filter row.
+  // The family axis lives in the Integrations sidebar submenu (`?tab=`).
+  // Unknown and disabled values fall back to the hub rather than exposing an
+  // integration category the organization cannot use.
   const urlTab = useDashboardTab();
-  const family: FamilyFilter =
-    urlTab !== null && (INTEGRATION_FAMILIES as string[]).includes(urlTab)
+  const family: IntegrationFamily | "all" =
+    urlTab !== null &&
+    (INTEGRATION_FAMILIES as string[]).includes(urlTab) &&
+    enabledFamilies.includes(urlTab as IntegrationFamily)
       ? (urlTab as IntegrationFamily)
       : "all";
-  const [status, setStatus] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
 
   const rows = useMemo<IntegrationRowModel[]>(() => {
@@ -264,49 +303,31 @@ export function IntegrationsCatalog({
     return [...custodyRows, ...rpcRows, ...rampRows, ...complianceRows, ...privacyRows];
   }, [custody, rpc, ramps, compliance, privacy, t]);
 
-  const visible = rows.filter((row) => matchesFilters(row, { family, status, query }));
-  const clearFilters = () => {
-    setStatus("all");
-    setQuery("");
-  };
+  const visible = rows.filter(
+    (row) =>
+      row.family === family &&
+      (query.trim().length === 0 ||
+        row.label.toLowerCase().includes(query.trim().toLowerCase()) ||
+        row.provider.toLowerCase().includes(query.trim().toLowerCase()))
+  );
 
   return (
     <div className="w-full space-y-6 px-4 py-5 md:px-6">
-      {/* No lead-in paragraph: each section explains itself, and the sidebar
-          submenu already frames the page — content starts at the toolbar. The
-          status group is one contained segmented control (the secondary pill
-          tabs), so it can never shed an orphaned pill onto its own wrap line;
-          on narrow viewports it scrolls within its strip instead. */}
-      <div
-        className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"
-        data-integrations-filters="true"
-      >
-        <div
-          className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] md:-mx-6 md:px-6 xl:mx-0 xl:px-0"
-          data-integrations-status-pills="true"
-        >
-          <SegmentedControl
-            aria-label={t("Shared.integrations.filterByStatus")}
-            items={STATUS_FILTERS.map((option) => ({
-              value: option,
-              label: filterLabel(option, t),
-            }))}
-            value={status}
-            // Re-clicking the active segment can emit an empty value from the
-            // underlying toggle group; a status filter always has a selection.
-            onValueChange={(value) => value && setStatus(value as StatusFilter)}
-          />
-        </div>
-        <div className="w-full max-w-xs xl:w-64 xl:shrink-0">
-          <SearchInput
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            placeholder={t("Shared.integrations.searchPlaceholder")}
-          />
-        </div>
-      </div>
+      {family === "all" ? <IntegrationsHub families={enabledFamilies} t={t} /> : null}
 
-      {visible.length === 0 && custody !== null ? (
+      {family !== "all" ? (
+        <div className="flex justify-end">
+          <div className="w-full max-w-xs">
+            <SearchInput
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder={t("Shared.integrations.searchPlaceholder")}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {family !== "all" && visible.length === 0 && custody !== null ? (
         <div
           className="rounded-2xl border border-border-default bg-surface-raised px-6 py-10 text-center"
           data-integrations-empty="true"
@@ -317,54 +338,37 @@ export function IntegrationsCatalog({
           <p className="mt-1 text-sm leading-6 text-tertiary">
             {t("Shared.integrations.emptyBody")}
           </p>
-          <Button variant="secondary" className="mt-5" onClick={clearFilters}>
+          <Button variant="secondary" className="mt-5" onClick={() => setQuery("")}>
             {t("Shared.integrations.clearFilters")}
           </Button>
         </div>
       ) : null}
 
-      {INTEGRATION_FAMILIES.map((sectionFamily) => {
-        const familyRows = visible.filter((row) => row.family === sectionFamily);
-        // The unknown-state alert belongs to the custody section, so it only
-        // renders where that section is in view — not under another tab.
-        const custodyUnknown =
-          sectionFamily === "custody" &&
-          custody === null &&
-          (family === "all" || family === "custody");
-        if (familyRows.length === 0 && !custodyUnknown) {
-          return null;
-        }
+      {family !== "all" ? (
+        <section className="space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-lg font-medium tracking-tight text-primary">
+              {t(familyLabelKey(family))}
+            </h2>
+            <p className="text-sm leading-5 text-tertiary">{t(familyDescriptionKey(family))}</p>
+          </div>
 
-        return (
-          <section key={sectionFamily} className="space-y-4">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <div className="space-y-1">
-                <h2 className="text-lg font-medium tracking-tight text-primary">
-                  {t(familyLabelKey(sectionFamily))}
-                </h2>
-                <p className="text-sm leading-5 text-tertiary">
-                  {t(familyDescriptionKey(sectionFamily))}
-                </p>
-              </div>
+          {family === "custody" && custody === null ? (
+            <div
+              role="alert"
+              className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
+            >
+              {t("Shared.integrations.custodyUnavailable")}
             </div>
+          ) : null}
 
-            {custodyUnknown ? (
-              <div
-                role="alert"
-                className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
-              >
-                {t("Shared.integrations.custodyUnavailable")}
-              </div>
-            ) : null}
-
-            <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {familyRows.map((row) => (
-                <IntegrationCard key={`${row.family}:${row.provider}`} row={row} t={t} />
-              ))}
-            </ul>
-          </section>
-        );
-      })}
+          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {visible.map((row) => (
+              <IntegrationCard key={`${row.family}:${row.provider}`} row={row} t={t} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

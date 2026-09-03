@@ -143,6 +143,13 @@ export default async function IntegrationsPage() {
         active: privateChannelsActive,
         label: t("Shared.dashboardShell.privateChannels"),
       })}
+      enabledFamilies={[
+        ...(custodyEnabled ? (["custody"] as const) : []),
+        "rpc",
+        ...(paymentsEnabled ? (["ramps"] as const) : []),
+        ...(policiesEnabled ? (["compliance"] as const) : []),
+        ...(privateChannelsEnabled ? (["privacy"] as const) : []),
+      ]}
     />
   );
 }
