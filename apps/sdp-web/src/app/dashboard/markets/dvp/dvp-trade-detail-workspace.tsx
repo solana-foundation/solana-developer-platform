@@ -221,7 +221,12 @@ function LegCard({
 
   return (
     <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-      <div className="flex items-baseline justify-between gap-3">
+      {/* Centred, not baseline-aligned. A flex row takes its baseline from its
+          first flex item, and this heading's first item is an SVG — whose
+          baseline is its bottom edge. Aligning the row on that pushed the icon
+          and the title up off the line they share with the holder beside them,
+          which is what made the status icon look hung above its own heading. */}
+      <div className="flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-1.5 font-medium text-primary text-sm">
           <status.Icon aria-hidden className={cn("h-4 w-4 shrink-0", status.tone)} />
           {title}

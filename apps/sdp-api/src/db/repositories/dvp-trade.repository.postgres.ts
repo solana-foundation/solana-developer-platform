@@ -64,6 +64,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     status: row.status as DvpTradeStatus,
     observedAt: (row.observed_at as string | null) ?? null,
     sdpLegFundingSignature: (row.sdp_leg_funding_signature as string | null) ?? null,
+    sdpLegFundingTx: (row.sdp_leg_funding_tx as string | null) ?? null,
     idempotencyKey: (row.idempotency_key as string | null) ?? null,
     idempotencyFingerprint: (row.idempotency_fingerprint as string | null) ?? null,
     createSignature: (row.create_signature as string | null) ?? null,
@@ -84,7 +85,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
-         status, observed_at, sdp_leg_funding_signature,
+         status, observed_at, sdp_leg_funding_signature, sdp_leg_funding_tx,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
          funding_claim_expiry_height,
@@ -330,6 +331,19 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
             WHERE id = ? AND sdp_leg_funding_signature = ?`
         )
         .bind(id, signature)
+        .run();
+    },
+
+    async recordLegFundingTx(id: string, signature: string) {
+      // Only ever written, never cleared — the claim is what gets released, and
+      // conflating the two is what made a funded leg look unfunded.
+      await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET sdp_leg_funding_tx = ?, updated_at = sdp_iso_now()
+            WHERE id = ?`
+        )
+        .bind(signature, id)
         .run();
     },
 

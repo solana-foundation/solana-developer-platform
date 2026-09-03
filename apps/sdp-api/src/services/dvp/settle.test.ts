@@ -75,6 +75,7 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     status: "funded",
     observedAt: null,
     sdpLegFundingSignature: null,
+    sdpLegFundingTx: null,
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,

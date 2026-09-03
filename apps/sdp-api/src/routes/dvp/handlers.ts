@@ -193,8 +193,15 @@ function toTradeResponse(row: DvpTradeRow, sdpWallet?: SdpWalletRef) {
     createSignature: row.createSignature,
     /** The transaction that closed it, so settlement is verifiable after the fact. */
     closeSignature: row.closeSignature,
-    /** What moved SDP's leg into escrow. */
-    fundingSignature: row.sdpLegFundingSignature,
+    /**
+     * What moved SDP's leg into escrow.
+     *
+     * The receipt, falling back to a live claim so a funding still in flight
+     * links to the transaction it is waiting on. Reading the claim ALONE — as
+     * this did — meant the link showed for the minute the claim lived and then
+     * disappeared from a leg that had funded successfully.
+     */
+    fundingSignature: row.sdpLegFundingTx ?? row.sdpLegFundingSignature,
     observedAt: row.observedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

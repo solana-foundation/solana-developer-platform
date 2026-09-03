@@ -70,8 +70,22 @@ export interface DvpTradeRow {
 
   status: DvpTradeStatus;
   observedAt: string | null;
-  /** Signature of the transfer that funded SDP's leg, once one is claimed. */
+  /**
+   * The LOCK held while SDP's leg is being funded, not a record of the funding.
+   *
+   * It is set before broadcasting so two overlapping requests cannot both send,
+   * and cleared on a released or expired claim — so it is NULL on a leg that
+   * funded perfectly. Read `sdpLegFundingTx` for the transaction.
+   */
   sdpLegFundingSignature: string | null;
+  /**
+   * The transfer that funded SDP's leg, kept permanently.
+   *
+   * Separate from the claim above because a receipt and a lock want opposite
+   * lifetimes: the lock has to disappear for the leg to be fundable again, and
+   * the receipt has to survive for the page to show what happened.
+   */
+  sdpLegFundingTx: string | null;
   /** Caller-supplied Idempotency-Key, when one was sent. */
   idempotencyKey: string | null;
   /** Hash of the terms that key was first used with. */
@@ -113,6 +127,8 @@ export type DvpTradeInsert = Omit<
   | "escrowAFrozen"
   | "escrowBFrozen"
   | "sdpLegFundingSignature"
+  // Written by `recordLegFundingTx` once a leg is actually funded.
+  | "sdpLegFundingTx"
   | "fundingClaimExpiryHeight"
 >;
 
@@ -199,6 +215,14 @@ export interface DvpTradeRepository {
   claimLegFunding(id: string, signature: string, expiryHeight: string): Promise<boolean>;
   /** Releases a claim whose broadcast was definitively rejected. */
   releaseLegFunding(id: string, signature: string): Promise<void>;
+  /**
+   * Records the transfer that funded SDP's leg, permanently.
+   *
+   * Written once the transaction is on the wire, so it outlives the claim that
+   * guarded the send. Without it a funded leg's only evidence is a changed
+   * number, and nothing on the page points at the transaction that moved it.
+   */
+  recordLegFundingTx(id: string, signature: string): Promise<void>;
   /**
    * Releases funding claims that can no longer be live, and reports how many.
    *

@@ -19,6 +19,7 @@ const readEscrowState = vi.hoisted(() => vi.fn());
 const readMintDecimals = vi.hoisted(() => vi.fn());
 const claimLegFunding = vi.hoisted(() => vi.fn());
 const releaseLegFunding = vi.hoisted(() => vi.fn());
+const recordLegFundingTx = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/policy/approved-operation-replay", () => ({
@@ -27,7 +28,7 @@ vi.mock("@/services/policy/approved-operation-replay", () => ({
 vi.mock("./read-chain", () => ({ readEscrowState }));
 vi.mock("@/db/repositories", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/repositories")>()),
-  createDvpTradeRepository: () => ({ claimLegFunding, releaseLegFunding }),
+  createDvpTradeRepository: () => ({ claimLegFunding, releaseLegFunding, recordLegFundingTx }),
 }));
 vi.mock("./mints", () => ({ readMintDecimals }));
 vi.mock("@sdp/rpc/solana", () => ({
@@ -75,6 +76,7 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     status: "created",
     observedAt: null,
     sdpLegFundingSignature: null,
+    sdpLegFundingTx: null,
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,
@@ -103,6 +105,7 @@ describe("fundDvpTradeLeg", () => {
     sendTransaction.mockResolvedValue("sig");
     claimLegFunding.mockResolvedValue(true);
     releaseLegFunding.mockResolvedValue(undefined);
+    recordLegFundingTx.mockResolvedValue(undefined);
   });
 
   it("moves SDP's leg into its escrow", async () => {
@@ -138,6 +141,24 @@ describe("fundDvpTradeLeg", () => {
   // refunds it, and on a transfer-hook mint that refund can revert the whole
   // settlement. This endpoint must not manufacture the hazard the trade page
   // exists to warn about.
+  // The claim is a lock with a deliberately short life: it is released on a
+  // rejected broadcast and swept once its blockhash expires, so a leg that
+  // funded correctly ends up holding none. Reading it as the funding record —
+  // which the trade response did — showed a transaction link for about a minute
+  // and then dropped it from a leg that had funded successfully.
+  it("records the funding transaction separately from the claim", async () => {
+    const result = await fundDvpTradeLeg(context, trade());
+
+    expect(recordLegFundingTx).toHaveBeenCalledWith(trade().id, result.signature);
+  });
+
+  it("records no receipt when the send failed", async () => {
+    sendTransaction.mockRejectedValue(new Error("socket hang up"));
+
+    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow("socket hang up");
+    expect(recordLegFundingTx).not.toHaveBeenCalled();
+  });
+
   it("refuses a leg that already holds its target", async () => {
     readEscrowState.mockResolvedValue({ amount: 1000n, frozen: false });
 

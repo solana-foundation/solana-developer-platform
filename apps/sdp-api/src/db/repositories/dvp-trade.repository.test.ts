@@ -436,4 +436,49 @@ describe("DvpTradeRepository (postgres)", () => {
       await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
     });
   });
+
+  /**
+   * The receipt for the transfer that funded SDP's leg.
+   *
+   * The claim above cannot serve as this. Its whole purpose is to disappear —
+   * released on a rejected broadcast, swept once its blockhash expires — so a
+   * leg that funded correctly holds no claim at all. Reading it as the funding
+   * record left a funded leg with no transaction to point at, and a leg with no
+   * transaction reads as a leg that never funded.
+   */
+  describe("recordLegFundingTx", () => {
+    it("keeps the transaction after the claim that guarded it is swept", async () => {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      await repo.claimLegFunding(created.id, "sig_fund", "100");
+      await repo.recordLegFundingTx(created.id, "sig_fund");
+
+      await repo.releaseExpiredFundingClaims(200n);
+
+      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+        sdpLegFundingSignature: null,
+        sdpLegFundingTx: "sig_fund",
+      });
+    });
+
+    // The leg has to be fundable again after a sweep, and the receipt must not
+    // be what stops it.
+    it("does not hold the claim open", async () => {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      await repo.claimLegFunding(created.id, "sig_fund", "100");
+      await repo.recordLegFundingTx(created.id, "sig_fund");
+      await repo.releaseExpiredFundingClaims(200n);
+
+      await expect(repo.claimLegFunding(created.id, "sig_retry", "400")).resolves.toBe(true);
+    });
+
+    it("is null on a trade whose leg was never funded", async () => {
+      const created = await repo.create(tradeInsert());
+
+      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+        sdpLegFundingTx: null,
+      });
+    });
+  });
 });
