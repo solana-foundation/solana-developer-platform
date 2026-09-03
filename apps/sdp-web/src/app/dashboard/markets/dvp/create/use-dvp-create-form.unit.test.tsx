@@ -9,7 +9,7 @@
  * call, because the bug worth catching is the wiring.
  */
 
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -119,17 +119,31 @@ describe("useDvpCreateForm", () => {
     expect(result.current.ready).toBe(true);
   });
 
-  // With no issued tokens the asset leg falls back to a pasted mint, and the
-  // form has to stay usable rather than becoming permanently un-submittable.
-  it("resolves a pasted mint when the organization has issued nothing", () => {
+  /**
+   * With no issued tokens the asset leg falls back to a pasted mint, and the
+   * form has to stay usable rather than becoming permanently un-submittable.
+   *
+   * It must NOT be usable while the lookup is still running, which is what this
+   * previously asserted: the mint's scale is unknown in that window, so the
+   * amount would be encoded either by a previous mint's decimals or as raw base
+   * units, and both send a different quantity than the one typed. Once the
+   * lookup settles with nothing, the documented base-unit fallback applies and
+   * the form is submittable again.
+   */
+  it("holds a pasted mint un-submittable until its lookup settles", async () => {
     const { result } = setup({ ...context, tokens: [] });
 
     act(() => result.current.asset.setCustom("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"));
     act(() => result.current.setCounterparty(COUNTERPARTY));
-    // No decimals are known for a pasted mint, so the field takes base units
-    // directly rather than guessing a scale.
     act(() => result.current.asset.setAmount("1000"));
     act(() => result.current.cash.setAmount("25"));
+
+    expect(result.current.asset.pendingLookup).toBe(true);
+    expect(result.current.ready).toBe(false);
+
+    // No decimals came back, so the field takes base units directly rather than
+    // guessing a scale — the fallback this test was always about.
+    await waitFor(() => expect(result.current.asset.pendingLookup).toBe(false));
 
     expect(result.current.asset.baseUnits).toBe("1000");
     expect(result.current.ready).toBe(true);
