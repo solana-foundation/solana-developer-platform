@@ -95,41 +95,15 @@ describe("buildPaymentTransferFingerprint", () => {
     );
   });
 
-  it("differs when private transfer options differ", () => {
-    const base = {
-      sourceAddress: "Src",
-      destinationAddress: "Dst",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer_confidential",
-    };
-    expect(
-      buildPaymentTransferFingerprint({ ...base, privateTransfer: { magicBlock: { split: 2 } } })
-    ).not.toBe(
-      buildPaymentTransferFingerprint({ ...base, privateTransfer: { magicBlock: { split: 3 } } })
-    );
-  });
-
-  it("is stable for identical private transfer options regardless of key order", () => {
-    const base = {
-      sourceAddress: "Src",
-      destinationAddress: "Dst",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer_confidential",
-    };
-    expect(
-      buildPaymentTransferFingerprint({
-        ...base,
-        privateTransfer: { magicBlock: { split: 2, gasless: true } },
-      })
-    ).toBe(
-      buildPaymentTransferFingerprint({
-        ...base,
-        privateTransfer: { magicBlock: { gasless: true, split: 2 } },
-      })
+  /**
+   * Pins the exact serialization, not just its stability. Removing the vestigial
+   * `privateTransfer` key would silently change every stored fingerprint, so an
+   * Idempotency-Key recorded before the deploy would stop matching its own row —
+   * and the retry it was meant to absorb would execute a second transfer.
+   */
+  it("keeps the byte-exact serialization recorded rows were fingerprinted with", () => {
+    expect(buildPaymentTransferFingerprint(base)).toBe(
+      '{"amount":"1","destinationAddress":"Dst","memo":null,"privateTransfer":null,"scope":"payment_transfer","sourceAddress":"Src","token":"SOL","type":"transfer"}'
     );
   });
 });

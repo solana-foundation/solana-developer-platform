@@ -213,10 +213,6 @@ export interface Env {
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 
-  // MagicBlock private payments configuration
-  MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
-  MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
-
   // Recurring payment collection controls
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
