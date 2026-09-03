@@ -1431,6 +1431,91 @@ describe("Payments routes — ramps", () => {
     fetchSpy.mockRestore();
   });
 
+  it("polls the Hercle payout account on the requirements GET while the verified business waits for the rail", async () => {
+    const accountId = "6f1b2c3d-0000-4000-8000-000000000005";
+    const counterpartyId = await seedHercleCounterparty({
+      externalId: "hercle_customer_rail_pending",
+      accountId,
+      verificationStatus: "ready",
+      payoutAccountStatus: "pending",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(200, {
+        payoutAccountId: "payee_address_hercle_customer_rail_pending",
+        currency: "EUR",
+        iban: "DE89 **** **** **** **30 00",
+        bic: "COBADEFFXXX",
+        accountHolder: "Acme Ltd",
+        status: "pending",
+        registeredAt: "2026-09-03T14:00:00.0000000Z",
+      })
+    );
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements?provider=hercle&direction=offramp&cryptoToken=USDC&fiatCurrency=EUR`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({
+      provider: "hercle",
+      direction: "offramp",
+      status: "funding_account_provisioning",
+    });
+    // The verdict is already in, so only the rail is asked.
+    expect(fetchSpy.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      `/partner/v1/accounts/${accountId}/payout-account`,
+    ]);
+
+    fetchSpy.mockRestore();
+  });
+
+  it("flips the Hercle counterparty to ready on the requirements GET once the rail activates the payout account", async () => {
+    const accountId = "6f1b2c3d-0000-4000-8000-000000000006";
+    const counterpartyId = await seedHercleCounterparty({
+      externalId: "hercle_customer_rail_active",
+      accountId,
+      verificationStatus: "ready",
+      payoutAccountStatus: "pending",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(200, {
+        payoutAccountId: "payee_address_hercle_customer_rail_active",
+        currency: "EUR",
+        iban: "DE89 **** **** **** **30 00",
+        bic: "COBADEFFXXX",
+        accountHolder: "Acme Ltd",
+        status: "active",
+        registeredAt: "2026-09-03T14:00:00.0000000Z",
+      })
+    );
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements?provider=hercle&direction=offramp&cryptoToken=USDC&fiatCurrency=EUR`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({
+      provider: "hercle",
+      direction: "offramp",
+      status: "ready",
+    });
+    // Hercle sends no webhook for this transition, so the row is what remembers it.
+    const row = await getDb(env)
+      .prepare(
+        `SELECT provider_status FROM counterparty_provider_accounts
+          WHERE counterparty_id = ? AND provider = 'hercle' AND kind = 'payout_account'`
+      )
+      .bind(counterpartyId)
+      .first<{ provider_status: string }>();
+    expect(row?.provider_status).toBe("active");
+
+    fetchSpy.mockRestore();
+  });
+
   it("re-collects only the bank details for a Hercle account provisioned before the payout account existed", async () => {
     const counterpartyId = await seedHercleCounterparty({
       externalId: "hercle_customer_legacy",

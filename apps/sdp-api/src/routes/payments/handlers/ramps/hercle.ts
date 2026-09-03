@@ -276,7 +276,9 @@ export async function advanceHercleCounterparty(
 /**
  * Requirements GET once the customer link exists. The hosted verification link is minted per read
  * (never stored), and the verification status is refreshed from Hercle so a verdict delivered while
- * the webhook was unreachable still lands.
+ * the webhook was unreachable still lands. Once the verdict is in, the payout account is polled the
+ * same way: the wizard sits on this read while `funding_account_provisioning`, and Hercle sends no
+ * webhook when the rail activates the account, so this is the only place the flip can be observed.
  */
 export async function resolveHercleRequirements(
   c: AppContext,
@@ -311,6 +313,22 @@ export async function resolveHercleRequirements(
         verificationStatus
       );
       state = { ...state, verificationStatus };
+    }
+  }
+
+  if (state.verificationStatus === "ready" && state.payoutAccountStatus === "pending") {
+    const latest = await RAMP_PROVIDER_CLIENTS.hercle.getPayoutAccount(
+      rampRuntime(c),
+      link.accountId,
+      HERCLE_PAYOUT_CURRENCY
+    );
+    if (latest.status !== state.payoutAccountStatus) {
+      await accountsRepository(c).updateExternalAccountStatus({
+        ...scopeOf(counterparty, projectId),
+        id: link.payoutAccount.id,
+        providerStatus: latest.status,
+      });
+      state = { ...state, payoutAccountStatus: latest.status };
     }
   }
 
