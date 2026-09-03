@@ -56,6 +56,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     status: row.status as DvpTradeStatus,
     observedAt: (row.observed_at as string | null) ?? null,
     idempotencyKey: (row.idempotency_key as string | null) ?? null,
+    idempotencyFingerprint: (row.idempotency_fingerprint as string | null) ?? null,
     createSignature: (row.create_signature as string | null) ?? null,
     createdAt: assertString(row.created_at, "created_at"),
     updatedAt: assertString(row.updated_at, "updated_at"),
@@ -68,7 +69,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
-         status, observed_at, idempotency_key, create_signature, created_at, updated_at`;
+         status, observed_at, idempotency_key, idempotency_fingerprint, create_signature, created_at, updated_at`;
 
 /**
  * The wallet allowlist clause, as SQL plus its bindings.
@@ -103,14 +104,15 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               token_program_a, token_program_b,
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
-              escrow_a, escrow_b, sdp_side, sdp_wallet_id, idempotency_key, create_signature
+              escrow_a, escrow_b, sdp_side, sdp_wallet_id,
+              idempotency_key, idempotency_fingerprint, create_signature
             ) VALUES (
               ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?,
-              ?, ?, ?, ?, ?, ?
+              ?, ?, ?, ?, ?, ?, ?
             )
             RETURNING ${SELECT_COLUMNS}`
         )
@@ -139,6 +141,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           row.sdpSide,
           row.sdpWalletId,
           row.idempotencyKey,
+          row.idempotencyFingerprint,
           row.createSignature
         )
         .first<Record<string, unknown>>();

@@ -62,6 +62,8 @@ export interface DvpTradeRow {
   observedAt: string | null;
   /** Caller-supplied Idempotency-Key, when one was sent. */
   idempotencyKey: string | null;
+  /** Hash of the terms that key was first used with. */
+  idempotencyFingerprint: string | null;
   createSignature: string | null;
   createdAt: string;
   updatedAt: string;
