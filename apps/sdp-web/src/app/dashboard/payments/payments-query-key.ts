@@ -1,4 +1,6 @@
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 
 export const paymentsQueryKeys = {
@@ -11,6 +13,33 @@ export const paymentsQueryKeys = {
     ["offramp-transfer-status", transferId] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
+  counterpartyRequirements: ({
+    counterpartyId,
+    provider,
+    direction,
+    cryptoToken,
+    fiatCurrency,
+    destinationWallet,
+    destinationCountry,
+  }: {
+    counterpartyId: string;
+    provider: RampProviderId;
+    direction: RampDirection;
+    cryptoToken: string;
+    fiatCurrency: RampFiatCurrency;
+    destinationWallet: string;
+    destinationCountry: string;
+  }) =>
+    [
+      "counterparty-requirements",
+      counterpartyId,
+      provider,
+      direction,
+      cryptoToken,
+      fiatCurrency,
+      destinationWallet,
+      destinationCountry,
+    ] as const,
   rampEstimate: ({
     direction,
     fiatCurrency,

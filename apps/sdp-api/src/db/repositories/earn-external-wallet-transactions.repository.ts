@@ -42,6 +42,18 @@ export interface EarnExternalWalletTransactionRow {
   /** Deposit min shares, or withdrawal min token amount; direction disambiguates the unit. */
   min_shares_out: string | null;
   creates_share_account: boolean;
+  /**
+   * Caller-provided partner fee payer compiled into the transaction, or null
+   * when the owner pays. Committed at build time — the submit's message
+   * equality makes a different fee payer a refused submit, never a swap.
+   */
+  fee_payer: string | null;
+  /**
+   * Who funds the share-ATA rent when this build creates the account: the fee
+   * payer (embedded as the provider's rentPayer) or null for the owner.
+   * Copied onto the movement at submit so the exit refunds the right party.
+   */
+  share_ata_rent_funder: string | null;
   /** Base64 wire bytes with empty signature slots, exactly as returned. */
   unsigned_transaction: string;
   /** NUMERIC in Postgres, read back as a string so uint64 round-trips exactly. */
@@ -72,6 +84,8 @@ export interface CreateEarnExternalWalletTransactionInput {
   /** Shared accepted output floor; withdrawal callers pass `minAmountOut` through this field. */
   minSharesOut?: string | null;
   createsShareAccount: boolean;
+  feePayer?: string | null;
+  shareAtaRentFunder?: string | null;
   unsignedTransaction: string;
   lastValidBlockHeight: string;
   createdBy?: string | null;
@@ -107,6 +121,8 @@ function mapRow(row: Record<string, unknown>): EarnExternalWalletTransactionRow 
     amount_requested: row.amount_requested as string,
     min_shares_out: row.min_shares_out as string | null,
     creates_share_account: row.creates_share_account === true,
+    fee_payer: (row.fee_payer as string | null) ?? null,
+    share_ata_rent_funder: (row.share_ata_rent_funder as string | null) ?? null,
     unsigned_transaction: row.unsigned_transaction as string,
     last_valid_block_height: String(row.last_valid_block_height),
     movement_id: row.movement_id as string | null,
@@ -129,9 +145,10 @@ export function createPostgresEarnExternalWalletTransactionsRepository(
              id, organization_id, project_id, environment, provider, direction,
              owner_address, vault_address, token_mint, share_mint, label,
              position_id, denomination, amount_requested, min_shares_out,
-             creates_share_account, unsigned_transaction, last_valid_block_height,
+             creates_share_account, fee_payer, share_ata_rent_funder,
+             unsigned_transaction, last_valid_block_height,
              created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -151,6 +168,8 @@ export function createPostgresEarnExternalWalletTransactionsRepository(
           input.amountRequested,
           input.minSharesOut ?? null,
           input.createsShareAccount,
+          input.feePayer ?? null,
+          input.shareAtaRentFunder ?? null,
           input.unsignedTransaction,
           input.lastValidBlockHeight,
           input.createdBy ?? null,

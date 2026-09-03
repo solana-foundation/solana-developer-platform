@@ -46,26 +46,26 @@ All provider-side counterparty state is rows in this table — one row per provi
 validateCounterparty(counterparty: Counterparty, options: ValidateCounterpartyOptions): CounterpartyRequirements
 ```
 
-`ValidateCounterpartyOptions` is direction-discriminated (`packages/sdp-payments/src/ramps/types.ts`): both arms carry `providerData` (legacy), `providerCustomerReference` (the handler-resolved `customer_link` reference), `cryptoToken?`, and `fiatCurrency?`; the offramp arm adds `cryptoRail?` and `payoutAccounts?` (handler-listed active corridor accounts). Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in the client; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
+`ValidateCounterpartyOptions` is direction-discriminated (`packages/sdp-payments/src/ramps/types.ts`): both arms carry `providerData` (legacy), `providerCustomerReference` (the handler-resolved `customer_link` reference), `cryptoToken?`, and `fiatCurrency?`; the offramp arm adds `cryptoRail?`, `payoutAccounts?` (handler-listed active corridor accounts), and `destinationCountry?` (the corridor the requirements GET is asked for). Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in the client; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
 
 Status events every provider gets:
 
-- `{ status: "ready"; providerAccountId? }` — good to quote. An offramp advance that resolved a payout account echoes its row id so the client can pass it back for explicit quote selection.
+- `{ status: "ready" }` — good to quote. The lightspark offramp arm is richer: `providerAccountId` (required — the corridor's resolved payout account, passed back for explicit quote selection) plus `payout?` (the tree, present on GET answers so the client can keep rendering the destination selector; advances omit it).
 - `{ status: "collect"; fields: RequirementField[] }` — need input first.
 - `{ status: "unsupported"; reason }` — this counterparty/corridor can't be served, and why.
 
-The full status union, discriminated on `(provider, status)`:
+The full status union, discriminated on `(provider, status)` (lightspark's `ready` also splits on `direction`):
 
 | Provider | Statuses |
 |---|---|
-| every provider | `ready` (may carry `providerAccountId`), `collect(fields)`, `unsupported(reason)` |
-| lightspark | `onboarding_not_started`, `collect_counterparty(fields)`, `collect_account(payout: PayoutRequirementTree)` |
+| every provider | `ready`, `collect(fields)`, `unsupported(reason)` |
+| lightspark | `onboarding_not_started`, `collect_counterparty(fields)`, `collect_account(payout: PayoutRequirementTree)`, offramp `ready(providerAccountId, payout?)` |
 | bvnk | `onboarding_not_started`, `customer_verification_required(verificationUrl)`, `customer_verifying`, `customer_verification_failed`, `funding_account_provisioning`, `provisioning_failed` |
 | mural | `onboarding_not_started`, `terms_of_service_required(termsOfServiceUrl)`, `customer_verification_required(verificationUrl)`, `customer_verifying`, `customer_verification_failed`, `funding_account_provisioning` |
 
 The authoritative union is `CounterpartyRequirements` in `packages/sdp-types/src/ramp-requirements.ts` — re-read it before editing; this table goes stale. Extend it only when generic `ready` / `collect` / `unsupported` cannot represent the provider.
 
-`RequirementField` kinds (same module): `text`, `select`, `country`, `date`, and `address` (nested dotted-key parts). `country` is codes-only on the wire — the server never inlines a country option list; the client renders its own dropdown from `COUNTRIES` with flag labels; values are ISO 3166-1 alpha-2 both ways. Build fields with `textField`, `selectField`, `countryField`, `dateField`, and `readyCounterparty` from `packages/sdp-payments/src/ramps/requirements.ts`; don't hand-roll the shape.
+`RequirementField` kinds (same module): `text`, `select`, `country`, `date`, and `address` (nested dotted-key parts). `country` is codes-only on the wire — the server never inlines a country option list; the client renders its own dropdown from `COUNTRIES` with flag labels; values are ISO 3166-1 alpha-2 both ways. Build fields with `textField`, `selectField`, `countryField`, `dateField`, and `readyCounterparty` from `packages/sdp-payments/src/ramps/requirements.ts` (`readyCounterparty` covers non-lightspark providers; lightspark readiness uses `lightsparkOnrampReady` / `lightsparkOfframpReady` from its provider file); don't hand-roll the shape.
 
 ## The payout tree (offramp account reuse)
 
@@ -73,7 +73,9 @@ The authoritative union is `CounterpartyRequirements` in `packages/sdp-types/src
 
 - `countryRails`: destination country → rail options for the corridor.
 - `railFields`: rail → fields with true per-rail requiredness.
-- `accounts`: the counterparty's existing active accounts for the corridor, `{ id, destinationCountry, paymentRail, status, bankName?, accountNumberLast4? }`, so the client offers reuse instead of silently re-collecting bank fields.
+- `accounts`: the counterparty's existing active accounts for the corridor, `{ id, destinationCountry, paymentRail, status, bankName?, accountNumberLast4? }`.
+
+Reuse is server-decided, not client-chosen: the requirements GET accepts an optional `destinationCountry` (lightspark offramp only — the offramp query arm discriminates on provider), and a corridor with exactly one active account answers `ready(providerAccountId, payout)` instead of `collect_account`. Multiple active corridor accounts are ambiguous and rejected, mirroring `selectLightsparkPayoutAccount`. The dashboard keys its requirements fetch on the collected destination country, so every country change re-asks the server; readiness is never client-derived from the tree.
 
 Display info (`bankName`, `accountNumberLast4`) comes from JIT provider enrichment via the optional `listExternalAccountDetails` provider method — masked server-side, never persisted; absent fields stay absent (typed optional), never defaulted.
 
@@ -83,7 +85,7 @@ Simplest first — pick the closest and mirror its decision function:
 
 - Always `readyCounterparty(...)` — no KYC gating.
 - `collect` KYC fields, `ready` once the provider verifies the customer.
-- Customer link first (`collect_counterparty`), then per-corridor payout collection (`collect_account` with the payout tree; existing accounts offered for reuse), then `ready`.
+- Customer link first (`collect_counterparty`), then per-corridor payout collection (`collect_account` with the payout tree; a corridor whose active account already exists answers `ready` straight from the GET), then `ready`.
 - Provider-hosted onboarding (ToS/verification URLs) advanced to `ready` by webhook events.
 
 ## The advance / submit flow

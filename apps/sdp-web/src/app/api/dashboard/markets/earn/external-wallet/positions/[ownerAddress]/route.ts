@@ -12,9 +12,12 @@ export async function GET(
   }
 
   const { ownerAddress } = await params;
+  // The API addresses the owner as a required query filter (the shape every
+  // per-owner external-wallet read shares); this route keeps its dashboard
+  // path-param shape and translates.
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.external_wallet_positions.list",
-    path: `/v1/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}${validated.query}`,
+    path: `/v1/earn/external-wallet/positions?ownerAddress=${encodeURIComponent(ownerAddress)}${validated.query.replace(/^\?/, "&")}`,
   });
 }
