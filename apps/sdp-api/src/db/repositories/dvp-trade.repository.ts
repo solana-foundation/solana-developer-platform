@@ -60,6 +60,8 @@ export interface DvpTradeRow {
 
   status: DvpTradeStatus;
   observedAt: string | null;
+  /** Caller-supplied Idempotency-Key, when one was sent. */
+  idempotencyKey: string | null;
   createSignature: string | null;
   /**
    * Block height past which the create transaction can no longer land.
@@ -162,5 +164,12 @@ export interface DvpTradeRepository {
    * lost that race, which is the same answer a vanished row gives.
    */
   recordObservation(input: DvpTradeObservationUpdate): Promise<DvpTradeRow | null>;
+  /**
+   * The trade a previous request with this key created, or null.
+   *
+   * Deliberately not wallet-scoped: a retry is the same caller replaying the
+   * same request, and the key is already scoped to their project.
+   */
+  getByIdempotencyKey(projectId: string, idempotencyKey: string): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
 }

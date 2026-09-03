@@ -4,6 +4,7 @@ import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -107,6 +108,9 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
       ? BigInt(body.earliestSettlementTimestamp)
       : null,
     refString: body.refString ?? null,
+    // Optional. Its only job is to make a retry after an ambiguous broadcast
+    // return the original trade rather than create a second one.
+    idempotencyKey: c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
   });
 
   return success(c, { trade: toTradeResponse(trade) }, 201);
