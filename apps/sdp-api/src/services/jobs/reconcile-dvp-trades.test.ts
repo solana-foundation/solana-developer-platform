@@ -203,6 +203,36 @@ describe("reconcileDvpTrades", () => {
     await expect(statusOf("dvp_gone")).resolves.toMatchObject({ status: "closed_unknown" });
   });
 
+  // The most destructive failure this job could cause. `create_failed` and
+  // `closed_unknown` are both terminal and both excluded from later sweeps, so
+  // treating a rate-limited RPC as "the account is gone" would permanently
+  // misclassify a live trade with nothing left to correct it.
+  it("never writes a terminal status when the chain could not be read", async () => {
+    await seedTrade("dvp_rpc_down", "funded");
+    readDvpTradeObservation.mockRejectedValue(new Error("429 Too Many Requests"));
+
+    await reconcileDvpTrades(env);
+
+    const row = await statusOf("dvp_rpc_down");
+    expect(row).toMatchObject({ status: "funded" });
+    // Still unobserved, so the next sweep picks it up first.
+    expect(row?.observed_at).toBeNull();
+  });
+
+  it("leaves a creating trade alone when the chain could not be read", async () => {
+    await seedTrade("dvp_creating_rpc_down", "creating", {
+      createLastValidBlockHeight: "1",
+    });
+    readDvpTradeObservation.mockRejectedValue(new Error("socket hang up"));
+    getBlockHeight.mockResolvedValue(999_999n);
+
+    await reconcileDvpTrades(env);
+
+    await expect(statusOf("dvp_creating_rpc_down")).resolves.toMatchObject({
+      status: "creating",
+    });
+  });
+
   // One unreadable trade must not end the sweep, or a single bad row would
   // permanently starve every trade behind it.
   it("keeps sweeping after a trade fails to read", async () => {

@@ -76,6 +76,8 @@ export interface CreateDvpTradeInput {
   expiryTimestamp: bigint;
   earliestSettlementTimestamp: bigint | null;
   refString: string | null;
+  /** Caller's Idempotency-Key, when they sent one. */
+  idempotencyKey: string | null;
 }
 
 /** Derives the per-trade nonce tombstone, seeds `[b"nonce", swap_dvp]`. */
@@ -95,6 +97,20 @@ async function findNonceTombstone(swapDvp: Address): Promise<Address> {
  * @returns The persisted trade, including the escrow addresses to publish.
  */
 export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Promise<DvpTradeRow> {
+  const repository = createDvpTradeRepository(env);
+
+  // Before anything else. A retry after an AMBIGUOUS broadcast — a timeout, a
+  // dropped socket — is the case this exists for: without it the retry draws a
+  // fresh nonce, lands at a different address, and leaves the first trade on
+  // chain with a published escrow nobody is watching. Returning the original is
+  // the only answer that does not create a second obligation.
+  if (input.idempotencyKey) {
+    const replayed = await repository.getByIdempotencyKey(input.projectId, input.idempotencyKey);
+    if (replayed) {
+      return replayed;
+    }
+  }
+
   const settlementAuthority = env.DVP_SETTLEMENT_AUTHORITY;
   if (!settlementAuthority) {
     // Not a user error: the deployment is missing configuration. Only this key
@@ -218,7 +234,6 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // fresh nonce and derives a different address. So a crash between send and
   // insert would strand a real on-chain trade permanently. Same safety order as
   // the Earn vault services — build, sign, record, send.
-  const repository = createDvpTradeRepository(env);
   const recorded = await repository.create({
     id: `dvp_${crypto.randomUUID().replace(/-/g, "")}`,
     organizationId: input.organizationId,
@@ -245,6 +260,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     escrowB,
     sdpSide: input.sdpSide,
     sdpWalletId: input.sdpWalletId,
+    idempotencyKey: input.idempotencyKey,
     createSignature: signature,
     // Stored so the reconciler can tell a create that is still in flight from
     // one that can never land, rather than inferring it from elapsed time.
