@@ -1116,3 +1116,56 @@ never-partial rule the position summary already follows. The live-hydration
 caveat stands unchanged: live value reads the owner's whole vault balance, so
 shares acquired outside SDP inflate `earned`; that stays a documented property
 of non-custodial reads.
+
+## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
+
+Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
+addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
+wallet the API caller (the partner) controls, which becomes the transaction's
+fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
+account creation needs. The compiled transaction then requires the partner's
+signature alongside the owner's; the partner co-signs OUTSIDE SDP before the
+submit. This is deliberately not PRO-1744 (Kora, SDP paying): no paymaster, no
+budget, no SDP co-signature. The partner funds and signs with its own wallet,
+which is why no new policy gate exists — the same authorization-by-signature
+rule the surface was built on, now with two signatures.
+
+Decisions that hold it together:
+
+- **Committed at build, unforgeable at submit.** The fee payer lives inside
+  the message bytes, so the existing message-equality check makes a swapped
+  fee payer a refused submit. It is persisted on the build row
+  (migration 0079) so the submit can name the right slot in its errors.
+- **One identity, three places** (the PRO-1736 rule restated for a caller's
+  wallet): the same resolved value drives the compiled fee-payer seat, the
+  simulation fee payer (the funds check moves to the partner wallet, which is
+  the point — the zero-SOL owner this feature serves must not fail it), and
+  the provider's `rentPayer`. `VaultFeeMode` gained a `caller-provided` kind;
+  its consumers are exhaustive, and the custody signing path asserts the new
+  kind unreachable.
+- **The signer set is asserted ordered and exact** at compile:
+  `[feePayer, owner]`, or `[owner]` without one. This keeps refusing a
+  provider plan that smuggles an extra signer AND refuses a fee-payer build
+  whose plan never names the owner as a signer — with the owner out of the
+  fee-payer seat, instruction-level signer roles are the only thing making
+  the owner's authorization mandatory.
+- **Rent attribution follows the money.** `share_ata_rent_funder` records the
+  partner when its wallet funded the account (build row → movement → position
+  projection), so the exit refunds the PARTNER; owner-paid rent stays the
+  NULL convention. Veda honors `rentPayer` via its ATA payer swap
+  (2026-09-02, #1611), so this is provider-neutral.
+- **Submit verifies EVERY signature** (ed25519, per-slot error naming), not
+  just the owner's: a garbage partner signature is a debuggable 400, never a
+  durable movement that can only die at broadcast. The recorded ledger
+  `signature` is slot zero — the partner's when present — which is the
+  on-chain txid, so reconciliation is unchanged.
+- **The split-swap contract carries `feePayer`** through `followUp`, and the
+  standalone swap compiles with the same payer, so every transaction the flow
+  hands out is partner-payable.
+
+Accepted costs: the partner wallet needs a SOL float and its balance is now
+partner-operational surface (a broke sponsor 400s at build, naming the fee
+payer); the fee payer adds 96 bytes to the compiled transaction, so near-limit
+swap-funded builds fall to the split flow slightly more often; and the
+blockhash window now has to fit the partner's co-signature too, which is why
+the docs tell partners to co-sign programmatically.

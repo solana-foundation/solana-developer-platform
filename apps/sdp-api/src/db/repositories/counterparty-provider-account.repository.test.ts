@@ -266,7 +266,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     });
   });
 
-  it("keeps customer links out of payout queries", async () => {
+  it("lists customer links but keeps them out of corridor reads", async () => {
     const counterparty = await seedCounterparty("cpacc_kind_filters");
     await repository.upsertProviderAccount({
       organizationId: TEST_ORG.id,
@@ -282,7 +282,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
       })
-    ).toEqual([]);
+    ).toEqual([expect.objectContaining({ kind: "customer_link", provider: "bvnk" })]);
     expect(
       await repository.getAccountByKindAndCurrency({
         organizationId: TEST_ORG.id,
@@ -525,7 +525,11 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
       })
-    ).toEqual([usd, expect.objectContaining({ id: gbp.id, status: "archived" })]);
+    ).toEqual([
+      expect.objectContaining({ id: customer.id, kind: "customer_link" }),
+      usd,
+      expect.objectContaining({ id: gbp.id, status: "archived" }),
+    ]);
     expect(
       await repository.listProviderAccounts({
         organizationId: TEST_ORG.id,
@@ -534,7 +538,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         fiatCurrency: "USD",
         destinationCountry: "US",
       })
-    ).toEqual([usd]);
+    ).toEqual([expect.objectContaining({ id: customer.id, kind: "customer_link" }), usd]);
     expect(
       await repository.listProviderAccounts({
         organizationId: TEST_ORG.id,

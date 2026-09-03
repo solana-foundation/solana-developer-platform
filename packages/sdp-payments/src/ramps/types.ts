@@ -1,6 +1,7 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
+  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
@@ -293,6 +294,7 @@ export type ValidateCounterpartyOptions =
       fiatCurrency?: RampFiatCurrency;
       cryptoRail?: CryptoRailId;
       payoutAccounts?: readonly PayoutRequirementAccount[];
+      destinationCountry?: CountryCode;
       providerCustomerReference?: string;
       collectedData?: CollectedFieldData;
     };

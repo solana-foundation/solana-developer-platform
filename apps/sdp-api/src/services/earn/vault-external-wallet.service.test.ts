@@ -1,8 +1,10 @@
 import { SdpVedaError } from "@sdp/veda";
 import type { Blockhash } from "@solana/kit";
 import {
+  AccountRole,
   generateKeyPair,
   getAddressFromPublicKey,
+  getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
@@ -683,6 +685,182 @@ describe("submitExternalWalletDeposit", () => {
     expect(result.movement.status).toBe("requested");
     expect(result.movement.signature).not.toBeNull();
     expect(result.movement.signed_transaction).not.toBeNull();
+  });
+});
+
+describe("partner fee payer (caller-provided)", () => {
+  let partnerKeyPair: CryptoKeyPair;
+  let partnerAddress: string;
+
+  /**
+   * A provider instruction that names the OWNER as a signer, the way every
+   * real deposit/exit plan does (the owner's tokens move). This matters here
+   * more than anywhere: with the partner in the fee-payer seat, the owner's
+   * authorization comes ONLY from instruction-level signer roles.
+   */
+  function ownerSignerInstruction() {
+    return {
+      programAddress: MEMO_PROGRAM_ADDRESS,
+      accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+      data: Buffer.from("provider-instruction", "utf8").toString("base64"),
+    };
+  }
+
+  beforeEach(async () => {
+    partnerKeyPair = await generateKeyPair();
+    partnerAddress = await getAddressFromPublicKey(partnerKeyPair.publicKey);
+    buildVaultDeposit.mockResolvedValue(depositPlan({ instructions: [ownerSignerInstruction()] }));
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ instructions: [ownerSignerInstruction()] })
+    );
+  });
+
+  it("refuses a fee-payer build whose plan does not require the owner's signature", async () => {
+    // Without the owner in the fee-payer seat, a plan that never names the
+    // owner as a signer would move money on the partner's signature alone —
+    // the compile-time signer assertion is what makes that unrepresentable.
+    buildVaultDeposit.mockResolvedValue(depositPlan());
+    await expect(buildDepositRow(depositInput({ feePayer: partnerAddress }))).rejects.toThrow(
+      "must require exactly the fee-payer and owner signatures"
+    );
+  });
+
+  it("builds a two-signer transaction, funds rent from the partner, and records both facts", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+
+    expect(built.fee_payer).toBe(partnerAddress);
+    // The plan creates the share account and the partner was its rent payer,
+    // so the funder is recorded for the exit's refund.
+    expect(built.share_ata_rent_funder).toBe(partnerAddress);
+
+    // Slot order is the on-chain contract: fee payer at zero, owner beside it,
+    // both unsigned.
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
+    expect(Object.values(decoded.signatures)).toEqual([null, null]);
+
+    // The funds check ran against the partner wallet, and the provider was
+    // asked to charge account rent to the same identity.
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        fee: { kind: "caller-provided", feePayer: partnerAddress },
+      })
+    );
+    expect(buildVaultDeposit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rentPayer: partnerAddress })
+    );
+  });
+
+  it("records no rent funder when the plan creates no account", async () => {
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({ createsShareAccount: false, instructions: [ownerSignerInstruction()] })
+    );
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    expect(built.fee_payer).toBe(partnerAddress);
+    expect(built.share_ata_rent_funder).toBeNull();
+  });
+
+  it("treats a fee payer equal to the owner as the default", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: ownerAddress }));
+    expect(built.fee_payer).toBeNull();
+    expect(built.share_ata_rent_funder).toBeNull();
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ fee: { kind: "wallet-pays" } })
+    );
+  });
+
+  it("accepts a submit signed by both parties and records the fee payer's signature as the txid", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const signed = await partiallySignTransaction([ownerKeyPair, partnerKeyPair], transaction);
+    const signedBase64 = Buffer.from(getTransactionEncoder().encode(signed)).toString("base64");
+
+    const result = await submitDeposit(built, signedBase64, crypto.randomUUID());
+
+    expect(result.movement.status).toBe("submitted");
+    // Slot zero is the partner's signature — the on-chain txid the ledger and
+    // the reconciler poll by.
+    expect(result.movement.signature).toBe(getSignatureFromTransaction(signed));
+    expect(result.movement.creates_share_account).toBe(true);
+    expect(result.movement.share_ata_rent_funder).toBe(partnerAddress);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+
+    // The projection carries the funder onto the position, where the exit
+    // build reads it as `rentRefundTo`.
+    const position = await getDb(env)
+      .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+      .bind(result.position.id)
+      .first<{ share_ata_rent_funder: string | null }>();
+    expect(position?.share_ata_rent_funder).toBe(partnerAddress);
+  });
+
+  it("rejects a submit the fee payer has not co-signed", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    // Owner-only signature: the partner slot stays null.
+    const ownerOnly = await signBuiltTransaction(built);
+
+    await expect(submitDeposit(built, ownerOnly, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("fee-payer signature"),
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a forged fee-payer signature by name", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const ownerSigned = await partiallySignTransaction([ownerKeyPair], transaction);
+    const forged = {
+      ...ownerSigned,
+      signatures: {
+        ...ownerSigned.signatures,
+        [partnerAddress]: new Uint8Array(64).fill(9),
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately corrupting the branded signature map to prove verification rejects it.
+    } as any;
+    const bytes = Buffer.from(getTransactionEncoder().encode(forged)).toString("base64");
+
+    await expect(submitDeposit(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("invalid fee-payer signature"),
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("builds the exit with the partner paying and refunds the recorded funder", async () => {
+    const positionId = await seedExternalWalletPosition();
+    const built = await buildExternalWalletWithdrawalTransaction(
+      env,
+      withdrawalInput(positionId, {
+        feePayer: partnerAddress,
+        // The deposit recorded the partner as the funder; the exit must refund
+        // THAT address, independent of who pays this exit's fee.
+        shareAtaRentFunder: partnerAddress,
+      })
+    );
+
+    expect(built.fee_payer).toBe(partnerAddress);
+    expect(buildVaultWithdrawal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rentPayer: partnerAddress, rentRefundTo: partnerAddress })
+    );
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
   });
 });
 
