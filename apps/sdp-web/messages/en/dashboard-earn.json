@@ -392,7 +392,11 @@
       "filterNoMatches": "No trades match these filters.",
       "filterClear": "Clear filters",
       "authorityUnfundedTitle": "The settlement authority needs SOL",
-      "authorityUnfundedBody": "Settling pays the network fee and the rent for the token accounts it has to create, and this project's settlement authority cannot cover that yet. Send at least {sol} SOL to {address}, then settle."
+      "authorityUnfundedBody": "Settling pays the network fee and the rent for the token accounts it has to create, and this project's settlement authority cannot cover that yet. Send at least {sol} SOL to {address}, then settle.",
+      "cancelConfirmTitle": "Cancel this trade?",
+      "cancelConfirmBody": "Each leg goes back to whoever deposited it and the trade closes for good. Neither side can settle it afterwards, and creating it again means a new trade with new escrow addresses.",
+      "cancelConfirmDismiss": "Keep the trade",
+      "cancelConfirmAccept": "Cancel trade"
     }
   },
   "DashboardEarn": {

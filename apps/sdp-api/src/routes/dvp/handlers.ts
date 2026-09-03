@@ -16,6 +16,7 @@ import {
 import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
+import { observeDvpTradeNow } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import {
   estimateSettlementCostLamports,
@@ -279,6 +280,10 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     result.signature
   );
 
+  // Same reason: settling closes both escrows and the trade account, and the
+  // page should show that when it happens rather than a minute later.
+  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
+
   return success(c, {
     tradeId: resolved.trade.id,
     action,
@@ -305,6 +310,11 @@ export const fundTrade = async (c: AppContext) => {
   ]);
 
   const result = await fundDvpTradeLeg(c, resolved.trade);
+
+  // The tokens have moved. Waiting for the once-a-minute sweep to say so left
+  // the page reading "Waiting on funds" straight after a successful transfer,
+  // which is indistinguishable from it having failed.
+  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
 
   return success(c, {
     tradeId: resolved.trade.id,
