@@ -1,12 +1,14 @@
 import type { RampProviderId } from "@sdp/types";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { LucideIcon } from "lucide-react";
+import type { SandboxTransferSimulationInput } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
 import {
   getHercleOnboardingCopy,
   getHercleProvisioningDetail,
   getHercleSimulateLabels,
+  hercleOfframpSettlementSimulation,
 } from "./hercle";
 import {
   getLightsparkOnboardingCopy,
@@ -142,7 +144,10 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
  */
 export function hasOnboardingLifecycle(provider: RampProviderId): boolean {
   return (
-    provider === "bvnk" || provider === "lightspark" || provider === "mural" || provider === "hercle"
+    provider === "bvnk" ||
+    provider === "lightspark" ||
+    provider === "mural" ||
+    provider === "hercle"
   );
 }
 
@@ -185,6 +190,22 @@ export function simulateActionLabels(
       return getMuralSimulateLabels(t);
     case "hercle":
       return getHercleSimulateLabels(t);
+    default:
+      return null;
+  }
+}
+
+/**
+ * Sandbox settlement simulation for an off-ramp still awaiting its crypto, keyed on the quote id
+ * (the provider's order id). Null for providers whose sandbox settles on its own.
+ */
+export function offrampSettlementSimulation(
+  provider: RampProviderId,
+  orderId: string
+): SandboxTransferSimulationInput | null {
+  switch (provider) {
+    case "hercle":
+      return hercleOfframpSettlementSimulation(orderId);
     default:
       return null;
   }

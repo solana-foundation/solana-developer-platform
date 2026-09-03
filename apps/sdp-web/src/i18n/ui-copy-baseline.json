@@ -163,5 +163,6 @@
   "src/lib/ramps.ts:48:22:MoneyGram",
   "src/lib/ramps.ts:49:21:Coinbase",
   "src/lib/ramps.ts:50:18:Mural Pay",
-  "src/lib/ramps.ts:51:19:Stripe"
+  "src/lib/ramps.ts:51:19:Stripe",
+  "src/lib/ramps.ts:66:19:Hercle"
 ]
