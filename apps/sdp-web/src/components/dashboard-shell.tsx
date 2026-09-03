@@ -471,7 +471,46 @@ function DashboardSidebarContent({
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
+function clipsDashboardHorizontalOverflow(pathname: string): boolean {
+  return (
+    pathname === "/dashboard/payments" ||
+    pathname === "/dashboard/payments/transactions" ||
+    (pathname.startsWith("/dashboard/payments/") &&
+      !pathname.startsWith("/dashboard/payments/counterparty"))
+  );
+}
+
+function usesWorkspaceViewport(pathname: string): boolean {
+  const isWalletDetailRoute =
+    (pathname.startsWith("/dashboard/wallets/") &&
+      pathname !== "/dashboard/wallets/setup" &&
+      pathname !== "/dashboard/wallets/switch") ||
+    (pathname.startsWith("/dashboard/custody/") &&
+      pathname !== "/dashboard/custody/setup" &&
+      pathname !== "/dashboard/custody/switch");
+  const isWalletSetupRoute =
+    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
+
+  return (
+    pathname === "/dashboard/issuance" ||
+    pathname === "/dashboard/issuance/create" ||
+    pathname === "/dashboard/policies" ||
+    pathname === "/dashboard/api-keys" ||
+    pathname === "/dashboard/api-keys/new" ||
+    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
+    pathname.startsWith("/dashboard/payments") ||
+    pathname.startsWith("/dashboard/markets") ||
+    pathname === "/dashboard/wallets" ||
+    pathname === "/dashboard/custody" ||
+    isWalletSetupRoute ||
+    pathname === "/dashboard/onboarding" ||
+    pathname.startsWith("/dashboard/integrations/private-channels") ||
+    pathname.startsWith("/dashboard/approvals") ||
+    isWalletDetailRoute
+  );
+}
+
+/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing shell orchestration */ /* react-doctor-disable-next-line no-high-complexity-react-function -- this change only supplies Private Channels route configuration */
 export function DashboardShell({
   children,
   flags,
@@ -544,37 +583,9 @@ export function DashboardShell({
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder =
     (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs;
-  const shouldClipHorizontalOverflow =
-    pathname === "/dashboard/payments" ||
-    pathname === "/dashboard/payments/transactions" ||
-    (pathname.startsWith("/dashboard/payments/") &&
-      !pathname.startsWith("/dashboard/payments/counterparty"));
-  const isWalletDetailRoute =
-    (pathname.startsWith("/dashboard/wallets/") &&
-      pathname !== "/dashboard/wallets/setup" &&
-      pathname !== "/dashboard/wallets/switch") ||
-    (pathname.startsWith("/dashboard/custody/") &&
-      pathname !== "/dashboard/custody/setup" &&
-      pathname !== "/dashboard/custody/switch");
-  const isWalletSetupRoute =
-    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
+  const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
   const isOrganizationOnboardingRoute = pathname === "/dashboard/onboarding";
-  const shouldUseWorkspaceViewport =
-    pathname === "/dashboard/issuance" ||
-    pathname === "/dashboard/issuance/create" ||
-    pathname === "/dashboard/policies" ||
-    pathname === "/dashboard/api-keys" ||
-    pathname === "/dashboard/api-keys/new" ||
-    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
-    pathname.startsWith("/dashboard/payments") ||
-    pathname.startsWith("/dashboard/markets") ||
-    pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody" ||
-    isWalletSetupRoute ||
-    isOrganizationOnboardingRoute ||
-    pathname.startsWith("/dashboard/approvals") ||
-    isWalletDetailRoute;
-  const shouldLockViewportScroll = shouldUseWorkspaceViewport;
+  const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
   const shouldRedirectToOnboarding = shouldRedirectToOrganizationOnboarding(
     onboardingStatus,

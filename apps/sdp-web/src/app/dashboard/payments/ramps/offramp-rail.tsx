@@ -1,10 +1,10 @@
 "use client";
 
+import { getCryptoRailAssetLabel } from "@sdp/types";
 import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { toRampCryptoToken } from "@/lib/ramps";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { InstructionActionButton } from "./components/manual-instructions-quote";
 import { OfframpStepContent } from "./components/offramp-step-content";
@@ -107,7 +107,7 @@ export function OfframpRail({
           : undefined
       }
       confirmSecondary={wizard.onTransactionStage && transferState.cancelable}
-      secondaryDisabled={wizard.isCanceling}
+      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
       hideSecondary={wizard.onTransactionStage && !transferState.cancelable}
       footerActions={
         transferState.terminal ? (
@@ -130,7 +130,7 @@ export function OfframpRail({
                 ? t("DashboardPayments.ramps.quoteExpired")
                 : t("DashboardPayments.ramps.sendCrypto", {
                     amount: wizard.depositTarget.amount,
-                    token: toRampCryptoToken(wizard.selectedRampPair.assetRail).toUpperCase(),
+                    token: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
                   }),
               busyLabel: t("DashboardPayments.ramps.sending"),
               doneLabel: t("DashboardPayments.ramps.transferSubmitted"),

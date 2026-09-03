@@ -573,6 +573,116 @@ describe("Counterparties Routes", () => {
       fetchSpy.mockRestore();
     });
 
+    it("rejects invalid new-account bank fields without persisting a pending account row", async () => {
+      const created = await createCounterparty({ externalId: "requirements_invalid_bank" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      await repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_invalid_bank",
+      });
+      await seedProviderAccount({
+        id: "provider_account_stale_reservation",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_invalid_bank",
+        externalAccountReference: null,
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: null,
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "lightspark",
+            direction: "offramp",
+            cryptoToken: "USDC",
+            fiatCurrency: "USD",
+            collectedData: {
+              destinationCountry: "US",
+              paymentRails: "ACH",
+              purposeOfPayment: "SELF",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const pendingRows = await getDb(env)
+        .prepare(
+          `SELECT id, status FROM counterparty_provider_accounts
+           WHERE counterparty_id = ? AND payment_rail IS NOT NULL
+             AND external_account_reference IS NULL`
+        )
+        .bind(counterparty.id)
+        .all<{ id: string; status: string }>();
+      expect(pendingRows.results).toEqual([
+        { id: "provider_account_stale_reservation", status: "active" },
+      ]);
+    });
+
+    it("rejects a providerAccountId owned by another counterparty on the advance", async () => {
+      const created = await createCounterparty({ externalId: "requirements_foreign_owner" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const other = await createCounterparty({ externalId: "requirements_foreign_other" });
+      expect(other.status).toBe(201);
+      const otherCounterparty = (await other.json()).data.counterparty;
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      await repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_foreign_owner",
+      });
+      await seedProviderAccount({
+        id: "provider_account_foreign_owned",
+        counterpartyId: otherCounterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_foreign_other",
+        externalAccountReference: "ExternalAccount:foreign_owned",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "lightspark",
+            direction: "offramp",
+            cryptoToken: "USDC",
+            fiatCurrency: "USD",
+            providerAccountId: "provider_account_foreign_owned",
+            collectedData: { destinationCountry: "US", purposeOfPayment: "SELF" },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.message).toContain("providerAccountId");
+    });
+
     it("returns the missing identity fields when Lightspark has no provider customer", async () => {
       const created = await createCounterparty({ externalId: "requirements_lightspark" });
       expect(created.status).toBe(201);

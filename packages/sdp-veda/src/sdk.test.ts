@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   },
   validateDeployment: vi.fn(),
   readMintDecimals: vi.fn(),
+  accountExists: vi.fn(),
 }));
 
 vi.mock("@vedatech/svm-sdk", () => ({
@@ -48,6 +49,7 @@ vi.mock("@vedatech/svm-sdk", () => ({
   },
 }));
 vi.mock("./mint", () => ({ readMintDecimals: mocks.readMintDecimals }));
+vi.mock("./accounts", () => ({ accountExists: mocks.accountExists }));
 // The RPC client is only handed to the (mocked) SDK; keep it inert.
 vi.mock("./rpc", () => ({ createVedaRpc: vi.fn(() => ({})) }));
 
@@ -96,6 +98,7 @@ function primeVault(assets: { mint: string; allowDeposits: boolean }[]): void {
     protectedInstructionGroups: [],
   });
   mocks.readMintDecimals.mockResolvedValue(6);
+  mocks.accountExists.mockResolvedValue(true);
 }
 
 beforeEach(() => {
@@ -224,6 +227,122 @@ describe("buildVedaDepositPlan owns the deposit gate", () => {
     await expect(buildVedaDepositPlan(runtime, config, input)).rejects.toMatchObject({
       code: "VAULT_UNREADABLE",
     });
+  });
+});
+
+describe("rent attribution and share-account truth", () => {
+  const input = { vault: VAULT, owner: OWNER, amount: "1.5", minSharesOut: "1.4" };
+  const SPONSOR = address("SysvarRecentB1ockHashes11111111111111111111");
+  const SHARE_ATA = address("SysvarRent111111111111111111111111111111111");
+  const VAULT_ATA = address("SysvarC1ock11111111111111111111111111111111");
+  const VAULT_HOLDER = address("Stake11111111111111111111111111111111111111");
+  const ATA_PROGRAM = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+  const SYSTEM = address("11111111111111111111111111111111");
+  const TOKEN_2022 = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+  /** The SDK's own ATA-create shape: funding payer at account index 0. */
+  const ataCreate = (payer: unknown, ata: unknown, wallet: unknown, mint: string) => ({
+    programAddress: ATA_PROGRAM,
+    accounts: [
+      { address: payer, role: 3 },
+      { address: ata, role: 1 },
+      { address: wallet, role: 0 },
+      { address: address(mint), role: 0 },
+      { address: SYSTEM, role: 0 },
+      { address: TOKEN_2022, role: 0 },
+    ],
+    data: new Uint8Array([1]),
+  });
+  const depositInstruction = {
+    programAddress: config.vaultProgramAddress,
+    accounts: [],
+    data: new Uint8Array([7]),
+  };
+
+  function primeDepositWithCreates(): void {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.buildDeposit.mockResolvedValue({
+      instructions: [
+        ataCreate(OWNER, SHARE_ATA, OWNER, SHARE_MINT),
+        ataCreate(OWNER, VAULT_ATA, VAULT_HOLDER, USDC_DEVNET),
+        depositInstruction,
+      ],
+      requiredSignerAddresses: [OWNER],
+      protectedInstructionGroups: [],
+    });
+  }
+
+  /**
+   * THE SPONSORSHIP CONTRACT (PRO-1736). The SDK hardcodes the owner as every
+   * ATA create's funding payer; honoring `rentPayer` means those creates are
+   * re-funded, or a zero-SOL custody wallet fails its first deposit with the
+   * fee sponsored and the rent not — the smoky failure of 2026-09-02.
+   */
+  it("charges the sponsor for every ATA create, preserving order and count", async () => {
+    primeDepositWithCreates();
+    mocks.accountExists.mockResolvedValue(false);
+
+    const plan = await buildVedaDepositPlan(runtime, config, { ...input, rentPayer: SPONSOR });
+
+    expect(plan.instructions).toHaveLength(3);
+    expect(plan.instructions[0]?.accounts?.[0]).toEqual({ address: SPONSOR, role: 3 });
+    expect(plan.instructions[1]?.accounts?.[0]).toEqual({ address: SPONSOR, role: 3 });
+    // Everything that is not the funding payer survives verbatim.
+    expect(plan.instructions[0]?.accounts?.[1]).toEqual({ address: SHARE_ATA, role: 1 });
+    expect(plan.instructions[2]).toEqual(depositInstruction);
+    // A missing share account means THIS deposit pays its rent.
+    expect(plan.createsShareAccount).toBe(true);
+    expect(mocks.accountExists).toHaveBeenCalledWith(runtime.rpcUrl, SHARE_ATA);
+  });
+
+  it("reports createsShareAccount false when the share account already exists", async () => {
+    primeDepositWithCreates();
+    mocks.accountExists.mockResolvedValue(true);
+
+    const plan = await buildVedaDepositPlan(runtime, config, { ...input, rentPayer: SPONSOR });
+
+    expect(plan.createsShareAccount).toBe(false);
+  });
+
+  it("leaves the owner as the funding payer when no rentPayer is supplied", async () => {
+    primeDepositWithCreates();
+    mocks.accountExists.mockResolvedValue(false);
+
+    const plan = await buildVedaDepositPlan(runtime, config, input);
+
+    expect(plan.instructions[0]?.accounts?.[0]).toEqual({ address: OWNER, role: 3 });
+    expect(plan.instructions[1]?.accounts?.[0]).toEqual({ address: OWNER, role: 3 });
+    // Truth about rent is reported either way — the funder differs, not the fact.
+    expect(plan.createsShareAccount).toBe(true);
+  });
+
+  it("omits createsShareAccount when the plan creates no share account", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+
+    const plan = await buildVedaDepositPlan(runtime, config, input);
+
+    expect("createsShareAccount" in plan).toBe(false);
+    expect(mocks.accountExists).not.toHaveBeenCalled();
+  });
+
+  it("charges the sponsor for the exit's asset-account create too", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.buildWithdraw.mockResolvedValue({
+      instructions: [ataCreate(OWNER, VAULT_ATA, OWNER, USDC_DEVNET), depositInstruction],
+    });
+
+    const plan = await buildVedaWithdrawPlan(runtime, config, {
+      vault: VAULT,
+      owner: OWNER,
+      shares: "2.5",
+      minAmountOut: "2.49",
+      rentPayer: SPONSOR,
+    });
+
+    expect(plan.instructions[0]?.accounts?.[0]).toEqual({ address: SPONSOR, role: 3 });
+    // No share account is ever created on the way out, so nothing is claimed.
+    expect("createsShareAccount" in plan).toBe(false);
+    expect(mocks.accountExists).not.toHaveBeenCalled();
   });
 });
 

@@ -57,6 +57,15 @@ export interface VedaInstructionPlan {
   assetIdentity: VedaVaultAssetIdentity;
   /** What the instructions above actually encode. See `VedaAcceptedAmounts`. */
   accepted: VedaAcceptedAmounts;
+  /**
+   * True when these instructions CREATE the owner's share token account, so
+   * its rent is charged on this transaction — read from the chain at build
+   * time, because the create is idempotent and its mere presence proves
+   * nothing. Absent when the plan carries no share-account create at all.
+   * Same contract (and same pre-execution residual) as
+   * `EarnVaultTransactionPlan.createsShareAccount` in `@sdp/earn`.
+   */
+  createsShareAccount?: boolean;
 }
 
 /** Live Veda vault asset identity carried with a built instruction plan. */
@@ -100,12 +109,23 @@ export interface VedaDepositInput {
    * reason and substitutes a noop signer internally, so the accounts are placed
    * correctly and nothing is signed here.
    *
-   * It is also the RENT PAYER for the associated token accounts the plan
-   * creates idempotently (the owner's share account, and the vault's asset
-   * account when absent). That is a real, separate spend from the transaction
-   * fee, and it is why no sponsor address is accepted here.
+   * It is also the DEFAULT rent payer for the associated token accounts the
+   * plan creates idempotently (the owner's share account, and the vault's
+   * asset account when absent) — see `rentPayer`.
    */
   owner: Address;
+  /**
+   * Who funds rent for the token accounts this plan creates. Omitted means the
+   * owner pays, which is what an unsponsored deposit wants.
+   *
+   * Veda's SDK offers no payer knob — it names the owner as the funding payer
+   * of every ATA create it emits — so honoring this means REWRITING those
+   * creates' funding account after the build (`./rent.ts`). NOT the
+   * transaction fee payer: this address lands inside the instruction accounts
+   * as writable+signer, and the API's paymaster supplies its signature after
+   * compilation, exactly as on the Kamino client.
+   */
+  rentPayer?: Address;
   /** Deposit amount in the vault asset's own units, as a decimal string. */
   amount: string;
   /**
@@ -128,6 +148,13 @@ export interface VedaWithdrawInput {
    * ADDRESS, not a signer — custody lives in the API, same as the deposit.
    */
   owner: Address;
+  /**
+   * Who funds rent for the token accounts this plan creates — an instant exit
+   * creates the owner's ASSET account idempotently when it is missing. Same
+   * semantics and same rewrite mechanism as the deposit's `rentPayer`; omitted
+   * means the owner pays.
+   */
+  rentPayer?: Address;
   /** Shares to redeem, canonical to the share mint's decimals. */
   shares: string;
   /**

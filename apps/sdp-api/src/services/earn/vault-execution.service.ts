@@ -525,7 +525,13 @@ export async function simulateVaultPlan(
   );
 
   if (result.value.err) {
-    const verdict = describeVaultSimulationError(result.value.err, input.fee);
+    // Logs sharpen the verdict: `Custom: 1` alone is unreadable, while the
+    // failing program's own log line says "insufficient lamports" outright.
+    const verdict = describeVaultSimulationError(
+      result.value.err,
+      input.fee,
+      result.value.logs ?? []
+    );
     return {
       ok: false,
       error: verdict.message,

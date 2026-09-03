@@ -148,13 +148,28 @@ silent choice that spends the wrong token. Widening
 `VEDA_DEPOSIT_TOKEN_SYMBOLS` therefore means carrying a mint on the provider
 contract first.
 
-## `owner` is the rent payer, not the fee payer
+## Rent: the SDK hardcodes the owner as payer, so `rentPayer` is a payer SWAP
 
-Veda's `buildDeposit` creates the owner's share account and the vault's asset
-account idempotently, with the owner as `payer` — embedded in the instruction
-accounts as writable+signer. That is ATA rent, a real spend separate from the
-transaction fee, which SDP's Kora path sets at compile time and signs
-post-compile. No sponsor address is accepted here for that reason.
+Veda's `buildDeposit`/`buildWithdraw` create associated token accounts
+idempotently (owner's share account + vault's asset account on the way in,
+owner's asset account on the way out) with the OWNER as funding payer — the
+SDK's `DepositInput` carries no payer knob at all (0.1.0-alpha.1). Left alone
+that re-creates the exact split `vault-sponsorship.ts` exists to prevent: Kora
+sponsors the fee while a zero-SOL custody wallet still cannot make a first
+deposit. Measured in smoky 2026-09-02 as `Custom:1` at instruction 0 — the
+System program's "insufficient lamports" inside the share-ATA create.
+
+`rentPayer` is therefore honored in `src/rent.ts` by swapping the funding
+account (index 0) on the ATA program's `Create`/`CreateIdempotent`
+instructions to the sponsor. One account changes; order, count and
+protected-group adjacency are untouched, and `RecoverNested` is never
+rewritten (its index 0 is not a payer). The sponsor signs nothing new: it is
+already the fee payer, and Solana dedupes account keys, so the paymaster's one
+`signAsFeePayer` covers both roles.
+
+The deposit build also reads the share ATA's existence (`src/accounts.ts`) and
+reports `createsShareAccount`, so the API's `share_ata_rent_funder` records
+the party that truly paid — which is what the eventual exit refunds.
 
 ## Positions are read in base units, and the valuation may be absent
 

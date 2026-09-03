@@ -18,12 +18,18 @@ import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   type CounterpartyProviderAccountRow,
   createPostgresCounterpartyProviderAccountsRepository,
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, counterpartyExternalAccountAmbiguous, internalError } from "@/lib/errors";
+import {
+  badRequest,
+  conflict,
+  counterpartyExternalAccountAmbiguous,
+  internalError,
+} from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { type AppContext, rampRuntime } from "../../context";
@@ -257,9 +263,9 @@ function requireDestinationCountry(collectedData: CollectedFieldData): CountryCo
 
 /**
  * Creates the Grid external payout account a new-account submission defines,
- * resuming an incomplete reservation for the same corridor and rail when one
- * exists. Completed accounts are never adopted — reusing one is an explicit
- * `providerAccountId` selection, not a side effect of submitting fields.
+ * always under a freshly minted platform identity. Completed accounts are never
+ * adopted — reusing one is an explicit `providerAccountId` selection, not a
+ * side effect of submitting fields.
  *
  * @param c - Request context for database and provider access.
  * @param input - Counterparty, project, customer, crypto rail, fiat currency, and collected payout data.
@@ -277,22 +283,27 @@ export async function ensureLightsparkPayoutAccount(
   if (paymentRail === undefined) {
     throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
   }
-  const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const accounts = await repository.listActiveExternalAccounts({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "lightspark",
-    fiatCurrency: input.fiatCurrency,
-    destinationCountry,
-  });
-  const resumable = accounts.find(
-    (account) => account.payment_rail === paymentRail && account.external_account_reference === null
+  // Validate the submitted bank fields before touching the database: a rejected
+  // submission must not leave a durable pending account row behind.
+  const accountInfo = buildLightsparkAccountInfo(
+    input.counterparty,
+    input.cryptoRail,
+    input.fiatCurrency,
+    input.collectedData
   );
+  const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  // Every submission mints a fresh pending identity — a stale same-rail pending
+  // row is never resumed. The provider converges on platformAccountId, so
+  // reusing a prior row's id could silently bind this submission to an account
+  // created from DIFFERENT bank details, and bank details are never persisted
+  // (store-nothing PII), so sameness cannot be proven. The partial unique index
+  // allows one live reservation per corridor and rail: a concurrent submission
+  // gets a 409 while another is genuinely in flight — never an archive of the
+  // other request's parent row, which would strand its provider account. On
+  // failure the request archives its OWN reservation so an immediate retry is
+  // clean; only a process crash leaves a reservation behind (409 until swept).
   let pending: CounterpartyProviderAccountRow;
-  if (resumable !== undefined) {
-    pending = resumable;
-  } else {
+  try {
     pending = await repository.insertPendingExternalAccount({
       organizationId: input.counterparty.organization_id,
       projectId: input.projectId,
@@ -303,31 +314,55 @@ export async function ensureLightsparkPayoutAccount(
       destinationCountry,
       paymentRail,
     });
-  }
-  const accountInfo = buildLightsparkAccountInfo(
-    input.counterparty,
-    input.cryptoRail,
-    input.fiatCurrency,
-    input.collectedData
-  );
-  const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
-    rampRuntime(c),
-    {
-      customerId: input.customer.customerId,
-      currency: input.fiatCurrency,
-      platformAccountId: pending.id,
-      accountInfo,
+  } catch (error) {
+    if (isPostgresUniqueViolation(error)) {
+      throw conflict(
+        "A payout account submission for this corridor is already in progress. Retry once it settles."
+      );
     }
-  );
-  const completed = await repository.completeExternalAccount({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "lightspark",
-    id: pending.id,
-    externalAccountReference: created.id,
-    providerStatus: created.status,
-  });
+    throw error;
+  }
+  let completed: CounterpartyProviderAccountRow | null;
+  try {
+    const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
+      rampRuntime(c),
+      {
+        customerId: input.customer.customerId,
+        currency: input.fiatCurrency,
+        platformAccountId: pending.id,
+        accountInfo,
+      }
+    );
+    completed = await repository.completeExternalAccount({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      id: pending.id,
+      externalAccountReference: created.id,
+      providerStatus: created.status,
+    });
+  } catch (error) {
+    try {
+      await repository.archiveExternalAccount({
+        organizationId: input.counterparty.organization_id,
+        projectId: input.projectId,
+        counterpartyId: input.counterparty.id,
+        provider: "lightspark",
+        id: pending.id,
+      });
+    } catch (compensationError) {
+      logEvent("warn", {
+        event: "sdp_api_lightspark_reservation_compensation_failed",
+        organization_id: input.counterparty.organization_id,
+        project_id: input.projectId,
+        counterparty_id: input.counterparty.id,
+        provider_account_id: pending.id,
+        error: compensationError instanceof Error ? compensationError.message : "unknown",
+      });
+    }
+    throw error;
+  }
   if (completed === null) {
     throw internalError("Lightspark external-account completion lost its parent scope.");
   }

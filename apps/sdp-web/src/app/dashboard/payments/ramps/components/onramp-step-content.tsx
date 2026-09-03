@@ -5,7 +5,6 @@ import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
@@ -43,6 +42,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     selectedWallet,
     selectedRampPair,
     onboarding,
+    isAdvancing,
     retryOnboarding,
     quote,
     transferStatus,
@@ -105,13 +105,18 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "REQUIREMENTS") {
+    // Native fieldset[disabled] freezes every nested input and combobox trigger
+    // while the advance POST is in flight, so mid-flight edits can't desync the
+    // form from what the provider was sent.
     return (
-      <RequirementsFields
-        provider={fields.provider}
-        fields={requirementFields}
-        values={collectedData}
-        onChange={setCollectedField}
-      />
+      <fieldset disabled={isAdvancing} className="min-w-0">
+        <RequirementsFields
+          provider={fields.provider}
+          fields={requirementFields}
+          values={collectedData}
+          onChange={setCollectedField}
+        />
+      </fieldset>
     );
   }
 
@@ -214,7 +219,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         amount={fields.amount.trim()}
         quote={quote}
         fiatCurrency={selectedRampPair.fiatCurrency}
-        cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
+        cryptoToken={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
         instructions={quote.paymentInstructions}
         action={simulateAction}
       />

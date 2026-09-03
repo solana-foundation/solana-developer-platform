@@ -3,10 +3,10 @@
 import type {
   CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
+  PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
-import { privateChannelTokens } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useTransition } from "react";
 import { toast } from "sonner";
@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { fetchWalletBalancesAction, type WalletBalanceView } from "../wallet-balances";
@@ -42,6 +41,7 @@ interface TransferFormProps {
   channels: PrivateChannelMembershipChannelDto[];
   scopeKey: string;
   sourceWallets: CustodyWalletSummary[];
+  tokens: PrivateChannelTokenEligibility[];
 }
 
 interface TransferFormState {
@@ -99,11 +99,57 @@ function toRecipientOptions(
 }
 
 export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
+  const t = useTranslations();
+  if (props.channels.length === 0) {
+    return (
+      <p className="text-sm text-secondary">{t("DashboardPrivateChannels.transfer.noChannels")}</p>
+    );
+  }
+  if (props.sourceWallets.length === 0) {
+    return (
+      <p className="text-sm text-secondary">
+        {t("DashboardPrivateChannels.transfer.noSourceWallets")}
+      </p>
+    );
+  }
   return <TransferFormState key={scopeKey} {...props} />;
 }
 
-function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, "scopeKey">) {
-  const tokens = privateChannelTokens(useSolanaCluster());
+function validateTransferSubmission({
+  amount,
+  channelId,
+  recipientVerifiedWalletId,
+  selectedToken,
+  walletId,
+}: {
+  amount: string;
+  channelId: string;
+  recipientVerifiedWalletId: string;
+  selectedToken: PrivateChannelTokenEligibility | undefined;
+  walletId: string;
+}):
+  | { ok: true; token: PrivateChannelTokenEligibility }
+  | { ok: false; messageKey: MessageKey | null } {
+  if (!selectedToken) {
+    return { ok: false, messageKey: "DashboardPrivateChannels.common.noEnabledTokens" };
+  }
+  if (!recipientVerifiedWalletId) {
+    return { ok: false, messageKey: "DashboardPrivateChannels.transfer.selectRecipient" };
+  }
+  if (!channelId || !walletId) {
+    return { ok: false, messageKey: "DashboardPrivateChannels.transfer.incomplete" };
+  }
+  if (getAmountError(amount)) {
+    return { ok: false, messageKey: null };
+  }
+  return { ok: true, token: selectedToken };
+}
+
+function TransferFormState({
+  channels,
+  sourceWallets,
+  tokens,
+}: Omit<TransferFormProps, "scopeKey">) {
   const t = useTranslations();
   const [state, updateState] = useReducer(transferFormReducer, {
     channelId: channels[0]?.id ?? "",
@@ -229,20 +275,6 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
     };
   }, [walletId, mint, balanceRefetchKey]);
 
-  if (channels.length === 0) {
-    return (
-      <p className="text-sm text-secondary">{t("DashboardPrivateChannels.transfer.noChannels")}</p>
-    );
-  }
-
-  if (sourceWallets.length === 0) {
-    return (
-      <p className="text-sm text-secondary">
-        {t("DashboardPrivateChannels.transfer.noSourceWallets")}
-      </p>
-    );
-  }
-
   const selectedRecipient = recipientOptions.find(
     (recipient) => recipient.id === recipientVerifiedWalletId
   );
@@ -285,17 +317,17 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
     if (submitting.current) {
       return;
     }
-
     updateState({ showAmountError: true });
-    let selectionKey: MessageKey | null = null;
-    if (!recipientVerifiedWalletId) {
-      selectionKey = "DashboardPrivateChannels.transfer.selectRecipient";
-    } else if (!channelId || !walletId) {
-      selectionKey = "DashboardPrivateChannels.transfer.incomplete";
-    }
-    if (selectionKey || getAmountError(amount)) {
+    const validation = validateTransferSubmission({
+      amount,
+      channelId,
+      recipientVerifiedWalletId,
+      selectedToken,
+      walletId,
+    });
+    if (!validation.ok) {
       // An amount problem already renders under the field, so it is not repeated here.
-      updateState({ error: selectionKey ? t(selectionKey) : null });
+      updateState({ error: validation.messageKey ? t(validation.messageKey) : null });
       return;
     }
 
@@ -313,7 +345,7 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
           walletId,
           recipientVerifiedWalletId,
           amount: amount.trim(),
-          mint: selectedToken?.mint,
+          mint: validation.token.mint,
         });
         if (result.ok) {
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });
@@ -368,6 +400,74 @@ function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, 
 
 type Translate = ReturnType<typeof useTranslations>;
 
+function TransferRecipientField({
+  isSubmitting,
+  recipientLoad,
+  recipientOptions,
+  recipientVerifiedWalletId,
+  submitting,
+  t,
+  updateState,
+}: {
+  isSubmitting: boolean;
+  recipientLoad: RecipientLoadState;
+  recipientOptions: RecipientOption[];
+  recipientVerifiedWalletId: string;
+  submitting: { current: boolean };
+  t: Translate;
+  updateState: (update: TransferFormUpdate) => void;
+}) {
+  const retry = () => {
+    if (submitting.current) return;
+    updateState((current) => ({ recipientReload: current.recipientReload + 1 }));
+  };
+  const selectRecipient = (value: string | null) => {
+    if (submitting.current) return;
+    const next = value ?? "";
+    if (next !== recipientVerifiedWalletId) {
+      updateState({ error: null, recipientVerifiedWalletId: next });
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("DashboardPrivateChannels.transfer.recipientWallet")}</Label>
+      {recipientLoad.status === "loading" && (
+        <p aria-live="polite" className="text-sm text-secondary" role="status">
+          {t("DashboardPrivateChannels.transfer.recipientsLoading")}
+        </p>
+      )}
+      {recipientLoad.status === "error" && (
+        <div className="space-y-2" role="alert">
+          <p className="text-destructive text-sm">{recipientLoad.message}</p>
+          <Button disabled={isSubmitting} onClick={retry} type="button" variant="secondary">
+            {t("DashboardPrivateChannels.transfer.recipientsRetry")}
+          </Button>
+        </div>
+      )}
+      {recipientLoad.status === "ready" && recipientOptions.length === 0 && (
+        <p className="text-sm text-secondary">
+          {t("DashboardPrivateChannels.transfer.recipientsEmpty")}
+        </p>
+      )}
+      {recipientLoad.status === "ready" && recipientOptions.length > 0 && (
+        <Select
+          ariaLabel={t("DashboardPrivateChannels.transfer.recipientWallet")}
+          disabled={isSubmitting}
+          value={recipientVerifiedWalletId}
+          onValueChange={selectRecipient}
+        >
+          {recipientOptions.map((recipient) => (
+            <SelectItem key={recipient.id} value={recipient.id}>
+              {recipient.label}
+            </SelectItem>
+          ))}
+        </Select>
+      )}
+    </div>
+  );
+}
+
 function TransferFields(props: {
   amountError: string | null;
   channels: PrivateChannelMembershipChannelDto[];
@@ -379,7 +479,7 @@ function TransferFields(props: {
   state: TransferFormState;
   submitting: { current: boolean };
   t: Translate;
-  tokens: ReturnType<typeof privateChannelTokens>;
+  tokens: PrivateChannelTokenEligibility[];
   updateState: (update: TransferFormUpdate) => void;
   onSubmit: () => void;
 }) {
@@ -402,6 +502,12 @@ function TransferFields(props: {
         props.onSubmit();
       }}
     >
+      {props.tokens.length === 0 && (
+        <p className="text-secondary text-sm">
+          {props.t("DashboardPrivateChannels.common.noEnabledTokens")}
+        </p>
+      )}
+
       <div className="space-y-1.5">
         <Label>{props.t("DashboardPrivateChannels.transfer.channel")}</Label>
         <Select
@@ -457,58 +563,15 @@ function TransferFields(props: {
         </p>
       </div>
 
-      <div className="space-y-1.5">
-        <Label>{props.t("DashboardPrivateChannels.transfer.recipientWallet")}</Label>
-        {recipientLoad.status === "loading" && (
-          <p aria-live="polite" className="text-sm text-secondary" role="status">
-            {props.t("DashboardPrivateChannels.transfer.recipientsLoading")}
-          </p>
-        )}
-        {recipientLoad.status === "error" && (
-          <div className="space-y-2" role="alert">
-            <p className="text-destructive text-sm">{recipientLoad.message}</p>
-            <Button
-              disabled={props.isSubmitting}
-              onClick={() => {
-                if (!props.submitting.current) {
-                  props.updateState((current) => ({
-                    recipientReload: current.recipientReload + 1,
-                  }));
-                }
-              }}
-              type="button"
-              variant="secondary"
-            >
-              {props.t("DashboardPrivateChannels.transfer.recipientsRetry")}
-            </Button>
-          </div>
-        )}
-        {recipientLoad.status === "ready" && props.recipientOptions.length === 0 && (
-          <p className="text-sm text-secondary">
-            {props.t("DashboardPrivateChannels.transfer.recipientsEmpty")}
-          </p>
-        )}
-        {recipientLoad.status === "ready" && props.recipientOptions.length > 0 && (
-          <Select
-            ariaLabel={props.t("DashboardPrivateChannels.transfer.recipientWallet")}
-            disabled={props.isSubmitting}
-            value={recipientVerifiedWalletId}
-            onValueChange={(value) => {
-              if (props.submitting.current) return;
-              const next = value ?? "";
-              if (next !== recipientVerifiedWalletId) {
-                props.updateState({ error: null, recipientVerifiedWalletId: next });
-              }
-            }}
-          >
-            {props.recipientOptions.map((recipient) => (
-              <SelectItem key={recipient.id} value={recipient.id}>
-                {recipient.label}
-              </SelectItem>
-            ))}
-          </Select>
-        )}
-      </div>
+      <TransferRecipientField
+        isSubmitting={props.isSubmitting}
+        recipientLoad={recipientLoad}
+        recipientOptions={props.recipientOptions}
+        recipientVerifiedWalletId={recipientVerifiedWalletId}
+        submitting={props.submitting}
+        t={props.t}
+        updateState={props.updateState}
+      />
 
       {props.tokens.length > 0 && (
         <div className="space-y-1.5">
@@ -563,6 +626,7 @@ function TransferFields(props: {
           props.isSubmitting ||
           !channelId ||
           !walletId ||
+          props.tokens.length === 0 ||
           !recipientVerifiedWalletId ||
           !amount.trim()
         }

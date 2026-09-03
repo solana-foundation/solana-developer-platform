@@ -268,6 +268,19 @@ async function advanceCounterpartyRequirements(
   return body.data;
 }
 
+/**
+ * A completed advance addressed by the corridor it answered for. `advanceId`
+ * is globally unique, making each advance a distinct polling subject: no
+ * earlier advance's poll cache can ever answer for a later one — including
+ * across a subject round trip, where any counter would restart and collide.
+ */
+interface AdvanceRecord {
+  corridor: string;
+  advanceId: string;
+  payload: AdvanceRequirementsPayload;
+  result: CounterpartyRequirements;
+}
+
 function isOnboardingPending(status: CounterpartyRequirements["status"]): boolean {
   return (
     status === "terms_of_service_required" ||
@@ -285,12 +298,6 @@ export interface CounterpartyRequirementsParams extends AdvanceRequirementsPaylo
   counterpartyId: string;
   provider: RampProviderId | null;
   direction: RampDirection;
-  /**
-   * Fires when onboarding reaches `ready` — on submit or when the status poll
-   * observes it. Receives the payout account the advance resolved so the quote
-   * never depends on a not-yet-rendered selection state update.
-   */
-  onReady?: (providerAccountId: string | null) => void;
 }
 
 export interface CounterpartyRequirementsState {
@@ -312,9 +319,17 @@ export interface CounterpartyRequirementsState {
   isResolved: boolean;
   /** Why the user can't proceed past provider selection: a fetch error OR an `unsupported` reason. null when fine. */
   blockReason: string | null;
-  /** Live provider onboarding lifecycle from the last advance (POST); null until advanced. */
+  /**
+   * Live onboarding lifecycle for the CURRENT corridor, derived from the last
+   * advance and its status poll; null until advanced or after a corridor change.
+   */
   onboarding: CounterpartyRequirements | null;
-  /** Advances provider provisioning (onramp); resolves to the new lifecycle state. */
+  /**
+   * The payout account a `ready` onboarding resolved for the current corridor;
+   * null otherwise.
+   */
+  resolvedProviderAccountId: string | null;
+  /** Advances provider provisioning; resolves to the new lifecycle state. */
   submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
   /** An advance request is in flight (initial submit or a poll tick). */
   isAdvancing: boolean;
@@ -372,24 +387,35 @@ export function useCounterpartyRequirements(
     });
   };
 
-  // Reset collected answers when the counterparty/provider/currency changes by comparing
+  // Reset collected answers when any request-corridor field changes by comparing
   // the previous value during render (React's no-effect way to reset state on a change),
-  // so stale KYC or bank details never leak into a different provider's payload.
+  // so stale KYC or bank details never leak into a different corridor's payload and a
+  // pending onboarding never survives into one.
   const subjectKey =
-    params === null ? "" : `${params.counterpartyId}:${params.provider}:${params.fiatCurrency}`;
+    params === null
+      ? ""
+      : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.cryptoToken}:${params.fiatCurrency}:${params.destinationWallet}`;
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
-  const [onboarding, setOnboarding] = useState<CounterpartyRequirements | null>(null);
-  const [lastAdvancePayload, setLastAdvancePayload] = useState<AdvanceRequirementsPayload | null>(
-    null
-  );
+  // The completed advance, tagged with the corridor it answered for. Responses
+  // are data addressed by their corridor, never commands: a write from a
+  // continuation that raced a corridor change is inert because every read
+  // filters on the CURRENT corridor identity — no application-time guards.
+  const [advanceRecord, setAdvanceRecord] = useState<AdvanceRecord | null>(null);
   const [isAdvancing, setIsAdvancing] = useState(false);
+  // The request subject plus the collected destination country (which lives
+  // outside the subject key): together the full corridor an advance or poll
+  // response answers for.
+  const corridorIdentity = `${subjectKey}:${
+    collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry
+  }`;
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
     setPayoutAccountSelection({ kind: "none" });
-    setOnboarding(null);
-    setLastAdvancePayload(null);
+    setAdvanceRecord(null);
   }
+  const advance =
+    advanceRecord !== null && advanceRecord.corridor === corridorIdentity ? advanceRecord : null;
 
   const key =
     params?.provider &&
@@ -408,7 +434,7 @@ export function useCounterpartyRequirements(
   // Requirements are deterministic for a (counterparty, provider, corridor) for the
   // wizard's lifetime — never revalidate, so `needsCollection` (and thus the wizard's
   // step list) can't flip out from under the user mid-flow.
-  const { data, error, mutate } = useSWR(
+  const { data, error } = useSWR(
     key,
     ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
       fetchCounterpartyRequirements(
@@ -431,6 +457,7 @@ export function useCounterpartyRequirements(
     if (!params?.provider || !params.counterpartyId) {
       throw new Error(t("DashboardPayments.workspace.requirementsContextMissing"));
     }
+    const corridor = corridorIdentity;
     setIsAdvancing(true);
     try {
       const result = await advanceCounterpartyRequirements(
@@ -446,23 +473,7 @@ export function useCounterpartyRequirements(
         },
         t
       );
-      setOnboarding(result);
-      setLastAdvancePayload(payload);
-      if (
-        result.status === "collect" ||
-        result.status === "collect_counterparty" ||
-        result.status === "collect_account"
-      ) {
-        await mutate(result, { revalidate: false });
-      }
-      if (result.status === "ready") {
-        const readyProviderAccountId =
-          result.providerAccountId !== undefined ? result.providerAccountId : null;
-        if (readyProviderAccountId !== null) {
-          setPayoutAccountSelection({ kind: "existing", id: readyProviderAccountId });
-        }
-        params.onReady?.(readyProviderAccountId);
-      }
+      setAdvanceRecord({ corridor, advanceId: crypto.randomUUID(), payload, result });
       return result;
     } finally {
       setIsAdvancing(false);
@@ -470,38 +481,59 @@ export function useCounterpartyRequirements(
   };
 
   const retryOnboarding = () => {
-    if (lastAdvancePayload) {
-      void submitRequirements(lastAdvancePayload).catch(() => {});
+    if (advance !== null) {
+      void submitRequirements(advance.payload).catch(() => {});
     }
   };
 
-  useSWR(
-    onboarding && lastAdvancePayload && params?.provider && isOnboardingPending(onboarding.status)
-      ? paymentsQueryKeys.requirementsStatusPoll({ subjectKey })
-      : null,
-    async () => {
-      if (!lastAdvancePayload || !params?.provider) {
-        return;
+  // The onboarding status poll is a pure data fetch keyed by the corridor the
+  // advance answered for: a corridor change changes the key, so a tick that
+  // resolves for an abandoned corridor lands in a cache entry nothing reads.
+  // Polling stops itself once its own data reports a non-pending status.
+  // The advanceId in the key is what guarantees freshness: SWR has no per-hook
+  // no-cache or TTL option (https://github.com/vercel/swr/discussions/1642,
+  // https://github.com/vercel/swr/discussions/2293) and cache.delete cannot
+  // stop an in-flight tick from repopulating a shared key, so no two advances
+  // ever share a key.
+  const pollKey =
+    advance !== null && params?.provider && isOnboardingPending(advance.result.status)
+      ? paymentsQueryKeys.requirementsStatusPoll({
+          subjectKey: `${corridorIdentity}#${advance.advanceId}`,
+        })
+      : null;
+  const { data: polledOnboarding } = useSWR(
+    pollKey,
+    () => {
+      if (advance === null || !params?.provider) {
+        throw new Error(t("DashboardPayments.workspace.requirementsContextMissing"));
       }
-      const result = await fetchCounterpartyRequirements(
+      return fetchCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
         params.direction,
-        lastAdvancePayload,
+        advance.payload,
         t
       );
-      setOnboarding(result);
-      if (result.status === "ready") {
-        const readyProviderAccountId =
-          result.providerAccountId !== undefined ? result.providerAccountId : null;
-        if (readyProviderAccountId !== null) {
-          setPayoutAccountSelection({ kind: "existing", id: readyProviderAccountId });
-        }
-        params.onReady?.(readyProviderAccountId);
-      }
     },
-    { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
+    {
+      refreshInterval: (latest) =>
+        latest !== undefined && !isOnboardingPending(latest.status) ? 0 : 4000,
+      revalidateOnFocus: false,
+      dedupingInterval: 0,
+    }
   );
+
+  // The live onboarding lifecycle for the CURRENT corridor: the freshest of the
+  // advance response and its status poll. Both sources are corridor-addressed,
+  // so an abandoned corridor's result can never surface here.
+  const onboarding =
+    advance === null ? null : polledOnboarding !== undefined ? polledOnboarding : advance.result;
+  const resolvedProviderAccountId =
+    onboarding !== null &&
+    onboarding.status === "ready" &&
+    onboarding.providerAccountId !== undefined
+      ? onboarding.providerAccountId
+      : null;
 
   const payoutLabels = useMemo<PayoutRequirementFieldLabels>(
     () => ({
@@ -510,7 +542,20 @@ export function useCounterpartyRequirements(
     }),
     [t]
   );
-  const payout = data !== undefined && data.status === "collect_account" ? data.payout : null;
+  // Progressive collection: an advance answered with a fresh field set (or a
+  // refreshed payout tree) supersedes the immutable initial GET for the current
+  // corridor — derived here rather than written into the SWR cache.
+  const requirementsData =
+    advance !== null &&
+    (advance.result.status === "collect" ||
+      advance.result.status === "collect_counterparty" ||
+      advance.result.status === "collect_account")
+      ? advance.result
+      : data;
+  const payout =
+    requirementsData !== undefined && requirementsData.status === "collect_account"
+      ? requirementsData.payout
+      : null;
   const existingPayoutAccounts = useMemo(
     () =>
       payout === null || collectedData.destinationCountry === undefined
@@ -518,8 +563,13 @@ export function useCounterpartyRequirements(
         : activePayoutAccounts(payout, collectedData.destinationCountry),
     [collectedData.destinationCountry, payout]
   );
+  // A ready advance resolves the corridor's payout account; it seeds an empty
+  // choice so the chooser and the quote agree, but never overrides an explicit
+  // user selection made afterwards.
   const effectivePayoutAccountSelection = resolvePayoutAccountSelection(
-    payoutAccountSelection,
+    payoutAccountSelection.kind === "none" && resolvedProviderAccountId !== null
+      ? { kind: "existing", id: resolvedProviderAccountId }
+      : payoutAccountSelection,
     existingPayoutAccounts
   );
   const fields = useMemo<RequirementField[]>(() => {
@@ -532,13 +582,13 @@ export function useCounterpartyRequirements(
       );
     }
     if (
-      data !== undefined &&
-      (data.status === "collect" || data.status === "collect_counterparty")
+      requirementsData !== undefined &&
+      (requirementsData.status === "collect" || requirementsData.status === "collect_counterparty")
     ) {
-      return data.fields;
+      return requirementsData.fields;
     }
     return [];
-  }, [collectedData, data, effectivePayoutAccountSelection, payout, payoutLabels]);
+  }, [collectedData, requirementsData, effectivePayoutAccountSelection, payout, payoutLabels]);
 
   const selectedProviderAccountId =
     effectivePayoutAccountSelection.kind === "existing" ? effectivePayoutAccountSelection.id : null;
@@ -573,13 +623,14 @@ export function useCounterpartyRequirements(
     collectedData,
     setField,
     needsCollection:
-      data?.status === "collect" ||
-      data?.status === "collect_counterparty" ||
-      data?.status === "collect_account",
+      requirementsData?.status === "collect" ||
+      requirementsData?.status === "collect_counterparty" ||
+      requirementsData?.status === "collect_account",
     isComplete: isComplete && isPayoutAccountChoiceComplete,
-    isResolved: data !== undefined,
+    isResolved: requirementsData !== undefined,
     blockReason,
     onboarding,
+    resolvedProviderAccountId,
     submitRequirements,
     isAdvancing,
     retryOnboarding,

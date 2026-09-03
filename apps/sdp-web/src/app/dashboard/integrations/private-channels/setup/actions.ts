@@ -7,7 +7,7 @@ import {
 import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
 import { summarizeProbeFailure } from "./probe-error";
 
 const privateChannelInstanceSchema = privateChannelInstanceInputSchema.extend({
@@ -147,6 +147,46 @@ export async function connectPrivateChannelAction(
   }
 }
 
+/** Re-probe and save changed endpoints/program addresses for the active instance. */
+export async function updatePrivateChannelAction(
+  input: unknown
+): Promise<ConnectPrivateChannelResult> {
+  const parsed = privateChannelInstanceInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, kind: "validation", fieldErrors: flattenFieldErrors(parsed.error) };
+  }
+  const instanceId =
+    input &&
+    typeof input === "object" &&
+    typeof (input as Record<string, unknown>).instanceId === "string"
+      ? (input as Record<string, unknown>).instanceId
+      : null;
+  if (!instanceId) {
+    return {
+      ok: false,
+      kind: "server",
+      message: "The active instance is unavailable. Refresh and try again.",
+    };
+  }
+  const { chainRpcUrl: _legacyChainRpcUrl, ...updateInput } = parsed.data;
+
+  try {
+    const client = await createSdpApiClient();
+    const response = await client.fetch<{ instance: PrivateChannelInstance }>(
+      "/v1/private-channels/instance",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ ...updateInput, instanceId }),
+      }
+    );
+    revalidatePath("/dashboard/integrations/private-channels", "layout");
+    revalidatePath("/dashboard/integrations");
+    return { ok: true, instance: response.instance };
+  } catch (error) {
+    return interpretApiError(error);
+  }
+}
+
 export type DisconnectResult =
   | { ok: true; instance: PrivateChannelInstance }
   | { ok: false; message: string };
@@ -158,11 +198,11 @@ export async function disconnectPrivateChannelAction(): Promise<DisconnectResult
       "/v1/private-channels/instance/disconnect",
       { method: "POST", body: "{}" }
     );
-    revalidatePath("/dashboard/integrations/private-channels/setup");
+    revalidatePath("/dashboard/integrations/private-channels", "layout");
     revalidatePath("/dashboard/integrations");
     return { ok: true, instance: response.instance };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "Unknown error." };
+    return { ok: false, message: extractSdpApiErrorMessage(error) };
   }
 }
 
@@ -176,7 +216,7 @@ export async function deletePrivateChannelAction(): Promise<DeleteResult> {
     revalidatePath("/dashboard/integrations");
     return { ok: true };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "Unknown error." };
+    return { ok: false, message: extractSdpApiErrorMessage(error) };
   }
 }
 
@@ -200,26 +240,21 @@ function flattenFieldErrors(error: import("zod").ZodError): FieldErrors {
 
 function interpretApiError(error: unknown): ConnectPrivateChannelResult {
   if (!(error instanceof Error)) {
-    return { ok: false, kind: "server", message: "Unknown error." };
+    return { ok: false, kind: "server", message: "Request failed." };
   }
-  const match = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/.exec(error.message);
+  const match = /^SDP API request failed \(\d+\):\s*([\s\S]*)$/.exec(error.message);
   if (!match) {
-    return { ok: false, kind: "server", message: error.message };
+    return { ok: false, kind: "server", message: "Unable to reach the SDP API." };
   }
-  const status = Number.parseInt(match[1] ?? "", 10);
   let payload: unknown;
   try {
-    payload = JSON.parse(match[2] ?? "");
+    payload = JSON.parse(match[1] ?? "");
   } catch {
-    return {
-      ok: false,
-      kind: "server",
-      message: `HTTP ${status}: ${match[2] ?? "Request failed"}`,
-    };
+    return { ok: false, kind: "server", message: "Request failed." };
   }
 
   const { details, message } = extractError(payload);
-  const displayMessage = message ?? error.message;
+  const displayMessage = message ?? "Request failed.";
 
   const existingInstance = privateChannelInstanceSchema.safeParse(details?.existingInstance);
   if (details?.requiresReactivateConfirmation === true && existingInstance.success) {

@@ -3,6 +3,7 @@
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
@@ -292,7 +293,7 @@ function getPrivateChannelsRoutePageConfig(
   if (pathname === "/dashboard/integrations/private-channels") {
     return {
       title: t("Shared.dashboardShell.integrations"),
-      contentWidthClass: "max-w-5xl",
+      contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/integrations",
         label: t("Shared.integrations.backToIntegrations"),
@@ -304,30 +305,69 @@ function getPrivateChannelsRoutePageConfig(
       title: t("DashboardPrivateChannels.instance.title"),
       backHref: "/dashboard/integrations/private-channels",
       backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
-      contentWidthClass: "max-w-5xl",
+      contentWidthClass: "max-w-none",
     });
+  }
+  const privateChannelsSegments = pathname.split("/");
+  const instanceId = privateChannelsSegments[4];
+  const instanceRoute =
+    instanceId && !["overview", "setup", "channels", "members", "wallets"].includes(instanceId);
+  const instanceSubpage = privateChannelsSegments[5];
+  const instanceNestedPage = privateChannelsSegments[6];
+  if (instanceRoute && instanceSubpage === "setup") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: privateChannelsInstancePath(instanceId),
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (instanceRoute && instanceSubpage === "channels" && instanceNestedPage === "new") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.directory.setupChannel"),
+      backHref: privateChannelsInstancePath(instanceId),
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (instanceRoute && instanceSubpage === "channels") {
+    return {
+      title: t("Shared.dashboardShell.privateChannels"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: privateChannelsInstancePath(instanceId),
+        label: t("Shared.dashboardShell.backToPrivateChannels"),
+      },
+    };
+  }
+  if (instanceRoute && !instanceSubpage) {
+    return {
+      title: t("Shared.dashboardShell.privateChannels"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
+    };
   }
   const isHub = pathname.startsWith("/dashboard/integrations/private-channels/overview");
   if (isHub) {
     return {
       title: t("Shared.dashboardShell.privateChannels"),
       contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
     };
   }
-  // The segment layout draws the Private Channels tab strip — and its bottom
-  // rule — directly under the top bar. `backAction` would add the top bar's own
-  // divider above it and double the rule, so the back link rides as plain
-  // leading content instead, the same way header-tab pages suppress that border.
   return {
     title: privateChannelsSubPageTitle(t, pathname.split("/")[4] ?? ""),
     contentWidthClass: "max-w-none",
-    topBarLeadingContent: (
-      <HeaderBackAction
-        href="/dashboard/integrations/private-channels/overview"
-        label={t("Shared.dashboardShell.backToPrivateChannels")}
-        compactOnMobile
-      />
-    ),
+    backAction: {
+      href: "/dashboard/integrations/private-channels/overview",
+      label: t("Shared.dashboardShell.backToPrivateChannels"),
+    },
   };
 }
 

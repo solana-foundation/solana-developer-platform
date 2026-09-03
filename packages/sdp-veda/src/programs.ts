@@ -76,6 +76,14 @@ export function toClusterConfig(
 }
 
 /**
+ * The associated-token-account program, named because `./rent.ts` has to
+ * recognise its create instructions to move their rent funding to a sponsor.
+ */
+export const ASSOCIATED_TOKEN_PROGRAM_ADDRESS =
+  // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+
+/**
  * Programs that are the same on every cluster and may appear in a plan without
  * being cluster-specific: system, both token programs, the ATA program, memo,
  * compute budget, and the Ed25519 verifier a compliance approval rides on.
@@ -89,8 +97,7 @@ const CLUSTER_INVARIANT_PROGRAMS: readonly string[] = [
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
   // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-  // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
-  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
   "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
   "ComputeBudget111111111111111111111111111111",
