@@ -64,8 +64,18 @@ CREATE TABLE IF NOT EXISTS dvp_trades (
     -- it, so this is a cache of a poll, never authoritative on its own. A closed
     -- PDA is also indistinguishable across settle/cancel/reject without fetching
     -- the closing transaction, hence closed_unknown.
-    status TEXT NOT NULL DEFAULT 'created'
+    --
+    -- 'creating' is the DEFAULT because the row is written before the create
+    -- transaction is broadcast. That ordering is not a style choice: the six seed
+    -- columns above are the only durable copy of what RecoverDvp needs, and a
+    -- crash between broadcast and insert would leave an on-chain trade nobody can
+    -- recover. A retry cannot repair it either — it draws a fresh nonce and lands
+    -- at a different address. So we record first and resolve afterwards, and
+    -- 'creating' is the honest name for "signed, outcome not yet observed".
+    status TEXT NOT NULL DEFAULT 'creating'
         CHECK (status IN (
+            'creating',
+            'create_failed',
             'created',
             'partially_funded',
             'funded',
@@ -93,7 +103,9 @@ CREATE TABLE IF NOT EXISTS dvp_trades (
 CREATE INDEX IF NOT EXISTS dvp_trades_project_status_idx
     ON dvp_trades(project_id, status);
 
--- Funding detection sweeps trades that are still open.
+-- Funding detection sweeps trades that are still open. 'creating' is in the set
+-- because those rows are exactly the ones whose broadcast outcome is unknown and
+-- has to be resolved by looking at the chain.
 CREATE INDEX IF NOT EXISTS dvp_trades_open_idx
     ON dvp_trades(project_id, updated_at)
-    WHERE status IN ('created', 'partially_funded');
+    WHERE status IN ('creating', 'created', 'partially_funded');

@@ -69,6 +69,28 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
          status, observed_at, create_signature, created_at, updated_at`;
 
+/**
+ * The wallet allowlist clause, as SQL plus its bindings.
+ *
+ * An empty list is "authorized for no wallet" and must match nothing — `1 = 0`
+ * rather than a dropped clause. Absent or null is genuinely unrestricted. That
+ * asymmetry is the whole point: treating empty as "no filter" would hand a key
+ * with no usable bindings the entire project's trades.
+ */
+function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
+  sql: string;
+  bindings: string[];
+} {
+  if (sdpWalletIds === undefined || sdpWalletIds === null) {
+    return { sql: "", bindings: [] };
+  }
+  if (sdpWalletIds.length === 0) {
+    return { sql: " AND 1 = 0", bindings: [] };
+  }
+  const placeholders = sdpWalletIds.map(() => "?").join(", ");
+  return { sql: ` AND sdp_wallet_id IN (${placeholders})`, bindings: sdpWalletIds };
+}
+
 export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository {
   return {
     async create(row: DvpTradeInsert) {
@@ -124,40 +146,59 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return mapDvpTradeRow(inserted);
     },
 
+    async resolveCreate(id: string, status: "created" | "create_failed") {
+      // Compare-and-swap on 'creating'. A reconciler that already read the chain
+      // and advanced the row has better information than this caller, so it wins
+      // and we match zero rows rather than overwriting an observation.
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET status = ?, updated_at = sdp_iso_now()
+            WHERE id = ? AND status = 'creating'
+            RETURNING ${SELECT_COLUMNS}`
+        )
+        .bind(status, id)
+        .first<Record<string, unknown>>();
+      return row ? mapDvpTradeRow(row) : null;
+    },
+
     async getById(scope: DvpTradeScope, id: string) {
+      const wallets = walletScopeClause(scope.sdpWalletIds);
       const row = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ? AND id = ?`
+            WHERE organization_id = ? AND project_id = ? AND id = ?${wallets.sql}`
         )
-        .bind(scope.organizationId, scope.projectId, id)
+        .bind(scope.organizationId, scope.projectId, id, ...wallets.bindings)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },
 
     async getBySwapDvp(scope: DvpTradeScope, swapDvp: string) {
+      const wallets = walletScopeClause(scope.sdpWalletIds);
       const row = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ? AND swap_dvp = ?`
+            WHERE organization_id = ? AND project_id = ? AND swap_dvp = ?${wallets.sql}`
         )
-        .bind(scope.organizationId, scope.projectId, swapDvp)
+        .bind(scope.organizationId, scope.projectId, swapDvp, ...wallets.bindings)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },
 
     async listByProject(scope: DvpTradeScope, limit: number) {
+      const wallets = walletScopeClause(scope.sdpWalletIds);
       const result = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ?
+            WHERE organization_id = ? AND project_id = ?${wallets.sql}
             ORDER BY created_at DESC
             LIMIT ?`
         )
-        .bind(scope.organizationId, scope.projectId, limit)
+        .bind(scope.organizationId, scope.projectId, ...wallets.bindings, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

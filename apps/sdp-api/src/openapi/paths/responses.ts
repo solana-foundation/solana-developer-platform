@@ -25,6 +25,7 @@ import {
   custodyWalletResponseSchema,
   custodyWalletsResponseSchema,
   deleteWalletResponseSchema,
+  dvpTradeResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
@@ -40,6 +41,7 @@ import {
   listCounterpartiesResponseSchema,
   listCounterpartyAccountsResponseSchema,
   listCounterpartyProviderAccountsResponseSchema,
+  listDvpTradesResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
@@ -135,6 +137,9 @@ export const assetProfileFieldOptionsResponse = successResponseSchema(
   assetProfileFieldOptionsResponseSchema
 );
 export const listAssetProfilesResponse = successResponseSchema(listAssetProfilesResponseSchema);
+
+export const dvpTradeResponse = successResponseSchema(dvpTradeResponseSchema);
+export const listDvpTradesResponse = successResponseSchema(listDvpTradesResponseSchema);
 
 export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
 export const counterpartyFieldOptionsResponse = successResponseSchema(

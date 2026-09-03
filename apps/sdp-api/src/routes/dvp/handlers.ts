@@ -1,13 +1,31 @@
 import type { Context } from "hono";
+import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { notFound } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
+import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyCustodyWalletIdsForPermissions,
+} from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
 import type { Env } from "@/types/env";
-import type { createDvpTradeSchema } from "./schemas";
+import { type createDvpTradeSchema, listDvpTradesQuerySchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+/**
+ * The custody wallets this caller may see trades for, or null for unrestricted.
+ *
+ * A trade names the custody wallet that holds SDP's leg, so a wallet-scoped API
+ * key reading a trade for a wallet it is not bound to would be reading outside
+ * its scope. Returns an EMPTY ARRAY, not null, for a key with no usable
+ * bindings — the repository reads that as deny-all.
+ */
+function readableSdpWalletIds(c: AppContext): string[] | null {
+  return getAllowedApiKeyCustodyWalletIdsForPermissions(getAuth(c), ["payments:read"]);
+}
 
 /**
  * Wire shape of a trade.
@@ -59,6 +77,15 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
+  // `payments:write` alone only says the key may write. It does not say which
+  // wallet, and this wallet pays the fee and the escrow rent and delivers SDP's
+  // leg. Re-read from the database rather than trusting the request's auth
+  // context, which may be up to an hour of cached KV — the same guard Payments
+  // uses before any money-moving write.
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, body.sdpWalletId, [
+    "payments:write",
+  ]);
+
   const trade = await createDvpTrade(c.env, {
     organizationId: auth.organizationId,
     projectId,
@@ -79,20 +106,28 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     refString: body.refString ?? null,
   });
 
-  return c.json({ trade: toTradeResponse(trade) }, 201);
+  return success(c, { trade: toTradeResponse(trade) }, 201);
 };
 
 export const listTrades = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const limit = Number(c.req.query("limit") ?? 25);
+
+  const query = listDvpTradesQuerySchema.safeParse({ limit: c.req.query("limit") });
+  if (!query.success) {
+    throw badRequest("Invalid limit: expected an integer between 1 and 100");
+  }
 
   const trades = await createDvpTradeRepository(c.env).listByProject(
-    { organizationId: auth.organizationId, projectId },
-    Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 25
+    {
+      organizationId: auth.organizationId,
+      projectId,
+      sdpWalletIds: readableSdpWalletIds(c),
+    },
+    query.data.limit
   );
 
-  return c.json({ trades: trades.map(toTradeResponse) });
+  return success(c, { trades: trades.map(toTradeResponse) });
 };
 
 export const getTrade = async (c: AppContext) => {
@@ -103,13 +138,20 @@ export const getTrade = async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
+  // A trade outside the key's wallet scope is 404, not 403. The scope filter is
+  // part of the lookup, so an unauthorized id is indistinguishable from an
+  // unknown one and nothing leaks about which trades exist.
   const trade = await createDvpTradeRepository(c.env).getById(
-    { organizationId: auth.organizationId, projectId },
+    {
+      organizationId: auth.organizationId,
+      projectId,
+      sdpWalletIds: readableSdpWalletIds(c),
+    },
     tradeId
   );
   if (!trade) {
     throw notFound("DvP trade not found");
   }
 
-  return c.json({ trade: toTradeResponse(trade) });
+  return success(c, { trade: toTradeResponse(trade) });
 };

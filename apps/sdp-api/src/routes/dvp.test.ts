@@ -81,6 +81,99 @@ function authHeaders() {
   };
 }
 
+const CUSTODY_CONFIG_ID = "cust_dvp_test";
+/** `id` is the custody wallet record id the API takes; `walletId` is the provider's. */
+const BOUND_WALLET = { id: "cwlt_dvp_test", walletId: "dvp_wallet_bound" };
+const UNBOUND_WALLET = { id: "cwlt_dvp_other", walletId: "dvp_wallet_unbound" };
+
+async function seedCustodyWallets(): Promise<void> {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+         VALUES (?, ?, ?, 'local', 'x', 'active')`
+      )
+      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id, TEST_PROJECT.id),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn', 'active')`
+      )
+      .bind(BOUND_WALLET.id, CUSTODY_CONFIG_ID, BOUND_WALLET.walletId),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg', 'active')`
+      )
+      .bind(UNBOUND_WALLET.id, CUSTODY_CONFIG_ID, UNBOUND_WALLET.walletId),
+  ]);
+}
+
+/**
+ * Re-seeds the cached key as wallet-scoped, bound to one provider wallet.
+ *
+ * The binding row goes in the DATABASE as well as the cache, because the guard
+ * deliberately re-reads it rather than trusting the request's auth context —
+ * that context can be an hour-old KV snapshot.
+ */
+async function seedWalletScopedKey(walletId: string): Promise<void> {
+  const db = getDb(env);
+  await db
+    .prepare(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+       VALUES (?, ?, ?, ?)`
+    )
+    .bind(`akwp_dvp_${walletId}`, TEST_API_KEY.id, walletId, JSON.stringify(["*"]))
+    .run();
+
+  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    walletScope: "selected",
+    signingWalletId: walletId,
+    walletBindings: [
+      {
+        walletId,
+        custodyWalletId: BOUND_WALLET.id,
+        permissions: ["*"],
+      },
+    ],
+  });
+}
+
+async function seedTradeFor(sdpWalletId: string, tradeId: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO dvp_trades (
+         id, organization_id, project_id, swap_dvp,
+         settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
+         token_program_a, token_program_b,
+         amount_a, amount_b, expiry_timestamp,
+         user_a_settlement_destination, user_b_settlement_destination,
+         escrow_a, escrow_b, sdp_side, sdp_wallet_id, status
+       ) VALUES (
+         ?, ?, ?, 'BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po',
+         '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
+         '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn',
+         '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
+         'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
+         'AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE',
+         '42',
+         'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+         'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+         '1000', '2000', '1800003600',
+         '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn',
+         '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
+         'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
+         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
+         'a', ?, 'created'
+       )`
+    )
+    .bind(tradeId, TEST_ORG.id, TEST_PROJECT.id, sdpWalletId)
+    .run();
+}
+
 /** A well-formed create body. Amounts are strings on purpose; see schemas.ts. */
 function createBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -133,10 +226,20 @@ describe("DvP routes", () => {
     expect(res.status).toBe(401);
   });
 
-  it("lists no trades for a fresh project", async () => {
+  // Every documented family answers in the { data, meta } envelope. DvP returned
+  // a bare object, which would have made its OpenAPI registration a lie.
+  it("lists no trades for a fresh project, in the standard envelope", async () => {
     const res = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ trades: [] });
+
+    const body = (await res.json()) as { data: unknown; meta: { timestamp: string } };
+    expect(body.data).toEqual({ trades: [] });
+    expect(body.meta.timestamp).toBeTruthy();
+  });
+
+  it("rejects a limit outside the documented range instead of clamping it", async () => {
+    const res = await app.request("/v1/dvp/trades?limit=0", { headers: authHeaders() }, env);
+    expect(res.status).toBe(400);
   });
 
   it("404s an unknown trade", async () => {
@@ -184,5 +287,81 @@ describe("DvP routes", () => {
       env
     );
     expect(res.status).toBe(400);
+  });
+
+  // `payments:write` says the key may write. It does not say which wallet, and
+  // the wallet named here pays the fee, pays the escrow rent and delivers SDP's
+  // leg. Without this check a selected-wallet key could spend any custody wallet
+  // in the project.
+  describe("wallet scope", () => {
+    beforeEach(async () => {
+      await seedCustodyWallets();
+    });
+
+    it("refuses a custody wallet outside the key's bindings", async () => {
+      await seedWalletScopedKey(BOUND_WALLET.walletId);
+
+      const res = await app.request(
+        "/v1/dvp/trades",
+        {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify(createBody({ sdpWalletId: UNBOUND_WALLET.id })),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    // The complement. Without it, a guard that rejected everything would look
+    // identical to a guard that works.
+    it("admits the key's own bound wallet past the scope check", async () => {
+      await seedWalletScopedKey(BOUND_WALLET.walletId);
+
+      const res = await app.request(
+        "/v1/dvp/trades",
+        {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify(createBody({ sdpWalletId: BOUND_WALLET.id })),
+        },
+        env
+      );
+
+      // Not 201: this environment configures no settlement authority, so the
+      // request fails further in. Asserting on THAT message, rather than merely
+      // on "not 403", is what proves the scope check let it through — a guard
+      // that rejected everything with a different status would still pass a
+      // bare `not.toBe(403)`.
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error?: { message?: string } };
+      expect(body.error?.message).toMatch(/settlement authority/i);
+    });
+
+    it("hides another wallet's trades from a wallet-scoped key", async () => {
+      await seedTradeFor(UNBOUND_WALLET.id, "dvp_unbound_trade");
+      await seedWalletScopedKey(BOUND_WALLET.walletId);
+
+      const list = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
+      const body = (await list.json()) as { data: { trades: { id: string }[] } };
+      expect(body.data.trades).toEqual([]);
+
+      const get = await app.request(
+        "/v1/dvp/trades/dvp_unbound_trade",
+        { headers: authHeaders() },
+        env
+      );
+      // 404 rather than 403, so nothing leaks about which trades exist.
+      expect(get.status).toBe(404);
+    });
+
+    it("shows the same trade to an unscoped key", async () => {
+      await seedTradeFor(UNBOUND_WALLET.id, "dvp_unbound_trade");
+
+      const list = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
+      const body = (await list.json()) as { data: { trades: { id: string }[] } };
+      expect(body.data.trades.map((t) => t.id)).toEqual(["dvp_unbound_trade"]);
+    });
   });
 });

@@ -10,6 +10,10 @@ import type { RepositoryDbClient } from "./base";
 
 /** Last observed lifecycle state. A cache of a poll, never an event. */
 export type DvpTradeStatus =
+  /** Signed and recorded, broadcast outcome not yet known. The initial state. */
+  | "creating"
+  /** The create transaction was rejected before it could land. Nothing exists. */
+  | "create_failed"
   | "created"
   | "partially_funded"
   | "funded"
@@ -61,12 +65,27 @@ export interface DvpTradeRow {
   updatedAt: string;
 }
 
-/** Everything needed to persist a trade the program has just accepted. */
+/**
+ * Everything needed to persist a trade before its create is broadcast.
+ *
+ * The row lands at `creating`. Callers do not choose the status: the point of
+ * this insert is that it happens while the outcome is still unknown.
+ */
 export type DvpTradeInsert = Omit<DvpTradeRow, "status" | "observedAt" | "createdAt" | "updatedAt">;
 
 export interface DvpTradeScope {
   organizationId: string;
   projectId: string;
+  /**
+   * Custody wallets a wallet-scoped API key may see trades for.
+   *
+   * `null` or absent means unrestricted — a Clerk session, or a key that is not
+   * wallet-scoped. An EMPTY ARRAY means deny everything, never "no filter". That
+   * reading is the repo-wide convention for wallet allowlists (see
+   * `payments.repository.postgres.ts:74-80`) and getting it backwards would turn
+   * a key with no usable bindings into a key that reads the whole project.
+   */
+  sdpWalletIds?: string[] | null;
 }
 
 export interface DvpTradeRepositoryContext {
@@ -74,7 +93,20 @@ export interface DvpTradeRepositoryContext {
 }
 
 export interface DvpTradeRepository {
+  /** Writes the row at `creating`, before the create transaction is broadcast. */
   create(row: DvpTradeInsert): Promise<DvpTradeRow>;
+  /**
+   * Resolves a `creating` row once the broadcast outcome is known.
+   *
+   * Compare-and-swap on `creating`, so a reconciler that already resolved the
+   * row from the chain wins over a late caller. Returns null when the row was
+   * no longer `creating` — the same answer a lost race gives.
+   *
+   * `create_failed` is only for a definitive rejection. An ambiguous send —
+   * a timeout, a dropped connection — must leave the row at `creating` for the
+   * chain to settle, because the transaction may still land.
+   */
+  resolveCreate(id: string, status: "created" | "create_failed"): Promise<DvpTradeRow | null>;
   /** Null when the trade does not exist or belongs to another project. */
   getById(scope: DvpTradeScope, id: string): Promise<DvpTradeRow | null>;
   /** Null when unknown. Lookup by the address a counterparty actually sees. */

@@ -33,10 +33,13 @@ import {
   createTransactionMessage,
   getAddressEncoder,
   getProgramDerivedAddress,
+  getSignatureFromTransaction,
   getTransactionEncoder,
+  isSolanaError,
   none,
   pipe,
   type Signature,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   some,
@@ -192,15 +195,17 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     (m) => appendTransactionMessageInstructions([instruction], m)
   );
   const signed = await signTransactionMessageWithSigners(message);
-  const signature: Signature = await solanaRpc.sendTransaction(
-    rpc,
-    new Uint8Array(getTransactionEncoder().encode(signed))
-  );
+  // Known from the signed bytes, so the row can carry it before anything is sent.
+  const signature: Signature = getSignatureFromTransaction(signed);
 
-  // Persisted AFTER the program accepts it. The six seed values are what
-  // RecoverDvp needs to rescue a deposit that lands once the trade has closed,
-  // so losing them is unrecoverable rather than merely inconvenient.
-  return createDvpTradeRepository(env).create({
+  // Recorded BEFORE broadcast, at status `creating`. The six seed values are the
+  // only durable copy of what RecoverDvp needs to rescue a deposit that lands
+  // once a trade has closed, and a retry cannot stand in for them: it draws a
+  // fresh nonce and derives a different address. So a crash between send and
+  // insert would strand a real on-chain trade permanently. Same safety order as
+  // the Earn vault services — build, sign, record, send.
+  const repository = createDvpTradeRepository(env);
+  const recorded = await repository.create({
     id: `dvp_${crypto.randomUUID().replace(/-/g, "")}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -228,4 +233,26 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     sdpWalletId: input.sdpWalletId,
     createSignature: signature,
   });
+
+  try {
+    await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+  } catch (error) {
+    // A preflight failure is the one send error that is definitively terminal:
+    // the RPC rejected the bytes in simulation and never forwarded them, so
+    // nothing landed and nothing will. Every other failure — a timeout, a
+    // dropped socket — is ambiguous, and the transaction may still be in flight.
+    // Those rows stay `creating` for the chain to settle rather than being
+    // marked failed on a guess.
+    if (
+      isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
+    ) {
+      await repository.resolveCreate(recorded.id, "create_failed");
+    }
+    throw error;
+  }
+
+  // The RPC accepted it. `created` here means "broadcast accepted", not
+  // "confirmed" — confirmation is the reconciler's job, and until it runs the
+  // status is still only ever a cache of what we last observed.
+  return (await repository.resolveCreate(recorded.id, "created")) ?? recorded;
 }

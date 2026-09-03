@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import custodyRoutes from "@/routes/custody";
+import dvpRoutes from "@/routes/dvp";
 import issuanceRoutes from "@/routes/issuance";
 import paymentsRoutes from "@/routes/payments";
 
@@ -160,6 +161,18 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /tokens/:tokenId/seize/prepare",
       "POST /tokens/:tokenId/unfreeze",
       "POST /tokens/:tokenId/unpause",
+    ]);
+  });
+
+  // DvP is small enough that every route is wallet-scoped: a trade names the
+  // custody wallet holding SDP's leg, so both the write and the two reads are
+  // bound to it. Behaviour is covered in dvp.test.ts; this list exists so a
+  // fourth route cannot be added without someone deciding which it is.
+  it("tracks every wallet-scoped DvP route", () => {
+    expect(extractRoutes(dvpRoutes)).toEqual([
+      "GET /trades",
+      "GET /trades/:tradeId",
+      "POST /trades",
     ]);
   });
 });

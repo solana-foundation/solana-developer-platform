@@ -10,6 +10,7 @@ const TEST_PROJECT_ID = "prj_dvp_repo_test";
 const OTHER_PROJECT_ID = "prj_dvp_repo_other";
 const CUSTODY_CONFIG_ID = "cust_dvp_repo_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_repo_test";
+const OTHER_CUSTODY_WALLET_ID = "cwlt_dvp_repo_other";
 
 // Deliberately above Number.MAX_SAFE_INTEGER (9007199254740991). The nonce is a
 // PDA seed, so if anything in the storage path routes it through a JS number it
@@ -103,17 +104,63 @@ describe("DvpTradeRepository (postgres)", () => {
       )
       .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID)
       .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, 'w2', '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg', 'active')`
+      )
+      .bind(OTHER_CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID)
+      .run();
 
     repo = createPostgresDvpTradeRepository(db);
   });
 
-  it("persists a trade and defaults it to created", async () => {
+  // The row is written before the create transaction is broadcast, so its
+  // opening state has to be "outcome unknown" rather than "created". Anything
+  // else would claim an on-chain fact nothing has observed yet.
+  it("persists a trade and defaults it to creating", async () => {
     const created = await repo.create(tradeInsert());
 
-    expect(created.status).toBe("created");
+    expect(created.status).toBe("creating");
     expect(created.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
     expect(created.sdpSide).toBe("a");
     expect(created.createdAt).toBeTruthy();
+  });
+
+  it("resolves a creating trade to created once the broadcast is accepted", async () => {
+    const created = await repo.create(tradeInsert());
+
+    const resolved = await repo.resolveCreate(created.id, "created");
+
+    expect(resolved?.status).toBe("created");
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({ status: "created" });
+  });
+
+  it("resolves a creating trade to create_failed when the broadcast is rejected", async () => {
+    const created = await repo.create(tradeInsert());
+
+    const resolved = await repo.resolveCreate(created.id, "create_failed");
+
+    expect(resolved?.status).toBe("create_failed");
+    // The seed tuple survives a failed create. It is the only durable copy of
+    // what RecoverDvp needs, and a preflight rejection is not proof that a
+    // retransmission of the same bytes can never land.
+    expect(resolved?.nonce).toBe(BIG_NONCE);
+    expect(resolved?.swapDvp).toBe(created.swapDvp);
+  });
+
+  // Compare-and-swap: whoever moved the row off `creating` first had better
+  // information, and a late caller must not overwrite it.
+  it("refuses to resolve a trade that is no longer creating", async () => {
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "created");
+
+    await expect(repo.resolveCreate(created.id, "create_failed")).resolves.toBeNull();
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({ status: "created" });
+  });
+
+  it("returns null resolving a trade that does not exist", async () => {
+    await expect(repo.resolveCreate("dvp_nope", "created")).resolves.toBeNull();
   });
 
   // The reason nonce and the amounts are TEXT columns.
@@ -170,5 +217,57 @@ describe("DvpTradeRepository (postgres)", () => {
     await repo.create(tradeInsert());
 
     await expect(repo.create(tradeInsert({ id: "dvp_trade_test_2" }))).rejects.toThrow();
+  });
+
+  // A trade names the custody wallet holding SDP's leg, so a wallet-scoped API
+  // key reading one for a wallet it is not bound to is reading outside its
+  // scope. The dangerous case is the empty list, which must deny rather than
+  // fall through to "no filter".
+  describe("wallet scope", () => {
+    const bothTrades = async () => {
+      await repo.create(
+        tradeInsert({ id: "dvp_mine", swapDvp: "SwapA11111111111111111111111111111111111111" })
+      );
+      await repo.create(
+        tradeInsert({
+          id: "dvp_theirs",
+          swapDvp: "SwapB11111111111111111111111111111111111111",
+          sdpWalletId: OTHER_CUSTODY_WALLET_ID,
+        })
+      );
+    };
+
+    it("returns every trade when the scope is unrestricted", async () => {
+      await bothTrades();
+
+      const listed = await repo.listByProject({ ...scope, sdpWalletIds: null }, 10);
+
+      expect(listed.map((t) => t.id).sort()).toEqual(["dvp_mine", "dvp_theirs"]);
+    });
+
+    it("returns only the bound wallet's trades", async () => {
+      await bothTrades();
+
+      const listed = await repo.listByProject({ ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] }, 10);
+
+      expect(listed.map((t) => t.id)).toEqual(["dvp_mine"]);
+    });
+
+    it("denies everything for a key with no usable bindings", async () => {
+      await bothTrades();
+
+      await expect(repo.listByProject({ ...scope, sdpWalletIds: [] }, 10)).resolves.toEqual([]);
+    });
+
+    it("hides an out-of-scope trade from getById and getBySwapDvp", async () => {
+      await bothTrades();
+      const bound = { ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] };
+
+      await expect(repo.getById(bound, "dvp_theirs")).resolves.toBeNull();
+      await expect(
+        repo.getBySwapDvp(bound, "SwapB11111111111111111111111111111111111111")
+      ).resolves.toBeNull();
+      await expect(repo.getById(bound, "dvp_mine")).resolves.toMatchObject({ id: "dvp_mine" });
+    });
   });
 });
