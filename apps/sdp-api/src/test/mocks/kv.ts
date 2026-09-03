@@ -122,8 +122,15 @@ export async function seedRateLimit(
  * @returns The current bucket's count, or 0 when the bucket does not exist.
  */
 export async function readRateLimitCount(env: Env, identifier: string): Promise<number> {
+  // Sum the current and previous buckets: a charge made just before a window
+  // rollover otherwise reads as 0 and flakes any test that asserts right after
+  // acting (the limiter itself weights both buckets, so this matches its
+  // semantics).
   const windowStart = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
   const kv = createKVStoreSet(env);
-  const raw = await kv.rateLimits.get(`ratelimit:${identifier}:${windowStart}`);
-  return raw === null ? 0 : Number(raw);
+  const [current, previous] = await Promise.all([
+    kv.rateLimits.get(`ratelimit:${identifier}:${windowStart}`),
+    kv.rateLimits.get(`ratelimit:${identifier}:${windowStart - RATE_LIMIT_WINDOW_MS}`),
+  ]);
+  return (current === null ? 0 : Number(current)) + (previous === null ? 0 : Number(previous));
 }
