@@ -315,7 +315,7 @@ export class CoinbaseRampClient implements RampProvider {
       CDP_V2_ORDERS_URL,
       {
         paymentCurrency: input.fiatCurrency ?? "USD",
-        purchaseCurrency: input.cryptoToken,
+        purchaseCurrency: getCryptoRailAssetLabel(input.assetRail),
         paymentMethod: ONRAMP_PAYMENT_METHOD,
         destinationAddress: input.destinationWalletAddress,
         destinationNetwork: SOLANA_NETWORK,

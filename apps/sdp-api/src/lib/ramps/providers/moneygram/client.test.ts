@@ -11,7 +11,7 @@ const MONEYGRAM_CONTEXT: RampRuntimeContext = {
 };
 
 const ONRAMP_INPUT: RampOnrampQuoteInput = {
-  cryptoToken: "USDC",
+  assetRail: "usdc.solana",
   fiatCurrency: "USD",
   fiatAmount: "25",
   destinationWalletAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",

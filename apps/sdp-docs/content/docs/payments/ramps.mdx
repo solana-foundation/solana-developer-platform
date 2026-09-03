@@ -90,7 +90,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
     "provider": "moonpay",
     "counterpartyId": "cp_...",
     "destinationWallet": "wal_...",
-    "cryptoToken": "USDC",
+    "assetRail": "usdc.solana",
     "fiatCurrency": "USD",
     "fiatAmount": "100.00"
   }'
@@ -110,7 +110,7 @@ const response = await fetch(
       provider: "moonpay",
       counterpartyId: "cp_...",
       destinationWallet: "wal_...",
-      cryptoToken: "USDC",
+      assetRail: "usdc.solana",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     }),
@@ -131,7 +131,7 @@ HttpRequest request = HttpRequest.newBuilder()
           "provider": "moonpay",
           "counterpartyId": "cp_...",
           "destinationWallet": "wal_...",
-          "cryptoToken": "USDC",
+          "assetRail": "usdc.solana",
           "fiatCurrency": "USD",
           "fiatAmount": "100.00"
         }"""))
@@ -147,7 +147,7 @@ HttpRequest request = HttpRequest.newBuilder()
 | `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. |
 | `counterpartyId` | yes | An existing Counterparty. Provider-side customer and payout-account state is resolved server-side from it, not passed on the request. Counterparties do not store identity or email fields. |
 | `destinationWallet` (onramp) / `sourceWallet` (offramp) | yes | A custody wallet you control — its `walletId` or its Solana address, resolved against your API key's wallet scope. Same shape for every provider. |
-| `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, `SOL`, …). |
+| `assetRail` | yes | Canonical SDP crypto asset rail (`usdc.solana`, `usdt.solana`, `sol.solana`, …). |
 | `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow (MoneyGram) can omit it on offramp. |
 | `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |
 | `rampsMemo` | no | Up to 20 key/value string pairs stored on the resulting transfer for your own correlation. |
