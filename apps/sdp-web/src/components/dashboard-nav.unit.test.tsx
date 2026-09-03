@@ -28,6 +28,7 @@ const t = ((key: string) => key) as Translate;
 function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {}) {
   return {
     canReadApprovals: false,
+    dvpEnabled: false,
     earnEnabled: false,
     heliusRingsEnabled: false,
     marketsEnabled: false,
@@ -52,6 +53,7 @@ function moreSheetMarkup(
       pathname="/dashboard"
       canReadApprovals={false}
       canManageOrgSettings={false}
+      dvpEnabled={false}
       earnEnabled={false}
       heliusRingsEnabled={false}
       marketsEnabled={false}
@@ -89,10 +91,29 @@ describe("Markets dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
   });
 
-  it("hides provider-backed Markets when the Earn runtime is off", () => {
+  it("hides Markets when no sub-module is enabled", () => {
     expect(
-      findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false }))
+      findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: false }))
     ).toBeUndefined();
+  });
+
+  // DvP is the first Markets sub-module that is not Earn-backed, so the entry
+  // point can no longer depend on Earn specifically.
+  it("shows Markets for a DvP-only organization", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: true })
+    );
+
+    expect(markets).toBeDefined();
+    expect(markets?.children?.map((child) => child.href)).toEqual(["/dashboard/markets/dvp"]);
+  });
+
+  it("omits DvP from the sub-nav when its own flag is off", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: true, dvpEnabled: false })
+    );
+
+    expect(markets?.children?.map((child) => child.href)).not.toContain("/dashboard/markets/dvp");
   });
 
   it("keeps Markets out of the mobile More sheet when the module flag is off", () => {

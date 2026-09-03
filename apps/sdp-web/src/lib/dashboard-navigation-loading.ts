@@ -15,6 +15,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
   earnProgram: "/dashboard/markets/embedded-yield",
+  dvp: "/dashboard/markets/dvp",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -45,6 +46,8 @@ export type DashboardLoadingRoute =
   | "embedded-yield-portfolio"
   | "embedded-yield-configure"
   | "embedded-yield-integrate"
+  | "dvp-trades"
+  | "dvp-trade-detail"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -106,6 +109,12 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   }
   if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`) {
     return "embedded-yield-integrate";
+  }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) return "dvp-trades";
+  // Detail routes need their own arm: every other markets match is exact, so a
+  // trade id would resolve to no loading key and fall back to the home skeleton.
+  if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
+    return "dvp-trade-detail";
   }
   return null;
 }

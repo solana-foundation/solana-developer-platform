@@ -4,7 +4,7 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 const BALANCE_SKELETON_IDS = ["one", "two", "three"];
 const STRATEGY_SKELETON_IDS = ["one", "two", "three", "four", "five"];
 const TREASURY_SECTION_SKELETON_IDS = ["one", "two"];
-const LANDING_PATH_SKELETON_IDS = ["treasury", "program"];
+const LANDING_PATH_SKELETON_IDS = ["treasury", "program", "dvp"];
 const INTEGRATION_SECTION_SKELETON_IDS = ["client", "deposit", "portfolio", "withdraw"];
 
 export function MarketsLandingSkeleton() {
@@ -141,6 +141,43 @@ export function EarnIntegrationGuideSkeleton() {
             <SkeletonBlock className="mt-6 h-56 w-full rounded-xl" />
           </section>
         ))}
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+const DVP_ROW_SKELETON_IDS = ["one", "two", "three", "four", "five"];
+const DVP_LEG_SKELETON_IDS = ["a", "b"];
+
+export function DvpTradesSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
+      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
+        <SkeletonBlock className="h-4 w-[28rem] max-w-full" />
+        <div className="overflow-hidden rounded-2xl border border-border-default">
+          <SkeletonBlock className="h-11 w-full rounded-none" />
+          {DVP_ROW_SKELETON_IDS.map((id) => (
+            <SkeletonBlock className="h-[68px] w-full rounded-none" key={`trade-${id}`} />
+          ))}
+        </div>
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function DvpTradeDetailSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
+      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
+        <SkeletonBlock className="h-[86px] w-full rounded-2xl" />
+        {/* Two legs side by side, mirroring the detail layout field for field so
+            the page does not jump when it resolves. */}
+        <div className="grid gap-4 md:grid-cols-2">
+          {DVP_LEG_SKELETON_IDS.map((id) => (
+            <SkeletonBlock className="h-[232px] w-full rounded-2xl" key={`leg-${id}`} />
+          ))}
+        </div>
+        <SkeletonBlock className="h-[188px] w-full rounded-2xl" />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

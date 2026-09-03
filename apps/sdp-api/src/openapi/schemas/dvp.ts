@@ -70,6 +70,29 @@ const dvpTradeLegSchema = z
     settlementDestination: z.string().openapi({
       description: "Address the counter-leg proceeds are delivered to at settlement.",
     }),
+    funding: z
+      .object({
+        observedAmount: z.string().openapi({
+          description: "Raw base units last seen in the escrow, as a decimal string (u64).",
+        }),
+        funded: z.boolean().openapi({
+          description:
+            "Whether the escrow holds at least the target amount. Settlement requires this on BOTH legs.",
+        }),
+        surplus: z.string().nullable().openapi({
+          description:
+            "Amount held above the target, or null. Not harmless: settlement refunds the surplus to its depositor, and on a transfer-hook mint that refund can revert the whole settlement. Anyone can send tokens to an escrow, so a surplus is not rare.",
+        }),
+        frozen: z.boolean().openapi({
+          description:
+            "Whether the escrow account is frozen. Funding transfers into a frozen escrow bounce, which a balance of zero cannot distinguish from nobody having paid yet.",
+        }),
+      })
+      .nullable()
+      .openapi({
+        description:
+          "What the reconciler last observed in this escrow, or null before it has looked. Null is not zero.",
+      }),
   })
   .openapi({ description: "One leg of the trade." });
 

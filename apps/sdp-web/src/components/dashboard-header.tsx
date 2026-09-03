@@ -367,9 +367,24 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  // A trade detail page keeps its own centred title beside a back action: it is
+  // the only orientation a detail route has, unlike a top-level list where the
+  // title would just repeat the active sidebar item.
+  if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
+    return {
+      title: t("DashboardMarkets.dvp.detailTitle"),
+      titlePosition: "center",
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+        label: t("DashboardMarkets.dvp.navLabel"),
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
   ) {
     return {
       title: t("Shared.dashboardShell.markets"),
@@ -385,6 +400,10 @@ function getMarketsRoutePageConfig(
           {
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
             label: t("Shared.dashboardShell.earnProgram"),
+          },
+          {
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+            label: t("DashboardMarkets.dvp.navLabel"),
           },
         ],
       },
