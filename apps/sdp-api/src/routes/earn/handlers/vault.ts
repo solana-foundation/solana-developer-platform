@@ -60,7 +60,7 @@ import {
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
-import { refusedBuildMessage } from "@/services/earn/vault-refusals";
+import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import {
   approvedWalletOperationId,
@@ -172,9 +172,7 @@ export async function createEarnVaultDepositPreview(
     // next quote-capable provider inherits the 400 by using the vocabulary
     // instead of 500ing here on a caller-fixable amount. Everything else keeps
     // bubbling.
-    const refusal = refusedBuildMessage(error);
-    if (refusal !== null) throw badRequest(refusal);
-    throw error;
+    rethrowVaultProviderFailure(error);
   }
 
   return success(c, {
@@ -1385,9 +1383,7 @@ export async function createEarnVaultWithdrawalPreview(
   } catch (error) {
     // An unusable share count is the CALLER's, in the provider's own words —
     // the same shared refusal vocabulary the deposit quote maps through.
-    const refusal = refusedBuildMessage(error);
-    if (refusal !== null) throw badRequest(refusal);
-    throw error;
+    rethrowVaultProviderFailure(error);
   }
 
   return success(c, {

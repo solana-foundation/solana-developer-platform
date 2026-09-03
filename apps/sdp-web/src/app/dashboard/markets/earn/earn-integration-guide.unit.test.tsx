@@ -98,6 +98,7 @@ describe("EarnIntegrationGuide", () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide
+        apiBaseUrl="http://127.0.0.1:8787"
         earnHref="/dashboard/markets/embedded-yield"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
@@ -130,6 +131,8 @@ describe("EarnIntegrationGuide", () => {
     }
     const code = snippets.join("\n");
     expect(code).toContain("/v1/earn/external-wallet/deposit-transactions");
+    expect(code).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
+    expect(code).not.toContain('const SDP_API_URL = "https://api.solana.com"');
     expect(code).toContain("/v1/earn/external-wallet/deposits");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");

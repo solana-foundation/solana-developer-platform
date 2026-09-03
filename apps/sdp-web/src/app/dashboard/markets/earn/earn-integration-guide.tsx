@@ -34,6 +34,7 @@ import {
 } from "./earn-surfacing";
 
 type EarnIntegrationGuideProps = {
+  apiBaseUrl?: string | null;
   configureHref?: string;
   earnHref: string;
   providerAccess: EarnProviderAccess | null;
@@ -125,6 +126,7 @@ function guideEmptyState(input: {
 }
 
 export function EarnIntegrationGuide({
+  apiBaseUrl,
   configureHref,
   earnHref,
   providerAccess,
@@ -179,7 +181,7 @@ export function EarnIntegrationGuide({
   }
 
   if (!strategy) throw new Error("Earn integration strategy invariant failed");
-  const sections = buildEarnIntegrationSections(strategy);
+  const sections = buildEarnIntegrationSections(strategy, apiBaseUrl ?? undefined);
   const activeSectionIndex = GUIDE_SECTIONS.findIndex(({ id }) => id === activeSectionId);
   const activeSection = GUIDE_SECTIONS[activeSectionIndex] ?? GUIDE_SECTIONS[0];
   const previousSection = GUIDE_SECTIONS[activeSectionIndex - 1];

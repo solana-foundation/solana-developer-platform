@@ -21,14 +21,14 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
-        SVC["@sdp/earn provider clients<br/>(Ground portfolio · Kamino catalogue-only; Veda/Upshift/Perena stubs)"]
+        SVC["provider clients<br/>(Ground portfolio · Kamino/Veda vault-direct)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions")]
         CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Ground · Kamino (+ future providers)"]
-        CHAIN["Solana<br/>(funding: customer → wallet deposit address)"]
+        VAULT["Vault-infra APIs<br/>Ground · Kamino · Veda (+ future providers)"]
+        CHAIN["Solana<br/>(provider-managed wallet or direct vault transaction)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
 
@@ -40,14 +40,16 @@ flowchart LR
     VAULT -.->|strategies + risk metadata| CRON
     CURATOR -.-> VAULT
     CRON --> DB
-    Clients -.->|send stablecoins to the wallet's deposit address| CHAIN
+    Clients -.->|fund or sign| CHAIN
     CHAIN -.-> VAULT
 ```
 
-Execution-era boxes (custody signing, per-strategy movement webhooks, NAV/
-reconcile crons) left this diagram with PRO-1628: V1 ships none of them, and
-the machinery they described was removed rather than documented as aspiration.
-PRO-1634 owns whatever returns.
+Vault-direct execution now has two signer surfaces over one provider runtime:
+the treasury flow signs with an organization custody wallet, while Embedded
+Yield returns an unsigned transaction for an end-user wallet and optional
+partner fee payer to co-sign. Both are recorded before broadcast and converge
+through the vault-movement reconciler. Ground's custodial portfolio flow remains
+address-funded and provider-observed.
 
 ## Where each surface gets its data (source of truth)
 
@@ -63,21 +65,17 @@ PRO-1634 owns whatever returns.
 | Withdrawals (history/audit) | `earn_movements` (**DB ledger** — `GET /programs/:programId/withdrawals`) | Written at intent by `POST /programs/:programId/withdrawals`; advanced by guarded CAS on every observation (`services/earn-withdrawal-ledger.service.ts`) | Intent = immediate; status = each observation (+ ledger sweep) |
 | Vault deposits (history/audit) | `earn_movements` (**DB ledger**; `GET /vault-deposits`, `GET /vault-deposits/:movementId`) | Written at intent BEFORE broadcast; detail reads observe the exact signature and advance the guarded row; the scheduled sweep supplies recovery | Intent = immediate; watched status follows chain finality on the next client poll; unattended recovery remains every minute |
 | Vault holdings | `earn_positions` (**DB claim index**, never a balance) **hydrated live from chain** — `GET /vault-positions` | Claim written with the first durable signed intent; shares and value read live per request | Claim = immediate; value = real-time |
+| Embedded Yield holdings + earnings | `earn_positions` scoped by org, project, environment, and owner, then hydrated live from chain; `GET /external-wallet/positions`, `/positions/summary`, `/earnings` | Claim written on the first submitted caller-signed movement; balances read from the owner's real on-chain shares | Claim = immediate; value = real-time |
+| Embedded Yield activity | `earn_movements`; `GET /external-wallet/movements` + `/:movementId` | Caller-signed deposit and withdrawal submits, recorded before SDP broadcasts | Intent = immediate; detail polls chain finality and the background sweep recovers unattended rows |
 | Movement history, ALL providers | `earn_movements` (**DB ledger** — `GET /v1/earn/movements`) | Every movement above, one chronological feed across both execution models; no provider gate (ADR 0002 exit safety) | Same as the rows it serves |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
-> **Ledger vs live — DECIDED (PRO-1628, ADR 0002 addendum 2026-08-11).**
-> *SDP ledgers what SDP initiates; SDP reads live what the provider observes.*
-> Positions/balances/deposits are live provider reads, permanently — the
-> empty execution-era ledgers (`earn_positions`, `earn_movements`, their
-> routes) were dropped by migration `0055`. Withdrawals — the one money
-> movement SDP initiates — get `earn_program_withdrawals`: written at intent
-> (which also gives the derived idempotency key an SDP-side anchor, ending
-> the era when the caller's key was the entire duplicate-defense), advanced
-> by guarded CAS on every observation, and listed as the audit surface. The
-> provider remains the authority for live status and final amounts; the
-> ledger relays provider truth, never replaces it.
+> **Ledger vs live.** SDP ledgers every movement it builds or submits, while
+> balances remain live provider or on-chain reads. Ground deposits are the
+> exception because customers transfer directly to a provider-managed address;
+> Ground observes those deposits and SDP has no build intent to record. A
+> ledger row proves SDP's movement lifecycle, never the current balance.
 
 > **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
 > The catalogue row and the numbers on it now have different cadences and
@@ -112,12 +110,11 @@ PRO-1634 owns whatever returns.
 > rationale, the collision cap, and the convergence rules: ADR 0002, PRO-1742
 > addendum.
 
-**No new indexer.** V1 needs no event-sourced chain indexer: the catalogue
-comes from provider APIs and position truth is the live provider snapshot.
-That is now decided, not provisional (PRO-1628) — deposits stay unledgered in
-V1 precisely because observing customer-initiated transfers from chain is
-indexer-shaped work. If V2 needs richer on-chain history (per-block share
-price, protocol events), that's the point to evaluate an indexer — not V1.
+**No new indexer.** The catalogue comes from provider APIs or bounded on-chain
+reads, and holdings are hydrated live. Vault-direct deposits and withdrawals
+are ledgered because SDP builds or submits them. Ground's address-funded
+deposits stay provider-observed. Richer per-block history would be an indexer
+decision for a later product need.
 
 ## Execution era (PRO-1634 — arrived for `vault_direct`)
 
@@ -152,15 +149,10 @@ deposits remain closed until PRO-1703 surfaces vault positions on the Active
 tab (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`); the exit route itself takes no
 environment gate — money out beats money off.
 
-The original V1 note, still accurate for the custodial model: The execution-era design that
-used to be diagrammed here (per-strategy `createDeposit`/`createWithdrawal`,
-`/movements/:id/submit`, movement webhooks + `getMovementStatus` reconcile
-polling) was **removed from the codebase by PRO-1628** because none of it had
-an implementation in any provider and its types referenced tables that no
-longer exist. If PRO-1634 revives execution endpoints, design them against
-real flows then — git history (`0048_earn.sql`, the pre-0055 `@sdp/earn`
-contract) preserves the sketch, and the withdrawal ledger's insert-at-intent +
-guarded-CAS shape is the pattern to extend.
+The removed pre-PRO-1634 execution sketch is not a contract. New providers must
+implement today's `EarnVaultDirectProvider` plan and quote capabilities, then
+inherit the shared treasury and external-wallet runtimes. Do not revive the old
+per-provider movement endpoints or status polling types from git history.
 
 ## Existing SDP we leverage (build ≠ rebuild)
 
@@ -169,22 +161,23 @@ guarded-CAS shape is the pattern to extend.
 | Auth + API keys + permissions | `middleware/auth.ts`, `@sdp/types/permissions` | `earn:read`/`earn:write` gating, partner `sk_live` access | ✅ wired in scaffold |
 | Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; every program lookup is scoped to org **and** environment, and the ledger anchors on the program wallet) | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
-| Custody + signing | `services/solana`, `@sdp/custody` | Vault-direct deposits sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault deposits |
+| Custody + signing | `services/solana`, `@sdp/custody` | Treasury vault deposits and withdrawals sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault-direct treasury paths |
 | Fee sponsorship | `@sdp/payments/fee-payment` (Kora), `services/earn/vault-sponsorship.ts` | Sign-only sponsorship of the network fee **and** share-ATA rent, resolved once per request and applied to the fee payer, the provider's `rentPayer` and the simulation payer together. The exit closes the share ATA and refunds its rent to whoever funded it: `earn_positions.share_ata_rent_funder` (0066), written by whichever movement in either direction actually created the account, or this exit's own rent payer when the exit creates it. Cluster-gated to devnet and off by default: deployed devnet carries the Earn ids on its Kora allowlist (sdp-infra#64, asserted by the `Kora / Live Smoke` shard on secret-bearing CI runs); mainnet additionally needs `allow_create_account` opened and `sbp_mainnet_global` enabled (PRO-1736) | ✅ code · ✅ devnet deploy · ⏸ mainnet |
 | Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
-| Helius DAS | `services/helius-das.service.ts` | No V1 consumer — positions are live provider reads, nothing to reconcile | ⏸ none in V1 |
+| Helius DAS | `services/helius-das.service.ts` | No V1 consumer; vault positions use direct RPC reads | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
-| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync + the withdrawal-ledger sweep (heals ref-less intent rows; launch-coupled follow-up ticket) | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly, gated on `isEarnEnabled` — `MARKETS_ENABLED` **and** `EARN_ENABLED`) · 🔨 ledger sweep |
+| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts` | Catalogue sync, metrics refresh, withdrawal-ledger polling, and vault-movement reconciliation | ✅ wired and gated by the owning jobs |
 | Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_withdrawals` (wallet, request_id) unique + `earn_provider_wallets` (provider, provider_wallet_ref) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop. Program **creation** is key-required too (PRO-1670) and derives against (org, environment, provider); the provider replays a retried create with the original wallet ref, so the global wallet-ref unique is what catches it — a violation there means "already created", answered 200, never 409 | ✅ wired (PRO-1628, PRO-1670) |
 | Compliance providers | `services/compliance/`, compliance family | RWA strategy KYC / depositor checks (open decision) | ⏸ decision pending |
-| Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Vault deposits emit `program` / `earn_vault_deposit`, enforce before custody, and fence approved retries against the signed-intent transaction | ✅ vault deposits · ⏸ remaining Earn writes |
+| Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Treasury vault deposits and withdrawals emit `program` / `earn_vault_deposit` or `earn_vault_withdrawal`, enforce before custody, and fence approved retries against the signed intent; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
-| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public `/v1/earn` reference once the Markets/Earn flags flip | ⏸ deliberately deferred |
+| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public strategy catalogue, deposit quote, and external-wallet build/submit/read surfaces | ✅ published; regenerate after contract changes |
 
-**Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
-(Ground is live — see below; the rest remain `StubEarnClient` subclasses
-carrying `provider` + `declaredSupport`, filled in method-by-method), the
+**Net-new (Earn-only) components:** the catalogue clients in `@sdp/earn`
+(Ground, Kamino, and Veda are implemented; Upshift and Perena remain
+`StubEarnClient` subclasses), the vault-direct execution packages
+`@sdp/kamino` and `@sdp/veda`, the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
 `earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
@@ -195,7 +188,7 @@ moved uniqueness onto the provider wallet itself — one link row per
 `services/earn-withdrawal-ledger.service.ts`, and the catalogue-sync cron
 (`cron/earn-catalogue-sync.ts`).
 
-## Ground — the first live provider (portfolio-wallet flow)
+## Ground portfolio-wallet flow
 
 The dashboard's mock seam (`earn-mock-data.ts`) is replaced by a live path
 built on `GroundEarnClient` (`@sdp/earn/providers/ground/client`), which

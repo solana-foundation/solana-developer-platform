@@ -56,7 +56,7 @@ import {
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
 import { broadcastRecordedVaultMovement } from "./vault-intent-execution.service";
-import { refusedBuildMessage } from "./vault-refusals";
+import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
 
@@ -125,9 +125,7 @@ export interface ExternalWalletDepositBuildInput {
  */
 function rethrowProviderBuildFailure(error: unknown, operation: string): never {
   getLogger().error({ error }, `${operation}: build failed`);
-  const refusal = refusedBuildMessage(error);
-  if (refusal) throw badRequest(refusal);
-  throw error;
+  rethrowVaultProviderFailure(error);
 }
 
 /**

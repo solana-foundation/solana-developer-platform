@@ -973,6 +973,27 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     });
   });
 
+  it("answers a sanitized retryable 503 when live provider state is unreadable", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ provider: "veda" });
+    const client = quoteCapableClient(undefined);
+    client.quoteVaultDeposit.mockRejectedValue(
+      Object.assign(new Error("RPC returned 429 from a secret endpoint"), {
+        code: "VAULT_UNREADABLE",
+      })
+    );
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error).toEqual({
+      code: "PROVIDER_UNAVAILABLE",
+      message: "Earn provider is temporarily unavailable. Try again.",
+    });
+  });
+
   it("refuses an un-surfaced provider before quoting anything", async () => {
     await seedAuth();
     // Upshift: registered and `vault_direct`, so it reaches the surfacing gate

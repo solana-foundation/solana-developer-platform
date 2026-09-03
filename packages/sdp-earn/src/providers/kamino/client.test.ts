@@ -562,7 +562,7 @@ describe("KaminoEarnClient contract surface", () => {
     assert.deepEqual(client.declaredSupport.depositTokens, ["USDC", "USDG", "USDT", "PYUSD"]);
   });
 
-  it("implements no portfolio-wallet capability — Kamino is catalogue-only", () => {
+  it("keeps the catalogue client outside the portfolio-wallet capability", () => {
     // Guards the shape the API's capability detection relies on to answer 501.
     for (const method of [
       "createPortfolioWallet",

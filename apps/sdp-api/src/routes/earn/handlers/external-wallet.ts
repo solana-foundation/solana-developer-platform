@@ -50,7 +50,7 @@ import {
   submitExternalWalletWithdrawal,
 } from "@/services/earn/vault-external-wallet.service";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
-import { refusedBuildMessage } from "@/services/earn/vault-refusals";
+import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import {
   assertEarnProviderSurfaced,
   assertProviderAvailable,
@@ -785,9 +785,7 @@ export async function createEarnExternalWalletWithdrawalPreview(
       shares: body.shares,
     });
   } catch (error) {
-    const refusal = refusedBuildMessage(error);
-    if (refusal !== null) throw badRequest(refusal);
-    throw error;
+    rethrowVaultProviderFailure(error);
   }
 
   return success(c, {

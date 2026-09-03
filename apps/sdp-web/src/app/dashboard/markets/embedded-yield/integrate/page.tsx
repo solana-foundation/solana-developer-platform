@@ -1,5 +1,6 @@
 import { SOLANA_CLUSTERS } from "@sdp/types";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { resolvePlaygroundApiBaseUrl } from "../../../playground-api-data";
 import { EarnIntegrationGuide } from "../../earn/earn-integration-guide";
 import { loadEarnProviderAccess } from "../../earn/earn-provider-access.server";
 
@@ -19,6 +20,7 @@ export default async function EmbeddedYieldIntegratePage({
     typeof cluster === "string" ? SOLANA_CLUSTERS.find((value) => value === cluster) : undefined;
   return (
     <EarnIntegrationGuide
+      apiBaseUrl={resolvePlaygroundApiBaseUrl()}
       configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`}
       earnHref={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
       providerAccess={providerAccess}
