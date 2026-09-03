@@ -889,6 +889,212 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ---
 
+### Embedded Yield
+Source: https://platform.solana.com/docs/guides/embedded-yield
+
+> Offer yield to your users from your own app. SDP builds the transactions, your customer's wallet signs, and you can sponsor their fees.
+
+{/* Keep this guide and the dashboard integration snippets (apps/sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
+
+Embedded Yield lets your platform offer vault yield to your end users without SDP ever holding their funds. Your backend asks SDP to **build** an unsigned Solana transaction for the customer's own wallet, the customer signs it in your app, and your backend **submits** the signed bytes back. SDP verifies the signature, records the movement, then broadcasts it. Withdrawals work the same way in reverse.
+
+Two properties define the surface:
+
+- **Non-custodial.** SDP holds no key for your customers' wallets. The customer's signature is the authorization, every time.
+- **Server-side.** Your SDP API key stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones.
+
+All endpoints live under `/v1/earn`. Authenticate with `Authorization: Bearer <SDP_API_KEY>`; the key needs the `earn:read` and `earn:write` permissions. Start in sandbox: new vault deposits are enabled there first.
+
+## The endpoints at a glance
+
+| Step | Endpoint |
+| --- | --- |
+| Discover strategies | `GET /v1/earn/strategies` |
+| Build a deposit | `POST /v1/earn/external-wallet/deposit-transactions` |
+| Submit the signed deposit | `POST /v1/earn/external-wallet/deposits` |
+| Poll a movement | `GET /v1/earn/external-wallet/movements/{movementId}` |
+| Balance and earnings | `GET /v1/earn/external-wallet/earnings?ownerAddress=…` |
+| Activity feed | `GET /v1/earn/external-wallet/movements?ownerAddress=…` |
+| Live positions | `GET /v1/earn/external-wallet/positions?ownerAddress=…` |
+| Portfolio totals | `GET /v1/earn/external-wallet/positions/summary` |
+| Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
+| Build a withdrawal | `POST /v1/earn/external-wallet/withdrawal-transactions` |
+| Submit the signed withdrawal | `POST /v1/earn/external-wallet/withdrawals` |
+
+Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
+
+## 1. Pick a strategy
+
+`GET /v1/earn/strategies` returns the catalogue, ranked by deposit size, with the live APY your UI can show. Each row carries the `strategyId` the deposit build takes.
+
+Two fields gate what you may offer:
+
+- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive. `true` is necessary but not sufficient: the strategy must also be `active`, and your organization entitled to the provider.
+- **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
+
+Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-null means that direction's builder refuses to run without an explicit protection floor (`minSharesOut` on deposits, `minAmountOut` on withdrawals): quote first, then derive the floor from the live figure minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). Null means the floor is optional there.
+
+## 2. Deposit: build, sign, submit, poll
+
+```ts
+const SDP_API_URL = "https://api.sdp.solana.com";
+
+function sdpHeaders(extra: Record<string, string> = {}) {
+  const apiKey = process.env.SDP_API_KEY;
+  if (!apiKey) throw new Error("SDP_API_KEY is required");
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
+
+async function sdpFetch(path: string, init?: RequestInit) {
+  const response = await fetch(`${SDP_API_URL}${path}`, init);
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(result?.error?.message ?? `SDP request failed: ${path} (${response.status})`);
+  }
+  return result.data;
+}
+```
+
+**Build.** SDP simulates the deposit before handing anything out, so a wallet that cannot fund it fails here with a readable 400 instead of a landed, failed transaction.
+
+```ts
+const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
+  method: "POST",
+  headers: sdpHeaders(),
+  body: JSON.stringify({
+    strategyId,
+    ownerAddress, // the customer's wallet
+    amount: "25", // decimal string in the vault token's units
+    minSharesOut, // slippage floor; required in production
+  }),
+});
+// { transactionId, transaction, lastValidBlockHeight, ... }
+```
+
+**Sign.** Hand the base64 `transaction.transaction` to the customer's wallet, for example with wallet-adapter:
+
+```ts
+const tx = VersionedTransaction.deserialize(Buffer.from(transaction.transaction, "base64"));
+const signed = await wallet.signTransaction(tx);
+const signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+```
+
+A built transaction expires with its blockhash (about a minute). If the customer walks away, build a fresh one; the expired build is inert.
+
+**Submit.** The `Idempotency-Key` header is required. Reuse the same key when retrying: a retry returns the original movement with `replayed: true` instead of moving money twice, and each built transaction is consumable exactly once.
+
+```ts
+const { deposit } = await sdpFetch("/v1/earn/external-wallet/deposits", {
+  method: "POST",
+  headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
+  body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
+});
+// { movementId, positionId, status, signature, ... }
+```
+
+**Poll.** Each poll of the movement detail reads the transaction's exact signature on chain and advances the recorded status immediately, so state lands as fast as the network decides it. A background reconciler covers RPC outages and expiry.
+
+```ts
+const { movement } = await sdpFetch(
+  `/v1/earn/external-wallet/movements/${encodeURIComponent(deposit.movementId)}`,
+  { headers: sdpHeaders() }
+);
+```
+
+Statuses are `requested`, `submitted`, `confirmed`, `finalized`, `failed`. Only `finalized` and `failed` are terminal; `confirmed` is optimistic and can still be dropped by a fork, so keep polling past it.
+
+## 3. Who pays fees and rent
+
+**By default, the customer's wallet pays everything**: the network fee, plus about 0.002 SOL of rent when a first deposit creates their share token account (refunded when the position fully exits). A customer holding only stablecoins cannot complete that transaction.
+
+**To pay on your customers' behalf, name a `feePayer` on the build.** The named wallet, one you control, becomes the transaction's fee payer and funds the account rent, and the built transaction then requires its signature alongside the customer's. Co-sign server-side after the customer signs, in either order, then submit:
+
+```ts
+
+// 1. Build with your sponsor wallet as the fee payer.
+const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
+  method: "POST",
+  headers: sdpHeaders(),
+  body: JSON.stringify({ strategyId, ownerAddress, amount, minSharesOut, feePayer: SPONSOR_ADDRESS }),
+});
+
+// 2. The customer signs in your app, exactly as before.
+
+// 3. Co-sign with the sponsor's key on your backend, then submit.
+const decoded = getTransactionDecoder().decode(Buffer.from(customerSignedTransaction, "base64"));
+const coSigned = await partiallySignTransaction([sponsorKeyPair], decoded);
+const signedTransaction = getBase64EncodedWireTransaction(coSigned);
+```
+
+What to know when sponsoring:
+
+- **Both signatures are required.** The submit verifies every signature and refuses a missing or invalid fee-payer signature by name, so a co-signing bug on your side is distinguishable from a customer-side one.
+- **The fee payer is committed at build time.** It is inside the signed message, so it cannot be swapped at submit; rebuild if you need a different sponsor.
+- **Keep a SOL float.** The sponsor wallet pays the fee on every sponsored transaction and the rent on every first deposit. The build simulates with your sponsor as the payer and refuses with a 400 naming it when it cannot pay.
+- **Rent comes back to you.** SDP records your sponsor as the rent funder, and a full exit refunds the share account's rent to the recorded funder, not to the customer.
+- **Mind the clock.** Build, customer signature, your co-signature, and submit must all fit inside the blockhash window (roughly a minute). Co-sign programmatically, not through a manual approval step.
+- Passing the customer's own address as `feePayer` simply means the default. Program-derived addresses cannot sign, so an off-curve fee payer can never be submitted.
+- Applies to `withdrawal-transactions` identically, and to the standalone swap transaction of a split swap-funded deposit, so every transaction the flow hands out can be sponsored.
+
+On the Treasury surface (your organization's own custody wallets) the wallet itself pays its fees, so keep some SOL on custody wallets that deposit into vaults.
+
+## 4. Show balances and activity
+
+- `GET /v1/earn/external-wallet/earnings?ownerAddress=…` returns balance and total earned per deposit token. `earned` is stated only when exact; otherwise it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
+- `GET /v1/earn/external-wallet/movements?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`.
+- `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals.
+- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token.
+
+## 5. Withdraw
+
+Same build-sign-submit shape. The build names the customer's **position** (never a strategy), so exits keep working even when a vault is delisted or its provider is disabled for new deposits.
+
+When the strategy's `withdrawalSlippage` is non-null (or whenever you want a floor), preview first and derive `minAmountOut` from the live quote:
+
+```ts
+// What would these shares pay right now? Read-only; nothing is built.
+const quote = await sdpFetch("/v1/earn/external-wallet/withdrawal-previews", {
+  method: "POST",
+  headers: sdpHeaders(),
+  body: JSON.stringify({ positionId, shares }),
+});
+// quote: { assetsOut, assetDecimals, blockingIssues } — floor = assetsOut minus
+// your customer's tolerance, quantized to assetDecimals.
+
+const { transaction } = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
+  method: "POST",
+  headers: sdpHeaders(),
+  body: JSON.stringify({ positionId, shares, minAmountOut }), // + feePayer to sponsor it
+});
+// customer signs (and your sponsor co-signs, if sponsoring) → submit:
+const { withdrawal } = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
+  method: "POST",
+  headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
+  body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
+});
+```
+
+## Swap-funded deposits
+
+Pass `sourceTokenMint` (USDC, USDG, PYUSD or USDT on your cluster) to accept a stablecoin the vault does not take: SDP prepends a Jupiter swap inside the same transaction, `amount` becomes the source amount, and the response's `transaction.swap` reports the derived deposit.
+
+If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
+
+## Idempotency, in one place
+
+| Call | Rule |
+| --- | --- |
+| Builds | No key. A build moves no money and expires with its blockhash. |
+| Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`); a different key against an already-consumed build is a 409. |
+
+Full request and response shapes: [Earn API reference](/docs/reference/api/earn).
+
+---
+
 ## Tokens
 
 ### Tokenize an Asset
@@ -5696,19 +5902,22 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 ### Earn
 Source: https://platform.solana.com/docs/reference/api/earn
 
-> Caller-signed external-wallet vault deposit and exit transactions.
+> The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `POST` | `/v1/earn/external-wallet/deposit-transactions` | Build an unsigned external-wallet deposit transaction |
 | `POST` | `/v1/earn/external-wallet/deposits` | Submit a signed external-wallet deposit |
-| `GET` | `/v1/earn/external-wallet/earnings/{ownerAddress}` | Get one external wallet's balance and earnings |
+| `GET` | `/v1/earn/external-wallet/earnings` | Get one external wallet's balance and earnings |
 | `GET` | `/v1/earn/external-wallet/movements` | List one external wallet's activity |
 | `GET` | `/v1/earn/external-wallet/movements/{movementId}` | Get one external-wallet movement |
-| `GET` | `/v1/earn/external-wallet/positions/{ownerAddress}` | List one external wallet's positions |
+| `GET` | `/v1/earn/external-wallet/positions` | List one external wallet's positions |
 | `GET` | `/v1/earn/external-wallet/positions/summary` | Get external-wallet position totals |
+| `POST` | `/v1/earn/external-wallet/withdrawal-previews` | Preview an external-wallet exit |
 | `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
 | `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
+| `GET` | `/v1/earn/strategies` | List yield strategies |
+| `GET` | `/v1/earn/strategies/{strategyId}` | Get one yield strategy |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

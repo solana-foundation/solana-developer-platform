@@ -616,13 +616,16 @@ export interface CreateSignedExternalWalletDepositIntentInput {
   idempotencyFingerprint: string;
   /** The built transaction being consumed (`earn_external_wallet_transactions.id`). */
   externalWalletTransactionId: string;
-  /**
-   * The builder's observation that this deposit creates the share account. The
-   * funder is always recorded as the owner (NULL by the 0066/0067 convention:
-   * the signing wallet paid its own rent and keeps it), so the exit's refund
-   * defaults back to the owner with no attribution to carry.
-   */
+  /** The builder's observation that this deposit creates the share account. */
   createsShareAccount?: boolean;
+  /**
+   * Who funded the share-ATA rent when the build creates the account, carried
+   * from the build row: the partner fee payer when one was named (its address
+   * was embedded as the provider's rentPayer), otherwise NULL — the 0066/0067
+   * convention for "the owner paid its own rent and keeps it". The exit's
+   * refund follows this recorded value, never the fee mode of the day.
+   */
+  shareAtaRentFunder?: string | null;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
 }
@@ -649,6 +652,8 @@ export interface CreateSignedExternalWalletWithdrawalIntentInput {
   /** The built transaction being consumed (`earn_external_wallet_transactions.id`). */
   externalWalletTransactionId: string;
   createsShareAccount?: boolean;
+  /** Same build-time rent attribution as the deposit intent's field. */
+  shareAtaRentFunder?: string | null;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
 }
@@ -2109,12 +2114,13 @@ async function insertExternalWalletDepositMovement(
       input.idempotencyFingerprint,
       input.createdBy ?? null,
       input.initiatedByKeyId ?? null,
-      // The owner pays its own share-account rent, recorded as the NULL funder
-      // (the 0066/0067 convention: the signing wallet keeps its own rent), so
-      // the exit's refund defaults back to the owner.
+      // Rent attribution recorded at build time (0066/0067 convention): NULL
+      // means the owner paid its own rent and the exit's refund defaults back
+      // to the owner; a partner fee payer that funded the share ATA is named
+      // so the exit refunds the partner, never the owner.
       ...shareAccountClaimBindings({
         createsShareAccount: input.createsShareAccount,
-        shareAtaRentFunder: null,
+        shareAtaRentFunder: input.shareAtaRentFunder ?? null,
       })
     )
     .first<Record<string, unknown>>();
@@ -2162,9 +2168,11 @@ async function insertExternalWalletWithdrawalMovement(
       input.idempotencyFingerprint,
       input.createdBy ?? null,
       input.initiatedByKeyId ?? null,
+      // Same build-time rent attribution rule as the deposit insert above: an
+      // exit consolidation that creates the account may be partner-funded.
       ...shareAccountClaimBindings({
         createsShareAccount: input.createsShareAccount,
-        shareAtaRentFunder: null,
+        shareAtaRentFunder: input.shareAtaRentFunder ?? null,
       })
     )
     .first<Record<string, unknown>>();

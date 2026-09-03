@@ -285,10 +285,29 @@ describe("OpenAPI spec", () => {
   it("documents counterparty ramp requirements", () => {
     const doc = createOpenApiDocument();
 
-    const requirementsPath = doc.paths?.["/v1/counterparties/{counterpartyId}/requirements"]?.get;
-    expect(requirementsPath).toBeDefined();
-    expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
-    expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
+    const paths = doc.paths;
+    if (paths === undefined) {
+      expect.fail("Expected OpenAPI paths");
+    }
+    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/requirements"];
+    if (requirementsPathItem === undefined) {
+      expect.fail("Expected counterparty requirements path");
+    }
+    const requirementsPath = requirementsPathItem.get;
+    if (requirementsPath === undefined) {
+      expect.fail("Expected counterparty requirements GET operation");
+    }
+    expect(requirementsPath.operationId).toBe("getCounterpartyRequirements");
+    const parameters = requirementsPath.parameters;
+    if (parameters === undefined) {
+      expect.fail("Expected counterparty requirements parameters");
+    }
+    expect(
+      parameters
+        .filter((parameter) => "in" in parameter && parameter.in === "query")
+        .map((parameter) => ("name" in parameter ? parameter.name : undefined))
+    ).toContain("destinationCountry");
+    expect(requirementsPath.responses["200"]).toMatchSnapshot();
   });
 
   it("documents every supported public wallet policy rule kind", () => {

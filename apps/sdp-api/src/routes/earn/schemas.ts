@@ -433,6 +433,26 @@ export const solanaOwnerAddressSchema = z.preprocess(
   })
 );
 
+/** The partner fee payer on the build routes; same shape rule as the owner. */
+const solanaFeePayerAddressSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim() : value),
+  z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
+    message: "feePayer must be a base58 Solana address",
+  })
+);
+
+/**
+ * The fee-payer field both external-wallet BUILD bodies share. Optional: the
+ * owner pays everything when absent (the launch behavior). Present, the
+ * partner's wallet pays the network fee — and the share-ATA rent an account
+ * creation needs, the one-identity rule — and the built transaction requires
+ * its signature alongside the owner's: co-sign server-side before submitting.
+ * Sending the owner's own address is accepted and means the default.
+ */
+export const earnExternalWalletFeePayerShape = {
+  feePayer: solanaFeePayerAddressSchema.optional(),
+} as const;
+
 /**
  * Build one unsigned deposit transaction for an external wallet. Shares the
  * custody deposit's amount/floor shapes; the wallet is an ADDRESS, because
@@ -441,8 +461,9 @@ export const solanaOwnerAddressSchema = z.preprocess(
 export const earnExternalWalletDepositTransactionSchema = z.object({
   /** Catalogue strategy id, resolved to a vault address server-side. */
   strategyId: z.string().min(1),
-  /** The external wallet that will sign, own the shares, and pay the fee. */
+  /** The external wallet that will sign and own the shares. */
   ownerAddress: solanaOwnerAddressSchema,
+  ...earnExternalWalletFeePayerShape,
   /**
    * Deposit amount as a decimal string — the vault token's units, or the
    * SOURCE token's units when `sourceTokenMint` requests a swap-funded build.
@@ -474,6 +495,7 @@ export const earnExternalWalletWithdrawalTransactionSchema = z.object({
   shares: earnWithdrawalSharesSchema,
   /** Same explicit output floor contract as the custody withdrawal builder. */
   minAmountOut: earnMinAmountOutSchema,
+  ...earnExternalWalletFeePayerShape,
 });
 
 /**
@@ -498,12 +520,15 @@ export const earnExternalWalletSubmitSchema = z.object({
     .optional(),
 });
 
-export const earnExternalWalletPositionParamsSchema = z
-  .object({ ownerAddress: solanaOwnerAddressSchema })
-  .strict();
-
+/**
+ * One external wallet's holdings, newest first. The owner rides the query on
+ * EVERY per-owner external-wallet read (movements, positions, earnings) —
+ * one addressing style for one concept, and no literal segment (`summary`)
+ * can ever collide with a path parameter.
+ */
 export const earnExternalWalletPositionsQuerySchema = z
   .object({
+    ownerAddress: solanaOwnerAddressSchema,
     limit: z.coerce.number().int().min(1).max(100).default(20),
     before: z.string().min(1).optional(),
   })
@@ -534,9 +559,10 @@ export const earnExternalWalletMovementParamsSchema = z
   .object({ movementId: z.string().min(1).max(128) })
   .strict();
 
-/** Balance + earned for one external wallet (PRO-1772); no knobs on purpose. */
-export const earnExternalWalletEarningsParamsSchema = earnExternalWalletPositionParamsSchema;
-export const earnExternalWalletEarningsQuerySchema = z.object({}).strict();
+/** Balance + earned for one external wallet (PRO-1772); the owner filter is the only knob. */
+export const earnExternalWalletEarningsQuerySchema = z
+  .object({ ownerAddress: solanaOwnerAddressSchema })
+  .strict();
 
 /**
  * The cross-provider movement feed.

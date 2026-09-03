@@ -16,9 +16,10 @@
  * capped at the same 2000 chars that helper uses.
  *
  * Wording depends on who pays the fee when the caller knows: the fee-payer
- * failures name the customer's wallet under `wallet-pays` and SDP's sponsor
- * under `sponsored`, because telling a customer to fund their wallet when SDP's
- * sponsor is broke sends them fixing the wrong thing. Callers that don't know
+ * failures name the customer's wallet under `wallet-pays`, SDP's sponsor
+ * under `sponsored`, and the partner's named wallet under `caller-provided`,
+ * because telling a customer to fund their wallet when someone else's fee
+ * wallet is broke sends them fixing the wrong thing. Callers that don't know
  * the fee mode (e.g. the reconciler describing a landed failure) omit it and
  * get neutral wording.
  *
@@ -31,7 +32,16 @@
  */
 
 import { safeStringify } from "@sdp/solana";
-import type { VaultFeeMode } from "./vault-sponsorship";
+
+/**
+ * The slice of `VaultFeeMode` (vault-sponsorship.ts) the wording needs: the
+ * kind, plus the ADDRESS for a caller-provided payer so the prose can name
+ * the wallet that is actually short. Any full `VaultFeeMode` is assignable.
+ */
+export type VaultFeeAttribution =
+  | { kind: "sponsored" }
+  | { kind: "wallet-pays" }
+  | { kind: "caller-provided"; feePayer: string };
 
 export interface VaultSimulationVerdict {
   message: string;
@@ -152,7 +162,7 @@ function formatSol(lamports: bigint): string {
 function describeInstructionFailureFromLogs(
   logs: readonly string[],
   raw: string,
-  fee?: Pick<VaultFeeMode, "kind">
+  fee?: VaultFeeAttribution
 ): VaultSimulationVerdict | undefined {
   const shortfall = rentShortfall(logs);
   if (shortfall !== undefined) {
@@ -209,6 +219,33 @@ function describeInstructionFailureFromLogs(
         sponsorCause: "prefund",
       };
     }
+    if (fee?.kind === "caller-provided") {
+      // The caller named this fee payer, and the plan charges it exactly the
+      // rent the plan itself authors (the ATA creates via the providers' payer
+      // swap, the allowed-user prefund transfer), so those frames are the
+      // caller's wallet to fund — and the prose must name THAT wallet: telling
+      // the end user to fund their own wallet when the partner's fee wallet is
+      // broke misdirects them. A shortfall inside any OTHER program is rent
+      // the plan should have pre-funded and did not: the same SDP-side plan
+      // defect as under sponsorship, which no fee-payer top-up clears.
+      if (insideAtaCreate || insidePlanTransfer || shortfall.topLevelProgram === undefined) {
+        return {
+          message:
+            `the provided fee payer (${fee.feePayer}) does not hold enough SOL ` +
+            `${callerPhrase}: rent requires ${sol} more SOL. ` +
+            `Fund the fee payer and retry. (${raw})`,
+          fault: "caller",
+        };
+      }
+      return {
+        message:
+          `the vault program charges the wallet rent for an account it creates on first use, ` +
+          `and this movement did not pre-fund the wallet for it (${sol} SOL short). This is ` +
+          `an SDP-side plan defect, not the provided fee payer's balance and not the wallet. (${raw})`,
+        fault: "sponsor",
+        sponsorCause: "prefund",
+      };
+    }
     const noun = fee === undefined ? "the rent payer" : "the wallet";
     const remedy =
       fee === undefined
@@ -255,24 +292,56 @@ function describeInstructionErrorDetail(detail: unknown): string {
  * hidden. `fee` is an attribution hint for the fee-payer failures; omit it when
  * the fee mode is unknown.
  */
+/** Who to name, what to suggest, and whose fault a fee-payer failure is. */
+function feePayerWording(fee?: VaultFeeAttribution): {
+  feePayerNoun: string;
+  feeRemedy: string;
+  feeFault: VaultSimulationVerdict["fault"];
+  /**
+   * A fee-payer failure under sponsorship is always the sponsor's own
+   * balance: simulation charges the fee to the sponsor and nothing else.
+   */
+  feeCause: { sponsorCause: "balance" } | Record<string, never>;
+} {
+  switch (fee?.kind) {
+    case "sponsored":
+      return {
+        feePayerNoun: "SDP's fee sponsor",
+        feeRemedy: "This is a problem on SDP's side, not with the wallet.",
+        feeFault: "sponsor",
+        feeCause: { sponsorCause: "balance" },
+      };
+    case "caller-provided":
+      return {
+        feePayerNoun: `the provided fee payer (${fee.feePayer})`,
+        feeRemedy: "Fund the fee payer and retry.",
+        feeFault: "caller",
+        feeCause: {},
+      };
+    case "wallet-pays":
+      return {
+        feePayerNoun: "the wallet",
+        feeRemedy: "Send SOL to the wallet and retry.",
+        feeFault: "caller",
+        feeCause: {},
+      };
+    default:
+      return {
+        feePayerNoun: "the fee payer",
+        feeRemedy: "It needs SOL before this can be retried.",
+        feeFault: "caller",
+        feeCause: {},
+      };
+  }
+}
+
 export function describeVaultSimulationError(
   err: unknown,
-  fee?: Pick<VaultFeeMode, "kind">,
+  fee?: VaultFeeAttribution,
   logs: readonly string[] = []
 ): VaultSimulationVerdict {
   const raw = stringifyRaw(err);
-  const sponsored = fee?.kind === "sponsored";
-  const feePayerNoun =
-    fee === undefined ? "the fee payer" : sponsored ? "SDP's fee sponsor" : "the wallet";
-  const feeRemedy = sponsored
-    ? "This is a problem on SDP's side, not with the wallet."
-    : fee === undefined
-      ? "It needs SOL before this can be retried."
-      : "Send SOL to the wallet and retry.";
-  const feeFault = sponsored ? "sponsor" : "caller";
-  // A fee-payer failure under sponsorship is always the sponsor's own
-  // balance: simulation charges the fee to the sponsor and nothing else.
-  const feeCause = sponsored ? ({ sponsorCause: "balance" } as const) : {};
+  const { feePayerNoun, feeRemedy, feeFault, feeCause } = feePayerWording(fee);
 
   if (typeof err === "string") {
     switch (err) {

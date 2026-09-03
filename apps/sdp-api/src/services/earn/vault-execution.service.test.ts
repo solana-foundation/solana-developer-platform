@@ -148,6 +148,100 @@ describe("vault execution validation", () => {
     ).toThrow("must require only the owner signature");
   });
 
+  it("compiles a caller-provided fee payer into slot zero beside the owner", () => {
+    const externalPlan = planForOwner(ownerAddress);
+    const unsigned = compileUnsignedVaultTransaction({
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: externalPlan.assetIdentity,
+      plan: externalPlan,
+      owner: ownerAddress,
+      feePayer: feePayerAddress,
+      prepared: {
+        plan: externalPlan,
+        lookupTables: {},
+        blockhash,
+        lastValidBlockHeight: 100n,
+      },
+    });
+    const decoded = getTransactionDecoder().decode(unsigned.bytes);
+    // Ordered and exact: kit places the fee payer at static slot zero, and the
+    // submit's recorded signature (= the on-chain txid) reads that slot.
+    expect(Object.keys(decoded.signatures)).toEqual([feePayerAddress, ownerAddress]);
+    expect(Object.values(decoded.signatures)).toEqual([null, null]);
+  });
+
+  it("still refuses a smuggled third signer when a fee payer is requested", async () => {
+    const extraSigner = await generateKeyPairSigner();
+    const externalPlan: EarnVaultTransactionPlan = {
+      ...plan,
+      instructions: [
+        {
+          programAddress: "11111111111111111111111111111111",
+          accounts: [
+            { address: ownerAddress, role: AccountRole.READONLY_SIGNER },
+            { address: extraSigner.address, role: AccountRole.READONLY_SIGNER },
+          ],
+          data: "",
+        },
+      ],
+    };
+
+    expect(() =>
+      compileUnsignedVaultTransaction({
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: externalPlan.assetIdentity,
+        plan: externalPlan,
+        owner: ownerAddress,
+        feePayer: feePayerAddress,
+        prepared: {
+          plan: externalPlan,
+          lookupTables: {},
+          blockhash,
+          lastValidBlockHeight: 100n,
+        },
+      })
+    ).toThrow("must require exactly the fee-payer and owner signatures");
+  });
+
+  it("treats a fee payer equal to the owner as absent", () => {
+    const externalPlan = planForOwner(ownerAddress);
+    // Solana deduplicates account keys, so owner-as-fee-payer compiles to ONE
+    // signer slot; the compile normalizes rather than tripping its own
+    // two-slot assertion on a legitimate build.
+    const unsigned = compileUnsignedVaultTransaction({
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: externalPlan.assetIdentity,
+      plan: externalPlan,
+      owner: ownerAddress,
+      feePayer: ownerAddress,
+      prepared: {
+        plan: externalPlan,
+        lookupTables: {},
+        blockhash,
+        lastValidBlockHeight: 100n,
+      },
+    });
+    const decoded = getTransactionDecoder().decode(unsigned.bytes);
+    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+  });
+
+  it("refuses to sign a caller-provided fee mode", async () => {
+    await expect(
+      signVaultPlan(env, {
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: plan.assetIdentity,
+        plan,
+        owner: createNoopSigner(ownerAddress),
+        rpcUrl,
+        fee: { kind: "caller-provided", feePayer: feePayerAddress },
+      })
+    ).rejects.toThrow("compile the transaction unsigned");
+  });
+
   it("blocks every raw execution path before RPC or signing on wrong genesis", async () => {
     genesisSend.mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
     const owner = createNoopSigner(ownerAddress);
@@ -271,6 +365,41 @@ describe("vault execution validation", () => {
     });
     expect(walletPays.ok).toBe(true);
     expect(feePayerOf(simulatedWire.at(-1) ?? "")).toBe(ownerAddress);
+  });
+
+  it("simulates a caller-provided plan as the named fee payer", async () => {
+    const result = await simulateVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan,
+      owner: ownerAddress,
+      rpcUrl,
+      fee: { kind: "caller-provided", feePayer: feePayerAddress },
+    });
+    expect(result.ok).toBe(true);
+    // The funds check moves to the partner wallet — the whole point for
+    // zero-SOL owners — and the simulated message matches the compiled one.
+    expect(feePayerOf(simulatedWire.at(-1) ?? "")).toBe(feePayerAddress);
+  });
+
+  it("names the caller-provided fee payer in a fee simulation failure", async () => {
+    simulateSend.mockResolvedValueOnce({ value: { err: "AccountNotFound", logs: [] } });
+
+    const result = await simulateVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan,
+      owner: ownerAddress,
+      rpcUrl,
+      fee: { kind: "caller-provided", feePayer: feePayerAddress },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a failed simulation");
+    expect(result.error).toContain(`the provided fee payer (${feePayerAddress}) holds no SOL`);
+    expect(result.fault).toBe("caller");
   });
 
   it("translates a fee-payer simulation failure into a readable verdict", async () => {

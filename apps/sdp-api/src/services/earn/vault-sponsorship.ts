@@ -40,6 +40,15 @@ import type { VaultDeadline } from "./vault-deadline";
  */
 export type VaultFeeMode =
   | { kind: "sponsored"; feePayment: FeePaymentPort; sponsor: Address }
+  /**
+   * A fee payer the API CALLER named and will co-sign itself (the partner
+   * fee payer on the external-wallet builds, PRO-1722). SDP holds no signer
+   * for it and no paymaster stands behind it: the compiled transaction simply
+   * requires its signature alongside the owner's. The same one-identity rule
+   * as sponsorship applies — this address is also the rent payer, or rent
+   * stays with the owner.
+   */
+  | { kind: "caller-provided"; feePayer: Address }
   | { kind: "wallet-pays" };
 
 export interface ResolveVaultSponsorshipInput {
@@ -96,5 +105,14 @@ export async function resolveVaultSponsorship(
  * signature.
  */
 export function vaultRentPayer(fee: VaultFeeMode): string | undefined {
-  return fee.kind === "sponsored" ? fee.sponsor : undefined;
+  // Exhaustive on purpose: a new fee mode falling through to "the owner pays
+  // rent" is exactly the silent split the header above rules out.
+  switch (fee.kind) {
+    case "sponsored":
+      return fee.sponsor;
+    case "caller-provided":
+      return fee.feePayer;
+    case "wallet-pays":
+      return undefined;
+  }
 }

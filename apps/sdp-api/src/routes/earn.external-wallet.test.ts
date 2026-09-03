@@ -261,6 +261,8 @@ function builtRow(overrides: Record<string, unknown> = {}) {
     amount_requested: "25",
     min_shares_out: null,
     creates_share_account: true,
+    fee_payer: null,
+    share_ata_rent_funder: null,
     unsigned_transaction: "AQ==",
     last_valid_block_height: "361",
     movement_id: null,
@@ -394,6 +396,66 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       amount: "25",
     });
     expect(res.status).toBe(404);
+  });
+
+  describe("partner fee payer", () => {
+    const FEE_PAYER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+
+    it("passes the fee payer through and echoes it on the built transaction", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      buildExternalWalletDepositTransaction.mockResolvedValue({
+        kind: "built",
+        built: builtRow({ fee_payer: FEE_PAYER, share_ata_rent_funder: FEE_PAYER }),
+      });
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer: FEE_PAYER,
+        amount: "25",
+      });
+
+      expect(res.status).toBe(200);
+      expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ feePayer: FEE_PAYER })
+      );
+      const body = (await res.json()) as { data: { transaction: { feePayer?: string } } };
+      expect(body.data.transaction.feePayer).toBe(FEE_PAYER);
+    });
+
+    it("normalizes a fee payer equal to the owner away", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer: OWNER,
+        amount: "25",
+      });
+
+      expect(res.status).toBe(200);
+      expect(buildExternalWalletDepositTransaction.mock.calls[0]?.[1]).not.toHaveProperty(
+        "feePayer"
+      );
+      const body = (await res.json()) as { data: { transaction: { feePayer?: string } } };
+      expect(body.data.transaction).not.toHaveProperty("feePayer");
+    });
+
+    it("400s a malformed fee payer before any build", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer: "not-a-real-address",
+        amount: "25",
+      });
+      expect(res.status).toBe(400);
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    });
   });
 
   describe("swap-funded builds", () => {
@@ -554,6 +616,36 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         amount: "24.8",
         minSharesOut: "24.5",
       });
+    });
+
+    it("carries the fee payer through the split's follow-up contract", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      const feePayer = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+      buildExternalWalletDepositTransaction.mockResolvedValue({
+        kind: "swap_required",
+        swap: swapLeg,
+        swapTransaction: {
+          bytes: Uint8Array.from([1, 2, 3]),
+          lastValidBlockHeight: "361",
+        },
+      });
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer,
+        amount: "25",
+        sourceTokenMint: SOURCE_MINT,
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { followUp: { feePayer?: string } };
+      };
+      // A follow-up build that silently dropped the fee payer would bill the
+      // customer's wallet — the same reasoning as the floor echo above.
+      expect(body.data.followUp.feePayer).toBe(feePayer);
     });
 
     it("omits the follow-up floor only when the original request carried none", async () => {

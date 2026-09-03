@@ -473,10 +473,12 @@ export interface EarnVaultDepositInput {
    * NOT the transaction fee payer. A provider SDK embeds this account INSIDE
    * the instruction accounts as writable+signer, so whoever is named here pays
    * a real, separate cost; the fee payer is set when SDP compiles the message.
-   * Omitted means the `owner` funds it, which is what an unsponsored deposit
-   * wants. SDP passes its sponsor here only when sponsorship is on, and then
-   * the SAME address is also the fee payer, so one sponsor signature covers
-   * both roles. See docs/decisions/0002-earn-provider-pluggability.md.
+   * Omitted means the `owner` funds it, which is what an owner-paid deposit
+   * wants. SDP names an address here only when someone else pays: its Kora
+   * sponsor under sponsorship, or the partner's caller-provided fee payer on
+   * the external-wallet builds — and then the SAME address is also the fee
+   * payer, so one extra signature covers both roles. See
+   * docs/decisions/0002-earn-provider-pluggability.md.
    */
   rentPayer?: string;
 }
@@ -504,10 +506,12 @@ export interface EarnVaultWithdrawInput {
    * NOT the transaction fee payer. A provider SDK embeds this account INSIDE
    * the instruction accounts as writable+signer, so whoever is named here pays
    * a real, separate cost; the fee payer is set when SDP compiles the message.
-   * Omitted means the `owner` funds it, which is what an unsponsored deposit
-   * wants. SDP passes its sponsor here only when sponsorship is on, and then
-   * the SAME address is also the fee payer, so one sponsor signature covers
-   * both roles. See docs/decisions/0002-earn-provider-pluggability.md.
+   * Omitted means the `owner` funds it, which is what an owner-paid deposit
+   * wants. SDP names an address here only when someone else pays: its Kora
+   * sponsor under sponsorship, or the partner's caller-provided fee payer on
+   * the external-wallet builds — and then the SAME address is also the fee
+   * payer, so one extra signature covers both roles. See
+   * docs/decisions/0002-earn-provider-pluggability.md.
    */
   rentPayer?: string;
   /**
