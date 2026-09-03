@@ -813,6 +813,96 @@ function PermanentRowBadges({
   );
 }
 
+/**
+ * The technical-mode action tags for a setting.
+ *
+ * Extracted alongside {@link PermanentRowBadges} and {@link PermanentRowBody}:
+ * between them the row was carrying four independent branch clusters, which is
+ * what put it over the complexity the linter allows.
+ */
+function PermanentRowActions({ actions }: { actions: readonly string[] }) {
+  return (
+    <>
+      {actions.map((action) => {
+        const ActionIcon = ACTION_ICONS[action];
+        return (
+          <Tag key={action}>
+            {ActionIcon ? <ActionIcon className="h-3 w-3 text-tertiary" /> : null}
+            {humanizeAction(action)}
+          </Tag>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * A permanent setting's footer: the conflict note, or its parameter fields.
+ *
+ * Never both — a footer rendering the two together adds phantom padding.
+ */
+function PermanentRowBody({
+  blocked,
+  conflictWith,
+  checked,
+  params,
+  settingKey,
+  selection,
+  showErrors,
+  disabled,
+  containerResponsive,
+  onParam,
+}: {
+  blocked: boolean;
+  conflictWith?: string;
+  checked: boolean;
+  params: readonly ParamFieldSpec[];
+  settingKey: string;
+  selection: SettingSelection | undefined;
+  showErrors?: boolean;
+  disabled?: boolean;
+  containerResponsive?: boolean;
+  onParam: (key: string, paramKey: string, value: string) => void;
+}) {
+  const t = useTranslations();
+
+  if (blocked) {
+    return (
+      <p className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2 text-[11px] text-tertiary">
+        {t("DashboardIssuance.config.settingConflictsWith")}
+        <Tag>{conflictWith}</Tag>
+      </p>
+    );
+  }
+
+  if (!checked || params.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className={cn(
+        "grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5",
+        containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
+      )}
+    >
+      {params.map((param) => (
+        <ParamField
+          key={param.key}
+          param={param}
+          settingKey={settingKey}
+          value={selection?.params?.[param.key] ?? ""}
+          invalid={
+            !!showErrors && !!param.required && (selection?.params?.[param.key] ?? "").trim() === ""
+          }
+          disabled={disabled}
+          onChange={(value) => onParam(settingKey, param.key, value)}
+        />
+      ))}
+    </div>
+  );
+}
+
 function PermanentRow({
   entry,
   selection,
@@ -878,49 +968,23 @@ function PermanentRow({
         />
       }
       actions={
-        showTechnical && setting.actions.length > 0
-          ? setting.actions.map((action) => {
-              const ActionIcon = ACTION_ICONS[action];
-              return (
-                <Tag key={action}>
-                  {ActionIcon ? <ActionIcon className="h-3 w-3 text-tertiary" /> : null}
-                  {humanizeAction(action)}
-                </Tag>
-              );
-            })
-          : null
+        showTechnical && setting.actions.length > 0 ? (
+          <PermanentRowActions actions={setting.actions} />
+        ) : null
       }
     >
-      {/* Render conflict or params, but not both (footer adds phantom padding otherwise). */}
-      {blocked ? (
-        <p className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2 text-[11px] text-tertiary">
-          {t("DashboardIssuance.config.settingConflictsWith")}
-          <Tag>{conflictWith}</Tag>
-        </p>
-      ) : checked && params.length > 0 ? (
-        <div
-          className={cn(
-            "grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5",
-            containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
-          )}
-        >
-          {params.map((param) => (
-            <ParamField
-              key={param.key}
-              param={param}
-              settingKey={key}
-              value={selection?.params?.[param.key] ?? ""}
-              invalid={
-                !!showErrors &&
-                !!param.required &&
-                (selection?.params?.[param.key] ?? "").trim() === ""
-              }
-              disabled={disabled}
-              onChange={(value) => onParam(key, param.key, value)}
-            />
-          ))}
-        </div>
-      ) : null}
+      <PermanentRowBody
+        blocked={blocked}
+        conflictWith={conflictWith}
+        checked={checked}
+        params={params}
+        settingKey={key}
+        selection={selection}
+        showErrors={showErrors}
+        disabled={disabled}
+        containerResponsive={containerResponsive}
+        onParam={onParam}
+      />
     </SettingShell>
   );
 }
