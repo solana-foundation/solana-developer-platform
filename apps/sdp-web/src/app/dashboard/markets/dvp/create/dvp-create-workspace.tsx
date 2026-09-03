@@ -9,6 +9,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { AmountField, Field, MintField, ReferenceField, SideChoice } from "./dvp-create-fields";
@@ -54,6 +55,30 @@ function Section({
  * form is a pure function of its inputs: it can be rendered, and asserted on,
  * without standing up the whole dashboard workspace context.
  */
+/**
+ * Whose leg this card is.
+ *
+ * The two cards are written for one direction — "Asset you are trading", "What
+ * the other side pays with" — and they did not change when the direction did.
+ * Choosing "You deliver the cash" left the cash card still captioned as the
+ * counterparty's, which is the opposite of the truth, and left nothing on
+ * either card saying which one you were filling in for yourself. The moving
+ * balance was the only signal, and a balance is a hint, not a label.
+ */
+function LegOwner({ mine }: { mine: boolean }) {
+  const t = useTranslations();
+  return (
+    <p
+      className={cn(
+        "font-medium text-[11px] uppercase tracking-wide",
+        mine ? "text-primary" : "text-tertiary"
+      )}
+    >
+      {mine ? t("DashboardMarkets.dvp.legYouDeliver") : t("DashboardMarkets.dvp.legTheyDeliver")}
+    </p>
+  );
+}
+
 export function DvpCreateWorkspace({
   cluster,
   context,
@@ -130,11 +155,16 @@ export function DvpCreateWorkspace({
             >
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
+                  <LegOwner mine={form.sdpSide === "a"} />
                   <MintField
                     choice={form.asset.choice}
                     custom={form.asset.custom}
                     emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
-                    hint={t("DashboardMarkets.dvp.fieldAssetMintHint")}
+                    hint={t(
+                      form.sdpSide === "a"
+                        ? "DashboardMarkets.dvp.fieldAssetMintHint"
+                        : "DashboardMarkets.dvp.fieldAssetMintHintTheirs"
+                    )}
                     id="dvp-asset-mint"
                     label={t("DashboardMarkets.dvp.fieldAssetMint")}
                     onChoiceChange={form.asset.setChoice}
@@ -158,10 +188,15 @@ export function DvpCreateWorkspace({
                 </div>
 
                 <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
+                  <LegOwner mine={form.sdpSide === "b"} />
                   <MintField
                     choice={form.cash.choice}
                     custom={form.cash.custom}
-                    hint={t("DashboardMarkets.dvp.fieldCashMintHint")}
+                    hint={t(
+                      form.sdpSide === "b"
+                        ? "DashboardMarkets.dvp.fieldCashMintHintMine"
+                        : "DashboardMarkets.dvp.fieldCashMintHint"
+                    )}
                     id="dvp-cash-mint"
                     label={t("DashboardMarkets.dvp.fieldCashMint")}
                     onChoiceChange={form.cash.setChoice}

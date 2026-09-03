@@ -128,4 +128,28 @@ describe("DvpCreateWorkspace", () => {
 
     expect(container.textContent).not.toContain("decimals)");
   });
+
+  /**
+   * Flipping the direction changes which leg you fund, and the two cards were
+   * written for one direction only: the cash card stayed captioned as the
+   * counterparty's even when you were the one funding it. The moving balance
+   * was the only signal, and a balance is a hint, not a label.
+   */
+  describe("which leg is whose", () => {
+    it("marks the asset leg as yours by default", () => {
+      const { container } = renderForm();
+
+      expect(container.textContent).toContain("You deliver");
+      expect(container.textContent).toContain("They deliver");
+    });
+
+    it("does not tell you the other side pays the cash when you do", () => {
+      const { container } = renderForm();
+
+      fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
+
+      expect(container.textContent).toContain("What you pay with");
+      expect(container.textContent).not.toContain("What the other side pays with");
+    });
+  });
 });
