@@ -58,13 +58,14 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
   );
   const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), payoutRows);
 
-  const accounts = payoutRows.map((row) =>
-    mapProviderAccount(row, enriched, customerLinks.get(row.provider))
-  );
   const payoutProviders = new Set(payoutRows.map((row) => row.provider));
-  for (const [provider, link] of customerLinks) {
-    if (!payoutProviders.has(provider)) {
-      accounts.push(mapCustomerLinkAccount(link));
+  const accounts: CounterpartyProviderAccount[] = [];
+  for (const row of rows) {
+    if (row.kind === "payout_account") {
+      accounts.push(mapProviderAccount(row, enriched, customerLinks.get(row.provider)));
+    }
+    if (row.kind === "customer_link" && !payoutProviders.has(row.provider)) {
+      accounts.push(mapCustomerLinkAccount(row));
     }
   }
 

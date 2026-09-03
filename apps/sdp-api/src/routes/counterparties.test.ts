@@ -1139,7 +1139,7 @@ describe("Counterparties Routes", () => {
       ]);
     });
 
-    it("lists the customer link as a top-level row when no payout accounts exist", async () => {
+    it("lists the customer link as a top-level row in creation order when its provider has no payout accounts", async () => {
       const created = await createCounterparty({ externalId: "provider_accounts_link_only" });
       const owner = (await created.json()).data.counterparty;
       const customerLink = await createPostgresCounterpartyProviderAccountsRepository(
@@ -1150,6 +1150,19 @@ describe("Counterparties Routes", () => {
         counterpartyId: owner.id,
         provider: "lightspark",
         providerCustomerReference: "Customer:link_only",
+      });
+      await seedProviderAccount({
+        id: "provider_account_after_link",
+        counterpartyId: owner.id,
+        provider: "mural",
+        providerCustomerReference: "mural_customer",
+        externalAccountReference: "mural_external",
+        fiatCurrency: "GBP",
+        destinationCountry: "GB",
+        paymentRail: "FPS",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2099-01-01T00:00:00.000Z",
       });
 
       const response = await app.request(
@@ -1178,6 +1191,17 @@ describe("Counterparties Routes", () => {
               providerStatus: null,
               createdAt: customerLink.created_at,
             },
+          },
+          {
+            id: "provider_account_after_link",
+            provider: "mural",
+            kind: "payout_account",
+            fiatCurrency: "GBP",
+            destinationCountry: "GB",
+            paymentRail: "FPS",
+            status: "active",
+            providerStatus: "ACTIVE",
+            createdAt: "2099-01-01T00:00:00.000Z",
           },
         ],
       });

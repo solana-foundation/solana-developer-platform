@@ -260,7 +260,7 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
         )}
         {customerLink !== undefined ? (
           <div className="flex min-w-0 items-center gap-1">
-            <span className="truncate text-xs text-tertiary">
+            <span className="max-w-40 truncate text-xs text-tertiary">
               {customerLink.providerCustomerReference}
             </span>
             <Button
@@ -278,6 +278,12 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
             >
               {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
             </Button>
+            <span
+              className="whitespace-nowrap text-xs text-tertiary"
+              title={formatTimestamp(customerLink.createdAt, t)}
+            >
+              {formatRelativeTime(customerLink.createdAt)}
+            </span>
           </div>
         ) : null}
       </div>
