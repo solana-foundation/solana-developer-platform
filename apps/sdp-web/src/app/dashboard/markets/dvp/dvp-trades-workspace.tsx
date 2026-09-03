@@ -1,7 +1,14 @@
 "use client";
 
 import { SegmentedControl } from "@solana/design-system/segmented-control";
-import { ArrowLeftRightIcon, ChevronRightIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  ArrowDownLeftIcon,
+  ArrowLeftRightIcon,
+  ArrowUpRightIcon,
+  ChevronRightIcon,
+  PlusIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
@@ -22,6 +29,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { DvpStatusBadge } from "./dvp-status";
 import {
@@ -43,9 +51,35 @@ import { DVP_TRADES_PAGE_SIZE } from "./dvp-trades.data";
  * because "1000 of 1000" and "1000" answer different questions and only the
  * first says whether anything is still owed.
  */
-function LegCell({ closed, leg }: { closed: boolean; leg: DvpTradeLeg }) {
+function LegCell({
+  closed,
+  leg,
+  mine,
+}: {
+  closed: boolean;
+  leg: DvpTradeLeg;
+  /** Whether this is the leg SDP delivers. */
+  mine: boolean;
+}) {
+  const t = useTranslations();
+  const direction = mine
+    ? { Icon: ArrowUpRightIcon, key: closed ? "youDelivered" : "youDeliver" }
+    : { Icon: ArrowDownLeftIcon, key: closed ? "youReceived" : "youReceive" };
+
   return (
     <div className="flex min-w-0 items-center gap-2">
+      {/* Which way this leg moves. The columns are fixed — Asset leg, Cash leg
+          — which names the legs and never says who gave what, so a row where
+          you delivered the cash was indistinguishable from one where you
+          delivered the asset. Two rows of the same trade type read identically
+          while meaning opposite things. The arrows differ down the column, so
+          the direction is scannable rather than something you open a trade to
+          find out. Same words the detail page uses. */}
+      <direction.Icon
+        aria-hidden
+        className={cn("h-3.5 w-3.5 shrink-0", mine ? "text-tertiary" : "text-success")}
+      />
+      <span className="sr-only">{t(`DashboardMarkets.dvp.${direction.key}` as MessageKey)}</span>
       {/* The mark resolves a logo only for a mint in the well-known registry,
           and falls back to a monogram of the SYMBOL — which it can only do if
           it is given one. Passing the mint alone left every issued asset
@@ -308,10 +342,18 @@ export function DvpTradesWorkspace({
                             </Link>
                           </TableCell>
                           <TableCell>
-                            <LegCell closed={isDvpTradeClosed(trade)} leg={trade.legs.a} />
+                            <LegCell
+                              closed={isDvpTradeClosed(trade)}
+                              leg={trade.legs.a}
+                              mine={trade.sdpSide === "a"}
+                            />
                           </TableCell>
                           <TableCell>
-                            <LegCell closed={isDvpTradeClosed(trade)} leg={trade.legs.b} />
+                            <LegCell
+                              closed={isDvpTradeClosed(trade)}
+                              leg={trade.legs.b}
+                              mine={trade.sdpSide === "b"}
+                            />
                           </TableCell>
                           <TableCell className="text-secondary text-sm">
                             {/* Shortened to read, copyable in full. A truncated

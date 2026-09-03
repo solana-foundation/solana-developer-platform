@@ -119,6 +119,37 @@ describe("DvpTradesWorkspace", () => {
     expect(html).not.toContain("/ 1,000");
   });
 
+  /**
+   * A row where you delivered the cash and a row where you delivered the asset
+   * rendered identically: the columns name the legs — Asset leg, Cash leg — and
+   * never say who gave what. Two rows meaning opposite things looked the same,
+   * and the only way to find out was to open the trade.
+   */
+  describe("which side you were on", () => {
+    it("says you delivered the asset leg when that is your side", () => {
+      const html = renderList([trade({ status: "settled", sdpSide: "a" })]);
+
+      expect(html).toContain("You delivered");
+      expect(html).toContain("You received");
+    });
+
+    it("says the same for a trade where you delivered the cash leg", () => {
+      const html = renderList([trade({ status: "settled", sdpSide: "b" })]);
+
+      expect(html).toContain("You delivered");
+      expect(html).toContain("You received");
+    });
+
+    // An open trade has not delivered anything yet, so it says what will happen
+    // rather than what did.
+    it("speaks in the future tense while the trade is still open", () => {
+      const html = renderList([trade({ status: "partially_funded" })]);
+
+      expect(html).toContain("You deliver");
+      expect(html).not.toContain("You delivered");
+    });
+  });
+
   it("keeps create reachable once trades exist", () => {
     const html = renderList([trade()]);
 
