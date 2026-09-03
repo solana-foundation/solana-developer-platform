@@ -84,6 +84,21 @@ describe("DvpTradesWorkspace", () => {
     expect(renderList([]).match(/dvp\/create/g)?.length).toBe(1);
   });
 
+  // The filter bar earns its space only when there is something to sift; and
+  // once it is there, "2 of 2" beside an untouched filter is a number that
+  // answers nothing.
+  it("does not show a filter bar over a single trade", () => {
+    expect(renderList([trade()])).not.toContain("Search trades");
+  });
+
+  it("offers filters once there is more than one trade", () => {
+    expect(renderList([trade(), trade({ id: "dvp_2" })])).toContain("Search trades");
+  });
+
+  it("counts nothing while every trade is shown", () => {
+    expect(renderList([trade(), trade({ id: "dvp_2" })])).not.toContain("2 of 2");
+  });
+
   it("keeps create reachable once trades exist", () => {
     const html = renderList([trade()]);
 

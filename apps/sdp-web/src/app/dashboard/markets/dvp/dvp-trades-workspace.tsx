@@ -1,6 +1,12 @@
 "use client";
 
-import { ArrowLeftRightIcon, ChevronRightIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  ArrowLeftRightIcon,
+  ChevronRightIcon,
+  PlusIcon,
+  SearchIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -169,16 +175,25 @@ export function DvpTradesWorkspace({
             {/* Only once there is enough to sift. A filter bar over three rows
                 is furniture. */}
             {trades.length > 1 ? (
+              /* One row, not three stacked blocks. `Select`'s trigger is w-full
+                 by design, so dropping it into a wrapping flex row made a
+                 two-word status filter span the page and pushed everything else
+                 onto its own line — while the search sat in a max-w-xs box too
+                 narrow to finish its own placeholder. The search is the field
+                 that wants the room, so it takes what is left and the other two
+                 are sized to their content. */
               <div className="flex flex-wrap items-center gap-3">
                 <Input
                   aria-label={t("DashboardMarkets.dvp.filterSearchLabel")}
-                  className="max-w-xs"
+                  className="min-w-0 flex-1 basis-64"
+                  iconLeft={<SearchIcon />}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t("DashboardMarkets.dvp.filterSearchPlaceholder")}
                   value={query}
                 />
                 <Select
                   ariaLabel={t("DashboardMarkets.dvp.filterStatusLabel")}
+                  className="w-44 shrink-0"
                   onValueChange={(next) => setStatus((next as StatusFilter) ?? "all")}
                   value={status}
                 >
@@ -187,12 +202,16 @@ export function DvpTradesWorkspace({
                   <SelectItem value="ready">{t("DashboardMarkets.dvp.filterReady")}</SelectItem>
                   <SelectItem value="closed">{t("DashboardMarkets.dvp.filterClosed")}</SelectItem>
                 </Select>
-                <span className="text-tertiary text-xs tabular-nums">
-                  {t("DashboardMarkets.dvp.filterCount", {
-                    shown: String(visible.length),
-                    total: String(trades.length),
-                  })}
-                </span>
+                {/* Only while it is telling you something. "2 of 2" next to an
+                    untouched filter is a number that answers nothing. */}
+                {visible.length === trades.length ? null : (
+                  <span className="shrink-0 text-tertiary text-xs tabular-nums">
+                    {t("DashboardMarkets.dvp.filterCount", {
+                      shown: String(visible.length),
+                      total: String(trades.length),
+                    })}
+                  </span>
+                )}
               </div>
             ) : null}
 
