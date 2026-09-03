@@ -60,6 +60,8 @@ export interface DvpTradeRow {
 
   status: DvpTradeStatus;
   observedAt: string | null;
+  /** Caller-supplied Idempotency-Key, when one was sent. */
+  idempotencyKey: string | null;
   createSignature: string | null;
   createdAt: string;
   updatedAt: string;
@@ -111,5 +113,12 @@ export interface DvpTradeRepository {
   getById(scope: DvpTradeScope, id: string): Promise<DvpTradeRow | null>;
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
   getBySwapDvp(scope: DvpTradeScope, swapDvp: string): Promise<DvpTradeRow | null>;
+  /**
+   * The trade a previous request with this key created, or null.
+   *
+   * Deliberately not wallet-scoped: a retry is the same caller replaying the
+   * same request, and the key is already scoped to their project.
+   */
+  getByIdempotencyKey(projectId: string, idempotencyKey: string): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
 }

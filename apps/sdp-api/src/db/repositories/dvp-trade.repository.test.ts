@@ -44,6 +44,7 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
     sdpSide: "a",
     sdpWalletId: CUSTODY_WALLET_ID,
+    idempotencyKey: null,
     createSignature: null,
     ...overrides,
   };
@@ -209,6 +210,43 @@ describe("DvpTradeRepository (postgres)", () => {
 
     expect(listed).toHaveLength(2);
     expect(listed.map((t) => t.id).sort()).toEqual(["dvp_a", "dvp_b"]);
+  });
+
+  // A retry after an ambiguous broadcast must find the original rather than
+  // create a second trade at a different address.
+  it("finds a trade by the key its request carried", async () => {
+    const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
+
+    await expect(repo.getByIdempotencyKey(TEST_PROJECT_ID, "key-1")).resolves.toMatchObject({
+      id: created.id,
+    });
+    await expect(repo.getByIdempotencyKey(TEST_PROJECT_ID, "other")).resolves.toBeNull();
+  });
+
+  it("refuses a second trade reusing a key within one project", async () => {
+    await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
+
+    await expect(
+      repo.create(
+        tradeInsert({
+          id: "dvp_trade_test_2",
+          swapDvp: "SwapZ11111111111111111111111111111111111111",
+          idempotencyKey: "key-1",
+        })
+      )
+    ).rejects.toThrow();
+  });
+
+  // Partial index: unkeyed trades all carry NULL and must not collide.
+  it("allows any number of trades with no key", async () => {
+    await repo.create(
+      tradeInsert({ id: "dvp_n1", swapDvp: "SwapN11111111111111111111111111111111111111" })
+    );
+    await repo.create(
+      tradeInsert({ id: "dvp_n2", swapDvp: "SwapN21111111111111111111111111111111111111" })
+    );
+
+    await expect(repo.listByProject(scope, 10)).resolves.toHaveLength(2);
   });
 
   // The program's nonce tombstone makes a (seeds, nonce) pair single-use forever,

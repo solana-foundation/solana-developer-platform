@@ -66,6 +66,7 @@ function tradeInput() {
     expiryTimestamp: BigInt(Math.floor(Date.now() / 1000) + 3600),
     earliestSettlementTimestamp: null,
     refString: null,
+    idempotencyKey: null,
   };
 }
 
@@ -212,6 +213,45 @@ describe("createDvpTrade", () => {
     const rows = await rowsInDb();
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("creating");
+  });
+
+  // A retry after an ambiguous broadcast must return the ORIGINAL trade. Create
+  // draws a fresh nonce every time, so without this the retry lands at a
+  // different address and the first trade sits on chain with a published escrow
+  // nobody is watching.
+  it("returns the original trade when a keyed request is retried", async () => {
+    sendTransaction.mockResolvedValue("sig");
+    const input = { ...tradeInput(), idempotencyKey: "key-1" };
+
+    const first = await createDvpTrade(env, input);
+    const retried = await createDvpTrade(env, input);
+
+    expect(retried.id).toBe(first.id);
+    expect(retried.swapDvp).toBe(first.swapDvp);
+    // The retry must not broadcast a second transaction.
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
+  it("creates separate trades for different keys", async () => {
+    sendTransaction.mockResolvedValue("sig");
+
+    const first = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-a" });
+    const second = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-b" });
+
+    expect(second.id).not.toBe(first.id);
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  // Without a key there is nothing to replay against, so each call is a new
+  // trade — which is exactly why the key matters on a retry.
+  it("creates a new trade every time when no key is sent", async () => {
+    sendTransaction.mockResolvedValue("sig");
+
+    const first = await createDvpTrade(env, tradeInput());
+    const second = await createDvpTrade(env, tradeInput());
+
+    expect(second.id).not.toBe(first.id);
   });
 
   it("writes nothing when the terms are refused before signing", async () => {
