@@ -501,6 +501,110 @@ describe("Counterparties Routes", () => {
       ]);
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
+
+    it("returns ready with the active Lightspark corridor account and payout tree", async () => {
+      const created = await createCounterparty({ externalId: "requirements_lightspark_reuse" });
+      const counterparty = (await created.json()).data.counterparty;
+      const providerAccounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+
+      await providerAccounts.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_reuse",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({ lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } }),
+          counterparty.id
+        )
+        .run();
+      await seedProviderAccount({
+        id: "provider_account_requirements_reuse",
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:requirements_reuse",
+        externalAccountReference: "ExternalAccount:requirements_reuse",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  platformAccountId: "provider_account_requirements_reuse",
+                  status: "ACTIVE",
+                  accountInfo: {
+                    accountType: "USD_ACCOUNT",
+                    paymentRails: ["ACH"],
+                    bankName: "Reuse Bank",
+                    accountNumber: "123456789",
+                  },
+                },
+              ],
+              hasMore: false,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+        )
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).data).toEqual(
+        expect.objectContaining({
+          provider: "lightspark",
+          direction: "offramp",
+          status: "ready",
+          providerAccountId: "provider_account_requirements_reuse",
+          payout: expect.objectContaining({
+            accounts: [
+              {
+                id: "provider_account_requirements_reuse",
+                destinationCountry: "US",
+                paymentRail: "ACH",
+                status: "ACTIVE",
+                bankName: "Reuse Bank",
+                accountNumberLast4: "6789",
+              },
+            ],
+          }),
+        })
+      );
+    });
+
+    it("rejects an invalid Lightspark off-ramp destination country", async () => {
+      const response = await app.request(
+        "/v1/counterparties/cp_invalid_country/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=USA",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(400);
+    });
+
+    it("rejects destinationCountry for non-Lightspark off-ramp requirements", async () => {
+      const response = await app.request(
+        "/v1/counterparties/cp_bvnk_country/requirements?provider=bvnk&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(400);
+    });
   });
 
   describe("POST /v1/counterparties/:counterpartyId/requirements", () => {

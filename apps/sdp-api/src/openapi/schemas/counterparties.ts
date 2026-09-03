@@ -44,15 +44,18 @@ export const counterpartyStatusSchema = withOpenApi(counterpartyStatusSchemaBase
   example: "active",
 });
 
-const [onrampRequirementsQuerySchema, offrampRequirementsQuerySchema] =
+const [onrampRequirementsQuerySchema, offrampRequirementsProviderQuerySchema] =
   counterpartyRequirementsQuerySchemaBase.options;
+const [lightsparkOfframpRequirementsQuerySchema, otherOfframpRequirementsQuerySchema] =
+  offrampRequirementsProviderQuerySchema.options;
 
 export const counterpartyRequirementsQuerySchema = z
   .object({
     provider: withOpenApi(
       z.union([
         onrampRequirementsQuerySchema.shape.provider,
-        offrampRequirementsQuerySchema.shape.provider,
+        lightsparkOfframpRequirementsQuerySchema.shape.provider,
+        otherOfframpRequirementsQuerySchema.shape.provider,
       ]),
       { description: "Ramp provider to evaluate.", example: "moonpay" }
     ),
@@ -73,6 +76,13 @@ export const counterpartyRequirementsQuerySchema = z
       {
         description: "Destination wallet ID. Required when direction is onramp.",
         example: "privy_wallet_123",
+      }
+    ),
+    destinationCountry: withOpenApi(
+      lightsparkOfframpRequirementsQuerySchema.shape.destinationCountry,
+      {
+        description: "Destination payout country. Valid only for Lightspark off-ramp requirements.",
+        example: "US",
       }
     ),
   })
@@ -171,9 +181,20 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
   z.union([
     z.object({
       ...requirementBase,
-      provider: z.enum(RAMP_PROVIDERS),
+      provider: z.enum(RAMP_PROVIDERS).exclude(["lightspark"]),
       status: z.literal("ready"),
-      providerAccountId: z.string().optional(),
+    }),
+    z.object({
+      direction: z.literal("onramp"),
+      provider: z.literal("lightspark"),
+      status: z.literal("ready"),
+    }),
+    z.object({
+      direction: z.literal("offramp"),
+      provider: z.literal("lightspark"),
+      status: z.literal("ready"),
+      providerAccountId: z.string(),
+      payout: payoutRequirementTreeSchema.optional(),
     }),
     z.object({
       ...requirementBase,

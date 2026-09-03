@@ -78,11 +78,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     setField,
     handlePairChange,
     requirementFields,
-    existingPayoutAccounts,
-    payoutAccountSelection,
     selectedProviderAccountId,
-    addingNewAccount,
-    selectPayoutAccount,
+    resolvedAccount,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -102,12 +99,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const destinationCountry =
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
   const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
-  const payoutAccountChoice = addingNewAccount ? "new" : selectedProviderAccountId;
   const requirementsKey = [
     "offramp-requirements",
     destinationCountry,
     paymentRails,
-    payoutAccountChoice,
+    selectedProviderAccountId,
   ].join(":");
 
   if (currentStepId === "WALLET") {
@@ -182,9 +178,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           fields={requirementFields}
           values={collectedData}
           onChange={setCollectedField}
-          existingPayoutAccounts={existingPayoutAccounts}
-          payoutAccountSelection={payoutAccountSelection}
-          onPayoutAccountSelectionChange={selectPayoutAccount}
+          resolvedAccount={resolvedAccount}
         />
       </fieldset>
     );

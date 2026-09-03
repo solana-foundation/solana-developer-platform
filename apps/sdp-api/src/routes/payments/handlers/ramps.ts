@@ -13,6 +13,8 @@ import {
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
   lightsparkCollectAccountRequirements,
+  lightsparkOfframpReady,
+  lightsparkOnrampReady,
   lightsparkPurposeOfPaymentRequirement,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
@@ -621,7 +623,7 @@ async function advanceLightsparkRequirements(
     return lightsparkPurposeOfPaymentRequirement(input.direction);
   }
   if (input.direction === "onramp") {
-    return readyCounterparty("lightspark", input.direction);
+    return lightsparkOnrampReady();
   }
   const cryptoRail = requireCryptoRail(input.cryptoToken);
   const collectedData = input.collectedData;
@@ -653,7 +655,7 @@ async function advanceLightsparkRequirements(
       fiatCurrency: input.fiatCurrency,
       destinationCountry: collectedData.destinationCountry,
     });
-    return readyCounterparty("lightspark", input.direction, selected.id);
+    return lightsparkOfframpReady(selected.id);
   }
   if (collectedData.paymentRails === undefined) {
     const accounts = await repository.listActiveExternalAccounts({
@@ -679,7 +681,7 @@ async function advanceLightsparkRequirements(
       isLightsparkExternalAccountActive(existing.provider_status) &&
       existing.payment_rail !== null
     ) {
-      return readyCounterparty("lightspark", input.direction, existing.id);
+      return lightsparkOfframpReady(existing.id);
     }
     const refreshed = await RAMP_PROVIDER_CLIENTS.lightspark.getExternalAccount(rampRuntime(c), {
       accountId: existing.external_account_reference,
@@ -698,7 +700,7 @@ async function advanceLightsparkRequirements(
       });
     }
     if (isLightsparkExternalAccountActive(refreshed.status)) {
-      return readyCounterparty("lightspark", input.direction, existing.id);
+      return lightsparkOfframpReady(existing.id);
     }
     throw badRequest(
       `Lightspark payout account is not active yet (status: ${refreshed.status}). Retry once it is verified.`
@@ -716,7 +718,7 @@ async function advanceLightsparkRequirements(
     throw badRequest("Lightspark payout account has no provider status yet.");
   }
   if (isLightsparkExternalAccountActive(account.provider_status)) {
-    return readyCounterparty("lightspark", input.direction, account.id);
+    return lightsparkOfframpReady(account.id);
   }
   throw badRequest(
     `Lightspark payout account was created but is not active yet (status: ${account.provider_status}). Retry once it is verified.`
