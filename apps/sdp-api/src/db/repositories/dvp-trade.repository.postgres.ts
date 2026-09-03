@@ -205,6 +205,23 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
+    async releaseIdempotencyKey(id: string) {
+      // Guarded on `create_failed`, the one status that proves the create never
+      // landed and never will. The key is cleared rather than the row deleted:
+      // the failed attempt stays auditable, it just stops answering for a
+      // request that was never made.
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET idempotency_key = NULL, updated_at = sdp_iso_now()
+            WHERE id = ? AND status = 'create_failed' AND idempotency_key IS NOT NULL
+            RETURNING id`
+        )
+        .bind(id)
+        .first<Record<string, unknown>>();
+      return row !== null && row !== undefined;
+    },
+
     async listByProject(scope: DvpTradeScope, limit: number) {
       const wallets = walletScopeClause(scope.sdpWalletIds);
       const result = await db

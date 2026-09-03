@@ -122,5 +122,24 @@ export interface DvpTradeRepository {
    * same request, and the key is already scoped to their project.
    */
   getByIdempotencyKey(projectId: string, idempotencyKey: string): Promise<DvpTradeRow | null>;
+  /**
+   * Frees a `create_failed` row's idempotency key so the same request can be
+   * made again.
+   *
+   * A key is a claim on one logical request, and a create that definitively
+   * never landed leaves that request unmade. Without this the failed row keeps
+   * the key forever and every retry replays it, so the caller is handed a dead
+   * trade for as long as they keep asking — and a caller that derives its key
+   * from the payload, which the dashboard does, can never create that trade at
+   * all.
+   *
+   * Guarded on `create_failed` in the statement rather than by the caller, because
+   * that is the only status proving nothing is on chain: `creating` may still
+   * land, and every other status means it already did.
+   *
+   * @returns Whether the key was freed. False when the row moved on first, in
+   *   which case the caller must treat the replay as live.
+   */
+  releaseIdempotencyKey(id: string): Promise<boolean>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
 }
