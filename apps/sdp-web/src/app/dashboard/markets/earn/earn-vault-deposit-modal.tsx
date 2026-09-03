@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useModalFocus } from "@/lib/use-modal-focus";
@@ -349,6 +350,8 @@ function DepositWalletPicker({
 }: DepositWalletPickerProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
 
   let walletContent: ReactNode;
   if (walletsLoading && wallets === undefined) {
@@ -376,9 +379,11 @@ function DepositWalletPicker({
         <p className="mt-1 text-sm leading-5 text-secondary">
           {t("DashboardEarn.deposit.walletsEmptyBody")}
         </p>
-        <Button asChild className="mt-3" size="sm" variant="outline">
-          <a href="/dashboard/wallets">{t("DashboardEarn.deposit.goToWallets")}</a>
-        </Button>
+        {custodyEnabled ? (
+          <Button asChild className="mt-3" size="sm" variant="outline">
+            <a href="/dashboard/wallets">{t("DashboardEarn.deposit.goToWallets")}</a>
+          </Button>
+        ) : null}
       </div>
     );
   } else {

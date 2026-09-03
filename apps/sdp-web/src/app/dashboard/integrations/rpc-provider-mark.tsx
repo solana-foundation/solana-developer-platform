@@ -38,7 +38,6 @@ const RPC_PROVIDER_LOGOS: Record<
 };
 
 export function RpcProviderMark({ provider }: { provider: OrganizationRpcProvider }) {
-  // The platform default ("SDP") has no vendor logo; mark it with the Solana glyph.
   if (provider === "default") {
     return (
       <span

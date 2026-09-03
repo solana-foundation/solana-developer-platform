@@ -687,23 +687,6 @@ async function fundWalletToLamports(
   }
 }
 
-export async function ensureUnlinkedOrg(identity: ClerkTestIdentity): Promise<void> {
-  await setClerkOrganizationTier(identity.organizationId, "enterprise");
-
-  await withDatabaseClient(async (client) => {
-    await client.query("BEGIN");
-
-    try {
-      await clearPlaywrightOrganizations(client, identity);
-      await ensureLocalUserIdentity(client, identity);
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw error;
-    }
-  });
-}
-
 export async function ensureLinkedOrg(
   identity: ClerkTestIdentity,
   options?: EnsureLinkedOrgOptions

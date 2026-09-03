@@ -3,7 +3,7 @@
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -79,7 +79,6 @@ import {
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
-import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
@@ -91,10 +90,6 @@ import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
-import {
-  type OrganizationOnboardingStatus,
-  shouldRedirectToOrganizationOnboarding,
-} from "@/lib/onboarding-route-guard";
 import { cn } from "@/lib/utils";
 
 function ApiKeyNewLoading() {
@@ -502,7 +497,6 @@ function usesWorkspaceViewport(pathname: string): boolean {
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
-    pathname === "/dashboard/onboarding" ||
     pathname.startsWith("/dashboard/integrations/private-channels") ||
     pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute
@@ -513,24 +507,24 @@ function usesWorkspaceViewport(pathname: string): boolean {
 export function DashboardShell({
   children,
   flags,
-  onboardingStatus,
 }: {
   children: ReactNode;
   flags: DashboardFlags;
-  onboardingStatus: OrganizationOnboardingStatus | null;
 }) {
   const {
     assetProfiles: assetProfilesEnabled,
+    custody: custodyEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
+    issuance: issuanceEnabled,
     markets: marketsEnabled,
     payments: paymentsEnabled,
+    policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
   } = flags;
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -555,15 +549,21 @@ export function DashboardShell({
     pathname,
     t,
     assetProfilesEnabled,
-    privateChannelsEnabled
+    privateChannelsEnabled,
+    custodyEnabled,
+    paymentsEnabled,
+    policiesEnabled
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
+    custodyEnabled,
     earnEnabled,
     heliusRingsEnabled,
+    issuanceEnabled,
     marketsEnabled,
     paymentsEnabled,
     pendingApprovalCount,
+    policiesEnabled,
     privateChannelsEnabled,
   });
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -583,19 +583,8 @@ export function DashboardShell({
   const shouldRenderTopBarBorder =
     (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs;
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
-  const isOrganizationOnboardingRoute = pathname === "/dashboard/onboarding";
   const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
-  const shouldRedirectToOnboarding = shouldRedirectToOrganizationOnboarding(
-    onboardingStatus,
-    pathname
-  );
-
-  useEffect(() => {
-    if (shouldRedirectToOnboarding) {
-      router.replace("/dashboard/onboarding");
-    }
-  }, [router, shouldRedirectToOnboarding]);
 
   useEffect(() => {
     setOpenSubnavs((current) => {
@@ -648,7 +637,7 @@ export function DashboardShell({
   }, [pathname]);
 
   useEffect(() => {
-    if (!dashboardAccess.capabilities.canReadApprovals || !selectedProjectId) {
+    if (!policiesEnabled || !dashboardAccess.capabilities.canReadApprovals || !selectedProjectId) {
       setPendingApprovalCount(null);
       return;
     }
@@ -677,9 +666,9 @@ export function DashboardShell({
       ignored = true;
       window.removeEventListener("sdp:approval-requests-updated", refreshPendingCount);
     };
-  }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
+  }, [dashboardAccess.capabilities.canReadApprovals, policiesEnabled, selectedProjectId]);
 
-  if (!isLoaded || shouldRedirectToOnboarding) {
+  if (!isLoaded) {
     // This is the only caller with a route in scope, so it hands the indicator the
     // same skeleton the settled page streams. Without it the cold load paints one
     // generic shape on every route and the layout jumps when content arrives.
@@ -716,29 +705,10 @@ export function DashboardShell({
   }
 
   if (!orgId) {
-    return <SelectOrganizationPanel />;
-  }
-
-  if (isOrganizationOnboardingRoute) {
     return (
-      <main className="h-screen overflow-hidden bg-[var(--sdp-shell-bg)] p-2 text-primary md:p-4">
-        <SentryUserContext />
-        <NetworkDebugPanel />
-        <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-border-subtle bg-surface-raised/90 shadow-sm">
-          <header className="relative flex h-16 shrink-0 items-center justify-between border-b border-border-subtle px-4 md:px-6">
-            <div className="min-w-0 max-w-[calc(100%-3rem)] sm:w-72">
-              <WorkspaceSwitcher
-                collapsed={false}
-                onOrganizationSwitchingChange={setOrganizationSwitching}
-              />
-            </div>
-            <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium text-secondary sm:block">
-              {t("Shared.dashboardShell.workspace")}
-            </span>
-          </header>
-          <section className="min-h-0 flex-1">{children}</section>
-        </div>
-      </main>
+      <FullscreenLoadingIndicator contentWidthClass={contentWidthClass}>
+        <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
+      </FullscreenLoadingIndicator>
     );
   }
 
@@ -802,6 +772,8 @@ export function DashboardShell({
         {isMobileSidebarOpen || isMoreSheetOpen ? null : (
           <DashboardBottomNav
             pathname={pathname}
+            custodyEnabled={custodyEnabled}
+            issuanceEnabled={issuanceEnabled}
             paymentsEnabled={paymentsEnabled}
             onOpenMore={() => setMoreSheetOpen(true)}
           />
@@ -815,6 +787,7 @@ export function DashboardShell({
             earnEnabled={earnEnabled}
             heliusRingsEnabled={heliusRingsEnabled}
             marketsEnabled={marketsEnabled}
+            policiesEnabled={policiesEnabled}
             onClose={() => setMoreSheetOpen(false)}
           />
         ) : null}
@@ -877,7 +850,7 @@ export function DashboardShell({
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
                   alignTitleWithTabs={hasHeaderTabs && !isMarketsHeader}
-                  showNotifications={assetProfilesEnabled}
+                  showNotifications={assetProfilesEnabled && issuanceEnabled}
                 />
               </div>
 

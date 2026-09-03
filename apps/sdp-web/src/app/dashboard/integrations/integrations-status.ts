@@ -53,13 +53,13 @@ export interface IntegrationEntry<TProvider extends string = string> {
 }
 
 const RPC_DESCRIPTION_KEYS: Record<OrganizationRpcProvider, MessageKey> = {
-  alchemy: "DashboardCustody.onboardingRpcAlchemyDescription",
-  default: "DashboardCustody.onboardingRpcDefaultDescription",
-  helius: "DashboardCustody.onboardingRpcHeliusDescription",
-  nodit: "DashboardCustody.onboardingRpcNoditDescription",
-  quicknode: "DashboardCustody.onboardingRpcQuickNodeDescription",
-  triton: "DashboardCustody.onboardingRpcTritonDescription",
-  validationcloud: "DashboardCustody.onboardingRpcValidationCloudDescription",
+  alchemy: "DashboardCustody.integrationRpcAlchemyDescription",
+  default: "DashboardCustody.integrationRpcDefaultDescription",
+  helius: "DashboardCustody.integrationRpcHeliusDescription",
+  nodit: "DashboardCustody.integrationRpcNoditDescription",
+  quicknode: "DashboardCustody.integrationRpcQuickNodeDescription",
+  triton: "DashboardCustody.integrationRpcTritonDescription",
+  validationcloud: "DashboardCustody.integrationRpcValidationCloudDescription",
 };
 
 const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {

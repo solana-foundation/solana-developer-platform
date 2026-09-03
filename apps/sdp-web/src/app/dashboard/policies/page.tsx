@@ -5,6 +5,7 @@ import type {
   PolicyControlInventoryTarget,
 } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { custody } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -23,9 +24,13 @@ function parsePositiveInteger(value: string | undefined, fallback: number, maxim
   return Number.isInteger(parsed) && parsed > 0 && parsed <= maximum ? parsed : fallback;
 }
 
-function parseState(params: RawSearchParams): PoliciesUrlState {
+function parseState(params: RawSearchParams, custodyEnabled: boolean): PoliciesUrlState {
   const tabParam = first(params.tab);
-  const tab: PoliciesTab = tabParam === "wallets" || tabParam === "api_keys" ? tabParam : "all";
+  const tab: PoliciesTab = !custodyEnabled
+    ? "api_keys"
+    : tabParam === "wallets" || tabParam === "api_keys"
+      ? tabParam
+      : "all";
   const statusParam = first(params.status);
   const status: PolicyControlInventoryStatus | "" =
     statusParam === "default_allow" ||
@@ -54,14 +59,15 @@ export default async function PoliciesPage({
 }: {
   searchParams?: Promise<RawSearchParams>;
 }) {
-  const [{ userId, orgId }, resolvedSearchParams] = await Promise.all([
+  const [{ userId, orgId }, resolvedSearchParams, custodyEnabled] = await Promise.all([
     auth(),
     searchParams ?? Promise.resolve({}),
+    custody(),
   ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const state = parseState(resolvedSearchParams);
+  const state = parseState(resolvedSearchParams, custodyEnabled);
   const query = new URLSearchParams({
     target: inventoryTarget(state.tab),
     page: String(state.page),
@@ -89,5 +95,12 @@ export default async function PoliciesPage({
     });
   }
 
-  return <PoliciesOverview inventory={inventory} error={error} state={state} />;
+  return (
+    <PoliciesOverview
+      inventory={inventory}
+      error={error}
+      state={state}
+      custodyEnabled={custodyEnabled}
+    />
+  );
 }

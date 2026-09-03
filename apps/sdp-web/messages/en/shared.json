@@ -7,12 +7,6 @@
     "prefix": "By using the app, you agree to the",
     "link": "Solana Foundation Terms of Service"
   },
-  "homeSignedIn": {
-    "loading": "Loading...",
-    "selectOrganization": "Select your organization",
-    "selectOrganizationDescription": "Choose or create an organization to continue.",
-    "loadingDashboard": "Loading your dashboard..."
-  },
   "allowlist": {
     "comingSoon": "Coming soon",
     "description": "Allowlist management will be available in a future update."
@@ -81,7 +75,6 @@
     "locked": "Locked",
     "sandboxOnly": "Only sandbox mode is supported for now.",
     "mainnetSoon": "Mainnet support coming soon.",
-    "createOrganization": "Create organization",
     "manageOrganization": "Manage organization",
     "copyOrganizationId": "Copy organization ID",
     "organizationId": "Organization ID",
@@ -158,8 +151,6 @@
     "signInToContinue": "Sign in to continue",
     "signInDescription": "Access your organization workspace and wallet controls.",
     "signIn": "Sign in",
-    "selectOrganization": "Select an organization",
-    "selectOrganizationDescription": "You need an organization to continue.",
     "counterparty": "Counterparty",
     "transactions": "Transactions",
     "pay": "Pay",

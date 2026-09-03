@@ -8,7 +8,7 @@ import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
 import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provider-display-status";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
-import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
+import { RpcProviderMark } from "@/app/dashboard/integrations/rpc-provider-mark";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";

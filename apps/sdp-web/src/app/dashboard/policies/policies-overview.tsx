@@ -76,6 +76,7 @@ interface PoliciesOverviewProps {
   inventory: PolicyControlInventoryResponse | null;
   error: boolean;
   state: PoliciesUrlState;
+  custodyEnabled?: boolean;
 }
 
 interface PoliciesOverviewSurfaceProps extends PoliciesOverviewProps {
@@ -265,7 +266,7 @@ function RowActions({ item }: { item: PolicyControlInventoryItem }) {
   );
 }
 
-function ConfigureMenu() {
+function ConfigureMenu({ custodyEnabled }: { custodyEnabled: boolean }) {
   const t = useTranslations();
   return (
     <DropdownMenu>
@@ -279,9 +280,11 @@ function ConfigureMenu() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem asChild>
-          <Link href="/dashboard/wallets">{t("DashboardPolicies.walletControls")}</Link>
-        </DropdownMenuItem>
+        {custodyEnabled ? (
+          <DropdownMenuItem asChild>
+            <Link href="/dashboard/wallets">{t("DashboardPolicies.walletControls")}</Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem asChild>
           <Link href="/dashboard/api-keys">{t("DashboardPolicies.apiKeyControls")}</Link>
         </DropdownMenuItem>
@@ -319,10 +322,12 @@ function LoadingRows() {
 }
 
 function EmptyState({
+  custodyEnabled,
   emptyLabelKey,
   filtered,
   onClear,
 }: {
+  custodyEnabled: boolean;
   emptyLabelKey: MessageKey;
   filtered: boolean;
   onClear: () => void;
@@ -338,7 +343,7 @@ function EmptyState({
             {t("DashboardPolicies.clearFilters")}
           </Button>
         ) : (
-          <ConfigureMenu />
+          <ConfigureMenu custodyEnabled={custodyEnabled} />
         )
       }
     />
@@ -346,12 +351,14 @@ function EmptyState({
 }
 
 function InventoryTable({
+  custodyEnabled,
   inventory,
   loading,
   emptyLabelKey,
   filtered,
   onClear,
 }: {
+  custodyEnabled: boolean;
   inventory: PolicyControlInventoryResponse | null;
   loading: boolean;
   emptyLabelKey: MessageKey;
@@ -364,7 +371,12 @@ function InventoryTable({
   if (!loading && controls.length === 0) {
     return (
       <div data-desktop-inventory className="hidden flex-1 lg:block">
-        <EmptyState emptyLabelKey={emptyLabelKey} filtered={filtered} onClear={onClear} />
+        <EmptyState
+          custodyEnabled={custodyEnabled}
+          emptyLabelKey={emptyLabelKey}
+          filtered={filtered}
+          onClear={onClear}
+        />
       </div>
     );
   }
@@ -435,12 +447,14 @@ function InventoryTable({
 }
 
 function MobileInventory({
+  custodyEnabled,
   inventory,
   loading,
   emptyLabelKey,
   filtered,
   onClear,
 }: {
+  custodyEnabled: boolean;
   inventory: PolicyControlInventoryResponse | null;
   loading: boolean;
   emptyLabelKey: MessageKey;
@@ -500,7 +514,12 @@ function MobileInventory({
             </article>
           ))}
       {!loading && controls.length === 0 ? (
-        <EmptyState emptyLabelKey={emptyLabelKey} filtered={filtered} onClear={onClear} />
+        <EmptyState
+          custodyEnabled={custodyEnabled}
+          emptyLabelKey={emptyLabelKey}
+          filtered={filtered}
+          onClear={onClear}
+        />
       ) : null}
     </div>
   );
@@ -510,6 +529,7 @@ export function PoliciesOverviewSurface({
   inventory,
   error,
   state,
+  custodyEnabled = true,
   loading = false,
   searchValue,
   onSearchChange = () => undefined,
@@ -569,7 +589,7 @@ export function PoliciesOverviewSurface({
                 </SelectItem>
               ))}
             </Select>
-            {emptyProject ? null : <ConfigureMenu />}
+            {emptyProject ? null : <ConfigureMenu custodyEnabled={custodyEnabled} />}
           </div>
         </div>
 
@@ -593,6 +613,7 @@ export function PoliciesOverviewSurface({
           ) : (
             <>
               <InventoryTable
+                custodyEnabled={custodyEnabled}
                 inventory={inventory}
                 loading={loading}
                 emptyLabelKey={emptyLabelKey}
@@ -600,6 +621,7 @@ export function PoliciesOverviewSurface({
                 onClear={clearFilters}
               />
               <MobileInventory
+                custodyEnabled={custodyEnabled}
                 inventory={inventory}
                 loading={loading}
                 emptyLabelKey={emptyLabelKey}
@@ -631,9 +653,15 @@ export function PoliciesOverviewSurface({
   );
 }
 
-export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewProps) {
+export function PoliciesOverview({
+  inventory,
+  error,
+  state,
+  custodyEnabled = true,
+}: PoliciesOverviewProps) {
   const router = useRouter();
-  const activeTab = parsePoliciesTab(useDashboardTab());
+  const dashboardTab = useDashboardTab();
+  const activeTab = custodyEnabled ? parsePoliciesTab(dashboardTab) : "api_keys";
   const stateRef = useRef(state);
   const [displayState, setDisplayState] = useState(state);
   const [searchValue, setSearchValue] = useState(state.query);
@@ -673,11 +701,12 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
 
   useEffect(() => {
     for (const tab of POLICIES_TABS) {
+      if (!custodyEnabled && tab !== "api_keys") continue;
       if (tab !== stateRef.current.tab) {
         router.prefetch(buildPoliciesHref(stateRef.current, { tab, page: 1 }));
       }
     }
-  }, [router]);
+  }, [custodyEnabled, router]);
 
   const updateState = useCallback(
     (changes: Partial<PoliciesUrlState>) => {
@@ -703,19 +732,21 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
   // snapshot is always null), so the effect defers to the URL and waits for the
   // store to re-fire with the settled value.
   useEffect(() => {
-    if (activeTab !== parsePoliciesTab(readDashboardTabFromUrl())) {
+    const currentTab = custodyEnabled ? parsePoliciesTab(readDashboardTabFromUrl()) : "api_keys";
+    if (activeTab !== currentTab) {
       return;
     }
     if (activeTab !== stateRef.current.tab) {
       updateState({ tab: activeTab, page: 1 });
     }
-  }, [activeTab, updateState]);
+  }, [activeTab, custodyEnabled, updateState]);
 
   return (
     <PoliciesOverviewSurface
       inventory={inventory}
       error={isPending ? false : error}
       state={displayState}
+      custodyEnabled={custodyEnabled}
       loading={isPending}
       searchValue={searchValue}
       onSearchChange={setSearchValue}

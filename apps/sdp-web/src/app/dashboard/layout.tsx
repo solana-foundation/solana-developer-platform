@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { SelectOrganizationPanel } from "@/components/select-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { getDashboardFlags } from "@/flags/dashboard";
@@ -11,26 +10,13 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-selection";
-import type { OrganizationOnboardingStatus } from "@/lib/onboarding-route-guard";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
-import { createOrgSdpApiClient, getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
-import type { OnboardingStatusResponse } from "./onboarding-status";
+import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 
 async function loadProjects(): Promise<Project[] | null> {
   try {
     return await listSdpProjects();
   } catch {
-    return null;
-  }
-}
-
-async function loadOnboardingStatus(): Promise<OrganizationOnboardingStatus | null> {
-  try {
-    const client = await createOrgSdpApiClient();
-    const response = await client.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
-    return response.setup?.status ?? "not_started";
-  } catch (error) {
-    console.error("Failed to load onboarding status; leaving dashboard routing unchanged", error);
     return null;
   }
 }
@@ -46,7 +32,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
 
   if (!orgId) {
-    return <SelectOrganizationPanel />;
+    redirect("/");
   }
 
   const dashboardAccess = resolveDashboardAccess(orgRole);
@@ -55,11 +41,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  const [loadedProjects, onboardingStatus, cookieStore] = await Promise.all([
-    loadProjects(),
-    flags.organizationOnboarding ? loadOnboardingStatus() : Promise.resolve(null),
-    cookies(),
-  ]);
+  const [loadedProjects, cookieStore] = await Promise.all([loadProjects(), cookies()]);
   const projects = loadedProjects ?? [];
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
   const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId, {
@@ -70,15 +52,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     <DashboardWorkspaceProvider
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
       dashboardAccess={dashboardAccess}
+      flags={flags}
       serverDashboardCacheScope={dashboardCacheScope}
       projects={projects}
       initialSelectedProjectId={projectSelection.selectedProjectId}
       shouldRepairInitialProjectCookie={projectSelection.shouldRepairCookie}
     >
       <NetworkDebugProvider>
-        <DashboardShell flags={flags} onboardingStatus={onboardingStatus}>
-          {children}
-        </DashboardShell>
+        <DashboardShell flags={flags}>{children}</DashboardShell>
       </NetworkDebugProvider>
     </DashboardWorkspaceProvider>
   );

@@ -37,7 +37,7 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
             provider: "helius",
             label: "Helius",
             status: "active",
-            descriptionKey: "DashboardCustody.onboardingRpcHeliusDescription",
+            descriptionKey: "DashboardCustody.integrationRpcHeliusDescription",
           },
           { provider: "alchemy", label: "Alchemy", status: "available" },
         ]}

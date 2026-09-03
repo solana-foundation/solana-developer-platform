@@ -3,13 +3,14 @@ import type { CustodyConfigSummary, PrivateChannelInstanceEnvelope } from "@sdp/
 import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
-import { privateChannels } from "@/flags";
+import { custody, payments, policies, privateChannels } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
+import { isIntegrationFamilyEnabled } from "./integration-feature-gates";
 import { IntegrationsCatalog } from "./integrations-catalog";
 import {
   resolveComplianceIntegrations,
@@ -71,7 +72,14 @@ export default async function IntegrationsPage() {
     throw new Error("Selected project required");
   }
   const organizationId = onboarding.organization.id;
-  const [t, privateChannelsEnabled] = await Promise.all([getTranslations(), privateChannels()]);
+  const [t, custodyEnabled, paymentsEnabled, policiesEnabled, privateChannelsEnabled] =
+    await Promise.all([getTranslations(), custody(), payments(), policies(), privateChannels()]);
+  const integrationFlags = {
+    custody: custodyEnabled,
+    payments: paymentsEnabled,
+    policies: policiesEnabled,
+    privateChannels: privateChannelsEnabled,
+  };
   const [availability, connectedProviders, privateChannelsActive, rpcTenantState] =
     await Promise.all([
       trace.step("fetch_provider_access", () =>
@@ -80,9 +88,11 @@ export default async function IntegrationsPage() {
       // null, not [] — an empty list claims nothing is connected and offers
       // Configure for providers that are already active. Unknown must render as
       // unknown, never as installable.
-      trace.step("fetch_custody_configs", () =>
-        getConnectedCustodyProviders(projectClient.request).catch(() => null)
-      ),
+      custodyEnabled
+        ? trace.step("fetch_custody_configs", () =>
+            getConnectedCustodyProviders(projectClient.request).catch(() => null)
+          )
+        : Promise.resolve([]),
       privateChannelsEnabled
         ? trace.step("fetch_private_channels_instance", () =>
             getPrivateChannelsActive(projectClient)
@@ -101,12 +111,14 @@ export default async function IntegrationsPage() {
   return (
     <IntegrationsCatalog
       custody={
-        connectedProviders === null
-          ? null
-          : resolveCustodyIntegrations({
-              connectedProviders,
-              enabledProviders: availability.enabledCustodyProviders,
-            })
+        !custodyEnabled
+          ? []
+          : connectedProviders === null
+            ? null
+            : resolveCustodyIntegrations({
+                connectedProviders,
+                enabledProviders: availability.enabledCustodyProviders,
+              })
       }
       rpc={resolveRpcIntegrations({
         // The shell only routes here after onboarding, so a missing setting
@@ -116,8 +128,16 @@ export default async function IntegrationsPage() {
         providersWithOwnKey: rpcTenantState.providersWithOwnKey,
         entries: availability.providers.rpc,
       })}
-      ramps={resolveRampIntegrations(availability.providers.ramps)}
-      compliance={resolveComplianceIntegrations(availability.providers.compliance)}
+      ramps={
+        isIntegrationFamilyEnabled("ramps", integrationFlags)
+          ? resolveRampIntegrations(availability.providers.ramps)
+          : []
+      }
+      compliance={
+        isIntegrationFamilyEnabled("compliance", integrationFlags)
+          ? resolveComplianceIntegrations(availability.providers.compliance)
+          : []
+      }
       privacy={resolvePrivacyIntegrations({
         enabled: privateChannelsEnabled,
         active: privateChannelsActive,

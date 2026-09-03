@@ -4,11 +4,9 @@ import { countHeldTokens } from "./home-balance-breakdown";
 /**
  * Which hero the home page owes this organization.
  *
- * `provisioned_empty` exists because onboarding does not merely record a provider
- * choice — completing it provisions a wallet before it finishes. Gating the
- * first-run panel on `wallets.length === 0` therefore never fired for a freshly
- * onboarded organization: it already had one empty wallet, fell through to the
- * populated hero, and rendered $0.00 as the first thing it ever saw.
+ * `provisioned_empty` covers organizations that already have one empty wallet.
+ * Gating the first-run panel on `wallets.length === 0` alone would let that state
+ * fall through to the populated hero and render $0.00 with no next step.
  *
  * `hasPricedValue` separates "the feed answered, and it said zero" from "nothing
  * here has a price feed at all". An organization holding only its own issued

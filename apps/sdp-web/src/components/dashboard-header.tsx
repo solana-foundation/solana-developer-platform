@@ -3,6 +3,10 @@
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import {
+  type IntegrationFeatureFlags,
+  isIntegrationFamilyEnabled,
+} from "@/app/dashboard/integrations/integration-feature-gates";
 import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
@@ -580,7 +584,8 @@ function getIssuanceRoutePageConfig(
 
 function getIntegrationsPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  flags: IntegrationFeatureFlags
 ): DashboardPageConfig | null {
   if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
     return {
@@ -602,12 +607,20 @@ function getIntegrationsPageConfig(
       headerTabs: {
         tabs: [
           { id: "all", label: t("Shared.integrations.filterAllFamilies") },
-          { id: "custody", label: t("Shared.integrations.custodyTitle") },
+          isIntegrationFamilyEnabled("custody", flags)
+            ? { id: "custody", label: t("Shared.integrations.custodyTitle") }
+            : null,
           { id: "rpc", label: t("Shared.integrations.rpcTitle") },
-          { id: "ramps", label: t("Shared.integrations.rampsTitle") },
-          { id: "compliance", label: t("Shared.integrations.complianceTitle") },
-          { id: "privacy", label: t("Shared.integrations.privacyTitle") },
-        ],
+          isIntegrationFamilyEnabled("ramps", flags)
+            ? { id: "ramps", label: t("Shared.integrations.rampsTitle") }
+            : null,
+          isIntegrationFamilyEnabled("compliance", flags)
+            ? { id: "compliance", label: t("Shared.integrations.complianceTitle") }
+            : null,
+          isIntegrationFamilyEnabled("privacy", flags)
+            ? { id: "privacy", label: t("Shared.integrations.privacyTitle") }
+            : null,
+        ].filter((tab): tab is { id: string; label: string } => tab !== null),
         hideOnMobile: false,
       },
       contentWidthClass: "max-w-7xl",
@@ -671,7 +684,10 @@ export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  custodyEnabled = true,
+  paymentsEnabled = true,
+  policiesEnabled = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -705,11 +721,13 @@ export function getDashboardPageConfig(
     return {
       title: t("Shared.dashboardShell.policies"),
       headerTabs: {
-        tabs: [
-          { id: "all", label: t("DashboardPolicies.all") },
-          { id: "wallets", label: t("DashboardPolicies.wallets") },
-          { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
-        ],
+        tabs: custodyEnabled
+          ? [
+              { id: "all", label: t("DashboardPolicies.all") },
+              { id: "wallets", label: t("DashboardPolicies.wallets") },
+              { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
+            ]
+          : [{ id: "api_keys", label: t("DashboardPolicies.apiKeys") }],
         hideOnMobile: false,
       },
       contentWidthClass: "max-w-none",
@@ -797,7 +815,12 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  const integrationsConfig = getIntegrationsPageConfig(pathname, t);
+  const integrationsConfig = getIntegrationsPageConfig(pathname, t, {
+    custody: custodyEnabled,
+    payments: paymentsEnabled,
+    policies: policiesEnabled,
+    privateChannels: privateChannelsEnabled,
+  });
   if (integrationsConfig) {
     return integrationsConfig;
   }

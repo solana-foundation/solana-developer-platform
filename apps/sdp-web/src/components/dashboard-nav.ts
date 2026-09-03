@@ -160,11 +160,14 @@ export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
     canReadApprovals: boolean;
+    custodyEnabled: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
+    issuanceEnabled: boolean;
     marketsEnabled: boolean;
     paymentsEnabled: boolean;
     pendingApprovalCount: number | null;
+    policiesEnabled: boolean;
     privateChannelsEnabled: boolean;
   }
 ): NavSection[] {
@@ -179,21 +182,29 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.home,
           icon: LayoutDashboardIcon,
         },
-        {
-          label: t("Shared.dashboardShell.wallets"),
-          href: DASHBOARD_SIDE_NAV_HREFS.wallets,
-          icon: WalletIcon,
-        },
+        ...(options.custodyEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.wallets"),
+                href: DASHBOARD_SIDE_NAV_HREFS.wallets,
+                icon: WalletIcon,
+              },
+            ]
+          : []),
       ],
     },
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        {
-          label: t("Shared.dashboardShell.issuance"),
-          href: DASHBOARD_SIDE_NAV_HREFS.issuance,
-          icon: CoinsIcon,
-        },
+        ...(options.issuanceEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.issuance"),
+                href: DASHBOARD_SIDE_NAV_HREFS.issuance,
+                icon: CoinsIcon,
+              },
+            ]
+          : []),
         ...(options.paymentsEnabled
           ? [
               {
@@ -230,17 +241,21 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        {
-          label: t("Shared.dashboardShell.policies"),
-          href: DASHBOARD_SIDE_NAV_HREFS.policies,
-          icon: ShieldCheckIcon,
-        },
+        ...(options.policiesEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.policies"),
+                href: DASHBOARD_SIDE_NAV_HREFS.policies,
+                icon: ShieldCheckIcon,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.integrations"),
           href: DASHBOARD_SIDE_NAV_HREFS.integrations,
           icon: BlocksIcon,
         },
-        ...(options.canReadApprovals
+        ...(options.policiesEnabled && options.canReadApprovals
           ? [
               {
                 label: t("Shared.dashboardShell.approvals"),
