@@ -19,6 +19,8 @@ import {
   earnExternalWalletPositionSummaryResponse,
   earnExternalWalletPositionsResponse,
   earnExternalWalletSubmitRequest,
+  earnExternalWalletWithdrawalPreviewRequest,
+  earnExternalWalletWithdrawalPreviewResponse,
   earnExternalWalletWithdrawalResponse,
   earnExternalWalletWithdrawalTransactionRequest,
   earnExternalWalletWithdrawalTransactionResponse,
@@ -299,6 +301,36 @@ function registerEarnExternalWalletPaths(
         content: jsonContent(earnExternalWalletDepositResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/external-wallet/withdrawal-previews",
+    tags: ["Earn"],
+    summary: "Preview an external-wallet exit",
+    operationId: "createEarnExternalWalletWithdrawalPreview",
+    description:
+      "Quotes what redeeming the shares would pay right now, from the vault's live " +
+      "accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` " +
+      "minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency " +
+      "key, and it takes the exit's own gates: a delisted strategy or a provider disabled for " +
+      "new deposits stays quotable. POST because the parameters are a body; 501 when the " +
+      "provider cannot quote exits.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(earnExternalWalletWithdrawalPreviewRequest),
+      },
+    },
+    responses: {
+      200: {
+        description: "Live exit quote",
+        content: jsonContent(earnExternalWalletWithdrawalPreviewResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 

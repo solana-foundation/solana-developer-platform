@@ -917,6 +917,7 @@ All endpoints live under `/v1/earn`. Authenticate with `Authorization: Bearer <S
 | Activity feed | `GET /v1/earn/external-wallet/movements?ownerAddress=…` |
 | Live positions | `GET /v1/earn/external-wallet/positions?ownerAddress=…` |
 | Portfolio totals | `GET /v1/earn/external-wallet/positions/summary` |
+| Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
 | Build a withdrawal | `POST /v1/earn/external-wallet/withdrawal-transactions` |
 | Submit the signed withdrawal | `POST /v1/earn/external-wallet/withdrawals` |
 
@@ -930,6 +931,8 @@ Two fields gate what you may offer:
 
 - **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive. `true` is necessary but not sufficient: the strategy must also be `active`, and your organization entitled to the provider.
 - **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
+
+Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-null means that direction's builder refuses to run without an explicit protection floor (`minSharesOut` on deposits, `minAmountOut` on withdrawals): quote first, then derive the floor from the live figure minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). Null means the floor is optional there.
 
 ## 2. Deposit: build, sign, submit, poll
 
@@ -1050,11 +1053,22 @@ On the Treasury surface (your organization's own custody wallets) the wallet its
 
 Same build-sign-submit shape. The build names the customer's **position** (never a strategy), so exits keep working even when a vault is delisted or its provider is disabled for new deposits.
 
+When the strategy's `withdrawalSlippage` is non-null (or whenever you want a floor), preview first and derive `minAmountOut` from the live quote:
+
 ```ts
+// What would these shares pay right now? Read-only; nothing is built.
+const quote = await sdpFetch("/v1/earn/external-wallet/withdrawal-previews", {
+  method: "POST",
+  headers: sdpHeaders(),
+  body: JSON.stringify({ positionId, shares }),
+});
+// quote: { assetsOut, assetDecimals, blockingIssues } — floor = assetsOut minus
+// your customer's tolerance, quantized to assetDecimals.
+
 const { transaction } = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
   method: "POST",
   headers: sdpHeaders(),
-  body: JSON.stringify({ positionId, shares }), // + feePayer to sponsor it
+  body: JSON.stringify({ positionId, shares, minAmountOut }), // + feePayer to sponsor it
 });
 // customer signs (and your sponsor co-signs, if sponsoring) → submit:
 const { withdrawal } = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
@@ -5899,6 +5913,7 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | `GET` | `/v1/earn/external-wallet/movements/{movementId}` | Get one external-wallet movement |
 | `GET` | `/v1/earn/external-wallet/positions` | List one external wallet's positions |
 | `GET` | `/v1/earn/external-wallet/positions/summary` | Get external-wallet position totals |
+| `POST` | `/v1/earn/external-wallet/withdrawal-previews` | Preview an external-wallet exit |
 | `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
 | `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
 | `GET` | `/v1/earn/strategies` | List yield strategies |

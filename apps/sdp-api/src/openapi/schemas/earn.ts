@@ -6,6 +6,27 @@ import { isoDateTimeSchema, successResponseSchema, z } from "./base";
 // live APY their own UI shows.
 // ---------------------------------------------------------------------------
 
+const earnStrategySlippagePolicySchema = z
+  .object({
+    quoteRequired: z.literal(true).openapi({
+      description: "The live quote endpoint must be called before building this direction.",
+    }),
+    defaultToleranceBps: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          "Suggested starting tolerance in basis points; the customer may choose another " +
+          "accepted value.",
+        example: 50,
+      }),
+  })
+  .openapi({
+    description:
+      "This direction's builder requires a quote-derived protection floor rather than " +
+      "accepting an implicit tolerance.",
+  });
+
 const earnStrategySchema = z
   .object({
     id: z.string().openapi({
@@ -66,6 +87,18 @@ const earnStrategySchema = z
       }),
     status: z.enum(["active", "paused", "deprecated"]).openapi({
       description: "Catalogue lifecycle. Only `active` strategies accept new deposits.",
+    }),
+    depositSlippage: earnStrategySlippagePolicySchema.nullable().openapi({
+      description:
+        "Non-null when this provider's deposit builder refuses to run without an explicit " +
+        "`minSharesOut`: quote the deposit first and derive the floor from the live figure " +
+        "minus a chosen tolerance. Null when the floor is optional.",
+    }),
+    withdrawalSlippage: earnStrategySlippagePolicySchema.nullable().openapi({
+      description:
+        "Non-null when this provider's withdrawal builder refuses to run without an explicit " +
+        "`minAmountOut`: call the withdrawal preview first and derive the floor from " +
+        "`assetsOut`. Null when the floor is optional.",
     }),
     hostCluster: z.enum(["devnet", "mainnet-beta"]).openapi({
       description: "The cluster the INSTRUMENT lives on — a stored fact about the vault.",
@@ -242,6 +275,14 @@ export const earnExternalWalletWithdrawalTransactionRequest = z
       description: "Shares to redeem, decimal string in share units.",
       example: "10",
     }),
+    minAmountOut: earnDecimalAmountSchema.optional().openapi({
+      description:
+        "Exit slippage floor: the minimum deposit-token amount to accept, decimal string in " +
+        "the token's own units. Derive it from the withdrawal preview's `assetsOut` minus a " +
+        "chosen tolerance. Providers whose builder refuses an implicit tolerance (see the " +
+        "strategy's `withdrawalSlippage`) answer its absence with a 400.",
+      example: "24.9",
+    }),
     feePayer: earnFeePayerRequestSchema.optional(),
   })
   .openapi({
@@ -249,6 +290,46 @@ export const earnExternalWalletWithdrawalTransactionRequest = z
       "Build one unsigned exit transaction for an external-wallet position. The position " +
       "carries the vault and both mints, so a delisted vault stays exitable.",
   });
+
+export const earnExternalWalletWithdrawalPreviewRequest = z
+  .object({
+    positionId: z.string().min(1).max(128).openapi({ example: "earn_position_example" }),
+    shares: earnDecimalAmountSchema.openapi({
+      description: "Shares the exit would redeem, decimal string in share units.",
+      example: "10",
+    }),
+  })
+  .openapi({
+    description:
+      "Quote one exit against the vault's live accounting. Read-only: nothing is built and " +
+      "nothing is persisted.",
+  });
+
+export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema(
+  z.object({
+    positionId: z.string().openapi({ example: "earn_position_example" }),
+    assetsOut: earnDecimalAmountSchema.openapi({
+      description:
+        "What redeeming the shares would pay at the live rate, decimal string in the deposit " +
+        "token's units — the figure a truthful `minAmountOut` floor is derived from.",
+      example: "25.02",
+    }),
+    assetDecimals: z.number().int().openapi({
+      description: "The deposit token's decimals — the scale a floor must be quantized to.",
+      example: 6,
+    }),
+    blockingIssues: z
+      .array(
+        z.object({
+          code: z.string().openapi({ example: "SHARE_LOCKED" }),
+          message: z.string(),
+        })
+      )
+      .openapi({
+        description: "Conditions the provider reports would block this exit; empty when none.",
+      }),
+  })
+);
 
 export const earnExternalWalletSubmitRequest = z
   .object({
@@ -333,6 +414,9 @@ const earnExternalWalletWithdrawalTransactionSchema = earnExternalWalletTransact
   .extend({
     positionId: z.string().openapi({ example: "earn_position_example" }),
     shares: earnDecimalAmountSchema,
+    minAmountOut: earnDecimalAmountSchema.nullable().openapi({
+      description: "The floor encoded in the transaction, or null when the request carried none.",
+    }),
   })
   .openapi({ description: "The built exit transaction plus the position it redeems from." });
 
@@ -488,6 +572,9 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
   }),
   label: z.string().openapi({ example: "Allez USDC" }),
+  ownerAddresses: z.array(earnOwnerAddressSchema).openapi({
+    description: "The exact project-scoped owners contributing to this strategy total.",
+  }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
   totalsByToken: z.array(earnExternalWalletTokenTotalSchema),

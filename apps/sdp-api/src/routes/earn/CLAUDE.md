@@ -793,6 +793,12 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   fingerprint includes the build id, so a key reused against a REBUILT
   transaction conflicts rather than silently replaying (and a rebuilt
   transaction is also how a different `feePayer` conflicts).
+- `POST /external-wallet/withdrawal-previews` — the exit QUOTE
+  (`supportsVaultWithdrawQuote`, 501 without it): what redeeming the shares
+  would pay from the vault's live accounting, from which the partner derives
+  a truthful `minAmountOut`. Read-only, no idempotency key, and it takes the
+  exit's own gates only (position 404-scoping; no surfacing, no entitlement,
+  no admission) — the external mirror of `POST /vault-withdrawal-previews`.
 - `POST /external-wallet/withdrawal-transactions` — the exit build, ADR 0002
   exit safety in its strongest form: 404-scoping (org, environment, EXACT
   project, owner shape — a custody position 404s here) and capability (501)
@@ -800,7 +806,10 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   exit-safety describe in `../earn.external-wallet.test.ts`. Takes the same
   optional `feePayer` as the deposit build (an exit consolidation can create
   an account, so the partner funds that rent too); `rentRefundTo` stays the
-  position's RECORDED funder, never the fee mode of the day.
+  position's RECORDED funder, never the fee mode of the day. `minAmountOut`
+  (optional; providers with a `withdrawalSlippage` policy refuse its absence)
+  is persisted through the build table's shared `min_shares_out` column —
+  direction disambiguates the unit.
 - `POST /external-wallet/withdrawals` — the submit, mirrored.
 - **NO policyGate and no `wallets:read`, deliberately** — this is not the
   vault-deposit cautionary tale repeating. Wallet policy governs the org's own

@@ -2263,6 +2263,30 @@
           }
         },
         {
+          "name": "Preview an external-wallet exit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-previews",
+            "description": "Quotes what redeeming the shares would pay right now, from the vault's live accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency key, and it takes the exit's own gates: a delisted strategy or a provider disabled for new deposits stays quotable. POST because the parameters are a body; 501 when the provider cannot quote exits.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Build an unsigned external-wallet exit transaction",
           "request": {
             "method": "POST",
@@ -2277,7 +2301,7 @@
             "description": "Builds one unsigned exit transaction for an external-wallet position. Takes no surfacing, entitlement, availability, or catalogue gate (ADR 0002 exit safety), so the exit works while the provider is disabled for new deposits.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\"\n}",
+              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\",\n  \"minAmountOut\": \"24.9\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
