@@ -565,8 +565,10 @@ export function useCounterpartyRequirements(
 
   // Every status the provider can return is handled: "collect" → needsCollection,
   // "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
+  // A fetch error only blocks while no usable answer exists — a failed
+  // post-advance refresh must not strand a wizard whose advance succeeded.
   let blockReason: string | null = null;
-  if (error instanceof Error) {
+  if (error instanceof Error && requirementsData === undefined) {
     blockReason = error.message;
   } else if (data?.status === "unsupported") {
     blockReason = data.reason;

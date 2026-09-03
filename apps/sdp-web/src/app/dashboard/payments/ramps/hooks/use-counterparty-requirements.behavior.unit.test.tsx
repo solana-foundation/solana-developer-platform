@@ -65,6 +65,29 @@ async function release(method: string, data: CounterpartyRequirements): Promise<
   return request;
 }
 
+/**
+ * Releases the oldest held request matching the method with an error response.
+ *
+ * @param method - HTTP method of the expected request.
+ * @param message - Error message the API responds with.
+ * @returns The released request.
+ */
+async function releaseFailure(method: string, message: string): Promise<HeldRequest> {
+  const index = held.findIndex((request) => request.method === method);
+  expect(index).toBeGreaterThanOrEqual(0);
+  const request = held[index];
+  held.splice(index, 1);
+  await act(async () => {
+    request.respondRaw(
+      new Response(JSON.stringify({ error: { message } }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+  });
+  return request;
+}
+
 const PAYOUT_TREE: PayoutRequirementTree = {
   countryRails: {
     US: [{ value: "ACH", label: "ACH" }],
@@ -221,6 +244,26 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     expect(result.current.selectedProviderAccountId).toBeNull();
     expect(result.current.isComplete).toBe(false);
     expect(result.current.collectedData).toEqual({ destinationCountry: "MX" });
+  });
+
+  it("a failed post-advance refresh never blocks a usable collect answer", async () => {
+    const { result } = await renderResolvedOfframp();
+
+    let submitPromise: Promise<CounterpartyRequirements> | null = null;
+    act(() => {
+      submitPromise = result.current.submitRequirements({
+        cryptoToken: "USDC",
+        destinationWallet: "",
+        fiatCurrency: "USD",
+      });
+    });
+    await release("POST", COLLECT_ACCOUNT);
+    await submitPromise;
+    await releaseFailure("GET", "requirements refresh failed");
+
+    expect(result.current.blockReason).toBeNull();
+    expect(result.current.isResolved).toBe(true);
+    expect(result.current.fields.map((field) => field.key)).toEqual(["destinationCountry"]);
   });
 
   it("a successful offramp advance clears and refetches the requirements answer", async () => {
