@@ -46,6 +46,9 @@ export interface DvpTradeRow {
   /** Each leg's mint decimals, or null when unknown. Never guessed. */
   decimalsA: number | null;
   decimalsB: number | null;
+  /** Each leg's token symbol from mint metadata, or null when it carries none. */
+  symbolA: string | null;
+  symbolB: string | null;
 
   amountA: string;
   amountB: string;

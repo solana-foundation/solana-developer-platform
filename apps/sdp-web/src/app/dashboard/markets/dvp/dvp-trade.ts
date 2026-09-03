@@ -54,6 +54,8 @@ export interface DvpLegFunding {
 export interface DvpTradeLeg {
   /** The mint's decimals, or null when unknown. Never guessed. */
   decimals: number | null;
+  /** The mint's symbol, or null when it carries no metadata. */
+  symbol: string | null;
   party: string;
   mint: string;
   tokenProgram: string;

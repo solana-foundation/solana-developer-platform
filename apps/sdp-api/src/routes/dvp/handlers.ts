@@ -44,6 +44,7 @@ interface LegInput {
   settlementDestination: string;
   observedAmount: string | null;
   decimals: number | null;
+  symbol: string | null;
   frozen: boolean | null;
 }
 
@@ -90,6 +91,8 @@ function legResponse(leg: LegInput) {
      * scale misstates an amount by orders of magnitude.
      */
     decimals: leg.decimals,
+    /** The mint's symbol, or null when it carries no metadata. Never invented. */
+    symbol: leg.symbol,
     /** Pay this address to fund the leg. */
     escrow: leg.escrow,
     settlementDestination: leg.settlementDestination,
@@ -121,6 +124,7 @@ function toTradeResponse(row: DvpTradeRow) {
         settlementDestination: row.userASettlementDestination,
         observedAmount: row.escrowAAmount,
         decimals: row.decimalsA,
+        symbol: row.symbolA,
         frozen: row.escrowAFrozen,
       }),
       b: legResponse({
@@ -132,6 +136,7 @@ function toTradeResponse(row: DvpTradeRow) {
         settlementDestination: row.userBSettlementDestination,
         observedAmount: row.escrowBAmount,
         decimals: row.decimalsB,
+        symbol: row.symbolB,
         frozen: row.escrowBFrozen,
       }),
     },

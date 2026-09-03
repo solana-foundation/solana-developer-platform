@@ -256,7 +256,7 @@
       "expiry": "Expires {when}",
       "expired": "Expired {when}",
       "settlementAuthority": "Settlement authority",
-      "settlementAuthorityHint": "The only key that can settle or cancel this trade. It is part of the trade's on-chain address and cannot be changed.",
+      "settlementAuthorityHint": "A wallet this project owns, created on its first trade. It holds the only key that can settle or cancel, and it pays the network fee and the account rent for doing so, so it needs a small SOL balance.",
       "onChainAddress": "On-chain trade",
       "moreTrades": "Showing the {count} most recent trades.",
       "status": {
@@ -357,7 +357,8 @@
       "amountExceedsBalance": "More than this wallet holds today. The trade will still be created; funding your leg is what would fail.",
       "fieldRefCount": "{used} of {total} bytes",
       "fieldRefTooLong": "Too long by {over} bytes. Accents and emoji cost more than one byte each.",
-      "deliveredLabel": "Delivered in full"
+      "deliveredLabel": "Delivered in full",
+      "onChainAddressHint": "The trade itself, as an account on Solana. It holds the terms and both escrows, and closes when the trade does. A counterparty can look it up to check the trade is real before paying anything."
     }
   },
   "DashboardEarn": {

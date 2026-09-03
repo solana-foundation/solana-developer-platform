@@ -112,12 +112,20 @@ function LegCard({
       </div>
 
       {/* One number at full weight; the target is context beneath it. */}
-      <p className="mt-3 font-semibold text-2xl text-primary tabular-nums">
-        {leg.funding
-          ? formatLegAmount(leg.funding.observedAmount, leg.decimals)
-          : closed
-            ? formatLegAmount(leg.amount, leg.decimals)
-            : t("DashboardMarkets.dvp.notObserved")}
+      <p className="mt-3 flex items-baseline gap-1.5 font-semibold text-2xl text-primary">
+        <span className="tabular-nums">
+          {leg.funding
+            ? formatLegAmount(leg.funding.observedAmount, leg.decimals)
+            : closed
+              ? formatLegAmount(leg.amount, leg.decimals)
+              : t("DashboardMarkets.dvp.notObserved")}
+        </span>
+        {/* A number with no unit is not an amount, and this screen shows two
+            different tokens side by side. Falls back to nothing rather than the
+            mint address, which would read as a second, longer number. */}
+        {leg.symbol ? (
+          <span className="font-medium text-base text-secondary">{leg.symbol}</span>
+        ) : null}
       </p>
       <p className="mt-0.5 text-tertiary text-xs">
         {closed
@@ -221,6 +229,11 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
             {t("DashboardMarkets.dvp.observedHint")}
           </p>
           <dl className="mt-4 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-2">
+            {/* Both of these are accounts SDP created, and neither is one a
+                reader has seen before. An address with a bare label is not an
+                explanation — the settlement authority in particular is minted
+                silently on a project's first trade, holds the only key that can
+                close one, and has to hold SOL to do it. */}
             <div>
               <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.onChainAddress")}</dt>
               <dd className="mt-0.5">
@@ -229,6 +242,9 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
                   label={t("DashboardMarkets.dvp.onChainAddress")}
                 />
               </dd>
+              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+                {t("DashboardMarkets.dvp.onChainAddressHint")}
+              </p>
             </div>
             <div>
               <dt className="text-tertiary text-xs">
@@ -240,6 +256,9 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
                   label={t("DashboardMarkets.dvp.settlementAuthority")}
                 />
               </dd>
+              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+                {t("DashboardMarkets.dvp.settlementAuthorityHint")}
+              </p>
             </div>
           </dl>
         </section>

@@ -50,7 +50,8 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import { dvpCreateFingerprint } from "./fingerprint";
-import { readMintDecimals, validateDvpMints } from "./mints";
+import { inspectDvpMint } from "./inspect-mint";
+import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
@@ -195,9 +196,9 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // a person entered. The mints were just read and validated above, so this
   // costs two cached reads rather than a round trip per view — and a mint's
   // decimals cannot change, which is what makes storing them safe at all.
-  const [decimalsA, decimalsB] = await Promise.all([
-    readMintDecimals(rpc, mintA),
-    readMintDecimals(rpc, mintB),
+  const [inspectedA, inspectedB] = await Promise.all([
+    inspectDvpMint(rpc, mintA),
+    inspectDvpMint(rpc, mintB),
   ]);
 
   // Only now, after the payload is known to be sound, do we touch the custody
@@ -318,8 +319,10 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     nonce: nonce.toString(),
     tokenProgramA: input.tokenProgramA,
     tokenProgramB: input.tokenProgramB,
-    decimalsA,
-    decimalsB,
+    decimalsA: inspectedA?.decimals ?? null,
+    decimalsB: inspectedB?.decimals ?? null,
+    symbolA: inspectedA?.symbol ?? null,
+    symbolB: inspectedB?.symbol ?? null,
     amountA: input.amountA.toString(),
     amountB: input.amountB.toString(),
     expiryTimestamp: input.expiryTimestamp.toString(),

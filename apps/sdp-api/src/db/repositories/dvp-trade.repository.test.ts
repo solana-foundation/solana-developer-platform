@@ -35,6 +35,8 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     decimalsA: 6,
     decimalsB: 6,
+    symbolA: "ATD",
+    symbolB: "USDC",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",

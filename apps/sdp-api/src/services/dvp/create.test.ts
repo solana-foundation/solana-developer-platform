@@ -33,14 +33,15 @@ const sendTransaction = vi.hoisted(() => vi.fn());
 // mints.test.ts; here it is stubbed so these tests stay about broadcast
 // ordering. The last case below still proves create is wired to it.
 const validateDvpMints = vi.hoisted(() => vi.fn());
-const readMintDecimals = vi.hoisted(() => vi.fn());
+const inspectDvpMint = vi.hoisted(() => vi.fn());
 // The settlement wallet is a per-project custody wallet provisioned on first
 // use. Its own behaviour is covered in settlement-wallet.test.ts; here it is
 // stubbed so these tests stay about broadcast ordering.
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
-vi.mock("./mints", () => ({ validateDvpMints, readMintDecimals }));
+vi.mock("./mints", () => ({ validateDvpMints }));
+vi.mock("./inspect-mint", () => ({ inspectDvpMint }));
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
@@ -103,8 +104,9 @@ describe("createDvpTrade", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     validateDvpMints.mockResolvedValue([]);
-    // Carried onto the row so later surfaces can show human amounts.
-    readMintDecimals.mockResolvedValue(6);
+    // Carried onto the row so later surfaces can show the trade in the units
+    // somebody typed, with the token named.
+    inspectDvpMint.mockResolvedValue({ decimals: 6, symbol: "ATD" });
     getOrCreateDvpSettlementWallet.mockResolvedValue({
       custodyWalletId: "cwlt_settlement",
       address: SETTLEMENT_AUTHORITY,
