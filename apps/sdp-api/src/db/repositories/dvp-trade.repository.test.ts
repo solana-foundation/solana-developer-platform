@@ -47,6 +47,7 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,
+    createLastValidBlockHeight: null,
     ...overrides,
   };
 }

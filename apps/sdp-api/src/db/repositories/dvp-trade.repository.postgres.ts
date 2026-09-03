@@ -1,6 +1,7 @@
 import type { AppDb } from "@/db";
 import type {
   DvpTradeInsert,
+  DvpTradeObservationUpdate,
   DvpTradeRepository,
   DvpTradeRow,
   DvpTradeScope,
@@ -58,6 +59,11 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     idempotencyKey: (row.idempotency_key as string | null) ?? null,
     idempotencyFingerprint: (row.idempotency_fingerprint as string | null) ?? null,
     createSignature: (row.create_signature as string | null) ?? null,
+    createLastValidBlockHeight: (row.create_last_valid_block_height as string | null) ?? null,
+    escrowAAmount: (row.escrow_a_amount as string | null) ?? null,
+    escrowBAmount: (row.escrow_b_amount as string | null) ?? null,
+    escrowAFrozen: (row.escrow_a_frozen as boolean | null) ?? null,
+    escrowBFrozen: (row.escrow_b_frozen as boolean | null) ?? null,
     createdAt: assertString(row.created_at, "created_at"),
     updatedAt: assertString(row.updated_at, "updated_at"),
   };
@@ -69,7 +75,10 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
-         status, observed_at, idempotency_key, idempotency_fingerprint, create_signature, created_at, updated_at`;
+         status, observed_at, idempotency_key, idempotency_fingerprint,
+         create_signature, create_last_valid_block_height,
+         escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
+         created_at, updated_at`;
 
 /**
  * The wallet allowlist clause, as SQL plus its bindings.
@@ -105,14 +114,16 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
               escrow_a, escrow_b, sdp_side, sdp_wallet_id,
-              idempotency_key, idempotency_fingerprint, create_signature
+              idempotency_key, idempotency_fingerprint,
+              create_signature, create_last_valid_block_height
             ) VALUES (
               ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?
+              ?, ?, ?, ?,
+              ?, ?, ?, ?
             )
             RETURNING ${SELECT_COLUMNS}`
         )
@@ -142,7 +153,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           row.sdpWalletId,
           row.idempotencyKey,
           row.idempotencyFingerprint,
-          row.createSignature
+          row.createSignature,
+          row.createLastValidBlockHeight
         )
         .first<Record<string, unknown>>();
       if (!inserted) {
@@ -163,6 +175,53 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
             RETURNING ${SELECT_COLUMNS}`
         )
         .bind(status, id)
+        .first<Record<string, unknown>>();
+      return row ? mapDvpTradeRow(row) : null;
+    },
+
+    async listOpenForReconciliation(limit: number) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
+        throw new Error("listOpenForReconciliation limit must be an integer from 1 to 256");
+      }
+      // Stalest first, never-observed before that, so a busy cluster cannot
+      // starve the trades nothing is known about.
+      const result = await db
+        .prepare(
+          `SELECT ${SELECT_COLUMNS}
+             FROM dvp_trades
+            WHERE status IN ('creating', 'created', 'partially_funded', 'funded')
+            ORDER BY observed_at ASC NULLS FIRST, created_at ASC, id ASC
+            LIMIT ?`
+        )
+        .bind(limit)
+        .all<Record<string, unknown>>();
+      return result.results.map((row) => mapDvpTradeRow(row));
+    },
+
+    async recordObservation(input: DvpTradeObservationUpdate) {
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET status = ?,
+                  escrow_a_amount = ?,
+                  escrow_b_amount = ?,
+                  escrow_a_frozen = ?,
+                  escrow_b_frozen = ?,
+                  observed_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ? AND status = ?
+            RETURNING ${SELECT_COLUMNS}`
+        )
+        .bind(
+          input.status,
+          input.escrowAAmount,
+          input.escrowBAmount,
+          input.escrowAFrozen,
+          input.escrowBFrozen,
+          input.observedAt,
+          input.id,
+          input.expectedStatus
+        )
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },

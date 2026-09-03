@@ -29,8 +29,13 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
+// The mint pre-flight is verified separately against real devnet mints in
+// mints.test.ts; here it is stubbed so these tests stay about broadcast
+// ordering. The last case below still proves create is wired to it.
+const validateDvpMints = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
+vi.mock("./mints", () => ({ validateDvpMints }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -91,6 +96,7 @@ describe("createDvpTrade", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    validateDvpMints.mockResolvedValue([]);
     originalSettlementAuthority = env.DVP_SETTLEMENT_AUTHORITY;
     env.DVP_SETTLEMENT_AUTHORITY = SETTLEMENT_AUTHORITY;
 
@@ -213,6 +219,21 @@ describe("createDvpTrade", () => {
     const rows = await rowsInDb();
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("creating");
+  });
+
+  // The pre-flight has to run BEFORE anything is signed or written. A mint the
+  // program refuses would otherwise cost a signature and leave a create_failed
+  // row behind for a request that could have been a plain 400.
+  it("refuses a mint the program would reject, before signing or writing", async () => {
+    validateDvpMints.mockResolvedValue([
+      "mintA carries the ScaledUiAmountConfig extension, which DvP settlement refuses",
+    ]);
+
+    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/ScaledUiAmountConfig/);
+
+    expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+    await expect(rowsInDb()).resolves.toEqual([]);
   });
 
   // A retry after an ambiguous broadcast must return the ORIGINAL trade. Create

@@ -10,6 +10,7 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
+import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
 import {
   isAssetProfilesEnabled,
   isEarnEnabled,
@@ -304,6 +305,20 @@ export function startCron(deps: CronDeps): CronHandle | null {
     schedule(EARN_VAULT_MOVEMENTS_CRON, () => {
       if (stopping) return;
       runEarnVaultMovementsReconciliation({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  // The DvP job checks the flag itself and returns early, so it is registered
+  // unconditionally: an open trade holds a counterparty's money in escrow, and
+  // must keep being observed even if the flag is turned off during an incident.
+  tasks.push(
+    schedule(DVP_TRADES_CRON, () => {
+      if (stopping) return;
+      runDvpTradeReconciliation({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,

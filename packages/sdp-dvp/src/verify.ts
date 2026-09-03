@@ -169,7 +169,35 @@ export async function verifySwapDvp<TAddress extends string = string>(
   address: Address<TAddress>,
   config?: FetchAccountConfig
 ): Promise<Account<SwapDvp, TAddress>> {
-  const account = await fetchSwapDvpChecked(rpc, address, config);
+  return verifySwapDvpAccount(await fetchEncodedAccount(rpc, address, config));
+}
+
+/**
+ * The same verification as {@link verifySwapDvp}, over an account the caller
+ * has ALREADY fetched.
+ *
+ * Split out so a caller reading several accounts can do it in one request:
+ * fetching the trade separately from its escrows reads them at different slots,
+ * which is how you observe a half-settled trade that never existed. Callers
+ * that only want one account should keep using `verifySwapDvp`.
+ *
+ * Throws the same `SwapDvpVerificationError`, including for an account that
+ * does not exist, so a single catch covers every "this is not a trade" case.
+ */
+export async function verifySwapDvpAccount<TAddress extends string = string>(
+  encodedAccount: MaybeEncodedAccount<TAddress>
+): Promise<Account<SwapDvp, TAddress>> {
+  if (!encodedAccount.exists) {
+    // Absence is the ordinary end of a trade's life: settle and cancel both
+    // close the account. Reporting it as the same kind of failure as bad bytes
+    // lets one catch handle every "there is no trade here" case, and keeps a
+    // transport error the only thing that escapes.
+    throw new SwapDvpVerificationError(
+      `Account ${encodedAccount.address} does not exist; there is no SwapDvp at that address.`
+    );
+  }
+  const account = decodeSwapDvpChecked(encodedAccount);
+  const address = account.address;
   const { data } = account;
   const [expected] = await findSwapDvpPda({
     settlementAuthority: data.settlementAuthority,
