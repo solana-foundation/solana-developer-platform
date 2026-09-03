@@ -51,6 +51,45 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
+  it("parses an agreement status-change webhook with the customer reference", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "bvnk:customers:agreements:status-change",
+        data: {
+          customerId: "customer_1",
+          agreementId: "agreement_1",
+          status: "ACCEPTED",
+          respondedAt: "2026-09-02T00:00:00.000Z",
+        },
+      })
+    ).toEqual({
+      kind: "bvnk:customers:agreements:status-change",
+      customerReference: "customer_1",
+      agreementId: "agreement_1",
+      agreementStatus: "ACCEPTED",
+      respondedAt: "2026-09-02T00:00:00.000Z",
+    });
+  });
+
+  it.each(["customerId", "agreementId"])("rejects an agreement event missing %s", (field) => {
+    const processor = new BvnkWebhookProcessor();
+    const data = {
+      customerId: "customer_1",
+      agreementId: "agreement_1",
+      status: "ACCEPTED",
+    };
+    delete data[field as keyof typeof data];
+
+    expect(() =>
+      processor.parse({
+        event: "bvnk:customers:agreements:status-change",
+        data,
+      })
+    ).toThrow(/missing (customerId|agreementId)/);
+  });
+
   it("parses a channel transaction SDP did not create without throwing", () => {
     const processor = new BvnkWebhookProcessor();
 

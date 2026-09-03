@@ -32,6 +32,32 @@ function resolveOrcaWasm() {
   return path.join(path.dirname(orca), "orca_whirlpools_core_js_bindings_bg.wasm");
 }
 
+/**
+ * `@solana-program/token-2022`'s confidential-transfer helpers hardcode
+ * `import ... from "@solana/zk-sdk/bundler"` — a wasm-bindgen build meant for
+ * bundlers with a native `.wasm` asset loader (webpack, Vite), which esbuild
+ * doesn't have: it fails with "No loader is configured for '.wasm' files"
+ * rather than producing a broken runtime.
+ *
+ * `@solana/zk-sdk` also ships a `/node` build that is functionally identical
+ * but loads its wasm the same way Orca's does above — `readFileSync` at
+ * module scope — so this plugin redirects the `/bundler` import to `/node`
+ * for every entry point that reaches it, and the wasm is then copied beside
+ * the bundle like Orca's.
+ */
+function zkSdkNodeWasmPlugin(resolvedEntries) {
+  return {
+    name: "zk-sdk-node-wasm",
+    setup(build) {
+      build.onResolve({ filter: /^@solana\/zk-sdk\/bundler$/ }, (args) => {
+        const resolved = createRequire(args.importer).resolve("@solana/zk-sdk/node");
+        resolvedEntries.add(resolved);
+        return { path: resolved };
+      });
+    },
+  };
+}
+
 // CJS interop banner for ESM output: pg and other native-backed deps still
 // reach for require/__filename/__dirname even when bundled as ESM.
 const banner =
@@ -53,6 +79,8 @@ const entryPoints = {
   configure: "scripts/configure.ts",
 };
 
+const zkSdkNodeEntries = new Set();
+
 await esbuild.build({
   entryPoints,
   bundle: true,
@@ -62,6 +90,7 @@ await esbuild.build({
   outdir: "dist",
   external: ["pg-native", "@sentry/profiling-node"],
   banner: { js: banner },
+  plugins: [zkSdkNodeWasmPlugin(zkSdkNodeEntries)],
 });
 
 // The workspace override for bigint-buffer is pure JavaScript and has no native
@@ -89,3 +118,15 @@ if (!existsSync(wasmSource)) {
   );
 }
 copyFileSync(wasmSource, path.join("dist", path.basename(wasmSource)));
+
+for (const zkSdkNodeEntry of zkSdkNodeEntries) {
+  const zkSdkWasmSource = path.join(path.dirname(zkSdkNodeEntry), "index_bg.wasm");
+  if (!existsSync(zkSdkWasmSource)) {
+    throw new Error(
+      `Expected the zk-sdk wasm binary at ${zkSdkWasmSource}. token-2022's confidential-transfer ` +
+        "helpers load it at module scope, so a missing file here means the built image dies on " +
+        "startup. Check whether @solana/zk-sdk moved or renamed its /node build's wasm output."
+    );
+  }
+  copyFileSync(zkSdkWasmSource, path.join("dist", path.basename(zkSdkWasmSource)));
+}

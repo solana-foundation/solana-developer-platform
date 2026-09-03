@@ -1,26 +1,27 @@
 // @vitest-environment jsdom
 
 import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "./earn-idempotency-key-store";
+import { VAULT_QUOTE_DEBOUNCE_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
   createEarnVaultWithdrawal: vi.fn(),
   fetchEarnVaultWithdrawalsByRequestId: vi.fn(),
   fetchEarnVaultWithdrawalPreview: vi.fn(),
-  useEarnVaultWithdrawalOutcomeToast: vi.fn(),
+  useEarnVaultWithdrawalOutcome: vi.fn(),
 }));
 
 vi.mock("./earn-program-data", () => ({
   createEarnVaultWithdrawal: mocks.createEarnVaultWithdrawal,
   fetchEarnVaultWithdrawalsByRequestId: mocks.fetchEarnVaultWithdrawalsByRequestId,
   fetchEarnVaultWithdrawalPreview: mocks.fetchEarnVaultWithdrawalPreview,
-  useEarnVaultWithdrawalOutcomeToast: mocks.useEarnVaultWithdrawalOutcomeToast,
+  useEarnVaultWithdrawalOutcome: mocks.useEarnVaultWithdrawalOutcome,
 }));
 
 const position: EarnVaultPosition = {
@@ -91,8 +92,8 @@ describe("EarnVaultWithdrawModal", () => {
 
     await user.click(screen.getByRole("button", { name: "Max" }));
 
-    expect((screen.getByLabelText("Shares to redeem") as HTMLInputElement).value).toBe("6");
-    expect(screen.getByText(/6 shares available to withdraw of 10 total/)).toBeTruthy();
+    expect((screen.getByLabelText("Shares") as HTMLInputElement).value).toBe("6");
+    expect(screen.getByText(/6 withdrawable of 10 total/)).toBeTruthy();
   });
 
   it("disables Max when the withdrawable balance is unavailable", () => {
@@ -122,13 +123,12 @@ describe("EarnVaultWithdrawModal", () => {
     });
     const { onWithdrawn } = renderModal();
 
-    await user.type(screen.getByLabelText("Shares to redeem"), "6");
+    await user.type(screen.getByLabelText("Shares"), "6");
     await user.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
 
     expect(await screen.findByText("Withdrawal queued")).toBeTruthy();
-    expect(
-      screen.getByText(/signed and recorded, but broadcast has not been confirmed/)
-    ).toBeTruthy();
+    expect(screen.getByText(/Signed and recorded/)).toBeTruthy();
+    expect(screen.getByText("Queued")).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
     expect(onWithdrawn).toHaveBeenCalledWith(recorded);
   });
@@ -148,15 +148,29 @@ describe("exit slippage floors (quote-derived)", () => {
     });
   }
 
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function advancePastQuoteDebounce() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VAULT_QUOTE_DEBOUNCE_MS);
+    });
+  }
+
   async function enterVedaShares(shares = "5") {
-    const user = userEvent.setup();
-    await screen.findByRole("dialog");
-    await user.type(screen.getByLabelText("Shares to redeem"), shares);
+    screen.getByRole("dialog");
+    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: shares } });
+    await advancePastQuoteDebounce();
     // The floor waits on the debounced live quote; the summary row appearing is
     // the signal that confirm is armed with a quote-derived floor.
-    await screen.findByText("Minimum amount received", undefined, { timeout: 3000 });
-    await user.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
-    return user;
+    expect(screen.getByText("Minimum received")).toBeTruthy();
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
   }
 
   it("derives the exit floor from the LIVE quote and sends it with the withdrawal", async () => {
@@ -185,13 +199,11 @@ describe("exit slippage floors (quote-derived)", () => {
   it("disables the exit while the quote is unavailable, never guessing a floor", async () => {
     mocks.fetchEarnVaultWithdrawalPreview.mockResolvedValue({ kind: "unavailable" });
     renderModal(vi.fn(), vedaPosition);
-    const user = userEvent.setup();
-    await screen.findByRole("dialog");
-    await user.type(screen.getByLabelText("Shares to redeem"), "5");
+    screen.getByRole("dialog");
+    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "5" } });
+    await advancePastQuoteDebounce();
 
-    expect(
-      await screen.findByText(/live payout quote is unavailable/, undefined, { timeout: 3000 })
-    ).toBeTruthy();
+    expect(screen.getByText(/live payout quote is unavailable/)).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "Confirm withdrawal" }) as HTMLButtonElement).disabled
     ).toBe(true);
@@ -233,10 +245,10 @@ describe("exit slippage floors (quote-derived)", () => {
       data: { kind: "submitted", withdrawal: withdrawal("submitted") },
     });
     renderModal();
-    const user = userEvent.setup();
-    await screen.findByRole("dialog");
-    await user.type(screen.getByLabelText("Shares to redeem"), "5");
-    await user.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    screen.getByRole("dialog");
+    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "5" } });
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
 
     await screen.findByText("Withdrawal submitted");
     expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();

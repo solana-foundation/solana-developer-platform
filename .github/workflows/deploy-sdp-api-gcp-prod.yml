@@ -76,12 +76,14 @@ jobs:
           ./scripts/notify-slack.sh
 
   smoke:
-    name: Gate on dev smoke
+    name: Gate on stage smoke
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.event_name != 'workflow_dispatch' &&
       inputs.image_sha == ''
     uses: ./.github/workflows/sdp-dev-smoke.yml
+    with:
+      target: stage
     permissions:
       contents: read
       id-token: write

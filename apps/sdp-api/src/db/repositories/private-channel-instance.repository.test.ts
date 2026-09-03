@@ -104,6 +104,32 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     expect(active).toBeNull();
   });
 
+  it("updateActive cannot update an instance outside its project scope", async () => {
+    const created = await repo.createActive({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      ...SANDBOX_DEFAULTS,
+    });
+    if (!created) throw new Error("createActive returned null");
+
+    const updated = await repo.updateActive({
+      id: created.id,
+      organizationId: TEST_ORG.id,
+      projectId: OTHER_PROJECT_ID,
+      ...SANDBOX_DEFAULTS,
+      gatewayUrl: "http://34.71.147.163:9900",
+    });
+
+    expect(updated).toBeNull();
+    expect(
+      await repo.getActiveByProject({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).toMatchObject({ gateway_url: SANDBOX_DEFAULTS.gatewayUrl });
+  });
+
   it("findByProjectAndGateway returns inactive rows too", async () => {
     await repo.createActive({
       organizationId: TEST_ORG.id,

@@ -1,3 +1,4 @@
+import { SdpVedaError } from "@sdp/veda";
 import type { Blockhash } from "@solana/kit";
 import {
   generateKeyPair,
@@ -300,6 +301,17 @@ describe("buildExternalWalletDepositTransaction", () => {
     await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toThrowError(
       /direct vault deposits/
     );
+  });
+
+  it("maps shared provider refusals to a caller-facing bad request", async () => {
+    buildVaultDeposit.mockRejectedValue(
+      new SdpVedaError("INVALID_AMOUNT", "Veda deposits require minSharesOut")
+    );
+
+    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Veda deposits require minSharesOut",
+    });
   });
 
   it("refuses a failed simulation before persisting anything", async () => {
@@ -705,12 +717,44 @@ describe("external-wallet withdrawals", () => {
     expect(result.movement.custody_wallet_id).toBeNull();
   });
 
+  it("carries the caller's withdrawal floor through the shared provider plan", async () => {
+    const positionId = await seedExternalWalletPosition();
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ accepted: { shares: "10", minAmountOut: "9.5" } })
+    );
+
+    const built = await buildExternalWalletWithdrawalTransaction(
+      env,
+      withdrawalInput(positionId, { minAmountOut: "9.5" })
+    );
+
+    expect(buildVaultWithdrawal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ shares: "10", minAmountOut: "9.5" })
+    );
+    expect(built.min_shares_out).toBe("9.5");
+  });
+
   it("answers 501 when the provider cannot build an exit", async () => {
     resolveVaultWithdrawClient.mockReturnValue(null);
     const positionId = await seedExternalWalletPosition();
     await expect(
       buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId))
     ).rejects.toThrowError(/vault withdrawals/);
+  });
+
+  it("maps shared withdrawal refusals to a caller-facing bad request", async () => {
+    buildVaultWithdrawal.mockRejectedValue(
+      new SdpVedaError("WITHDRAW_REFUSED", "The Veda vault is temporarily paused")
+    );
+    const positionId = await seedExternalWalletPosition();
+
+    await expect(
+      buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId))
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "The Veda vault is temporarily paused",
+    });
   });
 
   it("refuses a deposit submit against a withdrawal build", async () => {

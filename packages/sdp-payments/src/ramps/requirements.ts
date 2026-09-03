@@ -14,9 +14,13 @@ const countryCodeSchema = z.enum(COUNTRY_CODES);
 
 export function readyCounterparty(
   provider: RampProviderId,
-  direction: RampDirection
+  direction: RampDirection,
+  providerAccountId?: string
 ): CounterpartyRequirements {
-  return { provider, direction, status: "ready" };
+  if (providerAccountId === undefined) {
+    return { provider, direction, status: "ready" };
+  }
+  return { provider, direction, status: "ready", providerAccountId };
 }
 
 export function humanizeEnumLabel(value: string): string {

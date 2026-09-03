@@ -113,6 +113,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       selectedRampPair,
       cryptoToken,
       collectedData,
+      selectedProviderAccountId,
       rampsMemo,
     }) => {
       const base = {
@@ -140,6 +141,9 @@ export function useOfframpWizard(props: UseRampWizardProps) {
         provider,
         fiatCurrency: selectedRampPair.fiatCurrency,
         destinationCountry,
+        ...(selectedProviderAccountId === null
+          ? {}
+          : { providerAccountId: selectedProviderAccountId }),
       } satisfies PaymentOfframpQuoteRequest;
     },
     onQuoteCreated: () => {

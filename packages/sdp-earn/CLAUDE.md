@@ -56,9 +56,9 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
-  ids and `allow_create_account = true`, so the harness needs no edit, and the
-  harness is the only option today: deployed devnet Kora matches on the policy
-  flag but not on the allowlist, which lands with sdp-infra#64. Its
+  ids and `allow_create_account = true`, so the harness needs no edit (deployed
+  devnet Kora carries the same allowlist since sdp-infra#64, asserted by the
+  `Kora / Live Smoke` shard on secret-bearing CI runs). Its
   `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
   share-ATA rent for real. The flag fails CLOSED, so a value
   the wrapper drops looks like "sponsorship silently did nothing" rather than an
@@ -418,10 +418,12 @@ rates come from the same paged endpoint the catalogue uses.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, live
   metrics, vault-direct (deposit + read) and vault-withdraw. All are
   method-presence guards in capabilities.ts and a provider may implement any
-  subset — Kamino has live metrics and vault-direct, Veda has vault-direct.
-  NOBODY implements vault-withdraw yet, which is a statement about SDP's
-  plumbing rather than about anyone's right to their money (see
-  `docs/decisions/0003-veda-vault-withdrawals.md`).
+  subset — Kamino has live metrics, vault-direct and vault-withdraw
+  (PRO-1702); Veda has vault-direct and vault-withdraw (instant redemption
+  only — the queued exit waits on its own capability, see
+  `docs/decisions/0003-veda-vault-withdrawals.md`). A deposit-only provider's
+  exit route answers 501, which is a statement about SDP's plumbing rather
+  than about anyone's right to their money.
 - **`sponsoredPrograms(cluster)` is a REQUIRED member of
   `EarnVaultDirectProvider`, not an optional capability** (PRO-1736). It returns
   every program the client may emit an instruction for, as plain base58 strings,
