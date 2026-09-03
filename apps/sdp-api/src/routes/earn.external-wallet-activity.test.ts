@@ -21,6 +21,9 @@ const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
     })),
   };
 });
+// The movement detail's chain read-through, mocked as identity: these tests
+// prove the ROUTE calls it for scoped rows and never for a 404, not the
+// service's own RPC behavior (that lives with the reconciler's suite).
 const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
   vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
 );
@@ -408,8 +411,10 @@ describe("external-wallet activity", () => {
     expect(body.data.movements).toHaveLength(1);
     expect(body.data.movements[0]?.providerReference).toBe("vault-usdc");
 
-    // The sibling row is not addressable by id either.
+    // The sibling row is not addressable by id either, and its 404 is decided
+    // before the read-through could touch the chain.
     expect((await get(`/v1/earn/external-wallet/movements/${siblingMovement}`)).status).toBe(404);
+    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
 
     // An owner only a foreign organization has claimed reads as never seen.
     const foreignOrg = "org_external_activity_foreign";
@@ -437,7 +442,9 @@ describe("external-wallet activity", () => {
     expect((await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_B}`)).status).toBe(
       404
     );
-    expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_B}`)).status).toBe(404);
+    expect((await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_B}`)).status).toBe(
+      404
+    );
   });
 
   it("serves one movement by id and 404s a custody-signed row", async () => {
@@ -467,10 +474,13 @@ describe("external-wallet activity", () => {
       direction: "deposit",
       ownerAddress: OWNER_A,
     });
+    // The poll observes the chain through the shared read-through, exactly like
+    // the treasury detail reads (#1583).
     expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
       env,
       expect.objectContaining({ id: movementId })
     );
+    reconcileEarnVaultMovementReadThrough.mockClear();
 
     // A custody-signed vault movement is not an external-wallet movement, and a
     // guessed id answers exactly like a missing row.
@@ -528,7 +538,9 @@ describe("external-wallet activity", () => {
     expect((await get("/v1/earn/external-wallet/movements/earn_movement_missing")).status).toBe(
       404
     );
-    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledTimes(1);
+    // Scope decides before the chain read: a guessed or foreign id must not be
+    // able to use RPC timing as an existence oracle.
+    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
   });
 });
 
@@ -570,7 +582,7 @@ describe("external-wallet earnings", () => {
     }
     liveValue({ "vault-usdc-one": "66", "vault-usdc-two": "44.5", "vault-usdt": "9" });
 
-    const response = await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`);
+    const response = await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { earnings: Record<string, unknown> } };
     expect(body.data.earnings).toMatchObject({
@@ -616,7 +628,9 @@ describe("external-wallet earnings", () => {
     });
     readVaultPositions.mockRejectedValue(new Error("RPC unavailable"));
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: {
         earnings: {
           unavailablePositionCount: number;
@@ -664,7 +678,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc": "61" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
     const token = body.data.earnings.totalsByToken[0];
@@ -707,7 +723,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc": "58" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
     const token = body.data.earnings.totalsByToken[0];
@@ -772,7 +790,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc-open": "44" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: Record<string, unknown> };
     };
     expect(body.data.earnings).toMatchObject({
@@ -823,7 +843,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc": "66" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
     expect(body.data.earnings.totalsByToken[0]).toMatchObject({
@@ -833,13 +855,15 @@ describe("external-wallet earnings", () => {
     });
   });
 
-  it.each(["?limit=1", "?page=2"])("rejects unknown earnings query %s", async (query) => {
+  it.each(["&limit=1", "&page=2"])("rejects unknown earnings query %s", async (query) => {
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
       tokenMint: USDC,
       label: "USDC vault",
     });
-    expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_A}${query}`)).status).toBe(400);
+    expect(
+      (await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}${query}`)).status
+    ).toBe(400);
   });
 });

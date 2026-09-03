@@ -147,8 +147,12 @@ describe("EarnIntegrationGuide", () => {
     // same two-call way money came in.
     expect(code).toContain("/v1/earn/external-wallet/movements/");
     expect(code).toContain("/v1/earn/external-wallet/movements?");
-    expect(code).toContain("/v1/earn/external-wallet/earnings/");
-    expect(code).toContain("/v1/earn/external-wallet/positions/");
+    expect(code).toContain("/v1/earn/external-wallet/earnings?");
+    expect(code).toContain("/v1/earn/external-wallet/positions?");
+    // The path-addressed owner shapes were retired for the query form; a
+    // snippet regression here would hand partners a 404ing example.
+    expect(code).not.toContain("/v1/earn/external-wallet/earnings/");
+    expect(code).not.toContain("/v1/earn/external-wallet/positions/");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawals");
     expect(code).toContain("waitForEarnMovement");

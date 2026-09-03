@@ -414,7 +414,11 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       cryptoToken: query.data.cryptoToken,
       fiatCurrency: query.data.fiatCurrency,
       ...(query.data.provider === "lightspark"
-        ? { cryptoRail: requireCryptoRail(query.data.cryptoToken), payoutAccounts }
+        ? {
+            cryptoRail: requireCryptoRail(query.data.cryptoToken),
+            payoutAccounts,
+            destinationCountry: query.data.destinationCountry,
+          }
         : {}),
       ...(providerAccount === null
         ? {}

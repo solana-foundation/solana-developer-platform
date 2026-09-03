@@ -82,16 +82,18 @@ earn.use("*", projectContextMiddleware());
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
 
-// B2B2C live holdings (PRO-1724). Summary is declared before the owner path so
-// the literal segment can never be captured as a Solana address. No
-// `wallets:read`: these are end-user wallets SDP does not custody.
+// B2B2C live holdings (PRO-1724). The owner is a REQUIRED query filter on
+// every per-owner read of this surface (positions, movements, earnings) — one
+// addressing style for one concept, and no literal segment (`summary`) can
+// ever be captured as a Solana address. No `wallets:read`: these are end-user
+// wallets SDP does not custody.
 earn.get(
   "/external-wallet/positions/summary",
   requirePermissions("earn:read"),
   getEarnExternalWalletPositionSummary
 );
 earn.get(
-  "/external-wallet/positions/:ownerAddress",
+  "/external-wallet/positions",
   requirePermissions("earn:read"),
   listEarnExternalWalletPositions
 );
@@ -101,8 +103,7 @@ earn.get(
 // only, no `wallets:read` (end-user wallets carry no custody bindings), and NO
 // provider gate: these report on money that already moved (ADR 0002). The
 // movements collection is declared before its `:movementId` detail so a
-// literal segment can never be captured as an id; the owner rides the
-// collection as a REQUIRED query filter for the same reason.
+// literal segment can never be captured as an id.
 earn.get(
   "/external-wallet/movements",
   requirePermissions("earn:read"),
@@ -114,7 +115,7 @@ earn.get(
   getEarnExternalWalletMovement
 );
 earn.get(
-  "/external-wallet/earnings/:ownerAddress",
+  "/external-wallet/earnings",
   requirePermissions("earn:read"),
   getEarnExternalWalletEarnings
 );

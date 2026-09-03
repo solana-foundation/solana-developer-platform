@@ -205,6 +205,15 @@ export interface CounterpartyProviderAccount {
   bankName?: string;
   accountNumberLast4?: string;
   paymentRails?: string[];
+  customerLink?: CounterpartyProviderCustomerLink;
+}
+
+export interface CounterpartyProviderCustomerLink {
+  id: string;
+  providerCustomerReference: string;
+  status: CounterpartyAccountStatus;
+  providerStatus: string | null;
+  createdAt: string;
 }
 
 export type CounterpartyProviderAccountKind =
