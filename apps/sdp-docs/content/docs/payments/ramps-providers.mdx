@@ -25,7 +25,7 @@ Configure both credential pairs for any provider you want to expose to test and 
 | Coinbase | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Rate estimates work in production; order creation is sandbox-only. Onramp only. |
 | Mural | ✓ | ✗ (estimate only) | ✓ | `manual_instructions` | Off-ramp rate estimate works; off-ramp quote creation is not implemented yet. |
 | Stripe | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | No separate sandbox credentials — supply a Stripe test-mode secret key. Onramp only. |
-| Hercle | ✓ | ✓ | ✓ | `manual_instructions` | Signed Key v1 (per-request HMAC). Business counterparties only; EUR ↔ USDC (Solana) launch corridor; KYB verification via a hosted link. |
+| Hercle | ✓ | ✓ | ✓ | `manual_instructions` | Signed Key v1 (per-request HMAC). Business counterparties only; first-party fiat only; EUR ↔ USDC (Solana) launch corridor; KYB verification via a hosted link. |
 
 ## MoonPay
 
@@ -132,7 +132,9 @@ Stripe is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject
 | `HERCLE_SANDBOX_API_BASE_URL` | conditional | Sandbox partner API base URL. |
 | `HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY` | conditional | Sandbox webhook public key (PEM). |
 
-Hercle serves **business counterparties only**, registered in Switzerland or the EEA; each counterparty becomes a regulated Hercle sub-account selected via the `on-behalf-of` header on one platform credential. Requirements flow: the first POST collects the company registration number and provisions the account, then a hosted KYB verification link is returned (`customer_verification_required`); quotes are refused until the verification verdict lands (`ready`). Launch corridor is EUR ↔ `usdc.solana`, both directions, `deliveryMode: "manual_instructions"` — on-ramp returns wire instructions for a Hercle-issued account, off-ramp returns a Solana deposit address.
+Hercle serves **business counterparties only**, registered in Switzerland or the EEA; each counterparty becomes a regulated Hercle sub-account selected via the `on-behalf-of` header on one platform credential. Fiat moves **first-party only**: the business funds an on-ramp from its own bank account and is paid an off-ramp into its own bank account — the counterparty of a Hercle ramp is the business itself, never a third party.
+
+Requirements flow: the first POST collects the company registration number, the registered address and the business's own bank account (IBAN, BIC, account holder), provisions the sub-account, registers that account as the payout destination — Hercle refuses a holder that is not the business itself, and that refusal comes back as the form error — and returns a hosted KYB verification link (`customer_verification_required`). A verified business whose payout account is still being registered on the bank rail reports `funding_account_provisioning`; quotes are refused until both are done (`ready`). Provider state is kept as `counterparty_provider_accounts` rows (a `customer_link` and a `payout_account`); the collected bank details go to Hercle and are never stored. Launch corridor is EUR ↔ `usdc.solana`, both directions, `deliveryMode: "manual_instructions"` — on-ramp returns wire instructions for the business's own dedicated account at Hercle's bank, off-ramp returns a Solana deposit address.
 
 ## Provider gating
 
