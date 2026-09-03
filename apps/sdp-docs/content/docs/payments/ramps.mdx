@@ -169,7 +169,7 @@ curl -X POST https://api.solana.com/v1/counterparties \
 
 That is the whole body. SDP does not store names, emails, dates of birth, or addresses on the counterparty; providers that need identity details collect them in their own flows. The response carries an `id` of the form `cpty_...`, which is what `counterpartyId` takes below.
 
-Before a quote will succeed, the counterparty has to satisfy the provider's requirements for that corridor. Requirements depend on the provider, the direction, the token, and the currency, so all of those are part of the request. On-ramp requests also need the destination wallet.
+Before a quote will succeed, the counterparty has to satisfy the provider's requirements for that corridor. Requirements depend on the provider, the direction, the token, and the currency, so all of those are part of the request. On-ramp requests also need the destination wallet, and a Lightspark off-ramp request can carry the `destinationCountry` the payout is going to.
 
 ```bash
 curl "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements\
@@ -177,47 +177,68 @@ curl "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements\
   -H "Authorization: Bearer sk_test_..."
 ```
 
-A counterparty that still owes information returns `status: "collect"` and lists exactly what to gather:
+Every response carries `provider`, `direction`, and a `status`. `ready` means quote now. Any other status says what to do next, and the rest of the response is shaped by it. The full list is in the table further down. A Lightspark off-ramp walks through most of the flow, so it is the worked example here: identity fields first, then a payout account.
+
+### Step 1: identity fields
+
+A counterparty the provider has never seen returns `collect_counterparty` with the fields the provider needs to create its customer record. Lightspark and BVNK both do this, in both directions, each with its own list. For an individual counterparty Lightspark asks for:
 
 ```json
 {
   "data": {
     "provider": "lightspark",
     "direction": "offramp",
-    "status": "collect",
+    "status": "collect_counterparty",
     "fields": [
+      { "kind": "text", "key": "customer.fullName", "label": "Full name", "required": true, "maxLength": 256 },
+      { "kind": "date", "key": "customer.birthDate", "label": "Date of birth", "required": true, "before": "2026-09-03" },
+      { "kind": "country", "key": "customer.nationality", "label": "Nationality", "required": true },
+      { "kind": "country", "key": "customer.region", "label": "Region", "required": true },
       {
-        "kind": "select",
-        "key": "paymentRails",
-        "label": "Payment rail",
+        "kind": "text",
+        "key": "customer.email",
+        "label": "Email",
         "required": true,
-        "options": [
-          { "value": "ACH", "label": "ACH" },
-          { "value": "WIRE", "label": "Wire" },
-          { "value": "RTP", "label": "RTP" },
-          { "value": "FEDNOW", "label": "FedNow" }
+        "maxLength": 320,
+        "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+        "placeholder": "name@example.com"
+      },
+      {
+        "kind": "address",
+        "key": "customer.address",
+        "label": "Residential address",
+        "required": true,
+        "fields": [
+          { "kind": "text", "key": "customer.address.line1", "label": "Address line 1", "required": true },
+          { "kind": "text", "key": "customer.address.city", "label": "City", "required": true },
+          { "kind": "text", "key": "customer.address.subdivisionCode", "label": "State / region", "required": false },
+          { "kind": "text", "key": "customer.address.postalCode", "label": "Postal code", "required": true },
+          { "kind": "country", "key": "customer.address.countryCode", "label": "Country", "required": true }
         ]
       },
       {
-        "kind": "text",
-        "key": "routingNumber",
-        "label": "Routing number",
+        "kind": "select",
+        "key": "purposeOfPayment",
+        "label": "Purpose of payment",
         "required": true,
-        "pattern": "^[0-9]{9}$",
-        "placeholder": "021000021"
-      },
-      {
-        "kind": "text",
-        "key": "accountNumber",
-        "label": "Account number",
-        "required": true
+        "options": [{ "value": "...", "label": "..." }]
       }
     ]
   }
 }
 ```
 
-Render those fields, then submit what you collected to the same path:
+Each field has a `kind` that tells you what to render and what to send back:
+
+| `kind` | Render | Submit under the field's `key` |
+| --- | --- | --- |
+| `text` | A text input. `pattern`, `minLength`, `maxLength`, `placeholder`, and `mask` are hints the API also enforces. | The string. |
+| `select` | The listed `options`. | One option's `value`. |
+| `country` | A country picker. No options are sent. | An ISO 3166-1 alpha-2 code such as `US`. Anything else is rejected. |
+| `date` | A date picker. `before` is the exclusive upper bound, so a birth date must fall before today. | `YYYY-MM-DD`. |
+| `address` | Its nested `fields` as a group. | Each nested field separately, under its own dotted key. |
+
+Submit what you collected to the same path. Values go in `collectedData`, keyed exactly as the field's `key`:
 
 ```bash
 curl -X POST "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements" \
@@ -226,30 +247,137 @@ curl -X POST "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirem
   -d '{
     "provider": "lightspark",
     "direction": "offramp",
+    "cryptoToken": "USDC",
     "fiatCurrency": "USD",
     "collectedData": {
-      "paymentRails": "ACH",
-      "routingNumber": "021000021",
-      "accountNumber": "000123456789"
+      "customer.fullName": "Ada Lovelace",
+      "customer.birthDate": "1990-12-10",
+      "customer.nationality": "US",
+      "customer.region": "US",
+      "customer.email": "ada@example.com",
+      "customer.address.line1": "1 Main St",
+      "customer.address.city": "New York",
+      "customer.address.subdivisionCode": "NY",
+      "customer.address.postalCode": "10001",
+      "customer.address.countryCode": "US",
+      "purposeOfPayment": "..."
     }
   }'
 ```
 
-The body varies by provider. Lightspark and BVNK take `collectedData`; MoonPay, MoneyGram, Coinbase, and Stripe take only `provider` and `direction`; Mural takes the corridor fields and no `collectedData`. Repeat the `GET` until `status` reads `ready`.
+A submission that leaves out a required field comes back as `collect_counterparty` again, listing only what is still missing. A complete one creates the provider-side customer and moves on: an on-ramp answers `ready`, an off-ramp answers `collect_account`.
 
-The other statuses you will see:
+### Step 2, off-ramp only: the payout account
 
-| `status` | Meaning |
-| --- | --- |
-| `ready` | Quote now. |
-| `collect` | Submit the listed `fields`. |
-| `unsupported` | The provider won't serve this counterparty for this corridor. `reason` says why. |
-| `onboarding_not_started` | Lightspark, BVNK, and Mural: the provider-side customer does not exist yet. Submitting requirements starts it. |
-| `customer_verification_required` | BVNK and Mural: send the customer to `verificationUrl` to complete KYC. |
-| `terms_of_service_required` | Mural: send the customer to `termsOfServiceUrl`. |
-| `customer_verifying`, `funding_account_provisioning` | Wait and poll again. |
+`collect_account` carries a `payout` tree instead of a flat field list, because the bank fields depend on where the money is going:
 
-Two cases need a warning. BVNK and Coinbase on-ramps can't create a first-time provider customer today, because SDP no longer stores the identity fields those providers require and just-in-time collection is not wired yet. A new counterparty gets `400` with `"... requires identity fields that are no longer stored; JIT collection is not wired yet"` from BVNK requirements, and from the Coinbase quote itself even after requirements reported `ready`. Counterparties already known to those providers keep working.
+```json
+{
+  "data": {
+    "provider": "lightspark",
+    "direction": "offramp",
+    "status": "collect_account",
+    "payout": {
+      "countryRails": {
+        "US": [
+          { "value": "ACH", "label": "ACH" },
+          { "value": "WIRE", "label": "Wire" },
+          { "value": "RTP", "label": "RTP" },
+          { "value": "FEDNOW", "label": "FedNow" }
+        ]
+      },
+      "railFields": {
+        "ACH": [
+          { "kind": "text", "key": "bankAccount.accountNumber", "label": "Account number", "required": true, "minLength": 1, "maxLength": 34, "placeholder": "12345678" },
+          {
+            "kind": "select",
+            "key": "bankAccount.bankAccountType",
+            "label": "Account type",
+            "required": false,
+            "options": [{ "value": "CHECKING", "label": "Checking" }, { "value": "SAVINGS", "label": "Savings" }]
+          },
+          { "kind": "text", "key": "bankAccount.routingNumber", "label": "Routing number", "required": true, "pattern": "^[0-9]{9}$", "minLength": 9, "maxLength": 9, "placeholder": "021000021" }
+        ]
+      },
+      "accounts": []
+    }
+  }
+}
+```
+
+`countryRails` has one entry per country that can receive this currency, each listing the rails available there. `railFields` has the fields for every rail that appeared. `accounts` lists payout accounts this counterparty already has for the currency, empty on the first pass. The example is trimmed to the required ACH fields plus one optional one; the live tree carries the other rails and their optional fields too.
+
+Let the user pick a country, then a rail from that country's list, then render `railFields[rail]`. Submit all three in one `collectedData`:
+
+```bash
+curl -X POST "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements" \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "lightspark",
+    "direction": "offramp",
+    "cryptoToken": "USDC",
+    "fiatCurrency": "USD",
+    "collectedData": {
+      "destinationCountry": "US",
+      "paymentRails": "ACH",
+      "bankAccount.routingNumber": "021000021",
+      "bankAccount.accountNumber": "000123456789"
+    }
+  }'
+```
+
+That creates the payout account with the provider and answers `ready` with its id:
+
+```json
+{
+  "data": {
+    "provider": "lightspark",
+    "direction": "offramp",
+    "status": "ready",
+    "providerAccountId": "counterparty_provider_account_93809134-1b2c-4d5e-8f90-a1b2c3d4e5f6"
+  }
+}
+```
+
+Keep `providerAccountId`. The off-ramp quote takes it to pin the payout to that account, and it is how you tell accounts apart once a counterparty has more than one.
+
+### Reusing a payout account
+
+The account persists, so the next time you call the `GET` with the destination country on the query string, the API resolves it for you:
+
+```bash
+curl "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements\
+?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+A country with exactly one active account answers `ready` with that account's `providerAccountId`, plus the `payout` tree in case the user wants to send somewhere else. Inside the tree, `accounts` now lists what exists: `id`, `destinationCountry`, `paymentRail`, `status`, and where the provider reports them, `bankName` and `accountNumberLast4`. A country with no account answers `collect_account` as above. A country with two or more active accounts answers `400` until you choose one, which you do by submitting `providerAccountId` alongside `collectedData: { "destinationCountry": "US" }`; the `POST` verifies the account belongs to this counterparty and corridor and answers `ready`. Without `destinationCountry` the `GET` returns the tree and lets you pick.
+
+Every provider account a counterparty holds, across providers, is listed at `GET /v1/counterparties/{counterpartyId}/provider-accounts`, filterable by `provider`, `fiatCurrency`, and `destinationCountry`. `destinationCountry` on a requirements `GET` is accepted for Lightspark off-ramps only; other providers reject it with `400`.
+
+### Other providers
+
+The `POST` body varies by provider. Lightspark and BVNK take `collectedData`; BVNK additionally takes `agreementConsent: true` once it has shown you its agreements. MoonPay, MoneyGram, Coinbase, and Stripe take only `provider` and `direction` and answer `ready` at once. Mural takes the corridor fields and no `collectedData`. Repeat the `GET` until `status` reads `ready`.
+
+The statuses you will see:
+
+| `status` | Providers | Meaning |
+| --- | --- | --- |
+| `ready` | all | Quote now. A Lightspark off-ramp also returns `providerAccountId`. |
+| `collect_counterparty` | Lightspark, BVNK | Submit the identity `fields`. |
+| `collect_account` | Lightspark off-ramp | Pick a country and rail from `payout` and submit that rail's fields. |
+| `collect` | BVNK off-ramp | Submit the bank `fields` for the beneficiary. |
+| `unsupported` | all | The provider won't serve this counterparty for this corridor. `reason` says why: a currency it can't pay out, or an entity type it doesn't take. |
+| `onboarding_not_started` | Lightspark, Mural | The provider-side customer does not exist yet. For Mural, see the warning below. |
+| `customer_agreement_required` | BVNK | Show the listed `agreements` (each has a `downloadUrl`, minted per response) and resubmit with `agreementConsent: true`. |
+| `customer_pending_agreement_acceptance` | BVNK | Wait and poll again. |
+| `customer_verification_required` | BVNK, Mural | Send the customer to `verificationUrl` to complete KYC. The link is minted per response. |
+| `terms_of_service_required` | Mural | Send the customer to `termsOfServiceUrl`. |
+| `customer_verifying`, `customer_funding_account_provisioning`, `funding_account_provisioning` | BVNK, Mural | Wait and poll again. |
+| `customer_verification_failed`, `customer_funding_account_provisioning_failed` | BVNK, Mural | The provider rejected the customer or could not open the account. Polling will not change it; the provider-side status has to. |
+
+Three seams still fail because SDP no longer stores the identity fields the provider wants at that moment, and just-in-time collection is not wired for that call. Each returns `400` with a message ending in `requires identity fields that are no longer stored; JIT collection is not wired yet`. A Coinbase on-ramp quote fails this way for a counterparty Coinbase has not seen, even after requirements reported `ready`; counterparties Coinbase already knows keep working. A Mural requirements call fails this way for a counterparty with no Mural organization yet, so `onboarding_not_started` cannot currently advance. A BVNK off-ramp quote fails this way for every counterparty today, because the party details BVNK wants on the quote are rebuilt from fields that are no longer stored; the BVNK on-ramp is not affected, since its identity fields now arrive through `collect_counterparty`.
 
 ## Request a quote
 
@@ -310,6 +438,8 @@ The response has two top-level keys under `data`: `quote`, the provider-shaped p
 | `counterpartyId` | yes | A `cpty_...` id whose requirements are `ready` for this provider and corridor. |
 | `destinationWallet` | on-ramp | The `walletId` from `GET /v1/wallets` (for example `privy_...`) or that wallet's public key. It has to resolve to one of your wallets; an unrelated Solana address is rejected with `destinationWallet must reference an SDP wallet.` The `cwlt_...` custody wallet `id` is not accepted here. |
 | `sourceWallet` | off-ramp | The wallet you are cashing out from. Same forms, same restriction. |
+| `destinationCountry` | off-ramp, Lightspark | ISO 3166-1 alpha-2 code of the country the payout goes to. Required for Lightspark; it selects the payout account's corridor together with `fiatCurrency`. Other providers do not take it. |
+| `providerAccountId` | off-ramp, Lightspark, optional | The payout account to settle to, from the requirements flow above or `GET /v1/counterparties/{counterpartyId}/provider-accounts`. Omitted, SDP uses the counterparty's single active account for the corridor; two or more active accounts return `400` naming the ambiguity, and none returns `409`. An id that belongs to another counterparty, another corridor, or an inactive account is rejected with `400`, never silently swapped. The account used is recorded on the transfer. |
 | `cryptoToken` | yes | Token symbol, for example `USDC`. Passing the rail form (`usdc.solana`) is rejected with `Invalid ramp currency code` on `cryptoToken`. |
 | `fiatCurrency` | on-ramp; in practice off-ramp too | Required on on-ramp. The off-ramp schema marks it optional, but Lightspark and BVNK reject an off-ramp quote without it, so treat it as required unless you have checked your provider. |
 | `fiatAmount` | on-ramp | Decimal string greater than zero. |
@@ -532,7 +662,7 @@ The response is the transfer with `status: "canceled"`. Only `pending` and `awai
 
 The same flow is available without code. In the dashboard, **Payments → Deposit → Deposit with fiat** runs an on-ramp and **Payments → Pay → Pay with fiat** runs an off-ramp. Each wizard walks the steps on this page in order: pick the counterparty, pick the currency pair, compare the live estimates (providers that don't serve the pair are listed as unavailable), clear any provider requirements, then request the quote. Hosted pages and widgets open inside the wizard, and manual instructions render as a funding panel; in sandbox, Lightspark's panel has a **Simulate** button that stands in for the bank transfer.
 
-The wizard creates the same transfer record the API does. It appears under **Payments → Transactions** with the statuses in the table above, and you can cancel a pending one from there. Payments in the dashboard is enabled per organization, so if the section is missing from your sidebar, ask your SDP contact to turn it on.
+The wizard creates the same transfer record the API does. It appears under **Payments → Transactions** with the statuses in the table above, and you can cancel a pending one from there. Payments in the dashboard is enabled per organization, so if the section is missing from your sidebar, ask your SDP contact to turn it on. Each ramp provider can also be hidden from the wizards individually; a provider that is hidden there is still served by the API, so what the dashboard offers can be a subset of what the `currency` endpoints report.
 
 ## Test without moving money
 
