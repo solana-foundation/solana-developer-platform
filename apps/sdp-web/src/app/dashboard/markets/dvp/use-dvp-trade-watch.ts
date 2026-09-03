@@ -47,42 +47,30 @@ export function useDvpTradeWatch(trade: DvpTrade): void {
       return;
     }
 
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    const stop = () => {
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
+    // One timer, allocated here and cleared here. It was a start/stop pair
+    // driven by visibility, which owned the handle in a closure two functions
+    // away — correct, but neither a reader nor a linter can see that every
+    // allocation is released, and the whole point of a cleanup is that it is
+    // obvious. A backgrounded tab is nobody watching, so the tick checks
+    // rather than the timer being torn down; browsers throttle background
+    // timers anyway, and a no-op tick costs nothing.
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        router.refresh();
       }
-    };
+    }, POLL_MS);
 
-    const start = () => {
-      if (timer === null) {
-        timer = setInterval(() => router.refresh(), POLL_MS);
-      }
-    };
-
-    // A backgrounded tab is nobody watching. Polling it burns the API and the
-    // cluster to update a screen that is not on screen, and browsers throttle
-    // the timer anyway — so this stops properly rather than pretending to.
+    // Coming back to the tab is the moment the page is most likely to be
+    // wrong, so it re-reads immediately rather than waiting out an interval.
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        // Coming back to the tab is the moment the page is most likely to be
-        // wrong, so it re-reads immediately rather than waiting out an interval.
         router.refresh();
-        start();
-      } else {
-        stop();
       }
     };
-
-    if (document.visibilityState === "visible") {
-      start();
-    }
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
-      stop();
+      clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [closed, router]);

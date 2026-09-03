@@ -299,6 +299,176 @@ function LegCard({
   );
 }
 
+/**
+ * Everything the trade IS, before anything you can do about it.
+ *
+ * Extracted because the workspace had grown past three hundred lines and read
+ * as one wall: the badge and its reading age, the two accounts SDP created and
+ * what each is for, the wallet funding your leg, the counterparty, and every
+ * transaction the trade has produced. Those are one answer to one question —
+ * what am I looking at — and the rest of the page is a different question.
+ */
+function TradeSummary({
+  cluster,
+  counterparty,
+  trade,
+}: {
+  cluster: SolanaCluster;
+  counterparty: string;
+  trade: DvpTrade;
+}) {
+  const t = useTranslations();
+
+  return (
+    <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <DvpStatusBadge status={trade.status} />
+        <span className="text-tertiary text-xs">
+          {trade.observedAt
+            ? t("DashboardMarkets.dvp.observedAt", {
+                when: formatTimestamp(trade.observedAt, t),
+              })
+            : t("DashboardMarkets.dvp.neverObserved")}
+        </span>
+      </div>
+      <p className="mt-2 text-tertiary text-[11px] leading-relaxed">
+        {t("DashboardMarkets.dvp.observedHint")}
+      </p>
+      <dl className="mt-4 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-2">
+        {/* Both of these are accounts SDP created, and neither is one a
+            reader has seen before. An address with a bare label is not an
+            explanation — the settlement authority in particular is minted
+            silently on a project's first trade, holds the only key that can
+            close one, and has to hold SOL to do it. */}
+        <div>
+          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.onChainAddress")}</dt>
+          <dd className="mt-0.5">
+            <CopyableAddress
+              address={trade.swapDvp}
+              label={t("DashboardMarkets.dvp.onChainAddress")}
+            />
+          </dd>
+          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+            {t("DashboardMarkets.dvp.onChainAddressHint")}{" "}
+            <a
+              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+              href={explorerAddressUrl(trade.swapDvp, cluster)}
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              {t("DashboardMarkets.dvp.viewOnExplorer")}
+              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+            </a>
+          </p>
+        </div>
+        <div>
+          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.settlementAuthority")}</dt>
+          <dd className="mt-0.5">
+            <CopyableAddress
+              address={trade.settlementAuthority}
+              label={t("DashboardMarkets.dvp.settlementAuthority")}
+            />
+          </dd>
+          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+            {t("DashboardMarkets.dvp.settlementAuthorityHint")}{" "}
+            <a
+              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+              href={explorerAddressUrl(trade.settlementAuthority, cluster)}
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              {t("DashboardMarkets.dvp.viewOnExplorer")}
+              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+            </a>
+          </p>
+        </div>
+      </dl>
+
+      {/* The wallet YOU chose, which the page never showed — so the only
+          wallet-shaped address on it was the settlement authority, a system
+          account with signing power over the trade. It was read as the
+          reader's own, which is exactly the confusion to avoid. */}
+      {trade.sdpWallet ? (
+        <dl className="mt-3 border-border-subtle border-t pt-3">
+          <div>
+            <dt className="text-tertiary text-xs">
+              {t("DashboardMarkets.dvp.sdpWalletLabel")}
+              {trade.sdpWallet.label ? ` · ${trade.sdpWallet.label}` : ""}
+            </dt>
+            <dd className="mt-0.5">
+              <CopyableAddress
+                address={trade.sdpWallet.address}
+                label={t("DashboardMarkets.dvp.sdpWalletLabel")}
+              />
+            </dd>
+            <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+              {t("DashboardMarkets.dvp.sdpWalletHint")}
+            </p>
+          </div>
+        </dl>
+      ) : null}
+
+      {/* Who the trade is WITH. This page carried four addresses — both
+          escrows, the settlement authority and your own wallet — and not
+          the one fact that identifies the trade commercially. It is also
+          the address somebody needs to hand back to the other side to
+          confirm they are looking at the same trade, so it is copyable in
+          full like the rest. */}
+      <dl className="mt-3 border-border-subtle border-t pt-3">
+        <div>
+          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.counterpartyLabel")}</dt>
+          <dd className="mt-0.5">
+            <CopyableAddress
+              address={counterparty}
+              label={t("DashboardMarkets.dvp.counterpartyLabel")}
+            />
+          </dd>
+          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+            {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
+            <a
+              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+              href={explorerAddressUrl(counterparty, cluster)}
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              {t("DashboardMarkets.dvp.viewOnExplorer")}
+              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+            </a>
+          </p>
+        </div>
+      </dl>
+
+      {/* Every transaction this trade produced, in the order it happened.
+          The close is the one that matters and was the one not recorded. */}
+      {trade.createSignature || trade.fundingSignature || trade.closeSignature ? (
+        <dl className="mt-3 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-3">
+          {trade.createSignature ? (
+            <TransactionLink
+              cluster={cluster}
+              label={t("DashboardMarkets.dvp.txCreate")}
+              signature={trade.createSignature}
+            />
+          ) : null}
+          {trade.fundingSignature ? (
+            <TransactionLink
+              cluster={cluster}
+              label={t("DashboardMarkets.dvp.txFunding")}
+              signature={trade.fundingSignature}
+            />
+          ) : null}
+          {trade.closeSignature ? (
+            <TransactionLink
+              cluster={cluster}
+              label={t("DashboardMarkets.dvp.txClose")}
+              signature={trade.closeSignature}
+            />
+          ) : null}
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
 export function DvpTradeDetailWorkspace({
   trade,
   cluster,
@@ -352,156 +522,7 @@ export function DvpTradeDetailWorkspace({
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
-        <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <DvpStatusBadge status={trade.status} />
-            <span className="text-tertiary text-xs">
-              {trade.observedAt
-                ? t("DashboardMarkets.dvp.observedAt", {
-                    when: formatTimestamp(trade.observedAt, t),
-                  })
-                : t("DashboardMarkets.dvp.neverObserved")}
-            </span>
-          </div>
-          <p className="mt-2 text-tertiary text-[11px] leading-relaxed">
-            {t("DashboardMarkets.dvp.observedHint")}
-          </p>
-          <dl className="mt-4 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-2">
-            {/* Both of these are accounts SDP created, and neither is one a
-                reader has seen before. An address with a bare label is not an
-                explanation — the settlement authority in particular is minted
-                silently on a project's first trade, holds the only key that can
-                close one, and has to hold SOL to do it. */}
-            <div>
-              <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.onChainAddress")}</dt>
-              <dd className="mt-0.5">
-                <CopyableAddress
-                  address={trade.swapDvp}
-                  label={t("DashboardMarkets.dvp.onChainAddress")}
-                />
-              </dd>
-              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                {t("DashboardMarkets.dvp.onChainAddressHint")}{" "}
-                <a
-                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-                  href={explorerAddressUrl(trade.swapDvp, cluster)}
-                  rel="noreferrer noopener"
-                  target="_blank"
-                >
-                  {t("DashboardMarkets.dvp.viewOnExplorer")}
-                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-                </a>
-              </p>
-            </div>
-            <div>
-              <dt className="text-tertiary text-xs">
-                {t("DashboardMarkets.dvp.settlementAuthority")}
-              </dt>
-              <dd className="mt-0.5">
-                <CopyableAddress
-                  address={trade.settlementAuthority}
-                  label={t("DashboardMarkets.dvp.settlementAuthority")}
-                />
-              </dd>
-              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                {t("DashboardMarkets.dvp.settlementAuthorityHint")}{" "}
-                <a
-                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-                  href={explorerAddressUrl(trade.settlementAuthority, cluster)}
-                  rel="noreferrer noopener"
-                  target="_blank"
-                >
-                  {t("DashboardMarkets.dvp.viewOnExplorer")}
-                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-                </a>
-              </p>
-            </div>
-          </dl>
-
-          {/* The wallet YOU chose, which the page never showed — so the only
-              wallet-shaped address on it was the settlement authority, a system
-              account with signing power over the trade. It was read as the
-              reader's own, which is exactly the confusion to avoid. */}
-          {trade.sdpWallet ? (
-            <dl className="mt-3 border-border-subtle border-t pt-3">
-              <div>
-                <dt className="text-tertiary text-xs">
-                  {t("DashboardMarkets.dvp.sdpWalletLabel")}
-                  {trade.sdpWallet.label ? ` · ${trade.sdpWallet.label}` : ""}
-                </dt>
-                <dd className="mt-0.5">
-                  <CopyableAddress
-                    address={trade.sdpWallet.address}
-                    label={t("DashboardMarkets.dvp.sdpWalletLabel")}
-                  />
-                </dd>
-                <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                  {t("DashboardMarkets.dvp.sdpWalletHint")}
-                </p>
-              </div>
-            </dl>
-          ) : null}
-
-          {/* Who the trade is WITH. This page carried four addresses — both
-              escrows, the settlement authority and your own wallet — and not
-              the one fact that identifies the trade commercially. It is also
-              the address somebody needs to hand back to the other side to
-              confirm they are looking at the same trade, so it is copyable in
-              full like the rest. */}
-          <dl className="mt-3 border-border-subtle border-t pt-3">
-            <div>
-              <dt className="text-tertiary text-xs">
-                {t("DashboardMarkets.dvp.counterpartyLabel")}
-              </dt>
-              <dd className="mt-0.5">
-                <CopyableAddress
-                  address={counterparty}
-                  label={t("DashboardMarkets.dvp.counterpartyLabel")}
-                />
-              </dd>
-              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
-                <a
-                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-                  href={explorerAddressUrl(counterparty, cluster)}
-                  rel="noreferrer noopener"
-                  target="_blank"
-                >
-                  {t("DashboardMarkets.dvp.viewOnExplorer")}
-                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-                </a>
-              </p>
-            </div>
-          </dl>
-
-          {/* Every transaction this trade produced, in the order it happened.
-              The close is the one that matters and was the one not recorded. */}
-          {trade.createSignature || trade.fundingSignature || trade.closeSignature ? (
-            <dl className="mt-3 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-3">
-              {trade.createSignature ? (
-                <TransactionLink
-                  cluster={cluster}
-                  label={t("DashboardMarkets.dvp.txCreate")}
-                  signature={trade.createSignature}
-                />
-              ) : null}
-              {trade.fundingSignature ? (
-                <TransactionLink
-                  cluster={cluster}
-                  label={t("DashboardMarkets.dvp.txFunding")}
-                  signature={trade.fundingSignature}
-                />
-              ) : null}
-              {trade.closeSignature ? (
-                <TransactionLink
-                  cluster={cluster}
-                  label={t("DashboardMarkets.dvp.txClose")}
-                  signature={trade.closeSignature}
-                />
-              ) : null}
-            </dl>
-          ) : null}
-        </section>
+        <TradeSummary cluster={cluster} counterparty={counterparty} trade={trade} />
 
         {/* Whose move it is. The badge above says what state the trade is in;
             it does not say what to do about it. */}
