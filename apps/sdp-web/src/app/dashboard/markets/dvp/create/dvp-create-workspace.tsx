@@ -117,8 +117,8 @@ export function DvpCreateWorkspace({
               </Field>
 
               <SideChoice
-                assetSymbol={form.assetSymbol}
-                cashSymbol={form.cashSymbol}
+                assetSymbol={form.asset.symbol}
+                cashSymbol={form.cash.symbol}
                 onChange={form.setSdpSide}
                 value={form.sdpSide}
               />
@@ -131,46 +131,46 @@ export function DvpCreateWorkspace({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
                   <MintField
-                    choice={form.assetChoice}
-                    custom={form.assetCustom}
+                    choice={form.asset.choice}
+                    custom={form.asset.custom}
                     emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
                     hint={t("DashboardMarkets.dvp.fieldAssetMintHint")}
                     id="dvp-asset-mint"
                     label={t("DashboardMarkets.dvp.fieldAssetMint")}
-                    onChoiceChange={form.setAssetChoice}
-                    onCustomChange={form.setAssetCustom}
+                    onChoiceChange={form.asset.setChoice}
+                    onCustomChange={form.asset.setCustom}
                     options={context.tokens}
                     placeholder={PLACEHOLDER_ASSET_MINT}
                   />
                   <AmountField
-                    decimals={form.assetToken?.decimals ?? null}
+                    decimals={form.asset.token?.decimals ?? null}
                     id="dvp-amount-a"
                     label={t("DashboardMarkets.dvp.fieldAmountA")}
-                    onChange={form.setAmountA}
-                    symbol={form.assetSymbol}
-                    value={form.amountA}
+                    onChange={form.asset.setAmount}
+                    symbol={form.asset.symbol}
+                    value={form.asset.amount}
                   />
                 </div>
 
                 <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
                   <MintField
-                    choice={form.cashChoice}
-                    custom={form.cashCustom}
+                    choice={form.cash.choice}
+                    custom={form.cash.custom}
                     hint={t("DashboardMarkets.dvp.fieldCashMintHint")}
                     id="dvp-cash-mint"
                     label={t("DashboardMarkets.dvp.fieldCashMint")}
-                    onChoiceChange={form.setCashChoice}
-                    onCustomChange={form.setCashCustom}
+                    onChoiceChange={form.cash.setChoice}
+                    onCustomChange={form.cash.setCustom}
                     options={form.cashOptions}
                     placeholder={PLACEHOLDER_CASH_MINT}
                   />
                   <AmountField
-                    decimals={form.cashToken?.decimals ?? null}
+                    decimals={form.cash.token?.decimals ?? null}
                     id="dvp-amount-b"
                     label={t("DashboardMarkets.dvp.fieldAmountB")}
-                    onChange={form.setAmountB}
-                    symbol={form.cashSymbol}
-                    value={form.amountB}
+                    onChange={form.cash.setAmount}
+                    symbol={form.cash.symbol}
+                    value={form.cash.amount}
                   />
                 </div>
               </div>
@@ -237,12 +237,12 @@ export function DvpCreateWorkspace({
 
           <div className="grid gap-4 lg:sticky lg:top-6">
             <DvpCreateSummary
-              amountA={form.amountA}
-              amountB={form.amountB}
-              assetMint={form.assetToken?.mint ?? null}
-              assetSymbol={form.assetSymbol}
-              cashMint={form.cashToken?.mint ?? null}
-              cashSymbol={form.cashSymbol}
+              amountA={form.asset.amount}
+              amountB={form.cash.amount}
+              assetMint={form.asset.token?.mint ?? null}
+              assetSymbol={form.asset.symbol}
+              cashMint={form.cash.token?.mint ?? null}
+              cashSymbol={form.cash.symbol}
               counterparty={form.counterparty}
               ready={form.ready}
               sdpSide={form.sdpSide}

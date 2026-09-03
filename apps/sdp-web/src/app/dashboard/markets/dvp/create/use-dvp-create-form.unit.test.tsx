@@ -43,7 +43,7 @@ describe("useDvpCreateForm", () => {
     const { result } = setup();
 
     expect(result.current.walletId).toBe("cwlt_1");
-    expect(result.current.assetToken?.label).toBe("TBOND");
+    expect(result.current.asset.token?.label).toBe("TBOND");
   });
 
   it("offers stablecoins for the cash leg on this cluster", () => {
@@ -60,9 +60,9 @@ describe("useDvpCreateForm", () => {
   it("converts a typed amount into base units", () => {
     const { result } = setup();
 
-    act(() => result.current.setAmountA("10.5"));
+    act(() => result.current.asset.setAmount("10.5"));
 
-    expect(result.current.baseA).toBe("10500000");
+    expect(result.current.asset.baseUnits).toBe("10500000");
   });
 
   // Truncating would move a different amount than the one on screen, so the
@@ -70,9 +70,9 @@ describe("useDvpCreateForm", () => {
   it("refuses to resolve an amount finer than the mint allows", () => {
     const { result } = setup();
 
-    act(() => result.current.setAmountA("1.9999999"));
+    act(() => result.current.asset.setAmount("1.9999999"));
 
-    expect(result.current.baseA).toBeNull();
+    expect(result.current.asset.baseUnits).toBeNull();
     expect(result.current.ready).toBe(false);
   });
 
@@ -97,8 +97,8 @@ describe("useDvpCreateForm", () => {
     const { result } = setup();
 
     act(() => result.current.setCounterparty(COUNTERPARTY));
-    act(() => result.current.setAmountA("10"));
-    act(() => result.current.setAmountB("25"));
+    act(() => result.current.asset.setAmount("10"));
+    act(() => result.current.cash.setAmount("25"));
 
     expect(result.current.ready).toBe(true);
   });
@@ -108,14 +108,14 @@ describe("useDvpCreateForm", () => {
   it("resolves a pasted mint when the organization has issued nothing", () => {
     const { result } = setup({ ...context, tokens: [] });
 
-    act(() => result.current.setAssetCustom("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"));
+    act(() => result.current.asset.setCustom("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"));
     act(() => result.current.setCounterparty(COUNTERPARTY));
     // No decimals are known for a pasted mint, so the field takes base units
     // directly rather than guessing a scale.
-    act(() => result.current.setAmountA("1000"));
-    act(() => result.current.setAmountB("25"));
+    act(() => result.current.asset.setAmount("1000"));
+    act(() => result.current.cash.setAmount("25"));
 
-    expect(result.current.baseA).toBe("1000");
+    expect(result.current.asset.baseUnits).toBe("1000");
     expect(result.current.ready).toBe(true);
   });
 });

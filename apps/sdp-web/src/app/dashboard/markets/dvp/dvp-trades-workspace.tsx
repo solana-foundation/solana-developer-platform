@@ -119,8 +119,18 @@ export function DvpTradesWorkspace({
                   // Marked on the row rather than announced in a banner: a
                   // warning that does not say WHICH trade sends an operator
                   // through every row to find it.
-                  const attention =
-                    overFundedLegs(trade).length > 0 || frozenLegs(trade).length > 0;
+                  //
+                  // The two conditions need different words. Labelling a frozen
+                  // escrow "holds more than the trade needs" is not a vague
+                  // warning, it is a false one, and it is the only thing a
+                  // screen reader gets from this icon.
+                  const isFrozen = frozenLegs(trade).length > 0;
+                  const isOverFunded = overFundedLegs(trade).length > 0;
+                  const attention = isFrozen
+                    ? t("DashboardMarkets.dvp.frozenTitle")
+                    : isOverFunded
+                      ? t("DashboardMarkets.dvp.surplusTitle")
+                      : null;
                   return (
                     // The whole row navigates, via a stretched link on the
                     // status cell. Actions live on the detail page.
@@ -133,7 +143,7 @@ export function DvpTradesWorkspace({
                           <DvpStatusBadge status={trade.status} />
                           {attention ? (
                             <TriangleAlertIcon
-                              aria-label={t("DashboardMarkets.dvp.surplusTitle")}
+                              aria-label={attention}
                               className="h-3.5 w-3.5 shrink-0 text-warning"
                             />
                           ) : null}

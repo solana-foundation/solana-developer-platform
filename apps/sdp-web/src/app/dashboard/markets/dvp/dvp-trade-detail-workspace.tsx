@@ -3,16 +3,15 @@
 import { CheckIcon, CopyIcon, SnowflakeIcon, TriangleAlertIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
+import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
-  canCancelDvpTrade,
-  canSettleDvpTrade,
   type DvpTrade,
   type DvpTradeLeg,
   frozenLegs,
@@ -142,13 +141,17 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
 
   const fundAction = canFund ? (
     <div className="flex flex-col gap-2">
-      <HoldToConfirmButton
+      {/* Clicked, not held. Funding moves your leg into the trade's own escrow,
+          which is a step forward rather than something to walk back; hold is
+          reserved for destroying something (HOO-1230). */}
+      <Button
         className="self-start"
         disabled={pending !== null}
-        label={t("DashboardMarkets.dvp.actionFund")}
-        onConfirm={() => act("fund")}
-        variant="default"
-      />
+        onClick={() => act("fund")}
+        type="button"
+      >
+        {t("DashboardMarkets.dvp.actionFund")}
+      </Button>
       <p className="text-tertiary text-[11px] leading-relaxed">
         {t("DashboardMarkets.dvp.fundHint")}
       </p>
@@ -252,43 +255,7 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
           </Callout>
         ) : null}
 
-        {canCancelDvpTrade(trade) ? (
-          <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-            {/* Each action sits with its own explanation. Both are
-                irreversible so both are hold-to-confirm, but only cancel is
-                destructive: settling is the outcome the trade exists for, and
-                styling the two identically would make the intended path look
-                as risky as abandoning the trade. */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-2">
-                <HoldToConfirmButton
-                  className="self-start"
-                  disabled={!canSettleDvpTrade(trade) || pending !== null}
-                  label={t("DashboardMarkets.dvp.actionSettle")}
-                  onConfirm={() => act("settle")}
-                  variant="default"
-                />
-                <p className="text-secondary text-xs leading-relaxed">
-                  {t("DashboardMarkets.dvp.settleHint")}
-                </p>
-                {!canSettleDvpTrade(trade) ? (
-                  <p className="text-tertiary text-xs">{t("DashboardMarkets.dvp.settleBlocked")}</p>
-                ) : null}
-              </div>
-              <div className="flex flex-col gap-2">
-                <HoldToConfirmButton
-                  className="self-start"
-                  disabled={pending !== null}
-                  label={t("DashboardMarkets.dvp.actionCancel")}
-                  onConfirm={() => act("cancel")}
-                />
-                <p className="text-secondary text-xs leading-relaxed">
-                  {t("DashboardMarkets.dvp.cancelHint")}
-                </p>
-              </div>
-            </div>
-          </section>
-        ) : null}
+        <DvpCloseActions onAct={act} pending={pending} trade={trade} />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
