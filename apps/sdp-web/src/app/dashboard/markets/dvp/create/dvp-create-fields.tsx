@@ -227,7 +227,7 @@ export function AmountField({
               })}
             </span>
             <button
-              className="rounded text-accent text-xs underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              className="rounded text-primary text-xs underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               onClick={() => onChange(fromBaseUnits(balance.amount, balance.decimals))}
               type="button"
             >

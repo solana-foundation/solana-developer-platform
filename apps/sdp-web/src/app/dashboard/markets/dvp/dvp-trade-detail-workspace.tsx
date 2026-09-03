@@ -100,7 +100,7 @@ function TransactionLink({
       <dt className="text-tertiary text-xs">{label}</dt>
       <dd className="mt-0.5">
         <a
-          className="inline-flex items-center gap-1 text-accent text-xs underline-offset-2 hover:underline"
+          className="inline-flex items-center gap-1 text-primary text-xs underline underline-offset-2"
           href={explorerTxUrl(signature, cluster)}
           rel="noreferrer noopener"
           target="_blank"
@@ -369,7 +369,7 @@ export function DvpTradeDetailWorkspace({
               <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
                 {t("DashboardMarkets.dvp.onChainAddressHint")}{" "}
                 <a
-                  className="inline-flex items-center gap-0.5 text-accent underline-offset-2 hover:underline"
+                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
                   href={explorerAddressUrl(trade.swapDvp, cluster)}
                   rel="noreferrer noopener"
                   target="_blank"
@@ -392,7 +392,7 @@ export function DvpTradeDetailWorkspace({
               <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
                 {t("DashboardMarkets.dvp.settlementAuthorityHint")}{" "}
                 <a
-                  className="inline-flex items-center gap-0.5 text-accent underline-offset-2 hover:underline"
+                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
                   href={explorerAddressUrl(trade.settlementAuthority, cluster)}
                   rel="noreferrer noopener"
                   target="_blank"
