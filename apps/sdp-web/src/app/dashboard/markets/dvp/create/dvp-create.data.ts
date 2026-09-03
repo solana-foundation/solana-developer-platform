@@ -13,9 +13,12 @@ export interface DvpCreateOption {
   /** The mint address, which is what the API actually takes. */
   mint: string;
   label: string;
-  tokenProgram: string;
-  /** Extensions the DvP program refuses; present means the token is unusable. */
-  blockedReason: string | null;
+  /**
+   * Lets the form take a human amount and convert it. Null when unknown, in
+   * which case the field falls back to base units rather than guessing a scale
+   * and moving the wrong quantity.
+   */
+  decimals: number | null;
 }
 
 export interface DvpCreateWallet {
@@ -31,12 +34,21 @@ export interface DvpCreateContext {
   error: string | null;
 }
 
+/**
+ * The subset of `/v1/issuance/tokens` this form uses.
+ *
+ * Mirrors `RawToken` in `issuance-tokens.data.ts` rather than being guessed:
+ * the list carries no token program and its `extensions` is an object about
+ * the permanent delegate, NOT the Token-2022 extension set. So it cannot tell
+ * us whether DvP will accept a mint, and pretending otherwise would put a
+ * confident wrong answer in front of someone.
+ */
 interface TokenRow {
+  id?: string;
   mintAddress?: string | null;
   name?: string | null;
   symbol?: string | null;
-  tokenProgram?: string | null;
-  extensions?: string[] | null;
+  decimals?: number;
 }
 
 interface WalletRow {
@@ -45,23 +57,12 @@ interface WalletRow {
   label?: string | null;
 }
 
-/**
- * Extensions the DvP swap program refuses at CreateDvp and SettleDvp alike.
- *
- * Mirrors the server-side deny-list. Shown here so a token that cannot be
- * traded is visibly unusable at the point of choosing, rather than a 400 after
- * filling in the whole form.
- */
-const BLOCKED_EXTENSIONS: Readonly<Record<string, string>> = {
-  transferFee: "transfer fee",
-  interestBearing: "interest-bearing",
-  scaledUiAmount: "scaled display amount",
-  nonTransferable: "non-transferable",
-};
-
-function blockedReason(extensions: string[] | null | undefined): string | null {
-  const hit = (extensions ?? []).find((extension) => extension in BLOCKED_EXTENSIONS);
-  return hit ? BLOCKED_EXTENSIONS[hit] : null;
+function mapWallets(rows: WalletRow[]): DvpCreateWallet[] {
+  return rows.flatMap((wallet) =>
+    wallet.id && wallet.publicKey
+      ? [{ id: wallet.id, address: wallet.publicKey, label: wallet.label ?? null }]
+      : []
+  );
 }
 
 /** Never throws: a form that renders with empty pickers beats a 500. */
@@ -79,7 +80,8 @@ export async function fetchDvpCreateContext(
       error?: { message?: string };
     };
     const tokensBody = (await tokensResponse.json().catch(() => ({}))) as {
-      data?: TokenRow[] | { tokens?: TokenRow[] };
+      data?: TokenRow[];
+      error?: { message?: string };
     };
 
     if (!walletsResponse.ok) {
@@ -93,26 +95,34 @@ export async function fetchDvpCreateContext(
     const walletRows = Array.isArray(walletsBody.data)
       ? walletsBody.data
       : (walletsBody.data?.wallets ?? []);
-    const tokenRows = Array.isArray(tokensBody.data)
-      ? tokensBody.data
-      : (tokensBody.data?.tokens ?? []);
+    // A failed token request must not read as "you have no tokens". Silently
+    // returning an empty list would send someone hunting for assets they can
+    // see in Issuance.
+    if (!tokensResponse.ok) {
+      return {
+        wallets: mapWallets(walletRows),
+        tokens: [],
+        error: tokensBody.error?.message ?? `Token list failed (${tokensResponse.status}).`,
+      };
+    }
+    const tokenRows = tokensBody.data ?? [];
 
     return {
-      wallets: walletRows.flatMap((wallet) =>
-        wallet.id && wallet.publicKey
-          ? [{ id: wallet.id, address: wallet.publicKey, label: wallet.label ?? null }]
-          : []
-      ),
+      wallets: mapWallets(walletRows),
       // Only deployed tokens have a mint to trade. A draft has nothing to put
       // in escrow, so offering it would be an invitation to a 400.
+      //
+      // Whether DvP will ACCEPT a mint is deliberately not decided here. The
+      // create endpoint reads the mint on chain and refuses with the offending
+      // extension named, which is strictly better than anything this list could
+      // claim — it carries no extension data at all.
       tokens: tokenRows.flatMap((token) =>
         token.mintAddress
           ? [
               {
                 mint: token.mintAddress,
                 label: token.symbol || token.name || token.mintAddress,
-                tokenProgram: token.tokenProgram ?? "",
-                blockedReason: blockedReason(token.extensions),
+                decimals: typeof token.decimals === "number" ? token.decimals : null,
               },
             ]
           : []

@@ -82,7 +82,7 @@ function LegCard({
 
       {/* One number at full weight; the target is context beneath it. */}
       <p className="mt-3 font-semibold text-2xl text-primary tabular-nums">
-        {leg.funding ? leg.funding.observedAmount : "—"}
+        {leg.funding ? leg.funding.observedAmount : t("DashboardMarkets.dvp.notObserved")}
       </p>
       <p className="mt-0.5 text-tertiary text-xs">
         {t("DashboardMarkets.dvp.targetLabel")} {leg.amount}
@@ -285,7 +285,7 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
           <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
             {/* Each action sits with its own explanation. Both are
                 irreversible so both are hold-to-confirm, but only cancel is
-                destructive — settling is the outcome the trade exists for, and
+                destructive: settling is the outcome the trade exists for, and
                 styling the two identically would make the intended path look
                 as risky as abandoning the trade. */}
             <div className="grid gap-4 sm:grid-cols-2">

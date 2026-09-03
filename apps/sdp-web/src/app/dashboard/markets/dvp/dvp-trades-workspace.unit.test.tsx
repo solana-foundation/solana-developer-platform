@@ -62,12 +62,12 @@ describe("DvpTradesWorkspace", () => {
     expect(markup).toContain('href="/dashboard/markets/dvp/dvp_1"');
   });
 
-  // Showing a bare target for an unobserved leg is indistinguishable from one
-  // that is exactly funded, which is the difference between "waiting" and
-  // "ready".
+  // An unobserved leg shows only its target; an observed one shows what the
+  // escrow holds against it. Rendering both the same way would make "waiting"
+  // and "ready" indistinguishable.
   it("distinguishes an unobserved leg from an exactly funded one", () => {
     const unobserved = render(<DvpTradesWorkspace error={null} trades={[trade()]} />);
-    expect(unobserved).toContain("— / 1000");
+    expect(unobserved).not.toContain("1000 / 1000");
 
     const funded = render(
       <DvpTradesWorkspace

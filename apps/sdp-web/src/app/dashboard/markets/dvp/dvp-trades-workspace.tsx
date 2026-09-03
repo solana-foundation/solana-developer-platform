@@ -31,11 +31,11 @@ import { DVP_TRADES_PAGE_SIZE } from "./dvp-trades.data";
 function LegCell({ leg }: { leg: DvpTradeLeg }) {
   return (
     <div className="min-w-0">
-      {/* Always observed-over-target, with an em dash when nothing has been
-          read. Showing a bare target for an unobserved leg would be
-          indistinguishable from one that is exactly funded. */}
+      {/* Observed-over-target once anything has read the escrow. Before that
+          only the target is shown, with the status column carrying "not
+          checked" so the two are never confused. */}
       <div className="truncate font-medium text-primary text-sm tabular-nums">
-        {leg.funding ? leg.funding.observedAmount : "—"} / {leg.amount}
+        {leg.funding ? `${leg.funding.observedAmount} / ${leg.amount}` : leg.amount}
       </div>
       <div className="truncate text-tertiary text-xs">{shortenAddress(leg.mint)}</div>
     </div>
