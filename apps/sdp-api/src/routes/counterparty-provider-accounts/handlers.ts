@@ -79,6 +79,7 @@ function mapProviderAccount(
   const result: CounterpartyProviderAccount = {
     id: row.id,
     provider: row.provider,
+    kind: row.kind,
     fiatCurrency: row.fiat_currency,
     destinationCountry: row.destination_country,
     paymentRail: row.payment_rail,

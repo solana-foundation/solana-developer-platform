@@ -2,7 +2,17 @@ name: SDP smoke canary
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Environment to smoke"
+        type: choice
+        default: dev
+        options: [dev, stage]
   workflow_call:
+    inputs:
+      target:
+        type: string
+        default: dev
 
 permissions:
   contents: read
@@ -14,13 +24,14 @@ concurrency:
 
 jobs:
   smoke:
-    name: GCP dev dashboard smoke
+    name: GCP ${{ inputs.target || 'dev' }} dashboard smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.repository == 'solana-foundation/solana-developer-platform'
     env:
       DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,SDP_FLAG_ORGANIZATION_ONBOARDING,SDP_FLAG_PRIVY_BYOK,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,PAYMENTS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
-      PLAYWRIGHT_API_URL: https://api-dev.solana.com
+      SMOKE_TARGET: ${{ inputs.target || 'dev' }}
+      PLAYWRIGHT_API_URL: ${{ (inputs.target || 'dev') == 'stage' && 'https://api-stage.solana.com' || 'https://api-dev.solana.com' }}
       PLAYWRIGHT_USE_EXTERNAL_API: "1"
       PLAYWRIGHT_USE_NEXT_START: "1"
       PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
@@ -58,10 +69,19 @@ jobs:
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
 
+      - name: Probe API readiness
+        id: health
+        run: |
+          set -euo pipefail
+          READY=$(curl -sS -m 15 "${PLAYWRIGHT_API_URL}/health/ready")
+          echo "$READY"
+          echo "$READY" | jq -e '.status == "ready" and .checks.database == "ok" and .checks.redis == "ok"' >/dev/null
+
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
-      - name: Build web app against the dev API
+      - name: Build web app against the target API
+        if: env.SMOKE_TARGET != 'stage' || vars.STAGE_SMOKE_READY == 'true'
         env:
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
@@ -70,6 +90,7 @@ jobs:
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run GCP read-only smoke
+        if: env.SMOKE_TARGET != 'stage' || vars.STAGE_SMOKE_READY == 'true'
         id: smoke
         env:
           DOPPLER_CONFIG: dev_ci
@@ -78,6 +99,7 @@ jobs:
         run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run test:e2e:gcp-smoke
 
       - name: Private-channels vendor sandbox smoke
+        if: env.SMOKE_TARGET == 'dev'
         run: pnpm test:private-channels
 
       - name: Report run to Loki
@@ -86,8 +108,7 @@ jobs:
         env:
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
-          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
-          SMOKE_TARGET: dev
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome == 'skipped' && steps.health.outcome || steps.smoke.outcome }}
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: doppler run --scope=. --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh

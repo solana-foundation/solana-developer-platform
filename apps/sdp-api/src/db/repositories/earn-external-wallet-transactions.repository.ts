@@ -39,6 +39,7 @@ export interface EarnExternalWalletTransactionRow {
   /** Token mint for a deposit build, share mint for a withdrawal build. */
   denomination: string;
   amount_requested: string;
+  /** Deposit min shares, or withdrawal min token amount; direction disambiguates the unit. */
   min_shares_out: string | null;
   creates_share_account: boolean;
   /** Base64 wire bytes with empty signature slots, exactly as returned. */
@@ -68,6 +69,7 @@ export interface CreateEarnExternalWalletTransactionInput {
   positionId?: string | null;
   denomination: string;
   amountRequested: string;
+  /** Shared accepted output floor; withdrawal callers pass `minAmountOut` through this field. */
   minSharesOut?: string | null;
   createsShareAccount: boolean;
   unsignedTransaction: string;

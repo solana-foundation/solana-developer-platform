@@ -17,7 +17,7 @@ import {
   isPrivateChannelsEnabled,
 } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
+import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
   APPROVED_WALLET_OPERATIONS_CRON,
@@ -116,7 +116,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
   }
   deps = {
     ...deps,
-    observability: deps.observability ? withCheckinMargin(deps.observability) : undefined,
+    observability: withCheckinMargin(deps.observability ?? noopObservability),
   };
 
   // node-cron's `task.stop()` halts future scheduling but doesn't promise
