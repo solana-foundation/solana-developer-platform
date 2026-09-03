@@ -4,6 +4,7 @@ import { SegmentedControl } from "@solana/design-system/segmented-control";
 import { ArrowLeftRightIcon, ChevronRightIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
@@ -313,7 +314,19 @@ export function DvpTradesWorkspace({
                             <LegCell closed={isDvpTradeClosed(trade)} leg={trade.legs.b} />
                           </TableCell>
                           <TableCell className="text-secondary text-sm">
-                            {shortenAddress(counterparty)}
+                            {/* Shortened to read, copyable in full. A truncated
+                                address is not an address: it cannot be pasted
+                                into a wallet, an explorer or a message back to
+                                the other side, which is most of what anyone
+                                wants this column for. */}
+                            <span className="inline-flex items-center gap-1">
+                              <span className="sr-only">{counterparty}</span>
+                              <span aria-hidden>{shortenAddress(counterparty)}</span>
+                              <WalletAddressCopyButton
+                                address={counterparty}
+                                tooltip={counterparty}
+                              />
+                            </span>
                           </TableCell>
                           <TableCell className="text-secondary text-sm">
                             {formatTimestamp(trade.createdAt, t)}

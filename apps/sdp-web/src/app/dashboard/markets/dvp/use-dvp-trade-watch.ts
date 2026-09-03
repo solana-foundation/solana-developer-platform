@@ -20,8 +20,8 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { isDvpTradeClosed } from "./dvp-trade";
 import type { DvpTrade } from "./dvp-trade";
+import { isDvpTradeClosed } from "./dvp-trade";
 
 /**
  * Short enough that a deposit appears while you are still looking at the page,

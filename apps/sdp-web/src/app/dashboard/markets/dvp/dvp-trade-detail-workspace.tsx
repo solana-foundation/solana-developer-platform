@@ -323,6 +323,8 @@ export function DvpTradeDetailWorkspace({
   // with an ordinary transfer to the escrow — making that a button would mean
   // spending their wallet, which is the whole thing a DvP trade prevents.
   const sdpLeg = sdpLegIsA ? trade.legs.a : trade.legs.b;
+  // The other side's address, which is whichever leg is not ours.
+  const counterparty = sdpLegIsA ? trade.legs.b.party : trade.legs.a.party;
   const canFund =
     (trade.status === "created" || trade.status === "partially_funded") &&
     !sdpLeg.funding?.funded &&
@@ -439,6 +441,38 @@ export function DvpTradeDetailWorkspace({
               </div>
             </dl>
           ) : null}
+
+          {/* Who the trade is WITH. This page carried four addresses — both
+              escrows, the settlement authority and your own wallet — and not
+              the one fact that identifies the trade commercially. It is also
+              the address somebody needs to hand back to the other side to
+              confirm they are looking at the same trade, so it is copyable in
+              full like the rest. */}
+          <dl className="mt-3 border-border-subtle border-t pt-3">
+            <div>
+              <dt className="text-tertiary text-xs">
+                {t("DashboardMarkets.dvp.counterpartyLabel")}
+              </dt>
+              <dd className="mt-0.5">
+                <CopyableAddress
+                  address={counterparty}
+                  label={t("DashboardMarkets.dvp.counterpartyLabel")}
+                />
+              </dd>
+              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+                {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
+                <a
+                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+                  href={explorerAddressUrl(counterparty, cluster)}
+                  rel="noreferrer noopener"
+                  target="_blank"
+                >
+                  {t("DashboardMarkets.dvp.viewOnExplorer")}
+                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+                </a>
+              </p>
+            </div>
+          </dl>
 
           {/* Every transaction this trade produced, in the order it happened.
               The close is the one that matters and was the one not recorded. */}

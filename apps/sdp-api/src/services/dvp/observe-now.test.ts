@@ -68,7 +68,11 @@ describe("observeDvpTradeIfStale", () => {
   // The pairing with the page's poll interval is the whole cost control: most
   // polls must be answered from the row, not from the cluster.
   it("answers from the row when the reading is recent", async () => {
-    await observeDvpTradeIfStale(env, trade({ observedAt: new Date(NOW - 1_000).toISOString() }), NOW);
+    await observeDvpTradeIfStale(
+      env,
+      trade({ observedAt: new Date(NOW - 1_000).toISOString() }),
+      NOW
+    );
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
   });
