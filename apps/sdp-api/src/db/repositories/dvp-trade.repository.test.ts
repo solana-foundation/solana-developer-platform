@@ -373,4 +373,56 @@ describe("DvpTradeRepository (postgres)", () => {
       await expect(repo.getById(bound, "dvp_mine")).resolves.toMatchObject({ id: "dvp_mine" });
     });
   });
+
+  /**
+   * A funding claim is kept through an ambiguous failure on purpose: the
+   * transfer may still land, and releasing it could invite a second transfer on
+   * top of a live one. What was missing is the end of "may still land" — past
+   * the signed transaction's last-valid height it provably cannot, and until
+   * this the claim was held forever and the leg was unfundable with a hand-edit
+   * as the only recovery.
+   */
+  describe("releaseExpiredFundingClaims", () => {
+    async function claimedTrade(expiryHeight: string) {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      await repo.claimLegFunding(created.id, "sig_claim", expiryHeight);
+      return created.id;
+    }
+
+    it("releases a claim whose transaction can no longer land", async () => {
+      const id = await claimedTrade("100");
+
+      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(1);
+      await expect(repo.getById(scope, id)).resolves.toMatchObject({
+        sdpLegFundingSignature: null,
+      });
+    });
+
+    // Inside the window the transfer may still be in flight, and clearing the
+    // claim there is what would let a second one go out on top of it.
+    it("leaves a claim alone while its transaction could still land", async () => {
+      const id = await claimedTrade("300");
+
+      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
+      await expect(repo.getById(scope, id)).resolves.toMatchObject({
+        sdpLegFundingSignature: "sig_claim",
+      });
+    });
+
+    // A released claim is fundable again, which is the whole point.
+    it("lets the leg be claimed again once released", async () => {
+      const id = await claimedTrade("100");
+      await repo.releaseExpiredFundingClaims(200n);
+
+      await expect(repo.claimLegFunding(id, "sig_second", "400")).resolves.toBe(true);
+    });
+
+    it("does not touch a claim on a trade that has closed", async () => {
+      const id = await claimedTrade("100");
+      await repo.recordClose(id, "settled", "sig_close");
+
+      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
+    });
+  });
 });

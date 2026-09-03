@@ -80,6 +80,7 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
+    fundingClaimExpiryHeight: null,
     escrowAAmount: "1000",
     escrowBAmount: "2000",
     escrowAFrozen: false,

@@ -35,6 +35,8 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
     decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
     closeSignature: typeof row.close_signature === "string" ? row.close_signature : null,
+    fundingClaimExpiryHeight:
+      typeof row.funding_claim_expiry_height === "string" ? row.funding_claim_expiry_height : null,
     symbolA: typeof row.symbol_a === "string" ? row.symbol_a : null,
     symbolB: typeof row.symbol_b === "string" ? row.symbol_b : null,
     tokenProgramB: assertString(row.token_program_b, "token_program_b"),
@@ -85,6 +87,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          status, observed_at, sdp_leg_funding_signature,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
+         funding_claim_expiry_height,
          escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
 
@@ -266,18 +269,44 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async claimLegFunding(id: string, signature: string) {
+    async claimLegFunding(id: string, signature: string, expiryHeight: string) {
       // Compare-and-swap: only the request that finds the column NULL may send.
+      // The expiry height rides along so a claim left behind by a failure the
+      // code could not classify has a point at which it is provably dead.
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET sdp_leg_funding_signature = ?, updated_at = sdp_iso_now()
+              SET sdp_leg_funding_signature = ?,
+                  funding_claim_expiry_height = ?,
+                  updated_at = sdp_iso_now()
             WHERE id = ? AND sdp_leg_funding_signature IS NULL
             RETURNING id`
         )
-        .bind(signature, id)
+        .bind(signature, expiryHeight, id)
         .first<{ id: string }>();
       return row !== null;
+    },
+
+    async releaseExpiredFundingClaims(blockHeight: bigint) {
+      // Only claims on trades still open, and only past the height at which the
+      // signed transaction can no longer be accepted. A trade that closed keeps
+      // its record; a claim inside its window is left alone, because the
+      // transfer it belongs to may still land.
+      const result = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET sdp_leg_funding_signature = NULL,
+                  funding_claim_expiry_height = NULL,
+                  updated_at = sdp_iso_now()
+            WHERE sdp_leg_funding_signature IS NOT NULL
+              AND funding_claim_expiry_height IS NOT NULL
+              AND CAST(funding_claim_expiry_height AS NUMERIC) < ?
+              AND status IN ('created', 'partially_funded')
+            RETURNING id`
+        )
+        .bind(blockHeight.toString())
+        .all<{ id: string }>();
+      return (result.results ?? []).length;
     },
 
     async releaseLegFunding(id: string, signature: string) {

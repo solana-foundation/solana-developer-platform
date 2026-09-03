@@ -49,6 +49,8 @@ export interface DvpTradeRow {
   /** Each leg's token symbol from mint metadata, or null when it carries none. */
   symbolA: string | null;
   symbolB: string | null;
+  /** Block height past which a held funding claim is provably dead. */
+  fundingClaimExpiryHeight: string | null;
   /** The transaction that settled or cancelled the trade. Null while open. */
   closeSignature: string | null;
 
@@ -111,6 +113,7 @@ export type DvpTradeInsert = Omit<
   | "escrowAFrozen"
   | "escrowBFrozen"
   | "sdpLegFundingSignature"
+  | "fundingClaimExpiryHeight"
 >;
 
 export interface DvpTradeScope {
@@ -193,9 +196,21 @@ export interface DvpTradeRepository {
    * requests would both see the shortfall and both send, over-funding the
    * escrow. Returns false when another request already holds the claim.
    */
-  claimLegFunding(id: string, signature: string): Promise<boolean>;
+  claimLegFunding(id: string, signature: string, expiryHeight: string): Promise<boolean>;
   /** Releases a claim whose broadcast was definitively rejected. */
   releaseLegFunding(id: string, signature: string): Promise<void>;
+  /**
+   * Releases funding claims that can no longer be live, and reports how many.
+   *
+   * A claim is kept through an ambiguous failure on purpose — the transfer may
+   * still land. But "may still land" has an end: past the signed transaction's
+   * last-valid block height the cluster can never accept it. Before this, a
+   * claim left by an unclassifiable failure was held forever and the leg was
+   * permanently unfundable, recoverable only by editing the table by hand.
+   *
+   * @param blockHeight - Current cluster block height.
+   */
+  releaseExpiredFundingClaims(blockHeight: bigint): Promise<number>;
   /**
    * Frees a `create_failed` row's idempotency key so the same request can be
    * made again.
