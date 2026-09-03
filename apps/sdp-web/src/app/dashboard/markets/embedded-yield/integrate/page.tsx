@@ -21,7 +21,6 @@ export default async function EmbeddedYieldIntegratePage({
   return (
     <EarnIntegrationGuide
       apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-      configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`}
       earnHref={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
       providerAccess={providerAccess}
       strategyCluster={strategyCluster}
