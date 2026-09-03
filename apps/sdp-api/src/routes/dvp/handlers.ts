@@ -17,6 +17,11 @@ import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
+import {
+  estimateSettlementCostLamports,
+  findSettlementFundingShortfall,
+} from "@/services/dvp/settle-preflight";
+import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import type { Env } from "@/types/env";
 import type { DvpCloseResolved } from "./policy";
 import { type createDvpTradeSchema, listDvpTradesQuerySchema } from "./schemas";
@@ -339,6 +344,49 @@ export const listTrades = async (c: AppContext) => {
   });
 };
 
+/**
+ * Whether the settlement authority can pay for the close this trade will need.
+ *
+ * Read on the detail view rather than left for the attempt, because the failure
+ * it prevents is silent until it happens: the authority is provisioned empty,
+ * it pays the fee and the rent for every account settlement creates, and the
+ * first settle in a project failed in simulation with an error naming neither
+ * the account nor the amount.
+ *
+ * Never fatal. This is a readiness hint on a page that has to render either
+ * way; an RPC that will not answer must not take the trade with it.
+ */
+async function readSettlementReadiness(
+  c: AppContext,
+  trade: DvpTradeRow
+): Promise<{ address: string; balance: string; required: string; funded: boolean } | null> {
+  try {
+    const settlement = await readDvpSettlementWallet(c.env, {
+      organizationId: trade.organizationId,
+      projectId: trade.projectId,
+    });
+    if (!settlement) {
+      return null;
+    }
+    // Four accounts is settlement's worst case, which is the number worth
+    // quoting: telling somebody they are ready and then asking for more mid-flow
+    // is worse than asking for the ceiling once.
+    const shortfall = await findSettlementFundingShortfall(
+      solanaRpc.createRpc(c.env),
+      settlement.address as Address,
+      4
+    );
+    return {
+      address: settlement.address,
+      balance: shortfall ? shortfall.balance.toString() : "0",
+      required: (shortfall?.required ?? estimateSettlementCostLamports(4)).toString(),
+      funded: shortfall === null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const getTrade = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -362,8 +410,16 @@ export const getTrade = async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
-  const wallets = await readSdpWallets(c.env, [trade.sdpWalletId]);
-  return success(c, { trade: toTradeResponse(trade, wallets.get(trade.sdpWalletId)) });
+  const [wallets, settlementReadiness] = await Promise.all([
+    readSdpWallets(c.env, [trade.sdpWalletId]),
+    readSettlementReadiness(c, trade),
+  ]);
+  return success(c, {
+    trade: {
+      ...toTradeResponse(trade, wallets.get(trade.sdpWalletId)),
+      settlementReadiness,
+    },
+  });
 };
 
 /**

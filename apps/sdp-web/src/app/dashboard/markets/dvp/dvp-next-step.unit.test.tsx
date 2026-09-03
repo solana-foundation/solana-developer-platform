@@ -61,6 +61,7 @@ function trade({
     createSignature: null,
     closeSignature: null,
     sdpWallet: null,
+    settlementReadiness: null,
     fundingSignature: null,
     observedAt: null,
     createdAt: "2026-09-03T00:00:00.000Z",

@@ -93,6 +93,9 @@ export async function getOrCreateDvpSettlementWallet(
     // in a project fail, because creating one provisions this wallet.
     legacyConfigProjectId: scope.projectId,
     label: SETTLEMENT_WALLET_LABEL,
+    // Marked, so policy and the wallets list can treat it as the privileged
+    // account it is rather than showing it beside somebody's transfer wallets.
+    purpose: "dvp_settlement_authority",
   });
 
   const claimed = await getDb(env)
@@ -159,6 +162,19 @@ async function readMappedWalletId(env: Env, scope: Scope): Promise<string | null
  * wallet to still be active: a deactivated settlement wallet cannot sign, and
  * returning its address would produce trades that are born unsettleable.
  */
+/**
+ * The project's settlement wallet, or null when it has none yet.
+ *
+ * Exported for surfaces that need to REPORT on the authority without causing
+ * one to exist: reading a trade must not provision a wallet as a side effect.
+ */
+export async function readDvpSettlementWallet(
+  env: Env,
+  scope: Scope
+): Promise<DvpSettlementWallet | null> {
+  return readSettlementWallet(env, scope);
+}
+
 async function readSettlementWallet(env: Env, scope: Scope): Promise<DvpSettlementWallet | null> {
   const row = await getDb(env)
     .prepare(

@@ -55,8 +55,10 @@ async function runPreflight(): Promise<void> {
     : !env.KORA_RPC_URL && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
 
   if (!koraInScope && !spcInScope && !dvpInScope) {
+    // biome-ignore lint/security/noSecrets: environment variable names in a help message, not a secret.
+    const suites = "SDP_INTEGRATION_SUITE=kora|spc|dvp";
     throw new Error(
-      "Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with SDP_INTEGRATION_SUITE=kora|spc|dvp."
+      `Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with ${suites}.`
     );
   }
 

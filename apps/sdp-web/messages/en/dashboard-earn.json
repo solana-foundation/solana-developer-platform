@@ -390,7 +390,9 @@
       "filterClosed": "Finished",
       "filterCount": "{shown} of {total}",
       "filterNoMatches": "No trades match these filters.",
-      "filterClear": "Clear filters"
+      "filterClear": "Clear filters",
+      "authorityUnfundedTitle": "The settlement authority needs SOL",
+      "authorityUnfundedBody": "Settling pays the network fee and the rent for the token accounts it has to create, and this project's settlement authority cannot cover that yet. Send at least {sol} SOL to {address}, then settle."
     }
   },
   "DashboardEarn": {

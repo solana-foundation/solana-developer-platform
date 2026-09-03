@@ -79,6 +79,13 @@ function CopyableAddress({ address, label }: { address: string; label: string })
   );
 }
 
+/** Lamports as SOL, to three places — enough to read a rent figure. */
+function formatLamports(lamports: bigint): string {
+  const whole = lamports / 1_000_000_000n;
+  const fraction = (lamports % 1_000_000_000n).toString().padStart(9, "0").slice(0, 3);
+  return `${whole}.${fraction}`;
+}
+
 /**
  * One transaction, linked to an explorer.
  *
@@ -476,6 +483,23 @@ export function DvpTradeDetailWorkspace({
               <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
               {t("DashboardMarkets.dvp.surplusDescription")}
             </span>
+          </Callout>
+        ) : null}
+
+        {/* Before the button, not after the failure. The authority is minted
+            empty and pays the fee and the account rent for every close, so the
+            first settle in a project failed in simulation with an error that
+            named neither the account nor the amount. Shown only while the trade
+            can still be closed — on a settled one it is history. */}
+        {!tradeClosed && trade.settlementReadiness && !trade.settlementReadiness.funded ? (
+          <Callout live title={t("DashboardMarkets.dvp.authorityUnfundedTitle")} variant="warning">
+            {t("DashboardMarkets.dvp.authorityUnfundedBody", {
+              address: trade.settlementReadiness.address,
+              sol: formatLamports(
+                BigInt(trade.settlementReadiness.required) -
+                  BigInt(trade.settlementReadiness.balance)
+              ),
+            })}
           </Callout>
         ) : null}
 
