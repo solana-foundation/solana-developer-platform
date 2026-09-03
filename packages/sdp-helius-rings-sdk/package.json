@@ -22,7 +22,7 @@
     "@solana/kit": "7.1.1"
   },
   "devDependencies": {
-    "@types/node": "26.1.2",
-    "vitest": "4.1.10"
+    "@types/node": "26.4.0",
+    "vitest": "4.1.11"
   }
 }
