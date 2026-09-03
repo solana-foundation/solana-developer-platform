@@ -185,6 +185,19 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
+  // Re-read the binding from the database before anything irreversible.
+  //
+  // The scope used by the gate came from the request's auth context, which can
+  // be up to an hour of cached KV. A binding revoked inside that window would
+  // still resolve the trade and still settle it — and settle moves both legs at
+  // once and closes the trade permanently, so a stale read here is not a
+  // read-authorization slip, it is an irreversible spend by a revoked key.
+  // Same guard Payments uses before a money-moving write, and the same one
+  // create already runs.
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), resolved.trade.sdpWalletId, [
+    "payments:write",
+  ]);
+
   const result = await closeDvpTrade(c, resolved.trade, action);
 
   return success(c, {

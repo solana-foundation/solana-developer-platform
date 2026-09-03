@@ -57,6 +57,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     status: row.status as DvpTradeStatus,
     observedAt: (row.observed_at as string | null) ?? null,
     idempotencyKey: (row.idempotency_key as string | null) ?? null,
+    idempotencyFingerprint: (row.idempotency_fingerprint as string | null) ?? null,
     createSignature: (row.create_signature as string | null) ?? null,
     createLastValidBlockHeight: (row.create_last_valid_block_height as string | null) ?? null,
     escrowAAmount: (row.escrow_a_amount as string | null) ?? null,
@@ -74,7 +75,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, sdp_side, sdp_wallet_id,
-         status, observed_at, idempotency_key,
+         status, observed_at, idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height,
          escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
@@ -113,14 +114,16 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
               escrow_a, escrow_b, sdp_side, sdp_wallet_id,
-              idempotency_key, create_signature, create_last_valid_block_height
+              idempotency_key, idempotency_fingerprint,
+              create_signature, create_last_valid_block_height
             ) VALUES (
               ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?
+              ?, ?, ?, ?,
+              ?, ?, ?, ?
             )
             RETURNING ${SELECT_COLUMNS}`
         )
@@ -149,6 +152,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           row.sdpSide,
           row.sdpWalletId,
           row.idempotencyKey,
+          row.idempotencyFingerprint,
           row.createSignature,
           row.createLastValidBlockHeight
         )

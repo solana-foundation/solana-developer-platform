@@ -46,9 +46,10 @@ import {
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeSide } from "@/db/repositories";
-import { badRequest } from "@/lib/errors";
+import { badRequest, conflict } from "@/lib/errors";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
+import { dvpCreateFingerprint } from "./fingerprint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
@@ -81,6 +82,49 @@ export interface CreateDvpTradeInput {
   idempotencyKey: string | null;
 }
 
+/**
+ * Confirms a replay is the SAME request, not merely one carrying the same key.
+ *
+ * A key is a claim, not a proof. Reused with different terms it would hand back
+ * the earlier trade — and since that trade names a custody wallet and publishes
+ * escrow addresses, a wallet-scoped caller would receive a wallet and escrows
+ * outside their scope. `sdpWalletId` is part of the fingerprint precisely so
+ * that crossing cannot happen quietly.
+ */
+function assertOwnReplay(trade: DvpTradeRow, fingerprint: string | null): DvpTradeRow {
+  if (trade.idempotencyFingerprint !== fingerprint) {
+    throw conflict("Idempotency key already used with different request payload");
+  }
+  return trade;
+}
+
+/**
+ * Inserts the trade, or returns the one a concurrent keyed request just wrote.
+ *
+ * Two overlapping retries both miss the lookup above and both reach the insert.
+ * The unique index rejects the loser, and without this it would surface as a
+ * 500 — the exact case the key exists to make safe.
+ */
+async function insertOrReplay(
+  repository: ReturnType<typeof createDvpTradeRepository>,
+  idempotencyKey: string | null,
+  fingerprint: string | null,
+  row: Parameters<ReturnType<typeof createDvpTradeRepository>["create"]>[0]
+): Promise<DvpTradeRow> {
+  try {
+    return await repository.create(row);
+  } catch (error) {
+    if (!idempotencyKey) {
+      throw error;
+    }
+    const winner = await repository.getByIdempotencyKey(row.projectId, idempotencyKey);
+    if (!winner) {
+      throw error;
+    }
+    return assertOwnReplay(winner, fingerprint);
+  }
+}
+
 /** Derives the per-trade nonce tombstone, seeds `[b"nonce", swap_dvp]`. */
 async function findNonceTombstone(swapDvp: Address): Promise<Address> {
   const [tombstone] = await getProgramDerivedAddress({
@@ -105,10 +149,11 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // fresh nonce, lands at a different address, and leaves the first trade on
   // chain with a published escrow nobody is watching. Returning the original is
   // the only answer that does not create a second obligation.
+  const fingerprint = input.idempotencyKey ? dvpCreateFingerprint(input) : null;
   if (input.idempotencyKey) {
     const replayed = await repository.getByIdempotencyKey(input.projectId, input.idempotencyKey);
     if (replayed) {
-      return replayed;
+      return assertOwnReplay(replayed, fingerprint);
     }
   }
 
@@ -237,7 +282,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // fresh nonce and derives a different address. So a crash between send and
   // insert would strand a real on-chain trade permanently. Same safety order as
   // the Earn vault services — build, sign, record, send.
-  const recorded = await repository.create({
+  const recorded = await insertOrReplay(repository, input.idempotencyKey, fingerprint, {
     id: `dvp_${crypto.randomUUID().replace(/-/g, "")}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -264,11 +309,19 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     sdpSide: input.sdpSide,
     sdpWalletId: input.sdpWalletId,
     idempotencyKey: input.idempotencyKey,
+    idempotencyFingerprint: fingerprint,
     createSignature: signature,
     // Stored so the reconciler can tell a create that is still in flight from
     // one that can never land, rather than inferring it from elapsed time.
     createLastValidBlockHeight: lastValidBlockHeight.toString(),
   });
+
+  // A concurrent keyed request won the insert, so the row we got back is theirs
+  // and their transaction is the one on the network. Broadcasting ours too
+  // would create the second trade this key exists to prevent.
+  if (recorded.createSignature !== signature) {
+    return recorded;
+  }
 
   try {
     await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
