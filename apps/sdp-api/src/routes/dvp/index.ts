@@ -2,10 +2,12 @@ import { type Context, Hono, type Next } from "hono";
 import { AppError } from "@/lib/errors";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import { createTrade, getTrade, listTrades } from "./handlers";
+import { cancelTrade, createTrade, getTrade, listTrades, settleTrade } from "./handlers";
+import { extractDvpClosePolicyCandidate } from "./policy";
 import { createDvpTradeSchema } from "./schemas";
 
 const dvp = new Hono<{ Bindings: Env }>();
@@ -40,5 +42,24 @@ dvp.post(
 );
 dvp.get("/trades", requirePermissions("payments:read"), listTrades);
 dvp.get("/trades/:tradeId", requirePermissions("payments:read"), getTrade);
+
+// Settle and cancel are the only two actions the settlement authority can take,
+// and both are irreversible: settle delivers both legs and closes the trade,
+// cancel refunds both and closes it. They go through the policy gate like any
+// other custody spend, so an organization can require approval on a transaction
+// that moves both sides of a trade at once. They are separate operation types
+// because allowing an unwind is not the same as allowing a settlement.
+dvp.post(
+  "/trades/:tradeId/settle",
+  requirePermissions("payments:write"),
+  policyGate({ extract: (c) => extractDvpClosePolicyCandidate(c, "settle") }),
+  settleTrade
+);
+dvp.post(
+  "/trades/:tradeId/cancel",
+  requirePermissions("payments:write"),
+  policyGate({ extract: (c) => extractDvpClosePolicyCandidate(c, "cancel") }),
+  cancelTrade
+);
 
 export default dvp;

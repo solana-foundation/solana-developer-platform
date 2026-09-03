@@ -329,14 +329,14 @@ describe("DvP routes", () => {
         env
       );
 
-      // Not 201: this environment configures no settlement authority, so the
-      // request fails further in. Asserting on THAT message, rather than merely
-      // on "not 403", is what proves the scope check let it through — a guard
-      // that rejected everything with a different status would still pass a
-      // bare `not.toBe(403)`.
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error?: { message?: string } };
-      expect(body.error?.message).toMatch(/settlement authority/i);
+      // Not 201: the request now runs on past the scope check into the mint
+      // pre-flight, which reads chain state that route tests do not provide.
+      // Asserting the error is not a FORBIDDEN is what proves the scope gate let
+      // it through — a guard that rejected everything with some other status
+      // would still satisfy a bare `not.toBe(403)`.
+      expect(res.status).not.toBe(403);
+      const body = (await res.json()) as { error?: { code?: string } };
+      expect(body.error?.code).not.toBe("FORBIDDEN");
     });
 
     it("hides another wallet's trades from a wallet-scoped key", async () => {

@@ -11,7 +11,8 @@ type ValueMovingFamily =
   | "payments"
   | "ramps"
   | "custody"
-  | "earn";
+  | "earn"
+  | "dvp";
 
 interface OrderedBoundary {
   file: string;
@@ -160,6 +161,36 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
+    /**
+     * DvP settle and cancel. Registered WITH the routes rather than after them,
+     * following the Earn exit's example: a money-moving surface born governed,
+     * not retrofitted once someone notices.
+     */
+    family: "dvp",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/dvp/policy.ts",
+      evidence: "const settlement = await getOrCreateDvpSettlementWallet(c.env, {",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/dvp/index.ts",
+      section: '"/trades/:tradeId/settle",',
+      before: 'extract: (c) => extractDvpClosePolicyCandidate(c, "settle")',
+      after: "settleTrade",
+    },
+    replay: [
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/services/dvp/settle.test.ts",
+        evidence: "refuses to settle a trade that is already closed",
+      },
+      {
+        mode: "fresh_blockhash_per_attempt",
+        file: "apps/sdp-api/src/services/dvp/settle.test.ts",
+        evidence: "fences the approved operation before the bytes go out",
+      },
+    ],
+  },
+  {
     family: "custody",
     trustedContext: {
       file: "apps/sdp-api/src/routes/private-channels/transfer-access.ts",
@@ -256,6 +287,12 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
+  // DvP signs from the project's settlement-authority custody wallet. Both
+  // sinks return fully signed bytes without sending, so the signature is known
+  // before anything reaches the network — which is what lets create record the
+  // trade, and settle cross the approved-operation fence, before broadcasting.
+  "apps/sdp-api/src/services/dvp/create.ts": ["signTransactionMessageWithSigners"],
+  "apps/sdp-api/src/services/dvp/settle.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/payments/signed-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
@@ -277,6 +314,9 @@ const valueMovingSourceRoots = [
   // missing here, which is why the inventory below did not notice a whole
   // money-moving surface — the omission the `earn` contract above now pins.
   "apps/sdp-api/src/services/earn",
+  // DvP settles and cancels sign from the project's settlement-authority
+  // custody wallet, so it is a money-moving sink like the ones above.
+  "apps/sdp-api/src/services/dvp",
   "packages/sdp-issuance/src",
   "packages/sdp-solana/src",
 ];
@@ -339,6 +379,7 @@ describe("value-moving authorization and replay conformance", () => {
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
+      "dvp",
       "earn",
       "earn",
       "issuance",
