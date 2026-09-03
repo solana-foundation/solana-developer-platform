@@ -118,4 +118,14 @@ describe("DvpCreateWorkspace", () => {
 
     expect(screen.getByText("Token list failed (500).")).toBeTruthy();
   });
+
+  // "ATD (6 decimals)" is a fact about how the chain stores the amount, not a
+  // reason to choose one token over another — and with both legs usually at six
+  // it was the same suffix on every option. The scale is stated where it can
+  // act on the number: the amount field's hint and its conversion line.
+  it("names the token in the picker without its decimal count", () => {
+    const { container } = renderForm();
+
+    expect(container.textContent).not.toContain("decimals)");
+  });
 });

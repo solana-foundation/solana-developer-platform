@@ -114,14 +114,18 @@ export function MintField({
         >
           {options.map((option) => (
             <SelectItem key={option.mint} value={option.mint}>
+              {/* The token, and nothing else. This read "ATD (6 decimals)",
+                  which is a fact about how the chain stores the amount and not
+                  a reason to pick one token over another — and with both legs
+                  usually at six it was the same suffix on every option, so the
+                  only varying part was pushed left by a constant. The scale is
+                  already stated where it can act on the number: the amount
+                  field's own hint says how you write it, and the conversion
+                  line under it says what will be sent. It is left over from
+                  when this field took base units. */}
               <span className="flex items-center gap-2">
                 <TokenMark mint={option.mint} size="xs" symbol={option.label} />
-                {option.decimals == null
-                  ? option.label
-                  : t("DashboardMarkets.dvp.mintOption", {
-                      label: option.label,
-                      decimals: String(option.decimals),
-                    })}
+                {option.label}
               </span>
             </SelectItem>
           ))}

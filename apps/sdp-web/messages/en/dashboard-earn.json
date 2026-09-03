@@ -328,7 +328,6 @@
       "fieldWalletHintWithAddress": "{address}. Holds your side of the trade, pays the fees, and pays rent for the escrows.",
       "fieldCounterpartyInvalid": "That does not look like a Solana address. They are 32 to 44 base58 characters.",
       "fieldRefPlaceholder": "INV-2026-0042",
-      "mintOption": "{label} ({decimals} decimals)",
       "sideAssetTitle": "You deliver the asset",
       "sideAssetDetail": "You fund the {deliver} leg. They fund {receive}.",
       "sideCashTitle": "You deliver the cash",
