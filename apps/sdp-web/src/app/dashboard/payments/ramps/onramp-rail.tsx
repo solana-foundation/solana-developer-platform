@@ -80,6 +80,7 @@ export function OnrampRail({
   const verificationPending =
     wizard.currentStepId === "PROVIDER" &&
     (wizard.onboarding?.status === "customer_verifying" ||
+      wizard.onboarding?.status === "customer_funding_account_provisioning" ||
       wizard.onboarding?.status === "funding_account_provisioning");
 
   const summaryDetails = [

@@ -375,7 +375,7 @@ export function validateBvnkCounterparty(
   counterparty: Counterparty,
   options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  const { direction, providerData, cryptoToken, fiatCurrency } = options;
+  const { direction, providerData, fiatCurrency } = options;
   const collectedResidence = options.collectedData?.["taxIdentification.taxResidenceCountryCode"];
   const collectedCountry =
     collectedResidence !== undefined && isCountryCode(collectedResidence)
@@ -411,7 +411,11 @@ export function validateBvnkCounterparty(
     }
     const wallet = readBvnkOfframpWallet(providerData, fiatCurrency);
     if (!wallet || !isBvnkWalletActive(wallet.status)) {
-      return { provider: "bvnk", direction, status: "funding_account_provisioning" };
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_funding_account_provisioning",
+      };
     }
     return readyCounterparty("bvnk", direction);
   }
@@ -422,18 +426,6 @@ export function validateBvnkCounterparty(
       direction,
       "BVNK on-ramp supports individual counterparties only."
     );
-  }
-  if (options.providerCustomerReference !== undefined) {
-    if (!cryptoToken) {
-      throw badRequest("cryptoToken is required for BVNK on-ramp requirements.");
-    }
-    if (!fiatCurrency) {
-      throw badRequest("fiatCurrency is required for BVNK on-ramp requirements.");
-    }
-    if (!options.destinationWalletAddress) {
-      throw badRequest("destinationWallet is required for BVNK on-ramp requirements.");
-    }
-    return { provider: "bvnk", direction, status: "onboarding_not_started" };
   }
   return {
     provider: "bvnk",

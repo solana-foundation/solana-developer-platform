@@ -107,11 +107,10 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "lightspark"; status: "onboarding_not_started" }
   | { provider: "lightspark"; status: "collect_counterparty"; fields: RequirementField[] }
   | { provider: "lightspark"; status: "collect_account"; payout: PayoutRequirementTree }
-  | { provider: "bvnk"; status: "onboarding_not_started" }
   | { provider: "bvnk"; status: "collect_counterparty"; fields: RequirementField[] }
   | {
       provider: "bvnk";
-      status: "agreement_required";
+      status: "customer_agreement_required";
       /** Agreements are minted JIT per response and their URLs are never persisted. */
       agreements: {
         id: string;
@@ -120,7 +119,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
         declinable: boolean;
       }[];
     }
-  | { provider: "bvnk"; status: "pending_agreement_acceptance" }
+  | { provider: "bvnk"; status: "customer_pending_agreement_acceptance" }
   | {
       provider: "bvnk";
       status: "customer_verification_required";
@@ -129,8 +128,8 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
     }
   | { provider: "bvnk"; status: "customer_verifying" }
   | { provider: "bvnk"; status: "customer_verification_failed" }
-  | { provider: "bvnk"; status: "funding_account_provisioning" }
-  | { provider: "bvnk"; status: "provisioning_failed" }
+  | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
+  | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
   | { provider: "mural"; status: "onboarding_not_started" }
   | { provider: "mural"; status: "terms_of_service_required"; termsOfServiceUrl: string }
   | { provider: "mural"; status: "customer_verification_required"; verificationUrl: string }

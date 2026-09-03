@@ -842,7 +842,7 @@ export async function advanceCounterpartyRequirements(
           return {
             provider: "bvnk",
             direction: input.direction,
-            status: "funding_account_provisioning",
+            status: "customer_funding_account_provisioning",
           };
         }
         return readyCounterparty("bvnk", input.direction);

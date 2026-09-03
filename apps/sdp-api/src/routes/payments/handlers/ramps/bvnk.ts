@@ -272,7 +272,7 @@ async function persistBvnkOfframpWallet(
  *
  * A freshly-created wallet is not immediately ACTIVE; when a stored wallet is
  * still inactive its status is refreshed from BVNK so the requirements flow can
- * keep returning `funding_account_provisioning` until BVNK activates it.
+ * keep returning `customer_funding_account_provisioning` until BVNK activates it.
  */
 export async function ensureBvnkOfframpWallet(
   c: AppContext,
@@ -442,7 +442,7 @@ async function bvnkAgreementDetails(
   return {
     provider: "bvnk",
     direction,
-    status: "agreement_required",
+    status: "customer_agreement_required",
     agreements: agreementDetails,
   };
 }
@@ -485,7 +485,11 @@ export async function bvnkCustomerRequirementsFromMetadata(
   const pending = entries.filter(([, entry]) => entry.status.toUpperCase() !== "ACCEPTED");
   if (pending.length > 0) {
     if (metadata.status === undefined) {
-      return { provider: "bvnk", direction, status: "pending_agreement_acceptance" };
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_pending_agreement_acceptance",
+      };
     }
     const details = await Promise.all(
       pending.map(async ([id]) => {
@@ -500,7 +504,12 @@ export async function bvnkCustomerRequirementsFromMetadata(
         };
       })
     );
-    return { provider: "bvnk", direction, status: "agreement_required", agreements: details };
+    return {
+      provider: "bvnk",
+      direction,
+      status: "customer_agreement_required",
+      agreements: details,
+    };
   }
   if (metadata.status === undefined) {
     return {
@@ -757,7 +766,11 @@ export async function ensureBvnkCustomer(
     );
     await persistBvnkAgreementState(c, counterparty, projectId, agreements.id, entries);
     return {
-      requirements: { provider: "bvnk", direction, status: "pending_agreement_acceptance" },
+      requirements: {
+        provider: "bvnk",
+        direction,
+        status: "customer_pending_agreement_acceptance",
+      },
     };
   }
   const entries: BvnkAgreementEntries = Object.fromEntries(

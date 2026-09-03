@@ -855,7 +855,7 @@ describe("Counterparties Routes", () => {
     it("returns JIT agreement content without creating or persisting a customer", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_agreements" });
       const counterparty = (await created.json()).data.counterparty;
-      const agreementId = "agreement_required_1";
+      const agreementId = "agreement_1";
       const collectedData = {
         firstName: "Ada",
         lastName: "Lovelace",
@@ -928,7 +928,7 @@ describe("Counterparties Routes", () => {
         expect((await response.json()).data).toEqual({
           provider: "bvnk",
           direction: "onramp",
-          status: "agreement_required",
+          status: "customer_agreement_required",
           agreements: [
             {
               id: agreementId,
@@ -1051,7 +1051,7 @@ describe("Counterparties Routes", () => {
           env
         );
         expect(response.status).toBe(200);
-        expect((await response.json()).data.status).toBe("pending_agreement_acceptance");
+        expect((await response.json()).data.status).toBe("customer_pending_agreement_acceptance");
         expect(requests).toEqual(["/platform/v2/agreements", "/platform/v2/agreements/actions"]);
         expect(requests).not.toContain("/platform/v3/contacts");
         expect(requests).not.toContain("/platform/v2/customers");
@@ -1309,7 +1309,7 @@ describe("Counterparties Routes", () => {
           env
         );
         expect(response.status).toBe(200);
-        expect((await response.json()).data.status).toBe("agreement_required");
+        expect((await response.json()).data.status).toBe("customer_agreement_required");
         expect(paths).toEqual(["/platform/v2/agreements/agreement-revoked/content"]);
 
         expect(

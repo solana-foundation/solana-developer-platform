@@ -302,6 +302,8 @@
       "receiveTitle": "Receive funds onchain"
     },
     "bvnk": {
+      "agreementPendingTitle": "Confirming your agreement",
+      "agreementPendingDescription": "We're registering your acceptance with BVNK — this only takes a moment.",
       "verificationRequiredTitle": "Verify your identity",
       "verificationRequiredDescription": "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” to get started — this page refreshes automatically once you're approved, and your instructions will appear right here.",
       "verificationInReviewTitle": "Verification in review",

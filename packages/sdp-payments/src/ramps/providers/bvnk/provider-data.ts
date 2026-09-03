@@ -728,7 +728,11 @@ export function bvnkOnboardingRequirements(
     case "verification_failed":
       return { provider: "bvnk", direction, status: "customer_verification_failed" };
     case "provisioning":
-      return { provider: "bvnk", direction, status: "funding_account_provisioning" };
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_funding_account_provisioning",
+      };
     default: {
       const exhaustive: never = resolution.onboardingStatus;
       throw internalError(`Unhandled BVNK onboarding status: ${String(exhaustive)}`);

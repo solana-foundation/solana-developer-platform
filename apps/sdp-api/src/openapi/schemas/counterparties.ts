@@ -207,7 +207,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
-      provider: z.enum(["lightspark", "bvnk", "mural"]),
+      provider: z.enum(["lightspark", "mural"]),
       status: z.literal("onboarding_not_started"),
     }),
     z.object({
@@ -219,7 +219,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     z.object({
       ...requirementBase,
       provider: z.literal("bvnk"),
-      status: z.literal("agreement_required"),
+      status: z.literal("customer_agreement_required"),
       agreements: z.array(
         z.object({
           id: z.string(),
@@ -232,7 +232,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     z.object({
       ...requirementBase,
       provider: z.literal("bvnk"),
-      status: z.literal("pending_agreement_acceptance"),
+      status: z.literal("customer_pending_agreement_acceptance"),
     }),
     z.object({
       ...requirementBase,
@@ -243,16 +243,22 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     z.object({
       ...requirementBase,
       provider: z.enum(["bvnk", "mural"]),
-      status: z.enum([
-        "customer_verifying",
-        "customer_verification_failed",
-        "funding_account_provisioning",
-      ]),
+      status: z.enum(["customer_verifying", "customer_verification_failed"]),
     }),
     z.object({
       ...requirementBase,
       provider: z.literal("bvnk"),
-      status: z.literal("provisioning_failed"),
+      status: z.literal("customer_funding_account_provisioning"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("mural"),
+      status: z.literal("funding_account_provisioning"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("customer_funding_account_provisioning_failed"),
     }),
   ]),
   {
