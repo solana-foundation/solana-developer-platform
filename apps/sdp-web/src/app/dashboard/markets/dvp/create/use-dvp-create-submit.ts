@@ -28,9 +28,25 @@ const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
  * Hashed rather than concatenated only to keep the header short; every field
  * that distinguishes one trade from another is inside the digest, which is what
  * makes a double submit a replay and a changed asset a new request.
+ *
+ * Deliberately NOT `crypto.subtle`. That is async and, more importantly, only
+ * exists in a secure context — a dashboard reached over plain http on a LAN
+ * address would have no `subtle` at all and every create would throw. Nothing
+ * else in this app depends on it, and an idempotency key needs to be
+ * deterministic, not unforgeable: the API re-derives its own SHA-256
+ * fingerprint server-side and refuses a mismatched replay, so this value is a
+ * lookup handle rather than a security boundary.
+ *
+ * 128-bit FNV-1a over the JSON encoding. JSON is what makes the input
+ * injective: a `refString` is free text and could otherwise contain whatever
+ * separator a plain join picked, letting two different trades produce one key.
  */
-async function createIdempotencyKey(request: DvpCreateRequest): Promise<string> {
-  const material = [
+const FNV_OFFSET = 0x6c62272e07bb014262b821756295c58dn;
+const FNV_PRIME = 0x0000000001000000000000000000013bn;
+const FNV_MASK = (1n << 128n) - 1n;
+
+function createIdempotencyKey(request: DvpCreateRequest): string {
+  const material = JSON.stringify([
     request.walletId,
     request.sdpSide,
     request.counterparty,
@@ -42,13 +58,13 @@ async function createIdempotencyKey(request: DvpCreateRequest): Promise<string> 
     request.amountB,
     request.expiry,
     request.refString,
-  ].join(" ");
+  ]);
 
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
-  const hex = Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  return `dvp-create-${hex}`;
+  let hash = FNV_OFFSET;
+  for (const byte of new TextEncoder().encode(material)) {
+    hash = ((hash ^ BigInt(byte)) * FNV_PRIME) & FNV_MASK;
+  }
+  return `dvp-create-${hash.toString(16).padStart(32, "0")}`;
 }
 
 export interface DvpCreateRequest {
@@ -83,7 +99,7 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
     try {
       // One logical request: a double submit, or a retry after a dropped
       // connection, must not create a second trade at a second address.
-      const idempotencyKey = await createIdempotencyKey(request);
+      const idempotencyKey = createIdempotencyKey(request);
       const response = await fetch("/api/dashboard/markets/dvp/trades", {
         method: "POST",
         headers: {

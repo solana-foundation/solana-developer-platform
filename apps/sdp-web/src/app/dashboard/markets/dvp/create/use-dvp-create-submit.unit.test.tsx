@@ -105,4 +105,30 @@ describe("useDvpCreateSubmit idempotency key", () => {
   it("treats an unspecified token program as the Token-2022 default it sends", async () => {
     expect(await keyFor({ tokenProgramA: null })).toBe(await keyFor({ tokenProgramA: T22 }));
   });
+
+  // `crypto.subtle` exists only in a secure context, so a dashboard reached
+  // over plain http on a LAN address does not have it. An earlier version of
+  // this derived the key with `subtle.digest` and threw on every create in any
+  // environment without it — CI included, which is how it was caught.
+  it("derives the key without crypto.subtle", async () => {
+    const original = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: { getRandomValues: original.getRandomValues.bind(original) },
+    });
+    try {
+      await expect(keyFor()).resolves.toMatch(/^dvp-create-[0-9a-f]{32}$/);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", { configurable: true, value: original });
+    }
+  });
+
+  // Free text, and the separator problem it creates: a plain join would let
+  // a reference containing the separator impersonate a different field split.
+  it("does not collide when a reference contains the field separator", async () => {
+    const a = await keyFor({ refString: 'a", "b' });
+    const b = await keyFor({ refString: 'a\\", \\"b' });
+
+    expect(a).not.toBe(b);
+  });
 });
