@@ -90,6 +90,87 @@ export function DvpCreateWorkspace({
   const form = useDvpCreateForm(cluster, context);
   const wallet = context.wallets.find((entry) => entry.id === form.walletId) ?? null;
 
+  /**
+   * The two leg cards, held as values so the pair can be ORDERED.
+   *
+   * They sat in a fixed asset-then-cash order, so choosing "You deliver the
+   * cash" left the leg you actually act on sitting second, behind the one you
+   * are only recording. Reading order now matches the exchange — what you give,
+   * then what you get — and tab order follows it for the same reason.
+   *
+   * Hoisted rather than duplicated into two branches: writing the markup twice
+   * makes the direction check inside each copy provably constant, which is
+   * exactly what TypeScript said about the first attempt.
+   */
+  const assetLegCard = (
+    <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
+      <LegOwner mine={form.sdpSide === "a"} />
+      <MintField
+        choice={form.asset.choice}
+        custom={form.asset.custom}
+        emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
+        hint={t(
+          form.sdpSide === "a"
+            ? "DashboardMarkets.dvp.fieldAssetMintHint"
+            : "DashboardMarkets.dvp.fieldAssetMintHintTheirs"
+        )}
+        id="dvp-asset-mint"
+        label={t("DashboardMarkets.dvp.fieldAssetMint")}
+        onChoiceChange={form.asset.setChoice}
+        onCustomChange={form.asset.setCustom}
+        options={context.tokens}
+        placeholder={PLACEHOLDER_ASSET_MINT}
+      />
+      <AmountField
+        balance={form.assetBalance}
+        decimals={
+          form.asset.decimalsKnown
+            ? (form.asset.token?.decimals ?? form.asset.pasted.mint?.decimals ?? null)
+            : null
+        }
+        id="dvp-amount-a"
+        label={t("DashboardMarkets.dvp.fieldAmountA")}
+        onChange={form.asset.setAmount}
+        symbol={form.asset.symbol}
+        value={form.asset.amount}
+      />
+    </div>
+  );
+
+  const cashLegCard = (
+    <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
+      <LegOwner mine={form.sdpSide === "b"} />
+      <MintField
+        choice={form.cash.choice}
+        custom={form.cash.custom}
+        hint={t(
+          form.sdpSide === "b"
+            ? "DashboardMarkets.dvp.fieldCashMintHintMine"
+            : "DashboardMarkets.dvp.fieldCashMintHint"
+        )}
+        id="dvp-cash-mint"
+        label={t("DashboardMarkets.dvp.fieldCashMint")}
+        onChoiceChange={form.cash.setChoice}
+        onCustomChange={form.cash.setCustom}
+        options={form.cashOptions}
+        placeholder={PLACEHOLDER_CASH_MINT}
+      />
+      <AmountField
+        balance={form.cashBalance}
+        decimals={
+          form.cash.decimalsKnown
+            ? (form.cash.token?.decimals ?? form.cash.pasted.mint?.decimals ?? null)
+            : null
+        }
+        id="dvp-amount-b"
+        label={t("DashboardMarkets.dvp.fieldAmountB")}
+        onChange={form.cash.setAmount}
+        symbol={form.cash.symbol}
+        value={form.cash.amount}
+      />
+    </div>
+  );
+
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <form className="mx-auto w-full max-w-5xl" onSubmit={form.submit}>
@@ -154,70 +235,8 @@ export function DvpCreateWorkspace({
               title={t("DashboardMarkets.dvp.groupLegs")}
             >
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-                  <LegOwner mine={form.sdpSide === "a"} />
-                  <MintField
-                    choice={form.asset.choice}
-                    custom={form.asset.custom}
-                    emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
-                    hint={t(
-                      form.sdpSide === "a"
-                        ? "DashboardMarkets.dvp.fieldAssetMintHint"
-                        : "DashboardMarkets.dvp.fieldAssetMintHintTheirs"
-                    )}
-                    id="dvp-asset-mint"
-                    label={t("DashboardMarkets.dvp.fieldAssetMint")}
-                    onChoiceChange={form.asset.setChoice}
-                    onCustomChange={form.asset.setCustom}
-                    options={context.tokens}
-                    placeholder={PLACEHOLDER_ASSET_MINT}
-                  />
-                  <AmountField
-                    balance={form.assetBalance}
-                    decimals={
-                      form.asset.decimalsKnown
-                        ? (form.asset.token?.decimals ?? form.asset.pasted.mint?.decimals ?? null)
-                        : null
-                    }
-                    id="dvp-amount-a"
-                    label={t("DashboardMarkets.dvp.fieldAmountA")}
-                    onChange={form.asset.setAmount}
-                    symbol={form.asset.symbol}
-                    value={form.asset.amount}
-                  />
-                </div>
-
-                <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-                  <LegOwner mine={form.sdpSide === "b"} />
-                  <MintField
-                    choice={form.cash.choice}
-                    custom={form.cash.custom}
-                    hint={t(
-                      form.sdpSide === "b"
-                        ? "DashboardMarkets.dvp.fieldCashMintHintMine"
-                        : "DashboardMarkets.dvp.fieldCashMintHint"
-                    )}
-                    id="dvp-cash-mint"
-                    label={t("DashboardMarkets.dvp.fieldCashMint")}
-                    onChoiceChange={form.cash.setChoice}
-                    onCustomChange={form.cash.setCustom}
-                    options={form.cashOptions}
-                    placeholder={PLACEHOLDER_CASH_MINT}
-                  />
-                  <AmountField
-                    balance={form.cashBalance}
-                    decimals={
-                      form.cash.decimalsKnown
-                        ? (form.cash.token?.decimals ?? form.cash.pasted.mint?.decimals ?? null)
-                        : null
-                    }
-                    id="dvp-amount-b"
-                    label={t("DashboardMarkets.dvp.fieldAmountB")}
-                    onChange={form.cash.setAmount}
-                    symbol={form.cash.symbol}
-                    value={form.cash.amount}
-                  />
-                </div>
+                {form.sdpSide === "a" ? assetLegCard : cashLegCard}
+                {form.sdpSide === "a" ? cashLegCard : assetLegCard}
               </div>
             </Section>
 

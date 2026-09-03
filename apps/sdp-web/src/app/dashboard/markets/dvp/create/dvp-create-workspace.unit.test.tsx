@@ -143,6 +143,23 @@ describe("DvpCreateWorkspace", () => {
       expect(container.textContent).toContain("They deliver");
     });
 
+    // The leg you act on should be the one you reach first, by eye and by tab.
+    it("puts your own leg first, whichever side you are on", () => {
+      const { container } = renderForm();
+      const order = () =>
+        Array.from(container.querySelectorAll("label")).map((node) => node.textContent ?? "");
+
+      expect(order().findIndex((text) => /asset you are trading/i.test(text))).toBeLessThan(
+        order().findIndex((text) => /paid in/i.test(text))
+      );
+
+      fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
+
+      expect(order().findIndex((text) => /paid in/i.test(text))).toBeLessThan(
+        order().findIndex((text) => /asset you are trading/i.test(text))
+      );
+    });
+
     it("does not tell you the other side pays the cash when you do", () => {
       const { container } = renderForm();
 

@@ -545,28 +545,62 @@ export function DvpTradeDetailWorkspace({
         <ExchangeBand closed={tradeClosed} trade={trade} />
 
         <div className="grid gap-4 md:grid-cols-2">
-          <LegCard
-            action={sdpLegIsA ? fundAction : undefined}
-            closed={tradeClosed}
-            holder={
-              sdpLegIsA
-                ? t("DashboardMarkets.dvp.legSdp")
-                : t("DashboardMarkets.dvp.legCounterparty")
-            }
-            leg={trade.legs.a}
-            title={t("DashboardMarkets.dvp.legA")}
-          />
-          <LegCard
-            action={sdpLegIsA ? undefined : fundAction}
-            closed={tradeClosed}
-            holder={
-              sdpLegIsA
-                ? t("DashboardMarkets.dvp.legCounterparty")
-                : t("DashboardMarkets.dvp.legSdp")
-            }
-            leg={trade.legs.b}
-            title={t("DashboardMarkets.dvp.legB")}
-          />
+          {/* Your leg first, whichever it is. These were fixed in A-then-B
+              order while the exchange band directly above already reads as
+              what you give and then what you get — so on a trade where SDP
+              holds leg B, the band and the two cards under it ran opposite
+              ways. Same ordering as the create form, for the same reason. */}
+          {sdpLegIsA ? (
+            <>
+              <LegCard
+                action={sdpLegIsA ? fundAction : undefined}
+                closed={tradeClosed}
+                holder={
+                  sdpLegIsA
+                    ? t("DashboardMarkets.dvp.legSdp")
+                    : t("DashboardMarkets.dvp.legCounterparty")
+                }
+                leg={trade.legs.a}
+                title={t("DashboardMarkets.dvp.legA")}
+              />
+              <LegCard
+                action={sdpLegIsA ? undefined : fundAction}
+                closed={tradeClosed}
+                holder={
+                  sdpLegIsA
+                    ? t("DashboardMarkets.dvp.legCounterparty")
+                    : t("DashboardMarkets.dvp.legSdp")
+                }
+                leg={trade.legs.b}
+                title={t("DashboardMarkets.dvp.legB")}
+              />
+            </>
+          ) : (
+            <>
+              <LegCard
+                action={sdpLegIsA ? undefined : fundAction}
+                closed={tradeClosed}
+                holder={
+                  sdpLegIsA
+                    ? t("DashboardMarkets.dvp.legCounterparty")
+                    : t("DashboardMarkets.dvp.legSdp")
+                }
+                leg={trade.legs.b}
+                title={t("DashboardMarkets.dvp.legB")}
+              />
+              <LegCard
+                action={sdpLegIsA ? fundAction : undefined}
+                closed={tradeClosed}
+                holder={
+                  sdpLegIsA
+                    ? t("DashboardMarkets.dvp.legSdp")
+                    : t("DashboardMarkets.dvp.legCounterparty")
+                }
+                leg={trade.legs.a}
+                title={t("DashboardMarkets.dvp.legA")}
+              />
+            </>
+          )}
         </div>
 
         {awaitingApproval ? (
