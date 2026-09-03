@@ -904,10 +904,12 @@ describe("BVNK ramp webhook", () => {
       .prepare(
         `INSERT INTO counterparty_provider_accounts (
            id, organization_id, project_id, counterparty_id, provider,
-           provider_customer_reference, kind
-         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link')`
+           provider_customer_reference, kind, metadata
+         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', ?)`
       )
-      .bind(`cpa_${COUNTERPARTY_ID}`, ORG_ID, PROJECT_ID, COUNTERPARTY_ID, CUSTOMER_REFERENCE)
+      .bind(`cpa_${COUNTERPARTY_ID}`, ORG_ID, PROJECT_ID, COUNTERPARTY_ID, CUSTOMER_REFERENCE, {
+        status: "PENDING",
+      })
       .run();
   }
 
@@ -1195,7 +1197,14 @@ describe("BVNK ramp webhook", () => {
 
     expect(res.status).toBe(200);
     expect(getCustomer).toHaveBeenCalledWith(expect.anything(), { id: CUSTOMER_REFERENCE });
-    expect((await readBvnk())?.customer?.status).toBe("PENDING");
+    const account = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: { status?: string } }>();
+    expect(account?.metadata.status).toBe("PENDING");
 
     getCustomer.mockRestore();
   });

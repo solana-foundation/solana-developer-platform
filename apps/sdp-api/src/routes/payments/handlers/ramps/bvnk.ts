@@ -748,7 +748,7 @@ export async function ensureBvnkCustomer(
     };
   }
   if (pending.length > 0) {
-    const response = await client.respondAgreementsV2(ctx, {
+    await client.respondAgreementsV2(ctx, {
       idempotencyKey: (await hashString(`bvnk-agreement-response:${counterparty.id}`)).slice(0, 36),
       reference,
       actions: pending.map((agreement) => ({
@@ -756,13 +756,18 @@ export async function ensureBvnkCustomer(
         type: consentedIds.has(agreement.id) ? "ACCEPT" : "REJECT",
       })),
     });
+    // Relay responses never confirm acceptance: relayed agreements seed as
+    // PENDING and only the agreements status-change webhook (or the PRO-1837
+    // reconciler) flips them to ACCEPTED. Working-set statuses read from
+    // BVNK before the relay keep their value — that read is reconcile
+    // authority, the action response is not.
     const entries: BvnkAgreementEntries = Object.fromEntries(
       agreements.agreements
         .filter((agreement) => !agreement.declinable)
-        .map((agreement) => {
-          const result = response.content.find((entry) => entry.agreementId === agreement.id);
-          return [agreement.id, { status: result?.status ?? "PENDING" }];
-        })
+        .map((agreement) => [
+          agreement.id,
+          { status: agreement.status === "ACCEPTED" ? "ACCEPTED" : "PENDING" },
+        ])
     );
     await persistBvnkAgreementState(c, counterparty, projectId, agreements.id, entries);
     return {
