@@ -67,6 +67,7 @@ const MODULE_METADATA = [
       "@sdp/private-channels",
       "@sdp/rpc",
       "@sdp/spc-escrow",
+      "@sdp/spc-withdraw",
       "@sdp/types",
     ],
   },
