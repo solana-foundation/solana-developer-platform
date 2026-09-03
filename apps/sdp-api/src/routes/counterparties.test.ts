@@ -1016,6 +1016,15 @@ describe("Counterparties Routes", () => {
         status: "active",
         createdAt: "2026-01-04T00:00:00.000Z",
       });
+      const customerLink = await createPostgresCounterpartyProviderAccountsRepository(
+        getDb(env)
+      ).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:owner",
+      });
 
       const enrichmentPage = JSON.stringify({
         data: [
@@ -1073,6 +1082,13 @@ describe("Counterparties Routes", () => {
             bankName: "Example Bank",
             accountNumberLast4: "6789",
             paymentRails: ["ACH", "WIRE"],
+            customerLink: {
+              id: customerLink.id,
+              providerCustomerReference: "Customer:owner",
+              status: "active",
+              providerStatus: null,
+              createdAt: customerLink.created_at,
+            },
           },
           {
             id: "provider_account_usd_pending",
@@ -1084,6 +1100,13 @@ describe("Counterparties Routes", () => {
             status: "active",
             providerStatus: null,
             createdAt: "2026-01-02T00:00:00.000Z",
+            customerLink: {
+              id: customerLink.id,
+              providerCustomerReference: "Customer:owner",
+              status: "active",
+              providerStatus: null,
+              createdAt: customerLink.created_at,
+            },
           },
           {
             id: "provider_account_gbp_archived",
@@ -1114,6 +1137,50 @@ describe("Counterparties Routes", () => {
         "provider_account_usd_completed",
         "provider_account_usd_pending",
       ]);
+    });
+
+    it("lists the customer link as a top-level row when no payout accounts exist", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_link_only" });
+      const owner = (await created.json()).data.counterparty;
+      const customerLink = await createPostgresCounterpartyProviderAccountsRepository(
+        getDb(env)
+      ).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:link_only",
+      });
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).data).toEqual({
+        accounts: [
+          {
+            id: customerLink.id,
+            provider: "lightspark",
+            kind: "customer_link",
+            fiatCurrency: null,
+            destinationCountry: null,
+            paymentRail: null,
+            status: "active",
+            providerStatus: null,
+            createdAt: customerLink.created_at,
+            customerLink: {
+              id: customerLink.id,
+              providerCustomerReference: "Customer:link_only",
+              status: "active",
+              providerStatus: null,
+              createdAt: customerLink.created_at,
+            },
+          },
+        ],
+      });
     });
 
     it("returns 503 when Grid enrichment fails", async () => {

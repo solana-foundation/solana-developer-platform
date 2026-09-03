@@ -472,12 +472,13 @@ export const counterpartyProviderAccountSchema = withOpenApi(
         example: "payout_account",
       }
     ),
-    fiatCurrency: withOpenApi(z.string(), {
-      description: "Fiat currency for the provider account corridor.",
+    fiatCurrency: withOpenApi(z.string().nullable(), {
+      description: "Fiat currency for the provider account corridor. Null on customer-link rows.",
       example: "USD",
     }),
-    destinationCountry: withOpenApi(z.enum(COUNTRY_CODES), {
-      description: "Destination country for the provider account corridor.",
+    destinationCountry: withOpenApi(z.enum(COUNTRY_CODES).nullable(), {
+      description:
+        "Destination country for the provider account corridor. Null on customer-link rows.",
       example: "US",
     }),
     paymentRail: withOpenApi(z.string().nullable(), {
@@ -505,6 +506,33 @@ export const counterpartyProviderAccountSchema = withOpenApi(
       description: "Payment rails returned by the provider when available.",
       example: ["ACH", "WIRE"],
     }),
+    customerLink: withOpenApi(
+      z
+        .object({
+          id: withOpenApi(z.string(), {
+            description: "Customer-link row identifier.",
+            example: "counterparty_provider_account_customer",
+          }),
+          providerCustomerReference: withOpenApi(z.string(), {
+            description: "Provider-side customer identifier for the counterparty.",
+            example: "Customer:0193b2c4",
+          }),
+          status: counterpartyAccountStatusSchema,
+          providerStatus: withOpenApi(z.string().nullable(), {
+            description: "Provider-side customer status when known.",
+            example: "ACTIVE",
+          }),
+          createdAt: withOpenApi(isoDateTimeSchema, {
+            description: "Customer-link row creation timestamp.",
+            example: "2025-01-01T00:00:00.000Z",
+          }),
+        })
+        .optional(),
+      {
+        description:
+          "The counterparty's provider customer link, present when the provider customer exists.",
+      }
+    ),
   }),
   { description: "Counterparty provider-account row with optional JIT provider details." }
 );
