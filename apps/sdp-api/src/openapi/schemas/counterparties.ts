@@ -78,13 +78,11 @@ export const counterpartyRequirementsQuerySchema = z
         example: "privy_wallet_123",
       }
     ),
-    destinationCountry: withOpenApi(
-      lightsparkOfframpRequirementsQuerySchema.shape.destinationCountry,
-      {
-        description: "Destination payout country. Valid only for Lightspark off-ramp requirements.",
-        example: "US",
-      }
-    ),
+    destinationCountry: withOpenApi(z.string().optional(), {
+      description:
+        "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
+      example: "US",
+    }),
   })
   .openapi({
     description:
@@ -147,16 +145,22 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+const countryCodeDocSchema = withOpenApi(z.string(), {
+  description:
+    "ISO 3166-1 alpha-2 country code. Documented as a string; the API validates against the supported country set.",
+  example: "US",
+});
+
 const payoutRequirementTreeSchema = z.object({
-  countryRails: z.partialRecord(
-    z.enum(COUNTRY_CODES),
+  countryRails: z.record(
+    countryCodeDocSchema,
     z.array(z.object({ value: z.string(), label: z.string() }))
   ),
   railFields: z.record(z.string(), z.array(requirementFieldSchema)),
   accounts: z.array(
     z.object({
       id: z.string(),
-      destinationCountry: z.enum(COUNTRY_CODES),
+      destinationCountry: countryCodeDocSchema,
       paymentRail: z.string().nullable(),
       status: z.string(),
       bankName: z.string().optional(),
