@@ -84,6 +84,29 @@ describe("getOrCreateDvpSettlementWallet", () => {
     expect(provisionApiKeyWallet).toHaveBeenCalledTimes(1);
   });
 
+  // `projectId` and `legacyConfigProjectId` are NOT the same argument: the first
+  // scopes the custody CONNECTION lookup, the second the custody CONFIG one.
+  // Passing only the first makes the config fallback ask for the organization
+  // -wide default (`project_id IS NULL`), which almost no organization has —
+  // the dashboard writes a project-scoped row. The result was "Custody not
+  // initialized" on an organization whose custody works, failing every first
+  // DvP trade in a project.
+  it("scopes the legacy config lookup to the project, not the organization", async () => {
+    await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
+    provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
+
+    await getOrCreateDvpSettlementWallet(env, scope);
+
+    expect(provisionApiKeyWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        projectId: scope.projectId,
+        legacyConfigProjectId: scope.projectId,
+      })
+    );
+  });
+
   it("returns the same wallet on every later call, without provisioning again", async () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });

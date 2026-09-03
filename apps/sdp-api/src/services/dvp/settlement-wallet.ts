@@ -72,6 +72,17 @@ export async function getOrCreateDvpSettlementWallet(
   const provisioned = await provisionApiKeyWallet(getDb(env), env, {
     organizationId: scope.organizationId,
     projectId: scope.projectId,
+    // Both, and they are NOT the same argument. `projectId` scopes the custody
+    // CONNECTION lookup; `legacyConfigProjectId` scopes the custody CONFIG one,
+    // and omitting it makes the fallback ask for the organization-wide default
+    // (`custody-config.store.ts:151`, `project_id IS NULL`).
+    //
+    // Almost no organization has one. The dashboard writes a project-scoped
+    // `custody_scope_defaults` row, so the org-wide lookup finds nothing and
+    // provisioning fails with "Custody not initialized" — on an organization
+    // whose custody is configured and working. That made every first DvP trade
+    // in a project fail, because creating one provisions this wallet.
+    legacyConfigProjectId: scope.projectId,
     label: SETTLEMENT_WALLET_LABEL,
   });
 
