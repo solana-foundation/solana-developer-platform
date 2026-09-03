@@ -235,7 +235,8 @@
         "closed_unknown": "The trade account is gone. Settle, cancel and reject all close it and none of them announce which, so the outcome is not known from the account alone."
       },
       "loadErrorTitle": "This trade could not be loaded",
-      "loadErrorDescription": "The trade may still exist — the request to read it did not succeed. Reload to try again."
+      "loadErrorDescription": "The trade may still exist — the request to read it did not succeed. Reload to try again.",
+      "loadErrorUnexpected": "The request succeeded but carried no trade."
     }
   },
   "DashboardEarn": {
