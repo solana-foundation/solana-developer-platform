@@ -18,15 +18,17 @@ import {
   createTransactionMessage,
   getSignatureFromTransaction,
   getTransactionEncoder,
+  isSolanaError,
   pipe,
   type Signature,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { findAssociatedTokenPda, getTransferCheckedInstruction } from "@solana-program/token-2022";
 import type { Context } from "hono";
-import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
+import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
 import { badRequest, conflict } from "@/lib/errors";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -82,15 +84,19 @@ export async function fundDvpTradeLeg(
     );
   }
 
-  if (escrowState && escrowState.amount >= amount) {
-    // Funding twice would OVER-fund, and a surplus is not harmless: settle
-    // refunds it to the depositor, and on a transfer-hook mint that refund can
-    // revert the whole settlement. Refusing here is what stops this endpoint
-    // manufacturing the hazard the trade page warns about.
+  const held = escrowState?.amount ?? 0n;
+  if (held >= amount) {
     throw conflict(
-      `DvP trade ${trade.id}: this leg already holds ${escrowState.amount} of ${amount}. Funding again would over-fund the escrow, which puts settlement at risk.`
+      `DvP trade ${trade.id}: this leg already holds ${held} of ${amount}, so there is nothing left to fund.`
     );
   }
+
+  // Send the SHORTFALL, not the full target. Somebody may already have put
+  // part of the leg in, and sending the whole amount on top would leave a
+  // surplus, which settlement refunds and which on a transfer-hook mint can
+  // revert the whole settlement. Funding a partly funded leg has to top it up
+  // exactly.
+  const outstanding = amount - held;
 
   const signer = await createOrgSignerForCustodyWallet(
     env,
@@ -115,7 +121,7 @@ export async function fundDvpTradeLeg(
   }
 
   const instruction = getTransferCheckedInstruction(
-    { source, mint, destination: escrow, authority: signer, amount, decimals },
+    { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },
     { programAddress: tokenProgram }
   );
 
@@ -129,12 +135,33 @@ export async function fundDvpTradeLeg(
   const signed = await signTransactionMessageWithSigners(message);
   const signature = getSignatureFromTransaction(signed);
 
+  // The balance read above and this transfer are not atomic, so two overlapping
+  // requests would both see the same shortfall and both send. The claim is what
+  // makes exactly one of them broadcast.
+  const claimed = await createDvpTradeRepository(env).claimLegFunding(trade.id, signature);
+  if (!claimed) {
+    throw conflict(`DvP trade ${trade.id}: this leg is already being funded by another request.`);
+  }
+
   // Past this the tokens may have moved, so an approved operation that dies
-  // here needs reconciling by hand rather than replaying — a blind retry would
+  // here needs reconciling by hand rather than replaying: a blind retry would
   // over-fund.
   await beginApprovedWalletOperationEffect(c);
 
-  await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+  try {
+    await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+  } catch (error) {
+    // A preflight rejection never reached the network, so the claim can be
+    // released and the leg funded again. Any other failure is ambiguous and
+    // KEEPS the claim: releasing it would invite a second transfer on top of
+    // one that may yet land.
+    if (
+      isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
+    ) {
+      await createDvpTradeRepository(env).releaseLegFunding(trade.id, signature);
+    }
+    throw error;
+  }
 
-  return { signature, leg: trade.sdpSide, amount: amount.toString() };
+  return { signature, leg: trade.sdpSide, amount: outstanding.toString() };
 }

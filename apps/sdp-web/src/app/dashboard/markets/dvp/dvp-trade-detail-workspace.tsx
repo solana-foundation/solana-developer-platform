@@ -1,7 +1,6 @@
 "use client";
 
 import { CheckIcon, CopyIcon, SnowflakeIcon, TriangleAlertIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Callout } from "@/components/ui/callout";
@@ -9,6 +8,7 @@ import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
+import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   canCancelDvpTrade,
@@ -19,6 +19,7 @@ import {
   legFundingRatio,
   overFundedLegs,
 } from "./dvp-trade";
+import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
 /**
  * An address with a copy affordance.
@@ -124,45 +125,11 @@ function LegCard({
 
 export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
-  const router = useRouter();
-  const [pending, setPending] = useState<"settle" | "cancel" | "fund" | null>(null);
-  const [awaitingApproval, setAwaitingApproval] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
 
   const overFunded = overFundedLegs(trade);
   const frozen = frozenLegs(trade);
   const sdpLegIsA = trade.sdpSide === "a";
-
-  async function act(action: "settle" | "cancel" | "fund") {
-    setPending(action);
-    setError(null);
-    setAwaitingApproval(false);
-    try {
-      const response = await fetch(
-        `/api/dashboard/markets/dvp/trades/${encodeURIComponent(trade.id)}/${action}`,
-        { method: "POST" }
-      );
-      // 202 is a normal outcome, not a failure: wallet policy is holding the
-      // action for approval. Treating it as an error would tell an operator
-      // something broke when the platform did exactly what they configured.
-      if (response.status === 202) {
-        setAwaitingApproval(true);
-        return;
-      }
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
-        setError(body.error?.message ?? `Request failed (${response.status}).`);
-        return;
-      }
-      router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Request failed.");
-    } finally {
-      setPending(null);
-    }
-  }
 
   // Only SDP's own leg is fundable from here. The counterparty funds theirs
   // with an ordinary transfer to the escrow — making that a button would mean
@@ -228,6 +195,10 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
             </div>
           </dl>
         </section>
+
+        {/* Whose move it is. The badge above says what state the trade is in;
+            it does not say what to do about it. */}
+        <DvpNextStep trade={trade} />
 
         {frozen.length > 0 ? (
           <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">

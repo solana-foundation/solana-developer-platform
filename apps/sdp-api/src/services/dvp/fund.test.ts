@@ -17,12 +17,18 @@ const sendTransaction = vi.hoisted(() => vi.fn());
 const beginApprovedWalletOperationEffect = vi.hoisted(() => vi.fn());
 const readEscrowState = vi.hoisted(() => vi.fn());
 const readMintDecimals = vi.hoisted(() => vi.fn());
+const claimLegFunding = vi.hoisted(() => vi.fn());
+const releaseLegFunding = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   beginApprovedWalletOperationEffect,
 }));
 vi.mock("./read-chain", () => ({ readEscrowState }));
+vi.mock("@/db/repositories", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories")>()),
+  createDvpTradeRepository: () => ({ claimLegFunding, releaseLegFunding }),
+}));
 vi.mock("./mints", () => ({ readMintDecimals }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
@@ -64,6 +70,7 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     sdpWalletId: "cwlt_leg",
     status: "created",
     observedAt: null,
+    sdpLegFundingSignature: null,
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,
@@ -88,6 +95,8 @@ describe("fundDvpTradeLeg", () => {
     readMintDecimals.mockResolvedValue(6);
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
     sendTransaction.mockResolvedValue("sig");
+    claimLegFunding.mockResolvedValue(true);
+    releaseLegFunding.mockResolvedValue(undefined);
   });
 
   it("moves SDP's leg into its escrow", async () => {
@@ -123,25 +132,28 @@ describe("fundDvpTradeLeg", () => {
   // refunds it, and on a transfer-hook mint that refund can revert the whole
   // settlement. This endpoint must not manufacture the hazard the trade page
   // exists to warn about.
-  it("refuses to fund a leg that is already funded", async () => {
+  it("refuses a leg that already holds its target", async () => {
     readEscrowState.mockResolvedValue({ amount: 1000n, frozen: false });
 
-    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/would over-fund/);
+    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/nothing left to fund/);
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("refuses a leg already holding more than its target", async () => {
     readEscrowState.mockResolvedValue({ amount: 5000n, frozen: false });
 
-    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/would over-fund/);
+    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/nothing left to fund/);
   });
 
-  // Partial funding is legitimate: someone sent less than the target and the
-  // rest still has to go in.
-  it("still funds a leg holding less than its target", async () => {
+  // Topping up must send the SHORTFALL. Sending the full target on top of a
+  // partial deposit leaves a surplus, and settlement refunds a surplus, which
+  // on a transfer-hook mint can revert the whole settlement.
+  it("tops a partly funded leg up by the shortfall, not the full target", async () => {
     readEscrowState.mockResolvedValue({ amount: 400n, frozen: false });
 
-    await expect(fundDvpTradeLeg(context, trade())).resolves.toMatchObject({ leg: "a" });
+    const result = await fundDvpTradeLeg(context, trade());
+
+    expect(result.amount).toBe("600");
   });
 
   // The transfer would bounce. Learning that from a failed broadcast costs a
@@ -166,6 +178,40 @@ describe("fundDvpTradeLeg", () => {
       );
     }
     expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // The balance read and the transfer are not atomic, so the claim is what
+  // makes exactly one of two overlapping requests broadcast.
+  it("refuses to broadcast when another request holds the funding claim", async () => {
+    claimLegFunding.mockResolvedValue(false);
+
+    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow(/already being funded/);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("claims before it broadcasts", async () => {
+    const order: string[] = [];
+    claimLegFunding.mockImplementation(async () => {
+      order.push("claim");
+      return true;
+    });
+    sendTransaction.mockImplementation(async () => {
+      order.push("send");
+      return "sig";
+    });
+
+    await fundDvpTradeLeg(context, trade());
+
+    expect(order).toEqual(["claim", "send"]);
+  });
+
+  // An ambiguous send may still land, so releasing the claim would invite a
+  // second transfer on top of the first.
+  it("keeps the claim when a send fails ambiguously", async () => {
+    sendTransaction.mockRejectedValue(new Error("socket hang up"));
+
+    await expect(fundDvpTradeLeg(context, trade())).rejects.toThrow("socket hang up");
+    expect(releaseLegFunding).not.toHaveBeenCalled();
   });
 
   it("refuses when the mint cannot be read", async () => {

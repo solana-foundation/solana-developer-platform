@@ -1,3 +1,4 @@
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 /**
@@ -19,6 +20,12 @@ export interface DvpCreateOption {
    * and moving the wrong quantity.
    */
   decimals: number | null;
+  /**
+   * The program that owns the mint. Not assumable: USDC and USDT are legacy
+   * SPL Token, and declaring them as Token-2022 makes create refuse an
+   * otherwise valid trade, because the escrow address derives from this.
+   */
+  tokenProgram: string;
 }
 
 export interface DvpCreateWallet {
@@ -123,6 +130,8 @@ export async function fetchDvpCreateContext(
                 mint: token.mintAddress,
                 label: token.symbol || token.name || token.mintAddress,
                 decimals: typeof token.decimals === "number" ? token.decimals : null,
+                // Every SDP-issued asset is minted under Token-2022.
+                tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
               },
             ]
           : []
