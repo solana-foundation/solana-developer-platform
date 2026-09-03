@@ -1,8 +1,8 @@
-name: Deploy PR to dev (label-triggered)
+name: Deploy PR to dev (label or release PR)
 
 on:
   pull_request:
-    types: [labeled, synchronize]
+    types: [labeled, synchronize, opened]
 
 permissions:
   contents: read
@@ -15,10 +15,14 @@ concurrency:
 jobs:
   deploy:
     name: Deploy this PR branch to dev
+    # Release PRs always refresh dev so the web preview pass runs against the
+    # release candidate API (previews build with dev Clerk and cannot target
+    # stage, which trusts only the prod Clerk issuer).
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      contains(github.event.pull_request.labels.*.name, 'deploy-dev')
+      (contains(github.event.pull_request.labels.*.name, 'deploy-dev') ||
+       github.event.pull_request.head.ref == 'sdp/release-main')
     permissions:
       contents: read
       id-token: write
