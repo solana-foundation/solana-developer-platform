@@ -55,7 +55,7 @@ Transitions are CAS under `SELECT … FOR UPDATE`.
 | `signer_failed` | varies | Custody signing failed; also used when `ready_to_sign` ages out (10 min) before a signature was recorded. |
 | `submit_failed` | yes | RPC submit error (provisioning only in practice). |
 | `indexing_timeout` | yes | Unsigned rows: Photon did not index within 30 minutes. |
-| `manual_reconciliation_required` | no | Signed bytes exist; fate unknown. Operator must reconcile or void. |
+| `manual_reconciliation_required` | no | Signed bytes exist and neither the indexer nor the chain has a record of them. Operator rechecks or voids. |
 | `config_error` | no | Upstreams missing or gateway misconfigured. |
 | `gateway_unavailable` | yes | Port unreachable or transient upstream failure. |
 | `invalid_input` | varies | Bad input or inconsistent row. |
@@ -76,16 +76,22 @@ Rebuilds pass `pinnedInputs` from stored `input_notes`.
 Partial unique indexes serialize one in-flight spend (or unsettled signed deposit) per
 wallet. A signed failure holds the slot until completed or voided.
 
-### Manual void
+### Recheck and manual void
 
-When indexing times out on a row with signed bytes, the sweep classifies
-`manual_reconciliation_required` (non-retryable). The operator checks the chain:
+A row reaches `manual_reconciliation_required` (non-retryable) only once the
+sweep has asked both the indexer and the chain and neither accounts for its
+signature. The row then offers two actions:
 
-- **Landed** — resubmit same bytes or wait for Photon; do not void.
-- **Never landed** — `POST /operations/:id/void` with `{ signature }` matching
-  `outer_tx_signature`. CAS `failed → voided`, releases the spend slot.
+- **Recheck** — `POST /operations/:id/recheck`, no body. Asks the indexer again
+  and completes the row on a hit. It can never conclude absence, so it is safe
+  to press repeatedly, and an indexer lagging the chain is the likelier
+  explanation than a transaction that never landed.
+- **Void** — `POST /operations/:id/void` with `{ signature }` matching
+  `outer_tx_signature`. Asserts the transaction never landed: CAS
+  `failed → voided`, releasing the spend slot. A fresh indexer read backs the
+  assertion at commit time and refuses the void if the transaction turns up.
 
-No automatic reconcile job in this build.
+Never void a signature the chain confirms; wait the indexer out instead.
 
 ## SPL follow-up
 
@@ -110,7 +116,8 @@ outbox first so the same bytes can be resubmitted after a lost RPC response.
   end ("Retry of …", "Retried as …") and stops offering Retry on a failure that
   already has one. The cap counts ancestors, not siblings, so nothing server-side
   refuses a second retry of the same failure.
-- `POST /operations/:id/execute` has no trusted body.
+- `POST /operations/:id/execute` and `POST /operations/:id/recheck` have no
+  trusted body.
 
 ## Settling an operation
 
@@ -133,15 +140,25 @@ row with no bytes the same call concludes signing died and fails it.
 three passes per tick:
 
 1. **Expired bytes** — signed rows past `last_valid_block_height` get one Photon
-   check, then `manual_reconciliation_required` (non-retryable). Skipped when
-   the chain height is unavailable.
+   check, then a `getSignatureStatuses` check with history search, and only a
+   signature the chain cannot account for becomes
+   `manual_reconciliation_required` (non-retryable). A transaction the chain
+   confirms stays in `indexing` however far behind the indexer has fallen, and
+   one the chain could not be asked about waits for the next tick. The whole
+   pass is skipped when the chain height is unavailable.
+
+   The chain check is what makes the pass safe on a shield, which records only
+   a floor for its expiry because the SDK builder fetches its own later
+   blockhash and so reaches this pass while still valid. Without it, an indexer
+   stalled behind the chain failed finalized deposits as unresolvable.
 2. **Indexed failures** — a signed failure Photon now holds is completed. Never
    the reverse: absence from the indexer never voids anything.
 3. **In-flight** — advance `submitted` → poll (crash recovery) and poll
    `indexing` via `verifyIndexed`. A crashed `proving` rebuilds; a
    `ready_to_sign` resends its bytes, or fails `signer_failed` (retryable) if it
    has none. Stale `indexing` then times out: unsigned → `indexing_timeout`
-   (retryable); signed → `manual_reconciliation_required` (non-retryable).
+   (retryable); signed → `manual_reconciliation_required` (non-retryable), and
+   only once the same chain check has spared whatever the chain vouches for.
 
    Reads `proving` onward only. `preparing` and `approval_required` hold no
    spend slot and block nothing, and an approval waits on a person, so including
@@ -300,5 +317,6 @@ custody-signed endpoint), and `GET /rings/:name` point reads.
 ## Diagnostics
 
 - `GET /v1/helius-rings/health` — component probes in `helius_rings_runtime_health`.
-- Dashboard — health board, balances, composer (shield + withdraw), recovery card
-  (execute, retry, void for `manual_reconciliation_required`).
+- Dashboard — health board, balances, composer (shield + withdraw), and Activity
+  with each row's action inline: execute, retry, or recheck and void for
+  `manual_reconciliation_required`.

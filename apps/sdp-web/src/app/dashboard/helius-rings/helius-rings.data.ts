@@ -322,7 +322,7 @@ export interface PrepareRingsOperationInput {
   ring?: string;
 }
 
-type OperationResult = { operation?: RingsOperationDetail; error?: string };
+export type OperationResult = { operation?: RingsOperationDetail; error?: string };
 
 async function postOperation(
   path: string,
@@ -351,6 +351,16 @@ export function retryRingsOperation(operationId: string): Promise<OperationResul
   return postOperation(
     `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/retry`,
     { clientNonce: crypto.randomUUID() }
+  );
+}
+
+/**
+ * Asks the indexer about a signed failure again, completing it on a hit and
+ * leaving it untouched on a miss. Carries no body and never asserts absence.
+ */
+export function recheckRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/recheck`
   );
 }
 

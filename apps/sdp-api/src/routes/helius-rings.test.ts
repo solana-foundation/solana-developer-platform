@@ -388,6 +388,35 @@ describe("Helius Rings routes", () => {
       expect(body.data.operation.state).toBe("failed");
     });
 
+    /**
+     * The counterpart of void. Void asserts a transaction never landed and
+     * cannot be undone; recheck only asks the indexer, so a failure it still
+     * has nothing for comes back exactly as it was.
+     */
+    it("recheck leaves a failure the indexer has nothing for untouched", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
+      gatewayOverride.current = gateway;
+
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-recheck",
+        })
+      ).json()) as { data: { operation: { id: string } } };
+
+      const rechecked = await post(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/recheck`,
+        {}
+      );
+      expect(rechecked.status).toBe(200);
+      const body = (await rechecked.json()) as { data: { operation: { state: string } } };
+      expect(body.data.operation.state).toBe("failed");
+    });
+
     it("rejects an invalid operation body", async () => {
       const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,

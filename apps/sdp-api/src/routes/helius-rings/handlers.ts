@@ -260,6 +260,25 @@ export async function voidRingsOperation(c: AppContext) {
   return success(c, { operation });
 }
 
+/**
+ * POST /operations/:operationId/recheck — ask the indexer about a signed
+ * failure again.
+ *
+ * Observation, not assertion: it can only ever complete a row the indexer has
+ * caught up on, and it never concludes absence. That makes it the safe thing
+ * to try before a void, which asserts the opposite and cannot be undone. It
+ * carries no body and is idempotent, so pressing it twice costs one extra read.
+ */
+export async function recheckRingsOperation(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:write"]);
+  const service = getHeliusRingsService(c, tenant);
+  const operation = await withRingsErrors(() =>
+    service.completeIfIndexed(requireParam(c, "operationId"))
+  );
+  return success(c, { operation });
+}
+
 // --- zones ------------------------------------------------------------------
 
 /** GET /wallets/:walletId/zones — SDP-owned metadata; fully functional today. */

@@ -208,6 +208,10 @@
       "retrying": "Retrying…",
       "execute": "Execute",
       "executing": "Executing…",
+      "recheck": "Check indexer",
+      "rechecking": "Checking…",
+      "recheckFound": "The indexer has caught up — this operation is now complete.",
+      "recheckStillMissing": "The indexer still has no record of this transaction. It may be behind the chain; check again before voiding.",
       "void": "Void",
       "voiding": "Voiding…",
       "voidConfirm": "Voiding asserts this signed transaction never landed on chain and releases the wallet's spend slot. Continue only if you have reconciled the signature and confirmed absence."

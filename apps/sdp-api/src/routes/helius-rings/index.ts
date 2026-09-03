@@ -18,6 +18,7 @@ import {
   listRingsWallets,
   listRingsZones,
   prepareRingsOperation,
+  recheckRingsOperation,
   retryRingsOperation,
   syncRingsWallet,
   voidRingsOperation,
@@ -67,6 +68,13 @@ heliusRings.post(
   "/operations/:operationId/retry",
   requirePermissions("payments:write"),
   retryRingsOperation
+);
+// Write, not read: a recheck only observes the indexer, but a hit completes the
+// operation and advances the wallet's indexed slot.
+heliusRings.post(
+  "/operations/:operationId/recheck",
+  requirePermissions("payments:write"),
+  recheckRingsOperation
 );
 heliusRings.post(
   "/operations/:operationId/void",
