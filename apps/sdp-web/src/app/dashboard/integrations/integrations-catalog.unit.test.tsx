@@ -69,6 +69,7 @@ describe("IntegrationsCatalog", () => {
     expect(document.querySelectorAll("[data-integration-hub-action]")).toHaveLength(5);
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
     expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.queryByText("All")).toBeNull();
     for (const removed of ["All", "Connected", "Not connected", "Available on request"]) {
       expect(screen.queryByRole("button", { name: removed })).toBeNull();
     }

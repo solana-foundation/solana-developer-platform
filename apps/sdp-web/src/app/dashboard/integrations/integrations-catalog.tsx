@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
+import { DASHBOARD_INTEGRATIONS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,6 @@ import {
   type IntegrationFamily,
 } from "./integrations-filter";
 import type { IntegrationEntry, IntegrationStatus, PrivacyProviderId } from "./integrations-status";
-import { DASHBOARD_INTEGRATIONS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 
 type Translate = ReturnType<typeof useTranslations>;
 const EMPTY_PRIVACY: IntegrationEntry<PrivacyProviderId>[] = [];
@@ -190,37 +190,29 @@ function IntegrationsHub({
   t: Translate;
 }) {
   return (
-    <section
-      className="min-w-0 rounded-lg border border-border-default bg-surface-raised p-4"
-      data-integrations-hub="true"
-    >
-      <h2 className="text-base font-semibold tracking-[-0.01em] text-primary">
-        {t("Shared.integrations.filterAllFamilies")}
-      </h2>
-      <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-3">
-        {families.map((integrationFamily) => {
-          const Icon = FAMILY_ICONS[integrationFamily];
-          return (
-            <Link
-              key={integrationFamily}
-              href={DASHBOARD_INTEGRATIONS_SUBNAV_HREFS[integrationFamily]}
-              data-integration-hub-action={integrationFamily}
-              className="group flex min-h-36 min-w-0 flex-col items-center justify-center rounded-md border border-border-default px-3 py-4 text-center transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none xl:min-h-44"
-            >
-              <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary transition-colors group-hover:bg-fill-strong">
-                <Icon className="size-5" aria-hidden="true" />
-              </span>
-              <span className="mt-3 text-base font-semibold text-primary">
-                {t(familyLabelKey(integrationFamily))}
-              </span>
-              <span className="mt-1 text-sm leading-5 text-secondary">
-                {t(familyDescriptionKey(integrationFamily))}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-    </section>
+    <div data-integrations-hub="true" className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+      {families.map((integrationFamily) => {
+        const Icon = FAMILY_ICONS[integrationFamily];
+        return (
+          <Link
+            key={integrationFamily}
+            href={DASHBOARD_INTEGRATIONS_SUBNAV_HREFS[integrationFamily]}
+            data-integration-hub-action={integrationFamily}
+            className="group flex min-h-36 min-w-0 flex-col items-center justify-center rounded-md border border-border-default px-3 py-4 text-center transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none xl:min-h-44"
+          >
+            <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary transition-colors group-hover:bg-fill-strong">
+              <Icon className="size-5" aria-hidden="true" />
+            </span>
+            <span className="mt-3 text-base font-semibold text-primary">
+              {t(familyLabelKey(integrationFamily))}
+            </span>
+            <span className="mt-1 text-sm leading-5 text-secondary">
+              {t(familyDescriptionKey(integrationFamily))}
+            </span>
+          </Link>
+        );
+      })}
+    </div>
   );
 }
 
