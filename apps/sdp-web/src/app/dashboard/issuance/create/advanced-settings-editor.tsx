@@ -767,6 +767,52 @@ function CombinedFreezeRow({
   );
 }
 
+/**
+ * The message naming why an extension rules the asset out of DvP settlement.
+ *
+ * A plain lookup rather than a ternary in the row, so the row renders what it
+ * is given and branches on nothing.
+ */
+function settlementBlockedMessageKey(key: Parameters<typeof dvpBlockReason>[0]): MessageKey | null {
+  const reason = dvpBlockReason(key);
+  if (!reason) return null;
+  return reason === "amountMutating"
+    ? "DashboardIssuance.config.settlementBlockedAmount"
+    : "DashboardIssuance.config.settlementBlockedEscrow";
+}
+
+/**
+ * The pills above a permanent setting's label.
+ *
+ * Its own component because two independent badges — availability and the
+ * settlement warning — were enough nested branching in the row's JSX to put
+ * `PermanentRow` over the complexity the linter allows.
+ */
+function PermanentRowBadges({
+  availability,
+  settlementBlocked,
+}: {
+  availability: GroupedSetting["availability"];
+  settlementBlocked: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      {availability === "locked" ? (
+        <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill>
+      ) : availability === "recommended" ? (
+        <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
+      ) : null}
+      {settlementBlocked ? (
+        <Pill tone="warning">
+          <TriangleAlert className="h-3 w-3" aria-hidden />
+          {t("DashboardIssuance.config.settlementBlockedBadge")}
+        </Pill>
+      ) : null}
+    </>
+  );
+}
+
 function PermanentRow({
   entry,
   selection,
@@ -801,7 +847,7 @@ function PermanentRow({
   const params = setting.params ?? [];
   // Whether this extension rules the asset out of DvP settlement, and why. A
   // property of the single extension, so it is not a `conflictWith` pair.
-  const settlementBlock = dvpBlockReason(key);
+  const settlementBlockedKey = settlementBlockedMessageKey(key);
 
   return (
     <SettingShell
@@ -824,29 +870,12 @@ function PermanentRow({
       // is made before ticking the box and cannot be revisited afterwards.
       // Deliberately does not repeat that the choice is permanent — the section
       // this row sits in is headed "Permanent … cannot change after launch".
-      note={
-        settlementBlock
-          ? t(
-              settlementBlock === "amountMutating"
-                ? "DashboardIssuance.config.settlementBlockedAmount"
-                : "DashboardIssuance.config.settlementBlockedEscrow"
-            )
-          : null
-      }
+      note={settlementBlockedKey ? t(settlementBlockedKey) : null}
       badges={
-        <>
-          {isLocked ? (
-            <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill>
-          ) : availability === "recommended" ? (
-            <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
-          ) : null}
-          {settlementBlock ? (
-            <Pill tone="warning">
-              <TriangleAlert className="h-3 w-3" aria-hidden />
-              {t("DashboardIssuance.config.settlementBlockedBadge")}
-            </Pill>
-          ) : null}
-        </>
+        <PermanentRowBadges
+          availability={availability}
+          settlementBlocked={settlementBlockedKey !== null}
+        />
       }
       actions={
         showTechnical && setting.actions.length > 0
