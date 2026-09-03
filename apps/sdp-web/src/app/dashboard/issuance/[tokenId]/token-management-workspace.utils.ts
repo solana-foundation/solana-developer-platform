@@ -708,10 +708,9 @@ function getPendingAuthoritySignerWallet(
     return null;
   }
 
-  return (
-    findWalletByCustodyWalletId(availableWallets, token.signingCustodyWalletId) ??
-    availableWallets[0]
-  );
+  return token.signingCustodyWalletId
+    ? findWalletByCustodyWalletId(availableWallets, token.signingCustodyWalletId)
+    : availableWallets[0];
 }
 
 function pendingTokenRequiresPermanentDelegate(token: Token): boolean {
@@ -859,13 +858,21 @@ export function getSignerSelectionForAction({
   }
 
   if (action === "deploy") {
-    const preferredWallet =
-      findWalletByCustodyWalletId(availableWallets, token.signingCustodyWalletId) ??
-      availableWallets[0];
+    const preferredWallet = findWalletByCustodyWalletId(
+      availableWallets,
+      token.signingCustodyWalletId
+    );
+    if (token.signingCustodyWalletId && !preferredWallet) {
+      return {
+        wallets: availableWallets,
+        defaultWalletId: "",
+        unavailableReason: t("DashboardIssuance.management.requiredSignerNotControlled"),
+      };
+    }
 
     return {
       wallets: availableWallets,
-      defaultWalletId: preferredWallet.id,
+      defaultWalletId: (preferredWallet ?? availableWallets[0]).id,
       unavailableReason: null,
     };
   }

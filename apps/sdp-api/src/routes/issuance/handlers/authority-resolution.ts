@@ -405,7 +405,7 @@ async function loadResolvedAuthoritySigner(params: {
     params.custodyWalletId
   );
   if (signer.address !== params.currentAuthority) {
-    throw badRequest("Current authority is not controlled by custody");
+    throw conflict("Current authority is not controlled by custody");
   }
   return signer;
 }

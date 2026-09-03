@@ -2,6 +2,7 @@ import type { PaymentsDashboardWallet, Token } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   findWalletByCustodyWalletId,
+  getDisplayedAuthorityAddress,
   getSignerSelectionForAction,
   getSignerWalletOptionLabel,
 } from "./token-management-workspace.utils";
@@ -43,6 +44,37 @@ describe("issuance exact wallet selection", () => {
         t,
       }).defaultWalletId
     ).toBe("cwlt_b");
+  });
+
+  it("blocks deploy when the persisted exact wallet is unavailable", () => {
+    const selection = getSignerSelectionForAction({
+      action: "deploy",
+      token: { ...token, signingCustodyWalletId: "cwlt_missing" } as Token,
+      authorityWallets: wallets,
+      metadataAuthority: null,
+      t,
+    });
+
+    expect(selection.wallets).toEqual(wallets);
+    expect(selection.defaultWalletId).toBe("");
+    expect(selection.unavailableReason).toBe(
+      "DashboardIssuance.management.requiredSignerNotControlled"
+    );
+  });
+
+  it("does not display another wallet as a missing pending authority", () => {
+    expect(
+      getDisplayedAuthorityAddress({
+        token: {
+          ...token,
+          signingCustodyWalletId: "cwlt_missing",
+          mintAuthority: null,
+        } as Token,
+        role: "mint",
+        metadataAuthority: null,
+        authorityWallets: wallets,
+      })
+    ).toBeNull();
   });
 
   it.each(["mint", "seize", "force-burn", "freeze", "authority"] as const)(

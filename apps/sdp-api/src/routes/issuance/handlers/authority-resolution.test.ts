@@ -689,6 +689,24 @@ describe("authority-resolution", () => {
     expect(exactSigner).not.toHaveBeenCalled();
   });
 
+  it("reports a signer that diverges from its wallet record as a conflict", async () => {
+    await resetScope();
+    await seedConfigWallet({ id: "cwlt_authority", walletId: "wal_authority" });
+    vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet").mockResolvedValueOnce({
+      address: OTHER_AUTHORITY,
+    } as never);
+
+    await expect(
+      createResolvedAuthoritySigner({
+        env: testEnv,
+        auth: createAuth(),
+        custodyWalletId: "cwlt_authority",
+        currentAuthority: AUTHORITY,
+        requiredWalletPermissions: ["tokens:admin"],
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
+  });
+
   it("keeps legacy prepare signers Config-only", async () => {
     await resetScope();
     await seedConnectionWallet({ id: "cwlt_connection", walletId: "wal_connection" });
