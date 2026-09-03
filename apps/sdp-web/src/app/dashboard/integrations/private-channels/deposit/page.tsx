@@ -7,7 +7,11 @@ import {
   requirePrivateChannelsAccess,
 } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadInstance, loadSignableWallets } from "../private-channels-page.data";
+import {
+  loadInstance,
+  loadSignableWallets,
+  loadTokenEligibility,
+} from "../private-channels-page.data";
 import { DepositForm } from "./deposit-form";
 
 export default async function PrivateChannelsDepositPage() {
@@ -24,7 +28,10 @@ export default async function PrivateChannelsDepositPage() {
     redirect(PRIVATE_CHANNELS_SETUP_PATH);
   }
 
-  const wallets = await loadSignableWallets(client);
+  const [wallets, tokenEligibility] = await Promise.all([
+    loadSignableWallets(client),
+    loadTokenEligibility(client),
+  ]);
 
   return (
     <div className="mx-auto w-full max-w-2xl">
@@ -34,10 +41,13 @@ export default async function PrivateChannelsDepositPage() {
           <CardDescription>{t("DashboardPrivateChannels.deposit.description")}</CardDescription>
         </CardHeader>
         <CardContent>
-          {wallets.ok ? (
-            <DepositForm wallets={wallets.data} />
+          {wallets.ok && tokenEligibility.ok ? (
+            <DepositForm
+              tokens={tokenEligibility.data.filter((token) => token.enabled)}
+              wallets={wallets.data}
+            />
           ) : (
-            <PrivateChannelsLoadError message={wallets.error} />
+            <PrivateChannelsLoadError message={wallets.error ?? tokenEligibility.error} />
           )}
         </CardContent>
       </Card>

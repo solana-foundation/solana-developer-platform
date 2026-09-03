@@ -27,7 +27,14 @@ const STORAGE_KEY = "sdp:issuance:create-draft:v1";
 // hydrated into an inconsistent state. v2: advanced settings are combo-driven and
 // reset per category, so pre-combo drafts (e.g. security extensions left on a
 // generic asset) must not carry over.
-const STORAGE_VERSION = 2;
+// v3: tokenized securities no longer auto-select scaledUiAmount, because a mint
+// carrying it is rejected by the DvP settlement program. A v2 security draft has
+// it turned on without the issuer ever choosing it, and sanitizeAdvancedSettings
+// cannot strip it — the setting is still allowed (opt-in), and the draft records
+// no provenance, so that code cannot tell the old default from a deliberate
+// choice. Discarding the draft is the only option that does not either ship an
+// unsettleable mint or silently revert someone who genuinely wants the extension.
+const STORAGE_VERSION = 3;
 
 interface WizardState {
   draft: DraftState;

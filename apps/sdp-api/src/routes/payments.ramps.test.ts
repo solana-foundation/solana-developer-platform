@@ -872,7 +872,7 @@ describe("Payments routes — ramps", () => {
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
 
-  it("fails loudly when a BVNK off-ramp quote reaches the unwired JIT seam", async () => {
+  it("fails loudly when a BVNK off-ramp quote has no customer-link row", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
       providerData: {
@@ -915,12 +915,10 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error).toEqual({
-      code: "BAD_REQUEST",
-      message: `BVNK offramp requires identity fields for counterparty ${counterpartyId} that are no longer stored; JIT collection is not wired yet`,
-    });
+    expect(body.error.code).toBe("CONFLICT");
+    expect(body.error.message).toContain("not provisioned for bvnk offramp");
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -1555,9 +1553,9 @@ describe("Payments routes — ramps", () => {
         .prepare(
           `INSERT INTO counterparty_provider_accounts (
              id, organization_id, project_id, counterparty_id, provider,
-             provider_customer_reference, external_account_reference, fiat_currency,
+             provider_customer_reference, kind, external_account_reference, fiat_currency,
              destination_country, payment_rail, provider_status, status, metadata
-           ) VALUES (?, ?, ?, ?, 'lightspark', ?, ?, ?, ?, ?, ?, 'active', '{}')`
+           ) VALUES (?, ?, ?, ?, 'lightspark', ?, ?, ?, ?, ?, ?, ?, 'active', '{}')`
         )
         .bind(
           input.id,
@@ -1565,6 +1563,7 @@ describe("Payments routes — ramps", () => {
           TEST_PROJECT.id,
           input.counterpartyId,
           input.providerCustomerReference,
+          input.fiatCurrency === null ? "customer_link" : "payout_account",
           input.externalAccountReference,
           input.fiatCurrency,
           input.destinationCountry,

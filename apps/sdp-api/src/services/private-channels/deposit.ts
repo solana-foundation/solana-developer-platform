@@ -163,8 +163,9 @@ export async function createChannelDeposit(
     );
   }
 
-  const { mint, decimals, tokenProgram } = resolveChannelToken(
-    input.projectRpc.cluster,
+  const { mint, decimals, tokenProgram } = await resolveChannelToken(
+    input.instance,
+    input.projectRpc,
     input.mint
   );
   const depositor = wallet.publicKey;

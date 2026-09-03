@@ -33,6 +33,7 @@ import {
   notFound,
   walletNotFound,
 } from "@/lib/errors";
+import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import {
   buildEarnVaultDepositFingerprint,
   buildEarnVaultWithdrawalFingerprint,
@@ -52,11 +53,13 @@ import {
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
 import {
+  earnClusterFor,
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
+import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { refusedBuildMessage } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import {
@@ -179,6 +182,11 @@ export async function createEarnVaultDepositPreview(
     sharesOut: quote.sharesOut,
     shareDecimals: quote.shareDecimals,
     blockingIssues: quote.blockingIssues,
+    // Sponsorship INTENT, for honest fee copy on the confirm step — the same
+    // flag+cluster gate resolveVaultSponsorship applies at execution. A
+    // swap-funded deposit forces wallet-pays regardless; the swap choice lives
+    // client-side, so the client applies that override to the copy.
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment)),
   });
 }
 
@@ -816,7 +824,13 @@ export async function getEarnVaultDeposit(c: AppContext) {
     throw notFound("Earn vault deposit");
   }
 
-  const response: EarnVaultDepositResponse = { deposit: toEarnVaultDepositRecord(movement) };
+  // The scope checks happen before the chain read so a guessed movement id
+  // cannot use RPC timing to learn that another workspace's transaction exists.
+  // The scheduled sweep remains the recovery path if this best-effort read fails.
+  const currentMovement = await reconcileEarnVaultMovementReadThrough(c.env, movement);
+  const response: EarnVaultDepositResponse = {
+    deposit: toEarnVaultDepositRecord(currentMovement),
+  };
   return success(c, response);
 }
 
@@ -1381,6 +1395,8 @@ export async function createEarnVaultWithdrawalPreview(
     assetsOut: quote.assetsOut,
     assetDecimals: quote.assetDecimals,
     blockingIssues: quote.blockingIssues,
+    // Same sponsorship intent as the deposit preview; exits have no swap leg.
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment)),
   });
 }
 
@@ -1518,8 +1534,9 @@ export async function getEarnVaultWithdrawal(c: AppContext) {
     throw notFound("Earn vault withdrawal");
   }
 
+  const currentMovement = await reconcileEarnVaultMovementReadThrough(c.env, movement);
   const response: EarnVaultWithdrawalResponse = {
-    withdrawal: toEarnVaultWithdrawal(movement),
+    withdrawal: toEarnVaultWithdrawal(currentMovement),
   };
   return success(c, response);
 }

@@ -19,6 +19,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
+  CollectedFieldData,
   CounterpartyRequirements,
   PayoutRequirementAccount,
 } from "@sdp/types/ramp-requirements";
@@ -283,6 +284,7 @@ export type ValidateCounterpartyOptions =
       fiatCurrency?: RampFiatCurrency;
       destinationWalletAddress?: string;
       providerCustomerReference?: string;
+      collectedData?: CollectedFieldData;
     }
   | {
       direction: "offramp";
@@ -292,6 +294,7 @@ export type ValidateCounterpartyOptions =
       cryptoRail?: CryptoRailId;
       payoutAccounts?: readonly PayoutRequirementAccount[];
       providerCustomerReference?: string;
+      collectedData?: CollectedFieldData;
     };
 
 /**

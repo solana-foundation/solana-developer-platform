@@ -18,7 +18,7 @@ import type { PrivateChannelBalance, PrivateChannelInstance, SolanaCluster } fro
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
-import { knownMintToken, resolveChannelToken } from "./mint";
+import { knownMintToken, resolveRegisteredChannelToken } from "./mint";
 
 /** The instance fields the balance read needs. */
 type BalanceInstance = Pick<PrivateChannelInstance, "gatewayUrl">;
@@ -46,7 +46,10 @@ export async function getChannelBalance(
   }
 ): Promise<PrivateChannelBalance> {
   const ownerAddress = assertValidAddress(owner, "owner");
-  const mintAddress = assertValidAddress(mint ?? resolveChannelToken(cluster).mint, "mint");
+  const mintAddress = assertValidAddress(
+    mint ?? resolveRegisteredChannelToken(cluster).mint,
+    "mint"
+  );
 
   // This stays a GENERAL read: an explicitly-passed mint need not be on the
   // instance's allowlist, unlike the write paths. The allowlist only supplies the

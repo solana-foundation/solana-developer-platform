@@ -329,12 +329,12 @@ describe("startCron", () => {
     expect(runPendingDepositsReconciliation).toHaveBeenCalledWith({
       env,
       bg,
-      observability: undefined,
+      observability: expect.anything(),
     });
     expect(runPendingWithdrawalsReconciliation).toHaveBeenCalledWith({
       env,
       bg,
-      observability: undefined,
+      observability: expect.anything(),
     });
   });
 
@@ -464,7 +464,7 @@ describe("startCron", () => {
     });
   });
 
-  it("tick passes observability=undefined through when caller did not supply one", () => {
+  it("tick receives a proof-of-life observability even when caller did not supply one", () => {
     const bg = makeBg();
     const env = {} as Env;
     startCron({ env, bg });
@@ -473,7 +473,7 @@ describe("startCron", () => {
     expect(runPendingTransfersReconciliation).toHaveBeenCalledWith({
       env,
       bg,
-      observability: undefined,
+      observability: expect.anything(),
     });
   });
 

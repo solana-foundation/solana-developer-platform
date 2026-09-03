@@ -185,6 +185,13 @@ export interface EarnStrategyRiskMetadata {
   [key: string]: unknown;
 }
 
+export interface EarnStrategySlippagePolicy {
+  /** Live quote endpoint must be called before building this direction. */
+  quoteRequired: true;
+  /** Suggested starting tolerance; the customer may choose another accepted value. */
+  defaultToleranceBps: number;
+}
+
 export interface EarnStrategy {
   id: string;
   /**
@@ -212,6 +219,10 @@ export interface EarnStrategy {
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /** Null when this provider's deposit builder needs no quote-derived floor. */
+  depositSlippage: EarnStrategySlippagePolicy | null;
+  /** Null when this provider's withdrawal builder needs no quote-derived floor. */
+  withdrawalSlippage: EarnStrategySlippagePolicy | null;
   /**
    * The cluster the strategy's INSTRUMENT actually lives on — not the cluster
    * of the environment that catalogued it, and the two can differ.
@@ -324,6 +335,8 @@ export interface EarnExternalWalletStrategyTotal {
   provider: string;
   providerReference: string;
   label: string;
+  /** Exact project-scoped owners contributing to this strategy total. */
+  ownerAddresses: string[];
   walletCount: number;
   positionCount: number;
   totalsByToken: EarnExternalWalletTokenTotal[];
@@ -605,6 +618,8 @@ export interface EarnExternalWalletWithdrawalTransactionResponse {
     positionId: string;
     /** Shares encoded in the transaction, share units. */
     shares: string;
+    /** Minimum deposit-token amount encoded in the transaction, or null. */
+    minAmountOut: string | null;
   };
 }
 
