@@ -89,8 +89,8 @@ export function SelectExistingOrganizationPanel() {
                   if (!setActive) return;
                   setSwitchingTo(organization.id);
                   try {
-                    await setActive({ organization: organization.id });
                     await selectProjectAction(null);
+                    await setActive({ organization: organization.id });
                     router.refresh();
                   } catch {
                     setSwitchingTo(null);

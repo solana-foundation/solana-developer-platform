@@ -91,8 +91,11 @@ describe("SelectExistingOrganizationPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Existing workspace" }));
 
-    expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_existing" });
     expect(mocks.clearSelectedProject).toHaveBeenCalledWith(null);
+    expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_existing" });
+    expect(mocks.clearSelectedProject.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.setActive.mock.invocationCallOrder[0]
+    );
     expect(mocks.refresh).toHaveBeenCalledOnce();
   });
 
