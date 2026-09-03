@@ -6,8 +6,6 @@ import {
   earnExternalWalletMovementsQuerySchema,
   earnExternalWalletPositionParamsSchema,
   earnExternalWalletPositionsQuerySchema,
-  earnStrategyIdParamsSchema,
-  listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
 import { errorResponseSchema } from "../schemas/base";
 import {
@@ -20,15 +18,9 @@ import {
   earnExternalWalletPositionSummaryResponse,
   earnExternalWalletPositionsResponse,
   earnExternalWalletSubmitRequest,
-  earnExternalWalletWithdrawalPreviewRequest,
-  earnExternalWalletWithdrawalPreviewResponse,
   earnExternalWalletWithdrawalResponse,
   earnExternalWalletWithdrawalTransactionRequest,
   earnExternalWalletWithdrawalTransactionResponse,
-  earnStrategiesResponse,
-  earnStrategyResponse,
-  earnVaultDepositPreviewRequest,
-  earnVaultDepositPreviewResponse,
 } from "../schemas/earn";
 import {
   errorResponses,
@@ -46,96 +38,12 @@ const earnConfigurationSecurity: Array<Record<string, string[]>> = [
 const earnPublicSecurity: Array<Record<string, string[]>> = [{ apiKeyAuth: [] }];
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
-  registerEarnStrategyPaths(registry, earnConfigurationSecurity);
-  registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
 }
 
-/** The discover, quote, build, submit, and read loop exposed to partner backends. */
+/** Only the partner-facing caller-signed money routes belong in the public document. */
 export function registerPublicEarnPaths(registry: OpenAPIRegistry) {
-  registerEarnStrategyPaths(registry, earnPublicSecurity);
-  registerEarnDepositPreviewPath(registry, earnPublicSecurity);
   registerEarnExternalWalletPaths(registry, earnPublicSecurity);
-}
-
-function registerEarnStrategyPaths(
-  registry: OpenAPIRegistry,
-  security: Array<Record<string, string[]>>
-) {
-  registry.registerPath({
-    method: "get",
-    path: "/v1/earn/strategies",
-    tags: ["Earn"],
-    summary: "List Embedded Yield strategies",
-    operationId: "listEarnStrategies",
-    description:
-      "Lists the strategies visible to the active project. The default cluster matches the " +
-      "API key's project; pass `cluster` only to browse another cluster. Check `fundable` and " +
-      "use a mint from `depositMints` before building a deposit. Requires `earn:read`.",
-    security,
-    request: {
-      headers: projectScopeHeaders,
-      query: listEarnStrategiesQuerySchema,
-    },
-    responses: {
-      200: {
-        description: "Visible Embedded Yield strategies",
-        content: jsonContent(earnStrategiesResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/earn/strategies/{strategyId}",
-    tags: ["Earn"],
-    summary: "Get an Embedded Yield strategy",
-    operationId: "getEarnStrategy",
-    description:
-      "Returns one visible strategy and its live integration metadata. Requires `earn:read`.",
-    security,
-    request: {
-      headers: projectScopeHeaders,
-      params: earnStrategyIdParamsSchema,
-    },
-    responses: {
-      200: {
-        description: "Embedded Yield strategy",
-        content: jsonContent(earnStrategyResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
-    },
-  });
-}
-
-function registerEarnDepositPreviewPath(
-  registry: OpenAPIRegistry,
-  security: Array<Record<string, string[]>>
-) {
-  registry.registerPath({
-    method: "post",
-    path: "/v1/earn/vault-deposit-previews",
-    tags: ["Earn"],
-    summary: "Preview a vault deposit",
-    operationId: "createEarnVaultDepositPreview",
-    description:
-      "Quotes the shares a direct deposit would mint at the provider's current live rate. " +
-      "Use the result to derive `minSharesOut`; the preview moves no money and requires " +
-      "`earn:read`. A provider without quote support returns 501.",
-    security,
-    request: {
-      headers: projectScopeHeaders,
-      body: { required: true, content: jsonContent(earnVaultDepositPreviewRequest) },
-    },
-    responses: {
-      200: {
-        description: "Live deposit quote",
-        content: jsonContent(earnVaultDepositPreviewResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
-    },
-  });
 }
 
 function registerEarnExternalWalletPaths(
@@ -225,10 +133,9 @@ function registerEarnExternalWalletPaths(
     summary: "Get one external-wallet movement",
     operationId: "getEarnExternalWalletMovement",
     description:
-      "Polls one recorded movement to a terminal state. Each detail read performs a bounded, " +
-      "fail-soft Solana status check so an open client can observe progress immediately. " +
-      "Scheduled reconciliation remains the recovery path for closed clients and RPC outages. " +
-      "Keep polling until `finalized` or `failed`; no fixed settlement SLA is implied.",
+      "Polls one recorded movement to a terminal state — the read that settles a submit whose " +
+      "outcome the caller never learned. The reconciliation sweep drives every movement " +
+      "terminal within about ninety seconds; keep polling until `finalized` or `failed`.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -268,34 +175,6 @@ function registerEarnExternalWalletPaths(
         content: jsonContent(earnExternalWalletEarningsResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-previews",
-    tags: ["Earn"],
-    summary: "Preview an external-wallet exit",
-    operationId: "createEarnExternalWalletWithdrawalPreview",
-    description:
-      "Quotes the deposit-token amount an external-wallet position would return at the " +
-      "provider's current live rate. Derive `minAmountOut` from this quote and the customer's " +
-      "slippage tolerance. The exact project owns the position scope; no custody-wallet " +
-      "permission is required. Requires `earn:read`; unsupported providers return 501.",
-    security,
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(earnExternalWalletWithdrawalPreviewRequest),
-      },
-    },
-    responses: {
-      200: {
-        description: "Live external-wallet withdrawal quote",
-        content: jsonContent(earnExternalWalletWithdrawalPreviewResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
