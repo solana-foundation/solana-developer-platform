@@ -267,17 +267,20 @@ describe("DvpTradeRepository (postgres)", () => {
       ).resolves.toMatchObject({ id: "dvp_trade_test_2" });
     });
 
-    it.each(["creating", "created"] as const)("refuses to free a %s trade's key", async (status) => {
-      const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
-      if (status === "created") {
-        await repo.resolveCreate(created.id, "created");
-      }
+    it.each(["creating", "created"] as const)(
+      "refuses to free a %s trade's key",
+      async (status) => {
+        const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
+        if (status === "created") {
+          await repo.resolveCreate(created.id, "created");
+        }
 
-      await expect(repo.releaseIdempotencyKey(created.id)).resolves.toBe(false);
-      await expect(repo.getByIdempotencyKey(TEST_PROJECT_ID, "key-1")).resolves.toMatchObject({
-        id: created.id,
-      });
-    });
+        await expect(repo.releaseIdempotencyKey(created.id)).resolves.toBe(false);
+        await expect(repo.getByIdempotencyKey(TEST_PROJECT_ID, "key-1")).resolves.toMatchObject({
+          id: created.id,
+        });
+      }
+    );
 
     // Second call finds no key left to free, so it reports false rather than
     // claiming it did the work twice.
