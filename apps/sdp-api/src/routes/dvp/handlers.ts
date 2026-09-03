@@ -12,6 +12,7 @@ import {
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
+import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import type { Env } from "@/types/env";
 import type { DvpCloseResolved } from "./policy";
@@ -207,6 +208,31 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     // Named because they cost rent from the settlement wallet, and because a
     // caller seeing accounts appear should know why.
     createdAccounts: result.createdAccounts,
+  });
+};
+
+/**
+ * Funds SDP's leg. Same gate as settle and cancel — it spends from a custody
+ * wallet, and once the escrow holds the tokens only settle, cancel or reclaim
+ * gets them back.
+ */
+export const fundTrade = async (c: AppContext) => {
+  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
+  if (!resolved.trade) {
+    throw notFound("DvP trade not found");
+  }
+
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), resolved.trade.sdpWalletId, [
+    "payments:write",
+  ]);
+
+  const result = await fundDvpTradeLeg(c, resolved.trade);
+
+  return success(c, {
+    tradeId: resolved.trade.id,
+    leg: result.leg,
+    amount: result.amount,
+    signature: result.signature,
   });
 };
 

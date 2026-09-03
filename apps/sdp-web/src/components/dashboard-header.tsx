@@ -408,6 +408,19 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  // Create is a detail/action route, so it keeps a centred title and a way back
+  // to the list — the only orientation such a route has.
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`) {
+    return {
+      title: t("DashboardMarkets.dvp.createTitle"),
+      titlePosition: "center",
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+        label: t("DashboardMarkets.dvp.navLabel"),
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
   // A trade detail page keeps its own centred title beside a back action: it is
   // the only orientation a detail route has, unlike a top-level list where the
   // title would just repeat the active sidebar item.

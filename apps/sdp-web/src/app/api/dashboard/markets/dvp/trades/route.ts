@@ -39,3 +39,18 @@ export async function GET(request: Request) {
     path: `/v1/dvp/trades${validated.query}`,
   });
 }
+
+/**
+ * Create. The Idempotency-Key is forwarded deliberately: it is what makes a
+ * double submit, or a retry after a dropped connection, return the original
+ * trade instead of creating a second one at a second address.
+ */
+export async function POST(request: Request) {
+  const idempotencyKey = request.headers.get("Idempotency-Key");
+  return proxyToSdpApi({
+    request,
+    traceSource: "route.dashboard.dvp.trades.create",
+    path: "/v1/dvp/trades",
+    upstreamHeaders: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+  });
+}

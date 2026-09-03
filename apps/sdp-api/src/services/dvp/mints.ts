@@ -118,6 +118,29 @@ export async function validateDvpMints(
 }
 
 /**
+ * A mint's decimals, or null when it cannot be read.
+ *
+ * `TransferChecked` takes decimals and the token program verifies them against
+ * the mint, so passing a guess would fail the transfer rather than move a wrong
+ * quantity — but reading them is still the only way to send at all.
+ */
+export async function readMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number | null> {
+  const account = await getAccountInfo(rpc, mint);
+  if (!account) {
+    return null;
+  }
+  const bytes = toBytes(account.data);
+  if (!bytes) {
+    return null;
+  }
+  try {
+    return getMintDecoder().decode(bytes).decimals;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Names the deny-listed extensions present on a mint's raw account data.
  *
  * Returns nothing on data it cannot parse rather than throwing. This is a

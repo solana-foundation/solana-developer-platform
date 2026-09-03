@@ -174,6 +174,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /trades/:tradeId",
       "POST /trades",
       "POST /trades/:tradeId/cancel",
+      "POST /trades/:tradeId/fund",
       "POST /trades/:tradeId/settle",
     ]);
   });

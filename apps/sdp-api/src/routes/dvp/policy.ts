@@ -18,13 +18,21 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import {
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import type { DvpCloseAction } from "@/services/dvp/settle";
+
+/** Every trade action that spends from a custody wallet. */
+export type DvpTradeAction = DvpCloseAction | "fund";
+
+import { createPolicyRepository } from "@/db/repositories";
+import { readDvpLegShortfall } from "@/services/dvp/fund";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
+import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 
@@ -44,14 +52,32 @@ interface SettlementWalletRef {
  * @param action - settle or cancel; they are separate operation types because
  *   an org may well allow one and not the other.
  */
-export function buildDvpClosePolicyCandidate(
+export function buildDvpTradeActionPolicyCandidate(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
   settlement: SettlementWalletRef,
-  action: DvpCloseAction
+  action: DvpTradeAction,
+  /**
+   * What funding will actually move, when it is already known to be less than
+   * the leg's target. Null for settle and cancel, which move whole legs.
+   *
+   * `fundDvpTradeLeg` tops a partly funded leg up to its target rather than
+   * sending the target again (`services/dvp/fund.ts:99`), so the full amount is
+   * the wrong number to put in front of an approver: a top-up well inside an
+   * amount limit would be refused because the TARGET exceeds it, and the queue
+   * would ask a human to approve money that is not going to move.
+   *
+   * Safe as an approval basis despite being read before the transfer: an escrow
+   * only ever gains tokens while its trade is open — settle, cancel and reject
+   * each close the account — so the outstanding balance is monotonically
+   * non-increasing and this is an upper bound on the eventual transfer. Policy
+   * therefore never approves less than what moves.
+   */
+  fundingAmount: bigint | null = null
 ): { candidate: PolicyCandidate; legs: PolicyCandidate[] } {
   const auth = getAuth(c);
   const sdpLegIsA = trade.sdpSide === "a";
+  const sdpAmount = fundingAmount === null ? null : fundingAmount.toString();
 
   const base = {
     organizationId: auth.organizationId,
@@ -71,9 +97,11 @@ export function buildDvpClosePolicyCandidate(
     // interaction with a Solana program, not a payment rail, and reusing it
     // means no migration to widen the wallet_operations family constraint.
     operationFamily: "program" as const,
-    operationType: (action === "settle" ? "dvp_settle" : "dvp_cancel") as
-      | "dvp_settle"
-      | "dvp_cancel",
+    operationType: (action === "settle"
+      ? "dvp_settle"
+      : action === "cancel"
+        ? "dvp_cancel"
+        : "dvp_fund") as "dvp_settle" | "dvp_cancel" | "dvp_fund",
     providerExtensions: {},
   };
 
@@ -81,8 +109,15 @@ export function buildDvpClosePolicyCandidate(
     ...base,
     asset: trade.mintA,
     amount: trade.amountA,
-    // On settle the asset leg goes to user B; on cancel it returns to user A.
-    destination: action === "settle" ? trade.userBSettlementDestination : trade.userA,
+    // Where this leg's tokens end up: delivered to the counterparty on settle,
+    // returned to the depositor on cancel, and INTO the escrow on fund. A
+    // destination rule should see the address the money actually reaches.
+    destination:
+      action === "fund"
+        ? trade.escrowA
+        : action === "settle"
+          ? trade.userBSettlementDestination
+          : trade.userA,
     context: { dvpTradeId: trade.id, dvpLeg: "a", dvpAction: action },
   };
 
@@ -90,11 +125,24 @@ export function buildDvpClosePolicyCandidate(
     ...base,
     asset: trade.mintB,
     amount: trade.amountB,
-    destination: action === "settle" ? trade.userASettlementDestination : trade.userB,
+    destination:
+      action === "fund"
+        ? trade.escrowB
+        : action === "settle"
+          ? trade.userASettlementDestination
+          : trade.userB,
     context: { dvpTradeId: trade.id, dvpLeg: "b", dvpAction: action },
   };
 
-  const sdpLeg = sdpLegIsA ? legA : legB;
+  // Only SDP's leg is ever overridden: the counterparty's leg describes what
+  // THEY owe, which a partial top-up on our side does not change.
+  const sdpLegAtTarget = sdpLegIsA ? legA : legB;
+  const sdpLeg: PolicyCandidate =
+    sdpAmount === null ? sdpLegAtTarget : { ...sdpLegAtTarget, amount: sdpAmount };
+
+  // Funding moves ONE leg — SDP's — so the counterparty's leg is not part of
+  // the operation and must not be evaluated as though it were.
+  const legs = action === "fund" ? [sdpLeg] : [legA, legB];
 
   return {
     candidate: {
@@ -107,8 +155,36 @@ export function buildDvpClosePolicyCandidate(
         counterparty: sdpLegIsA ? trade.userB : trade.userA,
       },
     },
-    legs: [legA, legB],
+    legs,
   };
+}
+
+/**
+ * What funding should be evaluated at: the approved amount on a replay, the
+ * live shortfall otherwise.
+ *
+ * @param c - Request context, which carries the approved operation on a replay.
+ * @param trade - The trade whose SDP leg is being funded.
+ * @returns The base-unit amount to put on the policy candidate.
+ */
+async function approvedOrLiveFundingAmount(
+  c: Context<{ Bindings: Env }>,
+  trade: DvpTradeRow
+): Promise<bigint> {
+  const operationId = approvedWalletOperationId(c);
+  if (operationId) {
+    const operation = await createPolicyRepository(
+      c.env,
+      getRequestTenantScope(c)
+    ).getWalletOperationById(operationId);
+    // Only when the stored row actually carries an amount. A missing one means
+    // this is not the operation we think it is, and the field-by-field match
+    // downstream is the right place for that to fail loudly.
+    if (operation?.amount) {
+      return BigInt(operation.amount);
+    }
+  }
+  return readDvpLegShortfall(c.env, trade);
 }
 
 /**
@@ -120,9 +196,9 @@ export function buildDvpClosePolicyCandidate(
  * `policyGate` treats that as ungoverned and lets the handler produce the 404,
  * rather than filing a wallet operation for a trade that is not there.
  */
-export async function extractDvpClosePolicyCandidate(
+export async function extractDvpTradeActionPolicyCandidate(
   c: Context<{ Bindings: Env }>,
-  action: DvpCloseAction
+  action: DvpTradeAction
 ): Promise<PolicyGateExtraction> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -166,7 +242,31 @@ export async function extractDvpClosePolicyCandidate(
     organizationId: trade.organizationId,
     projectId: trade.projectId,
   });
-  const { candidate, legs } = buildDvpClosePolicyCandidate(c, trade, settlement, action);
+
+  // Funding tops SDP's leg up to its target, so what policy is shown has to be
+  // the shortfall rather than the target. Read here, at extraction, because
+  // this is the value the approval request stores and a human reads later.
+  //
+  // On an approved REPLAY the stored amount wins over a fresh read. The replay
+  // is checked field-by-field against the approved row with `amount` compared
+  // for exact equality (`services/policy/enforcement.service.ts:113`), and a
+  // deposit landing between approval and execution would make a fresh read
+  // smaller — so recomputing here would fail the match and strand an approved
+  // top-up behind a second approval it should never have needed.
+  //
+  // Pinning is safe in the direction that matters: an escrow only gains tokens
+  // while its trade is open, so the live shortfall funding actually sends is
+  // always at or below the amount that was approved. Policy approved a ceiling
+  // and the transfer stays under it.
+  const fundingAmount = action === "fund" ? await approvedOrLiveFundingAmount(c, trade) : null;
+
+  const { candidate, legs } = buildDvpTradeActionPolicyCandidate(
+    c,
+    trade,
+    settlement,
+    action,
+    fundingAmount
+  );
 
   return {
     candidate,

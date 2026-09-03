@@ -60,6 +60,8 @@ export interface DvpTradeRow {
 
   status: DvpTradeStatus;
   observedAt: string | null;
+  /** Signature of the transfer that funded SDP's leg, once one is claimed. */
+  sdpLegFundingSignature: string | null;
   /** Caller-supplied Idempotency-Key, when one was sent. */
   idempotencyKey: string | null;
   /** Hash of the terms that key was first used with. */
@@ -98,6 +100,7 @@ export type DvpTradeInsert = Omit<
   | "escrowBAmount"
   | "escrowAFrozen"
   | "escrowBFrozen"
+  | "sdpLegFundingSignature"
 >;
 
 export interface DvpTradeScope {
@@ -173,6 +176,16 @@ export interface DvpTradeRepository {
    * same request, and the key is already scoped to their project.
    */
   getByIdempotencyKey(projectId: string, idempotencyKey: string): Promise<DvpTradeRow | null>;
+  /**
+   * Claims the right to fund SDP's leg, atomically.
+   *
+   * Reading the escrow and then transferring is not atomic, so two overlapping
+   * requests would both see the shortfall and both send, over-funding the
+   * escrow. Returns false when another request already holds the claim.
+   */
+  claimLegFunding(id: string, signature: string): Promise<boolean>;
+  /** Releases a claim whose broadcast was definitively rejected. */
+  releaseLegFunding(id: string, signature: string): Promise<void>;
   /**
    * Frees a `create_failed` row's idempotency key so the same request can be
    * made again.

@@ -1,8 +1,10 @@
 "use client";
 
-import { ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowLeftRightIcon, ChevronRightIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
 import Link from "next/link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
+import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
@@ -29,14 +31,19 @@ import { DVP_TRADES_PAGE_SIZE } from "./dvp-trades.data";
  */
 function LegCell({ leg }: { leg: DvpTradeLeg }) {
   return (
-    <div className="min-w-0">
-      {/* Always observed-over-target, with an em dash when nothing has been
-          read. Showing a bare target for an unobserved leg would be
-          indistinguishable from one that is exactly funded. */}
-      <div className="truncate font-medium text-primary text-sm tabular-nums">
-        {leg.funding ? leg.funding.observedAmount : "—"} / {leg.amount}
+    <div className="flex min-w-0 items-center gap-2">
+      {/* The mark resolves only for a mint in the well-known registry; an
+          issued asset falls back to a monogram rather than a blank. */}
+      <TokenMark className="shrink-0" mint={leg.mint} size="sm" />
+      <div className="min-w-0">
+        {/* Observed-over-target once anything has read the escrow. Before that
+            only the target is shown, with the status column carrying "not
+            checked" so the two are never confused. */}
+        <div className="truncate font-medium text-primary text-sm tabular-nums">
+          {leg.funding ? `${leg.funding.observedAmount} / ${leg.amount}` : leg.amount}
+        </div>
+        <div className="truncate text-tertiary text-xs">{shortenAddress(leg.mint)}</div>
       </div>
-      <div className="truncate text-tertiary text-xs">{shortenAddress(leg.mint)}</div>
     </div>
   );
 }
@@ -49,20 +56,47 @@ export function DvpTradesWorkspace({
   error: string | null;
 }) {
   const t = useTranslations();
+  const listIsEmpty = trades.length === 0;
+  const createHref = `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`;
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
-        <p className="max-w-3xl text-secondary text-sm">{t("DashboardMarkets.dvp.description")}</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <p className="max-w-3xl text-secondary text-sm">
+            {t("DashboardMarkets.dvp.description")}
+          </p>
+          {/* Suppressed while the list is empty, because the empty state already
+              carries this exact call to action and two of the same button on one
+              screen reads as two different actions. */}
+          {listIsEmpty ? null : (
+            <Button asChild className="shrink-0" size="sm">
+              <Link href={createHref}>
+                <PlusIcon className="size-4" />
+                {t("DashboardMarkets.dvp.createAction")}
+              </Link>
+            </Button>
+          )}
+        </div>
 
+        {/* An error and a table of nothing say different things, and showing
+            both says the list is empty when the truth is that it could not be
+            read. The error stands alone. */}
         {error ? (
-          <Callout live variant="danger">
+          <Callout live title={t("DashboardMarkets.dvp.listErrorTitle")} variant="danger">
             {error}
           </Callout>
-        ) : null}
-
-        {trades.length === 0 && !error ? (
+        ) : listIsEmpty ? (
           <ListEmptyState
+            action={
+              <Button asChild size="sm">
+                <Link href={createHref}>
+                  <PlusIcon className="size-4" />
+                  {t("DashboardMarkets.dvp.createAction")}
+                </Link>
+              </Button>
+            }
             description={t("DashboardMarkets.dvp.emptyDescription")}
+            icon={<ArrowLeftRightIcon className="size-5" />}
             message={t("DashboardMarkets.dvp.empty")}
           />
         ) : (
@@ -85,8 +119,18 @@ export function DvpTradesWorkspace({
                   // Marked on the row rather than announced in a banner: a
                   // warning that does not say WHICH trade sends an operator
                   // through every row to find it.
-                  const attention =
-                    overFundedLegs(trade).length > 0 || frozenLegs(trade).length > 0;
+                  //
+                  // The two conditions need different words. Labelling a frozen
+                  // escrow "holds more than the trade needs" is not a vague
+                  // warning, it is a false one, and it is the only thing a
+                  // screen reader gets from this icon.
+                  const isFrozen = frozenLegs(trade).length > 0;
+                  const isOverFunded = overFundedLegs(trade).length > 0;
+                  const attention = isFrozen
+                    ? t("DashboardMarkets.dvp.frozenTitle")
+                    : isOverFunded
+                      ? t("DashboardMarkets.dvp.surplusTitle")
+                      : null;
                   return (
                     // The whole row navigates, via a stretched link on the
                     // status cell. Actions live on the detail page.
@@ -99,7 +143,7 @@ export function DvpTradesWorkspace({
                           <DvpStatusBadge status={trade.status} />
                           {attention ? (
                             <TriangleAlertIcon
-                              aria-label={t("DashboardMarkets.dvp.surplusTitle")}
+                              aria-label={attention}
                               className="h-3.5 w-3.5 shrink-0 text-warning"
                             />
                           ) : null}

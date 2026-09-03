@@ -1,24 +1,24 @@
 "use client";
 
 import { CheckIcon, CopyIcon, SnowflakeIcon, TriangleAlertIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
+import { DvpCloseActions } from "./dvp-close-actions";
+import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
-  canCancelDvpTrade,
-  canSettleDvpTrade,
   type DvpTrade,
   type DvpTradeLeg,
   frozenLegs,
   legFundingRatio,
   overFundedLegs,
 } from "./dvp-trade";
+import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
 /**
  * An address with a copy affordance.
@@ -59,7 +59,17 @@ function CopyableAddress({ address, label }: { address: string; label: string })
 }
 
 /** One leg: what it owes, what the escrow holds, and where to pay it. */
-function LegCard({ leg, title, holder }: { leg: DvpTradeLeg; title: string; holder: string }) {
+function LegCard({
+  leg,
+  title,
+  holder,
+  action,
+}: {
+  leg: DvpTradeLeg;
+  title: string;
+  holder: string;
+  action?: ReactNode;
+}) {
   const t = useTranslations();
   const ratio = legFundingRatio(leg);
 
@@ -72,7 +82,7 @@ function LegCard({ leg, title, holder }: { leg: DvpTradeLeg; title: string; hold
 
       {/* One number at full weight; the target is context beneath it. */}
       <p className="mt-3 font-semibold text-2xl text-primary tabular-nums">
-        {leg.funding ? leg.funding.observedAmount : "—"}
+        {leg.funding ? leg.funding.observedAmount : t("DashboardMarkets.dvp.notObserved")}
       </p>
       <p className="mt-0.5 text-tertiary text-xs">
         {t("DashboardMarkets.dvp.targetLabel")} {leg.amount}
@@ -107,51 +117,46 @@ function LegCard({ leg, title, holder }: { leg: DvpTradeLeg; title: string; hold
       <p className="mt-2 text-tertiary text-[11px] leading-relaxed">
         {t("DashboardMarkets.dvp.escrowHint")}
       </p>
+      {action ? <div className="mt-3 border-border-subtle border-t pt-3">{action}</div> : null}
     </section>
   );
 }
 
 export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
-  const router = useRouter();
-  const [pending, setPending] = useState<"settle" | "cancel" | null>(null);
-  const [awaitingApproval, setAwaitingApproval] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
 
   const overFunded = overFundedLegs(trade);
   const frozen = frozenLegs(trade);
   const sdpLegIsA = trade.sdpSide === "a";
 
-  async function close(action: "settle" | "cancel") {
-    setPending(action);
-    setError(null);
-    setAwaitingApproval(false);
-    try {
-      const response = await fetch(
-        `/api/dashboard/markets/dvp/trades/${encodeURIComponent(trade.id)}/${action}`,
-        { method: "POST" }
-      );
-      // 202 is a normal outcome, not a failure: wallet policy is holding the
-      // action for approval. Treating it as an error would tell an operator
-      // something broke when the platform did exactly what they configured.
-      if (response.status === 202) {
-        setAwaitingApproval(true);
-        return;
-      }
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
-        setError(body.error?.message ?? `Request failed (${response.status}).`);
-        return;
-      }
-      router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Request failed.");
-    } finally {
-      setPending(null);
-    }
-  }
+  // Only SDP's own leg is fundable from here. The counterparty funds theirs
+  // with an ordinary transfer to the escrow — making that a button would mean
+  // spending their wallet, which is the whole thing a DvP trade prevents.
+  const sdpLeg = sdpLegIsA ? trade.legs.a : trade.legs.b;
+  const canFund =
+    (trade.status === "created" || trade.status === "partially_funded") &&
+    !sdpLeg.funding?.funded &&
+    !sdpLeg.funding?.frozen;
+
+  const fundAction = canFund ? (
+    <div className="flex flex-col gap-2">
+      {/* Clicked, not held. Funding moves your leg into the trade's own escrow,
+          which is a step forward rather than something to walk back; hold is
+          reserved for destroying something (HOO-1230). */}
+      <Button
+        className="self-start"
+        disabled={pending !== null}
+        onClick={() => act("fund")}
+        type="button"
+      >
+        {t("DashboardMarkets.dvp.actionFund")}
+      </Button>
+      <p className="text-tertiary text-[11px] leading-relaxed">
+        {t("DashboardMarkets.dvp.fundHint")}
+      </p>
+    </div>
+  ) : undefined;
 
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
@@ -194,6 +199,10 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
           </dl>
         </section>
 
+        {/* Whose move it is. The badge above says what state the trade is in;
+            it does not say what to do about it. */}
+        <DvpNextStep trade={trade} />
+
         {frozen.length > 0 ? (
           <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">
             <span className="inline-flex items-start gap-2">
@@ -214,6 +223,7 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
 
         <div className="grid gap-4 md:grid-cols-2">
           <LegCard
+            action={sdpLegIsA ? fundAction : undefined}
             holder={
               sdpLegIsA
                 ? t("DashboardMarkets.dvp.legSdp")
@@ -223,6 +233,7 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
             title={t("DashboardMarkets.dvp.legA")}
           />
           <LegCard
+            action={sdpLegIsA ? undefined : fundAction}
             holder={
               sdpLegIsA
                 ? t("DashboardMarkets.dvp.legCounterparty")
@@ -244,43 +255,7 @@ export function DvpTradeDetailWorkspace({ trade }: { trade: DvpTrade }) {
           </Callout>
         ) : null}
 
-        {canCancelDvpTrade(trade) ? (
-          <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-            {/* Each action sits with its own explanation. Both are
-                irreversible so both are hold-to-confirm, but only cancel is
-                destructive — settling is the outcome the trade exists for, and
-                styling the two identically would make the intended path look
-                as risky as abandoning the trade. */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-2">
-                <HoldToConfirmButton
-                  className="self-start"
-                  disabled={!canSettleDvpTrade(trade) || pending !== null}
-                  label={t("DashboardMarkets.dvp.actionSettle")}
-                  onConfirm={() => close("settle")}
-                  variant="default"
-                />
-                <p className="text-secondary text-xs leading-relaxed">
-                  {t("DashboardMarkets.dvp.settleHint")}
-                </p>
-                {!canSettleDvpTrade(trade) ? (
-                  <p className="text-tertiary text-xs">{t("DashboardMarkets.dvp.settleBlocked")}</p>
-                ) : null}
-              </div>
-              <div className="flex flex-col gap-2">
-                <HoldToConfirmButton
-                  className="self-start"
-                  disabled={pending !== null}
-                  label={t("DashboardMarkets.dvp.actionCancel")}
-                  onConfirm={() => close("cancel")}
-                />
-                <p className="text-secondary text-xs leading-relaxed">
-                  {t("DashboardMarkets.dvp.cancelHint")}
-                </p>
-              </div>
-            </div>
-          </section>
-        ) : null}
+        <DvpCloseActions onAct={act} pending={pending} trade={trade} />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

@@ -1,18 +1,18 @@
-import type { ReactNode } from "react";
+/**
+ * The trades list.
+ *
+ * Two things here are easy to get wrong and expensive when wrong: an error must
+ * never render as an empty list, because "we could not read this" and "you have
+ * none" are opposite claims; and a leg that has never been read must not show
+ * as a zero balance.
+ */
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import type { DvpTrade, DvpTradeLeg } from "./dvp-trade";
 import { DvpTradesWorkspace } from "./dvp-trades-workspace";
-
-function render(children: ReactNode) {
-  return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      {children}
-    </I18nProvider>
-  );
-}
 
 function leg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
   return {
@@ -33,10 +33,10 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
     status: "created",
     swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
     settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
-    legs: { a: leg(), b: leg({ amount: "2000" }) },
+    legs: { a: leg(), b: leg() },
     sdpSide: "a",
     nonce: "42",
-    expiryTimestamp: "1800003600",
+    expiryTimestamp: "1900000000",
     earliestSettlementTimestamp: null,
     refString: null,
     createSignature: null,
@@ -47,88 +47,94 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
   };
 }
 
+function renderList(trades: DvpTrade[], error: string | null = null): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <DvpTradesWorkspace error={error} trades={trades} />
+    </I18nProvider>
+  );
+}
+
 describe("DvpTradesWorkspace", () => {
-  it("explains what DvP is before showing an empty list", () => {
-    const markup = render(<DvpTradesWorkspace error={null} trades={[]} />);
+  it("invites a first trade when the list is genuinely empty", () => {
+    const html = renderList([]);
 
-    expect(markup).toContain("No trades yet");
-    expect(markup).toContain("both legs move together");
+    expect(html).toContain("No trades yet");
+    expect(html).toContain("/dashboard/markets/dvp/create");
   });
 
-  // A row that navigates, with actions living on the destination.
-  it("makes every row a link to its trade", () => {
-    const markup = render(<DvpTradesWorkspace error={null} trades={[trade()]} />);
+  // An error and a table of nothing say opposite things. Showing both claims
+  // the list is empty when the truth is that it could not be read.
+  it("shows only the error when the list failed to load", () => {
+    const html = renderList([], "Upstream unavailable.");
 
-    expect(markup).toContain('href="/dashboard/markets/dvp/dvp_1"');
+    expect(html).toContain("Upstream unavailable.");
+    expect(html).not.toContain("No trades yet");
+    expect(html).not.toContain("<table");
   });
 
-  // Showing a bare target for an unobserved leg is indistinguishable from one
-  // that is exactly funded, which is the difference between "waiting" and
-  // "ready".
-  it("distinguishes an unobserved leg from an exactly funded one", () => {
-    const unobserved = render(<DvpTradesWorkspace error={null} trades={[trade()]} />);
-    expect(unobserved).toContain("— / 1000");
-
-    const funded = render(
-      <DvpTradesWorkspace
-        error={null}
-        trades={[
-          trade({
-            legs: {
-              a: leg({
-                funding: {
-                  observedAmount: "1000",
-                  funded: true,
-                  surplus: null,
-                  frozen: false,
-                },
-              }),
-              b: leg({ amount: "2000" }),
-            },
-          }),
-        ]}
-      />
-    );
-    expect(funded).toContain("1000 / 1000");
+  // Two identical buttons on one screen read as two different actions.
+  it("does not repeat the create button beside the empty state", () => {
+    expect(renderList([]).match(/dvp\/create/g)?.length).toBe(1);
   });
 
-  // A warning that does not say WHICH trade sends an operator through every row
-  // to find it, so it is marked on the row rather than announced in a banner.
-  it("marks the row of a trade holding a surplus", () => {
-    const markup = render(
-      <DvpTradesWorkspace
-        error={null}
-        trades={[
-          trade({
-            legs: {
-              a: leg({
-                funding: {
-                  observedAmount: "5000",
-                  funded: true,
-                  surplus: "4000",
-                  frozen: false,
-                },
-              }),
-              b: leg({ amount: "2000" }),
-            },
-          }),
-        ]}
-      />
-    );
+  it("keeps create reachable once trades exist", () => {
+    const html = renderList([trade()]);
 
-    expect(markup).toContain("Holds more than the trade needs");
+    expect(html).toContain("/dashboard/markets/dvp/create");
+    expect(html).toContain("<table");
   });
 
-  it("leaves a healthy trade unmarked", () => {
-    const markup = render(<DvpTradesWorkspace error={null} trades={[trade()]} />);
+  // Before anything has read the escrow, its balance is unknown rather than
+  // zero, so only the target is shown.
+  it("shows only the target for a leg nothing has read yet", () => {
+    const html = renderList([trade()]);
 
-    expect(markup).not.toContain("Holds more than the trade needs");
+    expect(html).toContain("1000");
+    expect(html).not.toContain("0 / 1000");
   });
 
-  it("surfaces a list error instead of rendering an empty table as success", () => {
-    const markup = render(<DvpTradesWorkspace error="Upstream unavailable" trades={[]} />);
+  it("shows observed over target once the escrow has been read", () => {
+    const funded = leg({
+      funding: { observedAmount: "400", funded: false, surplus: null, frozen: false },
+    });
+    const html = renderList([trade({ legs: { a: funded, b: leg() } })]);
 
-    expect(markup).toContain("Upstream unavailable");
-    expect(markup).not.toContain("No trades yet");
+    expect(html).toContain("400 / 1000");
+  });
+
+  // Marked on the row rather than announced in a banner: a warning that does
+  // not say WHICH trade sends an operator through every row to find it.
+  //
+  // The label is the only thing a screen reader gets from this icon, so it has
+  // to name the condition that is actually true. Calling a frozen escrow
+  // over-funded is a false statement, not a vague one.
+  it("labels a frozen row as frozen, not as over-funded", () => {
+    const frozen = leg({
+      funding: { observedAmount: "1000", funded: true, surplus: null, frozen: true },
+    });
+    const html = renderList([trade({ legs: { a: frozen, b: leg() } })]);
+
+    expect(html).toContain("Escrow is frozen");
+    expect(html).not.toContain("Holds more than the trade needs");
+  });
+
+  it("labels an over-funded row as over-funded", () => {
+    const surplus = leg({
+      funding: { observedAmount: "1500", funded: true, surplus: "500", frozen: false },
+    });
+    const html = renderList([trade({ legs: { a: surplus, b: leg() } })]);
+
+    expect(html).toContain("Holds more than the trade needs");
+  });
+
+  it("marks nothing on an ordinary row", () => {
+    const funded = leg({
+      funding: { observedAmount: "1000", funded: true, surplus: null, frozen: false },
+    });
+    const html = renderList([trade({ legs: { a: funded, b: funded } })]);
+
+    expect(html).not.toContain("Escrow is frozen");
+    expect(html).not.toContain("Holds more than the trade needs");
   });
 });

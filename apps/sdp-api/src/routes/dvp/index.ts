@@ -6,8 +6,8 @@ import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import { cancelTrade, createTrade, getTrade, listTrades, settleTrade } from "./handlers";
-import { extractDvpClosePolicyCandidate } from "./policy";
+import { cancelTrade, createTrade, fundTrade, getTrade, listTrades, settleTrade } from "./handlers";
+import { extractDvpTradeActionPolicyCandidate } from "./policy";
 import { createDvpTradeSchema } from "./schemas";
 
 const dvp = new Hono<{ Bindings: Env }>();
@@ -49,16 +49,26 @@ dvp.get("/trades/:tradeId", requirePermissions("payments:read"), getTrade);
 // other custody spend, so an organization can require approval on a transaction
 // that moves both sides of a trade at once. They are separate operation types
 // because allowing an unwind is not the same as allowing a settlement.
+// Funding SDP's own leg. The counterparty needs nothing from us to fund theirs
+// — an ordinary TransferChecked to the escrow is the whole of their
+// integration — but SDP holds the other leg, and without this the only way to
+// move it was a hand-written Payments transfer to the escrow address.
+dvp.post(
+  "/trades/:tradeId/fund",
+  requirePermissions("payments:write"),
+  policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "fund") }),
+  fundTrade
+);
 dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write"),
-  policyGate({ extract: (c) => extractDvpClosePolicyCandidate(c, "settle") }),
+  policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle") }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
   requirePermissions("payments:write"),
-  policyGate({ extract: (c) => extractDvpClosePolicyCandidate(c, "cancel") }),
+  policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "cancel") }),
   cancelTrade
 );
 
