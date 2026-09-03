@@ -1118,6 +1118,33 @@ describe("BVNK ramp webhook", () => {
     getCustomer.mockRestore();
   });
 
+  it("resolves a platform:customer:update by external reference and refreshes via the native id", async () => {
+    const getCustomer = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomerV2").mockResolvedValue({
+      id: CUSTOMER_REFERENCE,
+      reference: CUSTOMER_REFERENCE,
+      status: "PENDING",
+      type: "INDIVIDUAL",
+      model: "EMBEDDED_BVNK_MANAGED",
+      useCase: "STABLECOIN_PAYOUTS",
+      authenticatedLink: {
+        link: "https://in.sumsub.com/websdk/p/sbx_test",
+        expiresAt: "2030-01-01T00:00:00Z",
+      },
+      requiredActions: [],
+    });
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:platform:customer:update",
+      data: { reference: "cp_123e4567e89b12d3a456426614174000" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(getCustomer).toHaveBeenCalledWith(expect.anything(), { id: CUSTOMER_REFERENCE });
+    expect((await readBvnk())?.customer?.status).toBe("PENDING");
+
+    getCustomer.mockRestore();
+  });
+
   it("caches bank details on the matching wallet entry on a wallet status-change webhook", async () => {
     const res = await sendBvnkWebhook({
       event: "ledger:v2:wallet:status-change",

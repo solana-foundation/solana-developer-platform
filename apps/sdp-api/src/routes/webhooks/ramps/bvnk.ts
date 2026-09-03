@@ -5,6 +5,7 @@ import {
   type BvnkOnrampPaymentRuleState,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
+  parseBvnkCustomerExternalReference,
   parseBvnkOfframpWalletName,
   parseBvnkOnrampWalletName,
   pendingBvnkOnrampPaymentRuleKeys,
@@ -270,8 +271,13 @@ async function applyBvnkCustomerRequirementWebhook(
     { kind: "bvnk:customers:status-change" | "bvnk:platform:customer:update" }
   >
 ): Promise<void> {
+  const link = await readBvnkCustomerLink(c, counterparty);
+  if (!link?.customerReference) {
+    getLogger().info(`[bvnk webhook] "${event.kind}" for ${counterparty.id} has no customer link`);
+    return;
+  }
   const customer: Partial<Pick<BvnkCustomerResolution, "customerReference" | "status">> = {
-    customerReference: event.customerReference,
+    customerReference: link.customerReference,
   };
   if (event.kind === "bvnk:customers:status-change" && event.customerStatus) {
     customer.status = event.customerStatus.toUpperCase();
@@ -279,7 +285,7 @@ async function applyBvnkCustomerRequirementWebhook(
   if (!isBvnkCustomerVerified(customer.status)) {
     const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(
       webhookRampContext(c, environment),
-      { id: event.customerReference }
+      { id: link.customerReference }
     );
     customer.status = latest.status.toUpperCase();
   }
@@ -361,10 +367,22 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
         getLogger().info(`[bvnk webhook] "${event.kind}" has no customer reference`);
         return;
       }
-      const counterparty = await repo.findActiveCounterpartyByProviderCustomerReference({
+      // Customer events arrive in two id spaces: `customerId` on
+      // status-change is BVNK's native customer UUID, while
+      // platform:customer:update carries the `cp_…` externalReference SDP
+      // sent outbound. Resolve natively first, then via the reversible
+      // external reference; BVNK's API is only ever addressed with the
+      // row's stored native id.
+      let counterparty = await repo.findActiveCounterpartyByProviderCustomerReference({
         provider: "bvnk",
         providerCustomerReference: event.customerReference,
       });
+      if (!counterparty) {
+        const counterpartyId = parseBvnkCustomerExternalReference(event.customerReference);
+        if (counterpartyId !== null) {
+          counterparty = await repo.findActiveCounterpartyById(counterpartyId);
+        }
+      }
       if (!counterparty) {
         throw internalError(
           `BVNK webhook customer ${event.customerReference} was not found or is not active`
