@@ -71,4 +71,9 @@ describe("integration detail", () => {
     expect(isKnownIntegrationProvider("not-a-provider")).toBe(false);
     expect(resolveIntegrationDetail({ provider: "nope", ...INPUTS })).toBeNull();
   });
+
+  it("rejects SDP's round-robin routing mode as an integration provider", () => {
+    expect(isKnownIntegrationProvider("default")).toBe(false);
+    expect(resolveIntegrationDetail({ provider: "default", ...INPUTS })).toBeNull();
+  });
 });

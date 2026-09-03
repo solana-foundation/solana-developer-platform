@@ -124,10 +124,9 @@ export function resolveCustodyIntegrations(input: {
  * BYOK runs on the tenant's own endpoint, so deployment availability decides
  * nothing about whether their own key is live.
  *
- * `default` is listed like any other provider, including while the organization
- * is on a vendor. Hiding it left an organization that had moved to Helius with
- * no page offering SDP RPC and a 404 at its route, so the only way back was the
- * Settings dropdown this family replaced (HOO-787).
+ * `default` is the platform's round-robin routing mode, not a provider. It may
+ * still be the active organization setting, but it must never appear as an
+ * integration card or provider detail page.
  */
 export function resolveRpcIntegrations(input: {
   selectedProvider: OrganizationRpcProvider | null;
@@ -151,7 +150,7 @@ export function resolveRpcIntegrations(input: {
   const activeProvider = input.servingProvider ?? input.selectedProvider;
   const ownKeys = new Set(input.providersWithOwnKey ?? []);
 
-  return ORGANIZATION_RPC_PROVIDERS.map((provider) => {
+  return ORGANIZATION_RPC_PROVIDERS.filter((provider) => provider !== "default").map((provider) => {
     const entry = input.entries[provider];
     // Every RPC provider is generally available; an unconfigured one lacks a
     // URL in this deployment *and* a key of the tenant's own, because either
