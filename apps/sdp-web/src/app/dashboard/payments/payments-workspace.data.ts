@@ -727,7 +727,7 @@ export async function fetchCounterpartyAccounts(
   return body.data?.accounts ?? [];
 }
 
-type SandboxTransferSimulationInput =
+export type SandboxTransferSimulationInput =
   | {
       provider: "lightspark";
       payload: {
