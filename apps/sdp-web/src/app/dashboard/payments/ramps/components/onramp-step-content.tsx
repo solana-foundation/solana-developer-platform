@@ -135,7 +135,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     onboarding &&
     !quote &&
     hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding.status)
+    isOnboardingPanelStatus(onboarding)
   ) {
     return (
       <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />

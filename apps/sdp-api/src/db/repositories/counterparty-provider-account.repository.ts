@@ -52,6 +52,19 @@ export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadata
 export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   status: z.string().optional(),
   verificationStatus: z.enum(["init", "pending", "completed", "failed"]).optional(),
+  contactId: z.string().optional(),
+  agreements: z
+    .object({
+      relayedAt: z.string().datetime(),
+      entries: z.record(
+        z.string().min(1),
+        z.object({
+          status: z.string().min(1),
+          respondedAt: z.string().datetime().optional(),
+        })
+      ),
+    })
+    .optional(),
 });
 export type BvnkCustomerProviderAccountMetadata = z.infer<
   typeof bvnkCustomerProviderAccountMetadataSchema
@@ -251,10 +264,12 @@ export interface CounterpartyProviderAccountsRepository {
   listExternalAccounts(input: ListExternalAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
 
   /**
-   * Lists all external provider-account rows for one counterparty.
+   * Lists all payout-account and customer-link rows for one counterparty.
+   * Corridor filters apply to payout accounts only; customer links carry no
+   * corridor and are always included for the matching providers.
    *
    * @param input - Tenant, project, counterparty, and optional corridor filters.
-   * @returns Active and archived external-account rows in creation order.
+   * @returns Active and archived rows in creation order.
    */
   listProviderAccounts(input: ListProviderAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
 

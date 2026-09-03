@@ -48,6 +48,6 @@ export function useCounterpartyProviderAccounts(counterpartyId: string) {
   return useSWR(
     paymentsQueryKeys.counterpartyProviderAccounts({ counterpartyId }),
     () => fetchCounterpartyProviderAccounts(counterpartyId, t),
-    { revalidateOnFocus: false, revalidateIfStale: false, keepPreviousData: false }
+    { revalidateOnFocus: false }
   );
 }

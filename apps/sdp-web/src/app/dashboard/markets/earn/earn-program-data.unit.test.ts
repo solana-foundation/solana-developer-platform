@@ -37,6 +37,8 @@ function strategy(id: string): EarnStrategy {
     currentApy: "0.05",
     liquidityTerm: "instant",
     status: "active",
+    depositSlippage: null,
+    withdrawalSlippage: null,
     hostCluster: "devnet",
     fundable: true,
     createdAt: TIMESTAMP,

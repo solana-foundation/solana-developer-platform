@@ -16,9 +16,10 @@
  * capped at the same 2000 chars that helper uses.
  *
  * Wording depends on who pays the fee when the caller knows: the fee-payer
- * failures name the customer's wallet under `wallet-pays` and SDP's sponsor
- * under `sponsored`, because telling a customer to fund their wallet when SDP's
- * sponsor is broke sends them fixing the wrong thing. Callers that don't know
+ * failures name the customer's wallet under `wallet-pays`, SDP's sponsor
+ * under `sponsored`, and the partner's named wallet under `caller-provided`,
+ * because telling a customer to fund their wallet when someone else's fee
+ * wallet is broke sends them fixing the wrong thing. Callers that don't know
  * the fee mode (e.g. the reconciler describing a landed failure) omit it and
  * get neutral wording.
  *
@@ -31,16 +32,35 @@
  */
 
 import { safeStringify } from "@sdp/solana";
-import type { VaultFeeMode } from "./vault-sponsorship";
+
+/**
+ * The slice of `VaultFeeMode` (vault-sponsorship.ts) the wording needs: the
+ * kind, plus the ADDRESS for a caller-provided payer so the prose can name
+ * the wallet that is actually short. Any full `VaultFeeMode` is assignable.
+ */
+export type VaultFeeAttribution =
+  | { kind: "sponsored" }
+  | { kind: "wallet-pays" }
+  | { kind: "caller-provided"; feePayer: string };
 
 export interface VaultSimulationVerdict {
   message: string;
   /**
-   * "sponsor" when the failing account is SDP's fee sponsor: that is SDP's
-   * operational problem, so callers surface it as a retryable 5xx instead of a
-   * caller-fault 400 a client would treat as permanent.
+   * "sponsor" when the failure is SDP's operational problem rather than the
+   * caller's, so callers surface it as a 5xx instead of a caller-fault 400 a
+   * client would treat as permanent.
    */
   fault: "caller" | "sponsor";
+  /**
+   * Present on every sponsor fault, because the two flavours retry
+   * differently: "balance" means SDP's sponsor wallet itself came up short (a
+   * refill genuinely clears it, so "retry shortly" is honest), while
+   * "prefund" means a program charged the WALLET rent the plan should have
+   * pre-funded: a plan defect no retry clears (see the Veda allowed-user
+   * prefund in @sdp/veda). Blaming the sponsor's balance for the second
+   * flavour is exactly the misattribution this field exists to prevent.
+   */
+  sponsorCause?: "balance" | "prefund";
 }
 
 function stringifyRaw(err: unknown): string {
@@ -73,24 +93,55 @@ const INSTRUCTION_ERROR_DETAILS = new Map<string, string>([
 /**
  * The System program's log inside a failed account creation or transfer:
  * `Transfer: insufficient lamports <have>, need <need>`. In a vault plan this
- * is the rent payer coming up short on the token accounts a first deposit (or
- * first exit) creates — the failure the bare variant renders as `Custom: 1`.
+ * is a rent source coming up short on an account the transaction creates —
+ * the failure the bare variant renders as `Custom: 1`.
  */
 const INSUFFICIENT_LAMPORTS_LOG = /Transfer: insufficient lamports (\d+), need (\d+)/;
 
 /** The SPL Token processors' log for a transfer exceeding the balance. */
 const INSUFFICIENT_TOKENS_LOG = "Error: insufficient funds";
 
-function rentShortfallLamports(logs: readonly string[]): bigint | undefined {
-  for (const line of logs) {
+/** `Program <address> invoke [1]` — a TOP-LEVEL instruction entering. */
+const TOP_LEVEL_INVOKE_LOG = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) invoke \[1\]$/;
+
+const ASSOCIATED_TOKEN_PROGRAM =
+  // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+
+const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+
+interface RentShortfall {
+  lamports: bigint;
+  /**
+   * The top-level program whose instruction the shortfall happened inside:
+   * the nearest preceding `invoke [1]` frame. It decides WHOSE money was
+   * short: a top-level ATA create's funding payer and a top-level System
+   * transfer's source are chosen by the PLAN (the sponsor under sponsorship,
+   * via the providers' payer swap and the allowed-user prefund), while a
+   * shortfall inside any other program is that program moving lamports from
+   * an account IT names: for the vault programs SDP fronts, the depositing
+   * wallet, which no transaction-level sponsorship can reach. Undefined when
+   * the logs carry no top-level frame (e.g. a truncated tail).
+   */
+  topLevelProgram: string | undefined;
+}
+
+function rentShortfall(logs: readonly string[]): RentShortfall | undefined {
+  for (const [index, line] of logs.entries()) {
     const match = INSUFFICIENT_LAMPORTS_LOG.exec(line);
     if (!match) continue;
+    let lamports: bigint;
     try {
-      const shortfall = BigInt(match[2] as string) - BigInt(match[1] as string);
-      return shortfall > 0n ? shortfall : undefined;
+      lamports = BigInt(match[2] as string) - BigInt(match[1] as string);
     } catch {
       return undefined;
     }
+    if (lamports <= 0n) return undefined;
+    for (let frame = index - 1; frame >= 0; frame -= 1) {
+      const invoke = TOP_LEVEL_INVOKE_LOG.exec(logs[frame] as string);
+      if (invoke) return { lamports, topLevelProgram: invoke[1] as string };
+    }
+    return { lamports, topLevelProgram: undefined };
   }
   return undefined;
 }
@@ -111,20 +162,88 @@ function formatSol(lamports: bigint): string {
 function describeInstructionFailureFromLogs(
   logs: readonly string[],
   raw: string,
-  fee?: Pick<VaultFeeMode, "kind">
+  fee?: VaultFeeAttribution
 ): VaultSimulationVerdict | undefined {
-  const shortfall = rentShortfallLamports(logs);
+  const shortfall = rentShortfall(logs);
   if (shortfall !== undefined) {
+    const sol = formatSol(shortfall.lamports);
+    const insideAtaCreate = shortfall.topLevelProgram === ASSOCIATED_TOKEN_PROGRAM;
+    // A shortfall in a TOP-LEVEL System instruction is a transfer the PLAN
+    // authored, whose source the plan chose: under sponsorship that is the
+    // sponsor itself running short on the allowed-user prefund it fronts, a
+    // refillable balance problem, never a missing prefund. Only a shortfall
+    // inside a NON-System, non-ATA program is that program spending an
+    // account the plan could not redirect.
+    const insidePlanTransfer = shortfall.topLevelProgram === SYSTEM_PROGRAM;
+    // Words matched to the failing frame: only the ATA program's create is
+    // known to make a TOKEN account; other programs create their own records
+    // (Veda's per-user AllowedUser, for one) with the payer as funder rather
+    // than creator, and an unattributable frame gets the neutral phrase.
+    let created: string;
+    let callerPhrase: string;
+    if (insideAtaCreate) {
+      created = "a token account this transaction creates";
+      callerPhrase = "to create a token account this transaction needs";
+    } else if (insidePlanTransfer || shortfall.topLevelProgram === undefined) {
+      created = "an account this transaction creates";
+      callerPhrase = "to create an account this transaction needs";
+    } else {
+      created = "an account the vault program creates on first use";
+      callerPhrase = "to fund an account the vault program creates on first use";
+    }
     if (fee?.kind === "sponsored") {
-      // Post-PRO-1736 the sponsor funds rent alongside the fee, so a rent
-      // shortfall under sponsorship is SDP's operational problem, exactly like
-      // a broke fee payer — callers turn "sponsor" into a retryable 5xx.
+      // Post-PRO-1736 the sponsor funds rent alongside the fee, but only the
+      // rent the PLAN charges it: the ATA creates (payer-swapped by the
+      // provider) and its own top-level prefund transfer. A shortfall inside
+      // any OTHER program is that program spending the WALLET's lamports,
+      // which the plan should have pre-funded and did not: still SDP's
+      // fault, but a plan defect, not a broke sponsor. The two must not
+      // share a message, because "sponsor balance" sends operators refilling
+      // a wallet that is fine.
+      if (insideAtaCreate || insidePlanTransfer || shortfall.topLevelProgram === undefined) {
+        return {
+          message:
+            `SDP's fee sponsor could not fund the rent for ${created} ` +
+            `(${sol} SOL short). This is a problem on SDP's side, ` +
+            `not with the wallet. (${raw})`,
+          fault: "sponsor",
+          sponsorCause: "balance",
+        };
+      }
       return {
         message:
-          `SDP's fee sponsor could not fund the rent for a token account this transaction ` +
-          `creates (${formatSol(shortfall)} SOL short). This is a problem on SDP's side, ` +
-          `not with the wallet. (${raw})`,
+          `the vault program charges the wallet rent for an account it creates on first use, ` +
+          `and this movement did not pre-fund the wallet for it (${sol} SOL short). This is ` +
+          `an SDP-side plan defect, not the sponsor's balance and not the wallet. (${raw})`,
         fault: "sponsor",
+        sponsorCause: "prefund",
+      };
+    }
+    if (fee?.kind === "caller-provided") {
+      // The caller named this fee payer, and the plan charges it exactly the
+      // rent the plan itself authors (the ATA creates via the providers' payer
+      // swap, the allowed-user prefund transfer), so those frames are the
+      // caller's wallet to fund — and the prose must name THAT wallet: telling
+      // the end user to fund their own wallet when the partner's fee wallet is
+      // broke misdirects them. A shortfall inside any OTHER program is rent
+      // the plan should have pre-funded and did not: the same SDP-side plan
+      // defect as under sponsorship, which no fee-payer top-up clears.
+      if (insideAtaCreate || insidePlanTransfer || shortfall.topLevelProgram === undefined) {
+        return {
+          message:
+            `the provided fee payer (${fee.feePayer}) does not hold enough SOL ` +
+            `${callerPhrase}: rent requires ${sol} more SOL. ` +
+            `Fund the fee payer and retry. (${raw})`,
+          fault: "caller",
+        };
+      }
+      return {
+        message:
+          `the vault program charges the wallet rent for an account it creates on first use, ` +
+          `and this movement did not pre-fund the wallet for it (${sol} SOL short). This is ` +
+          `an SDP-side plan defect, not the provided fee payer's balance and not the wallet. (${raw})`,
+        fault: "sponsor",
+        sponsorCause: "prefund",
       };
     }
     const noun = fee === undefined ? "the rent payer" : "the wallet";
@@ -134,8 +253,8 @@ function describeInstructionFailureFromLogs(
         : "Send SOL to the wallet and retry.";
     return {
       message:
-        `${noun} does not hold enough SOL to create a token account this transaction ` +
-        `needs: rent requires ${formatSol(shortfall)} more SOL. ${remedy} (${raw})`,
+        `${noun} does not hold enough SOL ${callerPhrase}: ` +
+        `rent requires ${sol} more SOL. ${remedy} (${raw})`,
       fault: "caller",
     };
   }
@@ -173,21 +292,56 @@ function describeInstructionErrorDetail(detail: unknown): string {
  * hidden. `fee` is an attribution hint for the fee-payer failures; omit it when
  * the fee mode is unknown.
  */
+/** Who to name, what to suggest, and whose fault a fee-payer failure is. */
+function feePayerWording(fee?: VaultFeeAttribution): {
+  feePayerNoun: string;
+  feeRemedy: string;
+  feeFault: VaultSimulationVerdict["fault"];
+  /**
+   * A fee-payer failure under sponsorship is always the sponsor's own
+   * balance: simulation charges the fee to the sponsor and nothing else.
+   */
+  feeCause: { sponsorCause: "balance" } | Record<string, never>;
+} {
+  switch (fee?.kind) {
+    case "sponsored":
+      return {
+        feePayerNoun: "SDP's fee sponsor",
+        feeRemedy: "This is a problem on SDP's side, not with the wallet.",
+        feeFault: "sponsor",
+        feeCause: { sponsorCause: "balance" },
+      };
+    case "caller-provided":
+      return {
+        feePayerNoun: `the provided fee payer (${fee.feePayer})`,
+        feeRemedy: "Fund the fee payer and retry.",
+        feeFault: "caller",
+        feeCause: {},
+      };
+    case "wallet-pays":
+      return {
+        feePayerNoun: "the wallet",
+        feeRemedy: "Send SOL to the wallet and retry.",
+        feeFault: "caller",
+        feeCause: {},
+      };
+    default:
+      return {
+        feePayerNoun: "the fee payer",
+        feeRemedy: "It needs SOL before this can be retried.",
+        feeFault: "caller",
+        feeCause: {},
+      };
+  }
+}
+
 export function describeVaultSimulationError(
   err: unknown,
-  fee?: Pick<VaultFeeMode, "kind">,
+  fee?: VaultFeeAttribution,
   logs: readonly string[] = []
 ): VaultSimulationVerdict {
   const raw = stringifyRaw(err);
-  const sponsored = fee?.kind === "sponsored";
-  const feePayerNoun =
-    fee === undefined ? "the fee payer" : sponsored ? "SDP's fee sponsor" : "the wallet";
-  const feeRemedy = sponsored
-    ? "This is a problem on SDP's side, not with the wallet."
-    : fee === undefined
-      ? "It needs SOL before this can be retried."
-      : "Send SOL to the wallet and retry.";
-  const feeFault = sponsored ? "sponsor" : "caller";
+  const { feePayerNoun, feeRemedy, feeFault, feeCause } = feePayerWording(fee);
 
   if (typeof err === "string") {
     switch (err) {
@@ -195,11 +349,13 @@ export function describeVaultSimulationError(
         return {
           message: `${feePayerNoun} holds no SOL, so it cannot pay the network fee. ${feeRemedy} (${raw})`,
           fault: feeFault,
+          ...feeCause,
         };
       case "InsufficientFundsForFee":
         return {
           message: `${feePayerNoun} does not hold enough SOL to pay the network fee. ${feeRemedy} (${raw})`,
           fault: feeFault,
+          ...feeCause,
         };
       case "ProgramAccountNotFound":
         return {

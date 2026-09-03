@@ -75,12 +75,18 @@ program create still sends the body `requestId` form.
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
-  `GET …/movements/:movementId`, read `GET …/earnings/:ownerAddress`
+  `GET …/movements/:movementId`, read `GET …/earnings?ownerAddress=`
   (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
-  render a dash, never $0), list `GET …/movements?ownerAddress=`, and exit via
+  render a dash, never $0), list `GET …/movements?ownerAddress=` and
+  `GET …/positions?ownerAddress=` (the owner rides the query on every
+  per-owner read), and exit via
   `…/withdrawal-transactions` + `…/withdrawals`. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
-  snippets — a B2B2C partner cannot name a custody wallet. The guide is
+  snippets — a B2B2C partner cannot name a custody wallet. The optional
+  partner `feePayer` (the implementor sponsoring its customers' fees) is
+  documented in the public docs guide
+  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`), which mirrors
+  these snippets — update both together. The guide is
   entirely derived from the strategy catalogue: nothing is persisted, there is
   no styling to save, and no public handoff token exists. (The UI builder that
   used to hold those — styled previews, saved per-project configuration, the

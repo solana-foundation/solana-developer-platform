@@ -675,6 +675,8 @@ export const createOnrampQuoteSchema = z.object({
 
 const collectedDataSchema = z.record(z.string(), z.string()).optional();
 
+export const rampDestinationCountrySchema = z.enum(COUNTRY_CODES);
+
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
   z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
@@ -686,6 +688,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
     z.object({
       provider: z.literal("bvnk"),
@@ -693,6 +696,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
   ]),
   z.discriminatedUnion("direction", [
@@ -742,7 +746,7 @@ export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
     provider: z.literal("lightspark"),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema,
-    destinationCountry: z.enum(COUNTRY_CODES),
+    destinationCountry: rampDestinationCountrySchema,
     providerAccountId: z.string().min(1).optional(),
   }),
   z.object({

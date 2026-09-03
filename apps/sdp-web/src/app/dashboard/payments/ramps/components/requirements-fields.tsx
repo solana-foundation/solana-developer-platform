@@ -10,7 +10,7 @@ import {
   type RequirementField,
   requirementFieldName,
 } from "@sdp/types/ramp-requirements";
-import { CheckIcon, Loader2Icon, MapPinIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +21,6 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { autocompletePlaces, fetchPlaceDetails, newPlacesSessionToken } from "@/lib/places";
 import { cn } from "@/lib/utils";
-import type { PayoutAccountSelection } from "../hooks/use-counterparty-requirements";
 import { applyRequirementMask, requirementFieldError } from "../schema";
 
 /**
@@ -109,117 +108,49 @@ function requirementGroupCopy(
 }
 
 /**
- * Renders reusable payout accounts and the explicit new-account choice.
+ * Renders the payout account the selected corridor resolved to, read-only.
  *
- * @param accounts - Active payout accounts for the selected destination.
- * @param selection - Current payout account choice.
- * @param onSelectionChange - Callback for selecting an account or new-account collection.
- * @param title - Translated chooser title.
- * @param description - Translated chooser description.
- * @param addNewLabel - Translated new-account label.
- * @returns The payout account chooser card.
+ * @param account - Resolved corridor account from the payout tree.
+ * @param title - Translated card title.
+ * @param description - Translated card description.
+ * @returns The resolved payout account card.
  */
-function PayoutAccountChooser({
-  accounts,
-  selection,
-  onSelectionChange,
+function ResolvedPayoutAccountCard({
+  account,
   title,
   description,
-  addNewLabel,
-  newAccountFields,
-  values,
-  onFieldChange,
 }: {
-  accounts: PayoutRequirementAccount[];
-  selection: PayoutAccountSelection;
-  onSelectionChange: (selection: PayoutAccountSelection) => void;
+  account: PayoutRequirementAccount;
   title: string;
   description: string;
-  addNewLabel: string;
-  /** Collection fields rendered in place once the new-account choice is active. */
-  newAccountFields: RequirementField[];
-  values: CollectedFieldData;
-  onFieldChange: (key: string, value: string) => void;
 }) {
+  const flag = regionFlagEmoji(account.destinationCountry);
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {accounts.map((account) => {
-          const isSelected = selection.kind === "existing" && selection.id === account.id;
-          const flag = regionFlagEmoji(account.destinationCountry);
-          return (
-            <button
-              key={account.id}
-              type="button"
-              aria-pressed={isSelected}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                isSelected
-                  ? "border-[var(--input-border-focus)] bg-[var(--input-bg-hover)]"
-                  : "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)]"
-              )}
-              onClick={() => onSelectionChange({ kind: "existing", id: account.id })}
-            >
-              {flag !== null ? (
-                <span className="shrink-0 text-xl" aria-hidden="true">
-                  {flag}
-                </span>
+      <CardContent>
+        <div className="flex w-full items-center gap-3 rounded-lg border border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] px-4 py-3">
+          {flag !== null ? (
+            <span className="shrink-0 text-xl" aria-hidden="true">
+              {flag}
+            </span>
+          ) : null}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-primary">
+              {account.bankName !== undefined ? account.bankName : account.id}
+            </span>
+            <span className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+              {account.accountNumberLast4 !== undefined ? (
+                <span>•••• {account.accountNumberLast4}</span>
               ) : null}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-primary">
-                  {account.bankName !== undefined ? account.bankName : account.id}
-                </span>
-                <span className="flex flex-wrap items-center gap-2 text-sm text-secondary">
-                  {account.accountNumberLast4 !== undefined ? (
-                    <span>•••• {account.accountNumberLast4}</span>
-                  ) : null}
-                  {account.paymentRail !== null ? <Badge>{account.paymentRail}</Badge> : null}
-                </span>
-              </span>
-              {isSelected ? <CheckIcon className="size-5 shrink-0 text-primary" /> : null}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          aria-pressed={selection.kind === "new"}
-          className={cn(
-            "flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-            selection.kind === "new"
-              ? "border-[var(--input-border-focus)] bg-[var(--input-bg-hover)] text-primary"
-              : "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] text-secondary hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)] hover:text-primary"
-          )}
-          onClick={() => onSelectionChange({ kind: "new" })}
-        >
-          <PlusIcon className="size-5 shrink-0" aria-hidden="true" />
-          <span>{addNewLabel}</span>
-          {selection.kind === "new" ? <CheckIcon className="ml-auto size-5" /> : null}
-        </button>
-        {selection.kind === "new" && newAccountFields.length > 0 ? (
-          <div className="space-y-4 rounded-lg border border-border-default p-4">
-            {newAccountFields.map((field) =>
-              field.kind === "address" ? (
-                <AddressRequirementField
-                  key={field.key}
-                  field={field}
-                  values={values}
-                  onChange={onFieldChange}
-                />
-              ) : (
-                <RequirementFieldInput
-                  key={field.key}
-                  field={field}
-                  value={values[field.key] === undefined ? "" : values[field.key]}
-                  onChange={(value) => onFieldChange(field.key, value)}
-                />
-              )
-            )}
-          </div>
-        ) : null}
+              {account.paymentRail !== null ? <Badge>{account.paymentRail}</Badge> : null}
+            </span>
+          </span>
+          <CheckIcon className="size-5 shrink-0 text-primary" />
+        </div>
       </CardContent>
     </Card>
   );
@@ -235,18 +166,9 @@ type RequirementsFieldsProps = {
   fields: RequirementField[];
   values: CollectedFieldData;
   onChange: (key: string, value: string) => void;
-} & (
-  | {
-      existingPayoutAccounts?: undefined;
-      payoutAccountSelection?: undefined;
-      onPayoutAccountSelectionChange?: undefined;
-    }
-  | {
-      existingPayoutAccounts: PayoutRequirementAccount[];
-      payoutAccountSelection: PayoutAccountSelection;
-      onPayoutAccountSelectionChange: (selection: PayoutAccountSelection) => void;
-    }
-);
+  /** Payout account the selected corridor resolved to; rendered read-only. */
+  resolvedAccount?: PayoutRequirementAccount | null;
+};
 
 /**
  * Partitions the flat field list into consecutive runs sharing a section,
@@ -602,9 +524,7 @@ function AddressRequirementField({
  * @param fields - Fields currently required by the provider and local selections.
  * @param values - Collected values keyed by requirement field.
  * @param onChange - Callback for updating a collected value.
- * @param existingPayoutAccounts - Active corridor accounts available for reuse.
- * @param payoutAccountSelection - Current reusable-account or new-account choice.
- * @param onPayoutAccountSelectionChange - Callback for changing the payout account choice.
+ * @param resolvedAccount - Payout account the selected corridor resolved to, if any.
  * @returns The requirement field group.
  */
 export function RequirementsFields({
@@ -612,23 +532,13 @@ export function RequirementsFields({
   fields,
   values,
   onChange,
-  existingPayoutAccounts,
-  payoutAccountSelection,
-  onPayoutAccountSelectionChange,
+  resolvedAccount,
 }: RequirementsFieldsProps) {
   const t = useTranslations();
   const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
-  const chooserVisible = existingPayoutAccounts !== undefined && existingPayoutAccounts.length > 0;
-  const addingNewAccount = chooserVisible && payoutAccountSelection.kind === "new";
-  const topLevelFields = addingNewAccount
-    ? fields.filter((field) => field.key === "destinationCountry")
-    : fields;
-  const newAccountFields = addingNewAccount
-    ? fields.filter((field) => field.key !== "destinationCountry")
-    : [];
   return (
     <div className="space-y-6">
-      {requirementFieldRuns(topLevelFields).map((run) => {
+      {requirementFieldRuns(fields).map((run) => {
         const first = run.fields[0];
         if (first.kind === "address") {
           return (
@@ -669,17 +579,11 @@ export function RequirementsFields({
           </Card>
         );
       })}
-      {chooserVisible ? (
-        <PayoutAccountChooser
-          accounts={existingPayoutAccounts}
-          selection={payoutAccountSelection}
-          onSelectionChange={onPayoutAccountSelectionChange}
-          title={t("DashboardPayments.ramps.useExistingAccount")}
-          description={t("DashboardPayments.ramps.useExistingAccountDescription")}
-          addNewLabel={t("DashboardPayments.ramps.addNewAccount")}
-          newAccountFields={newAccountFields}
-          values={values}
-          onFieldChange={onChange}
+      {resolvedAccount !== undefined && resolvedAccount !== null ? (
+        <ResolvedPayoutAccountCard
+          account={resolvedAccount}
+          title={t("DashboardPayments.ramps.payoutAccountResolvedTitle")}
+          description={t("DashboardPayments.ramps.payoutAccountResolvedDescription")}
         />
       ) : null}
     </div>
