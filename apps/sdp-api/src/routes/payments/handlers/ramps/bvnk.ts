@@ -40,10 +40,13 @@ import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
+import { getDb } from "@/db";
 import type {
   CounterpartiesRepository,
   CounterpartyRow,
 } from "@/db/repositories/counterparty.repository";
+import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type {
   PaymentTransferRow,
   PaymentTransferStatus,
@@ -355,6 +358,37 @@ export async function ensureBvnkOfframpBeneficiary(
  * @param projectId - Project that owns the counterparty.
  * @returns The persisted or refreshed BVNK customer resolution.
  */
+/**
+ * Reads the BVNK customer state from the counterparty's customer-link
+ * provider-account row.
+ *
+ * @param c - Request context.
+ * @param counterparty - Owning counterparty row.
+ * @returns The row-backed customer resolution, or null when no BVNK customer link exists.
+ */
+export async function readBvnkCustomerLink(
+  c: AppContext,
+  counterparty: CounterpartyRow
+): Promise<BvnkCustomerResolution | null> {
+  const link = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: counterparty.organization_id,
+    projectId: counterparty.project_id,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+  });
+  if (!link) {
+    return null;
+  }
+  const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(link.metadata);
+  return {
+    customerReference: link.provider_customer_reference,
+    status: metadata.status,
+    verificationStatus: metadata.verificationStatus,
+  };
+}
+
 export async function ensureBvnkCustomer(
   c: AppContext,
   counterparty: CounterpartyRow,
@@ -368,9 +402,9 @@ export async function ensureBvnkCustomer(
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const repo = getCounterpartiesRepository(c);
 
-  let customer = readBvnkCustomer(counterparty.provider_data);
+  let customer = await readBvnkCustomerLink(c, counterparty);
 
-  if (!customer.customerReference) {
+  if (!customer?.customerReference) {
     throw badRequest(
       "BVNK customer creation requires identity fields that are no longer stored; JIT collection is not wired yet"
     );
@@ -382,13 +416,18 @@ export async function ensureBvnkCustomer(
       ...customer,
       status: latest.status,
       verificationStatus: latest.verificationStatus,
-      verificationUrl: latest.verificationUrl ?? customer.verificationUrl,
+      // Surfaced JIT to callers only — never persisted (store-nothing).
+      verificationUrl: latest.verificationUrl,
     };
     await repo.upsertBvnkCustomerProviderData({
       counterpartyId: counterparty.id,
       organizationId: counterparty.organization_id,
       projectId,
-      customer,
+      customer: {
+        customerReference: customer.customerReference,
+        status: customer.status,
+        verificationStatus: customer.verificationStatus,
+      },
     });
   }
 

@@ -8,7 +8,6 @@ import {
   parseBvnkOfframpWalletName,
   parseBvnkOnrampWalletName,
   pendingBvnkOnrampPaymentRuleKeys,
-  readBvnkCustomer,
   readBvnkOfframpReference,
   readBvnkOnrampPaymentRuleState,
   withBvnkOfframpWalletStatus,
@@ -27,7 +26,7 @@ import type {
 } from "@/db/repositories/counterparty.repository";
 import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
-import { ensureBvnkPaymentRule } from "@/routes/payments/handlers/ramps/bvnk";
+import { ensureBvnkPaymentRule, readBvnkCustomerLink } from "@/routes/payments/handlers/ramps/bvnk";
 import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
 
@@ -50,13 +49,12 @@ export type BvnkWebhookEvent =
     }
   | {
       kind: "bvnk:customers:status-change";
-      customerReference?: string;
+      customerReference: string;
       customerStatus?: string;
     }
   | {
       kind: "bvnk:platform:customer:update";
-      customerReference?: string;
-      verificationUrl?: string;
+      customerReference: string;
     }
   | {
       kind: "bvnk:payment:payin:status-change";
@@ -272,10 +270,6 @@ async function applyBvnkCustomerRequirementWebhook(
     { kind: "bvnk:customers:status-change" | "bvnk:platform:customer:update" }
   >
 ): Promise<void> {
-  if (event.customerReference === undefined) {
-    return;
-  }
-  const current = readBvnkCustomer(counterparty.provider_data);
   const customer: Partial<
     Pick<BvnkCustomerResolution, "customerReference" | "status" | "verificationStatus">
   > = {
@@ -284,10 +278,7 @@ async function applyBvnkCustomerRequirementWebhook(
   if (event.kind === "bvnk:customers:status-change" && event.customerStatus) {
     customer.status = event.customerStatus.toUpperCase();
   }
-  const nextStatus = typeof customer.status === "string" ? customer.status : current.status;
-  // TODO(PRO-1821): Replace the legacy provider_data read when BVNK customer resolution moves.
-  const nextUrl = current.verificationUrl;
-  if (!nextUrl && !isBvnkCustomerVerified(nextStatus)) {
+  if (!isBvnkCustomerVerified(customer.status)) {
     const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getBvnkCustomer(
       webhookRampContext(c, environment),
       { reference: event.customerReference }
@@ -316,7 +307,8 @@ async function provisionPendingBvnkOnramps(
       `BVNK webhook counterparty ${counterparty.id} was not found or is not active`
     );
   }
-  if (!isBvnkCustomerVerified(readBvnkCustomer(currentCounterparty.provider_data).status)) {
+  const customer = await readBvnkCustomerLink(c, currentCounterparty);
+  if (!customer || !isBvnkCustomerVerified(customer.status)) {
     return;
   }
   const pendingKeys = pendingBvnkOnrampPaymentRuleKeys(currentCounterparty.provider_data);
@@ -337,7 +329,7 @@ async function provisionPendingBvnkOnramps(
         ctx,
         reloadedCounterparty,
         reloadedCounterparty.project_id,
-        readBvnkCustomer(reloadedCounterparty.provider_data),
+        customer,
         entry.request,
         repo
       );
@@ -548,18 +540,28 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
     }
 
     switch (event) {
-      case "bvnk:customers:status-change":
+      case "bvnk:customers:status-change": {
+        const customerReference = readString(data.customerId);
+        if (!customerReference) {
+          throw badRequest(`BVNK webhook "${event}" is missing customerId`, {
+            provider: this.provider,
+          });
+        }
         return {
           kind: event,
-          customerReference: readString(data.customerId),
+          customerReference,
           customerStatus: readString(data.status),
         };
-      case "bvnk:platform:customer:update":
-        return {
-          kind: event,
-          customerReference: readString(data.reference),
-          verificationUrl: readString(readRecord(data.verification)?.url),
-        };
+      }
+      case "bvnk:platform:customer:update": {
+        const customerReference = readString(data.reference);
+        if (!customerReference) {
+          throw badRequest(`BVNK webhook "${event}" is missing a customer reference`, {
+            provider: this.provider,
+          });
+        }
+        return { kind: event, customerReference };
+      }
       case "ledger:v2:wallet:status-change": {
         const wallet = parseBvnkWebhookFiatWallet(data);
         return {

@@ -156,6 +156,12 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async insertProviderResourceAccount(input: InsertProviderResourceAccountInput) {
+      if (input.kind === "funding_wallet") {
+        // The onramp-key unique index and lookup are expression-based; a row
+        // missing metadata.onrampKey would commit but be unreachable and
+        // un-deduplicated, so the shape is enforced before the write.
+        bvnkFundingWalletMetadataSchema.parse(input.metadata);
+      }
       const row = await db
         .prepare(
           `INSERT INTO counterparty_provider_accounts (

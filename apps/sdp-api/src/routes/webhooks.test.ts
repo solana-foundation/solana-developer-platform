@@ -1133,6 +1133,13 @@ describe("BVNK ramp webhook", () => {
 
   it("records the pending-JIT provisioning error when a wallet activates for a verified customer", async () => {
     await getDb(env)
+      .prepare(
+        `UPDATE counterparty_provider_accounts SET metadata = ?
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind({ status: "VERIFIED" }, COUNTERPARTY_ID)
+      .run();
+    await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
         {

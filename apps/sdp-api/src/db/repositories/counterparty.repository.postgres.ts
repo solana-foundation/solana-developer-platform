@@ -1,7 +1,6 @@
 import { readRecord } from "@sdp/payments/json";
 import type { CounterpartyProviderData, CounterpartyStatus } from "@sdp/types";
 import type { AppDb, DatabaseExecutor } from "@/db";
-import { asTransactionalClient } from "@/db";
 import { internalError } from "@/lib/errors";
 import type {
   ArchiveCounterpartyInput,
@@ -338,45 +337,13 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         metadata.verificationStatus = params.customer.verificationStatus;
       }
       const parsedMetadata = bvnkCustomerProviderAccountMetadataSchema.parse(metadata);
-      await db.transaction(async (tx) => {
-        const client = asTransactionalClient(tx);
-        await createPostgresCounterpartyProviderAccountsRepository(client).upsertProviderAccount({
-          organizationId: params.organizationId,
-          projectId: params.projectId,
-          counterpartyId: params.counterpartyId,
-          provider: "bvnk",
-          providerCustomerReference,
-          metadata: parsedMetadata,
-        });
-        // TODO(PRO-1821): delete this provider_data mirror once BVNK requirement resolution reads provider-account rows.
-        await mutateProviderDataLocked(client, {
-          counterpartyId: params.counterpartyId,
-          organizationId: params.organizationId,
-          projectId: params.projectId,
-          mutate(currentProviderData) {
-            const bvnk = readRecord(currentProviderData.bvnk);
-            if (bvnk === undefined) {
-              return {
-                ...currentProviderData,
-                bvnk: { customer: params.customer },
-              };
-            }
-            const customer = readRecord(bvnk.customer);
-            if (customer === undefined) {
-              return {
-                ...currentProviderData,
-                bvnk: { ...bvnk, customer: params.customer },
-              };
-            }
-            return {
-              ...currentProviderData,
-              bvnk: {
-                ...bvnk,
-                customer: { ...customer, ...params.customer },
-              },
-            };
-          },
-        });
+      await createPostgresCounterpartyProviderAccountsRepository(db).upsertProviderAccount({
+        organizationId: params.organizationId,
+        projectId: params.projectId,
+        counterpartyId: params.counterpartyId,
+        provider: "bvnk",
+        providerCustomerReference,
+        metadata: parsedMetadata,
       });
     },
 

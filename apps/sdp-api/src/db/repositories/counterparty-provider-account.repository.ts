@@ -51,7 +51,7 @@ export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadata
 
 export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   status: z.string().optional(),
-  verificationStatus: z.string().optional(),
+  verificationStatus: z.enum(["init", "pending", "completed", "failed"]).optional(),
 });
 export type BvnkCustomerProviderAccountMetadata = z.infer<
   typeof bvnkCustomerProviderAccountMetadataSchema
