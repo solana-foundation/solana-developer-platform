@@ -13,7 +13,7 @@ function batchRequest(
   overrides: Partial<PaymentTransferBatchRequest> = {}
 ): PaymentTransferBatchRequest {
   return {
-    source: "wallet_1",
+    sourceCustodyWalletId: "cwlt_1",
     token: "USDC",
     recipients: [
       { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.5" },
@@ -43,7 +43,9 @@ describe("transferBatchRequestFingerprint", () => {
 
   it("differs when any part of the intent changes", () => {
     const base = transferBatchRequestFingerprint(batchRequest());
-    expect(transferBatchRequestFingerprint(batchRequest({ source: "wallet_2" }))).not.toBe(base);
+    expect(
+      transferBatchRequestFingerprint(batchRequest({ sourceCustodyWalletId: "cwlt_2" }))
+    ).not.toBe(base);
     expect(transferBatchRequestFingerprint(batchRequest({ token: "SOL" }))).not.toBe(base);
     expect(transferBatchRequestFingerprint(batchRequest({ externalId: "ref-1" }))).not.toBe(base);
     expect(

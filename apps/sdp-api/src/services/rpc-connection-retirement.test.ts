@@ -9,6 +9,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { deactivateRpcConnection, submitRpcConnection } from "@/services/rpc-connection.service";
@@ -286,6 +287,69 @@ describe("BYOK RPC secret retirement", () => {
     });
     await expect(clearQueuedSecretVersion(getDb(appEnv), stored)).resolves.toBeUndefined();
     expect(await retirementRows(stored.secretVersionRef)).toEqual([]);
+  });
+
+  it("keeps a sweeper and a committing transaction from both acting on one version", async () => {
+    // Destroying cannot join the transaction that cancels the obligation, so
+    // the row is the token that decides who acts. Both orderings must resolve
+    // to exactly one winner.
+    const repo = createWorkflowSecretRetirementsRepository(appEnv);
+    const lease = new Date(Date.now() + 60_000).toISOString();
+
+    async function queuedRow(secretVersionRef: string) {
+      const [row] = await getDb(appEnv).queryMany<{ id: string; attempt_count: number }>(
+        `SELECT id, attempt_count FROM workflow_action_secret_retirements
+          WHERE secret_version_ref = ?`,
+        [secretVersionRef]
+      );
+      return row;
+    }
+
+    // Sweeper first: it is now committed to destroying, so the create must not
+    // commit rows that would point at the version.
+    const swept = {
+      storageBackend: "gcp_secret_manager" as const,
+      secretRef: "projects/sdp-test/secrets/pcred_claimed",
+      secretVersionRef: "projects/sdp-test/secrets/pcred_claimed/versions/1",
+    };
+    await queuePendingSecretVersion(appEnv, swept, {
+      provider: "rpc_connection",
+      orgId: ORG_ID,
+      sourceId: "pcred_claimed",
+    });
+    const sweptRow = await queuedRow(swept.secretVersionRef);
+    expect(
+      await repo.claimRetirement({
+        id: sweptRow.id,
+        expectedAttemptCount: sweptRow.attempt_count,
+        nextAttemptAt: lease,
+      })
+    ).toBe(true);
+    await expect(clearQueuedSecretVersion(getDb(appEnv), swept)).rejects.toThrow(
+      /retired while this request was still running/i
+    );
+
+    // Transaction first: the sweeper is holding a listing that is now stale,
+    // and must not go on to destroy a version the commit made live.
+    const kept = {
+      storageBackend: "gcp_secret_manager" as const,
+      secretRef: "projects/sdp-test/secrets/pcred_cancelled",
+      secretVersionRef: "projects/sdp-test/secrets/pcred_cancelled/versions/1",
+    };
+    await queuePendingSecretVersion(appEnv, kept, {
+      provider: "rpc_connection",
+      orgId: ORG_ID,
+      sourceId: "pcred_cancelled",
+    });
+    const keptRow = await queuedRow(kept.secretVersionRef);
+    await expect(clearQueuedSecretVersion(getDb(appEnv), kept)).resolves.toBeUndefined();
+    expect(
+      await repo.claimRetirement({
+        id: keptRow.id,
+        expectedAttemptCount: keptRow.attempt_count,
+        nextAttemptAt: lease,
+      })
+    ).toBe(false);
   });
 
   it("refuses the create and takes the version back when the obligation cannot be recorded", async () => {

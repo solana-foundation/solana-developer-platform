@@ -177,7 +177,7 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
   return JSON.stringify([
     request.projectId ?? null,
     request.externalId ?? null,
-    request.source,
+    request.sourceCustodyWalletId,
     request.token,
     [...request.recipients]
       .sort((a, b) => a.counterpartyAccountId.localeCompare(b.counterpartyAccountId))

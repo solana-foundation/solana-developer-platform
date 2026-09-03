@@ -28,7 +28,7 @@
 import type { AppDb } from "@/db";
 import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
 import {
-  deleteWorkflowSecretRetirement,
+  cancelUnclaimedWorkflowSecretRetirement,
   insertWorkflowSecretRetirement,
 } from "@/db/repositories/workflow-secret-retirement.repository.postgres";
 import { serviceUnavailable } from "@/lib/errors";
@@ -252,7 +252,7 @@ export async function clearQueuedSecretVersion(
   if (!secretVersionRef) {
     return;
   }
-  const cleared = await deleteWorkflowSecretRetirement(exec, secretVersionRef);
+  const cleared = await cancelUnclaimedWorkflowSecretRetirement(exec, secretVersionRef);
   if (!cleared) {
     throw serviceUnavailable(
       "The credential secret was retired while this request was still running; nothing was created — retry the request"

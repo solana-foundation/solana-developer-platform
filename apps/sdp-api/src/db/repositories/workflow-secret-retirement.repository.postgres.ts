@@ -71,14 +71,37 @@ export async function deleteWorkflowSecretRetirement(
   exec: Pick<AppDb, "prepare">,
   secretVersionRef: string
 ): Promise<boolean> {
-  // RETURNING so the caller can tell "cancelled the obligation" from "there was
-  // nothing to cancel". For a write that is about to reference this version the
-  // difference is decisive: nothing to cancel means the sweeper already took
-  // the version, and committing would point live rows at a destroyed secret.
   const row = await exec
     .prepare(
       `DELETE FROM workflow_action_secret_retirements
         WHERE secret_version_ref = ?
+        RETURNING secret_version_ref`
+    )
+    .bind(secretVersionRef)
+    .first<{ secret_version_ref: string }>();
+  return Boolean(row);
+}
+
+/**
+ * Cancel an obligation ONLY while no sweeper has taken it — the other half of
+ * `claimRetirement`.
+ *
+ * `attempt_count` counts sweeper attempts, so zero means no sweeper has ever
+ * acted on this version and the version is certainly still there. A non-zero
+ * count means one is already committed to destroying it (or has), and a
+ * transaction about to reference the version must not proceed: it would commit
+ * live rows pointing at a secret that is being destroyed out from under them.
+ *
+ * @returns Whether the obligation was cancelled. False means "do not commit".
+ */
+export async function cancelUnclaimedWorkflowSecretRetirement(
+  exec: Pick<AppDb, "prepare">,
+  secretVersionRef: string
+): Promise<boolean> {
+  const row = await exec
+    .prepare(
+      `DELETE FROM workflow_action_secret_retirements
+        WHERE secret_version_ref = ? AND attempt_count = 0
         RETURNING secret_version_ref`
     )
     .bind(secretVersionRef)
@@ -126,17 +149,32 @@ export function createPostgresWorkflowSecretRetirementsRepository(
         .run();
     },
 
-    async rescheduleRetirement(params) {
-      await db
+    async claimRetirement(params) {
+      // Compare-and-swap on the attempt count that was read: a second sweeper,
+      // or a transaction that cancelled the obligation, makes this match zero
+      // rows rather than let two parties act on one version.
+      const row = await db
         .prepare(
           `UPDATE workflow_action_secret_retirements
              SET attempt_count = attempt_count + 1,
-                 last_error = ?,
                  next_attempt_at = ?,
                  updated_at = sdp_iso_now()
+           WHERE id = ? AND attempt_count = ?
+           RETURNING id`
+        )
+        .bind(params.nextAttemptAt, params.id, params.expectedAttemptCount)
+        .first<{ id: string }>();
+      return Boolean(row);
+    },
+
+    async recordRetirementFailure(params) {
+      await db
+        .prepare(
+          `UPDATE workflow_action_secret_retirements
+             SET last_error = ?, updated_at = sdp_iso_now()
            WHERE id = ?`
         )
-        .bind(params.error, params.nextAttemptAt, params.id)
+        .bind(params.error, params.id)
         .run();
     },
   };
