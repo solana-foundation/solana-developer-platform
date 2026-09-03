@@ -141,12 +141,14 @@ describe("useDvpCreateForm", () => {
     expect(result.current.asset.pendingLookup).toBe(true);
     expect(result.current.ready).toBe(false);
 
-    // No decimals came back, so the field takes base units directly rather than
-    // guessing a scale — the fallback this test was always about.
+    // And still not ready once it settles with nothing. There is no base-unit
+    // fallback: "no scale" used to mean "read the typed number as base units",
+    // which covered a lookup that FAILED as well as a mint with no metadata,
+    // so a network error silently turned 1000 tokens into 0.001 of one.
     await waitFor(() => expect(result.current.asset.pendingLookup).toBe(false));
 
-    expect(result.current.asset.baseUnits).toBe("1000");
-    expect(result.current.ready).toBe(true);
+    expect(result.current.asset.baseUnits).toBeNull();
+    expect(result.current.ready).toBe(false);
   });
 
   /**

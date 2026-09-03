@@ -313,7 +313,7 @@
       "cashOther": "Another mint",
       "fieldCashMintCustom": "Cash mint address",
       "fieldAmountHintDecimals": "As you would write it. {symbol} has {decimals} decimals.",
-      "fieldAmountHintRaw": "Base units, as a whole number. Decimals are unknown for a pasted mint, so this is not a decimal amount.",
+      "fieldAmountHintRaw": "This mint could not be read, so the amount cannot be scaled. Check the address, or create the trade through the API in base units.",
       "baseUnits": "Sends {value} base units",
       "amountTooPrecise": "More decimal places than {symbol} supports.",
       "summaryTitle": "What this creates",

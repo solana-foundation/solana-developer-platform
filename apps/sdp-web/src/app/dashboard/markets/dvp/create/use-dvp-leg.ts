@@ -67,11 +67,6 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
   // decimals, so this stays idle on the empty string for one.
   const pasted = usePastedMint(token ? "" : custom);
 
-  // A listed mint carries its decimals. A pasted one is read from the chain
-  // (`usePastedMint`), because the alternative is asking a person for base
-  // units on the leg carrying the security. Until it resolves the field still
-  // takes base units rather than guessing a scale and moving the wrong
-  // quantity — the fallback is unchanged, it is just far rarer now.
   // Only metadata that belongs to the address currently typed. A resolved
   // answer for a PREVIOUS address is not a slightly stale answer, it is a
   // different token, and reading its decimals scales the amount by the wrong
@@ -80,9 +75,22 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
   const pastedMint = pastedMatchesInput ? pasted.mint : null;
   const pendingLookup = token === null && (pasted.loading || !pastedMatchesInput);
 
+  // A listed mint carries its decimals. A pasted one is read from the chain by
+  // `usePastedMint`.
+  //
+  // There is no base-unit fallback any more. It read a typed amount as raw base
+  // units whenever the scale was unknown, and "unknown" covers a lookup that
+  // FAILED — a network error, a body that would not parse — not only a mint
+  // with no metadata. Those are different things and it could not tell them
+  // apart, so typing 1000 meaning a thousand tokens sent 0.001 of one whenever
+  // the request happened to fail. Under-sending is not the safe direction, it
+  // is a different wrong number.
+  //
+  // Without a scale the amount has no meaning, so this leg has no base units
+  // and submit is blocked rather than a quantity guessed.
   const decimals = token?.decimals ?? pastedMint?.decimals ?? null;
   const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
-  const baseUnits = resolved ? (resolved.ok ? resolved.baseUnits : null) : amount.trim() || null;
+  const baseUnits = resolved?.ok ? resolved.baseUnits : null;
 
   return {
     amount,
