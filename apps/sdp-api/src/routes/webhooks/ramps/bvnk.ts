@@ -334,14 +334,13 @@ async function applyBvnkAgreementStatusWebhook(
   if (!account) return;
   const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(account.metadata);
   if (!metadata.agreements) return;
-  const updated = await accounts.updateAccountMetadata({
+  const updated = await accounts.patchAccountMetadata({
     organizationId: counterparty.organization_id,
     projectId: counterparty.project_id,
     counterpartyId: counterparty.id,
     provider: "bvnk",
     id: account.id,
-    metadata: bvnkCustomerProviderAccountMetadataSchema.parse({
-      ...metadata,
+    set: {
       agreements: {
         ...metadata.agreements,
         entries: {
@@ -353,7 +352,8 @@ async function applyBvnkAgreementStatusWebhook(
           },
         },
       },
-    }),
+    },
+    unset: [],
   });
   if (!updated) throw internalError("BVNK agreement status update escaped its tenant scope.");
 }

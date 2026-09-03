@@ -91,16 +91,16 @@ async function refreshBvnkCustomerAccount(
   const detail = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(rampRuntime(c), {
     id: providerAccount.provider_customer_reference,
   });
-  const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata);
   const updated = await createPostgresCounterpartyProviderAccountsRepository(
     getDb(c.env)
-  ).updateAccountMetadata({
+  ).patchAccountMetadata({
     organizationId: counterparty.organization_id,
     projectId,
     counterpartyId: counterparty.id,
     provider: "bvnk",
     id: providerAccount.id,
-    metadata: { ...metadata, status: detail.status },
+    set: { status: detail.status },
+    unset: [],
   });
   if (updated === null) {
     throw internalError("BVNK customer status update escaped its tenant scope.");

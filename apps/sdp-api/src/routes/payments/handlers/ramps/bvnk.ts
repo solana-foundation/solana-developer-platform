@@ -519,7 +519,7 @@ export async function bvnkCustomerRequirementsFromMetadata(
  * @param c - Request context used for repository access.
  * @param counterparty - Counterparty receiving the BVNK customer link.
  * @param projectId - Project that owns the counterparty.
- * @param reference - BVNK working-set/customer reference.
+ * @param workingSetId - BVNK agreements working-set id (the v2 customer UUID space).
  * @param entries - Required agreement state to persist.
  * @returns Nothing.
  */
@@ -527,7 +527,7 @@ async function persistBvnkAgreementState(
   c: AppContext,
   counterparty: CounterpartyRow,
   projectId: string,
-  reference: string,
+  workingSetId: string,
   entries: BvnkAgreementEntries
 ): Promise<void> {
   await getCounterpartiesRepository(c).upsertBvnkCustomerProviderData({
@@ -535,7 +535,7 @@ async function persistBvnkAgreementState(
     organizationId: counterparty.organization_id,
     projectId,
     customer: {
-      customerReference: reference,
+      customerReference: workingSetId,
       agreements: { relayedAt: new Date().toISOString(), entries },
     },
   });
@@ -580,18 +580,14 @@ async function createBvnkCustomer(
   if (!existing) {
     throw internalError("BVNK customer-link row is missing after agreement relay.");
   }
-  const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(existing.metadata);
-  const updated = await accounts.updateAccountMetadata({
+  const updated = await accounts.patchAccountMetadata({
     organizationId: input.counterparty.organization_id,
     projectId: input.projectId,
     counterpartyId: input.counterparty.id,
     provider: "bvnk",
     id: existing.id,
-    metadata: bvnkCustomerProviderAccountMetadataSchema.parse({
-      ...metadata,
-      status: created.status,
-      contactId: contact.contactId,
-    }),
+    set: { status: created.status, contactId: contact.contactId },
+    unset: [],
   });
   if (!updated) {
     throw internalError("BVNK customer status update escaped its tenant scope.");
@@ -685,16 +681,14 @@ export async function ensureBvnkCustomer(
       throw internalError("BVNK customer-link metadata is missing agreement state.");
     }
     const latest = await client.getCustomerV2(ctx, { id: existing.provider_customer_reference });
-    const updated = await accounts.updateAccountMetadata({
+    const updated = await accounts.patchAccountMetadata({
       organizationId: counterparty.organization_id,
       projectId,
       counterpartyId: counterparty.id,
       provider: "bvnk",
       id: existing.id,
-      metadata: bvnkCustomerProviderAccountMetadataSchema.parse({
-        ...metadata,
-        status: latest.status,
-      }),
+      set: { status: latest.status },
+      unset: [],
     });
     if (!updated) {
       throw internalError("BVNK customer status update escaped its tenant scope.");
@@ -761,7 +755,7 @@ export async function ensureBvnkCustomer(
           return [agreement.id, { status: result?.status ?? "PENDING" }];
         })
     );
-    await persistBvnkAgreementState(c, counterparty, projectId, reference, entries);
+    await persistBvnkAgreementState(c, counterparty, projectId, agreements.id, entries);
     return {
       requirements: { provider: "bvnk", direction, status: "pending_agreement_acceptance" },
     };
@@ -771,7 +765,7 @@ export async function ensureBvnkCustomer(
       .filter((agreement) => !agreement.declinable)
       .map((agreement) => [agreement.id, { status: agreement.status }])
   );
-  await persistBvnkAgreementState(c, counterparty, projectId, reference, entries);
+  await persistBvnkAgreementState(c, counterparty, projectId, agreements.id, entries);
   return {
     requirements: {
       provider: "bvnk",
