@@ -239,6 +239,62 @@ describe("DvpTradeRepository (postgres)", () => {
     ).rejects.toThrow();
   });
 
+  // The guard lives in the statement rather than in the caller, because
+  // `create_failed` is the only status proving nothing is on chain. Freeing a
+  // key from any other status would let a retry create a SECOND trade while the
+  // first one exists, which is what the key is there to prevent.
+  describe("releaseIdempotencyKey", () => {
+    it("frees the key of a definitively failed create", async () => {
+      const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
+      await repo.resolveCreate(created.id, "create_failed");
+
+      await expect(repo.releaseIdempotencyKey(created.id)).resolves.toBe(true);
+      await expect(repo.getByIdempotencyKey(TEST_PROJECT_ID, "key-1")).resolves.toBeNull();
+    });
+
+    it("lets the freed key be claimed by a new trade", async () => {
+      const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
+      await repo.resolveCreate(created.id, "create_failed");
+      await repo.releaseIdempotencyKey(created.id);
+
+      await expect(
+        repo.create(
+          tradeInsert({
+            id: "dvp_trade_test_2",
+            swapDvp: "SwapZ11111111111111111111111111111111111111",
+            idempotencyKey: "key-1",
+          })
+        )
+      ).resolves.toMatchObject({ id: "dvp_trade_test_2" });
+    });
+
+    it.each(["creating", "created"] as const)("refuses to free a %s trade's key", async (status) => {
+      const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
+      if (status === "created") {
+        await repo.resolveCreate(created.id, "created");
+      }
+
+      await expect(repo.releaseIdempotencyKey(created.id)).resolves.toBe(false);
+      await expect(repo.getByIdempotencyKey(TEST_PROJECT_ID, "key-1")).resolves.toMatchObject({
+        id: created.id,
+      });
+    });
+
+    // Second call finds no key left to free, so it reports false rather than
+    // claiming it did the work twice.
+    it("is idempotent", async () => {
+      const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));
+      await repo.resolveCreate(created.id, "create_failed");
+
+      await expect(repo.releaseIdempotencyKey(created.id)).resolves.toBe(true);
+      await expect(repo.releaseIdempotencyKey(created.id)).resolves.toBe(false);
+    });
+
+    it("reports false for a trade that does not exist", async () => {
+      await expect(repo.releaseIdempotencyKey("dvp_nope")).resolves.toBe(false);
+    });
+  });
+
   // Partial index: unkeyed trades all carry NULL and must not collide.
   it("allows any number of trades with no key", async () => {
     await repo.create(
