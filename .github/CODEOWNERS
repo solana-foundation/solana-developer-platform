@@ -18,7 +18,7 @@
 /apps/sdp-api/src/lib/auth.ts                           @GuiBibeau @G1de0n
 
 # Database migrations
-/apps/sdp-api/src/db/migrations/                        @G1de0n @niks3089
+/apps/sdp-api/src/db/migrations/                        @pashpashkin @multipletwigs
 
 # CI/CD, release, and deploy machinery
 /.github/                                               @G1de0n @niks3089
