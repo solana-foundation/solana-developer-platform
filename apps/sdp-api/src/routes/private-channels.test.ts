@@ -216,6 +216,41 @@ describe("Private Channels routes", () => {
     expect(probeConnectionMock).toHaveBeenCalledTimes(1);
   });
 
+  it("PATCH /instance re-probes and updates the active instance in place", async () => {
+    probeConnectionMock.mockResolvedValue(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const gatewayUrl = "http://34.71.147.163:9900";
+
+    const updated = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...SANDBOX_DEFAULTS,
+          instanceId: createdBody.data.instance.id,
+          gatewayUrl,
+        }),
+      },
+      env
+    );
+
+    expect(updated.status).toBe(200);
+    const updatedBody = (await updated.json()) as {
+      data: { instance: { id: string; gatewayUrl: string } };
+    };
+    expect(updatedBody.data.instance).toMatchObject({
+      id: createdBody.data.instance.id,
+      gatewayUrl,
+    });
+    expect(probeConnectionMock).toHaveBeenCalledTimes(2);
+  });
+
   it("POST /instance/disconnect flips is_active and returns the row", async () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     await app.request(

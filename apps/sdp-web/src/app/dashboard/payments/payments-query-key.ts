@@ -24,6 +24,8 @@ export const paymentsQueryKeys = {
   }) => ["ramp-estimate", direction, fiatCurrency, assetRail, amount] as const,
   counterpartyAccounts: ({ counterpartyId }: { counterpartyId: string }) =>
     ["counterparty-accounts", counterpartyId] as const,
+  counterpartyProviderAccounts: ({ counterpartyId }: { counterpartyId: string }) =>
+    ["counterparty-provider-accounts", counterpartyId] as const,
   counterpartyRecentTransfers: ({ counterpartyId }: { counterpartyId: string }) =>
     ["counterparty-recent-transfers", counterpartyId] as const,
   batchRecipients: ({ page, search }: { page: number; search: string }) =>

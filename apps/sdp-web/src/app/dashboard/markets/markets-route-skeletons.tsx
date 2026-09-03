@@ -27,8 +27,8 @@ export function MarketsLandingSkeleton() {
 
 export function TreasurySolutionsSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-11">
+    <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-8 pb-12 md:px-8 xl:px-9">
+      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
         <div className="grid gap-2 sm:grid-cols-3">
           {BALANCE_SKELETON_IDS.map((id) => (
             <SkeletonBlock className="h-[121px] rounded-xl" key={`summary-${id}`} />

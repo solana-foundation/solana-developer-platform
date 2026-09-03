@@ -2,9 +2,19 @@ import { redactCredentialString } from "@sdp/custody";
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
+  bvnkOfframpFields,
+  isBvnkOfframpCurrency,
+} from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import type {
+  BvnkCustomerResolution,
+  BvnkPaymentRuleResolution,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkPartyDetails,
   bvnkOnboardingRequirements,
+  bvnkUnverifiedOnboardingStatus,
+  isBvnkCustomerVerified,
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
   normalizeBvnkCurrencyAndNetwork,
@@ -21,7 +31,7 @@ import {
   readLightsparkPurposeOfPayment,
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
-import { readyCounterparty } from "@sdp/payments/ramps/requirements";
+import { buildRequirementSchema, readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -81,7 +91,6 @@ import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/po
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { isSentryEnabled } from "@/runtime/observability";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
@@ -123,12 +132,14 @@ import {
   ensureBvnkOfframpBeneficiary,
   ensureBvnkOfframpWallet,
   ensureBvnkPaymentRule,
+  readBvnkCustomerLink,
 } from "./ramps/bvnk";
 import {
   ensureLightsparkCustomer,
   ensureLightsparkPayoutAccount,
   ensureLightsparkPurposeOfPayment,
   lightsparkProviderCustomerId,
+  requireLightsparkPayoutAccountById,
   selectLightsparkPayoutAccount,
 } from "./ramps/lightspark";
 import {
@@ -643,21 +654,34 @@ async function advanceLightsparkRequirements(
   if (!isCountryCode(collectedData.destinationCountry)) {
     throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
   }
-  const accounts = await repository.listActiveExternalAccounts({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "lightspark",
-    fiatCurrency: input.fiatCurrency,
-    destinationCountry: collectedData.destinationCountry,
-  });
-  const existing = selectLightsparkPayoutAccount(
-    accounts,
-    collectedData.paymentRails,
-    input.fiatCurrency,
-    collectedData.destinationCountry
-  );
-  if (existing !== null && existing.external_account_reference !== null) {
+  if (input.providerAccountId !== undefined) {
+    const selected = await requireLightsparkPayoutAccountById(c, {
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      providerAccountId: input.providerAccountId,
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry: collectedData.destinationCountry,
+    });
+    return readyCounterparty("lightspark", input.direction, selected.id);
+  }
+  if (collectedData.paymentRails === undefined) {
+    const accounts = await repository.listActiveExternalAccounts({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry: collectedData.destinationCountry,
+    });
+    const existing = selectLightsparkPayoutAccount(
+      accounts,
+      input.fiatCurrency,
+      collectedData.destinationCountry
+    );
+    if (existing === null || existing.external_account_reference === null) {
+      throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
+    }
     if (existing.provider_status === null) {
       throw badRequest("Lightspark payout account has no provider status yet.");
     }
@@ -665,7 +689,7 @@ async function advanceLightsparkRequirements(
       isLightsparkExternalAccountActive(existing.provider_status) &&
       existing.payment_rail !== null
     ) {
-      return readyCounterparty("lightspark", input.direction);
+      return readyCounterparty("lightspark", input.direction, existing.id);
     }
     const refreshed = await RAMP_PROVIDER_CLIENTS.lightspark.getExternalAccount(rampRuntime(c), {
       accountId: existing.external_account_reference,
@@ -684,14 +708,11 @@ async function advanceLightsparkRequirements(
       });
     }
     if (isLightsparkExternalAccountActive(refreshed.status)) {
-      return readyCounterparty("lightspark", input.direction);
+      return readyCounterparty("lightspark", input.direction, existing.id);
     }
     throw badRequest(
       `Lightspark payout account is not active yet (status: ${refreshed.status}). Retry once it is verified.`
     );
-  }
-  if (collectedData.paymentRails === undefined) {
-    throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
   }
   const account = await ensureLightsparkPayoutAccount(c, {
     counterparty: input.counterparty,
@@ -705,11 +726,32 @@ async function advanceLightsparkRequirements(
     throw badRequest("Lightspark payout account has no provider status yet.");
   }
   if (isLightsparkExternalAccountActive(account.provider_status)) {
-    return readyCounterparty("lightspark", input.direction);
+    return readyCounterparty("lightspark", input.direction, account.id);
   }
   throw badRequest(
     `Lightspark payout account was created but is not active yet (status: ${account.provider_status}). Retry once it is verified.`
   );
+}
+
+async function bvnkCustomerVerificationRequirements(
+  c: AppContext,
+  input: { counterparty: CounterpartyRow; projectId: string; direction: "onramp" | "offramp" },
+  customer: BvnkCustomerResolution
+): Promise<CounterpartyRequirements> {
+  if (!customer.customerReference) {
+    throw internalError("BVNK customer reference is missing while resolving verification.");
+  }
+  const detail = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(rampRuntime(c), {
+    id: customer.customerReference,
+  });
+  const resolution: BvnkPaymentRuleResolution = {
+    customer: { customerReference: detail.id, status: detail.status },
+    entry: {},
+    onboardingStatus: isBvnkCustomerVerified(detail.status)
+      ? "ready"
+      : bvnkUnverifiedOnboardingStatus(detail.status),
+  };
+  return bvnkOnboardingRequirements(resolution, input.direction, detail.authenticatedLink.link);
 }
 
 export async function advanceCounterpartyRequirements(
@@ -724,11 +766,63 @@ export async function advanceCounterpartyRequirements(
     case "lightspark":
       return advanceLightsparkRequirements(c, input);
     case "bvnk": {
+      if (input.direction === "offramp" && !isBvnkOfframpCurrency(input.fiatCurrency)) {
+        return {
+          provider: "bvnk",
+          direction: input.direction,
+          status: "unsupported",
+          reason: `BVNK off-ramp does not support payouts in ${input.fiatCurrency}.`,
+        };
+      }
+      const customerResult = await ensureBvnkCustomer(
+        c,
+        input.counterparty,
+        input.projectId,
+        input.direction,
+        input.collectedData,
+        input.agreementConsent
+      );
+      if ("requirements" in customerResult) {
+        return customerResult.requirements;
+      }
+      const customer = customerResult.customer;
+      if (!isBvnkCustomerVerified(customer.status)) {
+        return bvnkCustomerVerificationRequirements(
+          c,
+          {
+            counterparty: input.counterparty,
+            projectId: input.projectId,
+            direction: input.direction,
+          },
+          customer
+        );
+      }
       if (input.direction === "offramp") {
+        if (!isBvnkOfframpCurrency(input.fiatCurrency)) {
+          throw internalError(`BVNK off-ramp currency was not validated: ${input.fiatCurrency}.`);
+        }
+        const fiatCurrency = input.fiatCurrency;
+        const beneficiary = latestBvnkOfframpBeneficiary(
+          input.counterparty.provider_data,
+          fiatCurrency
+        );
+        if (beneficiary === undefined) {
+          const bankDetails = buildRequirementSchema(bvnkOfframpFields(fiatCurrency)).safeParse(
+            input.collectedData
+          );
+          if (!bankDetails.success) {
+            return {
+              provider: "bvnk",
+              direction: input.direction,
+              status: "collect",
+              fields: bvnkOfframpFields(fiatCurrency),
+            };
+          }
+        }
         await ensureBvnkOfframpBeneficiary(c, {
           counterparty: input.counterparty,
           projectId: input.projectId,
-          fiatCurrency: input.fiatCurrency,
+          fiatCurrency,
           collectedData: input.collectedData,
         });
         const refreshed = await getCounterpartiesRepository(c).getCounterpartyById({
@@ -742,18 +836,17 @@ export async function advanceCounterpartyRequirements(
           rampRuntime(c),
           refreshed,
           input.projectId,
-          input.fiatCurrency
+          fiatCurrency
         );
         if (!isBvnkWalletActive(wallet.status)) {
           return {
             provider: "bvnk",
             direction: input.direction,
-            status: "funding_account_provisioning",
+            status: "customer_funding_account_provisioning",
           };
         }
         return readyCounterparty("bvnk", input.direction);
       }
-      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId);
       const scope = await resolveScope(c);
       const destinationWalletAddress = resolveWalletAddress(
         scope.wallets,
@@ -770,6 +863,17 @@ export async function advanceCounterpartyRequirements(
         customer,
         { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency }
       );
+      if (resolution.onboardingStatus === "verification_required") {
+        return bvnkCustomerVerificationRequirements(
+          c,
+          {
+            counterparty: input.counterparty,
+            projectId: input.projectId,
+            direction: input.direction,
+          },
+          resolution.customer
+        );
+      }
       return bvnkOnboardingRequirements(resolution, input.direction);
     }
     case "mural":
@@ -817,7 +921,7 @@ export async function estimateAcrossProviders(
           ...describeError(error),
         });
         const observability = c.get("observability");
-        if (observability && isSentryEnabled(c.env)) {
+        if (observability) {
           try {
             observability.withScope((sentryScope) => {
               sentryScope.setTag("provider", provider);
@@ -984,8 +1088,13 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     case "bvnk": {
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+      const bvnkCustomer = await readBvnkCustomerLink(c, counterparty);
+      if (!bvnkCustomer) {
+        throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: undefined });
+      }
       const bvnkResult = await bvnkOnrampQuote(c, {
         counterparty,
+        customer: bvnkCustomer,
         paymentRule: {
           currency,
           network,
@@ -1180,32 +1289,18 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         });
         payoutAccount = selectLightsparkPayoutAccount(
           payoutAccounts,
-          undefined,
           input.fiatCurrency,
           input.destinationCountry
         );
       } else {
-        const selected = await accountsRepository.getExternalAccountById({
+        payoutAccount = await requireLightsparkPayoutAccountById(c, {
           organizationId: scope.auth.organizationId,
           projectId,
           counterpartyId: counterparty.id,
-          provider: "lightspark",
-          id: input.providerAccountId,
+          providerAccountId: input.providerAccountId,
+          fiatCurrency: input.fiatCurrency,
+          destinationCountry: input.destinationCountry,
         });
-        if (
-          selected === null ||
-          selected.status !== "active" ||
-          selected.fiat_currency !== input.fiatCurrency ||
-          selected.destination_country !== input.destinationCountry ||
-          selected.external_account_reference === null ||
-          selected.provider_status === null ||
-          !isLightsparkExternalAccountActive(selected.provider_status)
-        ) {
-          throw badRequest(
-            "providerAccountId does not reference an active lightspark payout account for this corridor."
-          );
-        }
-        payoutAccount = selected;
       }
       if (
         customerId === null ||
@@ -1243,6 +1338,17 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       if (!beneficiary || !wallet || !isBvnkWalletActive(wallet.status)) {
         throw counterpartyNotProvisioned("bvnk", "offramp");
       }
+      const customerLink = await createPostgresCounterpartyProviderAccountsRepository(
+        getDb(c.env)
+      ).getProviderAccount({
+        organizationId: scope.auth.organizationId,
+        projectId,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      });
+      if (customerLink === null) {
+        throw counterpartyNotProvisioned("bvnk", "offramp");
+      }
       pendingTransfer = await createPendingBvnkOfframpTransfer(c, {
         transferId: reservedTransferId,
         organizationId: scope.auth.organizationId,
@@ -1263,7 +1369,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           cryptoAmount: input.cryptoAmount,
           sourceWalletAddress,
           paymentTransferId: pendingTransfer.id,
-          externalCustomerId: counterparty.id,
+          externalCustomerId: customerLink.provider_customer_reference,
           bvnkCompliance: buildBvnkPartyDetails(counterparty),
           bvnkOfframpWalletId: wallet.id,
         });

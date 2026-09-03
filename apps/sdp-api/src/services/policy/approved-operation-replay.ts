@@ -322,9 +322,9 @@ export async function executeApprovedWalletOperation(
   const heartbeat = startExecutionLeaseHeartbeat(repository, operation.id, executionAttemptId);
   let response: Response;
   try {
-    const [{ createApp }, { nodeObservability }] = await Promise.all([
+    const [{ createApp }, { noopObservability }] = await Promise.all([
       import("@/app"),
-      import("@/runtime/observability-node"),
+      import("@/runtime/observability"),
     ]);
     const headers = new Headers({
       "content-type": "application/json",
@@ -334,7 +334,7 @@ export async function executeApprovedWalletOperation(
     if (operation.project_id) {
       headers.set("x-project-id", operation.project_id);
     }
-    response = await createApp({ observability: nodeObservability }).fetch(
+    response = await createApp({ observability: noopObservability }).fetch(
       new Request(`http://approved-operation.internal${request.path}`, {
         method: request.method,
         headers,

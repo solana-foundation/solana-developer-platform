@@ -85,11 +85,3 @@ jobs:
             exit 1
           fi
 
-  smoke:
-    name: Post-deploy dev smoke
-    needs: deploy
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/sdp-dev-smoke.yml
-

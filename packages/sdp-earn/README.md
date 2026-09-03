@@ -536,6 +536,10 @@ walk with the Ground integration as the worked example:
    capability guard, no route changes.
 5. Tests are no-network by design: stub `fetch` per the canonical pattern in
    `src/fetch.test.ts` / `providers/ground/client.test.ts`.
+6. If SDP executes for the provider (vault-direct): the executing client in
+   its own package (`packages/sdp-<id>`), the per-cluster deployment registry
+   in `@sdp/types`, both API registry entries, and the three Kora sponsorship
+   allowlists (playbook §4d and step 9, including the sdp-infra pair).
 
 Curators and vault/category changes require **no code at all** — they are
 catalogue data (see the playbook).

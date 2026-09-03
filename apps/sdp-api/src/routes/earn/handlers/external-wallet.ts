@@ -1,4 +1,7 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
+import { notImplemented } from "@sdp/earn/errors";
+import type { EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import { subtractDecimalAmounts, sumDecimalAmounts } from "@sdp/payments/decimal";
 import type {
   EarnDepositSwap,
@@ -37,19 +40,23 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import {
   buildExternalWalletDepositTransaction,
   buildExternalWalletWithdrawalTransaction,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
 } from "@/services/earn/vault-external-wallet.service";
+import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
+import { refusedBuildMessage } from "@/services/earn/vault-refusals";
 import {
   assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
-import { getEarnRepository, resolveSdpEnvironment } from "../context";
+import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   type earnExternalWalletDepositTransactionSchema,
   earnExternalWalletEarningsParamsSchema,
@@ -61,6 +68,7 @@ import {
   earnExternalWalletPositionsQuerySchema,
   type earnExternalWalletSubmitSchema,
   type earnExternalWalletWithdrawalTransactionSchema,
+  type earnVaultWithdrawalPreviewSchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
 import { decodeMovementCursor } from "./movements";
@@ -102,6 +110,7 @@ type EarnExternalWalletDepositTransactionBody = z.output<
 type EarnExternalWalletWithdrawalTransactionBody = z.output<
   typeof earnExternalWalletWithdrawalTransactionSchema
 >;
+type EarnExternalWalletWithdrawalPreviewBody = z.output<typeof earnVaultWithdrawalPreviewSchema>;
 type EarnExternalWalletSubmitBody = z.output<typeof earnExternalWalletSubmitSchema>;
 
 const EXTERNAL_POSITION_PAGE_SIZE = 100;
@@ -314,8 +323,13 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
   });
   if (!row) throw notFound("Earn external wallet movement");
 
+  // A partner polling this detail endpoint should observe chain progress now,
+  // not wait for the next scheduled recovery sweep. The shared read-through is
+  // bounded and fail-soft: RPC trouble returns the last durable row while the
+  // scheduled reconciler keeps working independently.
+  const current = await reconcileEarnVaultMovementReadThrough(c.env, row);
   const response: EarnExternalWalletMovementResponse = {
-    movement: toExternalWalletMovementWire(row),
+    movement: toExternalWalletMovementWire(current),
   };
   return success(c, response);
 }
@@ -331,9 +345,8 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  *
  * - a position's live value failed to hydrate (`live_value_unavailable`);
  * - a movement is still settling, so the chain and the ledger describe
- *   different moments (`movements_pending` — the reconciler drives every row
- *   terminal within about ninety seconds, so this is a short window, not a
- *   state);
+ *   different moments (`movements_pending` — detail polling performs a bounded
+ *   live chain read and the scheduled reconciler remains the recovery path);
  * - the wallet has a finalized withdrawal (`withdrawals_not_valued`): the
  *   ledger records exits in SHARES (migration 0070 pins `payout_token` NULL
  *   for vault rows), so no exact token-denominated earned figure exists once
@@ -700,6 +713,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
     label: position.label,
     shareAtaRentFunder: position.shareAtaRentFunder,
     shares: body.shares,
+    ...(body.minAmountOut === undefined ? {} : { minAmountOut: body.minAmountOut }),
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   });
@@ -709,9 +723,62 @@ export async function createEarnExternalWalletWithdrawalTransaction(
       ...toExternalWalletTransactionWire(built),
       positionId: position.id,
       shares: built.amount_requested,
+      minAmountOut: built.min_shares_out,
     },
   };
   return success(c, response);
+}
+
+/**
+ * POST /v1/earn/external-wallet/withdrawal-previews: quote one caller-owned
+ * exit without applying custody-wallet bindings. The position's exact project
+ * scope is the authorization boundary, matching the external build route.
+ *
+ * Like the build, this keeps every money-in gate out of the exit path. A
+ * delisted strategy and a provider disabled for new deposits must remain
+ * quotable and exitable. The quote is read-only and exists solely to derive a
+ * caller-chosen minAmountOut from current vault accounting.
+ */
+export async function createEarnExternalWalletWithdrawalPreview(
+  c: ValidatedBodyContext<typeof earnVaultWithdrawalPreviewSchema>
+) {
+  const body: EarnExternalWalletWithdrawalPreviewBody = c.req.valid("json");
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const positionRow = await createPostgresEarnMovementsRepository(getDb(c.env)).getPositionById({
+    organizationId: auth.organizationId,
+    environment,
+    positionId: body.positionId,
+  });
+  const position = toExternalWalletHolding(positionRow, projectId);
+  if (!position) throw notFound("Earn external-wallet position");
+
+  const deadline = createVaultDeadline();
+  const client = resolveVaultWithdrawClient(c.env, position.provider, deadline);
+  if (!client || !supportsVaultWithdrawQuote(client)) {
+    throw notImplemented(position.provider, "vault withdrawal quoting");
+  }
+
+  let quote: EarnVaultWithdrawQuote;
+  try {
+    quote = await client.quoteVaultWithdrawal(earnRuntime(c), {
+      providerReference: position.vaultAddress,
+      shares: body.shares,
+    });
+  } catch (error) {
+    const refusal = refusedBuildMessage(error);
+    if (refusal !== null) throw badRequest(refusal);
+    throw error;
+  }
+
+  return success(c, {
+    positionId: position.id,
+    assetsOut: quote.assetsOut,
+    assetDecimals: quote.assetDecimals,
+    blockingIssues: quote.blockingIssues,
+  });
 }
 
 /**
@@ -946,6 +1013,7 @@ function summarizeExternalWalletPositions(
         provider: strategy.provider,
         providerReference: strategy.providerReference,
         label: strategy.label,
+        ownerAddresses: [...strategy.owners].sort(compareWireStrings),
         walletCount: strategy.owners.size,
         positionCount: strategy.positionCount,
         totalsByToken: [...strategy.tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),
