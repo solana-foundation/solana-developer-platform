@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
+import { selectProjectAction } from "@/lib/project-cookie-action";
 
 function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string }) {
   if (imageUrl) {
@@ -89,6 +90,7 @@ export function SelectExistingOrganizationPanel() {
                   setSwitchingTo(organization.id);
                   try {
                     await setActive({ organization: organization.id });
+                    await selectProjectAction(null);
                     router.refresh();
                   } catch {
                     setSwitchingTo(null);

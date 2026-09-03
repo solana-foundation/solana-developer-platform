@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   fetchNext: vi.fn(),
   hasNextPage: false,
   isFetching: false,
+  clearSelectedProject: vi.fn(),
   refresh: vi.fn(),
   setActive: vi.fn(),
 }));
@@ -40,6 +41,10 @@ vi.mock("@clerk/nextjs", () => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mocks.refresh }),
+}));
+
+vi.mock("@/lib/project-cookie-action", () => ({
+  selectProjectAction: mocks.clearSelectedProject,
 }));
 
 function renderPanel() {
@@ -66,6 +71,8 @@ describe("SelectExistingOrganizationPanel", () => {
     mocks.fetchNext.mockReset();
     mocks.hasNextPage = false;
     mocks.isFetching = false;
+    mocks.clearSelectedProject.mockReset();
+    mocks.clearSelectedProject.mockResolvedValue(undefined);
     mocks.refresh.mockReset();
     mocks.setActive.mockReset();
     mocks.setActive.mockResolvedValue(undefined);
@@ -85,6 +92,7 @@ describe("SelectExistingOrganizationPanel", () => {
     await user.click(screen.getByRole("button", { name: "Existing workspace" }));
 
     expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_existing" });
+    expect(mocks.clearSelectedProject).toHaveBeenCalledWith(null);
     expect(mocks.refresh).toHaveBeenCalledOnce();
   });
 
