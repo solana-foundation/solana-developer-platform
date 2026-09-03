@@ -528,6 +528,7 @@
       "noControlledWalletsAvailable": "Nenhuma Wallet controlada está disponível para assinar esta ação.",
       "noSignerConfigured": "Nenhum signatário está configurado para esta ação.",
       "requiredSignerNotControlled": "O signatário exigido não é uma das suas Wallets controladas.",
+      "requiredSignerAmbiguous": "Mais de uma Wallet controlada corresponde ao signatário exigido. Resolva o conflito de Wallets antes de tentar novamente.",
       "mintAuthorityNotControlled": "A Mint Authority não é uma das suas Wallets controladas.",
       "permanentDelegateNotControlled": "O Permanent Delegate não é uma das suas Wallets controladas.",
       "authority": "autoridade",

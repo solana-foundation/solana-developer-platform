@@ -151,6 +151,7 @@ export interface AuthorityFormState {
 export interface FreezeFormState {
   accountAddress: string;
   reason: string;
+  signingWalletId: string;
 }
 
 export interface AllowlistFormState {

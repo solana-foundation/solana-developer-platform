@@ -169,6 +169,7 @@ export function createInitialFreezeForm(): FreezeFormState {
   return {
     accountAddress: "",
     reason: "",
+    signingWalletId: "",
   };
 }
 
@@ -707,7 +708,10 @@ function getPendingAuthoritySignerWallet(
     return null;
   }
 
-  return findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
+  return (
+    findWalletByCustodyWalletId(availableWallets, token.signingCustodyWalletId) ??
+    availableWallets[0]
+  );
 }
 
 function pendingTokenRequiresPermanentDelegate(token: Token): boolean {
@@ -780,20 +784,25 @@ export function getAvailableSignerWallets(
   return authorityWallets.filter((wallet) => wallet.publicKey.trim());
 }
 
-export function getSignerWalletOptionLabel(wallet: PaymentsDashboardWallet, t: Translate): string {
+export function getSignerWalletOptionLabel(
+  wallet: PaymentsDashboardWallet,
+  t: Translate,
+  includeCustodyWalletId = false
+): string {
   const primaryLabel = wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled");
-  return `${primaryLabel} · ${formatValue(wallet.walletId, t)} · ${formatValue(wallet.publicKey, t)}`;
+  const label = `${primaryLabel} · ${formatValue(wallet.walletId, t)} · ${formatValue(wallet.publicKey, t)}`;
+  return includeCustodyWalletId ? `${label} · ${wallet.id}` : label;
 }
 
-export function findWalletByWalletId(
+export function findWalletByCustodyWalletId(
   authorityWallets: PaymentsDashboardWallet[],
-  walletId: string | null | undefined
+  custodyWalletId: string | null | undefined
 ): PaymentsDashboardWallet | null {
-  if (!walletId) {
+  if (!custodyWalletId) {
     return null;
   }
 
-  return authorityWallets.find((wallet) => wallet.walletId === walletId) ?? null;
+  return authorityWallets.find((wallet) => wallet.id === custodyWalletId) ?? null;
 }
 
 export function findWalletByPublicKey(
@@ -849,13 +858,25 @@ export function getSignerSelectionForAction({
     };
   }
 
-  if (action === "deploy" || action === "burn") {
+  if (action === "deploy") {
     const preferredWallet =
-      findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
+      findWalletByCustodyWalletId(availableWallets, token.signingCustodyWalletId) ??
+      availableWallets[0];
 
     return {
       wallets: availableWallets,
-      defaultWalletId: preferredWallet.walletId,
+      defaultWalletId: preferredWallet.id,
+      unavailableReason: null,
+    };
+  }
+
+  if (action === "burn") {
+    const hasDuplicateAddress =
+      new Set(availableWallets.map((wallet) => wallet.publicKey)).size < availableWallets.length;
+
+    return {
+      wallets: availableWallets,
+      defaultWalletId: hasDuplicateAddress ? "" : availableWallets[0].id,
       unavailableReason: null,
     };
   }
@@ -910,8 +931,10 @@ export function getSignerSelectionForAction({
     };
   }
 
-  const matchedWallet = findWalletByPublicKey(availableWallets, requiredAuthority);
-  if (!matchedWallet) {
+  const matchedWallets = availableWallets.filter(
+    (wallet) => wallet.publicKey === requiredAuthority
+  );
+  if (matchedWallets.length === 0) {
     return {
       wallets: [],
       defaultWalletId: "",
@@ -919,9 +942,28 @@ export function getSignerSelectionForAction({
     };
   }
 
+  // Pause has no exact-wallet request field. It deliberately keeps automatic
+  // server-side authority resolution, so duplicate credentials cannot be
+  // disambiguated here. Selector-capable actions expose every exact row.
+  if (action === "pause") {
+    if (matchedWallets.length > 1) {
+      return {
+        wallets: matchedWallets,
+        defaultWalletId: "",
+        unavailableReason: t("DashboardIssuance.management.requiredSignerAmbiguous"),
+      };
+    }
+
+    return {
+      wallets: matchedWallets,
+      defaultWalletId: matchedWallets[0].id,
+      unavailableReason: null,
+    };
+  }
+
   return {
-    wallets: [matchedWallet],
-    defaultWalletId: matchedWallet.walletId,
+    wallets: matchedWallets,
+    defaultWalletId: matchedWallets.length === 1 ? matchedWallets[0].id : "",
     unavailableReason: null,
   };
 }

@@ -15,6 +15,7 @@ const token = {
   id: TOKEN_ID,
   projectId: "prj_operations_route_loading",
   organizationId: "org_operations_route_loading",
+  signingCustodyWalletId: null,
   signingWalletId: null,
   mintAddress: null,
   mintAuthority: null,

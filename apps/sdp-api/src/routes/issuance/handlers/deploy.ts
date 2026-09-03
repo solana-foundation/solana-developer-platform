@@ -10,18 +10,18 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import type { ApiKeyContext } from "@/lib/auth";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import type { MosaicFeePayment } from "@/services/issuance/mosaic";
-import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -29,11 +29,18 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import type { confirmDeploySchema, deployTokenSchema } from "../schemas";
+import type { confirmDeploySchema, deployTokenSchema, legacyDeployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
-import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
+import {
+  admitIssuanceRuntimeExecution,
+  createLegacyResolvedAuthoritySigner,
+  createResolvedAuthoritySigner,
+  getInitialPermanentDelegateAuthority,
+  resolveIssuanceWallet,
+} from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
+import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -246,6 +253,48 @@ async function completeDeployFailureBeforeEffect(
   });
 }
 
+async function resolveCompletedDeployReplay(params: {
+  env: Env;
+  auth: ApiKeyContext;
+  tokenService: TokenService;
+  token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
+  idempotencyKey?: string;
+  requestedCustodyWalletId?: string;
+  feePayment: MosaicFeePayment;
+}): Promise<boolean> {
+  const { token, idempotencyKey } = params;
+  if (!token.mintAddress || !idempotencyKey) return false;
+
+  const replay = await params.tokenService.findTransactionByIdempotency(
+    params.auth.organizationId,
+    idempotencyKey
+  );
+  if (!replay) return false;
+
+  const custodyWalletId =
+    params.requestedCustodyWalletId ?? token.signingCustodyWalletId ?? replay.custodyWalletId;
+  if (
+    !custodyWalletId ||
+    replay.tokenId !== token.id ||
+    replay.type !== "deploy" ||
+    replay.custodyWalletId !== custodyWalletId ||
+    replay.params.feePayment !== params.feePayment
+  ) {
+    throw conflict("Idempotency key already used with different request payload");
+  }
+  if ((replay.status !== "confirmed" && replay.status !== "finalized") || !replay.signature) {
+    throw conflict("Deployment transaction is not settled");
+  }
+
+  await resolveIssuanceWallet({
+    env: params.env,
+    auth: params.auth,
+    custodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+  return true;
+}
+
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -262,6 +311,22 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     throw notFound("Token");
   }
 
+  const { feePayment } = body;
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  if (
+    await resolveCompletedDeployReplay({
+      env: c.env,
+      auth,
+      tokenService,
+      token,
+      idempotencyKey,
+      requestedCustodyWalletId: body.signingCustodyWalletId,
+      feePayment,
+    })
+  ) {
+    return success(c, { token: toPublicToken(token) });
+  }
+
   // Validate token is in pending status
   if (token.status !== "pending") {
     throw new AppError(
@@ -274,9 +339,19 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     throw badRequest("Token already has a mint address");
   }
 
-  const { feePayment } = body;
+  const requestedCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
+  if (!requestedCustodyWalletId) {
+    throw badRequest("signingCustodyWalletId is required to deploy this token");
+  }
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+  const deploymentWallet = await resolveIssuanceWallet({
+    env: c.env,
+    auth,
+    custodyWalletId: requestedCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+
+  const idempotencyMetadata = buildIdempotencyMetadata(idempotencyKey, {
     tokenId,
     operation: "deploy",
     mode: "execute",
@@ -288,12 +363,22 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       },
       status: token.status,
       feePayment,
+      custodyWalletId: deploymentWallet.custodyWalletId,
     },
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: deploymentWallet.custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId: deploymentWallet.custodyWalletId,
     type: "deploy",
     params: {
       operation: "deploy",
@@ -309,7 +394,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   });
 
   if (replayed) {
-    return success(c, { token });
+    return success(c, { token: toPublicToken(token) });
   }
 
   // Claim the token for deployment before reading the snapshot we mint from.
@@ -318,7 +403,10 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   // created — which would otherwise leave the DB identity permanently out of
   // sync with the immutable mint. `beginTokenDeploy` re-reads post-claim, so we
   // mint from the now-frozen values.
-  const claimedToken = await tokenService.beginTokenDeploy(tokenId);
+  const claimedToken = await tokenService.beginTokenDeploy(tokenId, {
+    custodyWalletId: deploymentWallet.custodyWalletId,
+    providerWalletId: deploymentWallet.providerWalletId,
+  });
   if (!claimedToken) {
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
@@ -349,26 +437,26 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       action: "deploy",
       resourceType: "token",
       resourceId: tokenId,
-      metadata: { template: token.template, aclMode, feePayment, mode: "execute" },
+      metadata: {
+        template: token.template,
+        aclMode,
+        feePayment,
+        mode: "execute",
+        custodyWalletId: deploymentWallet.custodyWalletId,
+      },
     });
 
     // Resolve the signing wallet inside the try: it can throw, and now that we
     // hold the deploy claim (status=deploying) any failure before the mint lands
     // must release it (catch below) — otherwise the draft is stranded in
     // `deploying`, uneditable and un-redeployable.
-    const signingWalletId = resolveApiKeySigningWalletId(
+    const signer = await createResolvedAuthoritySigner({
+      env: c.env,
       auth,
-      body.signingWalletId ?? token.signingWalletId,
-      ["tokens:write"]
-    );
-
-    // Get custody signer (resolves via 3-tier: project → org → env fallback)
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId,
-      signingWalletId
-    );
+      custodyWalletId: deploymentWallet.custodyWalletId,
+      currentAuthority: deploymentWallet.publicKey,
+      requiredWalletPermissions: ["tokens:write"],
+    });
     custodyAddress = signer.address;
 
     if (feePayment === "wallet") {
@@ -447,8 +535,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       },
     });
 
-    const response: TokenResponse = { token: updatedToken };
-    return success(c, response);
+    return success(c, { token: toPublicToken(updatedToken) });
   } catch (error) {
     // The mint was created on-chain but the metadata-URI follow-up failed. The
     // create is irreversible, so record the mint (marking the token active)
@@ -510,7 +597,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   }
 };
 
-export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
+export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
   const body = c.req.valid("json");
@@ -543,6 +630,22 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSc
     ["tokens:write"]
   );
 
+  if (token.signingCustodyWalletId && signingWalletId !== token.signingWalletId) {
+    throw new AppError(
+      "CONFLICT",
+      "Legacy deploy prepare must use the provider wallet pinned on the token"
+    );
+  }
+
+  // This legacy client-signed flow intentionally remains Config-only. Validate
+  // the exact pin and load the Config signer before mutating the provider mirror.
+  const signer = await createLegacyResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId: signingWalletId,
+    expectedCustodyWalletId: token.signingCustodyWalletId,
+  });
+
   // Pin the resolved signing wallet on the token so confirmDeploy derives the
   // SAME custody address — and thus the same mint/metadata authorities and ABL
   // list PDA. Without this, a caller that passes a custom signingWalletId here
@@ -553,8 +656,6 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSc
     await tokenService.updateToken(tokenId, { signingWalletId });
   }
 
-  // Get custody signer (resolves via 3-tier: project → org → env fallback)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction
@@ -752,7 +853,12 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   // Recompute the authorities the deploy used (custody signer === mint &
   // metadata authority, matching prepareDeploy) rather than trusting the
   // request, so a recorded mint can't claim authorities the caller lacks.
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+  const signer = await createLegacyResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId: signingWalletId,
+    expectedCustodyWalletId: token.signingCustodyWalletId,
+  });
   const custodyAddress = signer.address;
   const freezeAuthority = token.isFreezable ? custodyAddress : null;
 
@@ -820,8 +926,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     });
 
     await auditService.completeCritical(c, auditIntent);
-    const response: TokenResponse = { token: updatedToken };
-    return success(c, response);
+    return success(c, { token: toPublicToken(updatedToken) });
   } catch (error) {
     if (!deploymentRecorded) {
       await auditService.completeCritical(c, auditIntent, {
@@ -846,7 +951,9 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
  * The update authority is the same signing wallet used for the create tx, so no
  * server key is involved.
  */
-export const prepareDeployMetadata = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
+export const prepareDeployMetadata = async (
+  c: ValidatedBodyContext<typeof legacyDeployTokenSchema>
+) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
@@ -873,7 +980,12 @@ export const prepareDeployMetadata = async (c: ValidatedBodyContext<typeof deplo
     "tokens:write",
   ]);
 
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+  const signer = await createLegacyResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId: signingWalletId,
+    expectedCustodyWalletId: token.signingCustodyWalletId,
+  });
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at

@@ -2,26 +2,30 @@ import { type Address, assertValidAddress } from "@sdp/solana/address";
 import {
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
-  type TokenTransaction,
-  type TokenTransactionListItem,
   type TokenTransactionStatus,
   type TokenTransactionType,
 } from "@sdp/types";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIdsForPermissions,
+  getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
-import { createSigningService } from "@/services/domain/signing.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { getTenantTokenService, requireProjectScope } from "../helpers";
-import { listTokenTransactionsQuerySchema } from "../schemas";
+import {
+  issuanceTransactionWalletFilterSchema,
+  listTokenTransactionsQuerySchema,
+} from "../schemas";
+import { resolveIssuanceWallet } from "./authority-resolution";
+import { toPublicTokenTransaction, toPublicTokenTransactionListItem } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -89,13 +93,15 @@ async function resolveWalletFilter(
 
   assertApiKeyWalletAccess(auth, walletId, ["tokens:read"]);
 
-  const signingService = createSigningService(c.env);
-  const wallets = await signingService.getWalletsWithProviders(
-    auth.organizationId,
-    auth.projectId ?? undefined,
-    { includeAllProviders: true }
-  );
-  const wallet = wallets.find((entry) => entry.walletId === walletId);
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(c.env),
+    c.env,
+    new Map()
+  ).findOperationalWallet({
+    organizationId: auth.organizationId,
+    projectId: auth.projectId ?? undefined,
+    walletId,
+  });
 
   if (!wallet) {
     throw walletNotFound();
@@ -173,9 +179,24 @@ async function buildWalletTransactionScope(
 async function resolveWalletTransactionScope(
   c: AppContext,
   tokenService: TokenService,
-  walletId?: string
+  selectors: { custodyWalletId?: string; walletId?: string }
 ): Promise<WalletTransactionScope | undefined> {
   const auth = getAuth(c);
+  const { custodyWalletId, walletId } = selectors;
+
+  if (custodyWalletId) {
+    const wallet = await resolveIssuanceWallet({
+      env: c.env,
+      auth,
+      custodyWalletId,
+      requiredWalletPermissions: ["tokens:read"],
+    });
+    return buildWalletTransactionScope(tokenService, {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      publicKeys: [wallet.publicKey],
+    });
+  }
 
   if (walletId) {
     const wallet = await resolveWalletFilter(c, walletId);
@@ -186,23 +207,24 @@ async function resolveWalletTransactionScope(
     });
   }
 
-  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["tokens:read"]);
-  if (allowedWalletIds === null) {
+  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
+    "tokens:read",
+  ]);
+  if (allowedCustodyWalletIds === null) {
     return undefined;
   }
-  if (allowedWalletIds.length === 0) {
+  if (allowedCustodyWalletIds.length === 0) {
     return { publicKeys: [], tokenAccounts: [] };
   }
 
-  const allowedWalletIdSet = new Set(allowedWalletIds);
-  const signingService = createSigningService(c.env);
-  const wallets = await signingService.getWalletsWithProviders(
-    auth.organizationId,
-    auth.projectId ?? undefined,
-    { includeAllProviders: true }
-  );
+  const allowedWalletIdSet = new Set(allowedCustodyWalletIds);
+  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
+    organizationId: auth.organizationId,
+    projectId: auth.projectId ?? undefined,
+    includeAllProviders: true,
+  });
   const publicKeys = wallets
-    .filter((wallet) => allowedWalletIdSet.has(wallet.walletId))
+    .filter((wallet) => allowedWalletIdSet.has(wallet.id))
     .map((wallet) => wallet.publicKey);
 
   return buildWalletTransactionScope(tokenService, {
@@ -243,7 +265,7 @@ export const listTokenTransactions = async (c: AppContext) => {
     offset,
   });
 
-  return paginated<TokenTransaction>(c, transactions, {
+  return paginated(c, transactions.map(toPublicTokenTransaction), {
     total,
     page,
     pageSize,
@@ -258,13 +280,15 @@ export const listTransactions = async (c: AppContext) => {
   const page = parsePositiveInteger(c.req.query("page"), 1, "page");
   const pageSize = Math.min(parsePositiveInteger(c.req.query("pageSize"), 50, "pageSize"), 100);
   const offset = (page - 1) * pageSize;
-  const walletIdRaw = c.req.query("walletId");
-  const walletId = walletIdRaw?.trim();
-  if (walletIdRaw !== undefined && !walletId) {
-    throw badRequest("Invalid walletId query parameter");
+  const walletFilter = issuanceTransactionWalletFilterSchema.safeParse({
+    custodyWalletId: c.req.query("custodyWalletId"),
+    walletId: c.req.query("walletId"),
+  });
+  if (!walletFilter.success) {
+    throw badRequestQuery({ errors: z.treeifyError(walletFilter.error) });
   }
 
-  const walletScope = await resolveWalletTransactionScope(c, tokenService, walletId);
+  const walletScope = await resolveWalletTransactionScope(c, tokenService, walletFilter.data);
 
   const { transactions, total } = await tokenService.listTransactions({
     organizationId: auth.organizationId,
@@ -276,7 +300,7 @@ export const listTransactions = async (c: AppContext) => {
     offset,
   });
 
-  return paginated<TokenTransactionListItem>(c, transactions, {
+  return paginated(c, transactions.map(toPublicTokenTransactionListItem), {
     total,
     page,
     pageSize,

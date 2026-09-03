@@ -85,7 +85,11 @@ export function OverviewTab({
     ops.authoritySummary.known,
     t
   );
-  const signerWallet = buildWalletIdentityForSigner(token.signingWalletId, ops.authorityWallets, t);
+  const signerWallet = buildWalletIdentityForSigner(
+    token.signingCustodyWalletId,
+    ops.authorityWallets,
+    t
+  );
   const accessMode = resolveAccessMode(token, draft);
   const verifiedHolders = resolveVerifiedHolders(draft);
   const statusPresentation = tokenStatusPresentation(t, token.status);

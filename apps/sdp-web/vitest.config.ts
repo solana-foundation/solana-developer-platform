@@ -10,10 +10,10 @@ export default defineConfig({
       provider: "istanbul",
       reporter: ["text-summary"],
       thresholds: {
-        statements: 60.59,
-        branches: 54.32,
+        statements: 60.92,
+        branches: 54.34,
         functions: 58.22,
-        lines: 61.27,
+        lines: 61.58,
         autoUpdate: true,
       },
     },

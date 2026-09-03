@@ -36,6 +36,8 @@ export function TokenSignerSelect({
   const hasNoWallets = !hasReason && signerWallets.length === 0;
   const isUnavailable = hasReason || signerWallets.length === 0;
   const isLocked = !isUnavailable && signerWallets.length === 1;
+  const hasDuplicateAddress =
+    new Set(signerWallets.map((wallet) => wallet.publicKey)).size < signerWallets.length;
   // Red only signals a genuine problem: an explicit unavailable reason, or no
   // wallets in a context that requires a signer. An empty list where the signer
   // is optional (draft creation) is expected, so it stays neutral.
@@ -52,7 +54,7 @@ export function TokenSignerSelect({
         : t("DashboardIssuance.signer.noneAvailable")
       : availableMessage;
   const selectedWallet =
-    signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
+    signerWallets.find((wallet) => wallet.id === signerWalletId) ?? signerWallets[0] ?? null;
 
   return (
     <div className="space-y-2">
@@ -78,8 +80,8 @@ export function TokenSignerSelect({
           onValueChange={(value) => onSignerWalletIdChange(value === null ? "" : value)}
         >
           {signerWallets.map((wallet) => (
-            <SelectItem key={wallet.id} value={wallet.walletId}>
-              {getSignerWalletOptionLabel(wallet, t)}
+            <SelectItem key={wallet.id} value={wallet.id}>
+              {getSignerWalletOptionLabel(wallet, t, hasDuplicateAddress)}
             </SelectItem>
           ))}
         </Select>

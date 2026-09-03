@@ -14,8 +14,10 @@ import {
 } from "./handlers/allowlist";
 import { getAssetAuditHistory } from "./handlers/audit";
 import {
+  admitUpdateAuthorityRuntimeExecution,
   executeUpdateAuthority,
   extractUpdateAuthorityPolicyCandidate,
+  findUpdateAuthorityIdempotentKeyReplay,
   prepareUpdateAuthority,
 } from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";
@@ -29,7 +31,13 @@ import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
 import { enrollHolder, enrollHolderSchema, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
-import { executeMint, extractMintPolicyCandidate, prepareMint } from "./handlers/mint";
+import {
+  admitMintRuntimeExecution,
+  executeMint,
+  extractMintPolicyCandidate,
+  findMintIdempotentKeyReplay,
+  prepareMint,
+} from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
 import { executeSeize, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
@@ -60,6 +68,7 @@ import {
   deployTokenSchema,
   forceBurnSchema,
   freezeSchema,
+  legacyDeployTokenSchema,
   mintSchema,
   pauseTokenSchema,
   seizeSchema,
@@ -124,7 +133,7 @@ issuance.post(
 issuance.post(
   "/tokens/:tokenId/deploy/prepare",
   requirePermissions("tokens:write"),
-  validateBody(deployTokenSchema),
+  validateBody(legacyDeployTokenSchema),
   prepareDeploy
 );
 // Confirmation step for the non-custodial deploy flow: records the mint after
@@ -142,7 +151,7 @@ issuance.post(
 issuance.post(
   "/tokens/:tokenId/deploy/prepare-metadata",
   requirePermissions("tokens:write"),
-  validateBody(deployTokenSchema),
+  validateBody(legacyDeployTokenSchema),
   prepareDeployMetadata
 );
 
@@ -157,7 +166,11 @@ issuance.post(
   "/tokens/:tokenId/mint",
   requirePermissions("tokens:write"),
   validateBody(mintSchema),
-  policyGate({ extract: extractMintPolicyCandidate }),
+  policyGate({
+    extract: extractMintPolicyCandidate,
+    findIdempotentKeyReplay: findMintIdempotentKeyReplay,
+    beforeEnforce: admitMintRuntimeExecution,
+  }),
   executeMint
 );
 
@@ -214,7 +227,11 @@ issuance.post(
   "/tokens/:tokenId/authority",
   requirePermissions("tokens:admin"),
   validateBody(updateAuthoritySchema),
-  policyGate({ extract: extractUpdateAuthorityPolicyCandidate }),
+  policyGate({
+    extract: extractUpdateAuthorityPolicyCandidate,
+    findIdempotentKeyReplay: findUpdateAuthorityIdempotentKeyReplay,
+    beforeEnforce: admitUpdateAuthorityRuntimeExecution,
+  }),
   executeUpdateAuthority
 );
 

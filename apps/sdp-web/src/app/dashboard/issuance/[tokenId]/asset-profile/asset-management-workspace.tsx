@@ -15,6 +15,7 @@ import { togglePublicField } from "../../create/draft-mapping";
 import { resolveVerifiedHolders } from "../../issuance-token-fields";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
+import { TokenDeployWalletDialog } from "../token-deploy-wallet-dialog";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
@@ -290,9 +291,12 @@ export function AssetManagementWorkspace({
         newAuthority={ops.authorityModalNewAuthority}
         authorityWallets={ops.authorityWallets}
         authorityWalletsError={ops.authorityWalletsError}
+        signerWallets={ops.authorityModalSignerSelection.wallets}
+        signerWalletId={ops.authorityModalSignerWalletId}
         signerUnavailableReason={ops.authorityModalSignerSelection.unavailableReason}
         isPending={ops.isPending}
         onNewAuthorityChange={ops.setAuthorityModalNewAuthority}
+        onSignerWalletIdChange={ops.setAuthorityModalSignerWalletId}
         onCancel={ops.handleAuthorityModalClose}
         onConfirm={ops.handleAuthorityModalConfirm}
       />
@@ -351,6 +355,17 @@ export function AssetManagementWorkspace({
         isPending={ops.isPending}
         onCancel={ops.dismissActionConfirmation}
         onConfirm={ops.confirmAction}
+      />
+
+      <TokenDeployWalletDialog
+        isOpen={ops.deployWalletDialogOpen}
+        isPending={ops.isPending}
+        signerWallets={ops.deploySignerSelection.wallets}
+        signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
+        signingCustodyWalletId={ops.deployCustodyWalletId}
+        onSigningCustodyWalletIdChange={ops.setDeployCustodyWalletId}
+        onCancel={ops.closeDeployWalletDialog}
+        onConfirm={ops.confirmDeployWallet}
       />
 
       {ops.isPending ? (

@@ -1,34 +1,38 @@
+import { createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
+import { inspectToken, MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createOrgSigner } from "@/services/solana";
-import type { TokenService } from "@/services/token.service";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
+import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
 import type { pauseTokenSchema } from "../schemas";
+import {
+  admitIssuanceRuntimeExecution,
+  createResolvedAuthoritySigner,
+  resolveAuthorityWallet,
+  resolveDirectIssuanceReplay,
+} from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
-type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
+type MosaicSdkRpc = Parameters<typeof inspectToken>[0];
 
-const resolvePauseAuthority = (token: TokenRecord): string | null => {
-  if (!token) {
-    return null;
-  }
-  return token.extensions?.pausable?.authority ?? token.mintAuthority ?? null;
-};
+async function resolvePauseAuthority(env: Env, mintAddress: ReturnType<typeof assertValidAddress>) {
+  const token = await inspectToken(createRpcForSdk<MosaicSdkRpc>(env), mintAddress);
+  return token.authorities.pausableAuthority ?? null;
+}
 
 export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema>) => {
   const { tokenId } = c.req.param();
@@ -47,30 +51,68 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     throw notFound("Token");
   }
 
+  const idempotencyForWallet = (custodyWalletId: string) =>
+    buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+      tokenId,
+      operation: "pause",
+      mode: "execute",
+      params: { ...body, signingCustodyWalletId: custodyWalletId },
+    });
+  const earlyReplay = await resolveDirectIssuanceReplay({
+    env: c.env,
+    auth,
+    tokenService,
+    tokenId,
+    type: "pause",
+    idempotencyKey: c.req.header("Idempotency-Key"),
+    requiredWalletPermissions: ["tokens:admin"],
+    fingerprintForCustodyWalletId: (custodyWalletId) =>
+      idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
+  });
+  if (earlyReplay) {
+    const transaction = await recoverSettledTransactionReplay({
+      auditService: new AuditService(getDb(c.env)),
+      tokenService,
+      transaction: earlyReplay,
+      action: "pause",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledTokenStatus(transaction.id, tokenId, "paused");
+    }
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
+  }
+
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const pauseAuthorityRaw = resolvePauseAuthority(token);
+  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const pauseAuthorityRaw = await resolvePauseAuthority(c.env, mintAddress);
   if (!pauseAuthorityRaw) {
     throw badRequest("Pause authority is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
-    "tokens:admin",
-  ]);
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const { custodyWalletId } = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    currentAuthority: pauseAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
-    tokenId,
-    operation: "pause",
-    mode: "execute",
-    params: body,
+  const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "pause",
     params: {
       signature: null,
@@ -92,7 +134,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     if (transaction.status === "confirmed") {
       await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
     }
-    return success(c, { transaction });
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
   if (token.status !== "active") {
@@ -107,20 +149,18 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     action: "pause",
     resourceType: "token_transaction",
     resourceId: tx.id,
-    metadata: { tokenId, mode: "execute" },
+    metadata: { tokenId, mode: "execute", custodyWalletId },
   });
   let onChainEffectCompleted = false;
 
   try {
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId,
-      signingWalletId
-    );
-    if (pauseAuthorityRaw !== signer.address) {
-      throw badRequest("Pause authority is not controlled by custody");
-    }
+    const signer = await createResolvedAuthoritySigner({
+      env: c.env,
+      auth,
+      custodyWalletId,
+      currentAuthority: pauseAuthorityRaw,
+      requiredWalletPermissions: ["tokens:admin"],
+    });
 
     const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
@@ -157,7 +197,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
       slot: result.slot.toString(),
     });
 
-    return success(c, { transaction: confirmedTx });
+    return success(c, { transaction: toPublicTokenTransaction(confirmedTx) });
   } catch (error) {
     if (!onChainEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {
@@ -197,30 +237,68 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     throw notFound("Token");
   }
 
+  const idempotencyForWallet = (custodyWalletId: string) =>
+    buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+      tokenId,
+      operation: "unpause",
+      mode: "execute",
+      params: { ...body, signingCustodyWalletId: custodyWalletId },
+    });
+  const earlyReplay = await resolveDirectIssuanceReplay({
+    env: c.env,
+    auth,
+    tokenService,
+    tokenId,
+    type: "unpause",
+    idempotencyKey: c.req.header("Idempotency-Key"),
+    requiredWalletPermissions: ["tokens:admin"],
+    fingerprintForCustodyWalletId: (custodyWalletId) =>
+      idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
+  });
+  if (earlyReplay) {
+    const transaction = await recoverSettledTransactionReplay({
+      auditService: new AuditService(getDb(c.env)),
+      tokenService,
+      transaction: earlyReplay,
+      action: "unpause",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledTokenStatus(transaction.id, tokenId, "active");
+    }
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
+  }
+
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const pauseAuthorityRaw = resolvePauseAuthority(token);
+  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const pauseAuthorityRaw = await resolvePauseAuthority(c.env, mintAddress);
   if (!pauseAuthorityRaw) {
     throw badRequest("Pause authority is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
-    "tokens:admin",
-  ]);
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const { custodyWalletId } = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    currentAuthority: pauseAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
-    tokenId,
-    operation: "unpause",
-    mode: "execute",
-    params: body,
+  const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "unpause",
     params: {
       signature: null,
@@ -242,7 +320,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     if (transaction.status === "confirmed") {
       await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
     }
-    return success(c, { transaction });
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
   if (token.status !== "paused") {
@@ -257,20 +335,18 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     action: "unpause",
     resourceType: "token_transaction",
     resourceId: tx.id,
-    metadata: { tokenId, mode: "execute" },
+    metadata: { tokenId, mode: "execute", custodyWalletId },
   });
   let onChainEffectCompleted = false;
 
   try {
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId,
-      signingWalletId
-    );
-    if (pauseAuthorityRaw !== signer.address) {
-      throw badRequest("Pause authority is not controlled by custody");
-    }
+    const signer = await createResolvedAuthoritySigner({
+      env: c.env,
+      auth,
+      custodyWalletId,
+      currentAuthority: pauseAuthorityRaw,
+      requiredWalletPermissions: ["tokens:admin"],
+    });
 
     const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
@@ -307,7 +383,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
       slot: result.slot.toString(),
     });
 
-    return success(c, { transaction: confirmedTx });
+    return success(c, { transaction: toPublicTokenTransaction(confirmedTx) });
   } catch (error) {
     if (!onChainEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {

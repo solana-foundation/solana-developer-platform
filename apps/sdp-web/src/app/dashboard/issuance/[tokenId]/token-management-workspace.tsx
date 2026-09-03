@@ -15,6 +15,7 @@ import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialo
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
 import { TokenControlListsSection } from "./token-control-lists-section";
+import { TokenDeployWalletDialog } from "./token-deploy-wallet-dialog";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import {
   type FundManagementModalAction,
@@ -47,7 +48,7 @@ import {
   createInitialMetadataForm,
   createInitialMintForm,
   createInitialSeizeForm,
-  findWalletByWalletId,
+  findWalletByCustodyWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
   getControlListCopy,
@@ -206,6 +207,8 @@ export function TokenManagementWorkspace({
   const [authorityModalSignerWalletId, setAuthorityModalSignerWalletId] = useState("");
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
+  const [deployWalletDialogOpen, setDeployWalletDialogOpen] = useState(false);
+  const [deployCustodyWalletId, setDeployCustodyWalletId] = useState("");
   const [metadataForm, setMetadataForm] = useState(() => createInitialMetadataForm(token));
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
@@ -436,9 +439,7 @@ export function TokenManagementWorkspace({
 
     return selection;
   };
-  // Deploy needs no signer picker (the server resolves the signing wallet), only
-  // the yes/no gate that at least one custody wallet exists to sign the mint.
-  const deployDisabledReason = withWalletLoadError(
+  const deploySignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "deploy",
       token,
@@ -446,7 +447,8 @@ export function TokenManagementWorkspace({
       metadataAuthority,
       t,
     })
-  ).unavailableReason;
+  );
+  const deployDisabledReason = deploySignerSelection.unavailableReason;
   const mintSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "mint",
@@ -558,12 +560,10 @@ export function TokenManagementWorkspace({
   const effectivePauseDisabledReason =
     pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
   const selectedBurnSignerWallet =
-    findWalletByWalletId(
+    findWalletByCustodyWalletId(
       burnSignerSelection.wallets,
       burnForm.signingWalletId || burnSignerSelection.defaultWalletId
-    ) ??
-    burnSignerSelection.wallets[0] ??
-    null;
+    ) ?? null;
   const mintValidationReason = getMintValidationReason({
     token,
     destination: mintForm.destination,
@@ -732,10 +732,7 @@ export function TokenManagementWorkspace({
     });
   };
 
-  // Fees are always Kora-sponsored and the server resolves the signing wallet
-  // (token signer, then org custody fallback), so deploy fires immediately —
-  // no modal, no confirmation dialog.
-  const deployToken = () => {
+  const submitDeploy = (signingCustodyWalletId: string) => {
     void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
@@ -743,6 +740,7 @@ export function TokenManagementWorkspace({
         path: `${tokenBasePath}/deploy`,
         body: {
           feePayment: "sponsored",
+          signingCustodyWalletId,
         },
       },
       {
@@ -750,6 +748,31 @@ export function TokenManagementWorkspace({
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
     );
+  };
+
+  const deployToken = () => {
+    if (token.signingCustodyWalletId) {
+      submitDeploy(token.signingCustodyWalletId);
+      return;
+    }
+
+    if (deploySignerSelection.unavailableReason) {
+      toast.error(deploySignerSelection.unavailableReason);
+      return;
+    }
+
+    setDeployCustodyWalletId(
+      deploySignerSelection.wallets.length === 1 ? deploySignerSelection.wallets[0].id : ""
+    );
+    setDeployWalletDialogOpen(true);
+  };
+
+  const confirmDeployWallet = () => {
+    if (!deployCustodyWalletId) {
+      return;
+    }
+    setDeployWalletDialogOpen(false);
+    submitDeploy(deployCustodyWalletId);
   };
 
   const handleRefreshSupply = () => {
@@ -788,7 +811,8 @@ export function TokenManagementWorkspace({
         method: "POST",
         path: `${tokenBasePath}/mint`,
         body: {
-          signingWalletId: mintForm.signingWalletId || undefined,
+          signingCustodyWalletId:
+            mintForm.signingWalletId || mintSignerSelection.defaultWalletId || undefined,
           mint: {
             destination,
             amount,
@@ -834,7 +858,7 @@ export function TokenManagementWorkspace({
         method: "POST",
         path: `${tokenBasePath}/burn`,
         body: {
-          signingWalletId: burnForm.signingWalletId || undefined,
+          signingCustodyWalletId: burnForm.signingWalletId || burnSignerSelection.defaultWalletId,
           burn: {
             source,
             amount,
@@ -881,7 +905,8 @@ export function TokenManagementWorkspace({
         method: "POST",
         path: `${tokenBasePath}/seize`,
         body: {
-          signingWalletId: seizeForm.signingWalletId || undefined,
+          signingCustodyWalletId:
+            seizeForm.signingWalletId || seizeSignerSelection.defaultWalletId || undefined,
           seize: {
             source,
             destination,
@@ -929,7 +954,8 @@ export function TokenManagementWorkspace({
         method: "POST",
         path: `${tokenBasePath}/force-burn`,
         body: {
-          signingWalletId: forceBurnForm.signingWalletId || undefined,
+          signingCustodyWalletId:
+            forceBurnForm.signingWalletId || forceBurnSignerSelection.defaultWalletId || undefined,
           forceBurn: {
             source,
             amount,
@@ -1030,6 +1056,8 @@ export function TokenManagementWorkspace({
           path: `${tokenBasePath}/unfreeze`,
           body: {
             accountAddress,
+            signingCustodyWalletId:
+              freezeForm.signingWalletId || freezeSignerSelection.defaultWalletId || undefined,
           },
         },
         {
@@ -1054,6 +1082,8 @@ export function TokenManagementWorkspace({
         body: {
           accountAddress,
           reason: asOptionalString(freezeForm.reason),
+          signingCustodyWalletId:
+            freezeForm.signingWalletId || freezeSignerSelection.defaultWalletId || undefined,
         },
       },
       {
@@ -1174,7 +1204,7 @@ export function TokenManagementWorkspace({
         method: "POST",
         path: `${tokenBasePath}/authority`,
         body: {
-          signingWalletId: authorityModalSignerWalletId || undefined,
+          signingCustodyWalletId: authorityModalSignerWalletId || undefined,
           authority: {
             role: authorityModalRow.authorityRole,
             currentAuthority: authorityModalCurrentAuthority ?? undefined,
@@ -1288,8 +1318,8 @@ export function TokenManagementWorkspace({
           signerWallets: freezeSignerSelection.wallets,
           defaultSignerWalletId: freezeSignerSelection.defaultWalletId,
           signerUnavailableReason: freezeSignerSelection.unavailableReason,
-          // Freeze authority is always single
-          onSignerWalletIdChange: (_value: string) => {},
+          onSignerWalletIdChange: (value: string) =>
+            setFreezeForm((previous) => ({ ...previous, signingWalletId: value })),
         };
       case "pause":
         return {
@@ -1579,9 +1609,12 @@ export function TokenManagementWorkspace({
         newAuthority={authorityModalNewAuthority}
         authorityWallets={authorityWallets}
         authorityWalletsError={authorityWalletsError}
+        signerWallets={authorityModalSignerSelection.wallets}
+        signerWalletId={authorityModalSignerWalletId}
         signerUnavailableReason={authorityModalSignerSelection.unavailableReason}
         isPending={isPending}
         onNewAuthorityChange={setAuthorityModalNewAuthority}
+        onSignerWalletIdChange={setAuthorityModalSignerWalletId}
         onCancel={handleAuthorityModalClose}
         onConfirm={handleAuthorityModalConfirm}
       />
@@ -1657,6 +1690,17 @@ export function TokenManagementWorkspace({
         isPending={isPending}
         onCancel={dismissActionConfirmation}
         onConfirm={confirmAction}
+      />
+
+      <TokenDeployWalletDialog
+        isOpen={deployWalletDialogOpen}
+        isPending={isPending}
+        signerWallets={deploySignerSelection.wallets}
+        signerUnavailableReason={deploySignerSelection.unavailableReason}
+        signingCustodyWalletId={deployCustodyWalletId}
+        onSigningCustodyWalletIdChange={setDeployCustodyWalletId}
+        onCancel={() => setDeployWalletDialogOpen(false)}
+        onConfirm={confirmDeployWallet}
       />
 
       {isPending ? (

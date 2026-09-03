@@ -73,30 +73,32 @@ export const tokenTemplateSchema = z.preprocess(
 
 // Supports template mode with optional overrides for customization
 
-export const createTokenSchema = z.object({
-  name: z.string().min(1).max(100),
-  symbol: z
-    .string()
-    .min(1)
-    .max(10)
-    .regex(/^[A-Za-z0-9.]+$/),
-  signingWalletId: z.string().min(1).optional(),
-  decimals: z.number().int().min(0).max(18).optional(),
-  description: z.string().max(500).optional(),
-  uri: z.string().url().optional(),
-  imageUrl: z.string().url().optional(),
-  maxSupply: z
-    .string()
-    .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
-    .optional(),
-  /** Token template - defaults to "custom" if not specified */
-  template: tokenTemplateSchema.optional(),
-  /** Template overrides for customization */
-  overrides: templateOverridesSchema.optional(),
-  requiresAllowlist: z.boolean().optional(),
-  isMintable: z.boolean().optional(),
-  isFreezable: z.boolean().optional(),
-});
+export const createTokenSchema = z
+  .object({
+    name: z.string().min(1).max(100),
+    symbol: z
+      .string()
+      .min(1)
+      .max(10)
+      .regex(/^[A-Za-z0-9.]+$/),
+    signingCustodyWalletId: z.string().min(1).optional(),
+    decimals: z.number().int().min(0).max(18).optional(),
+    description: z.string().max(500).optional(),
+    uri: z.string().url().optional(),
+    imageUrl: z.string().url().optional(),
+    maxSupply: z
+      .string()
+      .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+      .optional(),
+    /** Token template - defaults to "custom" if not specified */
+    template: tokenTemplateSchema.optional(),
+    /** Template overrides for customization */
+    overrides: templateOverridesSchema.optional(),
+    requiresAllowlist: z.boolean().optional(),
+    isMintable: z.boolean().optional(),
+    isFreezable: z.boolean().optional(),
+  })
+  .strict();
 
 export type CreateTokenInput = z.infer<typeof createTokenSchema>;
 
@@ -142,103 +144,120 @@ export const updateTokenSchema = z.object({
     .optional(),
 });
 
-export const mintSchema = z.object({
-  signingWalletId: z.string().min(1).optional(),
-  mint: z.object({
-    destination: z.string().min(32).max(44),
-    amount: z
-      .string()
-      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
-    memo: z.string().max(100).optional(),
-  }),
-  options: z
-    .object({
-      priorityFee: z
-        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
-        .optional(),
-      simulate: z.boolean().optional(),
-    })
-    .optional(),
-});
+export const mintSchema = z
+  .object({
+    signingCustodyWalletId: z.string().min(1).optional(),
+    mint: z.object({
+      destination: z.string().min(32).max(44),
+      amount: z
+        .string()
+        .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
+      memo: z.string().max(100).optional(),
+    }),
+    options: z
+      .object({
+        priorityFee: z
+          .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+          .optional(),
+        simulate: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .strict();
 
-export const burnSchema = z.object({
-  signingWalletId: z.string().min(1).optional(),
-  burn: z.object({
-    source: z.string().min(32).max(44),
-    amount: z
-      .string()
-      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
-    memo: z.string().max(100).optional(),
-  }),
-  options: z
-    .object({
-      priorityFee: z
-        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
-        .optional(),
-      simulate: z.boolean().optional(),
-    })
-    .optional(),
-});
+export const burnSchema = z
+  .object({
+    signingCustodyWalletId: z.string().min(1),
+    burn: z.object({
+      source: z.string().min(32).max(44),
+      amount: z
+        .string()
+        .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
+      memo: z.string().max(100).optional(),
+    }),
+    options: z
+      .object({
+        priorityFee: z
+          .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+          .optional(),
+        simulate: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .strict();
 
-export const seizeSchema = z.object({
-  signingWalletId: z.string().min(1).optional(),
-  seize: z.object({
-    source: z.string().min(32).max(44),
-    destination: z.string().min(32).max(44),
-    amount: z
-      .string()
-      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
-    delegateAuthority: z.string().min(32).max(44).optional(),
-    memo: z.string().max(100).optional(),
-  }),
-  options: z
-    .object({
-      priorityFee: z
-        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
-        .optional(),
-      simulate: z.boolean().optional(),
-    })
-    .optional(),
-});
+export const seizeSchema = z
+  .object({
+    signingCustodyWalletId: z.string().min(1).optional(),
+    seize: z.object({
+      source: z.string().min(32).max(44),
+      destination: z.string().min(32).max(44),
+      amount: z
+        .string()
+        .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
+      delegateAuthority: z.string().min(32).max(44).optional(),
+      memo: z.string().max(100).optional(),
+    }),
+    options: z
+      .object({
+        priorityFee: z
+          .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+          .optional(),
+        simulate: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .strict();
 
-export const forceBurnSchema = z.object({
-  signingWalletId: z.string().min(1).optional(),
-  forceBurn: z.object({
-    source: z.string().min(32).max(44),
-    amount: z
-      .string()
-      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
-    delegateAuthority: z.string().min(32).max(44).optional(),
-    memo: z.string().max(100).optional(),
-  }),
-  options: z
-    .object({
-      priorityFee: z
-        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
-        .optional(),
-      simulate: z.boolean().optional(),
-    })
-    .optional(),
-});
+export const forceBurnSchema = z
+  .object({
+    signingCustodyWalletId: z.string().min(1).optional(),
+    forceBurn: z.object({
+      source: z.string().min(32).max(44),
+      amount: z
+        .string()
+        .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
+      delegateAuthority: z.string().min(32).max(44).optional(),
+      memo: z.string().max(100).optional(),
+    }),
+    options: z
+      .object({
+        priorityFee: z
+          .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+          .optional(),
+        simulate: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .strict();
 
-export const updateAuthoritySchema = z.object({
-  signingWalletId: z.string().min(1).optional(),
-  authority: z.object({
-    role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
-    currentAuthority: z.string().min(32).max(44).optional(),
-    newAuthority: z.string().min(32).max(44).nullable(),
-  }),
-  options: z
-    .object({
-      priorityFee: z
-        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
-        .optional(),
-      simulate: z.boolean().optional(),
-    })
-    .optional(),
-});
+export const updateAuthoritySchema = z
+  .object({
+    signingCustodyWalletId: z.string().min(1).optional(),
+    authority: z.object({
+      role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
+      currentAuthority: z.string().min(32).max(44).optional(),
+      newAuthority: z.string().min(32).max(44).nullable(),
+    }),
+    options: z
+      .object({
+        priorityFee: z
+          .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+          .optional(),
+        simulate: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .strict();
 
-export const deployTokenSchema = z.object({
+export const deployTokenSchema = z
+  .object({
+    signingCustodyWalletId: z.string().min(1).optional(),
+    feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
+  })
+  .strict();
+
+export const legacyDeployTokenSchema = z.object({
   signingWalletId: z.string().min(1).optional(),
   feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
 });
@@ -268,16 +287,20 @@ export const pauseTokenSchema = z.object({
     .optional(),
 });
 
-export const freezeSchema = z.object({
-  accountAddress: z.string().min(32).max(44),
-  reason: z.string().max(500).optional(),
-  signingWalletId: z.string().min(1).optional(),
-});
+export const freezeSchema = z
+  .object({
+    accountAddress: z.string().min(32).max(44),
+    reason: z.string().max(500).optional(),
+    signingCustodyWalletId: z.string().min(1).optional(),
+  })
+  .strict();
 
-export const unfreezeSchema = z.object({
-  accountAddress: z.string().min(32).max(44),
-  signingWalletId: z.string().min(1).optional(),
-});
+export const unfreezeSchema = z
+  .object({
+    accountAddress: z.string().min(32).max(44),
+    signingCustodyWalletId: z.string().min(1).optional(),
+  })
+  .strict();
 
 export const addAllowlistSchema = z.object({
   address: z.string().min(32).max(44),
@@ -301,6 +324,15 @@ export const listTokenTransactionsQuerySchema = z.object({
   status: z.enum(TOKEN_TRANSACTION_STATUSES).optional(),
   type: z.enum(TOKEN_TRANSACTION_TYPES).optional(),
 });
+
+export const issuanceTransactionWalletFilterSchema = z
+  .object({
+    custodyWalletId: z.string().trim().min(1).optional(),
+    walletId: z.string().trim().min(1).optional(),
+  })
+  .refine(({ custodyWalletId, walletId }) => !(custodyWalletId && walletId), {
+    message: "custodyWalletId and walletId cannot be combined",
+  });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Token List Query

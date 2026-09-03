@@ -27,6 +27,7 @@ function mapTokenRow(
     id: row.id as string,
     projectId: row.project_id as string,
     organizationId: row.organization_id as string,
+    signingCustodyWalletId: (row.signing_custody_wallet_id as string | null | undefined) ?? null,
     signingWalletId: (row.signing_wallet_id as string | null | undefined) ?? null,
     mintAddress: (row.mint_address as string | null | undefined) ?? null,
     mintAuthority: (row.mint_authority as string | null | undefined) ?? null,

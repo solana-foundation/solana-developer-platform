@@ -719,6 +719,7 @@
       "noControlledWalletsAvailable": "Không có Wallet được kiểm soát để ký thao tác này.",
       "noSignerConfigured": "Chưa cấu hình Signer cho thao tác này.",
       "requiredSignerNotControlled": "Signer bắt buộc không thuộc Wallet được kiểm soát của bạn.",
+      "requiredSignerAmbiguous": "Có nhiều Wallet được kiểm soát khớp với Signer bắt buộc. Hãy giải quyết xung đột Wallet trước khi thử lại.",
       "mintAuthorityNotControlled": "Quyền Mint không thuộc Wallet được kiểm soát của bạn.",
       "permanentDelegateNotControlled": "Quyền Permanent Delegate không thuộc Wallet được kiểm soát của bạn.",
       "authority": "quyền hạn",

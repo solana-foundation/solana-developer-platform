@@ -46,8 +46,8 @@ export async function createAssetDraftAction(
   if (token.imageUrl) {
     payload.imageUrl = token.imageUrl;
   }
-  if (token.signingWalletId) {
-    payload.signingWalletId = token.signingWalletId;
+  if (token.signingCustodyWalletId) {
+    payload.signingCustodyWalletId = token.signingCustodyWalletId;
   }
   // Absent = uncapped. buildTokenInput already drops a blank cap, and the API's
   // decimal-string refinement would reject "".

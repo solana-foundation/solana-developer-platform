@@ -10,6 +10,7 @@ import {
   burnSchema as burnSchemaBase,
   confirmDeploySchema as confirmDeploySchemaBase,
   createTokenSchema as createTokenSchemaBase,
+  deployTokenSchema as deployTokenSchemaBase,
   forceBurnSchema as forceBurnSchemaBase,
   freezeSchema as freezeSchemaBase,
   listTokensQuerySchema as listTokensQuerySchemaBase,
@@ -24,6 +25,7 @@ import { assetProfileSchema } from "./asset-profiles";
 import {
   apiKeyIdParamSchema,
   base64Schema,
+  custodyWalletIdParamSchema,
   frozenAccountIdSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
@@ -32,8 +34,6 @@ import {
   tokenAllowlistEntryIdSchema,
   tokenIdParamSchema,
   tokenTransactionIdSchema,
-  WALLET_ID_INPUT_NOTE,
-  walletIdParamSchema,
   withOpenApi,
   z,
 } from "./base";
@@ -148,8 +148,9 @@ export const tokenSchema = z
     id: tokenIdParamSchema,
     projectId: projectIdParamSchema,
     organizationId: orgIdParamSchema,
-    signingWalletId: walletIdParamSchema.nullable().openapi({
-      description: "Preferred signer wallet for token deploy/admin/write actions.",
+    signingCustodyWalletId: custodyWalletIdParamSchema.nullable().openapi({
+      description:
+        "Exact deployment wallet selected for a pending token, or historical deployment attribution after deployment. This is not the current signer for later authority operations.",
     }),
     mintAddress: solanaAddressSchema.nullable().openapi({
       description: "Mint address once deployed.",
@@ -747,8 +748,9 @@ export const createTokenRequestSchema = createTokenSchemaBase
       description: "Token template preset. Defaults to 'custom' if not specified.",
       example: "stablecoin",
     }),
-    signingWalletId: walletIdParamSchema.optional().openapi({
-      description: `Preferred signer wallet for token deploy/admin/write actions — ${WALLET_ID_INPUT_NOTE}`,
+    signingCustodyWalletId: custodyWalletIdParamSchema.optional().openapi({
+      description:
+        "Optional exact SDP Wallet ID for direct deployment. A draft may defer selection until deploy.",
     }),
     overrides: templateOverridesOpenApiSchema.optional().openapi({
       description: "Template overrides to customize defaults.",
@@ -916,9 +918,10 @@ const mintOperationSchema = mintSchemaBase.shape.mint
 
 export const mintRequestSchema = mintSchemaBase
   .extend({
-    signingWalletId: withOpenApi(mintSchemaBase.shape.signingWalletId, {
-      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+    signingCustodyWalletId: withOpenApi(mintSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. When supplied, it must control the current mint authority.",
+      example: "cwlt_example",
     }),
     mint: mintOperationSchema,
     options: withOpenApi(mintSchemaBase.shape.options, {
@@ -927,6 +930,20 @@ export const mintRequestSchema = mintSchemaBase
     }),
   })
   .openapi({ description: "Mint request body." });
+
+export const deployTokenRequestSchema = deployTokenSchemaBase
+  .extend({
+    signingCustodyWalletId: withOpenApi(deployTokenSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. Overrides the wallet selected on the pending draft for this direct deployment.",
+      example: "cwlt_example",
+    }),
+    feePayment: withOpenApi(deployTokenSchemaBase.shape.feePayment, {
+      description: "How the deployment transaction fee is paid.",
+      example: "sponsored",
+    }),
+  })
+  .openapi({ description: "Direct token deployment request body." });
 
 export const confirmDeployRequestSchema = confirmDeploySchemaBase
   .extend({
@@ -970,9 +987,9 @@ const burnOperationSchema = burnSchemaBase.shape.burn
 
 export const burnRequestSchema = burnSchemaBase
   .extend({
-    signingWalletId: withOpenApi(burnSchemaBase.shape.signingWalletId, {
-      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+    signingCustodyWalletId: withOpenApi(burnSchemaBase.shape.signingCustodyWalletId, {
+      description: "Exact SDP Wallet ID that owns the source tokens and signs this burn.",
+      example: "cwlt_example",
     }),
     burn: burnOperationSchema,
     options: withOpenApi(burnSchemaBase.shape.options, {
@@ -1009,9 +1026,10 @@ const seizeOperationSchema = seizeSchemaBase.shape.seize
 
 export const seizeRequestSchema = seizeSchemaBase
   .extend({
-    signingWalletId: withOpenApi(seizeSchemaBase.shape.signingWalletId, {
-      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+    signingCustodyWalletId: withOpenApi(seizeSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. When supplied, it must control the current permanent delegate authority.",
+      example: "cwlt_example",
     }),
     seize: seizeOperationSchema,
     options: withOpenApi(seizeSchemaBase.shape.options, {
@@ -1044,9 +1062,10 @@ const forceBurnOperationSchema = forceBurnSchemaBase.shape.forceBurn
 
 export const forceBurnRequestSchema = forceBurnSchemaBase
   .extend({
-    signingWalletId: withOpenApi(forceBurnSchemaBase.shape.signingWalletId, {
-      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+    signingCustodyWalletId: withOpenApi(forceBurnSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. When supplied, it must control the current permanent delegate authority.",
+      example: "cwlt_example",
     }),
     forceBurn: forceBurnOperationSchema,
     options: withOpenApi(forceBurnSchemaBase.shape.options, {
@@ -1058,9 +1077,10 @@ export const forceBurnRequestSchema = forceBurnSchemaBase
 
 export const updateAuthorityRequestSchema = updateAuthoritySchemaBase
   .extend({
-    signingWalletId: withOpenApi(updateAuthoritySchemaBase.shape.signingWalletId, {
-      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+    signingCustodyWalletId: withOpenApi(updateAuthoritySchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. When supplied, it must control the authority being changed.",
+      example: "cwlt_example",
     }),
     authority: withOpenApi(updateAuthoritySchemaBase.shape.authority, {
       description: "Authority update details.",
@@ -1096,9 +1116,10 @@ export const freezeAccountRequestSchema = freezeSchemaBase
       description: "Optional reason for freezing.",
       example: "Compliance hold",
     }),
-    signingWalletId: withOpenApi(freezeSchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID to use as the signer for this request.",
-      example: "privy_abcd1234",
+    signingCustodyWalletId: withOpenApi(freezeSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. When supplied, it must control the current freeze authority.",
+      example: "cwlt_example",
     }),
   })
   .openapi({ description: "Freeze account request body." });
@@ -1110,9 +1131,10 @@ export const unfreezeAccountRequestSchema = unfreezeSchemaBase
         "Wallet or token account address to unfreeze. SDP resolves the associated token account automatically when a wallet address is provided.",
       example: "So11111111111111111111111111111111111111112",
     }),
-    signingWalletId: withOpenApi(unfreezeSchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID to use as the signer for this request.",
-      example: "privy_abcd1234",
+    signingCustodyWalletId: withOpenApi(unfreezeSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. When supplied, it must control the current freeze authority.",
+      example: "cwlt_example",
     }),
   })
   .openapi({ description: "Unfreeze account request body." });

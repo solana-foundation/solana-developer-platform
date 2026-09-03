@@ -43,6 +43,10 @@ function makeToken(overrides: Partial<Token> = {}): Token {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
+    signingCustodyWalletId:
+      overrides.signingCustodyWalletId === undefined
+        ? "cwlt_test"
+        : overrides.signingCustodyWalletId,
   };
 }
 

@@ -48,7 +48,12 @@ const INTEGRATION_CUSTODY_CONFIGURED =
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && INTEGRATION_CUSTODY_CONFIGURED;
 
 let cachedKeyHash: string | null = null;
-let cachedCustodyAddress: string | null = null;
+export interface IntegrationCustodyWallet {
+  id: string;
+  address: string;
+}
+
+let cachedCustodyWallet: IntegrationCustodyWallet | null = null;
 // 0.05 SOL — enough headroom for sRFC-37 deploy paths where custody pays
 // directly. A single tokenized-security deploy needs ~0.0095 SOL (mint +
 // mintConfig + listConfig + extraMetas PDA rent, plus keeping custody itself
@@ -95,12 +100,12 @@ export async function initIntegrationSuite() {
   const apiKeyHash = await computeApiKeyHash();
   const state = await resetIntegrationState(apiKeyHash);
 
-  return { apiKeyHash, custodyAddress: state.custodyAddress };
+  return { apiKeyHash, ...state };
 }
 
 export async function resetIntegrationState(
   apiKeyHash: string
-): Promise<{ custodyAddress: string }> {
+): Promise<{ custodyAddress: string; custodyWallet: IntegrationCustodyWallet }> {
   const db = getDb(env);
   const { apiKeys: apiKeysKV, rateLimits: rateLimitKV } = createKVStoreSet(env);
 
@@ -201,8 +206,41 @@ export async function resetIntegrationState(
     .run();
 
   await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
-  cachedCustodyAddress = await ensureIntegrationCustodyAddress();
-  return { custodyAddress: cachedCustodyAddress };
+  const custodyAddress = await ensureIntegrationCustodyAddress();
+  cachedCustodyWallet = await findIntegrationCustodyWallet(custodyAddress);
+  return { custodyAddress, custodyWallet: cachedCustodyWallet };
+}
+
+async function findIntegrationCustodyWallet(address: string): Promise<IntegrationCustodyWallet> {
+  if (!SOLANA_CONFIGURED) {
+    return { id: "", address };
+  }
+
+  const signingService = createSigningService(env);
+  const config = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    undefined,
+    INTEGRATION_CUSTODY_PROVIDER
+  );
+  if (!config?.defaultWalletId) {
+    throw new Error("Integration precondition failed: default custody wallet not found.");
+  }
+
+  const wallet = await getDb(env)
+    .prepare(
+      `SELECT id, public_key
+       FROM custody_wallets
+       WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+       LIMIT 1`
+    )
+    .bind(config.id, config.defaultWalletId)
+    .first<{ id: string; public_key: string }>();
+
+  if (!wallet || wallet.public_key !== address) {
+    throw new Error("Integration precondition failed: exact default custody wallet not found.");
+  }
+
+  return { id: wallet.id, address: wallet.public_key };
 }
 
 export async function cleanupIntegrationSuite() {

@@ -127,7 +127,7 @@ export interface TokenInput {
   description?: string;
   uri?: string;
   imageUrl?: string;
-  signingWalletId?: string;
+  signingCustodyWalletId?: string;
   // Omitted when the issuer left the cap blank — the API treats absent as
   // uncapped, and sending "" would fail its decimal-string refinement.
   maxSupply?: string;
@@ -161,7 +161,7 @@ export function buildTokenInput(draft: DraftState): TokenInput {
     description: draft.description.trim() || undefined,
     uri: draft.metadataUri.trim() || undefined,
     imageUrl: draft.imageUrl.trim() || undefined,
-    signingWalletId: draft.signingWalletId.trim() || undefined,
+    signingCustodyWalletId: draft.signingWalletId.trim() || undefined,
     maxSupply: draft.maxSupply.trim() || undefined,
     // Derived from the resolved settings, not stored separately: "freezeAccounts"
     // is the single control for the mint's freeze authority, so there is no second

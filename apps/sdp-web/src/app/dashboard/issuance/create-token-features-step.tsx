@@ -88,7 +88,7 @@ export function CreateTokenFeaturesStep({
                   {t("DashboardIssuance.create.selectSignerWallet")}
                 </option>
                 {availableSignerWallets.map((wallet) => (
-                  <option key={wallet.id} value={wallet.walletId}>
+                  <option key={wallet.id} value={wallet.id}>
                     {wallet.label ? `${wallet.label} · ${wallet.walletId}` : wallet.walletId}
                   </option>
                 ))}
