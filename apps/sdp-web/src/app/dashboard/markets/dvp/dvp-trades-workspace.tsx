@@ -3,6 +3,7 @@
 import { ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
 import Link from "next/link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
@@ -62,6 +63,13 @@ export function DvpTradesWorkspace({
 
         {trades.length === 0 && !error ? (
           <ListEmptyState
+            action={
+              <Button asChild>
+                <Link href={`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`}>
+                  {t("DashboardMarkets.dvp.createAction")}
+                </Link>
+              </Button>
+            }
             description={t("DashboardMarkets.dvp.emptyDescription")}
             message={t("DashboardMarkets.dvp.empty")}
           />

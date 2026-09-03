@@ -73,6 +73,24 @@ function readLeg(
 }
 
 /**
+ * Reads one escrow, or null when it is not on chain.
+ *
+ * Exposed for the funding path, which needs a LIVE reading rather than the
+ * reconciler's last sweep: that runs once a minute, so two funding requests
+ * seconds apart would both believe the escrow was empty and between them
+ * over-fund it.
+ */
+export async function readEscrowState(
+  rpc: SolanaRpc,
+  escrow: Address,
+  tokenProgram: Address
+): Promise<{ amount: bigint; frozen: boolean } | null> {
+  const [account] = await fetchEncodedAccounts(rpc as never, [escrow]);
+  const leg = readLeg(account, { escrow, tokenProgram });
+  return leg.exists ? { amount: leg.amount, frozen: leg.frozen } : null;
+}
+
+/**
  * Whether a verifiable trade account is at this address.
  *
  * Throws on a transport failure rather than reporting absence. The distinction

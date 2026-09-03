@@ -90,6 +90,23 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     },
   });
 
+  registry.registerPath({
+    method: "post",
+    path: "/v1/dvp/trades/{tradeId}/fund",
+    tags: [DVP_TAG],
+    summary: "Fund your leg of a DvP trade",
+    operationId: "fundDvpTrade",
+    description:
+      "Moves your side of the trade from its custody wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce. Subject to wallet policy: a request needing approval returns 202.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders, params: tradeIdPathParams },
+    responses: {
+      200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
+      202: { description: "Awaiting policy approval", content: jsonContent(errorResponseSchema) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
   for (const action of ["settle", "cancel"] as const) {
     registry.registerPath({
       method: "post",

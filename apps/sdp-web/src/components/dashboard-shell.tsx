@@ -25,6 +25,7 @@ import {
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
+  DvpCreateSkeleton,
   DvpTradeDetailSkeleton,
   DvpTradesSkeleton,
   EarnIntegrationGuideSkeleton,
@@ -172,6 +173,8 @@ function resolvePageLoadingComponent(
       return EarnIntegrationGuideSkeleton;
     case "dvp-trades":
       return DvpTradesSkeleton;
+    case "dvp-trade-create":
+      return DvpCreateSkeleton;
     case "dvp-trade-detail":
       return DvpTradeDetailSkeleton;
     case "payments-transactions":

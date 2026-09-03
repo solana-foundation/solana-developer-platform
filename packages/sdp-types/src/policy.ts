@@ -8,6 +8,10 @@ export const WALLET_OPERATION_TYPES = [
   // the settlement authority can take, and both are irreversible, which is
   // exactly the shape an org should be able to require approval on.
   "dvp_cancel",
+  // Moving SDP's own leg into escrow. A spend from a custody wallet like any
+  // other, and irreversible once the escrow holds it: only settle, cancel or
+  // reclaim get it back.
+  "dvp_fund",
   "dvp_settle",
   "earn_vault_deposit",
   "earn_vault_withdrawal",

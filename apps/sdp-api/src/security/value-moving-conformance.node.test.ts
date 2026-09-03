@@ -174,7 +174,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/dvp/index.ts",
       section: '"/trades/:tradeId/settle",',
-      before: 'extract: (c) => extractDvpClosePolicyCandidate(c, "settle")',
+      before: 'extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle")',
       after: "settleTrade",
     },
     replay: [
@@ -292,6 +292,7 @@ const signingSinkInventory: Record<string, string[]> = {
   // before anything reaches the network — which is what lets create record the
   // trade, and settle cross the approved-operation fence, before broadcasting.
   "apps/sdp-api/src/services/dvp/create.ts": ["signTransactionMessageWithSigners"],
+  "apps/sdp-api/src/services/dvp/fund.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/dvp/settle.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/payments/signed-submission.ts": ["prepareOwnedSubmission"],

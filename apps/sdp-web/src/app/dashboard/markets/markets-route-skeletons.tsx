@@ -182,3 +182,30 @@ export function DvpTradeDetailSkeleton() {
     </DashboardWorkspaceOverviewPanel>
   );
 }
+
+const DVP_FIELD_SKELETON_IDS = [
+  "wallet",
+  "side",
+  "counterparty",
+  "asset",
+  "cash",
+  "amounts",
+  "expiry",
+];
+
+export function DvpCreateSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+        <SkeletonBlock className="h-8 w-full max-w-lg" />
+        {DVP_FIELD_SKELETON_IDS.map((id) => (
+          <div className="grid gap-1.5" key={id}>
+            <SkeletonBlock className="h-3 w-32" />
+            <SkeletonBlock className="h-9 w-full rounded-lg" />
+          </div>
+        ))}
+        <SkeletonBlock className="h-9 w-32 rounded-lg" />
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}

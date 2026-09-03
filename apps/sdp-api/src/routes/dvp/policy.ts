@@ -20,6 +20,10 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import type { DvpCloseAction } from "@/services/dvp/settle";
+
+/** Every trade action that spends from a custody wallet. */
+export type DvpTradeAction = DvpCloseAction | "fund";
+
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
@@ -38,11 +42,11 @@ interface SettlementWalletRef {
  * @param action - settle or cancel; they are separate operation types because
  *   an org may well allow one and not the other.
  */
-export function buildDvpClosePolicyCandidate(
+export function buildDvpTradeActionPolicyCandidate(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
   settlement: SettlementWalletRef,
-  action: DvpCloseAction
+  action: DvpTradeAction
 ): { candidate: PolicyCandidate; legs: PolicyCandidate[] } {
   const auth = getAuth(c);
   const sdpLegIsA = trade.sdpSide === "a";
@@ -59,9 +63,11 @@ export function buildDvpClosePolicyCandidate(
     // interaction with a Solana program, not a payment rail, and reusing it
     // means no migration to widen the wallet_operations family constraint.
     operationFamily: "program" as const,
-    operationType: (action === "settle" ? "dvp_settle" : "dvp_cancel") as
-      | "dvp_settle"
-      | "dvp_cancel",
+    operationType: (action === "settle"
+      ? "dvp_settle"
+      : action === "cancel"
+        ? "dvp_cancel"
+        : "dvp_fund") as "dvp_settle" | "dvp_cancel" | "dvp_fund",
     providerExtensions: {},
   };
 
@@ -69,8 +75,15 @@ export function buildDvpClosePolicyCandidate(
     ...base,
     asset: trade.mintA,
     amount: trade.amountA,
-    // On settle the asset leg goes to user B; on cancel it returns to user A.
-    destination: action === "settle" ? trade.userBSettlementDestination : trade.userA,
+    // Where this leg's tokens end up: delivered to the counterparty on settle,
+    // returned to the depositor on cancel, and INTO the escrow on fund. A
+    // destination rule should see the address the money actually reaches.
+    destination:
+      action === "fund"
+        ? trade.escrowA
+        : action === "settle"
+          ? trade.userBSettlementDestination
+          : trade.userA,
     context: { dvpTradeId: trade.id, dvpLeg: "a", dvpAction: action },
   };
 
@@ -78,11 +91,20 @@ export function buildDvpClosePolicyCandidate(
     ...base,
     asset: trade.mintB,
     amount: trade.amountB,
-    destination: action === "settle" ? trade.userASettlementDestination : trade.userB,
+    destination:
+      action === "fund"
+        ? trade.escrowB
+        : action === "settle"
+          ? trade.userASettlementDestination
+          : trade.userB,
     context: { dvpTradeId: trade.id, dvpLeg: "b", dvpAction: action },
   };
 
   const sdpLeg = sdpLegIsA ? legA : legB;
+
+  // Funding moves ONE leg — SDP's — so the counterparty's leg is not part of
+  // the operation and must not be evaluated as though it were.
+  const legs = action === "fund" ? [sdpLeg] : [legA, legB];
 
   return {
     candidate: {
@@ -95,7 +117,7 @@ export function buildDvpClosePolicyCandidate(
         counterparty: sdpLegIsA ? trade.userB : trade.userA,
       },
     },
-    legs: [legA, legB],
+    legs,
   };
 }
 
@@ -108,9 +130,9 @@ export function buildDvpClosePolicyCandidate(
  * `policyGate` treats that as ungoverned and lets the handler produce the 404,
  * rather than filing a wallet operation for a trade that is not there.
  */
-export async function extractDvpClosePolicyCandidate(
+export async function extractDvpTradeActionPolicyCandidate(
   c: Context<{ Bindings: Env }>,
-  action: DvpCloseAction
+  action: DvpTradeAction
 ): Promise<PolicyGateExtraction> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -144,7 +166,7 @@ export async function extractDvpClosePolicyCandidate(
     organizationId: trade.organizationId,
     projectId: trade.projectId,
   });
-  const { candidate, legs } = buildDvpClosePolicyCandidate(c, trade, settlement, action);
+  const { candidate, legs } = buildDvpTradeActionPolicyCandidate(c, trade, settlement, action);
 
   return {
     candidate,

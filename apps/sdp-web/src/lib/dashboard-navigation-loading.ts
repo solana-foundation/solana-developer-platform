@@ -47,6 +47,7 @@ export type DashboardLoadingRoute =
   | "embedded-yield-configure"
   | "embedded-yield-integrate"
   | "dvp-trades"
+  | "dvp-trade-create"
   | "dvp-trade-detail"
   | "payments-transactions"
   | "payments-pay"
@@ -111,6 +112,8 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
     return "embedded-yield-integrate";
   }
   if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) return "dvp-trades";
+  // Before the detail arm: /dvp/create would otherwise match its id pattern.
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`) return "dvp-trade-create";
   // Detail routes need their own arm: every other markets match is exact, so a
   // trade id would resolve to no loading key and fall back to the home skeleton.
   if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
