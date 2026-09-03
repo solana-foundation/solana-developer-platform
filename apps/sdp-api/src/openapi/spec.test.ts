@@ -63,7 +63,7 @@ describe("OpenAPI spec", () => {
     ]);
   });
 
-  it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
+  it("publishes the complete Embedded Yield integration and keeps retired button paths out", () => {
     const internal = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument();
 
@@ -79,6 +79,17 @@ describe("OpenAPI spec", () => {
       expect(doc.paths?.["/v1/earn/button-configurations/public/{publicToken}"]).toBeUndefined();
     }
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
+
+    for (const [path, method] of [
+      ["/v1/earn/strategies", "get"],
+      ["/v1/earn/strategies/{strategyId}", "get"],
+      ["/v1/earn/vault-deposit-previews", "post"],
+      ["/v1/earn/external-wallet/withdrawal-previews", "post"],
+    ] as const) {
+      const operation = publicDocument.paths?.[path]?.[method];
+      expect(operation?.operationId).toBeDefined();
+      expect(operation?.security).toEqual([{ apiKeyAuth: [] }]);
+    }
 
     for (const path of [
       "/v1/earn/external-wallet/deposit-transactions",
@@ -107,6 +118,15 @@ describe("OpenAPI spec", () => {
     expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
       signedTransactionExample
     );
+
+    const withdrawalBuild = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
+    );
+    expect(withdrawalBuild.properties?.minAmountOut).toMatchObject({
+      type: "string",
+      example: "9.95",
+    });
+    expect(withdrawalBuild.required ?? []).not.toContain("minAmountOut");
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {

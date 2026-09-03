@@ -282,5 +282,32 @@ describe("Rate limiting", () => {
 
       expect(res.status).toBe(503);
     });
+
+    it("allows an explicit local development bypass", async () => {
+      const localEnv = { ...env, DISABLE_RATE_LIMITS: "true" } as Env;
+      const res = await enforcementApp({ kv: "missing", failClosed: true }).request(
+        "/resource",
+        {},
+        localEnv
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-RateLimit-Limit")).toBeNull();
+    });
+
+    it("never honors the local bypass in production", async () => {
+      const productionEnv = {
+        ...env,
+        ENVIRONMENT: "production",
+        DISABLE_RATE_LIMITS: "true",
+      } as Env;
+      const res = await enforcementApp({ kv: "missing", failClosed: true }).request(
+        "/resource",
+        {},
+        productionEnv
+      );
+
+      expect(res.status).toBe(503);
+    });
   });
 });

@@ -214,6 +214,14 @@ export async function enforceRateLimit(
   maxRequests: number,
   options: { failClosed?: boolean } = {}
 ): Promise<void> {
+  // Local dashboard pages intentionally fan out and poll aggressively while
+  // engineers iterate. Keep production enforcement unconditional, but let the
+  // local runner opt out so a single browser tab cannot make the whole local
+  // product surface appear unavailable.
+  if (c.env.ENVIRONMENT === "development" && c.env.DISABLE_RATE_LIMITS === "true") {
+    return;
+  }
+
   const kv = c.var.kv?.rateLimits;
   if (!kv) {
     if (options.failClosed) {

@@ -12,6 +12,10 @@ export interface Env {
   DATABASE_URL?: string;
   REDIS_URL?: string;
 
+  // Local development can explicitly disable request rate limiting. The
+  // runtime ignores this outside ENVIRONMENT=development.
+  DISABLE_RATE_LIMITS?: string;
+
   // Cloud Run services disable embedded cron by default so the dedicated job
   // is the sole scheduler. Set to "false" or "0" to opt in explicitly; other
   // Node runtimes remain enabled by default and may opt out with "true"/"1".

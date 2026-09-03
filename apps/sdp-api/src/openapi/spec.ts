@@ -61,11 +61,13 @@ const OPENAPI_TAG = {
   },
   PUBLIC_EARN: {
     name: "Earn",
-    description: "Caller-signed external-wallet vault deposit and exit transactions.",
+    description:
+      "Embedded Yield strategy discovery, live quoting, caller-signed vault transactions, positions, and movement tracking.",
   },
   EARN: {
     name: "Earn",
-    description: "Caller-signed external-wallet vault deposit and exit transactions.",
+    description:
+      "Embedded Yield strategy discovery, live quoting, caller-signed vault transactions, positions, and movement tracking.",
   },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },

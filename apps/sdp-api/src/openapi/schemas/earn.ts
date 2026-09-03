@@ -1,3 +1,10 @@
+import {
+  EARN_APY_TYPES,
+  EARN_LIQUIDITY_TERMS,
+  EARN_STRATEGY_SOURCE_KINDS,
+  EARN_STRATEGY_STATUSES,
+  SOLANA_CLUSTERS,
+} from "@sdp/types";
 import { isoDateTimeSchema, successResponseSchema, z } from "./base";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +51,138 @@ const earnSolanaMintSchema = z
     description: "Base58 Solana mint address.",
     example: "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
   });
+
+const earnStrategySchema = z
+  .object({
+    id: z.string().min(1).openapi({ example: "earn_strategy_example" }),
+    provider: z.string().openapi({ example: "kamino" }),
+    providerReference: z.string().openapi({
+      description: "The provider's vault or strategy identifier.",
+      example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+    }),
+    name: z.string().openapi({ example: "Allez USDC" }),
+    sourceKind: z.enum(EARN_STRATEGY_SOURCE_KINDS),
+    underlyingSource: z.string().optional().openapi({ example: "Kamino" }),
+    depositMints: z.array(earnSolanaMintSchema).openapi({
+      description:
+        "Stablecoin mints accepted directly by the strategy. Use one of these for the shortest integration path.",
+    }),
+    shareMint: earnSolanaMintSchema.optional().openapi({
+      description: "Yield-bearing share mint, when the strategy issues one.",
+    }),
+    apyType: z.enum(EARN_APY_TYPES),
+    currentApy: z.string().optional().openapi({
+      description: "Latest observed APY as a decimal string, for example 0.062 means 6.2%.",
+      example: "0.062",
+    }),
+    liquidityTerm: z.enum(EARN_LIQUIDITY_TERMS),
+    redemptionDelayDays: z.number().int().nonnegative().optional(),
+    riskMetadata: z
+      .object({
+        curator: z.string().optional(),
+        riskTier: z.string().optional(),
+        frameworkUrl: z.string().optional(),
+      })
+      .catchall(z.unknown())
+      .optional(),
+    status: z.enum(EARN_STRATEGY_STATUSES),
+    depositSlippage: z
+      .object({
+        quoteRequired: z.literal(true),
+        defaultToleranceBps: z.number().int().min(1).max(1000),
+      })
+      .nullable()
+      .openapi({
+        description:
+          "Quote-derived deposit floor policy. Null means the provider needs no preview before build.",
+      }),
+    withdrawalSlippage: z
+      .object({
+        quoteRequired: z.literal(true),
+        defaultToleranceBps: z.number().int().min(1).max(1000),
+      })
+      .nullable()
+      .openapi({
+        description:
+          "Quote-derived withdrawal floor policy. Null means the provider needs no preview before build.",
+      }),
+    hostCluster: z.enum(SOLANA_CLUSTERS).openapi({
+      description: "Solana cluster where the strategy's instrument exists.",
+    }),
+    fundable: z.boolean().openapi({
+      description:
+        "Whether the instrument exists on this API key's project cluster. Branch on this before building a deposit.",
+    }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "One Embedded Yield strategy visible to the active project." });
+
+export const earnStrategyResponse = successResponseSchema(
+  z.object({ strategy: earnStrategySchema })
+);
+
+export const earnStrategiesResponse = successResponseSchema(
+  z.object({
+    strategies: z.array(earnStrategySchema),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().positive(),
+    pageSize: z.number().int().positive(),
+  })
+);
+
+export const earnVaultDepositPreviewRequest = z.object({
+  strategyId: z.string().min(1).openapi({ example: "earn_strategy_example" }),
+  amount: earnDecimalAmountSchema.openapi({
+    description: "Deposit amount in the strategy's direct deposit token units.",
+    example: "25",
+  }),
+});
+
+const earnQuoteAmountSchema = z
+  .string()
+  .max(128)
+  .regex(/^\d+(\.\d+)?$/)
+  .openapi({
+    description: "Non-negative decimal quote returned by the provider; never a float.",
+    example: "24.98",
+  });
+
+const earnQuoteIssueSchema = z.object({
+  code: z.string().openapi({ example: "TELLER_PAUSED" }),
+  message: z.string().openapi({ example: "The vault is not accepting this operation." }),
+});
+
+export const earnVaultDepositPreviewResponse = successResponseSchema(
+  z.object({
+    strategyId: z.string(),
+    sharesOut: earnQuoteAmountSchema.openapi({
+      description: "Shares the provider expects to mint at the current live rate.",
+    }),
+    shareDecimals: z.number().int().nonnegative(),
+    blockingIssues: z.array(earnQuoteIssueSchema),
+    feeSponsored: z.boolean().optional(),
+  })
+);
+
+export const earnExternalWalletWithdrawalPreviewRequest = z.object({
+  positionId: z.string().min(1).max(128).openapi({ example: "earn_position_example" }),
+  shares: earnDecimalAmountSchema.openapi({
+    description: "Shares to quote for redemption.",
+    example: "10",
+  }),
+});
+
+export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema(
+  z.object({
+    positionId: z.string().openapi({ example: "earn_position_example" }),
+    assetsOut: earnQuoteAmountSchema.openapi({
+      description: "Deposit-token amount the provider expects to return at the current live rate.",
+    }),
+    assetDecimals: z.number().int().nonnegative(),
+    blockingIssues: z.array(earnQuoteIssueSchema),
+  })
+);
 
 export const earnExternalWalletDepositTransactionRequest = z
   .object({
@@ -122,6 +261,11 @@ export const earnExternalWalletWithdrawalTransactionRequest = z
     shares: earnDecimalAmountSchema.openapi({
       description: "Shares to redeem, decimal string in share units.",
       example: "10",
+    }),
+    minAmountOut: earnDecimalAmountSchema.optional().openapi({
+      description:
+        "Minimum deposit-token amount to accept. Required by providers such as Veda; derive it from the live withdrawal preview and your slippage tolerance.",
+      example: "9.95",
     }),
   })
   .openapi({
@@ -202,6 +346,9 @@ const earnExternalWalletWithdrawalTransactionSchema = earnExternalWalletTransact
   .extend({
     positionId: z.string().openapi({ example: "earn_position_example" }),
     shares: earnDecimalAmountSchema,
+    minAmountOut: earnDecimalAmountSchema.nullable().openapi({
+      description: "The accepted minimum deposit-token amount encoded by the provider builder.",
+    }),
   })
   .openapi({ description: "The built exit transaction plus the position it redeems from." });
 
@@ -347,6 +494,9 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
   }),
   label: z.string().openapi({ example: "Allez USDC" }),
+  ownerAddresses: z.array(earnOwnerAddressSchema).openapi({
+    description: "Project-scoped external wallet owners contributing to this strategy total.",
+  }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
   totalsByToken: z.array(earnExternalWalletTokenTotalSchema),

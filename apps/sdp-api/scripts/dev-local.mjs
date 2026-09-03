@@ -219,6 +219,8 @@ try {
       API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
       SDP_DEPLOYMENT_MODE:
         localEnv.SDP_DEPLOYMENT_MODE ?? process.env.SDP_DEPLOYMENT_MODE ?? "self_hosted",
+      DISABLE_RATE_LIMITS:
+        localEnv.DISABLE_RATE_LIMITS ?? process.env.DISABLE_RATE_LIMITS ?? "true",
       DATABASE_URL: databaseUrl,
       REDIS_URL: redisUrl,
       PORT: port,
