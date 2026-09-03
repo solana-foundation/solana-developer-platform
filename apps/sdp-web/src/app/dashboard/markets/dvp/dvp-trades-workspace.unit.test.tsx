@@ -105,6 +105,20 @@ describe("DvpTradesWorkspace", () => {
     }
   });
 
+  // A finished trade's escrows are closed and empty, so the stored reading is a
+  // leftover from before settlement. Rendering it as observed-over-target
+  // claimed a balance that no longer exists — and a trade settled before any
+  // reading was taken showed a bare number, so two finished trades rendered
+  // two different ways.
+  it("shows what a finished trade delivered, not a funding fraction", () => {
+    const funded = leg({
+      funding: { funded: true, observedAmount: "1000000000", frozen: false, surplus: false },
+    });
+    const html = renderList([trade({ status: "settled", legs: { a: funded, b: funded } })]);
+
+    expect(html).not.toContain("/ 1,000");
+  });
+
   it("keeps create reachable once trades exist", () => {
     const html = renderList([trade()]);
 

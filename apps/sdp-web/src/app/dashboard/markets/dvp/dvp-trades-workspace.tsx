@@ -29,6 +29,8 @@ import {
   type DvpTradeStatus,
   formatLegAmount,
   frozenLegs,
+  isDvpTradeClosed,
+  matchesAddressQuery,
   overFundedLegs,
 } from "./dvp-trade";
 import { DVP_TRADES_PAGE_SIZE } from "./dvp-trades.data";
@@ -40,18 +42,24 @@ import { DVP_TRADES_PAGE_SIZE } from "./dvp-trades.data";
  * because "1000 of 1000" and "1000" answer different questions and only the
  * first says whether anything is still owed.
  */
-function LegCell({ leg }: { leg: DvpTradeLeg }) {
+function LegCell({ closed, leg }: { closed: boolean; leg: DvpTradeLeg }) {
   return (
     <div className="flex min-w-0 items-center gap-2">
-      {/* The mark resolves only for a mint in the well-known registry; an
-          issued asset falls back to a monogram rather than a blank. */}
-      <TokenMark className="shrink-0" mint={leg.mint} size="sm" />
+      {/* The mark resolves a logo only for a mint in the well-known registry,
+          and falls back to a monogram of the SYMBOL — which it can only do if
+          it is given one. Passing the mint alone left every issued asset
+          rendering a literal question mark. */}
+      <TokenMark className="shrink-0" mint={leg.mint} size="sm" symbol={leg.symbol} />
       <div className="min-w-0">
-        {/* Observed-over-target once anything has read the escrow. Before that
-            only the target is shown, with the status column carrying "not
-            checked" so the two are never confused. */}
+        {/* Observed-over-target answers "is anything still owed", which is a
+            question a finished trade does not have. Its escrows are closed and
+            empty, so the stored reading is a leftover from before settlement —
+            and showing it as a fraction claimed a balance that no longer
+            exists. Worse, a trade settled before that reading was ever taken
+            showed a bare number, so two finished trades rendered differently.
+            A finished trade shows what it delivered. */}
         <div className="truncate font-medium text-primary text-sm tabular-nums">
-          {leg.funding
+          {leg.funding && !closed
             ? `${formatLegAmount(leg.funding.observedAmount, leg.decimals)} / ${formatLegAmount(leg.amount, leg.decimals)}`
             : formatLegAmount(leg.amount, leg.decimals)}
           {leg.symbol ? <span className="ml-1 text-secondary">{leg.symbol}</span> : null}
@@ -133,7 +141,7 @@ export function DvpTradesWorkspace({
       trade.sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party,
     ]
       .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(needle));
+      .some((value) => matchesAddressQuery(String(value), needle));
   });
 
   const listIsEmpty = trades.length === 0;
@@ -299,10 +307,10 @@ export function DvpTradesWorkspace({
                             </Link>
                           </TableCell>
                           <TableCell>
-                            <LegCell leg={trade.legs.a} />
+                            <LegCell closed={isDvpTradeClosed(trade)} leg={trade.legs.a} />
                           </TableCell>
                           <TableCell>
-                            <LegCell leg={trade.legs.b} />
+                            <LegCell closed={isDvpTradeClosed(trade)} leg={trade.legs.b} />
                           </TableCell>
                           <TableCell className="text-secondary text-sm">
                             {shortenAddress(counterparty)}

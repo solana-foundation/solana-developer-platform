@@ -181,3 +181,35 @@ export function formatLegAmount(baseUnits: string, decimals: number | null): str
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
 }
+
+/**
+ * Whether a value matches what somebody typed into the trade search.
+ *
+ * Plain substring, plus one case that plain substring gets wrong: this table
+ * shows addresses SHORTENED — `BMiuAa…w1eP` — and the first thing anyone does
+ * when hunting for a trade is select the address they can see and paste it in.
+ * That matched nothing, because the only thing being searched was the full
+ * forty-four characters. The UI was showing one string and searching another.
+ *
+ * So an ellipsis in the query is read as "starts with this, ends with that".
+ * Both the character the table renders (…) and the three dots people type
+ * count, because the two are indistinguishable to whoever pasted it.
+ *
+ * @param value - The full value being searched, e.g. an address or a symbol.
+ * @param needle - The query, already trimmed and lowercased.
+ */
+export function matchesAddressQuery(value: string, needle: string): boolean {
+  const haystack = value.toLowerCase();
+  if (haystack.includes(needle)) {
+    return true;
+  }
+
+  const [head, ...rest] = needle.split(/\u2026|\.\.\./);
+  const tail = rest.join("");
+  // Only when the query is genuinely a shortened address. A bare ellipsis, or
+  // one with nothing on a side, would otherwise match every row.
+  if (rest.length === 0 || !head || !tail) {
+    return false;
+  }
+  return haystack.startsWith(head) && haystack.endsWith(tail);
+}
