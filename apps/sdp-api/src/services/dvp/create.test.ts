@@ -254,6 +254,52 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
+  // A key is a claim, not a proof. Reused with different terms it would hand
+  // back the earlier trade — and that trade names a custody wallet and
+  // publishes escrow addresses, so a wallet-scoped caller would receive a
+  // wallet and escrows outside their own scope.
+  it("refuses a key reused with different terms", async () => {
+    sendTransaction.mockResolvedValue("sig");
+    await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1" });
+
+    await expect(
+      createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1", amountA: 999n })
+    ).rejects.toThrow(/different request payload/);
+  });
+
+  // sdpWalletId is in the fingerprint precisely so a key cannot be used to
+  // reach a trade belonging to another wallet.
+  it("refuses a key reused against a different custody wallet", async () => {
+    sendTransaction.mockResolvedValue("sig");
+    await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1" });
+
+    await expect(
+      createDvpTrade(env, {
+        ...tradeInput(),
+        idempotencyKey: "key-1",
+        sdpWalletId: "cwlt_someone_else",
+      })
+    ).rejects.toThrow(/different request payload/);
+  });
+
+  // Two overlapping retries both miss the lookup and both reach the insert. The
+  // unique index rejects one, and without recovery that retry gets a 500 —
+  // exactly the case the key exists to make safe.
+  it("replays rather than failing when two keyed requests race", async () => {
+    sendTransaction.mockResolvedValue("sig");
+    const input = { ...tradeInput(), idempotencyKey: "key-race" };
+
+    const [first, second] = await Promise.all([
+      createDvpTrade(env, input),
+      createDvpTrade(env, input),
+    ]);
+
+    expect(second.id).toBe(first.id);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+    // The loser must not broadcast a second transaction for the same trade.
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it("creates separate trades for different keys", async () => {
     sendTransaction.mockResolvedValue("sig");
 

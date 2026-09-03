@@ -97,6 +97,15 @@ CREATE TABLE IF NOT EXISTS dvp_trades (
     -- escrow nobody is watching. Keyed retries return the original instead.
     idempotency_key TEXT,
 
+    -- Hash of the terms the keyed request asked for.
+    --
+    -- Without it a replay is a hole rather than a convenience: the same key
+    -- reused with different terms would hand back the earlier trade, and a
+    -- wallet-scoped caller would receive another wallet's trade and its escrow
+    -- addresses. Compared on every replay; a mismatch is a 409, never a silent
+    -- substitution.
+    idempotency_fingerprint TEXT,
+
     create_signature TEXT,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
