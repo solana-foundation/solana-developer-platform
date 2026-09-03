@@ -52,20 +52,33 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     counterpartyId: counterparty.id,
     ...query.data,
   });
-  const payoutRows = rows.filter((row) => row.kind === "payout_account");
-  const customerLinks = new Map(
-    rows.filter((row) => row.kind === "customer_link").map((row) => [row.provider, row])
+  const enriched = await enrichCounterpartyProviderAccounts(
+    rampRuntime(c),
+    rows.filter((row) => row.kind === "payout_account")
   );
-  const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), payoutRows);
 
-  const payoutProviders = new Set(payoutRows.map((row) => row.provider));
-  const accounts: CounterpartyProviderAccount[] = [];
+  const rowsByProvider = new Map<
+    CounterpartyProviderAccountRow["provider"],
+    CounterpartyProviderAccountRow[]
+  >();
   for (const row of rows) {
-    if (row.kind === "payout_account") {
-      accounts.push(mapProviderAccount(row, enriched, customerLinks.get(row.provider)));
+    const providerRows = rowsByProvider.get(row.provider);
+    if (providerRows === undefined) {
+      rowsByProvider.set(row.provider, [row]);
+    } else {
+      providerRows.push(row);
     }
-    if (row.kind === "customer_link" && !payoutProviders.has(row.provider)) {
-      accounts.push(mapCustomerLinkAccount(row));
+  }
+
+  const accounts: CounterpartyProviderAccount[] = [];
+  for (const providerRows of rowsByProvider.values()) {
+    const customerLink = providerRows.find((row) => row.kind === "customer_link");
+    const payoutRows = providerRows.filter((row) => row.kind === "payout_account");
+    if (payoutRows.length === 0 && customerLink !== undefined) {
+      accounts.push(mapCustomerLinkAccount(customerLink));
+    }
+    for (const row of payoutRows) {
+      accounts.push(mapProviderAccount(row, enriched, customerLink));
     }
   }
 
