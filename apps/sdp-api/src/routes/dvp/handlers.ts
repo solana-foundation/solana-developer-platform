@@ -16,7 +16,7 @@ import {
 import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
-import { observeDvpTradeNow } from "@/services/dvp/observe-now";
+import { observeDvpTradeIfStale, observeDvpTradeNow } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import {
   estimateSettlementCostLamports,
@@ -427,13 +427,19 @@ export const getTrade = async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
+  // The sweep runs once a minute. That is the right cadence for a background
+  // job and the wrong one for somebody watching this page wait on a deposit, so
+  // a request for an open trade pays for a fresh reading when the stored one has
+  // aged out. Closed trades are answered from the row: they cannot change.
+  const observed = await observeDvpTradeIfStale(c.env, trade);
+
   const [wallets, settlementReadiness] = await Promise.all([
-    readSdpWallets(c.env, [trade.sdpWalletId]),
-    readSettlementReadiness(c, trade),
+    readSdpWallets(c.env, [observed.sdpWalletId]),
+    readSettlementReadiness(c, observed),
   ]);
   return success(c, {
     trade: {
-      ...toTradeResponse(trade, wallets.get(trade.sdpWalletId)),
+      ...toTradeResponse(observed, wallets.get(observed.sdpWalletId)),
       settlementReadiness,
     },
   });
