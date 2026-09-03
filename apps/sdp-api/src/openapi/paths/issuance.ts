@@ -403,7 +403,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token updated",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -430,7 +430,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 502]),
     },
   });
 
@@ -453,7 +453,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared deploy transaction",
         content: jsonContent(prepareDeployResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 502]),
     },
   });
 
@@ -481,7 +481,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 502]),
     },
   });
 
@@ -505,7 +505,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared metadata-URI follow-up transaction (or no-op)",
         content: jsonContent(prepareDeployMetadataResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 502]),
     },
   });
 
@@ -532,7 +532,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared mint",
         content: jsonContent(prepareMintResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -559,7 +559,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Mint executed",
         content: jsonContent(executeMintResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -586,7 +586,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared burn",
         content: jsonContent(prepareBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -613,7 +613,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Burn executed",
         content: jsonContent(executeBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -640,7 +640,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared seize",
         content: jsonContent(prepareSeizeResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -667,7 +667,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Seize executed",
         content: jsonContent(executeSeizeResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -694,7 +694,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared force burn",
         content: jsonContent(prepareForceBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -721,7 +721,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Force burn executed",
         content: jsonContent(executeForceBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -748,7 +748,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared authority update",
         content: jsonContent(prepareUpdateAuthorityResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -775,7 +775,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Authority updated",
         content: jsonContent(executeUpdateAuthorityResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -802,7 +802,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token paused",
         content: jsonContent(executePauseResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -829,7 +829,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token unpaused",
         content: jsonContent(executeUnpauseResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -856,7 +856,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Account frozen",
         content: jsonContent(frozenAccountResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -883,7 +883,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Account unfrozen",
         content: jsonContent(frozenAccountResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -1013,7 +1013,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       204: {
         description: "Allowlist entry removed",
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
     },
   });
 

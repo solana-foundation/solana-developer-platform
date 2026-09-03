@@ -59,4 +59,37 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     expect(names).toContain("custodyWalletId");
     expect(names).toContain("walletId");
   });
+
+  it("documents conflict responses for wallet-bound mutations", () => {
+    const doc = createOpenApiDocument();
+    const operations = [
+      ["patch", "/v1/issuance/tokens/{tokenId}"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy/prepare"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy/confirm"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata"],
+      ["post", "/v1/issuance/tokens/{tokenId}/mint/prepare"],
+      ["post", "/v1/issuance/tokens/{tokenId}/mint"],
+      ["post", "/v1/issuance/tokens/{tokenId}/burn/prepare"],
+      ["post", "/v1/issuance/tokens/{tokenId}/burn"],
+      ["post", "/v1/issuance/tokens/{tokenId}/seize/prepare"],
+      ["post", "/v1/issuance/tokens/{tokenId}/seize"],
+      ["post", "/v1/issuance/tokens/{tokenId}/force-burn/prepare"],
+      ["post", "/v1/issuance/tokens/{tokenId}/force-burn"],
+      ["post", "/v1/issuance/tokens/{tokenId}/authority/prepare"],
+      ["post", "/v1/issuance/tokens/{tokenId}/authority"],
+      ["post", "/v1/issuance/tokens/{tokenId}/pause"],
+      ["post", "/v1/issuance/tokens/{tokenId}/unpause"],
+      ["post", "/v1/issuance/tokens/{tokenId}/freeze"],
+      ["post", "/v1/issuance/tokens/{tokenId}/unfreeze"],
+      ["post", "/v1/issuance/tokens/{tokenId}/allowlist"],
+      ["delete", "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"],
+    ] as const;
+
+    const undocumented = operations
+      .filter(([method, path]) => doc.paths?.[path]?.[method]?.responses?.["409"] === undefined)
+      .map(([method, path]) => `${method.toUpperCase()} ${path}`);
+
+    expect(undocumented).toEqual([]);
+  });
 });

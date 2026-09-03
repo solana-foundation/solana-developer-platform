@@ -19,6 +19,13 @@ import {
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 
+const { fetchMaybeMintMock } = vi.hoisted(() => ({ fetchMaybeMintMock: vi.fn() }));
+
+vi.mock("@solana-program/token-2022", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
+  fetchMaybeMint: fetchMaybeMintMock,
+}));
+
 const AUTHORITY = "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9";
 const OTHER_AUTHORITY = "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod";
 
@@ -232,14 +239,20 @@ function createToken(overrides: Partial<Token> = {}): Token {
   };
 }
 
-function createRpcAccountInfo(info: unknown) {
+function createDecodedMint(input: {
+  mintAuthority?: string | null;
+  freezeAuthority?: string | null;
+  extensions?: unknown[];
+}) {
+  const option = (value: string | null | undefined) =>
+    value == null ? { __option: "None" } : { __option: "Some", value };
+
   return {
-    result: {
-      value: {
-        data: {
-          parsed: { info },
-        },
-      },
+    exists: true,
+    data: {
+      mintAuthority: option(input.mintAuthority),
+      freezeAuthority: option(input.freezeAuthority),
+      extensions: { __option: "Some", value: input.extensions ?? [] },
     },
   };
 }
@@ -254,31 +267,32 @@ describe("authority-resolution", () => {
     vi.unstubAllGlobals();
   });
 
+  it("reads decoded mint authority through the configured RPC client", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("raw fetch should not be used")));
+    fetchMaybeMintMock.mockResolvedValue(
+      createDecodedMint({ mintAuthority: OTHER_AUTHORITY, freezeAuthority: AUTHORITY })
+    );
+
+    await expect(
+      resolveCurrentAuthorityForRole(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        { updateTokenAuthorities: vi.fn() } as never,
+        createToken(),
+        "mint"
+      )
+    ).resolves.toBe(OTHER_AUTHORITY);
+    expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
+  });
+
   it("reads the on-chain permanent delegate without mutating the token record", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        result: {
-          value: {
-            data: {
-              parsed: {
-                info: {
-                  extensions: [
-                    {
-                      extension: "permanentDelegate",
-                      state: {
-                        delegate: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        },
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    fetchMaybeMintMock.mockResolvedValue(
+      createDecodedMint({
+        extensions: [{ __kind: "PermanentDelegate", delegate: AUTHORITY }],
+      })
+    );
 
     const tokenService = {
       updateTokenAuthorities: vi.fn(),
@@ -296,41 +310,25 @@ describe("authority-resolution", () => {
     );
 
     expect(delegate).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
     expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
   });
 
-  it("reads the on-chain metadata authority without mutating the token record", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        result: {
-          value: {
-            data: {
-              parsed: {
-                info: {
-                  extensions: [
-                    {
-                      extension: "metadataPointer",
-                      state: {
-                        authority: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
-                      },
-                    },
-                    {
-                      extension: "tokenMetadata",
-                      state: {
-                        updateAuthority: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
-                      },
-                    },
-                  ],
-                },
-              },
-            },
+  it("falls back to the metadata pointer authority without mutating the token record", async () => {
+    fetchMaybeMintMock.mockResolvedValue(
+      createDecodedMint({
+        extensions: [
+          {
+            __kind: "MetadataPointer",
+            authority: { __option: "Some", value: AUTHORITY },
           },
-        },
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+          {
+            __kind: "TokenMetadata",
+            updateAuthority: { __option: "None" },
+          },
+        ],
+      })
+    );
 
     const tokenService = {
       updateTokenAuthorities: vi.fn(),
@@ -351,31 +349,13 @@ describe("authority-resolution", () => {
     );
 
     expect(authority).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
     expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
   });
 
   it("uses live mint authority and treats a request value as an assertion", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          result: {
-            value: {
-              data: {
-                parsed: {
-                  info: {
-                    mintAuthority: OTHER_AUTHORITY,
-                    freezeAuthority: AUTHORITY,
-                    extensions: [],
-                  },
-                },
-              },
-            },
-          },
-        }),
-      })
+    fetchMaybeMintMock.mockResolvedValue(
+      createDecodedMint({ mintAuthority: OTHER_AUTHORITY, freezeAuthority: AUTHORITY })
     );
     const tokenService = { updateTokenAuthorities: vi.fn() };
     const env = {
@@ -390,52 +370,8 @@ describe("authority-resolution", () => {
     expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
   });
 
-  it.each([
-    {
-      name: "an invalid mint authority",
-      role: "mint",
-      payload: createRpcAccountInfo({
-        mintAuthority: "not-a-solana-address",
-        freezeAuthority: null,
-        extensions: [],
-      }),
-    },
-    {
-      name: "a response containing both a result and an error",
-      role: "mint",
-      payload: {
-        ...createRpcAccountInfo({
-          mintAuthority: AUTHORITY,
-          freezeAuthority: null,
-          extensions: [],
-        }),
-        error: { message: "RPC rejected the request" },
-      },
-    },
-    {
-      name: "an invalid lower-priority metadata authority",
-      role: "metadata",
-      payload: createRpcAccountInfo({
-        extensions: [
-          {
-            extension: "metadataPointer",
-            state: { authority: "not-a-solana-address" },
-          },
-          {
-            extension: "tokenMetadata",
-            state: { updateAuthority: AUTHORITY },
-          },
-        ],
-      }),
-    },
-  ] as const)("rejects $name returned by Solana RPC", async ({ payload, role }) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => payload,
-      })
-    );
+  it("maps RPC decoding failures to the public RPC error", async () => {
+    fetchMaybeMintMock.mockRejectedValue(new Error("RPC returned invalid mint data"));
 
     await expect(
       resolveCurrentAuthorityForRole(
@@ -445,9 +381,25 @@ describe("authority-resolution", () => {
         } as never,
         { updateTokenAuthorities: vi.fn() } as never,
         createToken(),
-        role
+        "mint"
       )
     ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
+  });
+
+  it("returns no authority when the mint account is not available yet", async () => {
+    fetchMaybeMintMock.mockResolvedValue({ exists: false });
+
+    await expect(
+      resolveCurrentAuthorityForRole(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        { updateTokenAuthorities: vi.fn() } as never,
+        createToken(),
+        "mint"
+      )
+    ).resolves.toBeNull();
   });
 
   it("resolves a unique authority to its exact custody wallet row", async () => {

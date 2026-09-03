@@ -1,9 +1,9 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
-import { getSolanaConfig } from "@sdp/rpc";
+import { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
-import type { TransactionSigner } from "@solana/kit";
-import { z } from "zod";
+import { type TransactionSigner, unwrapOption } from "@solana/kit";
+import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
@@ -97,48 +97,6 @@ interface IssuanceWalletRow {
   public_key: string;
 }
 
-const rpcAuthoritySchema = z.string().nullable().optional();
-const parsedMintInfoSchema = z.object({
-  mintAuthority: rpcAuthoritySchema,
-  freezeAuthority: rpcAuthoritySchema,
-  extensions: z
-    .array(
-      z.object({
-        extension: z.string(),
-        state: z
-          .object({
-            delegate: rpcAuthoritySchema,
-            authority: rpcAuthoritySchema,
-            updateAuthority: rpcAuthoritySchema,
-          })
-          .optional(),
-      })
-    )
-    .optional(),
-});
-const accountInfoRpcResponseSchema = z.union([
-  z.object({
-    result: z.object({
-      value: z
-        .object({
-          data: z.object({
-            parsed: z.object({ info: parsedMintInfoSchema }),
-          }),
-        })
-        .nullable(),
-    }),
-    error: z.never().optional(),
-  }),
-  z.object({
-    error: z.object({ message: z.string().optional() }),
-    result: z.never().optional(),
-  }),
-]);
-
-function validateRpcAuthority(value: string | null | undefined, fieldName: string): string | null {
-  return value == null ? null : assertValidAddress(value, fieldName);
-}
-
 function tokenMayHavePermanentDelegate(token: TokenRecord): boolean {
   if (!token) {
     return false;
@@ -153,7 +111,7 @@ function tokenMayHavePermanentDelegate(token: TokenRecord): boolean {
 }
 
 async function fetchMintAuthorities(
-  rpcUrl: string,
+  env: Env,
   mintAddress: string
 ): Promise<{
   mintAuthority: string | null;
@@ -161,56 +119,36 @@ async function fetchMintAuthorities(
   permanentDelegate: string | null;
   metadataAuthority: string | null;
 }> {
-  const rpcResponse = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "getAccountInfo",
-      params: [mintAddress, { encoding: "jsonParsed", commitment: "confirmed" }],
-    }),
-  });
-
-  if (!rpcResponse.ok) {
-    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
-  }
-
-  const parsedPayload = accountInfoRpcResponseSchema.safeParse(await rpcResponse.json());
-  if (!parsedPayload.success) {
-    throw new Error("RPC returned an unexpected response shape");
-  }
-  const payload = parsedPayload.data;
-  if (!payload.result) {
-    throw new Error(payload.error?.message ?? "RPC returned an error");
-  }
-
-  const info = payload.result.value?.data.parsed.info;
-  const permanentDelegate = info?.extensions?.find(
-    (extension) => extension.extension === "permanentDelegate"
-  )?.state?.delegate;
-  const metadataUpdateAuthority = info?.extensions?.find(
-    (extension) => extension.extension === "tokenMetadata"
-  )?.state?.updateAuthority;
-  const metadataPointerAuthority = info?.extensions?.find(
-    (extension) => extension.extension === "metadataPointer"
-  )?.state?.authority;
-  const validatedMetadataUpdateAuthority = validateRpcAuthority(
-    metadataUpdateAuthority,
-    "metadataAuthority"
+  const mint = await fetchMaybeMint(
+    createRpc(env),
+    assertValidAddress(mintAddress, "mintAddress"),
+    { commitment: "confirmed" }
   );
-  const validatedMetadataPointerAuthority = validateRpcAuthority(
-    metadataPointerAuthority,
-    "metadataAuthority"
+  if (!mint.exists) {
+    return {
+      mintAuthority: null,
+      freezeAuthority: null,
+      permanentDelegate: null,
+      metadataAuthority: null,
+    };
+  }
+
+  const extensions = unwrapOption(mint.data.extensions) ?? [];
+  const permanentDelegate = extensions.find(
+    (extension) => extension.__kind === "PermanentDelegate"
   );
+  const tokenMetadata = extensions.find((extension) => extension.__kind === "TokenMetadata");
+  const metadataPointer = extensions.find((extension) => extension.__kind === "MetadataPointer");
+  const metadataUpdateAuthority = tokenMetadata
+    ? unwrapOption(tokenMetadata.updateAuthority)
+    : null;
+  const metadataPointerAuthority = metadataPointer ? unwrapOption(metadataPointer.authority) : null;
 
   return {
-    mintAuthority: validateRpcAuthority(info?.mintAuthority, "mintAuthority"),
-    freezeAuthority: validateRpcAuthority(info?.freezeAuthority, "freezeAuthority"),
-    permanentDelegate: validateRpcAuthority(permanentDelegate, "permanentDelegate"),
-    metadataAuthority: validatedMetadataUpdateAuthority ?? validatedMetadataPointerAuthority,
+    mintAuthority: unwrapOption(mint.data.mintAuthority),
+    freezeAuthority: unwrapOption(mint.data.freezeAuthority),
+    permanentDelegate: permanentDelegate?.delegate ?? null,
+    metadataAuthority: metadataUpdateAuthority ?? metadataPointerAuthority,
   };
 }
 
@@ -228,8 +166,7 @@ export async function resolvePermanentDelegateAuthority(
   }
 
   try {
-    const { rpcUrl } = getSolanaConfig(env);
-    const { permanentDelegate } = await fetchMintAuthorities(rpcUrl, token.mintAddress);
+    const { permanentDelegate } = await fetchMintAuthorities(env, token.mintAddress);
 
     return permanentDelegate;
   } catch (error) {
@@ -254,8 +191,7 @@ export async function resolveMetadataAuthority(
   }
 
   try {
-    const { rpcUrl } = getSolanaConfig(env);
-    const { metadataAuthority } = await fetchMintAuthorities(rpcUrl, token.mintAddress);
+    const { metadataAuthority } = await fetchMintAuthorities(env, token.mintAddress);
 
     return metadataAuthority;
   } catch (error) {
@@ -285,8 +221,7 @@ export async function resolveCurrentAuthorityForRole(
         break;
       }
       try {
-        const { rpcUrl } = getSolanaConfig(env);
-        const { mintAuthority } = await fetchMintAuthorities(rpcUrl, token.mintAddress);
+        const { mintAuthority } = await fetchMintAuthorities(env, token.mintAddress);
         currentAuthority = mintAuthority;
       } catch (error) {
         throw new AppError(
@@ -302,8 +237,7 @@ export async function resolveCurrentAuthorityForRole(
         break;
       }
       try {
-        const { rpcUrl } = getSolanaConfig(env);
-        const { freezeAuthority } = await fetchMintAuthorities(rpcUrl, token.mintAddress);
+        const { freezeAuthority } = await fetchMintAuthorities(env, token.mintAddress);
         currentAuthority = freezeAuthority;
       } catch (error) {
         throw new AppError(
