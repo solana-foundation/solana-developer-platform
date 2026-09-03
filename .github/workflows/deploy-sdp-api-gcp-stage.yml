@@ -103,3 +103,19 @@ jobs:
             cat "${describe_err}" >&2
             exit 1
           fi
+
+  smoke:
+    name: Dispatch stage smoke (shadow)
+    needs: deploy
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Trigger the stage smoke run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run sdp-dev-smoke.yml --repo "${{ github.repository }}" --ref main -f target=stage
