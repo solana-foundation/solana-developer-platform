@@ -10,6 +10,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { DVP_TRADES_PAGE_SIZE, fetchDvpTrade, fetchDvpTrades, isNotFound } from "./dvp-trades.data";
 
+/**
+ * The minimum a trade must carry to be renderable, which is what these
+ * fixtures now use. They previously passed `{ id }` alone — a shape the API
+ * never returns and the views cannot render — so they went on passing while
+ * the code they covered had no idea what a usable trade looked like.
+ */
+function tradeFixture(overrides: Record<string, unknown> = {}) {
+  return { id: "dvp_1", status: "created", legs: { a: {}, b: {} }, ...overrides };
+}
+
 function ok(body: unknown) {
   return vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body }) as never;
 }
@@ -19,7 +29,7 @@ function fail(status: number, body: unknown = {}) {
 
 describe("fetchDvpTrades", () => {
   it("returns the trades the API sent", async () => {
-    const result = await fetchDvpTrades(ok({ data: { trades: [{ id: "dvp_1" }] } }));
+    const result = await fetchDvpTrades(ok({ data: { trades: [tradeFixture()] } }));
 
     expect(result.error).toBeNull();
     expect(result.trades).toHaveLength(1);
@@ -66,9 +76,9 @@ describe("fetchDvpTrades", () => {
 
 describe("fetchDvpTrade", () => {
   it("returns the trade and its status", async () => {
-    const result = await fetchDvpTrade(ok({ data: { trade: { id: "dvp_1" } } }), "dvp_1");
+    const result = await fetchDvpTrade(ok({ data: { trade: tradeFixture() } }), "dvp_1");
 
-    expect(result.trade).toEqual({ id: "dvp_1" });
+    expect(result.trade).toMatchObject({ id: "dvp_1" });
     expect(result.status).toBe(200);
   });
 
@@ -106,5 +116,47 @@ describe("isNotFound", () => {
     for (const status of [200, 401, 403, 429, 500, 503, null]) {
       expect(isNotFound({ status })).toBe(false);
     }
+  });
+});
+
+/**
+ * A 200 whose body is not a usable trade.
+ *
+ * The null check was the only guard, and `{}` is not null. A malformed trade
+ * therefore skipped the retryable load error the page was written around and
+ * reached a view that dereferences `trade.legs.a`, turning a bad response into
+ * a render exception and a server error page.
+ */
+describe("a malformed but successful response", () => {
+  it.each([
+    ["an empty object", {}],
+    ["no legs", { id: "dvp_1", status: "created" }],
+    ["only one leg", { id: "dvp_1", status: "created", legs: { a: {} } }],
+    ["a null leg", { id: "dvp_1", status: "created", legs: { a: {}, b: null } }],
+    ["legs that are not objects", { id: "dvp_1", status: "created", legs: { a: 1, b: 2 } }],
+  ])("reports %s as unreadable rather than rendering it", async (_label, trade) => {
+    const result = await fetchDvpTrade(ok({ data: { trade } }), "dvp_1");
+
+    expect(result.trade).toBeNull();
+    expect(result.error).toBeTruthy();
+  });
+
+  it("still returns a trade carrying both legs", async () => {
+    const trade = tradeFixture();
+
+    const result = await fetchDvpTrade(ok({ data: { trade } }), "dvp_1");
+
+    expect(result.trade).toMatchObject({ id: "dvp_1" });
+    expect(result.error).toBeNull();
+  });
+
+  // One bad row must not take the whole table down with it.
+  it("drops an unreadable row from the list and keeps the rest", async () => {
+    const good = tradeFixture({ id: "dvp_ok" });
+
+    const result = await fetchDvpTrades(ok({ data: { trades: [{}, good] } }));
+
+    expect(result.trades).toHaveLength(1);
+    expect(result.trades[0]).toMatchObject({ id: "dvp_ok" });
   });
 });
