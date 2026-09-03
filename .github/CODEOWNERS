@@ -1,9 +1,9 @@
 *    @solana-foundation/sdp-maintainers
 
 # Custody and signing
-/packages/sdp-custody/                                  @GuiBibeau @G1de0n
-/apps/sdp-api/src/services/adapters/signing/            @GuiBibeau @G1de0n
-/apps/sdp-api/src/services/domain/signing/              @GuiBibeau @G1de0n
+/packages/sdp-custody/                                  @GuiBibeau
+/apps/sdp-api/src/services/adapters/signing/            @GuiBibeau
+/apps/sdp-api/src/services/domain/signing/              @GuiBibeau
 
 # Payments and ramps
 /packages/sdp-payments/                                 @multipletwigs @GuiBibeau
@@ -14,8 +14,8 @@
 /apps/sdp-api/src/routes/issuance/                      @arseniy-nikitochkin @multipletwigs
 
 # Authentication and authorization
-/apps/sdp-api/src/middleware/                           @GuiBibeau @G1de0n
-/apps/sdp-api/src/lib/auth.ts                           @GuiBibeau @G1de0n
+/apps/sdp-api/src/middleware/                           @GuiBibeau
+/apps/sdp-api/src/lib/auth.ts                           @GuiBibeau
 
 # Database migrations
 /apps/sdp-api/src/db/migrations/                        @pashpashkin @multipletwigs
