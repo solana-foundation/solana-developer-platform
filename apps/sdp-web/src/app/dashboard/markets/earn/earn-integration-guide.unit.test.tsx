@@ -50,7 +50,6 @@ const secondLiveStrategy: EarnStrategy = {
 
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
-  mainnetFundable: false,
   strategyClusters: [] as Array<SolanaCluster | undefined>,
 }));
 
@@ -64,7 +63,7 @@ vi.mock("./earn-program-data", () => ({
     return {
       strategies:
         options?.cluster === "mainnet-beta"
-          ? [{ ...mainnetStrategy, fundable: mocks.mainnetFundable }]
+          ? [mainnetStrategy]
           : [liveStrategy, secondLiveStrategy],
       error: undefined,
       isLoading: false,
@@ -91,7 +90,6 @@ function renderWithEnglish(children: ReactNode) {
 
 afterEach(() => {
   mocks.environment = "sandbox";
-  mocks.mainnetFundable = false;
   mocks.strategyClusters.length = 0;
   vi.clearAllMocks();
   cleanup();
@@ -223,7 +221,6 @@ describe("EarnIntegrationGuide", () => {
   });
 
   it("does not let a mainnet deep link bypass provider access", () => {
-    mocks.mainnetFundable = true;
     renderWithEnglish(
       <EarnIntegrationGuide
         earnHref="/dashboard/markets/embedded-yield"
@@ -236,6 +233,7 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
     expect(screen.queryByText("Mainnet vault preview")).toBeNull();
+    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
   });
 
   it("defaults to the first available strategy without a separate selection step", () => {

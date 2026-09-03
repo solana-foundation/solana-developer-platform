@@ -100,17 +100,34 @@ function unavailableDescriptionKey(availability: EarnVaultDepositAvailability): 
   }
 }
 
-function isStrategySelectable(
+function strategyOptionState(
   strategy: EarnStrategy,
-  availability: EarnVaultDepositAvailability,
+  sdpEnvironment: SdpEnvironment,
+  providerAccess: EarnProviderAccess | null,
   previewingMainnet: boolean
-): boolean {
-  return (
-    availability === "available" ||
-    (previewingMainnet &&
-      availability === "cluster_unavailable" &&
-      strategy.hostCluster === "mainnet-beta")
+): { availability: EarnVaultDepositAvailability; selectable: boolean } {
+  const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
+  const isMainnetPreview =
+    previewingMainnet &&
+    availability === "cluster_unavailable" &&
+    strategy.hostCluster === "mainnet-beta";
+
+  if (!isMainnetPreview) {
+    return { availability, selectable: availability === "available" };
+  }
+
+  // Preview ignores only the cluster mismatch. Re-run the canonical checks so
+  // strategy status, deposit style, environment, and provider access still fail closed.
+  const previewAvailability = earnVaultDepositAvailability(
+    { ...strategy, fundable: true },
+    sdpEnvironment,
+    providerAccess
   );
+
+  return {
+    availability: previewAvailability === "available" ? availability : previewAvailability,
+    selectable: previewAvailability === "available",
+  };
 }
 
 export function EarnIntegrationGuide({
@@ -141,10 +158,15 @@ export function EarnIntegrationGuide({
 
   const rows = strategies ?? [];
   const options = rows.map((strategy) => {
-    const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
+    const { availability, selectable } = strategyOptionState(
+      strategy,
+      sdpEnvironment,
+      providerAccess,
+      previewingMainnet
+    );
     return {
       availability,
-      selectable: isStrategySelectable(strategy, availability, previewingMainnet),
+      selectable,
       strategy,
     };
   });
