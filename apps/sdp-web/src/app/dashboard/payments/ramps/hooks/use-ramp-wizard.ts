@@ -235,7 +235,11 @@ export function useRampWizard<TId extends string>(
   const stepSchema = config.stepSchemas[currentStepId];
   const canProceed = useMemo(() => {
     if (isRequirementsStep) {
-      return requirements.isComplete && !requirements.isCorridorLoading;
+      return (
+        requirements.isComplete &&
+        !requirements.isCorridorLoading &&
+        requirements.blockReason === null
+      );
     }
     // Block leaving the step that precedes the requirements insertion until the
     // requirements answer has resolved AND isn't a blocker (fetch error, or an

@@ -17,6 +17,7 @@ interface HeldRequest {
   method: string;
   body: Record<string, unknown> | null;
   respond: (data: CounterpartyRequirements) => void;
+  respondRaw: (response: Response) => void;
 }
 
 let held: HeldRequest[] = [];
@@ -40,6 +41,7 @@ function stubFetch(): void {
             })
           );
         },
+        respondRaw: resolveResponse,
       });
     });
   });
@@ -59,6 +61,29 @@ async function release(method: string, data: CounterpartyRequirements): Promise<
   held.splice(index, 1);
   await act(async () => {
     request.respond(data);
+  });
+  return request;
+}
+
+/**
+ * Releases the oldest held request matching the method with an error response.
+ *
+ * @param method - HTTP method of the expected request.
+ * @param message - Error message the API responds with.
+ * @returns The released request.
+ */
+async function releaseFailure(method: string, message: string): Promise<HeldRequest> {
+  const index = held.findIndex((request) => request.method === method);
+  expect(index).toBeGreaterThanOrEqual(0);
+  const request = held[index];
+  held.splice(index, 1);
+  await act(async () => {
+    request.respondRaw(
+      new Response(JSON.stringify({ error: { message } }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
   });
   return request;
 }
@@ -199,6 +224,30 @@ describe("useCounterpartyRequirements — corridor-addressed responses", () => {
     ]);
     expect(rendered.result.current.resolvedProviderAccountId).toBe("cpa_us_primary");
     expect(rendered.result.current.resolvedAccount?.bankName).toBe("First US");
+  });
+
+  it("surfaces a blocked corridor (ambiguous accounts) and clears it on the next corridor", async () => {
+    const { result } = await renderResolvedOfframp();
+
+    act(() => result.current.setField("destinationCountry", "US"));
+    await releaseFailure(
+      "GET",
+      "Counterparty has multiple active lightspark external accounts for USD to US."
+    );
+    await waitFor(() =>
+      expect(result.current.blockReason).toBe(
+        "Counterparty has multiple active lightspark external accounts for USD to US."
+      )
+    );
+    expect(result.current.resolvedProviderAccountId).toBeNull();
+
+    act(() => result.current.setField("destinationCountry", "MX"));
+    await release("GET", COLLECT_ACCOUNT);
+    expect(result.current.blockReason).toBeNull();
+    expect(result.current.fields.map((field) => field.key)).toEqual([
+      "destinationCountry",
+      "paymentRails",
+    ]);
   });
 
   it("never reads a stale corridor's ready answer while the next corridor loads", async () => {
