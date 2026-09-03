@@ -527,7 +527,8 @@ export function DashboardShell({
     pathname,
     t,
     assetProfilesEnabled,
-    privateChannelsEnabled
+    privateChannelsEnabled,
+    dvpEnabled
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,

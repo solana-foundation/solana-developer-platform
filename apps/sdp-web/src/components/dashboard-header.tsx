@@ -358,7 +358,8 @@ function getCounterpartyRoutePageConfig(
 
 function getMarketsRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  dvpEnabled: boolean
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/markets") {
     return {
@@ -414,10 +415,14 @@ function getMarketsRoutePageConfig(
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
             label: t("Shared.dashboardShell.earnProgram"),
           },
-          {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
-            label: t("DashboardMarkets.dvp.navLabel"),
-          },
+          ...(dvpEnabled
+            ? [
+                {
+                  href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+                  label: t("DashboardMarkets.dvp.navLabel"),
+                },
+              ]
+            : []),
         ],
       },
       contentWidthClass: "max-w-none",
@@ -663,7 +668,13 @@ export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  /**
+   * Gates the DvP tab. The sidebar already hides DvP behind this flag, and a
+   * header tab that stays visible when the sidebar entry is gone points at a
+   * workspace the flag exists to keep out of reach.
+   */
+  dvpEnabled = false
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -720,7 +731,7 @@ export function getDashboardPageConfig(
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
-  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
+  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t, dvpEnabled);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
   }
