@@ -84,7 +84,7 @@ describe("Markets dashboard headers", () => {
 });
 
 describe("Integrations dashboard headers", () => {
-  it("shows every family when its owning module is enabled", () => {
+  it("keeps category navigation in the sidebar submenu", () => {
     const config = getDashboardPageConfig(
       "/dashboard/integrations",
       t,
@@ -95,17 +95,10 @@ describe("Integrations dashboard headers", () => {
       true
     );
 
-    expect(config.headerTabs?.tabs.map((tab) => tab.id)).toEqual([
-      "all",
-      "custody",
-      "rpc",
-      "ramps",
-      "compliance",
-      "privacy",
-    ]);
+    expect(config.headerTabs).toBeUndefined();
   });
 
-  it("removes module-specific families when their modules are disabled", () => {
+  it("does not recreate category tabs when modules are disabled", () => {
     const config = getDashboardPageConfig(
       "/dashboard/integrations",
       t,
@@ -116,7 +109,7 @@ describe("Integrations dashboard headers", () => {
       false
     );
 
-    expect(config.headerTabs?.tabs.map((tab) => tab.id)).toEqual(["all", "rpc"]);
+    expect(config.headerTabs).toBeUndefined();
   });
 });
 

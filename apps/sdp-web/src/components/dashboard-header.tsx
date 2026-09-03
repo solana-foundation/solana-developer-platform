@@ -3,10 +3,6 @@
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import {
-  type IntegrationFeatureFlags,
-  isIntegrationFamilyEnabled,
-} from "@/app/dashboard/integrations/integration-feature-gates";
 import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
@@ -584,8 +580,7 @@ function getIssuanceRoutePageConfig(
 
 function getIntegrationsPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  flags: IntegrationFeatureFlags
+  t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
     return {
@@ -602,27 +597,6 @@ function getIntegrationsPageConfig(
     // second max-width inside the centered default and stranding gutters.
     return {
       title: t("Shared.dashboardShell.integrations"),
-      // The family axis rides the header tabs like policies; the catalog keeps
-      // status and search as its own secondary filters.
-      headerTabs: {
-        tabs: [
-          { id: "all", label: t("Shared.integrations.filterAllFamilies") },
-          isIntegrationFamilyEnabled("custody", flags)
-            ? { id: "custody", label: t("Shared.integrations.custodyTitle") }
-            : null,
-          { id: "rpc", label: t("Shared.integrations.rpcTitle") },
-          isIntegrationFamilyEnabled("ramps", flags)
-            ? { id: "ramps", label: t("Shared.integrations.rampsTitle") }
-            : null,
-          isIntegrationFamilyEnabled("compliance", flags)
-            ? { id: "compliance", label: t("Shared.integrations.complianceTitle") }
-            : null,
-          isIntegrationFamilyEnabled("privacy", flags)
-            ? { id: "privacy", label: t("Shared.integrations.privacyTitle") }
-            : null,
-        ].filter((tab): tab is { id: string; label: string } => tab !== null),
-        hideOnMobile: false,
-      },
       contentWidthClass: "max-w-7xl",
     };
   }
@@ -686,8 +660,8 @@ export function getDashboardPageConfig(
   assetProfilesEnabled: boolean,
   privateChannelsEnabled: boolean,
   custodyEnabled = true,
-  paymentsEnabled = true,
-  policiesEnabled = true
+  _paymentsEnabled = true,
+  _policiesEnabled = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -815,12 +789,7 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  const integrationsConfig = getIntegrationsPageConfig(pathname, t, {
-    custody: custodyEnabled,
-    payments: paymentsEnabled,
-    policies: policiesEnabled,
-    privateChannels: privateChannelsEnabled,
-  });
+  const integrationsConfig = getIntegrationsPageConfig(pathname, t);
   if (integrationsConfig) {
     return integrationsConfig;
   }

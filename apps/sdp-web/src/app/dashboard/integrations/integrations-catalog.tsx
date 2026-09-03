@@ -204,9 +204,9 @@ export function IntegrationsCatalog({
   privacy?: IntegrationEntry<PrivacyProviderId>[];
 }) {
   const t = useTranslations();
-  // The family axis lives in the header tabs (`?tab=`, same contract as
-  // policies); unknown tab values fall back to every family. Status and search
-  // stay in-page as the secondary filter row.
+  // The family axis lives in the Integrations sidebar submenu (`?tab=`);
+  // unknown tab values fall back to every family. Status and search stay
+  // in-page as the secondary filter row.
   const urlTab = useDashboardTab();
   const family: FamilyFilter =
     urlTab !== null && (INTEGRATION_FAMILIES as string[]).includes(urlTab)
@@ -272,8 +272,8 @@ export function IntegrationsCatalog({
 
   return (
     <div className="w-full space-y-6 px-4 py-5 md:px-6">
-      {/* No lead-in paragraph: each section explains itself, and the header
-          tabs already frame the page — content starts at the toolbar. The
+      {/* No lead-in paragraph: each section explains itself, and the sidebar
+          submenu already frames the page — content starts at the toolbar. The
           status group is one contained segmented control (the secondary pill
           tabs), so it can never shed an orphaned pill onto its own wrap line;
           on narrow viewports it scrolls within its strip instead. */}

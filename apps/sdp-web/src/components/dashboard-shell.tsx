@@ -3,7 +3,7 @@
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -235,6 +235,8 @@ function SidebarGroup({
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
+  const search = useSearchParams().toString();
+  const navigationLocation = search ? `${pathname}?${search}` : pathname;
   return (
     <div className="space-y-2">
       <p
@@ -255,7 +257,7 @@ function SidebarGroup({
         {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each branch preserves the shared navigation item and accessible payments disclosure in one rendering pass. */}
         {items.map((item) => {
           const Icon = item.icon;
-          const active = isDashboardNavItemActive(pathname, item.href);
+          const active = isDashboardNavItemActive(navigationLocation, item.href);
           const subnavKey = item.subnavKey;
           const showChildren = !isCollapsed && item.children && item.children.length > 0;
           const childrenExpanded = subnavKey ? openSubnavs[subnavKey] : true;
@@ -334,7 +336,7 @@ function SidebarGroup({
               {showChildren && childrenExpanded ? (
                 <div id={subnavId} className="ml-5 mt-2">
                   {(item.children ?? []).map((child, i, siblings) => {
-                    const childActive = isDashboardNavItemActive(pathname, child.href);
+                    const childActive = isDashboardNavItemActive(navigationLocation, child.href);
                     const isFirst = i === 0;
                     const isLast = i === siblings.length - 1;
                     return (

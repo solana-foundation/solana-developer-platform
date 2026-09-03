@@ -204,6 +204,44 @@ describe("Payments dashboard navigation", () => {
   });
 });
 
+describe("Integrations dashboard navigation", () => {
+  const findIntegrationsItem = (options: ReturnType<typeof navOptions>) =>
+    findManageItem(options, "Shared.dashboardShell.integrations");
+
+  it("groups every enabled family under the Integrations submenu", () => {
+    const item = findIntegrationsItem(
+      navOptions({
+        custodyEnabled: true,
+        paymentsEnabled: true,
+        policiesEnabled: true,
+        privateChannelsEnabled: true,
+      })
+    );
+
+    expect(item?.subnavKey).toBe("integrations");
+    expect(item?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/integrations?tab=custody",
+      "/dashboard/integrations?tab=rpc",
+      "/dashboard/integrations?tab=ramps",
+      "/dashboard/integrations?tab=compliance",
+      "/dashboard/integrations?tab=privacy",
+    ]);
+  });
+
+  it("keeps only RPC when every owning module is disabled", () => {
+    const item = findIntegrationsItem(
+      navOptions({
+        custodyEnabled: false,
+        paymentsEnabled: false,
+        policiesEnabled: false,
+        privateChannelsEnabled: false,
+      })
+    );
+
+    expect(item?.children?.map((child) => child.href)).toEqual(["/dashboard/integrations?tab=rpc"]);
+  });
+});
+
 describe("Custody dashboard navigation", () => {
   it("hides the Wallets entry when the module is disabled", () => {
     const options = { ...navOptions(), custodyEnabled: false };
@@ -275,30 +313,37 @@ describe("Policies dashboard navigation", () => {
 });
 
 describe("subnav open state", () => {
-  const closed = { payments: false, markets: false } as const;
+  const closed = { integrations: false, payments: false, markets: false } as const;
 
   it("opens a section when its top-level item is followed", () => {
     // Gui's ask: clicking Payments in the side nav expands the Payments
     // submenu rather than only navigating to it (HOO-1218).
-    expect(withSubnavOpen(closed, "payments")).toEqual({ payments: true, markets: false });
+    expect(withSubnavOpen(closed, "payments")).toEqual({
+      integrations: false,
+      payments: true,
+      markets: false,
+    });
   });
 
   it("never closes the section being navigated into", () => {
     // The whole reason this is not a toggle. A second click on the section you
     // are already inside would otherwise hide the pages you are looking at.
-    const open = { payments: true, markets: false };
+    const open = { integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments").payments).toBe(true);
   });
 
   it("returns the same object when the section is already open", () => {
     // Held in React state, so a click that decides nothing must not re-render
     // the whole shell.
-    const open = { payments: true, markets: false };
+    const open = { integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments")).toBe(open);
   });
 
   it("leaves other sections alone", () => {
-    expect(withSubnavOpen({ payments: false, markets: true }, "payments")).toEqual({
+    expect(
+      withSubnavOpen({ integrations: false, payments: false, markets: true }, "payments")
+    ).toEqual({
+      integrations: false,
       payments: true,
       markets: true,
     });
@@ -306,6 +351,8 @@ describe("subnav open state", () => {
 
   it("still flips both ways for the chevron", () => {
     expect(withSubnavToggled(closed, "markets").markets).toBe(true);
-    expect(withSubnavToggled({ payments: false, markets: true }, "markets").markets).toBe(false);
+    expect(
+      withSubnavToggled({ integrations: false, payments: false, markets: true }, "markets").markets
+    ).toBe(false);
   });
 });
