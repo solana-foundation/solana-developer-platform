@@ -5773,7 +5773,7 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `POST` | `/v1/wallets/default-wallet` | Set default wallet |
 | `POST` | `/v1/wallets/initialize` | Initialize wallet signing |
 | `GET` | `/v1/wallets/public-key` | Get wallet public key |
-| `POST` | `/v1/wallets/signer-check` | Check signer via memo transaction |
+| `POST` | `/v1/wallets/signer-check` | Check signer via simulated memo transaction |
 | `POST` | `/v1/wallets/switch` | Switch wallet signing provider |
 | `GET` | `/v1/wallets/switch-options` | List switch provider options |
 

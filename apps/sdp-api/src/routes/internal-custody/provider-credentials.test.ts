@@ -1619,6 +1619,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         .mockRejectedValue(new CredentialSecretStoreError("raw upstream detail", "UPSTREAM_ERROR")),
       read: vi.fn(),
       destroyVersion: vi.fn(),
+      predictFirstVersionRef: vi.fn(() => null),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
     const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
@@ -1676,6 +1677,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       }),
       read: vi.fn(),
       destroyVersion,
+      predictFirstVersionRef: vi.fn(() => null),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
     const { app, token } = buildApp();
@@ -1707,6 +1709,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       }),
       read: vi.fn(),
       destroyVersion,
+      predictFirstVersionRef: vi.fn(() => null),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
 
@@ -1750,6 +1753,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       }),
       read: vi.fn(),
       destroyVersion,
+      predictFirstVersionRef: vi.fn(() => null),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
     const { app, token } = buildApp();
@@ -1776,6 +1780,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       }),
       read: vi.fn(),
       destroyVersion: vi.fn().mockRejectedValue(new Error("raw cleanup failure")),
+      predictFirstVersionRef: vi.fn(() => null),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
     const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
@@ -1891,6 +1896,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       write,
       read: vi.fn(),
       destroyVersion,
+      predictFirstVersionRef: vi.fn(() => null),
     });
     const { app, token } = buildApp();
 
@@ -1959,6 +1965,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       write,
       read: vi.fn(),
       destroyVersion,
+      predictFirstVersionRef: vi.fn(() => null),
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
     const { app, token } = buildApp();

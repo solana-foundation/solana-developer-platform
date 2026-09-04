@@ -119,6 +119,8 @@ export async function destroyActionSecret(
 //
 // Deliberately short: the caller is a request that has already committed its work and
 // cannot be failed by anything here, so the whole budget is a fraction of a second.
+const PROVISIONAL_GRACE_MS = 15 * 60 * 1000;
+
 const QUEUE_ATTEMPTS = 3;
 const QUEUE_BACKOFF_MS = 50;
 
@@ -173,6 +175,11 @@ export async function queuePendingActionSecret(
     secretRef: stored.secretRef ?? null,
     secretVersionRef: stored.secretVersionRef,
     error: "written for a rule that has not committed yet",
+    // Held back from the sweeper: the version is unreferenced only because the
+    // request that will reference it is still running. Due immediately, a sweep
+    // landing inside that window claims the row, and the committing transaction
+    // would then have to abort a rule whose credential is being destroyed.
+    nextAttemptAt: new Date(Date.now() + PROVISIONAL_GRACE_MS).toISOString(),
   });
   if (!queued) {
     getLogger().error(

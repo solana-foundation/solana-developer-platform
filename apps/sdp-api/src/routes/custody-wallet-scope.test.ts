@@ -39,6 +39,7 @@ const createSigningServiceMock = vi.spyOn(signingServiceModule, "createSigningSe
 const resolveRpcTargetMock = vi.spyOn(rpcRelay, "resolveRpcTarget");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
+const simulateTransactionMock = vi.spyOn(solanaRpc, "simulateTransaction");
 
 const TEST_ORG = {
   id: "org_custody_wallet_scope",
@@ -342,6 +343,12 @@ describe("Custody wallet scope routes", () => {
       confirmationStatus: "confirmed",
       err: null,
     });
+    simulateTransactionMock.mockResolvedValue({
+      success: true,
+      logs: [],
+      unitsConsumed: null,
+      error: null,
+    });
     signerCheckMocks.createOrgSigner.mockResolvedValue(await generateKeyPairSigner());
     signerCheckMocks.signAndSend.mockResolvedValue(TEST_SIGNATURE);
     signerCheckMocks.createSponsorship.mockReturnValue({
@@ -395,15 +402,26 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      data: { walletId: "privy_wallet_a", signature: TEST_SIGNATURE },
-    });
+    const body = z
+      .object({
+        data: z.object({
+          walletId: z.string(),
+          signature: z.string().min(1),
+          simulated: z.literal(true),
+        }),
+      })
+      .parse(await response.json());
+    expect(body.data.walletId).toBe("privy_wallet_a");
     expect(signerCheckMocks.createOrgSigner).toHaveBeenCalledWith(
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
       "privy_wallet_a"
     );
+    // The signature is the wallet's own, verified locally and in simulation —
+    // never broadcast, and never paid for by sponsorship.
+    expect(simulateTransactionMock).toHaveBeenCalledOnce();
+    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
   });
 
   it("requires walletId for a session-authenticated signer check", async () => {
@@ -505,7 +523,8 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(signerCheckMocks.signAndSend).toHaveBeenCalledOnce();
+    expect(simulateTransactionMock).toHaveBeenCalledOnce();
+    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
 
     const operationCount = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
@@ -538,7 +557,8 @@ describe("Custody wallet scope routes", () => {
     const blocked = await request();
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
-    expect(signerCheckMocks.signAndSend).toHaveBeenCalledTimes(2);
+    expect(simulateTransactionMock).toHaveBeenCalledTimes(2);
+    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
   });
 
   it("filters listed wallets to the API key bindings", async () => {

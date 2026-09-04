@@ -16,14 +16,22 @@ import type {
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
 import { getAuth } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
-import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStorageBackend,
   createCredentialSecretStore,
+  type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import { probeRpcEndpoint, toRedactedFailureCode } from "@/services/rpc-probe";
+import {
+  clearQueuedSecretVersion,
+  destroySecretVersion,
+  queueOrphanedSecretVersion,
+  queuePendingSecretVersion,
+  reserveSecretVersionIntent,
+} from "@/services/secret-retirement";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import {
   ORGANIZATION_SCOPE_KEY,
@@ -375,12 +383,42 @@ export async function submitRpcConnection(
   const connectionId = `rconn_${crypto.randomUUID()}`;
 
   const secretStore = createCredentialSecretStore(c.env);
+  const retirementContext = {
+    provider: "rpc_connection",
+    orgId: auth.organizationId,
+    sourceId: providerCredentialId,
+  };
+  // The obligation is recorded BEFORE the write: the coming version ref is
+  // known up front, so a durable row exists before anything external does and
+  // no crash can leave a readable key without a record the sweeper drains. If
+  // it cannot be recorded, the request is refused while the backend still
+  // holds nothing.
+  const predictedVersionRef = secretStore.predictFirstVersionRef({ providerCredentialId });
+  if (predictedVersionRef) {
+    await reserveSecretVersionIntent(
+      c.env,
+      {
+        storageBackend: secretStore.storageBackend,
+        secretRef: null,
+        secretVersionRef: predictedVersionRef,
+      },
+      retirementContext
+    );
+  }
   const stored = await secretStore.write({
     orgId: auth.organizationId,
     provider: input.provider,
     providerCredentialId,
     payload: { endpointUrl: credential.endpointUrl, apiKey: input.apiKey },
   });
+  if (stored.secretVersionRef !== predictedVersionRef) {
+    await queuePendingSecretVersion(c.env, stored, retirementContext);
+    if (predictedVersionRef) {
+      await createWorkflowSecretRetirementsRepository(c.env)
+        .deleteRetirementByVersionRef(predictedVersionRef)
+        .catch(() => undefined);
+    }
+  }
 
   const db = getDb(c.env);
   try {
@@ -449,6 +487,10 @@ export async function submitRpcConnection(
         executor: tx,
       });
 
+      // The rows now reference the version; the same commit cancels the
+      // provisional retirement recorded before this transaction started.
+      await clearQueuedSecretVersion(tx, stored);
+
       return mapRpcConnection({
         ...(activated ?? connection),
         scope_key: scopeKey,
@@ -458,13 +500,13 @@ export async function submitRpcConnection(
       });
     });
   } catch (error) {
-    // Best effort: an orphaned secret version is not reachable without its
-    // credential row, but leaving it behind still costs money and audit noise.
-    if (stored.secretVersionRef) {
-      await secretStore
-        .destroyVersion({ secretVersionRef: stored.secretVersionRef })
-        .catch(() => {});
-    }
+    // The transaction failed, so nothing references the version: destroy it
+    // now, and let `destroySecretVersion` fall back to the durable retirement
+    // queue when the destroy itself fails — a silently swallowed failure here
+    // left the tenant's key readable in the backend with nothing that would
+    // ever try again. (The pre-commit queue row above already covers the case
+    // where this process dies before reaching this block.)
+    await destroySecretVersion(c.env, stored, retirementContext);
 
     // The serving check above is a read, so two saves racing each other both
     // see nothing serving and both try to become the default. The partial
@@ -759,6 +801,23 @@ export async function rotateRpcConnection(
     payload: { endpointUrl: candidate.endpointUrl, apiKey: input.apiKey },
   });
 
+  const nextRetirementContext = {
+    provider: "rpc_connection",
+    orgId: auth.organizationId,
+    sourceId: nextCredentialId,
+  };
+  const previousRetirementContext = {
+    provider: "rpc_connection",
+    orgId: auth.organizationId,
+    sourceId: previous.id,
+  };
+  const previousStored = toStoredSecret(previous);
+  // Same ordering as a create: the incoming version exists and nothing
+  // references it, so its destruction is on record before the transaction that
+  // would make it live, and a process that dies in between leaves a queued row
+  // rather than a readable tenant key nobody knows about.
+  await queuePendingSecretVersion(c.env, stored, nextRetirementContext);
+
   let rotated: Awaited<ReturnType<RpcConnectionStore["repointConnectionCredential"]>>;
   try {
     rotated = await getDb(c.env).transaction(async (tx) => {
@@ -809,21 +868,32 @@ export async function rotateRpcConnection(
         executor: tx,
       });
 
+      // This commit is what makes the incoming version live and the outgoing
+      // one garbage, so the two obligations flip together with it: the new
+      // version's provisional retirement is cancelled, and the old version's
+      // is recorded. Either the rotation is undone entirely or both are true.
+      await clearQueuedSecretVersion(tx, stored);
+      await queueOrphanedSecretVersion(
+        tx,
+        previousRetirementContext,
+        previousStored,
+        "orphaned by RPC connection rotation"
+      );
+
       return row;
     });
   } catch (error) {
-    if (stored.secretVersionRef) {
-      await secretStore
-        .destroyVersion({ secretVersionRef: stored.secretVersionRef })
-        .catch(() => {});
-    }
+    // Nothing references the incoming version, so destroy it — and when that
+    // fails, leave durable work behind rather than swallowing it.
+    await destroySecretVersion(c.env, stored, nextRetirementContext);
     throw error;
   }
 
   // Committed, so the old key is no longer reachable through any row. Dropping
   // the version is cleanup rather than part of the swap, and a failure here
-  // must not undo a rotation that already succeeded.
-  await destroyConnectionSecretBestEffort(c, previous);
+  // must not undo a rotation that already succeeded — it discharges the
+  // obligation the transaction recorded, or leaves it for the sweeper.
+  await destroySecretVersion(c.env, previousStored, previousRetirementContext);
 
   return toSafeWithCredential(rotated, {
     id: nextCredentialId,
@@ -844,11 +914,23 @@ export async function deactivateRpcConnection(
     scopeKeys,
   });
 
+  const retirementContext = {
+    provider: "rpc_connection",
+    orgId: auth.organizationId,
+    sourceId: credential?.id ?? connectionId,
+  };
+  const storedSecret = toStoredSecret(credential);
+
   // The connection and credential flips share one transaction: a crash
   // between them would leave a deactivated connection whose retry 409s while
   // the withdrawn credential silently stays active — the exact retention this
-  // endpoint exists to end. The Secret Manager destroy stays outside; it is
-  // best effort and must not roll back the committed deactivation.
+  // endpoint exists to end. The Secret Manager destroy stays outside; it must
+  // not roll back the committed deactivation.
+  //
+  // Deactivation is terminal, so this commit is exactly what orphans the
+  // stored key: the obligation to destroy it is recorded in the same
+  // transaction, which is what makes worker loss survivable rather than a
+  // tenant key left readable in Secret Manager forever.
   const deactivated = await getDb(c.env).transaction(async (tx) => {
     const txStore = new RpcConnectionStore(tx);
     const row = await txStore.deactivateConnection({
@@ -869,10 +951,18 @@ export async function deactivateRpcConnection(
     if (credentialFlips !== 1) {
       throw internalError("The credential behind this RPC connection did not deactivate");
     }
+    await queueOrphanedSecretVersion(
+      tx,
+      retirementContext,
+      storedSecret,
+      "orphaned by RPC connection deactivation"
+    );
     return row;
   });
 
-  await destroyConnectionSecretBestEffort(c, credential);
+  // Destroy immediately and discharge the queued obligation; a failure leaves
+  // the queue row for the sweeper.
+  await destroySecretVersion(c.env, storedSecret, retirementContext);
 
   return toSafeWithCredential(
     deactivated,
@@ -920,33 +1010,22 @@ export async function deleteRpcConnection(c: AppContext, connectionId: string): 
   });
 }
 
-async function destroyConnectionSecretBestEffort(
-  c: AppContext,
+/**
+ * A credential row as the retirement queue understands it. Only GCP-backed
+ * rows carry a version that outlives the row; the rest keep their ciphertext
+ * inline and die with it, which `destroySecretVersion` treats as nothing to do.
+ */
+function toStoredSecret(
   credential: Awaited<ReturnType<RpcConnectionStore["findConnectionSecret"]>>
-): Promise<void> {
-  if (credential?.storage_backend !== "gcp_secret_manager" || !credential.secret_version_ref) {
-    return;
+): StoredCredentialSecret | null {
+  if (!credential) {
+    return null;
   }
-
-  try {
-    // SAFETY: the guard above narrows storage_backend to "gcp_secret_manager".
-    const store = createCredentialSecretStore(
-      c.env,
-      credential.storage_backend as CredentialSecretStorageBackend
-    );
-    await store.destroyVersion({ secretVersionRef: credential.secret_version_ref });
-  } catch (err) {
-    getLogger().error(
-      {
-        provider_credential_id: credential.id,
-        storage_backend: credential.storage_backend,
-        request_id: c.get("requestId"),
-        reason: "secret_cleanup_failed",
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "rpc_connection_secret_orphan_risk"
-    );
-  }
+  return {
+    storageBackend: credential.storage_backend as CredentialSecretStorageBackend,
+    secretRef: credential.secret_ref ?? undefined,
+    secretVersionRef: credential.secret_version_ref ?? undefined,
+  };
 }
 
 function violationMessage(error: unknown): string {

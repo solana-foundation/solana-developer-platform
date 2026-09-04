@@ -167,14 +167,19 @@ describe("deactivateRpcConnection", () => {
     expect(row?.encrypted_secret_payload).toBeNull();
   });
 
-  it("still deactivates and logs the orphan risk when destroying the secret version fails", async () => {
+  it("still deactivates and leaves durable cleanup work when destroying the secret version fails", async () => {
     const connectionId = `${CONNECTION_ID}_orphan`;
     const credentialId = `${CREDENTIAL_ID}_orphan`;
     await seedActiveConnection(connectionId, credentialId);
-    destroyVersion.mockRejectedValueOnce(new Error("gcp unavailable"));
+    // Rejected for every attempt, not just the first: the destroy retries, so
+    // a single blip is absorbed rather than left for the sweeper. What is
+    // pinned here is the outage that outlasts the request.
+    destroyVersion.mockRejectedValue(new Error("gcp unavailable"));
     const logError = vi.spyOn(getLogger(), "error");
 
     const result = await deactivateRpcConnection(serviceContext(), connectionId);
+    destroyVersion.mockReset();
+    destroyVersion.mockResolvedValue(undefined);
 
     expect(result.status).toBe("deactivated");
     const row = await getDb(appEnv)
@@ -182,9 +187,21 @@ describe("deactivateRpcConnection", () => {
       .bind(credentialId)
       .first<{ status: string }>();
     expect(row?.status).toBe("deactivated");
+
+    // A failed destroy is no longer only a log line: the version the commit
+    // orphaned stays queued, so the retirement sweeper collects what this
+    // request could not. The log is the alert, the row is the guarantee.
+    const queued = await getDb(appEnv)
+      .prepare(
+        `SELECT secret_version_ref FROM workflow_action_secret_retirements
+          WHERE secret_version_ref = ?`
+      )
+      .bind(SECRET_VERSION_REF)
+      .first<{ secret_version_ref: string }>();
+    expect(queued?.secret_version_ref).toBe(SECRET_VERSION_REF);
     expect(logError).toHaveBeenCalledWith(
-      expect.objectContaining({ provider_credential_id: credentialId }),
-      "rpc_connection_secret_orphan_risk"
+      expect.objectContaining({ queuedForRetry: true }),
+      "credential_secret_orphan_risk"
     );
   });
 

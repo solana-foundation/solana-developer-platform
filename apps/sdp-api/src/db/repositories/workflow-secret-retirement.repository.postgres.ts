@@ -33,14 +33,21 @@ export async function insertWorkflowSecretRetirement(
   // ON CONFLICT refreshes the reason rather than inserting a duplicate: the version
   // is already queued, and the newest failure is the useful one. `attempt_count` is
   // left alone — it counts sweeper attempts, not reports.
+  //
+  // `next_attempt_at` is written only when the caller names one, so a report arriving
+  // while the sweeper is backing a row off cannot pull it forward — but a caller that
+  // DOES name one overrides whatever stands, which is how a provisional row's grace
+  // period is revoked the moment its version is known to be orphaned.
   await exec
     .prepare(
       `INSERT INTO workflow_action_secret_retirements
          (id, organization_id, workflow_id, storage_backend, secret_ref, secret_version_ref,
-          last_error)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+          last_error, next_attempt_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, sdp_iso_now()))
        ON CONFLICT (secret_version_ref) DO UPDATE
-         SET last_error = EXCLUDED.last_error, updated_at = sdp_iso_now()`
+         SET last_error = EXCLUDED.last_error,
+             next_attempt_at = COALESCE(?, workflow_action_secret_retirements.next_attempt_at),
+             updated_at = sdp_iso_now()`
     )
     .bind(
       `wf_secret_retirement_${crypto.randomUUID()}`,
@@ -49,7 +56,9 @@ export async function insertWorkflowSecretRetirement(
       input.storageBackend,
       input.secretRef,
       input.secretVersionRef,
-      input.error
+      input.error,
+      input.nextAttemptAt ?? null,
+      input.nextAttemptAt ?? null
     )
     .run();
 }
@@ -61,11 +70,43 @@ export async function insertWorkflowSecretRetirement(
 export async function deleteWorkflowSecretRetirement(
   exec: Pick<AppDb, "prepare">,
   secretVersionRef: string
-): Promise<void> {
-  await exec
-    .prepare("DELETE FROM workflow_action_secret_retirements WHERE secret_version_ref = ?")
+): Promise<boolean> {
+  const row = await exec
+    .prepare(
+      `DELETE FROM workflow_action_secret_retirements
+        WHERE secret_version_ref = ?
+        RETURNING secret_version_ref`
+    )
     .bind(secretVersionRef)
-    .run();
+    .first<{ secret_version_ref: string }>();
+  return Boolean(row);
+}
+
+/**
+ * Cancel an obligation ONLY while no sweeper has taken it — the other half of
+ * `claimRetirement`.
+ *
+ * `attempt_count` counts sweeper attempts, so zero means no sweeper has ever
+ * acted on this version and the version is certainly still there. A non-zero
+ * count means one is already committed to destroying it (or has), and a
+ * transaction about to reference the version must not proceed: it would commit
+ * live rows pointing at a secret that is being destroyed out from under them.
+ *
+ * @returns Whether the obligation was cancelled. False means "do not commit".
+ */
+export async function cancelUnclaimedWorkflowSecretRetirement(
+  exec: Pick<AppDb, "prepare">,
+  secretVersionRef: string
+): Promise<boolean> {
+  const row = await exec
+    .prepare(
+      `DELETE FROM workflow_action_secret_retirements
+        WHERE secret_version_ref = ? AND attempt_count = 0
+        RETURNING secret_version_ref`
+    )
+    .bind(secretVersionRef)
+    .first<{ secret_version_ref: string }>();
+  return Boolean(row);
 }
 
 export function createPostgresWorkflowSecretRetirementsRepository(
@@ -108,17 +149,32 @@ export function createPostgresWorkflowSecretRetirementsRepository(
         .run();
     },
 
-    async rescheduleRetirement(params) {
-      await db
+    async claimRetirement(params) {
+      // Compare-and-swap on the attempt count that was read: a second sweeper,
+      // or a transaction that cancelled the obligation, makes this match zero
+      // rows rather than let two parties act on one version.
+      const row = await db
         .prepare(
           `UPDATE workflow_action_secret_retirements
              SET attempt_count = attempt_count + 1,
-                 last_error = ?,
                  next_attempt_at = ?,
                  updated_at = sdp_iso_now()
+           WHERE id = ? AND attempt_count = ?
+           RETURNING id`
+        )
+        .bind(params.nextAttemptAt, params.id, params.expectedAttemptCount)
+        .first<{ id: string }>();
+      return Boolean(row);
+    },
+
+    async recordRetirementFailure(params) {
+      await db
+        .prepare(
+          `UPDATE workflow_action_secret_retirements
+             SET last_error = ?, updated_at = sdp_iso_now()
            WHERE id = ?`
         )
-        .bind(params.error, params.nextAttemptAt, params.id)
+        .bind(params.error, params.id)
         .run();
     },
   };

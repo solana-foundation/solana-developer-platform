@@ -933,6 +933,7 @@ describe("CustodyRuntimeTargets", () => {
       write: vi.fn(),
       read,
       destroyVersion: vi.fn(),
+      predictFirstVersionRef: vi.fn(() => null),
     });
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
@@ -1205,6 +1206,7 @@ function mockStoredCredentialRead() {
     write: vi.fn(),
     read,
     destroyVersion: vi.fn(),
+    predictFirstVersionRef: vi.fn(() => null),
   });
   return read;
 }
