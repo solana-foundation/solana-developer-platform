@@ -6,9 +6,11 @@ import {
   getBase58Codec,
   getBase64Codec,
   getBase64EncodedWireTransaction,
+  getSignatureFromTransaction,
   getTransactionDecoder,
   partiallySignTransaction,
 } from "@solana/kit";
+import { createIdempotentTransactionSubmitter } from "./kora-surfpool-submission.mjs";
 
 const host = process.env.KORA_SHIM_HOST ?? "127.0.0.1";
 const port = Number.parseInt(process.env.KORA_SHIM_PORT ?? "8080", 10);
@@ -38,6 +40,13 @@ const keyPair = await createKeyPairFromBytes(secretKey);
 const signerAddress = base58.decode(
   new Uint8Array(await crypto.subtle.exportKey("raw", keyPair.publicKey))
 );
+const submitTransaction = createIdempotentTransactionSubmitter({
+  rpc: solanaRpc,
+  sendTimeoutMs: sendTransactionTimeoutMs,
+  resubmissionTimeoutMs,
+  statusWaitMs: sendTransactionStatusWaitMs,
+  statusPollMs: sendTransactionStatusPollMs,
+});
 
 const server = http.createServer(async (request, response) => {
   let requestId = 1;
@@ -107,72 +116,24 @@ async function handleRpc(method, params) {
         signer_pubkey: signerAddress,
       };
     case "signTransaction": {
-      const signedTransaction = await signTransaction(params.transaction);
+      const { encodedTransaction } = await signTransaction(params.transaction);
       return {
-        signed_transaction: signedTransaction,
+        signed_transaction: encodedTransaction,
         signer_pubkey: signerAddress,
       };
     }
     case "signAndSendTransaction": {
-      const signedTransaction = await signTransaction(params.transaction);
-      const signature = await sendTransactionWithRetry(signedTransaction);
+      const { encodedTransaction, signature } = await signTransaction(params.transaction);
+      await submitTransaction(encodedTransaction, signature);
       return {
         signature,
-        signed_transaction: signedTransaction,
+        signed_transaction: encodedTransaction,
         signer_pubkey: signerAddress,
       };
     }
     default:
       throw new Error(`Unsupported Kora shim method: ${method}`);
   }
-}
-
-async function sendTransactionWithRetry(signedTransaction) {
-  const params = [
-    signedTransaction,
-    {
-      encoding: "base64",
-      skipPreflight: true,
-      preflightCommitment: "confirmed",
-    },
-  ];
-  const signature = await solanaRpc("sendTransaction", params, {
-    timeoutMs: sendTransactionTimeoutMs,
-  });
-
-  if (await waitForTransactionStatus(signature)) {
-    return signature;
-  }
-
-  console.warn(
-    `Transaction ${signature} was not observed after ${sendTransactionStatusWaitMs}ms; resubmitting.`
-  );
-  try {
-    const resentSignature = await solanaRpc("sendTransaction", params, {
-      timeoutMs: resubmissionTimeoutMs,
-    });
-    if (resentSignature !== signature) {
-      throw new Error("Resubmitted transaction returned a different signature");
-    }
-  } catch (error) {
-    console.warn("Transaction resubmission did not complete; continuing confirmation.", error);
-  }
-
-  return signature;
-}
-
-async function waitForTransactionStatus(signature) {
-  const deadline = Date.now() + sendTransactionStatusWaitMs;
-
-  while (Date.now() < deadline) {
-    const statuses = await solanaRpc("getSignatureStatuses", [[signature]]);
-    if (statuses?.value?.[0]) {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, sendTransactionStatusPollMs));
-  }
-
-  return false;
 }
 
 async function signTransaction(base64Transaction) {
@@ -182,7 +143,10 @@ async function signTransaction(base64Transaction) {
   const transactionBytes = base64.encode(base64Transaction);
   const transaction = getTransactionDecoder().decode(transactionBytes);
   const signed = await partiallySignTransaction([keyPair], transaction);
-  return getBase64EncodedWireTransaction(signed);
+  return {
+    encodedTransaction: getBase64EncodedWireTransaction(signed),
+    signature: getSignatureFromTransaction(signed),
+  };
 }
 
 async function solanaRpc(method, params = [], options = {}) {
@@ -195,9 +159,15 @@ async function solanaRpc(method, params = [], options = {}) {
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     signal,
   });
+  if (!response.ok) {
+    throw new Error(`Solana RPC ${method} returned HTTP ${response.status}`);
+  }
   const payload = await response.json();
   if (payload.error) {
-    throw new Error(payload.error.message ?? `Solana RPC ${method} failed`);
+    const error = new Error(payload.error.message ?? `Solana RPC ${method} failed`);
+    error.code = payload.error.code;
+    error.data = payload.error.data;
+    throw error;
   }
   return payload.result;
 }
@@ -230,13 +200,14 @@ function getConfig() {
       allowed_spl_paid_tokens: [],
       allowed_tokens: ["So11111111111111111111111111111111111111112"],
       disallowed_accounts: [],
-      // Mirror Kora's complete fee-payer policy shape. Empty or partial policy
-      // objects are intentionally treated as unsafe by managed admission.
+      // Mirror the deployed devnet policy, including the narrowly enabled
+      // system operations used to fund token-deploy rent. Empty or partial
+      // policy objects are intentionally treated as unsafe by admission.
       fee_payer_policy: {
         system: {
-          allow_transfer: false,
+          allow_transfer: true,
           allow_assign: false,
-          allow_create_account: false,
+          allow_create_account: true,
           allow_allocate: false,
           nonce: {
             allow_initialize: false,
@@ -274,7 +245,7 @@ function getConfig() {
           allow_thaw_account: false,
         },
       },
-      max_allowed_lamports: 10_000_000,
+      max_allowed_lamports: 9_900_000,
       max_signatures: 10,
       price: { type: "free" },
       price_source: "Mock",
