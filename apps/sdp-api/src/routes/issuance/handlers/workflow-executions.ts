@@ -5,6 +5,7 @@ import { notFound } from "@/lib/errors";
 import { parsePagination } from "@/lib/query";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
+import { notifyApprovalDecided } from "@/services/notifications";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
 import { assertWorkflowActionPermitted } from "./workflow-authz";
@@ -151,6 +152,7 @@ export const approveWorkflowExecution = async (c: AppContext) => {
   }
 
   await auditDecision(c, "workflow_execution_approved", execution);
+  notifyApprovalDecided(c, { execution, decision: "approved", decidedBy });
   return success(c, { execution: toExecutionResponse(execution) });
 };
 
@@ -190,5 +192,7 @@ export const cancelWorkflowExecution = async (c: AppContext) => {
   }
 
   await auditDecision(c, "workflow_execution_rejected", execution);
+  // Retry is deliberately NOT notified — an operational re-run, not a decision.
+  notifyApprovalDecided(c, { execution, decision: "rejected", decidedBy });
   return success(c, { execution: toExecutionResponse(execution) });
 };

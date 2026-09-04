@@ -53,6 +53,12 @@ export interface NotificationsRepository {
   createMany(inputs: CreateNotificationInput[]): Promise<number>;
   listForUser(params: ListNotificationsInput): Promise<{ rows: NotificationRow[]; total: number }>;
   countUnread(params: { organizationId: string; userId: string }): Promise<number>;
+  // Per-user unread counts for a fan-out's recipients in one query — feeds the
+  // realtime nudge payloads. Users with zero unread are present with 0.
+  countUnreadForUsers(params: {
+    organizationId: string;
+    userIds: string[];
+  }): Promise<Map<string, number>>;
   // Mark one notification read; scoped to (org, user) so a user can only touch their
   // own. Returns false when no matching row exists.
   markRead(params: {

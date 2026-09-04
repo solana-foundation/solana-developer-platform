@@ -13,6 +13,7 @@ export * from "./earn";
 export * from "./generated/ramp.generated";
 export * from "./kamino-programs";
 export * from "./kyc";
+export * from "./notifications";
 export * from "./organizations";
 export * from "./pagination";
 export * from "./payment-rails";

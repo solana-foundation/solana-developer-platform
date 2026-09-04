@@ -26,6 +26,7 @@ import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
+import { notifyMemberJoined, notifyMemberRemoved } from "@/services/notifications";
 import { ProjectService } from "@/services/project.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
@@ -415,6 +416,12 @@ async function upsertVerifiedMembership(
       );
   }
 
+  if (existing?.status !== "active") {
+    // Guarded on not-already-active so Clerk role updates don't re-fire; the (org, user)
+    // dedupe key also collapses this with the token-link acceptance path's event.
+    notifyMemberJoined(c, { organizationId, userId: data.userId, email, role });
+  }
+
   const projectService = new ProjectService(getDb(c.env));
   await Promise.all([
     projectService.findOrCreateDefault(organizationId, "sandbox", data.userId),
@@ -458,11 +465,13 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     return;
   }
 
-  await getDb(c.env)
+  // Transition-guarded: an API-path removal already flipped this row (and notified),
+  // so its Clerk sync-back — and any webhook redelivery — updates 0 rows here.
+  const transitioned = await getDb(c.env)
     .prepare(
       `UPDATE organization_members
        SET status = 'removed'
-       WHERE organization_id = ? AND user_id = ?`
+       WHERE organization_id = ? AND user_id = ? AND status != 'removed'`
     )
     .bind(mapping.organization_id, identity.user_id)
     .run();
@@ -473,6 +482,18 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     .catch((error) =>
       getLogger().error({ error }, "Failed to revoke sessions after membership deletion")
     );
+
+  // Only the path that performed the transition notifies, so a removal driven through
+  // our API never double-fires from here. When the removal originates in the Clerk
+  // dashboard there is no SDP actor to exclude — accepted: nobody self-notifies since
+  // the acting admin isn't an SDP request identity on that path at all.
+  if (transitioned > 0) {
+    notifyMemberRemoved(c, {
+      organizationId: mapping.organization_id,
+      removedUserId: identity.user_id,
+      email: await resolveMemberEmail(c, identity.user_id),
+    });
+  }
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {

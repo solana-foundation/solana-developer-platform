@@ -16,6 +16,7 @@ import type { CounterpartyRow } from "@/db/repositories/counterparty.repository"
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { notifyRampSettled } from "@/services/notifications";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import {
   emitKycApprovedForClearedEnrollments,
@@ -197,19 +198,23 @@ async function handleAccountCredited(
 
   // Workflow trigger seam: this on-ramp settled (Mural credit path bypasses
   // applyRampSettlementEvent, so it emits here directly).
+  const settled = {
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    direction: "onramp" as const,
+    transferId: transfer.id,
+    provider: transfer.provider,
+    counterpartyId: transfer.counterparty_id,
+    amount: String(event.tokenAmount),
+    fiatCurrency: transfer.fiat_currency,
+    cryptoToken: transfer.token,
+  };
+  // Rules are project-scoped; a project-less transfer still notifies admins below.
   if (transfer.project_id) {
-    emitRampSettled(c.env, {
-      organizationId: transfer.organization_id,
-      projectId: transfer.project_id,
-      direction: "onramp",
-      transferId: transfer.id,
-      provider: transfer.provider,
-      counterpartyId: transfer.counterparty_id,
-      amount: String(event.tokenAmount),
-      fiatCurrency: transfer.fiat_currency,
-      cryptoToken: transfer.token,
-    });
+    emitRampSettled(c.env, { ...settled, projectId: transfer.project_id });
   }
+  // Admin notification + counterparty settlement receipt (idempotent on transferId).
+  notifyRampSettled(c, settled);
 }
 
 async function handleOrganizationLifecycleEvent(

@@ -43,8 +43,6 @@ type DashboardTopBarProps = {
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
   alignTitleWithTabs?: boolean;
-  // Notifications ship with the asset-profiles feature (its only producer today).
-  showNotifications?: boolean;
 };
 
 export function HeaderBackAction({
@@ -178,14 +176,13 @@ export function DashboardTopBar({
   topBarLeadingContent,
   hasHeaderTabs = false,
   alignTitleWithTabs = hasHeaderTabs,
-  showNotifications = false,
 }: DashboardTopBarProps) {
   const centersPageTitle =
     !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
-      {showNotifications ? <NotificationBell /> : null}
+      <NotificationBell />
     </>
   );
 

@@ -12,6 +12,7 @@ import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
+import { runRetentionPurgeIfDue } from "@/cron/retention-purge";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
 import { runWithCronRunEvent } from "@/cron/run-event";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
@@ -214,6 +215,16 @@ export async function runCronJob(): Promise<void> {
         )
       );
     }
+    // Daily retention purge behind a Redis date slot (the job itself ticks every five
+    // minutes). Non-fatal for the same reason as the secret sweep: housekeeping must
+    // never fail the reconciliation this job exists for — hence before the collected
+    // throw below, which is the tick's last act.
+    await runRetentionPurgeIfDue(env).catch((error: unknown) => {
+      getLogger().error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "reconciliation job: retention purge failed"
+      );
+    });
     throwCollected(failures, "reconciliation job had multiple tick failures");
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);

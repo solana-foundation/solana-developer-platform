@@ -889,7 +889,6 @@ export function DashboardShell({
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
                   alignTitleWithTabs={hasHeaderTabs && !isMarketsHeader}
-                  showNotifications={assetProfilesEnabled}
                 />
               </div>
 

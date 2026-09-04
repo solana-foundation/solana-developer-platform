@@ -87,11 +87,15 @@ export function createPostgresNotificationsRepository(db: AppDb): NotificationsR
       }
       const where = filters.join(" AND ");
 
-      // Unread first, then newest first (matches the bell inbox expectation).
+      // Strictly newest-first. Deliberately NOT unread-first: mark-read must not
+      // re-sort the list, because the bell pages by offset — a leading read-state sort
+      // key shifted rows between pages as the user read them, silently skipping
+      // notifications. Chronological order is also served by idx_notifications_user
+      // ((org, user, created_at DESC)); the partition sort was a full re-sort before.
       const rowsResult = await db
         .prepare(
           `SELECT * FROM notifications WHERE ${where}
-             ORDER BY (read_at IS NULL) DESC, created_at DESC LIMIT ? OFFSET ?`
+             ORDER BY created_at DESC LIMIT ? OFFSET ?`
         )
         .bind(...bindings, params.limit, params.offset)
         .all<Record<string, unknown>>();
@@ -113,6 +117,25 @@ export function createPostgresNotificationsRepository(db: AppDb): NotificationsR
         .bind(params.organizationId, params.userId)
         .first<{ total: number }>();
       return row?.total ?? 0;
+    },
+
+    async countUnreadForUsers(params) {
+      const counts = new Map<string, number>(params.userIds.map((userId) => [userId, 0]));
+      if (params.userIds.length === 0) {
+        return counts;
+      }
+      const result = await db
+        .prepare(
+          `SELECT user_id, COUNT(*)::int AS total FROM notifications
+             WHERE organization_id = ? AND user_id = ANY(?::text[]) AND read_at IS NULL
+             GROUP BY user_id`
+        )
+        .bind(params.organizationId, params.userIds)
+        .all<{ user_id: string; total: number }>();
+      for (const row of result.results) {
+        counts.set(row.user_id, row.total);
+      }
+      return counts;
     },
 
     async markRead(params) {

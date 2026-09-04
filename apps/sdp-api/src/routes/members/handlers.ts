@@ -12,6 +12,12 @@ import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
+import {
+  notifyMemberInvited,
+  notifyMemberInviteRevoked,
+  notifyMemberJoined,
+  notifyMemberRemoved,
+} from "@/services/notifications";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import type { acceptSchema, inviteSchema } from "./schemas";
@@ -553,6 +559,14 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     apiKeyId: apiKeyId || undefined,
   });
 
+  notifyMemberInvited(c, {
+    organizationId,
+    invitationId,
+    email: normalizedEmail,
+    role,
+    actorUserId: inviterUserId,
+  });
+
   const response = {
     invitation: {
       id: invitationId,
@@ -655,6 +669,11 @@ export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSche
     throw new AppError("FORBIDDEN", "This invitation was issued to a different email address");
   }
 
+  // Set only where this acceptance creates the membership, so the join notification
+  // fires once. Assigned inside the transaction body, which is re-runnable — the
+  // assignment is idempotent, and a rolled-back attempt grants nothing to announce.
+  let joinedUserId: string | null = null;
+
   // The conditional claim makes acceptance single-use under concurrency
   // (exactly one caller flips pending → accepted) and re-tests expiry in the
   // statement that consumes the row. It must commit together with the
@@ -662,6 +681,7 @@ export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSche
   // without granting anything.
   const claimInvitationAndGrantMembership = () =>
     getDb(c.env).transaction(async (tx) => {
+      joinedUserId = null;
       const claimed = await tx
         .prepare(
           `UPDATE invitations
@@ -741,6 +761,7 @@ export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSche
           normalizeOrganizationRole(invitation.role)
         )
         .run();
+      joinedUserId = actorUserId;
     });
 
   try {
@@ -774,6 +795,17 @@ export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSche
     organizationId: invitation.organization_id,
     userId: actorUserId,
   });
+
+  if (joinedUserId) {
+    // Keyed on (org, user) — the Clerk membership webhook fires the same event for the
+    // same join, and the shared key collapses the pair to one notification.
+    notifyMemberJoined(c, {
+      organizationId: invitation.organization_id,
+      userId: joinedUserId,
+      email: invitation.email,
+      role: normalizeOrganizationRole(invitation.role),
+    });
+  }
 
   return success(c, { success: true });
 };
@@ -907,6 +939,17 @@ export const removeMember = async (c: AppContext) => {
     organizationId,
     userId: userId || undefined,
     apiKeyId: apiKeyId || undefined,
+  });
+
+  const removedUser = await getDb(c.env)
+    .prepare("SELECT email FROM users WHERE id = ?")
+    .bind(member.user_id)
+    .first<{ email: string | null }>();
+  notifyMemberRemoved(c, {
+    organizationId,
+    removedUserId: member.user_id,
+    email: removedUser?.email ?? null,
+    actorUserId: userId,
   });
 
   return noContent(c);
@@ -1073,6 +1116,13 @@ export const revokeInvitation = async (c: AppContext) => {
     organizationId,
     userId: userId || undefined,
     apiKeyId: apiKeyId || undefined,
+  });
+
+  notifyMemberInviteRevoked(c, {
+    organizationId,
+    invitationId: invitation.id,
+    email: invitation.email,
+    actorUserId: userId,
   });
 
   return noContent(c);

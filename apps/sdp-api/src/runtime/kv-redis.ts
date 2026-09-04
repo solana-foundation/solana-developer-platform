@@ -103,11 +103,18 @@ function ensureClient(url: string): Promise<Redis> {
   return promise;
 }
 
-/** Shared low-level client for features that require atomic Redis scripts. */
+/**
+ * The shared (per-URL) command client for callers outside the KVStore façade: features
+ * needing atomic Redis scripts (sponsorship budget admission) and pub/sub PUBLISH —
+ * legal on a normal connection, since only SUBSCRIBE needs the dedicated subscriber
+ * client in pubsub-redis.ts. Fails fast on missing REDIS_URL.
+ */
 export function getRedisClient(env: Pick<Env, "REDIS_URL">): Promise<Redis> {
   const url = env.REDIS_URL?.trim();
   if (!url) {
-    throw new Error("REDIS_URL is required for sponsorship budget admission.");
+    throw new Error(
+      "REDIS_URL is required. Set it in the environment (e.g. redis://localhost:6379)."
+    );
   }
   return ensureClient(url);
 }

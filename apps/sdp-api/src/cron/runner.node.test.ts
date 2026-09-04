@@ -27,6 +27,7 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import { RETENTION_PURGE_CRON, runRetentionPurge } from "./retention-purge";
 import {
   REVOKED_API_KEY_CACHE_CRON,
   runRevokedApiKeyCacheReconciliation,
@@ -169,14 +170,15 @@ describe("startCron", () => {
   // "* * * * *"), so identity is asserted by firing the tick and seeing which
   // reconciler runs.
   //
-  // The secret-retirement sweep is registered last and behind no flag at all, so it is
-  // in every count below too — including the ones where asset profiles is off.
+  // The secret-retirement sweep and the retention purge are registered behind no flag
+  // at all, so both are in every count below too — including the ones where asset
+  // profiles is off.
   //
   // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
-  // proof-of-life no-ops, so every configuration schedules all 12 tasks. What a
+  // proof-of-life no-ops, so every configuration schedules all 13 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 12;
+  const ALL_TASKS = 13;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -204,7 +206,8 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[8][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
     expect(scheduleMock.mock.calls[9][0]).toBe(EARN_METRICS_REFRESH_CRON);
     expect(scheduleMock.mock.calls[10][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
-    expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+    expect(scheduleMock.mock.calls[11][0]).toBe(RETENTION_PURGE_CRON);
+    expect(scheduleMock.mock.calls[12][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {

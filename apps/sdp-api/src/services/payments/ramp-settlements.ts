@@ -12,6 +12,7 @@ import {
   isRampTransferType,
 } from "@/db/repositories";
 import { logEvent } from "@/runtime/money-path-events";
+import { notifyRampSettledFromEnv } from "@/services/notifications";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 
@@ -229,17 +230,24 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
   // only when the settled transition actually landed. A settled event that lost a
   // race to another terminal event must not fire settlement workflows for a
   // transfer whose persisted state is not settled.
-  if (applied && event.kind === "settled" && transfer.project_id) {
-    emitRampSettled(env, {
+  if (applied && event.kind === "settled") {
+    const settled = {
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
-      direction: transfer.type === "offramp" ? "offramp" : "onramp",
+      direction: (transfer.type === "offramp" ? "offramp" : "onramp") as "offramp" | "onramp",
       transferId: transfer.id,
       provider: transfer.provider,
       counterpartyId: transfer.counterparty_id,
       amount: event.receivedAmount ?? null,
       fiatCurrency: transfer.fiat_currency,
       cryptoToken: transfer.token,
-    });
+    };
+    if (transfer.project_id) {
+      emitRampSettled(env, { ...settled, projectId: transfer.project_id });
+    }
+    // Gated on the guarded claim above: a settled event that lost the row to a
+    // conflicting terminal event must not send the counterparty receipt — its
+    // delivery claim would block a corrective send under the same transferId.
+    await notifyRampSettledFromEnv(env, settled);
   }
 }

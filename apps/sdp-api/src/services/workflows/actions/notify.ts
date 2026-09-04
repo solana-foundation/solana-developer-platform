@@ -1,7 +1,19 @@
-import { getDb } from "@/db";
-import { createNotificationsRepository, type WorkflowExecutionRow } from "@/db/repositories";
-import { getLogger } from "@/runtime/logger";
-import { createTransactionalEmailService, isEmailConfigured } from "@/services/email";
+import type { WorkflowExecutionRow } from "@/db/repositories";
+import {
+  createNotificationDeliveriesRepository,
+  createNotificationPreferencesRepository,
+} from "@/db/repositories";
+import {
+  createTransactionalEmailService,
+  isEmailConfigured,
+  TransactionalEmailError,
+} from "@/services/email";
+import { renderNotificationEmail } from "@/services/email/templates/notification";
+import {
+  dispatchNotification,
+  findOrganizationMemberByEmail,
+  managePreferencesLink,
+} from "@/services/notifications";
 import type { Env } from "@/types/env";
 import { humanizeWorkflowKey } from "../labels";
 import { errorMessage, permanentFail, resolveParam, succeeded } from "./onchain";
@@ -9,85 +21,34 @@ import type { ActionContext, ActionExecutionResult } from "./types";
 
 type Audience = "admins" | "members";
 
-interface Recipient {
-  userId: string;
-  email: string | null;
-}
-
-// Role values are not canonical in storage: legacy rows carry Clerk-style
-// 'org:admin' / 'org:owner' / bare 'owner' alongside 'admin' (mirrors
-// normalizeOrganizationRole in @sdp/types).
-const ELEVATED_ROLES = ["admin", "owner", "org:admin", "org:owner"];
-
-// Resolve who to notify from the rule's `audience` param, live from membership at
-// execution time — no preferences table (per-user opt-in/out is the deferred full
-// feature). Membership is scoped to the execution's project when the org uses
-// project-level membership; members without a project_members row fall back to
-// org-level membership so orgs that don't use project membership still resolve.
-async function resolveAudience(
-  env: Env,
-  execution: WorkflowExecutionRow,
-  audience: Audience
-): Promise<Recipient[]> {
-  const roleFilter = audience === "members" ? "" : "AND om.role = ANY(?::text[])";
-  const bindings: Array<string | string[]> = [
-    execution.project_id,
-    execution.organization_id,
-    execution.project_id,
-  ];
-  if (roleFilter) {
-    bindings.push(ELEVATED_ROLES);
-  }
-  const result = await getDb(env)
-    .prepare(
-      `SELECT u.id AS user_id, u.email
-         FROM organization_members om
-         JOIN users u ON u.id = om.user_id
-         LEFT JOIN project_members pm
-           ON pm.user_id = om.user_id AND pm.project_id = ?
-        WHERE om.organization_id = ? AND om.status = 'active'
-          AND (pm.user_id IS NOT NULL
-               OR NOT EXISTS (SELECT 1 FROM project_members WHERE project_id = ?))
-          ${roleFilter}`
-    )
-    .bind(...bindings)
-    .all<{ user_id: string; email: string | null }>();
-  return result.results.map((row) => ({ userId: row.user_id, email: row.email }));
-}
-
 // 'owner' collapsed into 'admins' intentionally (both are elevated); the catalog/UI
 // only offer admins/members.
 function parseAudience(value: string | null): Audience {
   return value === "members" ? "members" : "admins";
 }
 
-// The `email` param addresses one mailbox directly, with an operator-controlled subject
-// and body, from the org's verified sending domain — i.e. exactly the shape of an open
-// relay. Restricting delivery to addresses that already belong to an active member of
-// this organization keeps the escape hatch (alerting a specific admin) without letting a
-// rule mail arbitrary third parties.
-async function isOrganizationMemberEmail(
-  env: Env,
-  organizationId: string,
-  email: string
-): Promise<boolean> {
-  const row = await getDb(env)
-    .prepare(
-      `SELECT 1 AS ok
-         FROM organization_members om
-         JOIN users u ON u.id = om.user_id
-        WHERE om.organization_id = ? AND om.status = 'active'
-          AND LOWER(u.email) = LOWER(?)
-        LIMIT 1`
-    )
-    .bind(organizationId, email)
-    .first<{ ok: number }>();
-  return Boolean(row);
+// Retry only what a retry can fix. Typed classification — never regex the message
+// string: transport errors routinely embed 4xx-looking substrings (`ECONNREFUSED
+// 10.0.0.5:465`), and config errors carry fixed English text that no pattern can
+// reliably separate from provider rejections. Exported for its unit test.
+export function isPermanentEmailError(error: unknown): boolean {
+  if (!(error instanceof TransactionalEmailError)) {
+    // Unknown shape (network, DNS, undici) — transport-flavored, worth the budget.
+    return false;
+  }
+  if (error.code === "misconfigured" || error.code === "invalid_message") {
+    return true;
+  }
+  // Provider 4xx = rejected payload/recipient, except 429 which is pure backpressure.
+  return (
+    error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 429
+  );
 }
 
 // notify: deliver an in-app notification (and, when email is configured, an email) to a
-// per-rule audience. In-app is the durable channel and always works; email is a
-// best-effort add-on. A specific `email` param targets one external address (email only).
+// per-rule audience via the shared dispatcher — per-user preferences apply to both
+// channels. In-app is the durable channel; email is a best-effort add-on. A specific
+// `email` param targets one mailbox directly (email only, still org-member-guarded).
 export async function runNotify(
   env: Env,
   execution: WorkflowExecutionRow,
@@ -102,85 +63,118 @@ export async function runNotify(
     resolveParam(action, "message") ??
     `A ${triggerLabel} event triggered an automation on this asset.`;
 
-  // Targeting one specific mailbox (no in-app row — there's no user to attach it to).
-  const specificEmail = resolveParam(action, "email");
+  // Targeting one specific mailbox (no in-app row — the row belongs to the inbox, and
+  // this branch is about reaching an address). Trimmed: the member lookup compares
+  // exactly, and a rule author's stray padding must not read as "not an org member".
+  const specificEmail = resolveParam(action, "email")?.trim();
   if (specificEmail) {
     if (!isEmailConfigured(env)) {
       return permanentFail("EMAIL_NOT_CONFIGURED");
     }
-    if (!(await isOrganizationMemberEmail(env, execution.organization_id, specificEmail))) {
+    // Anti-open-relay guard: the address must belong to an active member of this org.
+    const member = await findOrganizationMemberByEmail(
+      env,
+      execution.organization_id,
+      specificEmail
+    );
+    if (!member) {
       return permanentFail("EMAIL_NOT_ORG_MEMBER");
     }
+    // The mailbox owner's email-channel preference applies here too — an opted-out
+    // member staying unmailed is the rule working, not a failure.
+    const emailDisabled = await createNotificationPreferencesRepository(env).listDisabledUserIds({
+      organizationId: execution.organization_id,
+      category: "workflows",
+      channel: "email",
+      userIds: [member.userId],
+    });
+    if (emailDisabled.has(member.userId)) {
+      return succeeded({ emailedTo: 0, skippedByPreference: true });
+    }
+
+    // Delivery claim: a manual retry of this execution must not re-send the email.
+    const deliveries = createNotificationDeliveriesRepository(env);
+    const claimId = await deliveries.claim({
+      organizationId: execution.organization_id,
+      userId: member.userId,
+      channel: "email",
+      recipient: specificEmail,
+      dedupeKey: `${execution.id}:email:${specificEmail.toLowerCase()}`,
+    });
+    if (!claimId) {
+      return succeeded({ emailedTo: 0, alreadyDelivered: true });
+    }
+    let delivery: { messageId: string | null };
     try {
-      await createTransactionalEmailService(env).send({
+      const { html, text } = await renderNotificationEmail({
+        title,
+        body,
+        managePreferencesUrl: managePreferencesLink(env),
+      });
+      delivery = await createTransactionalEmailService(env).send({
         to: [specificEmail],
         subject: title,
-        text: body,
+        html,
+        text,
       });
-      return succeeded({ emailedTo: 1 });
     } catch (error) {
       // A rejected address or a malformed payload won't fix itself; only transport
-      // failures deserve the retry budget.
+      // failures deserve the retry budget. The failed claim is reclaimable, so a retry
+      // re-attempts the send.
       const message = errorMessage(error);
-      return /\b4\d\d\b|invalid|rejected/i.test(message)
+      await deliveries.markFailed({ id: claimId, error: message }).catch(() => undefined);
+      return isPermanentEmailError(error)
         ? permanentFail(message)
         : { status: "failed", retryable: true, result: {}, error: message };
     }
+    // The mail is delivered; a markSent failure must not mark the claim `failed` — the
+    // engine would classify it retryable, reclaim, and send a duplicate. Left
+    // `pending`, the claim keeps blocking re-sends.
+    await deliveries
+      .markSent({ id: claimId, providerMessageId: delivery.messageId })
+      .catch(() => undefined);
+    return succeeded({ emailedTo: 1 });
   }
 
-  const recipients = await resolveAudience(
-    env,
-    execution,
-    parseAudience(resolveParam(action, "audience"))
-  );
-  if (recipients.length === 0) {
+  // Audience fan-out through the shared dispatcher: in-app rows dedupe on the execution
+  // id, email sends sit behind delivery claims, per-user preferences filter both
+  // channels, and recipients get a realtime nudge.
+  const result = await dispatchNotification(env, {
+    organizationId: execution.organization_id,
+    projectId: execution.project_id,
+    type: "workflow_execution",
+    // Bare execution id (no type prefix) so rows shipped before the dispatcher existed
+    // keep their dedupe keys. Collision-safe only because execution ids are
+    // `workflow_execution_<uuid>` — the id format carries what the prefix convention
+    // does elsewhere.
+    eventKey: execution.id,
+    title,
+    body,
+    resourceType: "token",
+    resourceId: execution.token_id,
+    params: {
+      triggerType: execution.trigger_type,
+      actionType: execution.action_type,
+      tokenId: execution.token_id,
+      workflowId: execution.workflow_id,
+      // True when the rule author wrote their own title — the client then renders it
+      // verbatim instead of its localized template.
+      customTitle: Boolean(resolveParam(action, "title")),
+    },
+    audience: parseAudience(resolveParam(action, "audience")),
+  });
+
+  if (result.error) {
+    // The pipeline itself broke (DB/render) — that's transient, not a config gap.
+    return { status: "failed", retryable: true, result: {}, error: result.error };
+  }
+  if (result.resolved === 0) {
     // A rule that notifies nobody is a config gap worth surfacing, not a silent success.
     return permanentFail("NO_RECIPIENTS_RESOLVED");
   }
-
-  // One insert round trip; the execution-id dedupe key makes engine/manual retries no-op
-  // instead of duplicating every recipient's notification.
-  const inserted = await createNotificationsRepository(env).createMany(
-    recipients.map((recipient) => ({
-      organizationId: execution.organization_id,
-      userId: recipient.userId,
-      type: "workflow_execution",
-      title,
-      body,
-      resourceType: "token",
-      resourceId: execution.token_id,
-      params: {
-        triggerType: execution.trigger_type,
-        actionType: execution.action_type,
-        tokenId: execution.token_id,
-        workflowId: execution.workflow_id,
-        // True when the rule author wrote their own title — the client then renders it
-        // verbatim instead of its localized template.
-        customTitle: Boolean(resolveParam(action, "title")),
-      },
-      dedupeKey: `${execution.id}:${recipient.userId}`,
-    }))
-  );
-
-  // Best-effort email fan-out (does not fail the action — the in-app rows are the
-  // truth). Sent per-recipient so addresses are never disclosed across recipients.
-  let emailed = 0;
-  if (isEmailConfigured(env)) {
-    const emailService = createTransactionalEmailService(env);
-    const emails = recipients.map((r) => r.email).filter((e): e is string => Boolean(e));
-    const sends = await Promise.allSettled(
-      emails.map((to) => emailService.send({ to: [to], subject: title, text: body }))
-    );
-    emailed = sends.filter((s) => s.status === "fulfilled").length;
-    for (const send of sends) {
-      if (send.status === "rejected") {
-        getLogger().error(
-          { error: errorMessage(send.reason) },
-          "workflow notify: email send failed"
-        );
-      }
-    }
-  }
-
-  return succeeded({ notified: recipients.length, inserted, emailed });
+  return succeeded({
+    notified: result.resolved,
+    inserted: result.inserted,
+    emailed: result.emailed,
+  });
 }

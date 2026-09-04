@@ -3,9 +3,16 @@ import * as dbClient from "@/db/client";
 import type { BackgroundRunner } from "./background";
 import * as kvRedis from "./kv-redis";
 import { shutdown } from "./shutdown-node";
+import { registerSseStream } from "./sse-registry";
 
 vi.mock("./kv-redis", () => ({
   closeAllRedisClients: vi.fn(async () => {}),
+  // pubsub-redis (imported via shutdown-node) pulls the shared client getter.
+  getRedisClient: vi.fn(),
+}));
+
+vi.mock("./pubsub-redis", () => ({
+  closeAllSubscribers: vi.fn(async () => {}),
 }));
 
 vi.mock("@/db/client", async (importOriginal) => {
@@ -95,6 +102,28 @@ describe("shutdown", () => {
     await expect(
       shutdown({ server: makeServer(), cron: null, bg: makeBg(), log: () => {} })
     ).resolves.toBeUndefined();
+  });
+
+  it("releases open SSE streams before awaiting server.close", async () => {
+    // An open SSE stream is an in-flight request: server.close() only resolves once the
+    // stream's finish callback runs, so the drain must come first or shutdown hangs
+    // into the watchdog. Simulated by a close() that stays pending until released.
+    let released = false;
+    const unregister = registerSseStream(() => {
+      released = true;
+    });
+    try {
+      const server = makeServer((cb) => {
+        expect(released).toBe(true);
+        cb();
+      });
+      await expect(
+        shutdown({ server, cron: null, bg: makeBg(), log: () => {} })
+      ).resolves.toBeUndefined();
+      expect(released).toBe(true);
+    } finally {
+      unregister();
+    }
   });
 
   it("rejects when server.close reports an error", async () => {

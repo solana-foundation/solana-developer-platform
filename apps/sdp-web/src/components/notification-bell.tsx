@@ -1,23 +1,26 @@
 "use client";
 
-import { Bell, CheckCheck, Loader2, type LucideIcon, Zap } from "lucide-react";
-import { useRouter } from "next/navigation";
+import type { NotificationDto } from "@sdp/types";
+import {
+  BadgeCheck,
+  Banknote,
+  Bell,
+  CheckCheck,
+  Loader2,
+  type LucideIcon,
+  ShieldCheck,
+  Users,
+  Zap,
+} from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useInboxStream } from "./use-inbox-stream";
 
-interface NotificationItem {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  resource_type: string | null;
-  resource_id: string | null;
-  params: Record<string, unknown> | null;
-  read_at: string | null;
-  created_at: string;
-}
+// The API's wire shape (raw snake_case rows) — shared with sdp-api via @sdp/types.
+type NotificationItem = NotificationDto;
 
 const POLL_INTERVAL_MS = 60_000;
 const PAGE_SIZE = 15;
@@ -42,36 +45,81 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T | null> {
   }
 }
 
-// Icon tile per notification type (workflow automations today; falls back to the bell).
+// Icon tile per notification type (falls back to the bell for unknown types).
 const TYPE_ICON: Record<string, LucideIcon> = {
   workflow_execution: Zap,
+  workflow_run_failed: Zap,
+  workflow_approval_requested: ShieldCheck,
+  workflow_approval_decided: ShieldCheck,
+  member_invited: Users,
+  member_joined: Users,
+  member_invite_revoked: Users,
+  member_removed: Users,
+  payment_settled: Banknote,
+  recurring_payment_failed: Banknote,
+  kyc_approved: BadgeCheck,
+  kyc_rejected: BadgeCheck,
 };
+
+// Status tint per type — color is reserved for exactly this. Failures and successes
+// share icons with their neutral siblings (Banknote, BadgeCheck), so without the tint
+// "Payment settled" and "Recurring payment failed" were byte-identical at a glance.
+const TYPE_TILE_CLASS: Record<string, string> = {
+  workflow_run_failed: "bg-error-bg text-error",
+  recurring_payment_failed: "bg-error-bg text-error",
+  kyc_rejected: "bg-error-bg text-error",
+  payment_settled: "bg-success-bg text-success",
+  kyc_approved: "bg-success-bg text-success",
+};
+const NEUTRAL_TILE_CLASS = "bg-fill-subtle text-secondary";
 
 // Humanize any snake_case system key left in server-composed text (e.g. an older row
 // that stored `token_operation_completed`): "token_operation_completed" → "Token
 // operation completed". A display-time safety net so no raw event key ever reaches a
-// reader, regardless of when/where the row was written.
+// reader, regardless of when/where the row was written. The lookarounds skip tokens
+// touching '@' or '.', so email addresses survive — member_invited bodies ARE an
+// address, and "john_doe@acme.com" must not become "John doe@acme.com".
 function humanizeKeys(text: string): string {
-  return text.replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g, (key) => {
+  return text.replace(/(?<![\w@.])[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?![\w@.])/g, (key) => {
     const spaced = key.replace(/_/g, " ");
     return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`.replace(/\bkyc\b/gi, "KYC");
   });
 }
 
-// Deep-link a notification to its subject (today: a token's asset profile; workflow
-// notifications land directly on the Workflows tab).
+// Deep-link a notification to its subject. Keep this map in lockstep with the API's
+// email-CTA map (apps/sdp-api/src/services/notifications/resource-links.ts). Unknown
+// resource types render without a link.
 function hrefFor(item: NotificationItem): string | null {
-  if (item.resource_type === "token" && item.resource_id) {
-    const base = `/dashboard/issuance/${item.resource_id}`;
-    return item.type === "workflow_execution" ? `${base}?tab=workflows` : base;
+  switch (item.resource_type) {
+    case "token": {
+      if (!item.resource_id) return null;
+      const base = `/dashboard/issuance/${item.resource_id}`;
+      return item.type.startsWith("workflow_") ? `${base}?tab=workflows` : base;
+    }
+    case "member":
+    case "invitation":
+      return "/dashboard/members";
+    case "payment_transfer":
+      // The transfer list lives on the transactions sub-page, not the payments hub.
+      return "/dashboard/payments/transactions";
+    case "recurring_payment":
+      return item.resource_id
+        ? `/dashboard/payments/recurring/${item.resource_id}`
+        : "/dashboard/payments/recurring";
+    case "counterparty":
+      return item.resource_id
+        ? `/dashboard/payments/counterparty/${item.resource_id}`
+        : "/dashboard/payments/counterparty";
+    default:
+      // Includes kyc_wallet (no detail route exists) — such rows render without link
+      // affordance and click-to-mark-read only.
+      return null;
   }
-  return null;
 }
 
 export function NotificationBell() {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
   const titleId = useId();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -81,8 +129,18 @@ export function NotificationBell() {
   const [loadError, setLoadError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   // Drops out-of-order responses (rapid open/close, slow network).
   const listGeneration = useRef(0);
+  // Deepest page currently loaded — the next "Show more" fetches pageRef + 1. Derived
+  // page math (items.length / PAGE_SIZE) broke as soon as merges deduped a row.
+  const pageRef = useRef(1);
+  // Ordering guard for nudges: two concurrent dispatches can publish counts read
+  // around each other's inserts, so a later frame may carry the older count.
+  const lastNudgeTs = useRef("");
+  // Right after a local optimistic mutation, an in-flight nudge's count predates the
+  // mark-read and would resurrect the badge; refreshCount reconciles instead.
+  const suppressNudgeUntil = useRef(0);
 
   // Translate with a safe fallback — a missing key must degrade, not crash the shell.
   const safeT = useCallback(
@@ -96,11 +154,16 @@ export function NotificationBell() {
     [t]
   );
 
-  // Server-composed title unless the row carries structured params without a custom
-  // title — then render a localized template so French users don't read English.
+  // Server-composed title unless the row's type has a localized template — then render
+  // that so French users don't read English. workflow_execution keeps its trigger-label
+  // interpolation (and honors rule-authored custom titles); every other known type maps
+  // straight to Shared.notifications.types.<type>, with the server title as fallback.
   const displayTitle = (item: NotificationItem): string => {
     const params = item.params ?? {};
-    if (item.type === "workflow_execution" && !params.customTitle) {
+    if (item.type === "workflow_execution") {
+      if (params.customTitle) {
+        return item.title;
+      }
       const triggerType = typeof params.triggerType === "string" ? params.triggerType : null;
       if (triggerType) {
         const trigger = safeT(
@@ -110,8 +173,21 @@ export function NotificationBell() {
         );
         return safeT("Shared.notifications.types.workflow_execution", { trigger }, item.title);
       }
+      return item.title;
     }
-    return item.title;
+    if (item.type === "workflow_approval_decided") {
+      // The generic key says "decided", flattening the one fact the reader cares
+      // about; the producer records it in params.decision — use the variant keys.
+      const decision = params.decision;
+      if (decision === "approved" || decision === "rejected") {
+        return safeT(
+          `Shared.notifications.types.workflow_approval_decided_${decision}`,
+          undefined,
+          item.title
+        );
+      }
+    }
+    return safeT(`Shared.notifications.types.${item.type}`, undefined, item.title);
   };
 
   const refreshCount = useCallback(async () => {
@@ -121,7 +197,10 @@ export function NotificationBell() {
     }
   }, []);
 
-  const loadList = useCallback(async (page: number) => {
+  // merge=true (nudge refresh of an open panel): fold page 1 into the loaded list —
+  // prepend unseen rows, refresh overlapping ones in place — instead of resetting a
+  // user who has paged deeper back to 15 rows and yanking their scroll position.
+  const loadList = useCallback(async (page: number, merge = false) => {
     const generation = ++listGeneration.current;
     setLoading(true);
     setLoadError(false);
@@ -136,9 +215,74 @@ export function NotificationBell() {
       setLoading(false);
       return;
     }
-    setItems((prev) => (page === 1 ? data.notifications : [...prev, ...data.notifications]));
+    setItems((prev) => {
+      if (page === 1 && !merge) {
+        return data.notifications;
+      }
+      // Dedupe by id in both directions: rows inserted after page 1 shift offsets, so
+      // an appended page can overlap the loaded tail (the old derived-page math turned
+      // that into duplicate React keys).
+      const incoming = data.notifications;
+      if (page === 1) {
+        const byId = new Map(incoming.map((n) => [n.id, n]));
+        const known = new Set(prev.map((n) => n.id));
+        const refreshed = prev.map((n) => byId.get(n.id) ?? n);
+        return [...incoming.filter((n) => !known.has(n.id)), ...refreshed];
+      }
+      const known = new Set(prev.map((n) => n.id));
+      return [...prev, ...incoming.filter((n) => !known.has(n.id))];
+    });
+    if (!merge) {
+      pageRef.current = page;
+    }
     setTotal(data.total);
     setLoading(false);
+  }, []);
+
+  // Realtime nudges over SSE: the badge updates instantly from the pushed count, and
+  // an open panel folds in fresh rows. Purely additive — the polling below stays as
+  // the fallback whenever the stream is down.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const nudgeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useInboxStream(
+    useCallback(
+      (nudge) => {
+        // Ordering guard: drop frames older than the last applied one.
+        if (nudge.ts && nudge.ts < lastNudgeTs.current) {
+          return;
+        }
+        if (nudge.ts) {
+          lastNudgeTs.current = nudge.ts;
+        }
+        // The badge write yields to a fresh local mutation (its count predates it);
+        // the list refresh below is unaffected — rows carry their own read state.
+        if (Date.now() >= suppressNudgeUntil.current) {
+          setUnread(nudge.unread);
+        }
+        if (openRef.current) {
+          // Trailing debounce: a burst of dispatches (batch settlement, failing cron
+          // tick) must coalesce into one refetch, not one per nudge.
+          if (nudgeRefreshTimer.current) {
+            clearTimeout(nudgeRefreshTimer.current);
+          }
+          nudgeRefreshTimer.current = setTimeout(() => {
+            nudgeRefreshTimer.current = null;
+            if (openRef.current) {
+              void loadList(1, true);
+            }
+          }, 750);
+        }
+      },
+      [loadList]
+    )
+  );
+  useEffect(() => {
+    return () => {
+      if (nudgeRefreshTimer.current) {
+        clearTimeout(nudgeRefreshTimer.current);
+      }
+    };
   }, []);
 
   // Poll the unread count so the badge stays live without a socket. Hidden tabs skip
@@ -164,10 +308,13 @@ export function NotificationBell() {
     };
   }, [refreshCount]);
 
-  // Load the list (first page) when the panel opens.
+  // Load the list (first page) when the panel opens, and move focus into the dialog —
+  // without this a screen reader's cursor stays on the trigger and the open panel is
+  // never announced. close() restores focus.
   useEffect(() => {
     if (open) {
       void loadList(1);
+      panelRef.current?.focus();
     }
   }, [open, loadList]);
 
@@ -199,54 +346,65 @@ export function NotificationBell() {
     };
   }, [open, close]);
 
+  // Bounded POST — a wedged API must fail the mutation into rollback, not hang it.
+  const postWithTimeout = async (url: string) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { method: "POST", signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   const markRead = async (id: string) => {
-    const previousItems = items;
-    const previousUnread = unread;
+    suppressNudgeUntil.current = Date.now() + 2_000;
     setItems((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read_at: n.read_at ?? new Date().toISOString() } : n))
     );
     setUnread((prev) => Math.max(0, prev - 1));
     try {
-      const response = await fetch(`/api/dashboard/notifications/${encodeURIComponent(id)}/read`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      await postWithTimeout(`/api/dashboard/notifications/${encodeURIComponent(id)}/read`);
       // Server truth for the badge (the optimistic decrement can drift when more than
       // one page of unread rows exists).
       void refreshCount();
     } catch {
-      setItems(previousItems);
-      setUnread(previousUnread);
+      // Revert ONLY this row, functionally — a wholesale restore of a captured array
+      // would clobber whatever the stream merged in while the POST was in flight.
+      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read_at: null } : n)));
+      void refreshCount();
     }
   };
 
   const markAllRead = async () => {
-    const previousItems = items;
-    const previousUnread = unread;
-    setItems((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
+    suppressNudgeUntil.current = Date.now() + 2_000;
+    // One shared timestamp doubles as the marker for which rows THIS action touched,
+    // so the failure path can revert exactly those and nothing else.
+    const stampedAt = new Date().toISOString();
+    setItems((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: stampedAt })));
     setUnread(0);
     try {
-      const response = await fetch("/api/dashboard/notifications/read-all", { method: "POST" });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      await postWithTimeout("/api/dashboard/notifications/read-all");
       void refreshCount();
     } catch {
-      setItems(previousItems);
-      setUnread(previousUnread);
+      setItems((prev) => prev.map((n) => (n.read_at === stampedAt ? { ...n, read_at: null } : n)));
+      void refreshCount();
     }
   };
 
-  const onItemClick = async (item: NotificationItem) => {
+  // Rows with a destination render as real links (navigation belongs to next/link —
+  // middle-click, copy-link, and history all work); this handler only does the
+  // bookkeeping. It never awaits the mark-read POST: that's best-effort with its own
+  // timeout/rollback, and gating activation on it made a slow API feel like a dead row.
+  const onItemActivate = (item: NotificationItem) => {
     if (!item.read_at) {
-      await markRead(item.id);
+      void markRead(item.id);
     }
-    const href = hrefFor(item);
-    if (href) {
+    if (hrefFor(item)) {
       setOpen(false);
-      router.push(href);
     }
   };
 
@@ -268,23 +426,35 @@ export function NotificationBell() {
       >
         <Bell className="h-4.5 w-4.5" />
         {unread > 0 ? (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-info px-1 text-[10px] font-semibold text-white">
+          // bg-primary/text-on-primary flips with the theme; the old bg-info/text-white
+          // put white 10px text on LIGHT blue in dark mode (~1.7:1). A count isn't a
+          // status, so the neutral emphasis pair is also the token-correct choice.
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-on-primary">
             {unread > 99 ? "99+" : unread}
           </span>
         ) : null}
       </button>
+      {/* Realtime badge changes on an unfocused element are silent to assistive tech;
+          this polite live region announces them without stealing focus. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {unread > 0
+          ? safeT("Shared.notifications.ariaLabelUnread", { count: unread }, `${unread}`)
+          : ""}
+      </span>
 
       {open ? (
         <div
           role="dialog"
           aria-labelledby={titleId}
-          className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-border-default bg-surface-raised shadow-lg"
+          ref={panelRef}
+          tabIndex={-1}
+          className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-border-default bg-surface-raised outline-none"
         >
           <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
             <span id={titleId} className="text-sm font-semibold text-primary">
               {t("Shared.notifications.title")}
             </span>
-            {items.some((n) => !n.read_at) ? (
+            {unread > 0 ? (
               <button
                 type="button"
                 onClick={() => void markAllRead()}
@@ -303,8 +473,9 @@ export function NotificationBell() {
             locale={locale}
             t={t}
             displayTitle={displayTitle}
-            onItemClick={(item) => void onItemClick(item)}
-            onLoadPage={(page) => void loadList(page)}
+            onItemActivate={onItemActivate}
+            onRetryInitial={() => void loadList(1)}
+            onShowMore={() => void loadList(pageRef.current + 1)}
           />
         </div>
       ) : null}
@@ -320,11 +491,22 @@ function NotificationPanelBody(props: {
   locale: string;
   t: ReturnType<typeof useTranslations>;
   displayTitle: (item: NotificationItem) => string;
-  onItemClick: (item: NotificationItem) => void;
-  onLoadPage: (page: number) => void;
+  onItemActivate: (item: NotificationItem) => void;
+  onRetryInitial: () => void;
+  onShowMore: () => void;
 }) {
-  const { items, total, loading, loadError, locale, t, displayTitle, onItemClick, onLoadPage } =
-    props;
+  const {
+    items,
+    total,
+    loading,
+    loadError,
+    locale,
+    t,
+    displayTitle,
+    onItemActivate,
+    onRetryInitial,
+    onShowMore,
+  } = props;
 
   if (loading && items.length === 0) {
     return (
@@ -339,7 +521,7 @@ function NotificationPanelBody(props: {
         <p className="text-sm text-secondary">{t("Shared.notifications.error")}</p>
         <button
           type="button"
-          onClick={() => onLoadPage(1)}
+          onClick={onRetryInitial}
           className="mt-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
         >
           {t("Shared.notifications.retry")}
@@ -355,56 +537,97 @@ function NotificationPanelBody(props: {
     );
   }
   return (
-    <div className="max-h-96 overflow-y-auto">
+    // overflow-x-hidden is the backstop: the panel is a fixed 320px, so nothing in a
+    // row is ever allowed to scroll it sideways, whatever a future body interpolates.
+    <div className="max-h-96 overflow-y-auto overflow-x-hidden">
       <ul className="divide-y divide-border-subtle">
         {items.map((item) => {
           const TypeIcon = TYPE_ICON[item.type] ?? Bell;
           const unread = !item.read_at;
+          const href = hrefFor(item);
+          const content = (
+            <>
+              <span
+                className={`relative flex size-9 shrink-0 items-center justify-center rounded-lg ${TYPE_TILE_CLASS[item.type] ?? NEUTRAL_TILE_CLASS}`}
+                aria-hidden
+              >
+                <TypeIcon className="size-[18px]" />
+                {unread ? (
+                  <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-info ring-2 ring-surface-raised" />
+                ) : null}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span
+                  className={`block truncate text-sm ${unread ? "font-semibold text-primary" : "font-medium text-secondary"}`}
+                >
+                  {/* The dot is aria-hidden with the icon tile — read state needs a
+                      textual form too. */}
+                  {unread ? (
+                    <span className="sr-only">{t("Shared.notifications.unreadItem")} </span>
+                  ) : null}
+                  {humanizeKeys(displayTitle(item))}
+                </span>
+                {item.body ? (
+                  // Bodies quote raw identifiers (wallet addresses, provider ids) with
+                  // no break opportunity in them, which otherwise widens the row past
+                  // the panel and gives the list a horizontal scrollbar.
+                  <span className="mt-0.5 block break-words text-xs text-secondary">
+                    {humanizeKeys(item.body)}
+                  </span>
+                ) : null}
+                <span className="mt-0.5 block text-xs text-tertiary">
+                  {formatRelativeTime(item.created_at, locale)}
+                </span>
+              </span>
+            </>
+          );
           return (
             <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => onItemClick(item)}
-                className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
-              >
-                <span
-                  className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
-                  aria-hidden
+              {href ? (
+                // A real link, not a router.push button: middle-click/Cmd-click open a
+                // tab, the status bar previews the URL, copy-link works.
+                <Link
+                  href={href}
+                  onClick={() => onItemActivate(item)}
+                  className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
                 >
-                  <TypeIcon className="size-[18px]" />
-                  {unread ? (
-                    <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-info ring-2 ring-surface-raised" />
-                  ) : null}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={`block truncate text-sm ${unread ? "font-semibold text-primary" : "font-medium text-secondary"}`}
-                  >
-                    {humanizeKeys(displayTitle(item))}
-                  </span>
-                  {item.body ? (
-                    <span className="mt-0.5 block text-xs text-secondary">
-                      {humanizeKeys(item.body)}
-                    </span>
-                  ) : null}
-                  <span className="mt-0.5 block text-xs text-tertiary">
-                    {formatRelativeTime(item.created_at, locale)}
-                  </span>
-                </span>
-              </button>
+                  {content}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onItemActivate(item)}
+                  className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                >
+                  {content}
+                </button>
+              )}
             </li>
           );
         })}
       </ul>
-      {items.length < total ? (
+      {loadError ? (
+        // A failed "Show more" was previously silent (the empty-state branch above
+        // only renders with no items): say so inline, where the click happened.
+        <div className="flex items-center justify-center gap-2 border-t border-border-subtle px-4 py-2.5 text-xs text-secondary">
+          {t("Shared.notifications.error")}
+          <button
+            type="button"
+            onClick={onShowMore}
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            {t("Shared.notifications.retry")}
+          </button>
+        </div>
+      ) : items.length < total ? (
         <button
           type="button"
           disabled={loading}
-          onClick={() => onLoadPage(Math.floor(items.length / PAGE_SIZE) + 1)}
+          onClick={onShowMore}
           className="flex w-full items-center justify-center gap-2 border-t border-border-subtle px-4 py-2.5 text-xs font-medium text-secondary transition-colors hover:bg-fill-subtle hover:text-primary disabled:opacity-60"
         >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-          {t("Shared.notifications.showMore")}
+          {t("Shared.notifications.showMoreCount", { loaded: items.length, total })}
         </button>
       ) : null}
     </div>

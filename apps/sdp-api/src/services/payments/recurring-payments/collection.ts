@@ -40,6 +40,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
+import { notifyRecurringPaymentFailed } from "@/services/notifications";
 import {
   createTransferSignedSubmissionStore,
   isDefiniteSubmissionError,
@@ -639,6 +640,14 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     recurringPaymentId: input.recurringPaymentId,
     subscriptionId: input.attempt.subscription_id,
     dueAt: input.attempt.due_at,
+    attemptId: input.attempt.id,
+    error: message,
+  });
+  // Admin notification, one per failed attempt (idempotent on the attempt id).
+  await notifyRecurringPaymentFailed(input.env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
     attemptId: input.attempt.id,
     error: message,
   });
