@@ -309,6 +309,31 @@ function resolveDepositSubmission(
   };
 }
 
+type ExpiredFloorVerdict = "still_satisfiable" | "floor_exceeded" | "quote_unavailable" | "aborted";
+
+/**
+ * EXPIRY BACKSTOP (PRO-1691), the read half: the floor on screen came from a
+ * quote that aged past the TTL, so ask the vault again before sending it. The
+ * floor the user REVIEWED is what a passing verdict submits, never a weaker
+ * floor re-derived from the fresh rate (that would accept up to double the
+ * chosen tolerance).
+ */
+async function revalidateExpiredFloor(
+  strategyId: string,
+  amount: string,
+  floor: string,
+  signal: AbortSignal
+): Promise<ExpiredFloorVerdict> {
+  const fresh = await fetchEarnVaultDepositPreview({ strategyId, amount }, signal);
+  if (signal.aborted) return "aborted";
+  if (fresh.kind !== "quoted" || fresh.preview.blockingIssues.length > 0) {
+    return "quote_unavailable";
+  }
+  return compareUnsignedDecimals(fresh.preview.sharesOut, floor) === -1
+    ? "floor_exceeded"
+    : "still_satisfiable";
+}
+
 type Translation = ReturnType<typeof useTranslations>;
 
 function amountValidationMessage(
@@ -916,16 +941,13 @@ export function EarnVaultDepositModal({
     (slippagePolicy !== null && minSharesOut === undefined);
 
   /**
-   * EXPIRY BACKSTOP (PRO-1691). The quote hook re-quotes on its own, but
-   * timers throttle in background tabs, so the floor on screen can be older
-   * than the TTL at submit. A floor that fresh — or a HELD floor, which a
-   * replay must carry verbatim — passes straight through. An expired one is
-   * re-quoted first: the floor the user REVIEWED is submitted only once a
-   * fresh rate proves it still satisfiable — never a weaker floor re-derived
-   * from the fresh rate, which could accept up to double the chosen tolerance.
-   * A rate that moved beyond that floor stops the submission on THIS side of
-   * the API, through the same copy and control as a blown floor, and either
-   * way the displayed quote re-syncs. Returns whether to proceed.
+   * EXPIRY BACKSTOP (PRO-1691), the state half. The quote hook re-quotes on
+   * its own, but timers throttle in background tabs, so the floor on screen
+   * can be older than the TTL at submit. A fresh floor, or a HELD floor (a
+   * replay must carry it verbatim), passes straight through. An expired one is
+   * revalidated first; a rate that moved beyond it stops the submission on
+   * THIS side of the API, through the same copy and control as a blown floor,
+   * and either way the displayed quote re-syncs. Returns whether to proceed.
    */
   async function floorSafeToSubmit(
     controller: AbortController,
@@ -934,19 +956,13 @@ export function EarnVaultDepositModal({
     floor: string | null
   ): Promise<boolean> {
     if (heldFloor !== undefined || floor === null || !isExpiredQuote(quote)) return true;
-    const fresh = await fetchEarnVaultDepositPreview(
-      { strategyId: strategy.id, amount },
-      controller.signal
-    );
-    if (controller.signal.aborted) return false;
-    const usable = fresh.kind === "quoted" && fresh.preview.blockingIssues.length === 0;
-    if (usable && compareUnsignedDecimals(fresh.preview.sharesOut, floor) !== -1) {
-      return true;
-    }
-    if (usable) setSlippageOpen(true);
+    const verdict = await revalidateExpiredFloor(strategy.id, amount, floor, controller.signal);
+    if (verdict === "still_satisfiable") return true;
+    if (verdict === "aborted") return false;
+    if (verdict === "floor_exceeded") setSlippageOpen(true);
     setQuoteRefreshKey((refresh) => refresh + 1);
     setSubmitError(
-      usable
+      verdict === "floor_exceeded"
         ? t("DashboardEarn.deposit.vaultSlippageExceeded")
         : t("DashboardEarn.deposit.vaultQuoteUnavailable")
     );
