@@ -51,6 +51,7 @@ import {
 import { AppError, badRequest } from "@/lib/errors";
 import {
   buildPrivateChannelWithdrawalFingerprint,
+  isAbandonedReservation,
   resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
@@ -214,6 +215,40 @@ async function reserveWithdrawal(
   }
 }
 
+/**
+ * A replayed reservation whose original request died before the burn was
+ * broadcast (see `isAbandonedReservation`) is failed here so the client can
+ * retry under a new idempotency key instead of reading `pending` forever. The
+ * `pending` CAS means a still-live original wins the race and this write is a
+ * no-op.
+ */
+async function failAbandonedReservation(
+  env: Env,
+  repo: PrivateChannelWithdrawalRepository,
+  row: PrivateChannelWithdrawalRow
+) {
+  const failureReason =
+    "Withdrawal reservation was abandoned before broadcast; retry with a new idempotency key.";
+  const failed = await repo.updateWithdrawal({
+    id: row.id,
+    status: "failed",
+    failureReason,
+    expectedStatus: "pending",
+  });
+  if (failed) {
+    await emitWithdrawalEvent(
+      env,
+      failed,
+      PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
+      "failed",
+      {
+        failureReason,
+      }
+    );
+  }
+  return mapPrivateChannelWithdrawalRow(failed ?? row);
+}
+
 /** Create a withdrawal intent: reserve, check the balance, burn, confirm. */
 export async function createChannelWithdrawal(
   env: Env,
@@ -254,6 +289,9 @@ export async function createChannelWithdrawal(
   // spent is gone, so re-checking would reject the caller's own success.
   const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
   if (replay) {
+    if (isAbandonedReservation(replay)) {
+      return failAbandonedReservation(env, repo, replay);
+    }
     return mapPrivateChannelWithdrawalRow(replay);
   }
 
@@ -294,6 +332,9 @@ export async function createChannelWithdrawal(
     idempotencyKey: input.idempotencyKey,
   });
   if (replayed) {
+    if (isAbandonedReservation(created)) {
+      return failAbandonedReservation(env, repo, created);
+    }
     return mapPrivateChannelWithdrawalRow(created);
   }
 

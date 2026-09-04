@@ -547,6 +547,53 @@ describe("createChannelTransfer", () => {
     expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 
+  it("fails a replayed reservation the original request abandoned before broadcast", async () => {
+    // The original request dies between the reserving insert and the broadcast:
+    // the broadcast rejects and the settle write also fails, leaving the row
+    // `pending`. Its `updated_at` (2026-07-28 from the mock) is far older than
+    // the abandonment window by the time the retry arrives.
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC unreachable"));
+    vi.mocked(repo.updateTransfer).mockRejectedValueOnce(new Error("database unavailable"));
+    const stuck = await createChannelTransfer(TEST_ENV, makeInput());
+    expect(stuck).toMatchObject({ status: "pending" });
+
+    vi.mocked(solanaRpc.sendTransaction).mockClear();
+    const replayed = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(replayed).toMatchObject({
+      status: "failed",
+      failureReason:
+        "Transfer reservation was abandoned before broadcast; retry with a new idempotency key.",
+    });
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+    expect(transferEvents.emitTransferEvent).toHaveBeenLastCalledWith(
+      TEST_ENV,
+      expect.objectContaining({ status: "failed" }),
+      "transfer.transfer.failed",
+      "failed",
+      "usr_transfer_test"
+    );
+  });
+
+  it("returns a replayed pending row untouched while the original request is still live", async () => {
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC unreachable"));
+    vi.mocked(repo.updateTransfer).mockRejectedValueOnce(new Error("database unavailable"));
+    const stuck = await createChannelTransfer(TEST_ENV, makeInput());
+
+    // Same stuck row, but its last write is recent — an in-flight request may
+    // still own it, so the replay must not fail it out from under the original.
+    vi.mocked(repo.findTransferByIdempotency).mockResolvedValueOnce({
+      ...(await vi.mocked(repo.createTransfer).mock.results[0].value),
+      updated_at: new Date().toISOString(),
+    });
+    vi.mocked(solanaRpc.sendTransaction).mockClear();
+
+    const replayed = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(replayed).toMatchObject({ status: "pending", id: stuck.id });
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
   it("fails the request without sending when the pending row cannot be stored", async () => {
     vi.mocked(repo.createTransfer).mockResolvedValueOnce(null);
 

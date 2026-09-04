@@ -62,6 +62,25 @@ export async function resolveIdempotencyReplay<
   throw conflict("Idempotency key already used with different request payload");
 }
 
+/**
+ * A replayed row still `pending` this long after its last write was abandoned
+ * mid-flight: the process died between the reserving insert and the broadcast,
+ * and private channels have no reconciliation worker to recover it. Replaying
+ * such a row verbatim would pin the operation to `pending` forever, so callers
+ * fail it instead, freeing the client to retry under a new idempotency key. The
+ * window sits far above the broadcast + confirm budget (seconds) so a live
+ * request can never be failed out from under itself, and the callers' `pending`
+ * status CAS backstops that race regardless of the clock.
+ */
+const ABANDONED_RESERVATION_AFTER_MS = 10 * 60 * 1000;
+
+export function isAbandonedReservation(row: { status: string; updated_at: string }): boolean {
+  return (
+    row.status === "pending" &&
+    Date.now() - Date.parse(row.updated_at) >= ABANDONED_RESERVATION_AFTER_MS
+  );
+}
+
 export async function resolveIdentityBoundIdempotencyReplay<
   Row extends { idempotency_fingerprint: string | null },
 >(

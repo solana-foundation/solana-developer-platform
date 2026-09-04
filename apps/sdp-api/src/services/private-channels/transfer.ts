@@ -32,6 +32,7 @@ import {
 import { AppError, badRequest } from "@/lib/errors";
 import {
   buildPrivateChannelTransferFingerprint,
+  isAbandonedReservation,
   resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
@@ -284,6 +285,34 @@ async function reserveTransfer(
 }
 
 /**
+ * A replayed reservation whose original request died before broadcast (see
+ * `isAbandonedReservation`) is failed here so the client can retry under a new
+ * idempotency key instead of reading `pending` forever. The `pending` CAS in
+ * `settleTransfer` means a still-live original wins the race and this write is
+ * a no-op.
+ */
+async function failAbandonedReservation(
+  env: Env,
+  repo: PrivateChannelTransferRepository,
+  row: PrivateChannelTransferRow,
+  sdpUserId: string
+) {
+  const failureReason =
+    "Transfer reservation was abandoned before broadcast; retry with a new idempotency key.";
+  const failed = await settleTransfer(repo, row, { status: "failed", failureReason });
+  if (failed.status === "failed") {
+    await emitTransferEvent(
+      env,
+      failed,
+      PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
+      PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+      sdpUserId
+    );
+  }
+  return mapPrivateChannelTransferRow(failed);
+}
+
+/**
  * Persist a `pending` row, send once through SPC, then confirm the result:
  * `pending` → `submitted` → `confirmed` | `failed`.
  *
@@ -340,6 +369,9 @@ export async function createChannelTransfer(
   // is gone, so re-checking would reject the caller's own success.
   const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
   if (replay) {
+    if (isAbandonedReservation(replay)) {
+      return failAbandonedReservation(env, repo, replay, input.sdpUserId);
+    }
     return mapPrivateChannelTransferRow(replay);
   }
 
@@ -374,6 +406,9 @@ export async function createChannelTransfer(
     idempotencyKey: input.idempotencyKey,
   });
   if (reserved.replayed) {
+    if (isAbandonedReservation(reserved.row)) {
+      return failAbandonedReservation(env, repo, reserved.row, input.sdpUserId);
+    }
     return mapPrivateChannelTransferRow(reserved.row);
   }
   const pending = reserved.row;
