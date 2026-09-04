@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.73.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.72.0...v0.73.0) (2026-09-04)
+
+### Features
+
+* **web:** gate unfinished dashboard modules for Earn onboarding ([#1642](https://github.com/solana-foundation/solana-developer-platform/pull/1642)) ([2a477f1](https://github.com/solana-foundation/solana-developer-platform/commit/2a477f11def66b1bf32f4231396f776d86c6cba9))
+* **ci:** ephemeral per-PR API environments on dev (PRO-1767) ([#1520](https://github.com/solana-foundation/solana-developer-platform/pull/1520)) ([15f49df](https://github.com/solana-foundation/solana-developer-platform/commit/15f49df10e865bf5330546123cb2d312e02dc78c))
+* **helius:** named custom rings with ring-bound withdraws and private transfers ([#1523](https://github.com/solana-foundation/solana-developer-platform/pull/1523)) ([8ed29e6](https://github.com/solana-foundation/solana-developer-platform/commit/8ed29e6dc0aaf563b74014c7d1b1f5adf5dbd9d9))
+
+### Bug Fixes
+
+* HOO-1008 Deepsec: make API-key revocation and secret handoff immediate ([#1214](https://github.com/solana-foundation/solana-developer-platform/pull/1214)) ([76dd460](https://github.com/solana-foundation/solana-developer-platform/commit/76dd4602daf4460eaeaa3e9c05f991b670ae93f7))
+* **payments:** refetch counterparty requirements on every provider selection ([#1649](https://github.com/solana-foundation/solana-developer-platform/pull/1649)) ([aaee61d](https://github.com/solana-foundation/solana-developer-platform/commit/aaee61d6eab125a2a0d0d3562816d39c3a746315))
+
 ## [0.72.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.71.0...v0.72.0) (2026-09-04)
 
 ### Features
