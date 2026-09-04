@@ -15,13 +15,13 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "162bddc6552318446b36e54fa23f968dd13011dc580d15c722089092508a9ea4" as const;
+  "628c7222145f9b56062a8d7836bd5657aefa5c8824bf2c8bcffca5695fb08f2e" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moonpay: "1bae9f40aaee0402594dbe2d72babb8c38032e7300131dc3edee1fe543931d41",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  lightspark: "07c43f9309b3198adfd2739ca57bc2fdc062b35bd986925e37b27105b7fc8e68",
+  lightspark: "1583e7ba1a5859c1d1d45be4d2582ff631e5b35037c73884183152491323401e",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "5683ea502021864b6aea7a5feccb2e6aaae73ceb0ddd0730a21ce366cee6bf91",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -2001,7 +2001,7 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
   lightspark: {
     onramp: {
       currencies: {
-        USD: { min: "1", max: "5000" },
+        USD: { min: "1", max: "10" },
       },
       countrySupport: { coverage: "unreported" },
       entityTypes: ["business", "individual"],
@@ -2037,7 +2037,7 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
         THB: { min: "4.940718", max: "5000" },
         TZS: { min: "1", max: "3887.781591" },
         UGX: { min: "4.065523", max: "813.051482" },
-        USD: { min: "1", max: "5000" },
+        USD: { min: "5", max: "5000" },
         VND: { min: "0.000264", max: "527.66603" },
         XAF: { min: "1.035101", max: "2612.589704" },
         XOF: { min: "1", max: "2750.728549" },

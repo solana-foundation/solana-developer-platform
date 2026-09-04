@@ -24,6 +24,11 @@ import { readLightsparkConfig } from "./client";
 /** Lightspark only supports usdc.solana for now, so corridors are discovered from USDC alone. */
 const LIGHTSPARK_DISCOVERY_CRYPTO = "USDC";
 
+// Lightspark's effective USD bounds are not included in the exchange-rates
+// response or OpenAPI document, so keep the provider-specific limits here.
+const LIGHTSPARK_USD_ONRAMP_MAX = "10";
+const LIGHTSPARK_USD_OFFRAMP_MIN = "5";
+
 const LIGHTSPARK_OPENAPI_URL =
   "https://raw.githubusercontent.com/lightsparkdev/grid-api/refs/heads/main/openapi.yaml";
 
@@ -111,8 +116,14 @@ export function distillLightsparkRailSupport(
   openapiRaw: unknown
 ): ProviderRailSupportDistillation {
   const droppedCurrencyCodes = new Set<string>();
-  const offramp = distillDirection(offrampRatesRaw, "sourceCurrency", droppedCurrencyCodes);
-  const onramp = distillDirection(onrampRatesRaw, "destinationCurrency", droppedCurrencyCodes);
+  const offramp = applyLightsparkUsdLimits(
+    distillDirection(offrampRatesRaw, "sourceCurrency", droppedCurrencyCodes),
+    "offramp"
+  );
+  const onramp = applyLightsparkUsdLimits(
+    distillDirection(onrampRatesRaw, "destinationCurrency", droppedCurrencyCodes),
+    "onramp"
+  );
   const accounts = distillLightsparkPayoutAccounts(
     openapiRaw,
     Object.keys(offramp.currencies).sort()
@@ -122,6 +133,26 @@ export function distillLightsparkRailSupport(
     snapshot: { onramp, offramp: { ...offramp, accounts, swiftAccount } },
     droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
     droppedCountryCodes: [],
+  };
+}
+
+function applyLightsparkUsdLimits(
+  direction: ReturnType<typeof distillDirection>,
+  rampDirection: "onramp" | "offramp"
+): ReturnType<typeof distillDirection> {
+  const usd = direction.currencies.USD;
+  if (usd === undefined) {
+    return direction;
+  }
+  return {
+    ...direction,
+    currencies: {
+      ...direction.currencies,
+      USD:
+        rampDirection === "onramp"
+          ? { ...usd, max: LIGHTSPARK_USD_ONRAMP_MAX }
+          : { ...usd, min: LIGHTSPARK_USD_OFFRAMP_MIN },
+    },
   };
 }
 
