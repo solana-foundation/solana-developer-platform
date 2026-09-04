@@ -1229,6 +1229,53 @@ describe("TokenService", () => {
       expect(await readStatus("tok_claim_release_noop")).toBe("active");
     });
 
+    // HOO-1013: the commit is only valid while the caller holds the deploying
+    // claim — a confirm that skipped the claim used to pass its read-time
+    // guards concurrently and overwrite the winner's mint.
+    it("refuses to commit a deploy on an unclaimed token", async () => {
+      await insertToken("tok_deploy_unclaimed", { status: "pending", mintAddress: null });
+
+      await expect(
+        tokenService.setTokenDeployed(
+          "tok_deploy_unclaimed",
+          "11111111111111111111111111111111",
+          "11111111111111111111111111111111",
+          null
+        )
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(await readStatus("tok_deploy_unclaimed")).toBe("pending");
+    });
+
+    it("never overwrites an established mint, even from a raced second confirmation", async () => {
+      await insertToken("tok_deploy_once", { status: "pending", mintAddress: null });
+      await tokenService.beginTokenDeploy("tok_deploy_once");
+      await tokenService.setTokenDeployed(
+        "tok_deploy_once",
+        "11111111111111111111111111111111",
+        "11111111111111111111111111111111",
+        null
+      );
+
+      await expect(
+        tokenService.setTokenDeployed(
+          "tok_deploy_once",
+          "Attacker11111111111111111111111111111111111",
+          "Attacker11111111111111111111111111111111111",
+          null
+        )
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT mint_address, mint_authority, status FROM issued_tokens WHERE id = ?")
+        .bind("tok_deploy_once")
+        .first<{ mint_address: string; mint_authority: string; status: string }>();
+      expect(row).toEqual({
+        mint_address: "11111111111111111111111111111111",
+        mint_authority: "11111111111111111111111111111111",
+        status: "active",
+      });
+    });
+
     it("applies tenant predicates before deployment and supply mutations", async () => {
       const foreignProjectId = "prj_token_foreign";
       await db

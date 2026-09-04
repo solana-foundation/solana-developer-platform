@@ -10,6 +10,7 @@
 import type { TokenTransactionType } from "@sdp/types";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -17,6 +18,8 @@ import { errorMessage } from "./onchain";
 
 // Best-effort: the chain effect has already landed by the time this runs, so a ledger
 // write failure must never fail (or re-run) the action. Surfaced as `ledgerFailed`.
+// Returns the confirmed transaction row's id (so lifecycle actions can anchor their
+// status mirror on it), or null when the write failed.
 export async function recordWorkflowTransaction(
   env: Env,
   execution: WorkflowExecutionRow,
@@ -26,9 +29,15 @@ export async function recordWorkflowTransaction(
     signature: string;
     slot?: string | number | bigint | null;
   }
-): Promise<boolean> {
+): Promise<string | null> {
   try {
-    const tokenService = new TokenService(getDb(env));
+    const tokenService = new TokenService(
+      getDb(env),
+      createTenantScope({
+        organizationId: execution.organization_id,
+        projectId: execution.project_id,
+      })
+    );
     const { transaction } = await tokenService.createTransaction({
       tokenId: execution.token_id,
       organizationId: execution.organization_id,
@@ -51,12 +60,12 @@ export async function recordWorkflowTransaction(
       signature: input.signature,
       ...(input.slot == null ? {} : { slot: Number(input.slot) }),
     });
-    return true;
+    return transaction.id;
   } catch (error) {
     getLogger().error(
       { executionId: execution.id, type: input.type, error: errorMessage(error) },
       "workflow: transaction ledger write failed"
     );
-    return false;
+    return null;
   }
 }

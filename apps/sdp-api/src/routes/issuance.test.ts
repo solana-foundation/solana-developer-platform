@@ -1527,6 +1527,69 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(400);
     });
 
+    // HOO-1013: dots may only join alphanumeric runs — a leading, trailing, or
+    // doubled dot is the path-traversal primitive and must never validate.
+    it("returns 400 for traversal-shaped symbols", async () => {
+      for (const symbol of ["..", ".A", "A.", "A..B", "..."]) {
+        const res = await app.request(
+          "/v1/issuance/tokens",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ name: "Traversal Symbol Token", symbol }),
+          },
+          env
+        );
+        expect(res.status).toBe(400);
+      }
+    });
+
+    it("accepts a symbol with interior dots", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Dotted Symbol Token", symbol: "A.B.C" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+    });
+
+    // HOO-1013: uri/imageUrl are republished verbatim (on-chain metadata, public
+    // metadata.json, dashboard <img>), so active-content schemes must 400.
+    it("returns 400 for non-http(s) uri and imageUrl schemes", async () => {
+      for (const fields of [
+        { uri: "javascript:alert(1)" },
+        { uri: "data:text/html;base64,PGh0bWw+" },
+        { uri: "file:///etc/passwd" },
+        { imageUrl: "javascript:alert(1)" },
+        { imageUrl: "data:image/svg+xml,<svg onload=alert(1)>" },
+      ]) {
+        const res = await app.request(
+          "/v1/issuance/tokens",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ name: "Hostile Link Token", symbol: "EVIL", ...fields }),
+          },
+          env
+        );
+        expect(res.status).toBe(400);
+      }
+    });
+
     it("returns 401 without auth", async () => {
       const res = await app.request(
         "/v1/issuance/tokens",
@@ -1811,6 +1874,62 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.data.token.name).toBe("Updated Token Name");
       expect(body.data.token.description).toBe("New description");
+    });
+
+    // HOO-1013: `status` mirrors the on-chain pausable extension, so a
+    // tokens:write PATCH must never move it — pause state changes only through
+    // the settled tokens:admin pause/unpause paths.
+    it("does not change pause state through the PATCH body", async () => {
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'active' WHERE id = ?")
+        .bind(tokenId)
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ status: "paused", name: "Still Active" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.token.status).toBe("active");
+
+      const row = await getDb(env)
+        .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+        .bind(tokenId)
+        .first<{ status: string }>();
+      expect(row?.status).toBe("active");
+    });
+
+    it("rejects active-content uri and imageUrl schemes", async () => {
+      for (const body of [
+        { uri: "javascript:alert(1)" },
+        { uri: "data:text/html;base64,PGh0bWw+" },
+        { imageUrl: "javascript:alert(1)" },
+        { imageUrl: "file:///etc/passwd" },
+      ]) {
+        const res = await app.request(
+          `/v1/issuance/tokens/${tokenId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify(body),
+          },
+          env
+        );
+        expect(res.status).toBe(400);
+      }
     });
 
     it("rejects metadata updates while token deployment is in progress", async () => {
@@ -5469,8 +5588,8 @@ describe("Issuance Routes", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("SDP-hosted token metadata", () => {
-    // app.request with a bare path builds requests against http://localhost, so
-    // the request-derived origin the deploy handlers compute is deterministic.
+    // The minted origin comes only from the trusted PUBLIC_API_ORIGIN config
+    // (http://localhost in the test env) — never from the request's Host.
     const expectedMetadataUrl = (tokenId: string) =>
       `http://localhost/v1/issuance/tokens/${tokenId}/metadata.json`;
 
@@ -5519,6 +5638,93 @@ describe("Issuance Routes", () => {
             })
           );
         } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      // HOO-1013: the minted origin must come only from PUBLIC_API_ORIGIN. A
+      // hostile Host header (absolute request URL here) must not reach the
+      // permanent on-chain MetadataPointer.
+      it("ignores the request host when minting the SDP-hosted metadata URL", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_uri_hostile_host",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+
+        try {
+          const res = await app.request(
+            `https://attacker.example/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "x-forwarded-proto": "https",
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(createTokenSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
+            })
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("fails the deploy closed when PUBLIC_API_ORIGIN is not configured", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_uri_no_origin",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValue(mockDeployResult as never);
+        const savedOrigin = (env as { PUBLIC_API_ORIGIN?: string }).PUBLIC_API_ORIGIN;
+        (env as { PUBLIC_API_ORIGIN?: string }).PUBLIC_API_ORIGIN = undefined;
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(500);
+          expect(createTokenSpy).not.toHaveBeenCalled();
+        } finally {
+          (env as { PUBLIC_API_ORIGIN?: string }).PUBLIC_API_ORIGIN = savedOrigin;
           createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
@@ -6859,6 +7065,96 @@ describe("Issuance Routes", () => {
         );
 
         expect(res.status).toBe(400);
+      });
+
+      // HOO-1013: two confirmations racing past the read-time guards must not
+      // both reach the commit — the atomic pending→deploying claim serializes
+      // them, and the loser gets a 409 instead of overwriting the winner's mint.
+      it("returns 409 when a concurrent deployment already holds the claim", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_claim_race",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        // The token read still shows `pending` (as it would mid-race), but the
+        // claim is already gone by the time this request tries to take it.
+        const beginTokenDeploySpy = vi
+          .spyOn(TokenService.prototype, "beginTokenDeploy")
+          .mockResolvedValueOnce(null);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5racedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(409);
+        } finally {
+          beginTokenDeploySpy.mockRestore();
+        }
+      });
+
+      it("releases the claim after a failed verification so a retry can re-claim", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_release",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([null]);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5unconfirmedRetrySig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+          expect(res.status).toBe(400);
+
+          // The claim must not stay stuck on `deploying`: a client retry after
+          // the transaction settles has to be able to take it again.
+          const after = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(after?.status).toBe("pending");
+          expect(after?.mintAddress).toBeNull();
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+        }
       });
     });
 

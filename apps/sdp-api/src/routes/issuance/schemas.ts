@@ -73,18 +73,31 @@ export const tokenTemplateSchema = z.preprocess(
 
 // Supports template mode with optional overrides for customization
 
+// Symbols are interpolated into labels and may one day reach storage keys or
+// URLs, so dots are allowed only between alphanumeric runs — never leading,
+// trailing, or doubled ("..", the path-traversal primitive).
+const tokenSymbolSchema = z
+  .string()
+  .min(1)
+  .max(10)
+  .regex(/^[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*$/);
+
+// uri/imageUrl are republished verbatim (on-chain metadata, public
+// metadata.json, dashboard <img>), so active-content schemes (javascript:,
+// data:, file:) must never validate.
+const externalHttpUrl = z
+  .string()
+  .url({ protocol: /^https?$/ })
+  .max(512);
+
 export const createTokenSchema = z.object({
   name: z.string().min(1).max(100),
-  symbol: z
-    .string()
-    .min(1)
-    .max(10)
-    .regex(/^[A-Za-z0-9.]+$/),
+  symbol: tokenSymbolSchema,
   signingWalletId: z.string().min(1).optional(),
   decimals: z.number().int().min(0).max(18).optional(),
   description: z.string().max(500).optional(),
-  uri: z.string().url().optional(),
-  imageUrl: z.string().url().optional(),
+  uri: externalHttpUrl.optional(),
+  imageUrl: externalHttpUrl.optional(),
   maxSupply: z
     .string()
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
@@ -114,21 +127,19 @@ export const createTokenWithAssetProfileSchema = createTokenSchema
 
 export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAssetProfileSchema>;
 
+// Pause state is deliberately NOT patchable here: `status` mirrors the on-chain
+// pausable extension and may only move through the settled pause/unpause paths
+// (tokens:admin + an on-chain transaction). Accepting it in a tokens:write PATCH
+// desynchronized the DB flag from the chain (HOO-1013).
 export const updateTokenSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   // Symbol and decimals define the mint; the handler rejects them after deploy.
   // Same constraints as createTokenSchema.
-  symbol: z
-    .string()
-    .min(1)
-    .max(10)
-    .regex(/^[A-Za-z0-9.]+$/)
-    .optional(),
+  symbol: tokenSymbolSchema.optional(),
   decimals: z.number().int().min(0).max(18).optional(),
   description: z.string().max(500).nullable().optional(),
-  uri: z.string().url().nullable().optional(),
-  imageUrl: z.string().url().nullable().optional(),
-  status: z.enum(["active", "paused"]).optional(),
+  uri: externalHttpUrl.nullable().optional(),
+  imageUrl: externalHttpUrl.nullable().optional(),
   // Access-control enforcement input for deploy; only accepted while the token
   // is still undeployed (the handler rejects it after deployment).
   requiresAllowlist: z.boolean().optional(),
