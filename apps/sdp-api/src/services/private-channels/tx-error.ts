@@ -157,8 +157,16 @@ export function isAmbiguousSubmissionOutcome(error: unknown): boolean {
       code?: unknown;
       message?: unknown;
       cause?: unknown;
+      details?: unknown;
     };
     if (record.name === "AbortError" || record.name === "TimeoutError") return true;
+    if (
+      typeof record.details === "object" &&
+      record.details !== null &&
+      (record.details as { timedOut?: unknown }).timedOut === true
+    ) {
+      return true;
+    }
     if (typeof record.code === "string" && AMBIGUOUS_TRANSPORT_CODES.has(record.code)) return true;
     if (record.message === "socket hang up") return true;
     if (record.cause === undefined || record.cause === current) break;

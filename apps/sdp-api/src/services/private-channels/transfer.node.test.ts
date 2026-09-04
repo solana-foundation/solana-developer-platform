@@ -602,6 +602,23 @@ describe("createChannelTransfer", () => {
     );
   });
 
+  it("reconciles a deadline-wrapped RPC timeout instead of failing the signed reservation", async () => {
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(
+      Object.assign(new Error("RPC request timed out after 10000ms"), {
+        name: "SdpRpcError",
+        code: "SOLANA_RPC_ERROR",
+        details: { timedOut: true },
+      })
+    );
+
+    const result = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(result).toMatchObject({ status: "confirmed" });
+    expect(repo.updateTransfer).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" })
+    );
+  });
+
   it("still fails a definitive RPC rejection even though the signature was recorded", async () => {
     vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC rejected transfer"));
 
