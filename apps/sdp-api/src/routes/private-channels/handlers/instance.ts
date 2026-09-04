@@ -115,7 +115,7 @@ export const connectPrivateChannelInstance = async (
     // The bounded DTO, not the engine result: this detail is echoed to the
     // client that nominated the gateway, and the engine result carries what
     // that gateway answered with.
-    const { ok: _ok, ...detail } = toProbeResultDto(probe);
+    const { ok: _ok, ...detail } = summary;
     throw badRequest("Connection check failed", detail);
   }
 
@@ -272,7 +272,7 @@ export const updatePrivateChannelInstance = async (
       }),
       "updatePrivateChannelInstance: connection probe failed"
     );
-    const { ok: _ok, ...detail } = toProbeResultDto(probe);
+    const { ok: _ok, ...detail } = summary;
     throw badRequest("Connection check failed", detail);
   }
 

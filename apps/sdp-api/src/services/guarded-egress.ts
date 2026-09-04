@@ -148,6 +148,14 @@ export interface GuardedFetchInit {
    * is what decides, and this flag then only repeats a decision already made.
    */
   approvedInsecureDestination?: boolean;
+  /**
+   * The operator approved this origin on plaintext http, but its host is a
+   * NAME: the transport is relaxed while the connect-time address check stays,
+   * so the name still resolves through `guardedLookup`. Same trust rule as
+   * `approvedInsecureDestination`: never set from anything a request can
+   * influence.
+   */
+  approvedPlaintextDestination?: boolean;
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -217,7 +225,9 @@ export function nextRedirectStep(
  */
 export async function guardedFetch(url: string, init: GuardedFetchInit): Promise<Response> {
   const target = new URL(url);
-  const plaintextApproved = target.protocol === "http:" && init.approvedInsecureDestination;
+  const plaintextApproved =
+    target.protocol === "http:" &&
+    (init.approvedPlaintextDestination || init.approvedInsecureDestination);
   if (target.protocol !== "https:" && !plaintextApproved) {
     throw new EgressBlockedError(target.hostname);
   }
@@ -235,6 +245,7 @@ export async function guardedFetch(url: string, init: GuardedFetchInit): Promise
     body: step.body,
     maxRedirects: init.maxRedirects - 1,
     approvedInsecureDestination: false,
+    approvedPlaintextDestination: false,
   });
 }
 

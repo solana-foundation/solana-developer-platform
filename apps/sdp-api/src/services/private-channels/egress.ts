@@ -52,9 +52,15 @@ export interface ApprovedOrigin {
   /** Canonical `scheme://host[:port]`. */
   origin: string;
   /**
-   * The operator's own entry is plaintext or a private literal. Carried on the
-   * entry rather than derived from the candidate, so the relaxation belongs to
-   * the configured origin and a matching request simply inherits it.
+   * The operator's own entry is plaintext. Carried on the entry rather than
+   * derived from the candidate, so the relaxation belongs to the configured
+   * origin and a matching request simply inherits it.
+   */
+  plaintext: boolean;
+  /**
+   * The operator's own entry is a private literal, so no resolution step
+   * remains to guard. A plaintext NAME does not qualify: it still resolves
+   * through `guardedLookup` while dialling.
    */
   insecure: boolean;
 }
@@ -108,9 +114,11 @@ export function buildPrivateChannelEgressAllowlist(
     // An entry SDP cannot parse approves nothing. Dropping it keeps a typo from
     // widening the boundary, at the cost of a destination that stops working.
     if (!url) continue;
+    const bareHost = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
     allowlist.set(url.origin, {
       origin: url.origin,
-      insecure: isIpLiteral(url.hostname) && isBlockedAddress(url.hostname),
+      plaintext: url.protocol === "http:",
+      insecure: isIpLiteral(url.hostname) && isBlockedAddress(bareHost),
     });
   }
   return allowlist;
@@ -216,6 +224,7 @@ export function createPrivateChannelProbeTransport(env: Env): ProbeTransport {
       signal: AbortSignal.timeout(request.timeoutMs),
       maxResponseBytes: MAX_PROBE_RESPONSE_BYTES,
       approvedInsecureDestination: checked.approved.insecure,
+      approvedPlaintextDestination: checked.approved.plaintext,
     });
 
     return { status: response.status, ok: response.ok, text: await response.text() };

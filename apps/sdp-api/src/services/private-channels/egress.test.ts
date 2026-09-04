@@ -122,7 +122,20 @@ describe("checkPrivateChannelDestination", () => {
     );
     expect(checked.ok).toBe(true);
     if (!checked.ok) throw new Error("narrowing");
+    expect(checked.approved.plaintext).toBe(true);
     expect(checked.approved.insecure).toBe(false);
+  });
+
+  it("skips the address check only for a bracketed private literal, brackets stripped", () => {
+    const allowlist = buildPrivateChannelEgressAllowlist(["http://[::1]:8899"]);
+    const checked = checkPrivateChannelDestination(
+      "http://[::1]:8899/health",
+      allowlist,
+      "gatewayUrl"
+    );
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) throw new Error("narrowing");
+    expect(checked.approved.insecure).toBe(true);
   });
 
   it("approves nothing from an entry it cannot parse", () => {
