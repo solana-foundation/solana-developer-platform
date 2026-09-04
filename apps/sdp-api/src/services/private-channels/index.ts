@@ -12,7 +12,16 @@ export {
   PrivateChannelEventService,
   type PrivateChannelEventSink,
 } from "./event.service";
-export { type InviteMemberInput, type InviteMemberResult, inviteMember } from "./members";
+export {
+  type ProvisionPrincipalInput,
+  type ProvisionPrincipalResult,
+  provisionPrincipal,
+} from "./members";
+export {
+  readPrivateChannelTokenEligibility,
+  resolveChannelToken,
+  resolveRegisteredChannelToken,
+} from "./mint";
 export {
   getInstanceOverview,
   probeInstanceHealth,
@@ -25,6 +34,7 @@ export {
 export {
   deletePrivateChannelWallet,
   listPrivateChannelWallets,
+  revokePrivateChannelPrincipalWallets,
   verifyPrivateChannelWallet,
 } from "./wallets";
 export {

@@ -1,9 +1,11 @@
 import type {
   EarnLiveMetricsProvider,
   EarnPortfolioWalletProvider,
+  EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultProvider,
   EarnVaultWithdrawProvider,
+  EarnVaultWithdrawQuoteProvider,
   EarnWithdrawalApprovalProvider,
 } from "./types";
 
@@ -70,6 +72,12 @@ export function supportsWithdrawalApprovals(
 const VAULT_DIRECT_METHODS = [
   "buildVaultDeposit",
   "readVaultPositions",
+  // Required, not optional, and that is the point: a client that can build a
+  // deposit but cannot say which programs it touches cannot be sponsored
+  // safely, because the paymaster allowlist could not have been checked
+  // against it. Such a client answers false here and its route returns 501,
+  // which is loud, rather than silently executing unsponsored.
+  "sponsoredPrograms",
 ] as const satisfies readonly Exclude<keyof EarnVaultDirectProvider, keyof EarnVaultProvider>[];
 
 /**
@@ -110,6 +118,46 @@ export function supportsVaultWithdraw(
   if (!supportsVaultDirect(client)) return false;
   const candidate = client as Partial<Record<(typeof VAULT_WITHDRAW_METHODS)[number], unknown>>;
   return VAULT_WITHDRAW_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const VAULT_DEPOSIT_QUOTE_METHODS = ["quoteVaultDeposit"] as const satisfies readonly Exclude<
+  keyof EarnVaultDepositQuoteProvider,
+  keyof EarnVaultDirectProvider
+>[];
+
+/**
+ * Capability discovery for the optional deposit-quote read. Requires the
+ * vault-direct capability first: a quote exists to derive a deposit floor, and
+ * a floor without a deposit builder to hand it to protects nothing.
+ */
+export function supportsVaultDepositQuote(
+  client: EarnVaultProvider
+): client is EarnVaultDepositQuoteProvider {
+  if (!supportsVaultDirect(client)) return false;
+  const candidate = client as Partial<
+    Record<(typeof VAULT_DEPOSIT_QUOTE_METHODS)[number], unknown>
+  >;
+  return VAULT_DEPOSIT_QUOTE_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const VAULT_WITHDRAW_QUOTE_METHODS = ["quoteVaultWithdrawal"] as const satisfies readonly Exclude<
+  keyof EarnVaultWithdrawQuoteProvider,
+  keyof EarnVaultWithdrawProvider
+>[];
+
+/**
+ * Capability discovery for the optional withdrawal-quote read. Requires the
+ * withdraw capability first: an exit quote exists to derive an exit floor,
+ * and a floor without an exit builder to hand it to protects nothing.
+ */
+export function supportsVaultWithdrawQuote(
+  client: EarnVaultProvider
+): client is EarnVaultWithdrawQuoteProvider {
+  if (!supportsVaultWithdraw(client)) return false;
+  const candidate = client as Partial<
+    Record<(typeof VAULT_WITHDRAW_QUOTE_METHODS)[number], unknown>
+  >;
+  return VAULT_WITHDRAW_QUOTE_METHODS.every((method) => typeof candidate[method] === "function");
 }
 
 const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly Exclude<

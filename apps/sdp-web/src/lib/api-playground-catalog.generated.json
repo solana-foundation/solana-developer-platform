@@ -5,7 +5,7 @@
     "modules": {
       "wallets": 19,
       "payments": 38,
-      "counterparties": 12,
+      "counterparties": 13,
       "issuance": 46
     }
   },
@@ -1164,7 +1164,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-vault-deposits\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"earn_vault_deposit\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ]\n}",
+            "defaultValue": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-vault-deposits\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"earn_vault_deposit\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ],\n  \"expectedRevisionId\": \"wcpr_example\"\n}",
             "required": true
           }
         ],
@@ -1617,7 +1617,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"privy_wallet_123\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -1626,7 +1626,8 @@
             "transfer": {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -1648,7 +1649,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -1694,20 +1695,13 @@
         "operationId": "listPaymentTransfers",
         "title": "List transfers",
         "method": "GET",
-        "path": "/v1/payments/transfers?wallet={wallet}&walletAddress={walletAddress}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
+        "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
         "pathFields": [
           {
-            "key": "wallet",
-            "label": "wallet",
-            "description": "Filter by wallet `walletId`.",
-            "defaultValue": "privy_wallet_123",
-            "required": false
-          },
-          {
-            "key": "walletAddress",
-            "label": "walletAddress",
-            "description": "Filter by wallet address.",
-            "defaultValue": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "description": "Filter persisted transfers by exact SDP Wallet ID.",
+            "defaultValue": "cwlt_example",
             "required": false
           },
           {
@@ -1778,7 +1772,7 @@
             "key": "counterpartyId",
             "label": "counterpartyId",
             "description": "Filter transfers tied to a specific counterparty.",
-            "defaultValue": "counterparty_example",
+            "defaultValue": "cpty_example",
             "required": false
           },
           {
@@ -1843,7 +1837,7 @@
           {
             "key": "includeObserved",
             "label": "includeObserved",
-            "description": "When filtering a wallet, include RPC-observed on-chain activity that has not been recorded by SDP. Disable for stable database-backed pagination.",
+            "description": "When custodyWalletId is supplied, also include RPC-observed activity for that exact wallet row's address. Observed rows have custodyWalletId null.",
             "defaultValue": "false",
             "required": false,
             "kind": "select",
@@ -1925,7 +1919,8 @@
             {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -1947,7 +1942,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -2002,7 +1997,8 @@
             "transfer": {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -2024,7 +2020,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -2079,7 +2075,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -2116,7 +2112,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -2127,7 +2123,8 @@
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -2143,7 +2140,7 @@
                 "batchId": "batch_example",
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
@@ -2157,7 +2154,8 @@
               {
                 "id": "xfr_example",
                 "organizationId": "org_example",
-                "walletId": "privy_wallet_123",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
                 "direction": "outbound",
@@ -2179,7 +2177,7 @@
                 },
                 "amount": "100.00",
                 "provider": "moonpay",
-                "counterpartyId": "counterparty_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
                 "providerReference": "ramp_quote_example",
                 "deliveryMode": "session_widget",
@@ -2216,13 +2214,13 @@
         "operationId": "listPaymentTransferBatches",
         "title": "List transfer batches",
         "method": "GET",
-        "path": "/v1/payments/transfer-batches?wallet={wallet}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
+        "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
         "pathFields": [
           {
-            "key": "wallet",
-            "label": "wallet",
-            "description": "Filter by source wallet `walletId`.",
-            "defaultValue": "privy_wallet_123",
+            "key": "sourceCustodyWalletId",
+            "label": "sourceCustodyWalletId",
+            "description": "Filter by exact source SDP Wallet ID.",
+            "defaultValue": "cwlt_example",
             "required": false
           },
           {
@@ -2298,7 +2296,8 @@
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -2341,7 +2340,8 @@
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -2357,7 +2357,7 @@
                 "batchId": "batch_example",
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
@@ -2371,7 +2371,8 @@
               {
                 "id": "xfr_example",
                 "organizationId": "org_example",
-                "walletId": "privy_wallet_123",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
                 "direction": "outbound",
@@ -2393,7 +2394,7 @@
                 },
                 "amount": "100.00",
                 "provider": "moonpay",
-                "counterpartyId": "counterparty_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
                 "providerReference": "ramp_quote_example",
                 "deliveryMode": "session_widget",
@@ -2439,7 +2440,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -2449,9 +2450,10 @@
               "id": "prp_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2492,7 +2494,7 @@
             "key": "counterpartyId",
             "label": "counterpartyId",
             "description": "Filter recurring payments by counterparty.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": false
           },
           {
@@ -2564,9 +2566,10 @@
                 "id": "prp_example",
                 "organizationId": "org_example",
                 "projectId": "prj_example",
-                "sourceWalletId": "privy_wallet_123",
+                "sourceCustodyWalletId": "cwlt_example",
+                "sourceProviderWalletId": "privy_wallet_123",
                 "sourceAddress": "So11111111111111111111111111111111111111112",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destinationAddress": "So11111111111111111111111111111111111111112",
                 "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2622,7 +2625,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -2632,9 +2635,10 @@
               "id": "prp_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2686,9 +2690,10 @@
               "id": "prp_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2740,9 +2745,10 @@
               "id": "prp_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2794,9 +2800,10 @@
               "id": "prp_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2848,9 +2855,10 @@
               "id": "prp_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -2893,7 +2901,8 @@
             "transfer": {
               "id": "xfr_example",
               "organizationId": "org_example",
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "direction": "outbound",
@@ -2915,7 +2924,7 @@
               },
               "amount": "100.00",
               "provider": "moonpay",
-              "counterpartyId": "counterparty_example",
+              "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
               "providerReference": "ramp_quote_example",
               "deliveryMode": "session_widget",
@@ -2968,9 +2977,10 @@
               "id": "prp_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "sourceWalletId": "privy_wallet_123",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
@@ -3302,7 +3312,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
+            "defaultValue": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
             "required": true
           }
         ],
@@ -5292,7 +5302,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -5335,7 +5345,8 @@
                 "decimals": 2
               },
               "expiresAt": "2025-01-01T00:00:00.000Z"
-            }
+            },
+            "transferId": "transfer_example"
           },
           "meta": {
             "requestId": "req_example",
@@ -5386,12 +5397,6 @@
             "fields": {
               "entityTypes": ["individual"],
               "countries": [
-                {
-                  "code": "US",
-                  "name": "United States"
-                }
-              ],
-              "usStates": [
                 {
                   "code": "US",
                   "name": "United States"
@@ -5453,29 +5458,12 @@
           "data": {
             "counterparties": [
               {
-                "id": "cp_example",
+                "id": "cpty_example",
                 "organizationId": "org_example",
                 "projectId": "prj_example",
                 "externalId": "customer_42",
                 "entityType": "individual",
                 "displayName": "Jane Doe",
-                "email": "jane@example.com",
-                "identity": {
-                  "firstName": "Jane",
-                  "middleName": "Q",
-                  "lastName": "Doe",
-                  "secondLastName": "Garcia",
-                  "dateOfBirth": "1990-01-15",
-                  "phone": "+14155551234",
-                  "address": {
-                    "line1": "123 Main St",
-                    "line2": "Apt 4B",
-                    "city": "San Francisco",
-                    "postalCode": "94105",
-                    "countryCode": "US",
-                    "subdivisionCode": "CA"
-                  }
-                },
                 "status": "active",
                 "createdBy": "usr_example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
@@ -5506,36 +5494,19 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"displayName\": \"Jane Doe\",\n  \"email\": \"jane@example.com\",\n  \"entityType\": \"individual\",\n  \"identity\": {\n    \"firstName\": \"Jane\",\n    \"middleName\": \"Q\",\n    \"lastName\": \"Doe\",\n    \"secondLastName\": \"Garcia\",\n    \"dateOfBirth\": \"1990-01-15\",\n    \"phone\": \"+14155551234\",\n    \"address\": {\n      \"line1\": \"123 Main St\",\n      \"line2\": \"Apt 4B\",\n      \"city\": \"San Francisco\",\n      \"postalCode\": \"94105\",\n      \"countryCode\": \"US\",\n      \"subdivisionCode\": \"CA\"\n    }\n  }\n}",
+            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"individual\",\n  \"displayName\": \"Jane Doe\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
             "counterparty": {
-              "id": "cp_example",
+              "id": "cpty_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "customer_42",
               "entityType": "individual",
               "displayName": "Jane Doe",
-              "email": "jane@example.com",
-              "identity": {
-                "firstName": "Jane",
-                "middleName": "Q",
-                "lastName": "Doe",
-                "secondLastName": "Garcia",
-                "dateOfBirth": "1990-01-15",
-                "phone": "+14155551234",
-                "address": {
-                  "line1": "123 Main St",
-                  "line2": "Apt 4B",
-                  "city": "San Francisco",
-                  "postalCode": "94105",
-                  "countryCode": "US",
-                  "subdivisionCode": "CA"
-                }
-              },
               "status": "active",
               "createdBy": "usr_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -5559,7 +5530,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -5567,29 +5538,12 @@
         "expectedResponse": {
           "data": {
             "counterparty": {
-              "id": "cp_example",
+              "id": "cpty_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "customer_42",
               "entityType": "individual",
               "displayName": "Jane Doe",
-              "email": "jane@example.com",
-              "identity": {
-                "firstName": "Jane",
-                "middleName": "Q",
-                "lastName": "Doe",
-                "secondLastName": "Garcia",
-                "dateOfBirth": "1990-01-15",
-                "phone": "+14155551234",
-                "address": {
-                  "line1": "123 Main St",
-                  "line2": "Apt 4B",
-                  "city": "San Francisco",
-                  "postalCode": "94105",
-                  "countryCode": "US",
-                  "subdivisionCode": "CA"
-                }
-              },
               "status": "active",
               "createdBy": "usr_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -5613,7 +5567,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -5624,36 +5578,19 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"business\",\n  \"displayName\": \"Jane Q. Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"identity\": {\n    \"firstName\": \"Jane\",\n    \"middleName\": \"Q\",\n    \"lastName\": \"Doe\",\n    \"secondLastName\": \"Garcia\",\n    \"dateOfBirth\": \"1990-01-15\",\n    \"phone\": \"+14155551234\",\n    \"address\": {\n      \"line1\": \"123 Main St\",\n      \"line2\": \"Apt 4B\",\n      \"city\": \"San Francisco\",\n      \"postalCode\": \"94105\",\n      \"countryCode\": \"US\",\n      \"subdivisionCode\": \"CA\"\n    }\n  }\n}",
+            "defaultValue": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"business\",\n  \"displayName\": \"Jane Q. Doe\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
             "counterparty": {
-              "id": "cp_example",
+              "id": "cpty_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "externalId": "customer_42",
               "entityType": "individual",
               "displayName": "Jane Doe",
-              "email": "jane@example.com",
-              "identity": {
-                "firstName": "Jane",
-                "middleName": "Q",
-                "lastName": "Doe",
-                "secondLastName": "Garcia",
-                "dateOfBirth": "1990-01-15",
-                "phone": "+14155551234",
-                "address": {
-                  "line1": "123 Main St",
-                  "line2": "Apt 4B",
-                  "city": "San Francisco",
-                  "postalCode": "94105",
-                  "countryCode": "US",
-                  "subdivisionCode": "CA"
-                }
-              },
               "status": "active",
               "createdBy": "usr_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -5677,7 +5614,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -5695,7 +5632,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6368,7 +6305,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6415,10 +6352,6 @@
             "kind": "select",
             "options": [
               {
-                "label": "bank_account",
-                "value": "bank_account"
-              },
-              {
                 "label": "crypto_wallet",
                 "value": "crypto_wallet"
               }
@@ -6433,7 +6366,7 @@
                 "id": "cpa_example",
                 "organizationId": "org_example",
                 "projectId": "prj_example",
-                "counterpartyId": "cp_example",
+                "counterpartyId": "cpty_example",
                 "accountKind": "crypto_wallet",
                 "label": "USDC wallet",
                 "details": {
@@ -6467,7 +6400,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           }
         ],
@@ -6488,7 +6421,7 @@
               "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "accountKind": "crypto_wallet",
               "label": "USDC wallet",
               "details": {
@@ -6508,6 +6441,1098 @@
         }
       },
       {
+        "id": "list-counterparty-provider-accounts",
+        "operationId": "listCounterpartyProviderAccounts",
+        "title": "List counterparty provider accounts",
+        "method": "GET",
+        "path": "/v1/counterparties/{counterpartyId}/provider-accounts?provider={provider}&fiatCurrency={fiatCurrency}&destinationCountry={destinationCountry}",
+        "pathFields": [
+          {
+            "key": "counterpartyId",
+            "label": "{counterpartyId}",
+            "description": "Counterparty identifier.",
+            "defaultValue": "cpty_example",
+            "required": true
+          },
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Filter by ramp provider.",
+            "defaultValue": "lightspark",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "moonpay",
+                "value": "moonpay"
+              },
+              {
+                "label": "lightspark",
+                "value": "lightspark"
+              },
+              {
+                "label": "bvnk",
+                "value": "bvnk"
+              },
+              {
+                "label": "moneygram",
+                "value": "moneygram"
+              },
+              {
+                "label": "coinbase",
+                "value": "coinbase"
+              },
+              {
+                "label": "mural",
+                "value": "mural"
+              },
+              {
+                "label": "stripe",
+                "value": "stripe"
+              }
+            ]
+          },
+          {
+            "key": "fiatCurrency",
+            "label": "fiatCurrency",
+            "description": "Filter by fiat currency.",
+            "defaultValue": "USD",
+            "required": false
+          },
+          {
+            "key": "destinationCountry",
+            "label": "destinationCountry",
+            "description": "Filter by ISO 3166-1 alpha-2 destination country.",
+            "defaultValue": "US",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "AF",
+                "value": "AF"
+              },
+              {
+                "label": "AX",
+                "value": "AX"
+              },
+              {
+                "label": "AL",
+                "value": "AL"
+              },
+              {
+                "label": "DZ",
+                "value": "DZ"
+              },
+              {
+                "label": "AS",
+                "value": "AS"
+              },
+              {
+                "label": "AD",
+                "value": "AD"
+              },
+              {
+                "label": "AO",
+                "value": "AO"
+              },
+              {
+                "label": "AI",
+                "value": "AI"
+              },
+              {
+                "label": "AQ",
+                "value": "AQ"
+              },
+              {
+                "label": "AG",
+                "value": "AG"
+              },
+              {
+                "label": "AR",
+                "value": "AR"
+              },
+              {
+                "label": "AM",
+                "value": "AM"
+              },
+              {
+                "label": "AW",
+                "value": "AW"
+              },
+              {
+                "label": "AU",
+                "value": "AU"
+              },
+              {
+                "label": "AT",
+                "value": "AT"
+              },
+              {
+                "label": "AZ",
+                "value": "AZ"
+              },
+              {
+                "label": "BS",
+                "value": "BS"
+              },
+              {
+                "label": "BH",
+                "value": "BH"
+              },
+              {
+                "label": "BD",
+                "value": "BD"
+              },
+              {
+                "label": "BB",
+                "value": "BB"
+              },
+              {
+                "label": "BY",
+                "value": "BY"
+              },
+              {
+                "label": "BE",
+                "value": "BE"
+              },
+              {
+                "label": "BZ",
+                "value": "BZ"
+              },
+              {
+                "label": "BJ",
+                "value": "BJ"
+              },
+              {
+                "label": "BM",
+                "value": "BM"
+              },
+              {
+                "label": "BT",
+                "value": "BT"
+              },
+              {
+                "label": "BO",
+                "value": "BO"
+              },
+              {
+                "label": "BA",
+                "value": "BA"
+              },
+              {
+                "label": "BW",
+                "value": "BW"
+              },
+              {
+                "label": "BV",
+                "value": "BV"
+              },
+              {
+                "label": "BR",
+                "value": "BR"
+              },
+              {
+                "label": "IO",
+                "value": "IO"
+              },
+              {
+                "label": "VG",
+                "value": "VG"
+              },
+              {
+                "label": "BN",
+                "value": "BN"
+              },
+              {
+                "label": "BG",
+                "value": "BG"
+              },
+              {
+                "label": "BF",
+                "value": "BF"
+              },
+              {
+                "label": "BI",
+                "value": "BI"
+              },
+              {
+                "label": "KH",
+                "value": "KH"
+              },
+              {
+                "label": "CM",
+                "value": "CM"
+              },
+              {
+                "label": "CA",
+                "value": "CA"
+              },
+              {
+                "label": "CV",
+                "value": "CV"
+              },
+              {
+                "label": "BQ",
+                "value": "BQ"
+              },
+              {
+                "label": "KY",
+                "value": "KY"
+              },
+              {
+                "label": "CF",
+                "value": "CF"
+              },
+              {
+                "label": "TD",
+                "value": "TD"
+              },
+              {
+                "label": "CL",
+                "value": "CL"
+              },
+              {
+                "label": "CN",
+                "value": "CN"
+              },
+              {
+                "label": "CX",
+                "value": "CX"
+              },
+              {
+                "label": "CC",
+                "value": "CC"
+              },
+              {
+                "label": "CO",
+                "value": "CO"
+              },
+              {
+                "label": "KM",
+                "value": "KM"
+              },
+              {
+                "label": "CG",
+                "value": "CG"
+              },
+              {
+                "label": "CD",
+                "value": "CD"
+              },
+              {
+                "label": "CK",
+                "value": "CK"
+              },
+              {
+                "label": "CR",
+                "value": "CR"
+              },
+              {
+                "label": "CI",
+                "value": "CI"
+              },
+              {
+                "label": "HR",
+                "value": "HR"
+              },
+              {
+                "label": "CU",
+                "value": "CU"
+              },
+              {
+                "label": "CW",
+                "value": "CW"
+              },
+              {
+                "label": "CY",
+                "value": "CY"
+              },
+              {
+                "label": "CZ",
+                "value": "CZ"
+              },
+              {
+                "label": "DK",
+                "value": "DK"
+              },
+              {
+                "label": "DJ",
+                "value": "DJ"
+              },
+              {
+                "label": "DM",
+                "value": "DM"
+              },
+              {
+                "label": "DO",
+                "value": "DO"
+              },
+              {
+                "label": "EC",
+                "value": "EC"
+              },
+              {
+                "label": "EG",
+                "value": "EG"
+              },
+              {
+                "label": "SV",
+                "value": "SV"
+              },
+              {
+                "label": "GQ",
+                "value": "GQ"
+              },
+              {
+                "label": "ER",
+                "value": "ER"
+              },
+              {
+                "label": "EE",
+                "value": "EE"
+              },
+              {
+                "label": "SZ",
+                "value": "SZ"
+              },
+              {
+                "label": "ET",
+                "value": "ET"
+              },
+              {
+                "label": "FK",
+                "value": "FK"
+              },
+              {
+                "label": "FO",
+                "value": "FO"
+              },
+              {
+                "label": "FJ",
+                "value": "FJ"
+              },
+              {
+                "label": "FI",
+                "value": "FI"
+              },
+              {
+                "label": "FR",
+                "value": "FR"
+              },
+              {
+                "label": "GF",
+                "value": "GF"
+              },
+              {
+                "label": "PF",
+                "value": "PF"
+              },
+              {
+                "label": "TF",
+                "value": "TF"
+              },
+              {
+                "label": "GA",
+                "value": "GA"
+              },
+              {
+                "label": "GM",
+                "value": "GM"
+              },
+              {
+                "label": "GE",
+                "value": "GE"
+              },
+              {
+                "label": "DE",
+                "value": "DE"
+              },
+              {
+                "label": "GH",
+                "value": "GH"
+              },
+              {
+                "label": "GI",
+                "value": "GI"
+              },
+              {
+                "label": "GR",
+                "value": "GR"
+              },
+              {
+                "label": "GL",
+                "value": "GL"
+              },
+              {
+                "label": "GD",
+                "value": "GD"
+              },
+              {
+                "label": "GP",
+                "value": "GP"
+              },
+              {
+                "label": "GU",
+                "value": "GU"
+              },
+              {
+                "label": "GT",
+                "value": "GT"
+              },
+              {
+                "label": "GG",
+                "value": "GG"
+              },
+              {
+                "label": "GN",
+                "value": "GN"
+              },
+              {
+                "label": "GW",
+                "value": "GW"
+              },
+              {
+                "label": "GY",
+                "value": "GY"
+              },
+              {
+                "label": "HT",
+                "value": "HT"
+              },
+              {
+                "label": "HM",
+                "value": "HM"
+              },
+              {
+                "label": "HN",
+                "value": "HN"
+              },
+              {
+                "label": "HK",
+                "value": "HK"
+              },
+              {
+                "label": "HU",
+                "value": "HU"
+              },
+              {
+                "label": "IS",
+                "value": "IS"
+              },
+              {
+                "label": "IN",
+                "value": "IN"
+              },
+              {
+                "label": "ID",
+                "value": "ID"
+              },
+              {
+                "label": "IR",
+                "value": "IR"
+              },
+              {
+                "label": "IQ",
+                "value": "IQ"
+              },
+              {
+                "label": "IE",
+                "value": "IE"
+              },
+              {
+                "label": "IM",
+                "value": "IM"
+              },
+              {
+                "label": "IL",
+                "value": "IL"
+              },
+              {
+                "label": "IT",
+                "value": "IT"
+              },
+              {
+                "label": "JM",
+                "value": "JM"
+              },
+              {
+                "label": "JP",
+                "value": "JP"
+              },
+              {
+                "label": "JE",
+                "value": "JE"
+              },
+              {
+                "label": "JO",
+                "value": "JO"
+              },
+              {
+                "label": "KZ",
+                "value": "KZ"
+              },
+              {
+                "label": "KE",
+                "value": "KE"
+              },
+              {
+                "label": "KI",
+                "value": "KI"
+              },
+              {
+                "label": "KW",
+                "value": "KW"
+              },
+              {
+                "label": "KG",
+                "value": "KG"
+              },
+              {
+                "label": "LA",
+                "value": "LA"
+              },
+              {
+                "label": "LV",
+                "value": "LV"
+              },
+              {
+                "label": "LB",
+                "value": "LB"
+              },
+              {
+                "label": "LS",
+                "value": "LS"
+              },
+              {
+                "label": "LR",
+                "value": "LR"
+              },
+              {
+                "label": "LY",
+                "value": "LY"
+              },
+              {
+                "label": "LI",
+                "value": "LI"
+              },
+              {
+                "label": "LT",
+                "value": "LT"
+              },
+              {
+                "label": "LU",
+                "value": "LU"
+              },
+              {
+                "label": "MO",
+                "value": "MO"
+              },
+              {
+                "label": "MG",
+                "value": "MG"
+              },
+              {
+                "label": "MW",
+                "value": "MW"
+              },
+              {
+                "label": "MY",
+                "value": "MY"
+              },
+              {
+                "label": "MV",
+                "value": "MV"
+              },
+              {
+                "label": "ML",
+                "value": "ML"
+              },
+              {
+                "label": "MT",
+                "value": "MT"
+              },
+              {
+                "label": "MH",
+                "value": "MH"
+              },
+              {
+                "label": "MQ",
+                "value": "MQ"
+              },
+              {
+                "label": "MR",
+                "value": "MR"
+              },
+              {
+                "label": "MU",
+                "value": "MU"
+              },
+              {
+                "label": "YT",
+                "value": "YT"
+              },
+              {
+                "label": "MX",
+                "value": "MX"
+              },
+              {
+                "label": "FM",
+                "value": "FM"
+              },
+              {
+                "label": "MD",
+                "value": "MD"
+              },
+              {
+                "label": "MC",
+                "value": "MC"
+              },
+              {
+                "label": "MN",
+                "value": "MN"
+              },
+              {
+                "label": "ME",
+                "value": "ME"
+              },
+              {
+                "label": "MS",
+                "value": "MS"
+              },
+              {
+                "label": "MA",
+                "value": "MA"
+              },
+              {
+                "label": "MZ",
+                "value": "MZ"
+              },
+              {
+                "label": "MM",
+                "value": "MM"
+              },
+              {
+                "label": "NA",
+                "value": "NA"
+              },
+              {
+                "label": "NR",
+                "value": "NR"
+              },
+              {
+                "label": "NP",
+                "value": "NP"
+              },
+              {
+                "label": "NL",
+                "value": "NL"
+              },
+              {
+                "label": "NC",
+                "value": "NC"
+              },
+              {
+                "label": "NZ",
+                "value": "NZ"
+              },
+              {
+                "label": "NI",
+                "value": "NI"
+              },
+              {
+                "label": "NE",
+                "value": "NE"
+              },
+              {
+                "label": "NG",
+                "value": "NG"
+              },
+              {
+                "label": "NU",
+                "value": "NU"
+              },
+              {
+                "label": "NF",
+                "value": "NF"
+              },
+              {
+                "label": "KP",
+                "value": "KP"
+              },
+              {
+                "label": "MK",
+                "value": "MK"
+              },
+              {
+                "label": "MP",
+                "value": "MP"
+              },
+              {
+                "label": "NO",
+                "value": "NO"
+              },
+              {
+                "label": "OM",
+                "value": "OM"
+              },
+              {
+                "label": "PK",
+                "value": "PK"
+              },
+              {
+                "label": "PW",
+                "value": "PW"
+              },
+              {
+                "label": "PS",
+                "value": "PS"
+              },
+              {
+                "label": "PA",
+                "value": "PA"
+              },
+              {
+                "label": "PG",
+                "value": "PG"
+              },
+              {
+                "label": "PY",
+                "value": "PY"
+              },
+              {
+                "label": "PE",
+                "value": "PE"
+              },
+              {
+                "label": "PH",
+                "value": "PH"
+              },
+              {
+                "label": "PN",
+                "value": "PN"
+              },
+              {
+                "label": "PL",
+                "value": "PL"
+              },
+              {
+                "label": "PT",
+                "value": "PT"
+              },
+              {
+                "label": "PR",
+                "value": "PR"
+              },
+              {
+                "label": "QA",
+                "value": "QA"
+              },
+              {
+                "label": "RE",
+                "value": "RE"
+              },
+              {
+                "label": "RO",
+                "value": "RO"
+              },
+              {
+                "label": "RU",
+                "value": "RU"
+              },
+              {
+                "label": "RW",
+                "value": "RW"
+              },
+              {
+                "label": "WS",
+                "value": "WS"
+              },
+              {
+                "label": "SM",
+                "value": "SM"
+              },
+              {
+                "label": "ST",
+                "value": "ST"
+              },
+              {
+                "label": "SA",
+                "value": "SA"
+              },
+              {
+                "label": "SN",
+                "value": "SN"
+              },
+              {
+                "label": "RS",
+                "value": "RS"
+              },
+              {
+                "label": "SC",
+                "value": "SC"
+              },
+              {
+                "label": "SL",
+                "value": "SL"
+              },
+              {
+                "label": "SG",
+                "value": "SG"
+              },
+              {
+                "label": "SX",
+                "value": "SX"
+              },
+              {
+                "label": "SK",
+                "value": "SK"
+              },
+              {
+                "label": "SI",
+                "value": "SI"
+              },
+              {
+                "label": "SB",
+                "value": "SB"
+              },
+              {
+                "label": "SO",
+                "value": "SO"
+              },
+              {
+                "label": "ZA",
+                "value": "ZA"
+              },
+              {
+                "label": "GS",
+                "value": "GS"
+              },
+              {
+                "label": "KR",
+                "value": "KR"
+              },
+              {
+                "label": "SS",
+                "value": "SS"
+              },
+              {
+                "label": "ES",
+                "value": "ES"
+              },
+              {
+                "label": "LK",
+                "value": "LK"
+              },
+              {
+                "label": "BL",
+                "value": "BL"
+              },
+              {
+                "label": "SH",
+                "value": "SH"
+              },
+              {
+                "label": "KN",
+                "value": "KN"
+              },
+              {
+                "label": "LC",
+                "value": "LC"
+              },
+              {
+                "label": "MF",
+                "value": "MF"
+              },
+              {
+                "label": "PM",
+                "value": "PM"
+              },
+              {
+                "label": "VC",
+                "value": "VC"
+              },
+              {
+                "label": "SD",
+                "value": "SD"
+              },
+              {
+                "label": "SR",
+                "value": "SR"
+              },
+              {
+                "label": "SJ",
+                "value": "SJ"
+              },
+              {
+                "label": "SE",
+                "value": "SE"
+              },
+              {
+                "label": "CH",
+                "value": "CH"
+              },
+              {
+                "label": "SY",
+                "value": "SY"
+              },
+              {
+                "label": "TW",
+                "value": "TW"
+              },
+              {
+                "label": "TJ",
+                "value": "TJ"
+              },
+              {
+                "label": "TZ",
+                "value": "TZ"
+              },
+              {
+                "label": "TH",
+                "value": "TH"
+              },
+              {
+                "label": "TL",
+                "value": "TL"
+              },
+              {
+                "label": "TG",
+                "value": "TG"
+              },
+              {
+                "label": "TK",
+                "value": "TK"
+              },
+              {
+                "label": "TO",
+                "value": "TO"
+              },
+              {
+                "label": "TT",
+                "value": "TT"
+              },
+              {
+                "label": "TN",
+                "value": "TN"
+              },
+              {
+                "label": "TR",
+                "value": "TR"
+              },
+              {
+                "label": "TM",
+                "value": "TM"
+              },
+              {
+                "label": "TC",
+                "value": "TC"
+              },
+              {
+                "label": "TV",
+                "value": "TV"
+              },
+              {
+                "label": "UM",
+                "value": "UM"
+              },
+              {
+                "label": "VI",
+                "value": "VI"
+              },
+              {
+                "label": "UG",
+                "value": "UG"
+              },
+              {
+                "label": "UA",
+                "value": "UA"
+              },
+              {
+                "label": "AE",
+                "value": "AE"
+              },
+              {
+                "label": "GB",
+                "value": "GB"
+              },
+              {
+                "label": "US",
+                "value": "US"
+              },
+              {
+                "label": "UY",
+                "value": "UY"
+              },
+              {
+                "label": "UZ",
+                "value": "UZ"
+              },
+              {
+                "label": "VU",
+                "value": "VU"
+              },
+              {
+                "label": "VA",
+                "value": "VA"
+              },
+              {
+                "label": "VE",
+                "value": "VE"
+              },
+              {
+                "label": "VN",
+                "value": "VN"
+              },
+              {
+                "label": "WF",
+                "value": "WF"
+              },
+              {
+                "label": "EH",
+                "value": "EH"
+              },
+              {
+                "label": "YE",
+                "value": "YE"
+              },
+              {
+                "label": "ZM",
+                "value": "ZM"
+              },
+              {
+                "label": "ZW",
+                "value": "ZW"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "accounts": [
+              {
+                "id": "counterparty_provider_account_example",
+                "provider": "lightspark",
+                "kind": "payout_account",
+                "fiatCurrency": "USD",
+                "destinationCountry": "US",
+                "paymentRail": "ACH",
+                "status": "active",
+                "providerStatus": "ACTIVE",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "bankName": "Example Bank",
+                "accountNumberLast4": "6789",
+                "paymentRails": ["ACH", "WIRE"]
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
         "id": "get-counterparty-account",
         "operationId": "getCounterpartyAccount",
         "title": "Get counterparty account",
@@ -6518,7 +7543,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6536,7 +7561,7 @@
               "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "accountKind": "crypto_wallet",
               "label": "USDC wallet",
               "details": {
@@ -6566,7 +7591,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {
@@ -6594,7 +7619,7 @@
               "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
-              "counterpartyId": "cp_example",
+              "counterpartyId": "cpty_example",
               "accountKind": "crypto_wallet",
               "label": "USDC wallet",
               "details": {
@@ -6624,7 +7649,7 @@
             "key": "counterpartyId",
             "label": "{counterpartyId}",
             "description": "Counterparty identifier.",
-            "defaultValue": "cp_example",
+            "defaultValue": "cpty_example",
             "required": true
           },
           {

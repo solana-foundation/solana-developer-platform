@@ -18,6 +18,7 @@ import {
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { custodyQueryKeys } from "../../custody-query-key";
 import { DestinationsAndOperationsStep } from "./destinations-operations-step";
 import { DisableControlsDialog } from "./disable-controls-dialog";
 import { IntentStep } from "./intent-step";
@@ -26,7 +27,7 @@ import type { IssuedPolicyToken } from "./policy-assets.data";
 import { PolicyCommitDrawer } from "./policy-commit-drawer";
 import { PolicySummaryRail } from "./policy-summary-rail";
 import { ReviewStep } from "./review-step";
-import { RevisionHistoryDrawer, walletPolicyRevisionsKey } from "./revision-history-drawer";
+import { RevisionHistoryDrawer } from "./revision-history-drawer";
 import {
   buildDisabledPolicyPayload,
   buildPolicyAssetOptions,
@@ -220,14 +221,22 @@ export function WalletPolicyStartingProfileFlow({
         wallet.walletId,
         buildPolicyPayload(wallet.walletId, state),
         t,
-        commitMessage
+        commitMessage,
+        // Stale base 409s instead of replacing another session's controls.
+        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);
       setState(returnedState);
       setCommitMessage("");
       setReviewDrawerOpen(false);
-      void mutate(walletPolicyRevisionsKey(wallet.walletId), undefined, { revalidate: false });
+      void mutate(
+        custodyQueryKeys.walletPolicyRevisions({ walletId: wallet.walletId }),
+        undefined,
+        {
+          revalidate: false,
+        }
+      );
       setActiveFingerprint(policyStateFingerprint(wallet.walletId, returnedState));
       clearPolicyDraft(window.localStorage, projectId, wallet.walletId);
       toast.success(t("DashboardCustody.policyActive"), {
@@ -256,7 +265,9 @@ export function WalletPolicyStartingProfileFlow({
       const updated = await updateWalletPolicy(
         wallet.walletId,
         buildDisabledPolicyPayload(wallet.walletId),
-        t
+        t,
+        undefined,
+        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);

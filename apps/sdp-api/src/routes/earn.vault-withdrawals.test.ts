@@ -16,16 +16,42 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const withdrawFromVault = vi.hoisted(() => vi.fn());
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
+const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
+  vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
+);
 
 vi.mock("@/services/earn/vault-withdraw.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/vault-withdraw.service")>()),
   withdrawFromVault,
+}));
+vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
+  reconcileEarnVaultMovementReadThrough,
 }));
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/types/provider-access")>()),
   isEarnProviderSurfaced: () => surfacingEnabled.value,
 }));
+
+/**
+ * Per-test override for the withdraw-capable client, delegating to the REAL
+ * registry when unset — same pattern as `earn.vault.test.ts`. The preview
+ * route reaches the client directly, and the real Veda client would quote
+ * against a live RPC; Kamino cases stay on the real registry, whose client
+ * genuinely lacks `quoteVaultWithdrawal`, so the 501 is measured, not staged.
+ */
+const vaultWithdrawClientOverride = vi.hoisted(() => ({ current: null as unknown }));
+
+vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/earn/execution-registry")>();
+  return {
+    ...actual,
+    resolveVaultWithdrawClient: (...args: Parameters<typeof actual.resolveVaultWithdrawClient>) =>
+      (vaultWithdrawClientOverride.current as ReturnType<
+        typeof actual.resolveVaultWithdrawClient
+      > | null) ?? actual.resolveVaultWithdrawClient(...args),
+  };
+});
 
 /**
  * `POST /v1/earn/vault-withdrawals` and its reads — the gates, the exit-safety
@@ -183,6 +209,7 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     shares_out: null,
     payout_token: null,
     custody_wallet_id: CUSTODY_WALLET_ID,
+    owner_address: null,
     vault_address: VAULT,
     source_address: VAULT,
     destination_address: WALLET_ADDRESS,
@@ -197,6 +224,8 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     initiated_by_key_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    creates_share_account: false,
+    share_ata_rent_funder: null,
     ...overrides,
   };
 }
@@ -248,6 +277,7 @@ beforeEach(async () => {
 afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
+  vaultWithdrawClientOverride.current = null;
   vi.restoreAllMocks();
 });
 
@@ -538,6 +568,7 @@ describe("POST /v1/earn/vault-withdrawals — response shape", () => {
         provider: "kamino",
         positionId,
         shares: "10",
+        minAmountOut: null,
       }),
     });
     await repository.advanceVaultMovement({
@@ -606,6 +637,10 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     };
     expect(body.data.withdrawal.movementId).toBe(recorded.movement.id);
     expect(body.data.withdrawal.signature).toBe(recorded.movement.signature);
+    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: recorded.movement.id })
+    );
   });
 
   it("serves one withdrawal for ?requestId=", async () => {
@@ -658,6 +693,7 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     });
 
     expect((await getWithdrawal(`/${recorded.movement.id}`)).status).toBe(404);
+    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
     expect((await getWithdrawal("?requestId=vw-sibling-key")).status).toBe(200);
     const page = (await (await getWithdrawal("?requestId=vw-sibling-key")).json()) as {
       data: { withdrawals: unknown[] };
@@ -703,5 +739,143 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
       confirmed.recorded.movement.id,
       pending.recorded.movement.id,
     ]);
+  });
+});
+
+describe("POST /v1/earn/vault-withdrawals — the exit slippage floor", () => {
+  it("passes the caller's minAmountOut through to the service verbatim", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "veda" });
+    const requestId = crypto.randomUUID();
+
+    const res = await postVaultWithdrawal(
+      { positionId, shares: "5", minAmountOut: "4.99" },
+      { idempotencyKey: requestId }
+    );
+
+    expect(res.status).toBe(200);
+    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+    expect(withdrawFromVault.mock.calls[0]?.[1]).toMatchObject({
+      positionId,
+      shares: "5",
+      minAmountOut: "4.99",
+      requestId,
+    });
+  });
+});
+
+/**
+ * `POST /v1/earn/vault-withdrawal-previews` — the exit quote. EXIT gates only:
+ * position scoping (404) and capability (501), nothing money-in-shaped — plus
+ * `wallets:read`, which is not a money-in gate: it backs the binding check the
+ * read scopes through, and for a key with no wallet bindings that check is a
+ * documented no-op.
+ */
+describe("POST /v1/earn/vault-withdrawal-previews", () => {
+  function postVaultWithdrawalPreview(body: Record<string, unknown>) {
+    return app.request(
+      "/v1/earn/vault-withdrawal-previews",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      env
+    );
+  }
+
+  function quoteCapableClient(quote: unknown) {
+    return {
+      buildVaultDeposit: vi.fn(),
+      // Required for the vault-direct capability (PRO-1736); the quote guard
+      // narrows through supportsVaultDirect first.
+      sponsoredPrograms: vi.fn(() => []),
+      readVaultPositions: vi.fn(),
+      buildVaultWithdrawal: vi.fn(),
+      quoteVaultWithdrawal: vi.fn().mockResolvedValue(quote),
+    };
+  }
+
+  it("answers the provider's own quote for the caller's position", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "veda" });
+    const client = quoteCapableClient({
+      assetsOut: "4.997",
+      assetDecimals: 6,
+      blockingIssues: [],
+    });
+    vaultWithdrawClientOverride.current = client;
+
+    const res = await postVaultWithdrawalPreview({ positionId, shares: "5" });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({
+      positionId,
+      assetsOut: "4.997",
+      assetDecimals: 6,
+      blockingIssues: [],
+      // Sponsorship is unset in this harness, so the intent reads wallet-pays.
+      feeSponsored: false,
+    });
+    expect(client.quoteVaultWithdrawal).toHaveBeenCalledWith(expect.anything(), {
+      providerReference: VAULT,
+      shares: "5",
+    });
+  });
+
+  it("answers 501 for a provider that cannot quote, measured against the real client", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "kamino" });
+
+    const res = await postVaultWithdrawalPreview({ positionId, shares: "5" });
+
+    expect(res.status).toBe(501);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  it("answers 404 for a position this workspace cannot see", async () => {
+    await seedAuth();
+
+    const res = await postVaultWithdrawalPreview({
+      positionId: "earn_position_missing",
+      shares: "5",
+    });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses an earn:read-only key — wallets:read backs the binding check it reads through", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "veda" });
+    const readOnlyKey = { id: "key_earn_vw_ro", raw: "sk_test_earn_vw_ro" };
+    await seedCachedApiKey(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
+      ...TEST_CACHED_API_KEY,
+      id: readOnlyKey.id,
+      permissions: ["earn:read"],
+    });
+
+    const res = await app.request(
+      "/v1/earn/vault-withdrawal-previews",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${readOnlyKey.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ positionId, shares: "5" }),
+      },
+      env
+    );
+
+    // For a key with NO wallet bindings the handler's binding check is a
+    // documented no-op, so this gate is the only thing keeping an
+    // earn:read-only key from reading any org position's live payout while
+    // GET /vault-positions answers the same key 403.
+    expect(res.status).toBe(403);
   });
 });

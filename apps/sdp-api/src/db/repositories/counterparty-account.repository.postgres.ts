@@ -4,8 +4,7 @@ import type {
   CounterpartyAccountProviderData,
   CounterpartyAccountStatus,
 } from "@sdp/types";
-import type { AppDb, DatabaseExecutor } from "@/db";
-import type { PiiCipher, PiiCipherContext } from "@/services/pii-cipher/pii-cipher";
+import type { AppDb } from "@/db";
 import type {
   ArchiveCounterpartyAccountInput,
   CounterpartyAccountRow,
@@ -16,18 +15,6 @@ import type {
   UpdateCounterpartyAccountInput,
 } from "./counterparty-account.repository";
 import { generateCounterpartyAccountId } from "./counterparty-account.repository";
-import {
-  acquireCounterpartyPiiWriteLock,
-  cryptoAccountLookup,
-  getCounterpartyPiiMigrationPhase,
-  recordCounterpartyPiiFallbackRead,
-} from "./counterparty-pii.repository";
-
-interface CounterpartyAccountPiiPayload {
-  label: string | null;
-  details: CounterpartyAccountDetails;
-  providerAccountData: CounterpartyAccountProviderData;
-}
 
 function assertString(value: unknown, field: string): string {
   if (typeof value !== "string") {
@@ -36,117 +23,40 @@ function assertString(value: unknown, field: string): string {
   return value;
 }
 
-function accountContext(row: Record<string, unknown>): PiiCipherContext {
+/**
+ * Extracts the denormalized crypto-wallet lookup columns from account details.
+ *
+ * @param details - The account details JSON.
+ * @returns The network and address values, or null when absent.
+ */
+function cryptoAccountLookup(details: Record<string, unknown>): {
+  network: string | null;
+  address: string | null;
+} {
   return {
-    organizationId: assertString(row.organization_id, "organization_id"),
-    projectId: assertString(row.project_id, "project_id"),
-    resourceType: "counterparty_account",
-    resourceId: assertString(row.id, "id"),
-    field: "account_data",
+    network: typeof details.network === "string" ? details.network : null,
+    address: typeof details.address === "string" ? details.address : null,
   };
 }
 
-function parsePayload(value: string): CounterpartyAccountPiiPayload {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error("Counterparty account ciphertext contains invalid JSON");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Counterparty account ciphertext must contain a JSON object");
-  }
-  return parsed as CounterpartyAccountPiiPayload;
-}
-
-async function mapCounterpartyAccountRow(
-  db: DatabaseExecutor,
-  cipher: PiiCipher,
-  row: Record<string, unknown>
-): Promise<CounterpartyAccountRow> {
-  let payload: CounterpartyAccountPiiPayload;
-  if (typeof row.sensitive_data_encrypted === "string") {
-    payload = parsePayload(await cipher.decrypt(accountContext(row), row.sensitive_data_encrypted));
-  } else {
-    await recordCounterpartyPiiFallbackRead(db);
-    payload = {
-      label: (row.label as string | null) ?? null,
-      details: (row.details as CounterpartyAccountDetails | null) ?? {},
-      providerAccountData:
-        (row.provider_account_data as CounterpartyAccountProviderData | null) ?? {},
-    };
-  }
-
+function mapCounterpartyAccountRow(row: Record<string, unknown>): CounterpartyAccountRow {
   return {
     id: assertString(row.id, "id"),
     organization_id: assertString(row.organization_id, "organization_id"),
     project_id: assertString(row.project_id, "project_id"),
     counterparty_id: assertString(row.counterparty_id, "counterparty_id"),
     account_kind: row.account_kind as CounterpartyAccountKind,
-    label: payload.label,
-    details: payload.details,
-    provider_account_data: payload.providerAccountData,
+    label: (row.label as string | null) ?? null,
+    details: row.details as CounterpartyAccountDetails,
+    provider_account_data: row.provider_account_data as CounterpartyAccountProviderData,
     status: row.status as CounterpartyAccountStatus,
     created_at: assertString(row.created_at, "created_at"),
     updated_at: assertString(row.updated_at, "updated_at"),
   };
 }
 
-function inputContext(input: {
-  organizationId: string;
-  projectId: string;
-  counterpartyAccountId: string;
-}): PiiCipherContext {
-  return {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    resourceType: "counterparty_account",
-    resourceId: input.counterpartyAccountId,
-    field: "account_data",
-  };
-}
-
-async function encryptAccountData(
-  cipher: PiiCipher,
-  input: {
-    counterpartyAccountId: string;
-    organizationId: string;
-    projectId: string;
-    label: string | null;
-    details: CounterpartyAccountDetails;
-    providerAccountData: CounterpartyAccountProviderData;
-  }
-): Promise<string> {
-  return cipher.encrypt(
-    inputContext(input),
-    JSON.stringify({
-      label: input.label,
-      details: input.details,
-      providerAccountData: input.providerAccountData,
-    })
-  );
-}
-
-async function getCounterpartyAccountByIdInternal(
-  db: DatabaseExecutor,
-  cipher: PiiCipher,
-  params: { counterpartyAccountId: string; organizationId: string; projectId: string }
-): Promise<CounterpartyAccountRow | null> {
-  const row = await db
-    .prepare(
-      `SELECT * FROM counterparty_accounts
-        WHERE id = ?
-          AND organization_id = ?
-          AND project_id = ?`
-    )
-    .bind(params.counterpartyAccountId, params.organizationId, params.projectId)
-    .first<Record<string, unknown>>();
-  return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
-}
-
 export function createPostgresCounterpartyAccountsRepository(
-  db: AppDb,
-  cipher: PiiCipher
+  db: AppDb
 ): CounterpartyAccountsRepository {
   return {
     async createCounterpartyAccount(input: CreateCounterpartyAccountInput) {
@@ -154,54 +64,35 @@ export function createPostgresCounterpartyAccountsRepository(
       const label = input.label ?? null;
       const details = input.details ?? {};
       const providerAccountData = input.providerAccountData ?? {};
-      const encrypted = await encryptAccountData(cipher, {
-        counterpartyAccountId: id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        label,
-        details,
-        providerAccountData,
-      });
       const lookup = cryptoAccountLookup(details);
 
-      await db.transaction(async (tx) => {
-        await acquireCounterpartyPiiWriteLock(tx);
-        const phase = await getCounterpartyPiiMigrationPhase(tx);
-        await tx
-          .prepare(
-            `INSERT INTO counterparty_accounts (
-               id, organization_id, project_id, counterparty_id, account_kind,
-               label, details, provider_account_data, sensitive_data_encrypted,
-               network, address
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            id,
-            input.organizationId,
-            input.projectId,
-            input.counterpartyId,
-            input.accountKind,
-            phase === "dual_write" ? label : null,
-            phase === "dual_write" ? details : null,
-            phase === "dual_write" ? providerAccountData : null,
-            encrypted,
-            lookup.network,
-            lookup.address
-          )
-          .run();
-      });
+      const row = await db
+        .prepare(
+          `INSERT INTO counterparty_accounts (
+             id, organization_id, project_id, counterparty_id, account_kind,
+             label, details, provider_account_data, network, address
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           RETURNING *`
+        )
+        .bind(
+          id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.accountKind,
+          label,
+          details,
+          providerAccountData,
+          lookup.network,
+          lookup.address
+        )
+        .first<Record<string, unknown>>();
 
-      return getCounterpartyAccountByIdInternal(db, cipher, {
-        counterpartyAccountId: id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return row ? mapCounterpartyAccountRow(row) : null;
     },
 
     async updateCounterpartyAccount(input: UpdateCounterpartyAccountInput) {
       return db.transaction(async (tx) => {
-        await acquireCounterpartyPiiWriteLock(tx);
-        const phase = await getCounterpartyPiiMigrationPhase(tx);
         const row = await tx
           .prepare(
             `SELECT * FROM counterparty_accounts
@@ -222,48 +113,28 @@ export function createPostgresCounterpartyAccountsRepository(
         if (!row) {
           return null;
         }
-        const current = await mapCounterpartyAccountRow(tx, cipher, row);
+        const current = mapCounterpartyAccountRow(row);
         const label = input.label !== undefined ? input.label : current.label;
         const details = input.details ?? current.details;
         const providerAccountData = input.providerAccountData ?? current.provider_account_data;
-        const encrypted = await encryptAccountData(cipher, {
-          counterpartyAccountId: current.id,
-          organizationId: current.organization_id,
-          projectId: current.project_id,
-          label,
-          details,
-          providerAccountData,
-        });
         const lookup = cryptoAccountLookup(details);
 
-        await tx
+        const updated = await tx
           .prepare(
             `UPDATE counterparty_accounts
                 SET label = ?,
                     details = ?,
                     provider_account_data = ?,
-                    sensitive_data_encrypted = ?,
                     network = ?,
                     address = ?,
                     updated_at = sdp_iso_now()
-              WHERE id = ?`
+              WHERE id = ?
+            RETURNING *`
           )
-          .bind(
-            phase === "dual_write" ? label : null,
-            phase === "dual_write" ? details : null,
-            phase === "dual_write" ? providerAccountData : null,
-            encrypted,
-            lookup.network,
-            lookup.address,
-            current.id
-          )
-          .run();
+          .bind(label, details, providerAccountData, lookup.network, lookup.address, current.id)
+          .first<Record<string, unknown>>();
 
-        return getCounterpartyAccountByIdInternal(tx, cipher, {
-          counterpartyAccountId: current.id,
-          organizationId: current.organization_id,
-          projectId: current.project_id,
-        });
+        return updated ? mapCounterpartyAccountRow(updated) : null;
       });
     },
 
@@ -287,7 +158,7 @@ export function createPostgresCounterpartyAccountsRepository(
           input.projectId
         )
         .first<Record<string, unknown>>();
-      return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
+      return row ? mapCounterpartyAccountRow(row) : null;
     },
 
     async getCounterpartyAccountById(params) {
@@ -307,7 +178,7 @@ export function createPostgresCounterpartyAccountsRepository(
           params.projectId
         )
         .first<Record<string, unknown>>();
-      return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
+      return row ? mapCounterpartyAccountRow(row) : null;
     },
 
     async getCounterpartyAccountByIdInProject(params) {
@@ -321,7 +192,7 @@ export function createPostgresCounterpartyAccountsRepository(
         )
         .bind(params.counterpartyAccountId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();
-      return row ? mapCounterpartyAccountRow(db, cipher, row) : null;
+      return row ? mapCounterpartyAccountRow(row) : null;
     },
 
     async listCounterpartyAccountsByIdsInProject(params) {
@@ -339,7 +210,7 @@ export function createPostgresCounterpartyAccountsRepository(
         )
         .bind(...params.counterpartyAccountIds, params.organizationId, params.projectId)
         .all<Record<string, unknown>>();
-      return Promise.all(result.results.map((row) => mapCounterpartyAccountRow(db, cipher, row)));
+      return result.results.map((row) => mapCounterpartyAccountRow(row));
     },
 
     async listCounterpartyAccountsByCounterparty(
@@ -391,9 +262,7 @@ export function createPostgresCounterpartyAccountsRepository(
       ]);
 
       return {
-        rows: await Promise.all(
-          rowsResult.results.map((row) => mapCounterpartyAccountRow(db, cipher, row))
-        ),
+        rows: rowsResult.results.map((row) => mapCounterpartyAccountRow(row)),
         total: countRow?.total ?? 0,
       };
     },
@@ -448,20 +317,18 @@ export function createPostgresCounterpartyAccountsRepository(
           .first<{ total: number }>(),
       ]);
 
-      const rows = await Promise.all(
-        rowsResult.results.map(async (row) => {
-          const account = await mapCounterpartyAccountRow(db, cipher, row);
-          const address =
-            typeof row.address === "string" ? row.address : (account.details.address as string);
-          return {
-            counterparty_id: account.counterparty_id,
-            counterparty_display_name: row.counterparty_display_name as string,
-            account_id: account.id,
-            account_label: account.label,
-            address,
-          };
-        })
-      );
+      const rows = rowsResult.results.map((row) => {
+        const account = mapCounterpartyAccountRow(row);
+        const address =
+          typeof row.address === "string" ? row.address : (account.details.address as string);
+        return {
+          counterparty_id: account.counterparty_id,
+          counterparty_display_name: row.counterparty_display_name as string,
+          account_id: account.id,
+          account_label: account.label,
+          address,
+        };
+      });
       return { rows, total: countRow?.total ?? 0 };
     },
   };

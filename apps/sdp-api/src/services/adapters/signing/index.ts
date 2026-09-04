@@ -49,6 +49,7 @@ import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { instrumentVendorPort, signFailedResult } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -179,7 +180,10 @@ export async function createSigningAdapterFromConfig(
     case "utila":
       return createUtilaAdapterFromRecord(record, env);
     case "local":
-      return createMemoryAdapterFromEnv(env);
+      throw new SigningError(
+        "Local signing cannot be built from a stored configuration record",
+        "PROVIDER_NOT_CONFIGURED"
+      );
     case "anchorage":
       throw new SigningError(
         "Anchorage does not support transaction signing in SDP",
@@ -202,9 +206,17 @@ export async function createSigningAdapter(
   config?: SigningConfigRecord | null
 ): Promise<SigningPort> {
   if (config) {
-    return createSigningAdapterFromConfig(config, env);
+    return instrumentVendorPort(
+      config.provider,
+      await createSigningAdapterFromConfig(config, env),
+      signFailedResult
+    );
   }
-  return createSigningAdapterFromEnv(env);
+  return instrumentVendorPort(
+    env.SIGNING_PROVIDER ?? "local",
+    await createSigningAdapterFromEnv(env),
+    signFailedResult
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

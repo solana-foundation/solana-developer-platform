@@ -266,10 +266,26 @@ export function notifyRampSettled(
     cryptoToken?: string | null;
   }
 ): void {
+  fireAndForget(c, Promise.allSettled(rampSettledDispatches(c.env, input)));
+}
+
+// Env-based twin for callers outside a request context (the shared settlement
+// applier runs from webhook workers and cron alike). Same dispatches, awaited.
+export async function notifyRampSettledFromEnv(
+  env: Env,
+  input: Parameters<typeof notifyRampSettled>[1]
+): Promise<void> {
+  await Promise.allSettled(rampSettledDispatches(env, input));
+}
+
+function rampSettledDispatches(
+  env: Env,
+  input: Parameters<typeof notifyRampSettled>[1]
+): Promise<unknown>[] {
   const directionLabel = input.direction === "offramp" ? "Off-ramp" : "On-ramp";
   const amountText = formatAmount(input.amount, input.fiatCurrency);
-  const work = Promise.allSettled([
-    dispatchNotification(c.env, {
+  return [
+    dispatchNotification(env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
       type: "payment_settled",
@@ -288,7 +304,7 @@ export function notifyRampSettled(
       },
     }),
     input.counterpartyId && input.projectId
-      ? dispatchCounterpartyEmail(c.env, {
+      ? dispatchCounterpartyEmail(env, {
           organizationId: input.organizationId,
           projectId: input.projectId,
           counterpartyId: input.counterpartyId,
@@ -298,8 +314,7 @@ export function notifyRampSettled(
           body: `Your ${input.direction === "offramp" ? "payout" : "payment"}${amountText} has settled.`,
         })
       : Promise.resolve(null),
-  ]);
-  fireAndForget(c, work);
+  ];
 }
 
 // Env-based (cron). Best-effort; dispatchNotification never throws.

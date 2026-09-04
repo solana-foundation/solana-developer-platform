@@ -25,6 +25,7 @@ export interface PaymentRequestRow {
   organization_id: string;
   project_id: string | null;
   counterparty_id: string | null;
+  custody_wallet_id: string | null;
   wallet_id: string;
   destination_address: string;
   token: string;
@@ -44,6 +45,7 @@ export interface CreatePaymentRequestInput {
   organizationId: string;
   projectId: string;
   counterpartyId: string | null;
+  custodyWalletId: string;
   walletId: string;
   destinationAddress: string;
   token: string;

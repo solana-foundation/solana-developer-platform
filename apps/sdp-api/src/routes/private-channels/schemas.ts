@@ -17,12 +17,30 @@ export type ConnectPrivateChannelInstanceInput = z.infer<
   typeof connectPrivateChannelInstanceSchema
 >;
 
-/** Body for `POST /probe`: the three URLs the connect flow re-probes. */
-export const probeConnectionSchema = z.object({
-  gatewayUrl: z.string().min(1),
-  chainRpcUrl: z.string().min(1),
-  authUrl: z.string().min(1),
-});
+/** Reconfigure the active instance only when the URL still names that exact row. */
+export const updatePrivateChannelInstanceSchema = z.intersection(
+  privateChannelInstanceInputSchema,
+  z.object({ instanceId: z.string().min(1) })
+);
+
+/** Body for `POST /probe`: SPC-owned URLs; Solana RPC comes from the project. */
+export const probeConnectionSchema = privateChannelInstanceInputSchema
+  .pick({
+    gatewayUrl: true,
+    authUrl: true,
+    escrowProgramId: true,
+    escrowInstanceAddr: true,
+  })
+  .partial({ escrowProgramId: true, escrowInstanceAddr: true })
+  .superRefine((value, ctx) => {
+    if (Boolean(value.escrowProgramId) !== Boolean(value.escrowInstanceAddr)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Escrow program ID and escrow instance address must be provided together.",
+        path: value.escrowProgramId ? ["escrowInstanceAddr"] : ["escrowProgramId"],
+      });
+    }
+  });
 
 /** Query params for `GET /health`. */
 export const healthQuerySchema = z.object({
@@ -123,8 +141,17 @@ export const privateChannelEventsQuerySchema = z.object({
 });
 
 /** Invite an existing SDP project user to the SPC workspace. */
-export const inviteMemberBodySchema = z.object({
-  userId: z.string().min(1),
+export const createPrincipalBodySchema = z.object({
+  name: z.string().trim().min(2).max(64),
+});
+
+export const addPrincipalMembershipBodySchema = z.object({
+  principalId: z.string().min(1),
+});
+
+/** Selects which project principal owns a verified custody wallet. */
+export const verifyWalletBodySchema = z.object({
+  principalId: z.string().min(1).optional(),
 });
 
 /** Body for `POST /channels/:channelId/memberships`. */

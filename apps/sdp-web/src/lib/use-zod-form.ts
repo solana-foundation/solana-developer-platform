@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { z } from "zod";
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
@@ -55,5 +55,8 @@ export function useZodForm<TSchema extends z.ZodTypeAny>(
     setErrors({});
   }, []);
 
-  return { values, errors, setField, validate, reset };
+  return useMemo(
+    () => ({ values, errors, setField, validate, reset }),
+    [values, errors, setField, validate, reset]
+  );
 }

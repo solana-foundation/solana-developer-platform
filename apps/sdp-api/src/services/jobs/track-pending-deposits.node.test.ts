@@ -33,6 +33,19 @@ const { createRpc, getSignatureStatuses } = vi.hoisted(() => ({
 }));
 vi.mock("@sdp/rpc/solana", () => ({ createRpc, getSignatureStatuses }));
 
+const { loadProjectRpcClient, PROJECT_RPC } = vi.hoisted(() => {
+  const PROJECT_RPC = { __projectRpc: true };
+  return {
+    PROJECT_RPC,
+    loadProjectRpcClient: vi.fn(async () => ({
+      cluster: "devnet",
+      rpc: PROJECT_RPC,
+      target: { endpoint: "https://project-rpc.example" },
+    })),
+  };
+});
+vi.mock("@/services/private-channels/project-rpc", () => ({ loadProjectRpcClient }));
+
 import { trackPendingDeposits } from "./track-pending-deposits";
 
 const NOW_ISO = "2026-07-17T00:00:00.000Z";
@@ -66,7 +79,6 @@ function instanceRow(overrides: Record<string, unknown> = {}) {
     organization_id: "org",
     project_id: "proj",
     gateway_url: "http://gw",
-    chain_rpc_url: "https://api.devnet.solana.com",
     escrow_program_id: "esc",
     withdraw_program_id: "wdp",
     escrow_instance_addr: "instAddr",
@@ -95,24 +107,23 @@ describe("trackPendingDeposits", () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([]);
     await trackPendingDeposits({} as Env);
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(loadProjectRpcClient).not.toHaveBeenCalled();
   });
 
-  it("advances submitted → confirmed via the CURRENT instance's chain RPC", async () => {
+  it("advances submitted → confirmed via the project's configured RPC", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
       depositRow({ id: "d1", status: "submitted", signature: "sig1" }),
     ]);
-    // Instance may have been reconfigured; the reconciler reads the live row.
-    instanceRepo.getById.mockResolvedValueOnce(
-      instanceRow({ chain_rpc_url: "https://api.devnet.solana.com/new" })
-    );
     getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
 
     await trackPendingDeposits({} as Env);
 
-    expect(createRpc).toHaveBeenCalledWith(expect.anything(), {
-      rpcUrl: "https://api.devnet.solana.com/new",
+    expect(loadProjectRpcClient).toHaveBeenCalledWith({
+      env: expect.anything(),
+      organizationId: "org",
+      projectId: "proj",
     });
+    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, ["sig1"]);
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d1", status: "confirmed", expectedStatus: "submitted" })
     );

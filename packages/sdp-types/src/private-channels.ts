@@ -41,14 +41,25 @@ export interface PrivateChannelToken {
   tokenProgram: string;
 }
 
+export type PrivateChannelTokenExclusionCode = "NOT_ALLOWED_BY_INSTANCE" | "ALLOWLIST_UNAVAILABLE";
+
+/** Why a registered token cannot currently be used with the connected instance. */
+export interface PrivateChannelTokenExclusion {
+  code: PrivateChannelTokenExclusionCode;
+  message: string;
+}
+
+/** SDP token metadata combined with the instance's on-chain `allowedMint` state. */
+export interface PrivateChannelTokenEligibility extends PrivateChannelToken {
+  enabled: boolean;
+  exclusionReasons: PrivateChannelTokenExclusion[];
+}
+
 /**
- * Infer the Solana cluster from an instance's chain RPC URL. The persisted
- * instance stores no explicit cluster, and the sandbox is devnet, so an
- * unrecognized URL is treated as devnet.
+ * Legacy cluster inference used by the currently deployed Private Channels UI.
  *
- * Lives here rather than in the API so the web derives the cluster the SAME way
- * the API does. `useSolanaCluster()` resolves from the selected project's
- * environment instead, which can disagree with the instance's own RPC URL.
+ * @deprecated Private Channels now derives the cluster from the SDP project.
+ * Keep this helper until the UI migration no longer imports it.
  */
 export function inferCluster(chainRpcUrl: string): SolanaCluster {
   return /mainnet/i.test(chainRpcUrl) ? "mainnet-beta" : "devnet";
@@ -83,6 +94,13 @@ export function privateChannelTokens(cluster: SolanaCluster): PrivateChannelToke
  */
 export interface PrivateChannelInstanceInput {
   gatewayUrl: string;
+  /**
+   * Legacy compatibility field. The API accepts and returns it while the
+   * existing dashboard is being migrated, but Private Channels operations use
+   * the project's configured RPC instead.
+   *
+   * @deprecated Configure RPC on the SDP project.
+   */
   chainRpcUrl: string;
   escrowProgramId: string;
   withdrawProgramId: string;
@@ -193,6 +211,7 @@ export type PrivateChannelTransferStatus =
  */
 export interface PrivateChannelTransferContext {
   gatewayUrl?: string;
+  /** @deprecated Private Channels uses the project's configured RPC. */
   chainRpcUrl?: string;
   escrowProgramId?: string;
   escrowInstanceAddr?: string;
@@ -374,19 +393,9 @@ export interface PrivateChannelVerifiedWalletDto {
   verifiedAt: string;
 }
 
-/** An SDP user invited to the SPC workspace, joined with `users` for display. */
-export interface PrivateChannelUserDto {
-  id: string;
-  userId: string;
-  email: string;
-  name: string | null;
-  /** Per-project role; null once the user's project_members row is removed. */
-  projectRole: string | null;
-  /** How many wallets this member has verified with the connected instance. */
-  verifiedWalletCount: number;
-  invitedAt: string;
-  /** Channels this user is a member of. */
-  channels: PrivateChannelMembershipChannelDto[];
+/** Optional target principal for a custody-wallet verification. Defaults to the project principal. */
+export interface VerifyPrivateChannelWalletRequest {
+  principalId?: string;
 }
 
 export interface PrivateChannelMembershipChannelDto {
@@ -395,14 +404,23 @@ export interface PrivateChannelMembershipChannelDto {
   isDefault: boolean;
 }
 
-/** Invite an existing SDP project user to the SPC workspace. */
-export interface InvitePrivateChannelUserRequest {
-  userId: string;
+/** A project-scoped SPC identity. It represents a business participant, not an SDP user. */
+export interface PrivateChannelPrincipalDto {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  status: "active" | "disabled";
+  verifiedWalletCount: number;
+  createdAt: string;
+  channels: PrivateChannelMembershipChannelDto[];
 }
 
-/** Request body for adding a user to a channel. */
-export interface AddPrivateChannelMembershipRequest {
-  privateChannelUserId: string;
+export interface CreatePrivateChannelPrincipalRequest {
+  name: string;
+}
+
+export interface AddPrivateChannelPrincipalMembershipRequest {
+  principalId: string;
 }
 
 // --- Private Channel Events ---------------------------------------------

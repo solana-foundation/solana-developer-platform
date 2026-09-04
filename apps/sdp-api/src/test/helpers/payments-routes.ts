@@ -1,10 +1,21 @@
+import { createHash } from "node:crypto";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
-import type { Signature } from "@solana/kit";
-import { address, createNoopSigner } from "@solana/kit";
+import {
+  address,
+  createNoopSigner,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  type Signature,
+  type SignatureBytes,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+} from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, vi } from "vitest";
@@ -28,6 +39,8 @@ export const getTransactionMock = vi.spyOn(solanaRpc, "getTransaction");
 
 export const sendAndConfirmTransactionMock = vi.spyOn(solanaRpc, "sendAndConfirmTransaction");
 
+export const sendTransactionMock = vi.spyOn(solanaRpc, "sendTransaction");
+
 export const getSignaturesForAddressMock = vi.spyOn(solanaRpc, "getSignaturesForAddress");
 
 export const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
@@ -40,6 +53,11 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 
 export const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
+
+export const createOrgSignerForCustodyWalletMock = vi.spyOn(
+  solanaServices,
+  "createOrgSignerForCustodyWallet"
+);
 
 const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
@@ -90,6 +108,45 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   feePayerPolicy: { test: "zero-outflow" },
 } satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
 
+export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
+  const cause =
+    customProgramErrorCode === undefined
+      ? undefined
+      : new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
+          code: customProgramErrorCode,
+          index: 0,
+        });
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: null,
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+export function fullySignTestTransaction(transactionBytes: Uint8Array): Uint8Array {
+  const transaction = getTransactionDecoder().decode(transactionBytes);
+  const signatureSeed = createHash("sha512")
+    .update(new Uint8Array(transaction.messageBytes))
+    .digest();
+  const signatures = Object.fromEntries(
+    Object.entries(transaction.signatures).map(([signer, signature], index) => [
+      signer,
+      signature ?? (new Uint8Array(signatureSeed.map((byte) => byte ^ index)) as SignatureBytes),
+    ])
+  ) as typeof transaction.signatures;
+  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
+}
+
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -110,7 +167,7 @@ export const TEST_MOONPAY_SECRET_KEY = "moonpay_secret_key";
 
 export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
-const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
 const TEST_LIGHTSPARK_GRID_CLIENT_ID = "lightspark_token_id";
 
@@ -125,6 +182,10 @@ const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 export const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+
+export const TEST_MONEYGRAM_PUBLIC_KEY = "moneygram_sandbox_public_key";
+
+export const TEST_MONEYGRAM_SECRET_KEY = "moneygram_sandbox_secret_key";
 
 let originalMoonPaySandboxApiKey: string | undefined;
 
@@ -163,6 +224,10 @@ let originalBvnkApiBaseUrl: string | undefined;
 let originalMagicBlockApiBaseUrl: string | undefined;
 
 let originalMagicBlockAuthToken: string | undefined;
+
+let originalMoneygramSandboxPublicKey: string | undefined;
+
+let originalMoneygramSandboxSecretKey: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -267,10 +332,11 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
 export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
-  identity?: Record<string, unknown>;
   providerData?: Record<string, unknown>;
 }): Promise<string> {
-  const id = params?.id ?? `counterparty_${crypto.randomUUID()}`;
+  const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
+  const externalId = params?.externalId ?? null;
+  const providerData = params?.providerData ?? {};
   await getDb(env)
     .prepare(
       `INSERT INTO counterparties (
@@ -280,23 +346,19 @@ export async function seedCounterparty(params?: {
          external_id,
          entity_type,
          display_name,
-         email,
-         identity,
          provider_data,
          status,
          created_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
     )
     .bind(
       id,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      params?.externalId ?? null,
+      externalId,
       "individual",
       "MoonPay Test Counterparty",
-      "moonpay-counterparty@example.com",
-      params?.identity ?? {},
-      params?.providerData ?? {},
+      providerData,
       TEST_USER.id
     )
     .run();
@@ -505,6 +567,9 @@ export function installPaymentsRouteTestHooks(): void {
       confirmationStatus: "confirmed",
       err: null,
     });
+    sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
+      getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
+    );
     getSignaturesForAddressMock.mockResolvedValue([]);
     getSplTokenBalancesMock.mockResolvedValue([]);
     getSplTokenAccountAddressesMock.mockResolvedValue([]);
@@ -515,6 +580,7 @@ export function installPaymentsRouteTestHooks(): void {
         status: subscriptionsProgram.PlanStatus.Active,
         data: {
           endTs: 0n,
+          metadataUri: "",
           pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
           terms: { createdAt: 1_770_000_000n },
         },
@@ -528,7 +594,7 @@ export function installPaymentsRouteTestHooks(): void {
     fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
-      data: {},
+      data: { expiresAtTs: 1_800_000_000n },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
@@ -537,7 +603,7 @@ export function installPaymentsRouteTestHooks(): void {
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
         signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       }),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi
         .fn()
         .mockResolvedValue(
@@ -545,6 +611,9 @@ export function installPaymentsRouteTestHooks(): void {
         ),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     createOrgSignerMock.mockResolvedValue(
+      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
+    );
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
 
@@ -567,6 +636,8 @@ export function installPaymentsRouteTestHooks(): void {
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
     originalMagicBlockApiBaseUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL;
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
+    originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
+    originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -587,6 +658,8 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = undefined;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
+    env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
+    env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -612,6 +685,8 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
+    env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
+    env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
 
     await clearKVStores(env);
   });

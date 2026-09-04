@@ -20,11 +20,13 @@ import {
   privateChannelIdParamSchema,
   privateChannelInstanceInputSchema,
   privateChannelInstanceSchema,
+  privateChannelInstanceUpdateSchema,
   privateChannelListSchema,
   privateChannelOverviewSchema,
   privateChannelProbeBodySchema,
   privateChannelProbeResultSchema,
   privateChannelSchema,
+  privateChannelTokenEligibilityListSchema,
   privateChannelTransferChannelIdParamSchema,
   privateChannelTransferIdParamSchema,
   privateChannelTransferListQuerySchema,
@@ -33,6 +35,7 @@ import {
   privateChannelTransferSchema,
   privateChannelVerifiedWalletListSchema,
   privateChannelVerifiedWalletSchema,
+  privateChannelVerifyWalletBodySchema,
   privateChannelVerifyWalletParamSchema,
   privateChannelWithdrawalIdParamSchema,
   privateChannelWithdrawalListSchema,
@@ -66,6 +69,30 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         ),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/private-channels/instance",
+    tags: [TAG],
+    summary: "Update the active Private Channels instance",
+    operationId: "updatePrivateChannelInstance",
+    description:
+      "Server-probes the proposed gateway, auth service, and escrow deployment before replacing the active instance configuration.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: { content: jsonContent(privateChannelInstanceUpdateSchema) },
+    },
+    responses: {
+      200: {
+        description: "The updated active instance.",
+        content: jsonContent(
+          successResponseSchema(z.object({ instance: privateChannelInstanceSchema }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -163,7 +190,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Probe a candidate SPC configuration",
     operationId: "probePrivateChannelConnection",
     description:
-      "Full pre-connect probe: gateway `/health` + `/ready` and chain RPC `getVersion`. Always 200 with the raw probe result; only a malformed body is 400. The Connect handler runs the same probe internally, so `probe.ok === true` here means Connect will not fail on the probe step.",
+      "Full pre-connect probe: gateway `/health` + `/ready`, project RPC connectivity, and escrow deployment verification when both deployment addresses are supplied. Legacy payloads may omit both addresses for connectivity-only probing. Connect always verifies the deployment. The endpoint returns 200 with the raw probe result; only a malformed body is 400.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -213,6 +240,25 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(successResponseSchema(privateChannelBalanceSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/private-channels/tokens",
+    tags: [TAG],
+    summary: "List token eligibility for the active instance",
+    operationId: "listPrivateChannelTokenEligibility",
+    description:
+      "Combines SDP's token registry with the active instance's on-chain allowed-mint accounts.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Registered tokens and their eligibility for the active instance.",
+        content: jsonContent(successResponseSchema(privateChannelTokenEligibilityListSchema)),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500, 503]),
     },
   });
 
@@ -339,7 +385,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List eligible verified-wallet transfer recipients",
     operationId: "listPrivateChannelTransferRecipients",
     description:
-      "Requires a user identity and explicit membership in the active channel. Returns every verified wallet in that channel, one entry per wallet, including the caller's own. A transfer to the same wallet it is sent from is rejected on create.",
+      "Requires the project's default principal to have access to the active channel. Returns every verified wallet in that channel, one entry per wallet, including the project's own. A transfer to the same wallet it is sent from is rejected on create.",
     security: [{ sessionCookie: [] }],
     request: {
       headers: sessionProjectScopeHeaders,
@@ -358,10 +404,10 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/private-channels/channels/{channelId}/transfers",
     tags: [TAG],
-    summary: "Create a verified member-to-member channel transfer",
+    summary: "Create a verified principal-to-principal channel transfer",
     operationId: "createPrivateChannelTransfer",
     description:
-      "Server-signs with the acting member's verified SDP custody wallet and sends only to an opaque verified-wallet recipient returned by the channel recipient endpoint. Records the transfer as `pending` before broadcast, `submitted` once SPC accepts it, then `confirmed` once a signature-status read shows it executed. `failed` covers preparation errors, ingress rejection and execution errors, and may be retried by the user. Returns once the confirm read resolves; a transfer still `submitted` in the response means that read returned no verdict.",
+      "Server-signs with the project's default principal's verified SDP custody wallet and sends only to an opaque verified-wallet recipient returned by the channel recipient endpoint. Records the transfer as `pending` before broadcast, `submitted` once SPC accepts it, then `confirmed` once a signature-status read shows it executed. `failed` covers preparation errors, ingress rejection and execution errors, and may be retried by the caller. Returns once the confirm read resolves; a transfer still `submitted` in the response means that read returned no verdict.",
     security: [{ sessionCookie: [] }],
     request: {
       headers: sessionProjectScopeHeaders,
@@ -508,7 +554,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List display-name references for events",
     operationId: "listPrivateChannelEventReferences",
     description:
-      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, custody wallet labels (by pubkey and wallet id), member display names (by private-channel-user id and SDP user id), issued-token symbols (by mint address), and instance gateway URLs. Channels, members, and instances follow the same viewer rules as the events feed. Token symbols are project-wide, and wallet labels follow the same `wallets:read` and selected-wallet scope as the custody endpoints.",
+      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, custody wallet labels (by pubkey and wallet id), principal names (by private-channel-principal id), issued-token symbols (by mint address), and instance gateway URLs. Channels, principals, and instances follow the same viewer rules as the events feed. Token symbols are project-wide, and wallet labels follow the same `wallets:read` and selected-wallet scope as the custody endpoints.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -563,10 +609,10 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/private-channels/wallets",
     tags: [TAG],
-    summary: "List the caller's verified wallets",
+    summary: "List the project's verified wallets",
     operationId: "listPrivateChannelVerifiedWallets",
     description:
-      "Lists the caller's own custody wallets that have completed SPC verification for this project. Requires a user session — under API-key auth this returns an empty list because there is no acting-member identity.",
+      "Lists custody wallets that have completed SPC verification for the project's default principal.",
     security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
@@ -585,9 +631,13 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Verify a custody wallet with the SPC auth service",
     operationId: "verifyPrivateChannelWallet",
     description:
-      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification. A member may verify many wallets; idempotent per (member, instance, wallet). Requires the caller to be an invited member of the connected instance. Requires a user session — API-key auth is not accepted at runtime.",
+      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification for the selected project principal (or the default principal when omitted). A principal may verify many wallets; idempotent per (principal, instance, wallet).",
     security: [{ sessionCookie: [] }],
-    request: { headers: projectScopeHeaders, params: privateChannelVerifyWalletParamSchema },
+    request: {
+      headers: projectScopeHeaders,
+      params: privateChannelVerifyWalletParamSchema,
+      body: { content: jsonContent(privateChannelVerifyWalletBodySchema) },
+    },
     responses: {
       200: {
         description: "The verified wallet.",
@@ -606,7 +656,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Revoke a verified wallet",
     operationId: "deletePrivateChannelVerifiedWallet",
     description:
-      "Revokes a wallet verification with the SPC auth service and removes the SDP mirror row. Requires the caller to be an invited member of the connected instance. Requires a user session — API-key auth is not accepted at runtime.",
+      "Revokes a wallet verification for the project's default principal with the SPC auth service and removes the SDP mirror row.",
     security: [{ sessionCookie: [] }],
     request: { headers: projectScopeHeaders, params: privateChannelDeleteWalletParamSchema },
     responses: {

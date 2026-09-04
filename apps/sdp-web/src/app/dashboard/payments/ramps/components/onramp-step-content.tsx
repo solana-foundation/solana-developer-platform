@@ -5,7 +5,6 @@ import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
@@ -13,12 +12,12 @@ import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
-import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
+import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
+import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -33,15 +32,18 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const t = useTranslations();
   const {
     currentStepId,
+    enabledRampProviders,
     rampProviderAccess,
     selectedCounterparty,
     fields,
     setField,
+    selectProvider,
     liveWallets,
     walletsLoading,
     selectedWallet,
     selectedRampPair,
     onboarding,
+    isAdvancing,
     retryOnboarding,
     quote,
     transferStatus,
@@ -54,6 +56,9 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     setCollectedField,
     requirementsBlocker,
     refreshQuote,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
     memoRows,
     setMemoRows,
   } = wizard;
@@ -75,6 +80,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       <div className="space-y-4">
         <RampPairProviderSelector
           direction="onramp"
+          enabledRampProviders={enabledRampProviders}
           rampProviderAccess={rampProviderAccess}
           selectedCounterparty={selectedCounterparty}
           wallets={liveWallets}
@@ -88,7 +94,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           onAmountBlur={() => {}}
           onWalletChange={(walletId) => setField("walletId", walletId)}
           onPairChange={handlePairChange}
-          onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+          onProviderSelect={selectProvider}
         />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
@@ -100,11 +106,27 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "REQUIREMENTS") {
+    // Native fieldset[disabled] freezes every nested input and combobox trigger
+    // while the advance POST is in flight, so mid-flight edits can't desync the
+    // form from what the provider was sent.
     return (
-      <RequirementsFields
-        fields={requirementFields}
-        values={collectedData}
-        onChange={setCollectedField}
+      <fieldset disabled={isAdvancing} className="min-w-0">
+        <RequirementsFields
+          provider={fields.provider}
+          fields={requirementFields}
+          values={collectedData}
+          onChange={setCollectedField}
+        />
+      </fieldset>
+    );
+  }
+
+  if (currentStepId === "PROVIDER" && !quote && quoteCreationError) {
+    return (
+      <RampQuoteError
+        error={quoteCreationError}
+        retrying={quoteCreationRetrying}
+        onRetry={() => void retryQuoteCreation()}
       />
     );
   }
@@ -113,7 +135,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     currentStepId === "PROVIDER" &&
     onboarding &&
     !quote &&
-    hasOnboardingLifecycle(onboarding.provider)
+    hasOnboardingLifecycle(onboarding.provider) &&
+    isOnboardingPanelStatus(onboarding)
   ) {
     return (
       <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
@@ -126,15 +149,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
 
   if (currentStepId === "PROVIDER" && quote?.provider === "stripe") {
     return (
-      <div className="space-y-6">
-        <StripeOnrampFrame
-          clientSecret={quote.clientSecret}
-          publishableKey={quote.publishableKey}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
-      </div>
+      <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
     );
   }
 
@@ -143,24 +158,18 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       return <RampQuoteSkeleton />;
     }
     return (
-      <div className="space-y-6">
-        <MoneygramRampWidget
-          direction="onramp"
-          quote={quote}
-          counterparty={selectedCounterparty}
-          sourceWalletId={fields.walletId}
-          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-          sourceWalletAddress={selectedWallet.publicKey}
-          sourceTokenMint={null}
-          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-          cryptoAmount={fields.amount.trim()}
-          fiatCurrency={selectedRampPair.fiatCurrency}
-          onSessionExpiring={refreshQuote}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
-      </div>
+      <MoneygramRampWidget
+        direction="onramp"
+        quote={quote}
+        sourceWalletId={selectedWallet.id}
+        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+        sourceWalletAddress={selectedWallet.publicKey}
+        sourceTokenMint={null}
+        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+        cryptoAmount={fields.amount.trim()}
+        fiatCurrency={selectedRampPair.fiatCurrency}
+        onSessionExpiring={refreshQuote}
+      />
     );
   }
 
@@ -178,9 +187,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
             src={quote.hostedUrl}
           />
         )}
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
       </div>
     );
   }
@@ -210,19 +216,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         }
       : undefined;
     return (
-      <div className="space-y-6">
-        <ManualInstructionsQuote
-          amount={fields.amount.trim()}
-          quote={quote}
-          fiatCurrency={selectedRampPair.fiatCurrency}
-          cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
-          instructions={quote.paymentInstructions}
-          action={simulateAction}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="onramp" transfer={transferStatus} />
-        </div>
-      </div>
+      <ManualInstructionsQuote
+        amount={fields.amount.trim()}
+        quote={quote}
+        fiatCurrency={selectedRampPair.fiatCurrency}
+        cryptoToken={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+        instructions={quote.paymentInstructions}
+        action={simulateAction}
+      />
     );
   }
 

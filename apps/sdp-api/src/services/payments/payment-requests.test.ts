@@ -13,7 +13,10 @@ import {
 } from "vitest";
 import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
-import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import {
+  createPaymentRequestsRepository,
+  createPaymentsRepository,
+} from "@/db/repositories/repository-factory";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { SOL_MINT } from "@/services/payment-operation.service";
@@ -24,6 +27,8 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { reconcilePaymentRequest } from "./payment-requests";
 
 const TEST_PROJECT_ID = "prj_preq_handler_test";
+const TEST_CONFIG_ID = "cust_cfg_preq_handler_test";
+const TEST_CUSTODY_WALLET_ID = "cwlt_preq_handler_test";
 const TEST_WALLET_ID = "wal_preq_handler_test";
 const SIGNATURE = "S".repeat(64);
 
@@ -66,6 +71,7 @@ async function createRequest(overrides?: { token?: string; expiresAt?: string })
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
     counterpartyId: null,
+    custodyWalletId: TEST_CUSTODY_WALLET_ID,
     walletId: TEST_WALLET_ID,
     destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
     token: overrides?.token ?? SOL_MINT,
@@ -121,6 +127,23 @@ describe("reconcilePaymentRequest", () => {
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
       .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted,
+            encryption_version, status)
+         VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
+      )
+      .bind(TEST_CONFIG_ID, TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(TEST_CUSTODY_WALLET_ID, TEST_CONFIG_ID, TEST_WALLET_ID, TEST_CUSTODY_PUBLIC_KEY)
+      .run();
   });
 
   it("settles an awaiting request and links a recorded inbound transfer", async () => {
@@ -139,6 +162,7 @@ describe("reconcilePaymentRequest", () => {
     expect(transfers[0].direction).toBe("inbound");
     expect(transfers[0].status).toBe("confirmed");
     expect(transfers[0].signature).toBe(SIGNATURE);
+    expect(transfers[0].custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
   });
 
   it("settles an SPL request, exercising the splToken branch", async () => {
@@ -167,6 +191,50 @@ describe("reconcilePaymentRequest", () => {
     expect(a.status).toBe("paid");
     expect(b.status).toBe("paid");
     expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
+  it("does not link a request to a conflicting transfer with the same signature", async () => {
+    const request = await createRequest();
+    const transfer = await createPaymentsRepository(
+      env,
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+    ).createTransfer({
+      id: "xfr_conflicting_signature",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: null,
+      destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
+      token: SOL_MINT,
+      amount: "1.5",
+      memo: null,
+      type: "transfer",
+      direction: "inbound",
+      status: "confirmed",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: SIGNATURE,
+      slot: 1,
+      initiatedByKeyId: null,
+    });
+    if (!transfer) throw new Error("Expected conflicting transfer fixture creation to succeed");
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?")
+      .bind(transfer.id)
+      .run();
+    mockSettlementSucceeds();
+
+    await expect(reconcilePaymentRequest(env, request, { bestEffort: false })).rejects.toThrow(
+      "does not match payment request"
+    );
+    expect((await listInboundTransfers())[0]?.custody_wallet_id).toBeNull();
   });
 
   it("does not settle when the signature fails the independent confirmation check", async () => {
@@ -247,6 +315,35 @@ describe("reconcilePaymentRequest", () => {
     await expect(reconcilePaymentRequest(env, request, { bestEffort: true })).rejects.toThrow(
       "missing project_id"
     );
+  });
+
+  it("returns an unresolved legacy request on best-effort reads without touching the chain", async () => {
+    const request: PaymentRequestRow = {
+      ...(await createRequest()),
+      custody_wallet_id: null,
+    };
+
+    const result = await reconcilePaymentRequest(env, request, { bestEffort: true });
+
+    expect(result).toBe(request);
+    expect(findReferenceSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("rejects an unresolved legacy request when current state is required", async () => {
+    const request: PaymentRequestRow = {
+      ...(await createRequest()),
+      custody_wallet_id: null,
+    };
+
+    await expect(
+      reconcilePaymentRequest(env, request, { bestEffort: false })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+    });
+    expect(findReferenceSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
   });
 
   it("short-circuits non-awaiting requests without touching the chain", async () => {

@@ -7,7 +7,7 @@ const PLAYGROUND_TAB_PATHS = new Set([
   // a cross-route jump and the legacy /api-playground redirect both land here
   // carrying tab=playground. Without this entry the tab is stripped on the
   // pathname change and the destination silently reverts to Overview.
-  "/dashboard/payments/private-channels/overview",
+  "/dashboard/integrations/private-channels/overview",
 ]);
 
 function normalizePathname(pathname: string): string {

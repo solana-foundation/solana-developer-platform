@@ -7,17 +7,32 @@ When a payment lands on a wallet you control, the inbound transfer moves through
 
 ## Status lifecycle
 
-The `status` field on the `Transfer` record takes one of five values:
+The `status` field on the `Transfer` record takes one of several values, depending on whether the transfer is a wallet transfer or a ramp transfer.
+
+**Wallet transfers** (`POST /v1/payments/transfers`, and inbound transfers discovered on-chain):
 
 | Status | Meaning |
 | --- | --- |
-| `pending` | Provider-backed ramp transfer setup is still underway. Wallet transfers created with `POST /v1/payments/transfers` do not start here; they start at `processing`. No wallet-transfer `signature` yet. |
-| `processing` | The transfer is in flight. For outbound wallet transfers this is the **initial state** at record creation: the request has been accepted and the transaction is being built and submitted; the `signature` field is not yet populated when the record is first written. |
+| `processing` | The transfer is in flight. For outbound transfers this is the **initial state** at record creation: the transaction is being built and submitted; `signature` is not yet populated. |
 | `confirmed` | The cluster has confirmed the transaction. `signature` and `slot` are populated. `blockTime` may also be set, but is not guaranteed at this stage — treat it as optional until `finalized`. |
-| `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. `signature` and `slot` are populated; `blockTime` is best-effort and may remain `null` for wallet transfers whose finalization is observed by the `track-pending-transfers` job (which updates status and slot but does not backfill block time). When you need a definitive timestamp, resolve it from the on-chain `signature` via Solana RPC. Safe to treat as irreversible. |
+| `finalized` | The slot containing the transaction is locked in — finality at the Solana cluster's strongest guarantee. `signature` and `slot` are populated; `blockTime` is best-effort and may remain `null` for transfers finalized by the `track-pending-transfers` job (which updates status and slot but does not backfill block time). Resolve a definitive timestamp from `signature` via Solana RPC if you need one. Safe to treat as irreversible. |
 | `failed` | The transaction was built and submitted but rejected by the network (insufficient funds, frozen account, expired blockhash, etc.). The `error` field describes what reached the chain. |
 
-A wallet transfer created with `POST /v1/payments/transfers` moves forward through `processing → confirmed → finalized`. Ramp transfers may begin at `pending` before moving into provider-specific processing. **Inbound transfers** discovered via on-chain signature history surface directly at `confirmed` (or `failed` if the on-chain transaction errored) — they never appear as `pending`. Any state can transition to `failed`; `failed` is terminal.
+Outbound wallet transfers move `processing → confirmed → finalized`. Inbound transfers discovered via on-chain signature history surface directly at `confirmed` (or `failed`) — they never appear as `processing`.
+
+**Ramp transfers** (created by a [Ramp Quote](/docs/payments/ramps)):
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | The quote was created; no funding has been detected yet. No `signature`. |
+| `awaiting_payment` | The quote's delivery mode is `manual_instructions` — SDP is waiting for the payer to fund the account described in the quote. |
+| `settling` | The provider has detected or started processing the payment. |
+| `completed` | The provider reports the ramp settled. |
+| `canceled` | Canceled via `POST /v1/payments/ramps/transfers/cancel` before funding. |
+| `expired` | The funding window elapsed without payment. |
+| `failed` | The provider rejected or reversed the ramp. The `error` field describes why, when set. |
+
+Any state can transition to `failed`; `failed`, `completed`, `canceled`, and `expired` are terminal.
 
 ## Finality on Solana
 

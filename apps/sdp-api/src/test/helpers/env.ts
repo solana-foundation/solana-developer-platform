@@ -1,5 +1,4 @@
 import { getDb } from "@/db";
-import { LocalPiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 
 const workerId = process.env.VITEST_POOL_ID;
@@ -53,6 +52,7 @@ const providedEnv: Env = {
   REDIS_URL: workerRedisUrl(baseRedisUrl, workerId),
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
   CREDENTIAL_FINGERPRINT_PEPPER: "test-credential-fingerprint-pepper-for-unit-tests",
+  SPC_CREDENTIAL_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",
@@ -64,5 +64,4 @@ const providedEnv: Env = {
 export const env = {
   ...providedEnv,
   db: getDb(providedEnv),
-  counterpartyPiiCipher: new LocalPiiCipher("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="),
 };

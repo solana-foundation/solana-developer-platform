@@ -391,9 +391,10 @@ export async function dispatchCounterpartyEmail(
     if (!isEmailConfigured(env)) {
       return { emailed: 0 };
     }
-    // Through the tenant-scoped repository, never raw SQL: counterparty PII (the
-    // email) lives encrypted in pii_encrypted — the plain column is only a
-    // migration-phase shadow — and the scope pins the lookup to the producer's org.
+    // Counterparty PII is no longer stored at all (JIT pass-through to the
+    // provider only), so there is no email on record to send a receipt to.
+    // The seam stays: producers keep requesting the receipt, and it becomes
+    // real again the moment a compliant contact source exists.
     const scope = createTenantScope({
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -406,9 +407,8 @@ export async function dispatchCounterpartyEmail(
     if (counterparty?.status !== "active") {
       return { emailed: 0 };
     }
-    const recipient = counterparty.email.trim();
+    const recipient = "";
     if (!recipient) {
-      // No contact email on record — a clean no-op, not an error.
       return { emailed: 0 };
     }
     const organization = await getDb(env)

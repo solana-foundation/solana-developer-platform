@@ -1,35 +1,33 @@
 ---
 name: rail-discovery
-description: Declare which fiat↔crypto rails a ramp provider supports. Implement _discoverRails + distillRailSupport, declare a <PROVIDER>_DECLARED_RAIL_SUPPORT const, and add a RAMP_RAIL_DUMPS entry, then regenerate the committed support snapshot + matrix. Use when opening a PR against apps/sdp-api to add or update a ramp provider's supported currencies/corridors.
+description: Declare which fiat↔crypto rails a ramp provider supports. Implement discovery or an explicit static distiller in @sdp/payments, then regenerate the committed provider snapshot and shared support matrix.
 disable-model-invocation: true
 ---
 
 # Rail discovery
 
-The platform serves a generated support matrix — which `(fiat, crypto)` pairs each provider can on/off-ramp — from `packages/sdp-types/src/generated/ramp-support.generated.ts` (`ONRAMP_SUPPORT`, `OFFRAMP_SUPPORT`, `RAMP_FIAT_CURRENCIES`). You do **not** hand-edit that file. You teach your provider to report its rails, then a script distills live provider responses into a committed per-provider snapshot and merges every provider's snapshot into the matrix.
+The platform serves a generated support matrix — which `(fiat, crypto)` pairs each provider can on/off-ramp — from `packages/sdp-types/src/generated/ramp.generated.ts` (`ONRAMP_SUPPORT`, `OFFRAMP_SUPPORT`, `RAMP_FIAT_CURRENCIES`). You do **not** hand-edit that file. You teach your provider to report its rails, then a script distills live provider responses into a committed per-provider snapshot and merges every provider's snapshot into the matrix.
 
-You implement four things; the codegen (`apps/sdp-api/scripts/discover-ramp-rails.ts`) does the rest:
+Implement rail support in `packages/sdp-payments`; the codegen (`apps/sdp-api/scripts/ramp-support.ts`) owns snapshots and the generated matrix. Choose one source:
 
-1. a `RAMP_RAIL_DUMPS.<id>` entry in `lib/ramps/shared.ts`
-2. `_discoverRails` — HTTP → raw response dumps
-3. `distillRailSupport` — dumps → a `ProviderRailSupportSnapshot`, reporting any codes it drops
-4. a `<PROVIDER>_DECLARED_RAIL_SUPPORT` const — entity types, plus country support for whichever direction your snapshot doesn't discover it for
+1. **Upstream discovery API:** add `RAMP_RAIL_DUMPS.<id>` in `packages/sdp-payments/src/ramps/shared.ts`; `_discoverRails` writes raw responses; `distillRailSupport` reads and normalizes them.
+2. **No discovery API:** make `_discoverRails` a no-op and return an explicit, tested snapshot from `distillRailSupport`. Do not invent a network endpoint or dump.
 
-**Canonical example: `lib/ramps/providers/lightspark/client.ts`** (one dump, declares country support as unreported on both directions). For a multi-endpoint provider, copy `bvnk/client.ts` (three dumps). For discovered — not declared — country support, copy `mural/client.ts`.
+Both paths declare `<PROVIDER>_DECLARED_RAIL_SUPPORT` for entity types and country support not discovered in the snapshot. Reference the existing providers under `packages/sdp-payments/src/ramps/providers/` — single-dump, multi-endpoint, discovered-country-support, and static-support variants are all represented.
 
 ## The data flow
 
 ```
-_discoverRails ──fetch──▶ .ramp-rails/raw/<id>/*.json        (gitignored raw dumps)
-distillRailSupport ──parse──▶ .ramp-rails/<id>.support.json  (committed snapshot)
-rails:generate ──merge snapshots + declared consts──▶ ramp-support.generated.ts  (committed)
+_discoverRails ──fetch──▶ .ramp-support/raw/<id>/*.json        (gitignored raw dumps)
+distillRailSupport ──parse──▶ .ramp-support/<id>.currency.json  (committed snapshot)
+ramp-support:generate ──merge snapshots + declared consts──▶ ramp.generated.ts  (committed)
 ```
 
-Raw dumps under `.ramp-rails/raw/` are gitignored — network scratch, safe to delete and re-fetch. The snapshot (`.ramp-rails/<id>.support.json`) and the generated `.ts` are both committed and must be regenerated together when your support changes.
+Raw dumps under `.ramp-support/raw/` are gitignored — network scratch, safe to delete and re-fetch. The snapshot (`.ramp-support/<id>.currency.json`) and the generated `.ts` are both committed and must be regenerated together when your support changes.
 
-## Step 1 — declare your dumps
+## Step 1 — choose the source
 
-Add an entry to `RAMP_RAIL_DUMPS` in `lib/ramps/shared.ts`, one per upstream response you need:
+For discovery-backed support, add an entry to `RAMP_RAIL_DUMPS` in `packages/sdp-payments/src/ramps/shared.ts`, one per upstream response:
 
 ```ts
 <id>: {
@@ -37,11 +35,11 @@ Add an entry to `RAMP_RAIL_DUMPS` in `lib/ramps/shared.ts`, one per upstream res
 },
 ```
 
-`name` is what `_discoverRails` writes; `file` is what `distillRailSupport` reads back.
+`name` is what `_discoverRails` writes; `file` is what `distillRailSupport` reads back. For static support, skip the dump entry.
 
 ## Step 2 — `_discoverRails`
 
-HTTP only. Read **sandbox** creds from the passed `env` with `requireEnv` (it throws on a missing key — don't add a presence check), fetch each upstream endpoint with the injected `fetchJson`, and `writeDump` the raw response. No parsing, no mapping here — just capture.
+HTTP only. Read **sandbox** creds from the passed `env` with `requireEnv`, fetch each upstream endpoint with the injected `fetchJson`, and `writeDump` the raw response. No parsing or mapping here. For static support, use a no-op method and read no credentials.
 
 ```ts
 async _discoverRails({ env, fetchJson, writeDump }: Parameters<RampProvider["_discoverRails"]>[0]) {
@@ -53,11 +51,11 @@ async _discoverRails({ env, fetchJson, writeDump }: Parameters<RampProvider["_di
 }
 ```
 
-Use the provider's most public/anonymous discovery endpoints where possible (see BVNK's anon `/api/currency/*?offset=0&max=1000` paging). `_discoverRails` is `@internal` — only the discovery script ever calls it.
+Use the provider's most public/anonymous discovery endpoints where possible (some upstreams expose anonymous paged catalog endpoints). `_discoverRails` is `@internal` — only the discovery script ever calls it.
 
 ## Step 3 — `distillRailSupport`
 
-Pure: given a `readDump` function, read the dump(s) back with `readDump(RAMP_RAIL_DUMPS.<id>.<key>.file)` and map into a `ProviderRailSupportSnapshot`:
+Pure: map the dump(s), or an explicit static declaration, into the types from `packages/sdp-payments/src/ramps/types.ts`:
 
 ```ts
 interface ProviderRailSupportSnapshot {
@@ -89,7 +87,7 @@ Mapping rules (helpers live in `shared.ts`):
 - **Fiat code → currency key** — validate with `isActiveIso4217CurrencyCode(code)`; codes that fail are dropped into `droppedCurrencyCodes`, not added to the snapshot. Uppercase ISO 4217 only.
 - **Country code** — validate with `isIso3166Alpha2CountryCode(code)`; failures go into `droppedCountryCodes`.
 - **Limits** — `{ min, max }` are major-unit decimal strings when the provider reports bounds; use `unreportedCurrencyLimit()` (`{ min: null, max: null }`) when it doesn't.
-- Only populate `countrySupport` on the snapshot if you're genuinely discovering it from the dump (Mural derives per-currency country lists this way). If your provider doesn't report country coverage, leave it `undefined` here and declare it instead (step 4).
+- Only populate `countrySupport` on the snapshot if you're genuinely discovering it from the dump (one existing provider derives per-currency country lists this way). If your provider doesn't report country coverage, leave it `undefined` here and declare it instead (step 4).
 
 ## Step 4 — declare what you don't discover
 
@@ -97,15 +95,18 @@ Every provider needs a `<PROVIDER>_DECLARED_RAIL_SUPPORT` const satisfying `Prov
 
 ```ts
 export const <PROVIDER>_DECLARED_RAIL_SUPPORT = {
-  onramp: { entityTypes: ["individual"] },
+  onramp: {
+    countrySupport: { coverage: "unreported" },
+    entityTypes: ["individual"],
+  },
   offramp: {
     countrySupport: { coverage: "unreported" },
-    entityTypes: ["individual", "business"],
+    entityTypes: [],
   },
 } as const satisfies ProviderDeclaredRailSupport;
 ```
 
-`entityTypes` (`CounterpartyEntityType[]`) is always declared here — it's never discovered from a dump. `countrySupport` is discovered **xor** declared, per direction: if your snapshot sets `countrySupport` for a direction, leave it off the declared const for that direction; if it doesn't (the common case — declare `{ coverage: "unreported" }`), it must be declared. `rails:generate` throws if a direction ends up with both or neither.
+`entityTypes` (`CounterpartyEntityType[]`) is always declared here — it's never discovered from a dump. `countrySupport` is discovered **xor** declared, per direction: if your snapshot sets `countrySupport` for a direction, leave it off the declared const for that direction; if it doesn't (the common case — declare `{ coverage: "unreported" }`), it must be declared. `ramp-support:generate` throws if a direction ends up with both or neither.
 
 ## Generate + verify
 
@@ -113,20 +114,20 @@ Fetching raw dumps hits live sandbox APIs, so it runs under Doppler. Regeneratin
 
 ```bash
 # from apps/sdp-api — fetch raw dumps for every provider + distill their snapshots
-pnpm --filter @sdp/api rails:discover
+pnpm --filter @sdp/api currencies:discover
 # just your provider
-pnpm --filter @sdp/api rails:discover -- <id>
-# re-distill from the existing raw dumps only — no network, no creds
-pnpm --filter @sdp/api rails:discover -- <id> --offline
+pnpm --filter @sdp/api currencies:discover -- <id>
+# re-distill existing dumps, or generate a static-provider snapshot whose distiller ignores dumps
+pnpm --filter @sdp/api exec tsx scripts/ramp-support.ts discover <id> --offline
 
-# regenerate ramp-support.generated.ts from the committed snapshots + declared consts
-pnpm --filter @sdp/api rails:generate
+# regenerate ramp.generated.ts from the committed snapshots + declared consts
+pnpm --filter @sdp/api ramp-support:generate
 
 # CI gate: regenerate in memory and byte-diff against the committed file
-pnpm --filter @sdp/api rails:drift
+pnpm --filter @sdp/api ramp-support:drift
 ```
 
-Commit `.ramp-rails/<id>.support.json` and the regenerated `ramp-support.generated.ts` together (confirm your provider's row in `RAMP_PROVIDER_SUPPORT_COUNTS` looks sane). Never hand-edit the generated file. Never commit `.ramp-rails/raw/`.
+Commit `.ramp-support/<id>.currency.json` and the regenerated `ramp.generated.ts` together (confirm your provider's row in `RAMP_PROVIDER_SUPPORT_COUNTS` looks sane). Never hand-edit the generated file. Never commit `.ramp-support/raw/`.
 
 ## Rules
 
@@ -135,3 +136,4 @@ Commit `.ramp-rails/<id>.support.json` and the regenerated `ramp-support.generat
 - No fallbacks: a missing cred throws via `requireEnv`.
 - Strong typing: the declared-support const is `as const satisfies ProviderDeclaredRailSupport`; no `any`.
 - Your provider must already be registered (`register-provider`) — the codegen iterates `RAMP_PROVIDERS` and will fail if a client is missing.
+- Verify with `pnpm --filter @sdp/api ramp-support:drift`, plus `@sdp/payments` typecheck, lint, and tests.

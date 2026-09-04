@@ -343,19 +343,116 @@ function answerRetiresIdempotencyKey(result: IdempotencyKeyOutcome): boolean {
   return result.status !== null && result.status >= 400 && result.status < 500;
 }
 
-/** Apply the shared retire, hold, or preserve rule to one API answer. */
+/**
+ * Apply the shared retire, hold, or preserve rule to one API answer, and say
+ * which was applied — callers keeping per-key state beside the store (the
+ * deposit flow's floor memo) retire that state on exactly the same rule
+ * rather than re-deriving it and drifting.
+ */
 export function applyIdempotencyKeyOutcome(
   store: IdempotencyKeyStore,
   fingerprint: string,
   result: IdempotencyKeyOutcome
-): void {
+): "retired" | "held" | "kept" {
   if (answerRetiresIdempotencyKey(result)) {
     store.release(fingerprint);
-    return;
+    return "retired";
   }
   if (result.ok && result.data.kind === "approval_pending") {
     store.hold(fingerprint);
+    return "held";
   }
+  return "kept";
+}
+
+/**
+ * A bounded per-tab memo of the floor each in-flight fingerprint's key was
+ * MINTED with. The fingerprint deliberately carries the user's TOLERANCE, not
+ * the quote-derived floor (a floor moves with the live rate, and a fingerprint
+ * must be reproducible from user input after a reload) — but the API's own
+ * idempotency fingerprint includes the floor and refuses a replay whose floor
+ * changed, so a held key must resubmit the exact floor it first carried. Same
+ * tiers as the key store: `sessionStorage` so it survives the reload the held
+ * key survives, memory when storage is refused, and a hard bound so an
+ * abandoned tab cannot grow it without limit.
+ */
+export interface FloorMemo {
+  /** Record the floor `fingerprint`'s key is being submitted with. */
+  remember(fingerprint: string, floor: string | null): void;
+  /**
+   * A string floor, `null` for "deliberately none", or `undefined` when
+   * nothing is remembered (evicted, another tab, storage refused) — the caller
+   * then falls back to a fresh derivation, and the server's own fingerprint
+   * remains the last line.
+   */
+  recall(fingerprint: string): string | null | undefined;
+  /** Drop a retired key's floor so the next fresh derivation cannot inherit it. */
+  forget(fingerprint: string): void;
+  /** Test-only. @internal */
+  resetForTests(): void;
+}
+
+const FLOOR_MEMO_BOUND = 32;
+
+/** One per money flow, each under its own versioned `sessionStorage` key. */
+export function createFloorMemo(storageKey: string): FloorMemo {
+  type Entries = Record<string, string | null>;
+  let memory: Entries = {};
+
+  function read(): Entries {
+    try {
+      const raw = window.sessionStorage.getItem(storageKey);
+      if (raw === null) return {};
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+      const entries: Entries = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        if (typeof value === "string" || value === null) entries[key] = value;
+      }
+      return entries;
+    } catch {
+      return { ...memory };
+    }
+  }
+
+  function write(entries: Entries): void {
+    memory = { ...entries };
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify(entries));
+    } catch {
+      // The memory tier above still serves this tab's lifetime.
+    }
+  }
+
+  return {
+    remember(fingerprint, floor) {
+      const entries = read();
+      delete entries[fingerprint];
+      entries[fingerprint] = floor;
+      const keys = Object.keys(entries);
+      for (const stale of keys.slice(0, Math.max(0, keys.length - FLOOR_MEMO_BOUND))) {
+        delete entries[stale];
+      }
+      write(entries);
+    },
+    recall(fingerprint) {
+      const entries = read();
+      return fingerprint in entries ? entries[fingerprint] : undefined;
+    },
+    forget(fingerprint) {
+      const entries = read();
+      delete entries[fingerprint];
+      write(entries);
+    },
+    resetForTests() {
+      memory = {};
+      try {
+        window.sessionStorage.removeItem(storageKey);
+      } catch {
+        // No storage in this environment; the memory tier is already clear.
+      }
+    },
+  };
 }
 
 /** One per money flow, each under its own versioned `sessionStorage` key. */

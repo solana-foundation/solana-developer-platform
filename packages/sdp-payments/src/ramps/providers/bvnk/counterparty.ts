@@ -1,169 +1,316 @@
-import type { Counterparty, CounterpartyIndividualIdentity } from "@sdp/types";
 import {
-  COUNTERPARTY_EMPLOYMENT_STATUSES,
   COUNTERPARTY_INDUSTRY_SECTORS,
   COUNTERPARTY_INTENDED_USE,
   COUNTERPARTY_PEP_STATUSES,
   COUNTERPARTY_SOURCE_OF_FUNDS,
   COUNTERPARTY_YEARLY_INCOME,
-  COUNTRIES,
-  US_STATES,
+  type Counterparty,
+  type CountryCode,
+  isCountryCode,
 } from "@sdp/types";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
   RequirementField,
 } from "@sdp/types/ramp-requirements";
-import { z } from "zod";
-import type { CounterpartyRow } from "../../../counterparty";
-import { badRequest, SdpPaymentsError, unsupportedCounterparty } from "../../../errors";
+import { badRequest, unsupportedCounterparty } from "../../../errors";
 import {
-  buildRequirementSchema,
+  countryField,
+  dateField,
   enumOptions,
+  parseCollectedFields,
   readyCounterparty,
   selectField,
   textField,
 } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
-  bvnkOnrampStatusFromProviderData,
+  type BvnkCustomerV2Individual,
+  bvnkV2CddSchema,
+  type CreateBvnkContactV3Input,
+} from "./client";
+import {
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
-  normalizeBvnkStateCode,
-  readBvnkCustomer,
   readBvnkOfframpWallet,
 } from "./provider-data";
 
-interface BvnkOnrampField {
-  descriptor: RequirementField;
-  read: (identity: CounterpartyIndividualIdentity) => string | undefined;
+const BVNK_EMPLOYMENT_STATUSES = ["SELF_EMPLOYED", "SALARIED", "UNEMPLOYED", "RETIRED"] as const;
+const BVNK_EU_COUNTRIES = new Set<CountryCode>([
+  "AT",
+  "BE",
+  "BG",
+  "CY",
+  "CZ",
+  "DE",
+  "DK",
+  "EE",
+  "ES",
+  "FI",
+  "FR",
+  "GR",
+  "HR",
+  "HU",
+  "IE",
+  "IT",
+  "LT",
+  "LU",
+  "LV",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SE",
+  "SI",
+  "SK",
+]);
+
+const BVNK_ONRAMP_BASE_FIELDS: RequirementField[] = [
+  textField({
+    key: "firstName",
+    label: "First name",
+    required: true,
+    maxLength: 100,
+  }),
+  textField({
+    key: "lastName",
+    label: "Last name",
+    required: true,
+    maxLength: 100,
+  }),
+  dateField({
+    key: "dateOfBirth",
+    label: "Date of birth",
+    required: true,
+    before: new Date().toISOString().slice(0, 10),
+  }),
+  textField({
+    key: "email",
+    label: "Email",
+    required: true,
+    maxLength: 320,
+    pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+    placeholder: "name@example.com",
+  }),
+  {
+    kind: "address",
+    key: "address",
+    label: "Residential address",
+    required: true,
+    fields: [
+      textField({ key: "address.addressLine1", label: "Address line 1", required: true }),
+      textField({ key: "address.city", label: "City", required: true }),
+      textField({ key: "address.postalCode", label: "Postal code", required: true }),
+      countryField({ key: "address.countryCode", label: "Country", required: true }),
+    ],
+  },
+  countryField({
+    key: "taxIdentification.taxResidenceCountryCode",
+    label: "Tax residence country",
+    required: true,
+  }),
+  countryField({
+    key: "birthCountryCode",
+    label: "Country of birth",
+    required: true,
+  }),
+  selectField({
+    key: "cdd.employmentStatus",
+    label: "Employment status",
+    required: true,
+    options: enumOptions(BVNK_EMPLOYMENT_STATUSES),
+  }),
+  selectField({
+    key: "cdd.sourceOfFunds",
+    label: "Source of funds",
+    required: true,
+    options: enumOptions(COUNTERPARTY_SOURCE_OF_FUNDS),
+  }),
+  selectField({
+    key: "cdd.pepStatus",
+    label: "Politically exposed person status",
+    required: true,
+    options: enumOptions(COUNTERPARTY_PEP_STATUSES),
+  }),
+  selectField({
+    key: "cdd.intendedUseOfAccount",
+    label: "Intended use of account",
+    required: true,
+    options: enumOptions(COUNTERPARTY_INTENDED_USE),
+  }),
+  textField({
+    key: "cdd.expectedMonthlyVolume.amount",
+    label: "Expected monthly volume",
+    required: true,
+    pattern: "^\\d+(\\.\\d{1,2})?$",
+    placeholder: "1000",
+  }),
+  selectField({
+    key: "cdd.expectedMonthlyVolume.currency",
+    label: "Expected monthly volume currency",
+    required: true,
+    options: enumOptions(RAMP_FIAT_CURRENCIES),
+  }),
+];
+
+const BVNK_ONRAMP_US_FIELDS: RequirementField[] = [
+  textField({
+    key: "taxIdentification.number",
+    label: "Tax identification number (SSN / ITIN)",
+    required: true,
+    maxLength: 64,
+    placeholder: "123-45-6789",
+    mask: "###-##-####",
+  }),
+  selectField({
+    key: "cdd.estimatedYearlyIncome",
+    label: "Estimated yearly income",
+    required: true,
+    options: enumOptions(COUNTERPARTY_YEARLY_INCOME),
+  }),
+  selectField({
+    key: "cdd.employmentIndustrySector",
+    label: "Employment industry sector",
+    required: true,
+    options: enumOptions(COUNTERPARTY_INDUSTRY_SECTORS),
+  }),
+  textField({
+    key: "address.stateCode",
+    label: "State",
+    required: true,
+    pattern: "^([A-Za-z]{2}-)?[A-Za-z0-9]{2}$",
+    placeholder: "CA",
+  }),
+];
+
+const BVNK_ONRAMP_EU_FIELDS: RequirementField[] = [
+  countryField({
+    key: "nationality",
+    label: "Nationality",
+    required: true,
+  }),
+];
+
+/**
+ * @param countryCode - The counterparty's residence country, collected just-in-time.
+ * @returns The BVNK collect fields for that residence country.
+ */
+export function bvnkOnrampFields(countryCode?: CountryCode): RequirementField[] {
+  if (countryCode === undefined) {
+    return [...BVNK_ONRAMP_BASE_FIELDS];
+  }
+  if (countryCode === "US") {
+    return [...BVNK_ONRAMP_BASE_FIELDS, ...BVNK_ONRAMP_US_FIELDS];
+  }
+  return BVNK_EU_COUNTRIES.has(countryCode)
+    ? [...BVNK_ONRAMP_BASE_FIELDS, ...BVNK_ONRAMP_EU_FIELDS]
+    : [...BVNK_ONRAMP_BASE_FIELDS];
 }
 
-const COUNTRY_OPTIONS = COUNTRIES.map((country) => ({ value: country.code, label: country.name }));
-const US_STATE_OPTIONS = US_STATES.map((state) => ({ value: state.code, label: state.name }));
+function collectedString(data: Record<string, unknown>, key: string): string {
+  const value = data[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw badRequest(`Missing required BVNK field "${key}".`);
+  }
+  return value;
+}
 
-const BVNK_ONRAMP_BASE_FIELDS: BvnkOnrampField[] = [
-  {
-    // TODO: US-centric SSN/ITIN mask + format; branch per-country for non-US tax IDs.
-    descriptor: textField({
-      key: "taxIdentification.number",
-      label: "Tax identification number (SSN / ITIN)",
-      required: true,
-      maxLength: 64,
-      placeholder: "123-45-6789",
-      mask: "###-##-####",
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "taxIdentification.taxResidenceCountryCode",
-      label: "Tax residence country",
-      required: true,
-      options: COUNTRY_OPTIONS,
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "nationality",
-      label: "Nationality",
-      required: true,
-      options: COUNTRY_OPTIONS,
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "birthCountryCode",
-      label: "Country of birth",
-      required: true,
-      options: COUNTRY_OPTIONS,
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "cdd.employmentStatus",
-      label: "Employment status",
-      required: true,
-      options: enumOptions(COUNTERPARTY_EMPLOYMENT_STATUSES),
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "cdd.sourceOfFunds",
-      label: "Source of funds",
-      required: true,
-      options: enumOptions(COUNTERPARTY_SOURCE_OF_FUNDS),
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "cdd.pepStatus",
-      label: "Politically exposed person status",
-      required: true,
-      options: enumOptions(COUNTERPARTY_PEP_STATUSES),
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "cdd.intendedUseOfAccount",
-      label: "Intended use of account",
-      required: true,
-      options: enumOptions(COUNTERPARTY_INTENDED_USE),
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: textField({
-      key: "cdd.expectedMonthlyVolume.amount",
-      label: "Expected monthly volume",
-      required: true,
-      pattern: "^\\d+(\\.\\d{1,2})?$",
-      placeholder: "1000",
-    }),
-    read: () => undefined,
-  },
-];
+/**
+ * Builds the BVNK v2 individual request from transient collected fields.
+ *
+ * @param collectedData - Flattened PII fields supplied for this request.
+ * @returns A typed BVNK individual request. No collected value is persisted.
+ */
+export function buildBvnkCustomerRequest(
+  collectedData: CollectedFieldData
+): BvnkCustomerV2Individual {
+  const base = parseCollectedFields(
+    BVNK_ONRAMP_BASE_FIELDS,
+    collectedData,
+    "Missing or invalid BVNK customer details."
+  );
+  const residenceCountryValue = collectedString(base, "taxIdentification.taxResidenceCountryCode");
+  if (!isCountryCode(residenceCountryValue)) {
+    throw badRequest("taxIdentification.taxResidenceCountryCode must be a supported country code.");
+  }
+  const residenceCountry = residenceCountryValue;
+  const fields = bvnkOnrampFields(residenceCountry);
+  const data = parseCollectedFields(
+    fields,
+    collectedData,
+    "Missing or invalid BVNK customer details."
+  );
+  const cdd = bvnkV2CddSchema.parse({
+    employmentStatus: collectedString(data, "cdd.employmentStatus"),
+    sourceOfFunds: collectedString(data, "cdd.sourceOfFunds"),
+    pepStatus: collectedString(data, "cdd.pepStatus"),
+    intendedUseOfAccount: collectedString(data, "cdd.intendedUseOfAccount"),
+    expectedMonthlyVolume: {
+      amount: collectedString(data, "cdd.expectedMonthlyVolume.amount"),
+      currency: collectedString(data, "cdd.expectedMonthlyVolume.currency"),
+    },
+    ...(residenceCountry === "US"
+      ? {
+          estimatedYearlyIncome: collectedString(data, "cdd.estimatedYearlyIncome"),
+          employmentIndustrySector: collectedString(data, "cdd.employmentIndustrySector"),
+        }
+      : {}),
+  });
+  const address = {
+    addressLine1: collectedString(data, "address.addressLine1"),
+    city: collectedString(data, "address.city"),
+    postalCode: collectedString(data, "address.postalCode"),
+    countryCode: collectedString(data, "address.countryCode"),
+    ...(residenceCountry === "US" ? { stateCode: collectedString(data, "address.stateCode") } : {}),
+  };
+  return {
+    address,
+    dateOfBirth: collectedString(data, "dateOfBirth"),
+    firstName: collectedString(data, "firstName"),
+    lastName: collectedString(data, "lastName"),
+    birthCountryCode: collectedString(data, "birthCountryCode"),
+    emailAddress: collectedString(data, "email"),
+    ...(BVNK_EU_COUNTRIES.has(residenceCountry)
+      ? { nationality: collectedString(data, "nationality") }
+      : {}),
+    ...(residenceCountry === "US"
+      ? {
+          taxIdentification: {
+            number: collectedString(data, "taxIdentification.number"),
+            taxResidenceCountryCode: residenceCountry,
+          },
+        }
+      : {}),
+    cdd,
+  };
+}
 
-const BVNK_ONRAMP_US_FIELDS: BvnkOnrampField[] = [
-  {
-    descriptor: selectField({
-      key: "cdd.estimatedYearlyIncome",
-      label: "Estimated yearly income",
-      required: true,
-      options: enumOptions(COUNTERPARTY_YEARLY_INCOME),
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "cdd.employmentIndustrySector",
-      label: "Employment industry sector",
-      required: true,
-      options: enumOptions(COUNTERPARTY_INDUSTRY_SECTORS),
-    }),
-    read: () => undefined,
-  },
-  {
-    descriptor: selectField({
-      key: "address.stateCode",
-      label: "State",
-      required: true,
-      options: US_STATE_OPTIONS,
-    }),
-    read: (id) => id.address?.subdivisionCode,
-  },
-];
-
-export function bvnkOnrampFields(identity: CounterpartyIndividualIdentity): BvnkOnrampField[] {
-  return identity.address?.countryCode === "US"
-    ? [...BVNK_ONRAMP_BASE_FIELDS, ...BVNK_ONRAMP_US_FIELDS]
-    : BVNK_ONRAMP_BASE_FIELDS;
+/**
+ * Builds the BVNK v3 travel-rule contact request from the same transient PII.
+ *
+ * @param collectedData - Flattened PII fields supplied for this request.
+ * @returns A typed BVNK contact request. No collected value is persisted.
+ */
+export function buildBvnkContactRequest(
+  collectedData: CollectedFieldData
+): CreateBvnkContactV3Input["entity"] {
+  const customer = buildBvnkCustomerRequest(collectedData);
+  return {
+    type: "INDIVIDUAL",
+    relationshipType: "SELF_OWNED",
+    firstName: customer.firstName,
+    lastName: customer.lastName,
+    dateOfBirth: customer.dateOfBirth,
+    address: {
+      addressLine1: customer.address.addressLine1,
+      city: customer.address.city,
+      postalCode: customer.address.postalCode,
+      country: customer.address.countryCode,
+      ...(customer.address.stateCode === undefined ? {} : { region: customer.address.stateCode }),
+    },
+  };
 }
 
 interface BvnkOfframpSpec {
@@ -219,137 +366,23 @@ export function bvnkOfframpFields(fiatCurrency: BvnkOfframpCurrency): Requiremen
   return [...BVNK_OFFRAMP_SPECS[fiatCurrency].fields];
 }
 
-export function buildBvnkIndividualPayload(
-  counterparty: CounterpartyRow,
-  collectedData: CollectedFieldData | undefined,
-  expectedVolumeCurrency: string
-): Record<string, unknown> {
-  if (counterparty.entity_type !== "individual") {
-    throw badRequest("BVNK on-ramp requires an individual counterparty.");
-  }
-  const identity = counterparty.identity;
-  const fields = bvnkOnrampFields(identity);
-  const missing = fields.filter((field) => field.read(identity) === undefined);
-
-  let supplied: Record<string, unknown> = {};
-  if (missing.length > 0) {
-    const result = buildRequirementSchema(missing.map((field) => field.descriptor)).safeParse(
-      collectedData
-    );
-    if (!result.success) {
-      throw new SdpPaymentsError(
-        "BAD_REQUEST",
-        "Missing or invalid KYC details required for BVNK on-ramp.",
-        { errors: z.treeifyError(result.error) }
-      );
-    }
-    supplied = result.data;
-  }
-
-  const resolveField = (key: string): string => {
-    const field = fields.find((entry) => entry.descriptor.key === key);
-    if (!field) {
-      throw new Error(`Unknown BVNK on-ramp field "${key}"`);
-    }
-    const stored = field.read(identity);
-    if (stored !== undefined) {
-      return stored;
-    }
-    const collected = supplied[key];
-    if (typeof collected !== "string") {
-      throw badRequest(`Missing required field "${key}" for BVNK on-ramp.`);
-    }
-    return collected;
-  };
-
-  const address = identity.address;
-  const isUnitedStates = address?.countryCode === "US";
-
-  return {
-    description: "SDP onramp",
-    firstName: identity.firstName,
-    lastName: identity.lastName,
-    ...(identity.dateOfBirth ? { dateOfBirth: identity.dateOfBirth } : {}),
-    emailAddress: counterparty.email,
-    nationality: resolveField("nationality"),
-    birthCountryCode: resolveField("birthCountryCode"),
-    taxIdentification: {
-      number: resolveField("taxIdentification.number").replace(/\D/g, ""),
-      taxResidenceCountryCode: resolveField("taxIdentification.taxResidenceCountryCode"),
-    },
-    ...(address
-      ? {
-          address: {
-            addressLine1: address.line1,
-            ...(address.line2 ? { addressLine2: address.line2 } : {}),
-            city: address.city,
-            ...(address.postalCode ? { postalCode: address.postalCode } : {}),
-            countryCode: address.countryCode,
-            ...(isUnitedStates
-              ? {
-                  stateCode: normalizeBvnkStateCode(
-                    address.countryCode,
-                    resolveField("address.stateCode")
-                  ),
-                }
-              : {}),
-          },
-        }
-      : {}),
-    cdd: {
-      employmentStatus: resolveField("cdd.employmentStatus"),
-      sourceOfFunds: resolveField("cdd.sourceOfFunds"),
-      pepStatus: resolveField("cdd.pepStatus"),
-      intendedUseOfAccount: resolveField("cdd.intendedUseOfAccount"),
-      expectedMonthlyVolume: {
-        amount: resolveField("cdd.expectedMonthlyVolume.amount"),
-        currency: expectedVolumeCurrency,
-      },
-      ...(isUnitedStates
-        ? {
-            estimatedYearlyIncome: resolveField("cdd.estimatedYearlyIncome"),
-            employmentIndustrySector: resolveField("cdd.employmentIndustrySector"),
-          }
-        : {}),
-    },
-  };
-}
-
 /**
  * Decides what BVNK still needs from a counterparty before a ramp can run.
  * Pure decision over stored `provider_data` plus the caller-resolved ramp
- * inputs — no HTTP. On-ramp customer verification/status resolution is
- * delegated to {@link bvnkOnrampStatusFromProviderData} once a BVNK customer
- * exists, so the phase switch lives in exactly one place.
+ * inputs — no HTTP. BVNK customer status is refreshed by the API handlers.
  */
 export function validateBvnkCounterparty(
   counterparty: Counterparty,
-  {
-    direction,
-    providerData,
-    cryptoToken,
-    fiatCurrency,
-    destinationWalletAddress,
-  }: ValidateCounterpartyOptions
+  options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  const onrampConfiguredStatus = (): CounterpartyRequirements => {
-    if (!cryptoToken) {
-      throw badRequest("cryptoToken is required for BVNK on-ramp requirements.");
-    }
-    if (!fiatCurrency) {
-      throw badRequest("fiatCurrency is required for BVNK on-ramp requirements.");
-    }
-    if (!destinationWalletAddress) {
-      throw badRequest("destinationWallet is required for BVNK on-ramp requirements.");
-    }
-    return bvnkOnrampStatusFromProviderData(providerData, {
-      cryptoToken,
-      fiatCurrency,
-      destinationWalletAddress,
-    });
-  };
+  const { direction, providerData, fiatCurrency } = options;
+  const collectedResidence = options.collectedData?.["taxIdentification.taxResidenceCountryCode"];
+  const collectedCountry =
+    collectedResidence !== undefined && isCountryCode(collectedResidence)
+      ? collectedResidence
+      : undefined;
 
-  if (direction === "offramp") {
+  if (options.direction === "offramp") {
     if (!fiatCurrency) {
       throw badRequest("fiatCurrency is required for BVNK off-ramp requirements.");
     }
@@ -359,6 +392,14 @@ export function validateBvnkCounterparty(
         direction,
         `BVNK off-ramp does not support payouts in ${fiatCurrency}.`
       );
+    }
+    if (options.providerCustomerReference === undefined) {
+      return {
+        provider: "bvnk",
+        direction,
+        status: "collect_counterparty",
+        fields: bvnkOnrampFields(collectedCountry),
+      };
     }
     if (!latestBvnkOfframpBeneficiary(providerData, fiatCurrency)) {
       return {
@@ -370,7 +411,11 @@ export function validateBvnkCounterparty(
     }
     const wallet = readBvnkOfframpWallet(providerData, fiatCurrency);
     if (!wallet || !isBvnkWalletActive(wallet.status)) {
-      return { provider: "bvnk", direction, status: "funding_account_provisioning" };
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_funding_account_provisioning",
+      };
     }
     return readyCounterparty("bvnk", direction);
   }
@@ -382,41 +427,10 @@ export function validateBvnkCounterparty(
       "BVNK on-ramp supports individual counterparties only."
     );
   }
-  const identity = counterparty.identity;
-
-  if (!identity.address?.countryCode) {
-    return unsupportedCounterparty(
-      "bvnk",
-      direction,
-      "Counterparty is missing a stored address country, required for BVNK on-ramp."
-    );
-  }
-
-  const customer = readBvnkCustomer(providerData);
-  if (customer.customerReference) {
-    return onrampConfiguredStatus();
-  }
-
-  const missingIdentity = [
-    identity.firstName ? null : "first name",
-    identity.lastName ? null : "last name",
-    identity.dateOfBirth ? null : "date of birth",
-    identity.address.line1 ? null : "address line 1",
-    identity.address.city ? null : "address city",
-  ].filter((entry): entry is string => entry !== null);
-  if (missingIdentity.length > 0) {
-    return unsupportedCounterparty(
-      "bvnk",
-      direction,
-      `Counterparty is missing details required for BVNK on-ramp: ${missingIdentity.join(", ")}.`
-    );
-  }
-
-  const missing = bvnkOnrampFields(identity)
-    .filter((field) => field.read(identity) === undefined)
-    .map((field) => field.descriptor);
-  if (missing.length === 0) {
-    return onrampConfiguredStatus();
-  }
-  return { provider: "bvnk", direction, status: "collect", fields: missing };
+  return {
+    provider: "bvnk",
+    direction,
+    status: "collect_counterparty",
+    fields: bvnkOnrampFields(collectedCountry),
+  };
 }

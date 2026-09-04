@@ -16,10 +16,10 @@ import { getProcessEnv } from "@/lib/runtime-env";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
-import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
-import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { noopObservability } from "@/runtime/observability";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
+import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 
 const DEFAULT_PORT = 8787;
@@ -99,6 +99,7 @@ function assertRequiredEnv(env: Env): void {
   if (!env.REDIS_URL?.trim()) {
     throw new Error("REDIS_URL is required for the Node runtime");
   }
+  assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
 }
 
@@ -106,21 +107,14 @@ async function main(): Promise<void> {
   const env = getProcessEnv();
   assertRequiredEnv(env);
 
-  // Validate boot-time process.env tunables before opening any sockets or
-  // initialising Sentry, so a typo fails immediately instead of after a
-  // partial startup.
+  // Validate boot-time process.env tunables before opening any sockets, so a
+  // typo fails immediately instead of after a partial startup.
   const shutdownTimeoutMs = resolveShutdownTimeoutMs();
   const fatalOnUnhandledRejection = shouldShutdownOnUnhandledRejection();
 
-  initNodeSentry(getSentryOptions(env));
-
-  const app = createNodeHttpApp(createApp({ observability: nodeObservability }));
+  const app = createNodeHttpApp(createApp({ observability: noopObservability }));
   const bg = new NodeBackgroundRunner();
-  const cron = startCron({
-    env,
-    bg,
-    observability: isSentryEnabled(env) ? nodeObservability : undefined,
-  });
+  const cron = startCron({ env, bg });
 
   const port = resolvePort();
   const server: ServerType = serve({

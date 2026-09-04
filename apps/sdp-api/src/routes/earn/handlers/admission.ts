@@ -1,7 +1,16 @@
+import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
 import type { SdpEnvironment } from "@sdp/types";
+import { type EarnProviderId, earnDepositStyle } from "@sdp/types/provider-access";
+import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
+import { getAuth } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
+import {
+  assertEarnProviderSurfaced,
+  assertProviderAvailable,
+} from "@/services/provider-availability.service";
+import { type AppContext, resolveSdpEnvironment } from "../context";
 
 /**
  * The ONE money-in admission predicate for an Earn catalogue row.
@@ -50,6 +59,49 @@ export function assertStrategyDepositable(
       { strategyId: strategy.id, hostCluster: strategy.host_cluster, environment }
     );
   }
+}
+
+/**
+ * The ONE vault money-in gate sequence for every handler that commits a
+ * strategy to the vault-deposit path — today that is `POST /vault-deposits`.
+ * Runs, in order: deposit-style shape, provider registration, surfacing,
+ * entitlement/credentials, catalogue admission. Keep it shared if a second
+ * money-in caller appears: a second copy is a second thing that can drift
+ * toward permissive.
+ *
+ * Strategy RESOLUTION stays with the caller on purpose: the deposit route
+ * resolves bare-by-id (browse policy never gates money).
+ */
+export async function assertVaultDepositAdmissible(
+  c: AppContext,
+  strategy: EarnStrategyRow
+): Promise<EarnProviderId> {
+  const environment = resolveSdpEnvironment(c);
+
+  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
+    throw badRequest(
+      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
+    );
+  }
+  if (!isEarnProviderId(strategy.provider)) {
+    throw providerNotConfigured(
+      `Earn provider ${strategy.provider} is not available in this deployment`
+    );
+  }
+  const provider = strategy.provider;
+
+  assertEarnProviderSurfaced(provider);
+  await assertProviderAvailable(
+    c.env,
+    getDb(c.env),
+    getAuth(c).organizationId,
+    "earn",
+    provider,
+    environment === "sandbox"
+  );
+  assertStrategyDepositable(strategy, environment);
+
+  return provider;
 }
 
 /**

@@ -18,7 +18,7 @@ import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, redactErrorForCapture } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
@@ -57,7 +57,8 @@ import rpc from "@/routes/rpc";
 import webhookEndpoints from "@/routes/webhook-endpoints";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
-import { isSentryEnabled, type Observability } from "@/runtime/observability";
+import { describeError, logEvent } from "@/runtime/money-path-events";
+import type { Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
@@ -259,35 +260,17 @@ function captureUnexpectedError(
   });
 }
 
-function redactErrorForCapture(err: Error): Error {
-  const sanitized = new Error(redactCredentialString(err.message));
-  sanitized.name = err.name;
-  sanitized.stack = err.stack ? redactCredentialString(err.stack) : undefined;
-
-  const source = err as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  const target = sanitized as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  if (source.context !== undefined) {
-    target.context = redactCredentialSecrets(source.context);
-  }
-  if (source.cause !== undefined) {
-    target.cause = redactCredentialSecrets(source.cause);
-  }
-
-  return sanitized;
-}
-
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Global Middleware
   // ═══════════════════════════════════════════════════════════════════════════
+
+  app.use("*", async (c, next) => {
+    c.set("observability", deps.observability);
+    await next();
+  });
 
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
@@ -403,6 +386,18 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");
 
+    const logVendorError = (vendor: string, code: string, status: number) =>
+      logEvent("error", {
+        event: "sdp_api_vendor_error",
+        vendor,
+        code,
+        status,
+        method: c.req.method,
+        path: c.req.path,
+        request_id: requestId,
+        ...describeError(err),
+      });
+
     // Hono core throws HTTPException(400) for malformed JSON bodies before
     // route-level body validation runs; normalize it into the AppError envelope.
     const normalizedError =
@@ -424,6 +419,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       err instanceof SdpPaymentsError ||
       err instanceof SdpEarnError
     ) {
+      if (err instanceof SdpRpcError) {
+        logVendorError("rpc", err.code, err.statusCode);
+      }
       const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
@@ -441,6 +439,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     if (err instanceof SigningError) {
       const mapped = mapSigningError(err);
+      logVendorError("signing", mapped.code, mapped.status);
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
@@ -456,6 +455,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     if (err instanceof FeePaymentError) {
       const mapped = mapFeePaymentError(err);
+      logVendorError("fee-payment", err.code, mapped.status);
       // The response message is sanitized; without this log entry the actual
       // failure (breaker trip, provider outage, budget denial) is invisible.
       getLogger().warn(
@@ -485,6 +485,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     const fireblocksBlocked = getFireblocksBlockedError(err);
     if (fireblocksBlocked) {
+      logVendorError("fireblocks", fireblocksBlocked.code, fireblocksBlocked.status);
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
@@ -505,6 +506,13 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       context?: Record<string, unknown>;
       cause?: unknown;
     };
+    logEvent("error", {
+      event: "sdp_api_internal_error",
+      method: c.req.method,
+      path: c.req.path,
+      request_id: requestId,
+      ...describeError(err),
+    });
     getLogger().error(
       redactCredentialSecrets({
         requestId,
@@ -517,13 +525,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       }),
       "Unexpected error"
     );
-    // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
-    // shouldn't pay the cost of building a scope when no observability backend
-    // is wired up. Kept at this seam (rather than inside captureUnexpectedError)
-    // so the helper stays a pure scope-builder against the injected Observability.
-    if (isSentryEnabled(c.env)) {
-      captureUnexpectedError(deps.observability, err, c);
-    }
+    captureUnexpectedError(deps.observability, err, c);
 
     c.header("X-SDP-Trace-ID", traceId);
     return c.json(

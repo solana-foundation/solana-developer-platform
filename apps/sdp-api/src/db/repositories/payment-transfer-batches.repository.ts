@@ -40,6 +40,7 @@ export interface PaymentTransferBatchRow {
   organization_id: string;
   project_id: string;
   external_id: string | null;
+  source_custody_wallet_id: string | null;
   source_wallet_id: string;
   source_address: string;
   token: string;
@@ -77,6 +78,7 @@ export interface CreatePaymentTransferBatchInput {
   organizationId: string;
   projectId: string;
   externalId?: string | null;
+  sourceCustodyWalletId: string;
   sourceWalletId: string;
   sourceAddress: string;
   token: string;
@@ -123,6 +125,11 @@ export type DeletePaymentTransferBatchInput = GetPaymentTransferBatchInput;
 export interface ListPaymentTransferBatchesInput {
   organizationId: string;
   projectId: string;
+  walletAuthorization?: {
+    custodyWalletIds: string[];
+    providerWalletIds: string[];
+  };
+  sourceCustodyWalletId?: string;
   walletId?: string;
   walletIds?: string[];
   token?: string;

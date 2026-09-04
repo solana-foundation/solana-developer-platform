@@ -348,8 +348,7 @@ describe("dispatchCounterpartyEmail (postgres)", () => {
       externalId: null,
       entityType: "business",
       displayName: "ACME Corp",
-      email: "finance@acme.example.com",
-      identity: { address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" } },
+      providerData: {},
       createdBy: TEST_USER.id,
     });
     if (!counterparty) throw new Error("failed to seed counterparty");
@@ -368,23 +367,15 @@ describe("dispatchCounterpartyEmail (postgres)", () => {
     };
   }
 
-  it("emails the counterparty once, with the who-and-why footer, and no in-app row", async () => {
+  it("no-ops with no stored recipient: counterparty PII is never persisted", async () => {
     const result = await dispatchCounterpartyEmail(env, receipt());
-    expect(result).toEqual({ emailed: 1 });
-    expect(sendMock).toHaveBeenCalledTimes(1);
-    const message = sendMock.mock.calls[0]?.[0];
-    expect(message.to).toEqual(["finance@acme.example.com"]);
-    expect(message.html).toContain(TEST_ORG.name);
+    expect(result).toEqual({ emailed: 0 });
+    expect(sendMock).not.toHaveBeenCalled();
 
     const notifications = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS n FROM notifications")
       .first<{ n: number }>();
     expect(notifications?.n).toBe(0);
-
-    // Webhook replay: the delivery claim refuses a second send.
-    sendMock.mockClear();
-    expect(await dispatchCounterpartyEmail(env, receipt())).toEqual({ emailed: 0 });
-    expect(sendMock).not.toHaveBeenCalled();
   });
 
   it("no-ops cleanly for a wrong org or an unknown counterparty", async () => {
@@ -401,13 +392,6 @@ describe("dispatchCounterpartyEmail (postgres)", () => {
     expect(claims?.n).toBe(0);
   });
 
-  it("never throws when the send fails", async () => {
-    sendMock.mockRejectedValue(new Error("provider down"));
-    const result = await dispatchCounterpartyEmail(env, receipt());
-    expect(result.emailed).toBe(0);
-    expect(result.error).toContain("provider down");
-  });
-
   it("no-ops for a non-active counterparty", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET status = 'archived' WHERE id = ?")
@@ -417,7 +401,7 @@ describe("dispatchCounterpartyEmail (postgres)", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it("sends ONE receipt when a multi-wallet counterparty verifies in one transition", async () => {
+  it("sends NO external receipt on KYC transitions while counterparty PII is unstored", async () => {
     // A provider webhook that verifies a counterparty updates every linked wallet in
     // one statement (identical status_changed_at) and the caller loops per wallet —
     // the external recipient must still get exactly one email per transition.
@@ -443,18 +427,11 @@ describe("dispatchCounterpartyEmail (postgres)", () => {
       status: "verified",
     });
 
+    // With no stored counterparty PII there is no external recipient: the admin
+    // notifications still fire, the receipt seam stays a clean no-op.
     const receipts = sendMock.mock.calls.filter(
       (call) => call[0].to[0] === "finance@acme.example.com"
     );
-    expect(receipts).toHaveLength(1);
-
-    // A genuine LATER transition (new status_changed_at) re-fires the receipt.
-    await notifyKycOutcome(env, {
-      kycWallet: wallet("kyw_multi_1", "Wallet111", "2026-08-14T09:00:00.000Z"),
-      status: "verified",
-    });
-    expect(
-      sendMock.mock.calls.filter((call) => call[0].to[0] === "finance@acme.example.com")
-    ).toHaveLength(2);
+    expect(receipts).toHaveLength(0);
   });
 });

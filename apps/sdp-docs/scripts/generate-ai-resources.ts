@@ -50,23 +50,24 @@ const FEATURE_SUMMARY = [
   "Payments, transfers, and ramps",
   "Compliance screening",
   "Asset profiles and public token metadata",
+  "Caller-signed Earn vault deposits and exits",
 ];
 
 const KEY_PAGE_SLUGS = [
   "introduction",
   "guides/setup-organization",
   "guides/setup-wallets",
-  "guides/manage-api-keys",
-  "guides/tokenize-an-asset",
-  "guides/create-a-token",
-  "guides/deploy-a-token",
-  "guides/mint-and-burn",
+  "developing-with-sdp/manage-api-keys",
+  "tokens/tokenize-an-asset",
+  "tokens/create-a-token",
+  "tokens/deploy-a-token",
+  "tokens/mint-and-burn",
   "payments/index",
   "payments/send-basic-payment",
   "reference/issuance-token-types",
   "tutorials/end-to-end-payment-flow",
   "reference/provider-onboarding",
-  "reference/ai-consumption",
+  "reference/docs-for-ai",
   "reference/postman-collection",
   "reference/api/index",
   "reference/api/health",
@@ -77,6 +78,7 @@ const KEY_PAGE_SLUGS = [
   "reference/api/payments",
   "reference/api/compliance",
   "reference/api/asset-profiles",
+  "reference/api/earn",
 ];
 
 function stripMarkdownFormatting(value: string): string {
@@ -275,7 +277,7 @@ function renderLlms(keyPages: DocsPage[]): string {
     ...keyPages.map(renderLink),
     "",
     "## AI guide",
-    `- [AI Consumption](${aiGuideUrl}): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.`,
+    `- [Docs for AI](${aiGuideUrl}): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.`,
     "",
     "## Machine-readable resources",
     `- [llms.txt](${aiLlmsUrl})`,

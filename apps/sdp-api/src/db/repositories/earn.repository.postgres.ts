@@ -80,17 +80,23 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
 
 /**
  * Shared count+page read for the earn list methods (same shape as the
- * payments-family where-builder idiom). Ordering is fixed at newest-first with
- * id as the deterministic tiebreaker — bulk catalogue syncs write many rows in
- * the same instant, so created_at alone would make pages unstable.
+ * payments-family where-builder idiom).
+ *
+ * `ordering` is a literal ORDER BY body (never caller input) and every value
+ * passed must be TOTAL: end it with an `id` tiebreaker, because bulk catalogue
+ * syncs write many rows in the same sdp_iso_now() instant and any prefix of the
+ * sort can tie — a non-total order makes OFFSET pages repeat and skip rows.
+ *
+ * REQUIRED rather than defaulted, so a new list states its own order instead of
+ * inheriting one silently: the two existing callers want genuinely different
+ * orders (strategies rank by TVL, programs oldest-first so the head of that
+ * list cannot move when a program is created — migration 0056's header explains
+ * what breaks if it does), which is exactly the situation where an invisible
+ * default is the wrong answer. `NEWEST_FIRST` stays as the shared tail every
+ * total ordering can end with.
  */
-/**
- * `order` picks the direction of the (created_at, id) sort — id is always the
- * tiebreaker because bulk rows share sdp_iso_now(). DESC (newest first) is the
- * default every history list wants. Programs pass ASC deliberately: the head of
- * that list must not move when a new program is created (migration 0056's
- * header explains what breaks if it does).
- */
+const NEWEST_FIRST = "created_at DESC, id DESC";
+
 async function selectPage<Row>(
   db: AppDb,
   table: "earn_strategies" | "earn_provider_wallets",
@@ -98,7 +104,7 @@ async function selectPage<Row>(
   bindings: unknown[],
   window: { limit: number; offset: number },
   mapRow: (row: Record<string, unknown>) => Row,
-  order: "ASC" | "DESC" = "DESC"
+  ordering: string
 ): Promise<{ rows: Row[]; total: number }> {
   const where = conditions.join(" AND ");
 
@@ -107,7 +113,7 @@ async function selectPage<Row>(
       .prepare(
         `SELECT * FROM ${table}
            WHERE ${where}
-           ORDER BY created_at ${order}, id ${order}
+           ORDER BY ${ordering}
            LIMIT ? OFFSET ?`
       )
       .bind(...bindings, window.limit, window.offset)
@@ -239,21 +245,39 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // so `NOT` admits everything) and delete the provider's whole shelf.
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account or a silently-empty response, so it can never trigger a
-      // catalogue-wide teardown.
-      if (input.listedProviderReferences.length === 0) {
+      // catalogue-wide teardown, unless the caller explicitly authorizes it
+      // (`allowEmptyKeepSet`), which the mirror lane does when its truth source
+      // reliably answered "nothing is listed". Even then the delist must be
+      // cluster-scoped: an authorized empty pass tears down one sub-shelf, never
+      // an environment.
+      if (input.listedProviderReferences.length === 0 && !input.allowEmptyKeepSet) {
         return [];
+      }
+      if (input.allowEmptyKeepSet && !input.hostCluster) {
+        throw new Error("deleteUnlistedStrategies: allowEmptyKeepSet requires a cluster scope");
+      }
+
+      const conditions = ["provider = ?", "environment = ?", "status = 'active'"];
+      const bindings: unknown[] = [input.provider, input.environment];
+      if (input.hostCluster) {
+        // COALESCE mirrors mapStrategyRow's NULL rule: a row an older writer left
+        // unset means the environment's own cluster, so a delist scoped to that
+        // cluster governs it and a mainnet-scoped delist leaves it alone.
+        conditions.push("COALESCE(host_cluster, ?) = ?");
+        bindings.push(CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster);
+      }
+      if (input.listedProviderReferences.length > 0) {
+        conditions.push("NOT (provider_reference = ANY(?))");
+        bindings.push([...input.listedProviderReferences]);
       }
 
       const rows = await db
         .prepare(
           `DELETE FROM earn_strategies
-            WHERE provider = ?
-              AND environment = ?
-              AND status = 'active'
-              AND NOT (provider_reference = ANY(?))
+            WHERE ${conditions.join("\n              AND ")}
             RETURNING provider_reference`
         )
-        .bind(input.provider, input.environment, [...input.listedProviderReferences])
+        .bind(...bindings)
         .all<{ provider_reference: string }>();
 
       return (rows.results ?? []).map((row) => row.provider_reference);
@@ -265,6 +289,13 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       if (!input.includeInactive) {
         conditions.push("status = 'active'");
+      }
+      if (input.hostCluster) {
+        // COALESCE mirrors mapStrategyRow's NULL rule (a pre-0057 row means the
+        // environment's own cluster), so the default devnet view cannot drop a
+        // legacy row the read layer would report as devnet.
+        conditions.push("COALESCE(host_cluster, ?) = ?");
+        bindings.push(CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster);
       }
       if (input.sourceKind) {
         conditions.push("source_kind = ?");
@@ -321,7 +352,33 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(pattern, pattern, pattern);
       }
 
-      return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);
+      // The PRD ranks the shelf by deposit size (PRO-1732): TVL descending,
+      // rows with no TVL last — devnet rows carry none by design (the metrics
+      // endpoint is mainnet's), so the sandbox default view falls through to
+      // newest-first. TVL lives in the `riskMetadata` JSON (`tvlUsd`); at a
+      // ~25-row shelf per cluster the cast costs nothing, so it does not earn
+      // its own column. The trailing (created_at, id) keeps the order TOTAL —
+      // equal-TVL and no-TVL rows would otherwise make OFFSET pages repeat and
+      // skip rows.
+      //
+      // The `jsonb_typeof` guard is load-bearing, not belt-and-braces: the
+      // column is an open bag (`EarnStrategyRiskMetadata` allows any key, and
+      // the schema only CHECKs that the whole value is an object), so "always a
+      // JSON number or absent" is a convention two provider clients keep, NOT
+      // something the database enforces. A bare `::numeric` cast would turn one
+      // malformed row — a string `"12M"`, a bool — into a 500 on EVERY
+      // `GET /strategies` for that environment, an outage far from the write
+      // that caused it. Guarded, such a row reads as unsized and sorts last.
+      return selectPage(
+        db,
+        "earn_strategies",
+        conditions,
+        bindings,
+        input,
+        mapStrategyRow,
+        `CASE WHEN jsonb_typeof(risk_metadata->'tvlUsd') = 'number'
+              THEN (risk_metadata->>'tvlUsd')::numeric END DESC NULLS LAST, ${NEWEST_FIRST}`
+      );
     },
 
     async getProviderWalletById(params) {
@@ -346,7 +403,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings.push(input.provider);
       }
 
-      // ASC: oldest first, so the head of the list is stable for a program's
+      // Oldest first, so the head of the list is stable for a program's
       // whole life (migration 0056).
       return selectPage(
         db,
@@ -355,7 +412,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         bindings,
         input,
         mapProviderWalletRow,
-        "ASC"
+        "created_at ASC, id ASC"
       );
     },
 

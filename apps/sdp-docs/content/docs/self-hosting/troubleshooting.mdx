@@ -6,7 +6,7 @@ description: Diagnose common startup and configuration failures on a self-hosted
 Most self-hosting problems surface at startup. Start by looking at the service
 state and logs:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose ps
 docker compose logs -f sdp-api
@@ -50,7 +50,7 @@ process holds one of them, the service won't bind. Override the host port in
 `sdp-migrate` runs once before the API starts; if it fails, the API stays down.
 Inspect it with:
 
-```bash
+```bash title="Terminal"
 docker compose logs sdp-migrate
 ```
 

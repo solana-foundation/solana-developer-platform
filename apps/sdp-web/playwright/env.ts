@@ -4,7 +4,12 @@ import path from "node:path";
 const DEFAULT_CLERK_TEST_ORG_NAME = "Solana";
 const DEFAULT_CLERK_TEST_EMAIL = "e2e-smoke+sdp-web@example.com";
 const BASE_URL = "http://localhost:3100";
-const GCP_DEV_API_URL = "https://api-dev.solana.com";
+const GCP_EXTERNAL_API_URLS = [
+  "https://api-dev.solana.com",
+  "https://api-stage.solana.com",
+  "https://api-preview.solana.com",
+];
+const GCP_DEV_API_URL = GCP_EXTERNAL_API_URLS[0];
 
 type E2EEnvCommon = {
   baseURL: string;
@@ -121,9 +126,9 @@ export function getE2EEnv(): E2EEnv {
   const explicitExternalApiUrl = useExternalApi
     ? resolveExplicitEnvValue("PLAYWRIGHT_API_URL").replace(/\/$/, "")
     : null;
-  if (explicitExternalApiUrl && explicitExternalApiUrl !== GCP_DEV_API_URL) {
+  if (explicitExternalApiUrl && !GCP_EXTERNAL_API_URLS.includes(explicitExternalApiUrl)) {
     throw new Error(
-      `External GCP smoke only accepts ${GCP_DEV_API_URL}; received ${explicitExternalApiUrl}`
+      `External GCP smoke only accepts ${GCP_EXTERNAL_API_URLS.join(", ")}; received ${explicitExternalApiUrl}`
     );
   }
 

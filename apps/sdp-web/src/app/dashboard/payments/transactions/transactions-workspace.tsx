@@ -13,6 +13,7 @@ import {
   useTransition,
 } from "react";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -218,8 +219,8 @@ function AdvancedFilters({
   const t = useTranslations();
   const wallets = [...(options?.wallets ?? [])];
   const counterparties = [...(options?.counterparties ?? [])];
-  if (filters.walletId && !wallets.some((option) => option.id === filters.walletId)) {
-    wallets.unshift({ id: filters.walletId, label: filters.walletId });
+  if (filters.custodyWalletId && !wallets.some((option) => option.id === filters.custodyWalletId)) {
+    wallets.unshift({ id: filters.custodyWalletId, label: filters.custodyWalletId });
   }
   if (
     filters.counterpartyId &&
@@ -260,14 +261,19 @@ function AdvancedFilters({
       </SelectFilter>
       <SelectFilter
         label={t("DashboardPayments.transactions.filterWallet")}
-        value={filters.walletId}
+        value={filters.custodyWalletId}
         allLabel={
           optionsLoading
             ? t("DashboardPayments.transactions.loadingOptions")
             : t("DashboardPayments.transactions.allWallets")
         }
         ariaLabel={t("DashboardPayments.transactions.allWallets")}
-        onChange={(walletId) => updateFilters({ walletId })}
+        onChange={(custodyWalletId) =>
+          updateFilters({
+            custodyWalletId,
+            ...(!custodyWalletId ? { includeObserved: false } : {}),
+          })
+        }
       >
         {wallets.map((wallet) => (
           <SelectItem key={wallet.id} value={wallet.id}>
@@ -333,6 +339,7 @@ function AdvancedFilters({
         <ToggleSwitch
           checked={filters.includeObserved}
           onChange={(checked) => updateFilters({ includeObserved: checked })}
+          disabled={!filters.custodyWalletId}
           aria-labelledby={INCLUDE_OBSERVED_LABEL_ID}
         />
         <span id={INCLUDE_OBSERVED_LABEL_ID} className="text-secondary text-sm">
@@ -345,9 +352,11 @@ function AdvancedFilters({
 
 export function TransactionsWorkspace({
   filters,
+  disableCsvExport = false,
   children,
 }: {
   filters: TransactionFilters;
+  disableCsvExport?: boolean;
   children: ReactNode;
 }) {
   const t = useTranslations();
@@ -368,23 +377,20 @@ export function TransactionsWorkspace({
   const hasAdvancedFilter = Boolean(
     displayFilters.direction ||
       displayFilters.type ||
-      displayFilters.walletId ||
+      displayFilters.custodyWalletId ||
       displayFilters.counterpartyId ||
       displayFilters.asset ||
       displayFilters.provider ||
       displayFilters.from ||
       displayFilters.to ||
-      // Counted by countActiveTransactionFilters, so it has to open the panel
-      // too. Otherwise excluding observed deposits shows an active-filter badge
-      // over a collapsed panel with no visible cause.
-      !displayFilters.includeObserved
+      displayFilters.includeObserved
   );
   const [filtersOpen, setFiltersOpen] = useState(hasAdvancedFilter);
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
   const debouncedAsset = useDebounce(assetValue.trim(), 300);
   const { data: filterOptions, isLoading: optionsLoading } = useSWR<TransactionFilterOptions>(
     filtersOpen && selectedProjectId
-      ? ["payments-transaction-filter-options-v2", selectedProjectId]
+      ? paymentsQueryKeys.transactionFilterOptions({ projectId: selectedProjectId })
       : null,
     () => fetchTransactionFilterOptions(),
     { dedupingInterval: 60_000, revalidateOnFocus: false }
@@ -494,13 +500,13 @@ export function TransactionsWorkspace({
       status: undefined,
       direction: undefined,
       type: undefined,
-      walletId: undefined,
+      custodyWalletId: undefined,
       counterpartyId: undefined,
       asset: undefined,
       provider: undefined,
       from: undefined,
       to: undefined,
-      includeObserved: true,
+      includeObserved: false,
       sortBy: "createdAt",
       sortDirection: "desc",
       page: 1,
@@ -510,7 +516,7 @@ export function TransactionsWorkspace({
   const sortValue = `${displayFilters.sortBy}:${displayFilters.sortDirection}`;
 
   const downloadCsv = async () => {
-    if (csvDownloading) return;
+    if (csvDownloading || disableCsvExport) return;
     setCsvDownloading(true);
     setCsvError(null);
 
@@ -623,7 +629,7 @@ export function TransactionsWorkspace({
               <Button
                 type="button"
                 variant="outline"
-                disabled={csvDownloading}
+                disabled={csvDownloading || disableCsvExport}
                 iconLeft={
                   csvDownloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />
                 }

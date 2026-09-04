@@ -1,17 +1,11 @@
 import type { CounterpartyRow } from "@sdp/payments";
 import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import type {
-  CounterpartyEntityType,
-  CounterpartyIdentity,
-  CounterpartyProviderData,
-} from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyProviderData, RampProviderId } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
+import type { BvnkCustomerProviderAccountMetadata } from "./counterparty-provider-account.repository";
 
 export type { CounterpartyRow } from "@sdp/payments";
-
-export function generateCounterpartyId(): string {
-  return `counterparty_${crypto.randomUUID()}`;
-}
+export { generateCounterpartyId } from "@sdp/payments";
 
 export interface CreateCounterpartyInput {
   organizationId: string;
@@ -19,9 +13,7 @@ export interface CreateCounterpartyInput {
   externalId: string | null;
   entityType: CounterpartyEntityType;
   displayName: string;
-  email: string;
-  identity: CounterpartyIdentity;
-  providerData?: CounterpartyProviderData;
+  providerData: CounterpartyProviderData;
   createdBy: string | null;
 }
 
@@ -32,8 +24,6 @@ export interface UpdateCounterpartyInput {
   externalId?: string | null;
   entityType?: CounterpartyEntityType;
   displayName?: string;
-  email?: string;
-  identity?: CounterpartyIdentity;
   providerData?: CounterpartyProviderData;
 }
 
@@ -46,7 +36,7 @@ export interface ArchiveCounterpartyInput {
 export interface ListCounterpartiesInput {
   organizationId: string;
   projectId: string;
-  includeArchived?: boolean;
+  includeArchived: boolean;
   limit: number;
   offset: number;
 }
@@ -60,7 +50,12 @@ export interface UpsertBvnkCustomerProviderDataInput {
   counterpartyId: string;
   organizationId: string;
   projectId: string;
-  customer: Partial<BvnkCustomerResolution>;
+  customer: Partial<
+    Pick<BvnkCustomerResolution, "customerReference" | "status" | "verificationStatus">
+  > & {
+    contactId?: string;
+    agreements?: BvnkCustomerProviderAccountMetadata["agreements"];
+  };
 }
 
 export interface MutateCounterpartyProviderDataInput {
@@ -89,9 +84,10 @@ export interface CounterpartiesRepository {
     projectId: string;
   }): Promise<CounterpartyRow | null>;
   findActiveCounterpartyById(counterpartyId: string): Promise<CounterpartyRow | null>;
-  findActiveCounterpartyByBvnkCustomerReference(
-    customerReference: string
-  ): Promise<CounterpartyRow | null>;
+  findActiveCounterpartyByProviderCustomerReference(params: {
+    provider: RampProviderId;
+    providerCustomerReference: string;
+  }): Promise<CounterpartyRow | null>;
   findCounterpartyByMuralOrganizationId(organizationId: string): Promise<CounterpartyRow | null>;
   mutateProviderData(params: MutateCounterpartyProviderDataInput): Promise<CounterpartyRow | null>;
   upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;

@@ -1,4 +1,5 @@
 import { SdpKaminoError } from "@sdp/kamino";
+import { SdpVedaError } from "@sdp/veda";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -14,11 +15,19 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import type { VaultDepositInput } from "./vault-deposit.service";
 
 const buildVaultDeposit = vi.hoisted(() => vi.fn());
+const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
 const signVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
+const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
+
+// `prependSwapLegToVaultPlan` stays real; only the Jupiter HTTP boundary is stubbed.
+vi.mock("./jupiter-swap.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./jupiter-swap.service")>()),
+  fetchJupiterSwapLeg,
+}));
 
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
@@ -38,7 +47,15 @@ vi.mock("@/services/solana", async (importOriginal) => ({
   createOrgSignerForCustodyWallet,
 }));
 
+// `vaultRentPayer` stays real: it is the thing under test in the rent-funder
+// cases below, and it only reads whatever this mock returns.
+vi.mock("./vault-sponsorship", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./vault-sponsorship")>()),
+  resolveVaultSponsorship,
+}));
+
 const { depositIntoVault } = await import("./vault-deposit.service");
+const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 const ORG = "org_vault_deposit";
 const PROJECT = "prj_vault_deposit";
@@ -132,6 +149,9 @@ beforeEach(async () => {
   vi.clearAllMocks();
   resolveVaultDirectClient.mockReturnValue({ buildVaultDeposit });
   buildVaultDeposit.mockResolvedValue(plan());
+  // Matches the real resolver with the flag unset, which is the default in every
+  // existing case here.
+  resolveVaultSponsorship.mockResolvedValue({ kind: "wallet-pays" });
   simulateVaultPlan.mockResolvedValue({ ok: true });
   createOrgSignerForCustodyWallet.mockResolvedValue({ address: WALLET_ADDRESS });
   signVaultPlan.mockResolvedValue({
@@ -168,6 +188,9 @@ describe("depositIntoVault — idempotency", () => {
     expect(resolveVaultDirectClient).not.toHaveBeenCalled();
     expect(buildVaultDeposit).not.toHaveBeenCalled();
     expect(signVaultPlan).not.toHaveBeenCalled();
+    // A replay is a durable read. Resolving sponsorship first would 5xx every
+    // retry of an already-signed movement during a paymaster outage.
+    expect(resolveVaultSponsorship).not.toHaveBeenCalled();
   });
 
   it("treats insignificant decimal zeroes as the same on-chain intent", async () => {
@@ -326,6 +349,30 @@ describe("depositIntoVault — idempotency", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * Replay is a property of this service, not of a provider, so it is asserted
+   * for the second `vault_direct` provider rather than assumed to carry over —
+   * the fingerprint includes the provider, and the durable movement is what the
+   * retry returns.
+   */
+  it("replays a Veda deposit from durable state without rebuilding it", async () => {
+    const input = depositInput({ provider: "veda", providerReference: VAULT_B });
+
+    const first = await depositIntoVault(env, input);
+    expect(first.replayed).toBe(false);
+
+    buildVaultDeposit.mockClear();
+    const second = await depositIntoVault(env, input);
+
+    expect(second.replayed).toBe(true);
+    expect(second.movement.id).toBe(first.movement.id);
+    expect(second.movement.signature).toBe(first.movement.signature);
+    // The whole point of a durable replay: no chain work, so a retry survives
+    // an RPC outage.
+    expect(buildVaultDeposit).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it("treats a changed minSharesOut as a different request", async () => {
     buildVaultDeposit.mockResolvedValue(plan({ accepted: { amount: "10", minSharesOut: "1" } }));
     await depositIntoVault(env, depositInput({ minSharesOut: "1" }));
@@ -345,6 +392,47 @@ describe("depositIntoVault — validation and custody identity", () => {
     await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "amount exceeds its mint precision",
+    });
+  });
+
+  /**
+   * Provider-neutral by CODE, not by class. Each of these names something the
+   * request or the vault's current state makes impossible, and the provider's
+   * own sentence explains it better than a status code — while an unrecognised
+   * failure keeps bubbling, because telling a customer their request was wrong
+   * when SDP does not know that would be a guess.
+   */
+  it("maps every refused-build code to a caller 400, across providers", async () => {
+    const refusals = [
+      new SdpKaminoError("INVALID_AMOUNT", "amount exceeds its mint precision"),
+      new SdpVedaError("INVALID_AMOUNT", "minSharesOut is below one share atom"),
+      new SdpVedaError("DEPOSIT_REFUSED", "the vault is at its deposit cap"),
+      new SdpVedaError("COMPLIANCE_APPROVAL_REQUIRED", "this vault requires an approval"),
+    ];
+
+    for (const [index, refusal] of refusals.entries()) {
+      buildVaultDeposit.mockRejectedValueOnce(refusal);
+      await expect(
+        depositIntoVault(
+          env,
+          depositInput({
+            provider: refusal instanceof SdpVedaError ? "veda" : "kamino",
+            requestId: `3333333${index}-3333-4333-8333-333333333333`,
+          })
+        )
+      ).rejects.toMatchObject({ code: "BAD_REQUEST", message: refusal.message });
+    }
+  });
+
+  it("maps unreadable provider state to a retryable 503", async () => {
+    buildVaultDeposit.mockRejectedValue(
+      new SdpVedaError("VAULT_UNREADABLE", "the configured RPC could not be reached")
+    );
+
+    await expect(depositIntoVault(env, depositInput({ provider: "veda" }))).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+      message: "Earn provider is temporarily unavailable. Try again.",
     });
   });
 
@@ -807,6 +895,33 @@ describe("depositIntoVault — signed persistence boundary", () => {
     expect(await tableCount("earn_movements")).toBe(0);
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
+
+  /**
+   * A blown slippage floor is the caller's tolerance, not a fault: the 400
+   * carries `details.reason` so the dashboard can reopen its slippage control
+   * with its own copy instead of relaying a simulation log. Matched on the
+   * program's NAMED error — the bare custom-error number is every Anchor
+   * program's first error code and would relabel unrelated failures.
+   */
+  it("names a slippage-exceeded simulation in the caller's terms", async () => {
+    simulateVaultPlan.mockResolvedValue({
+      ok: false,
+      error: "custom program error: 0x1770",
+      logs: [
+        "Program log: AnchorError occurred. Error Code: SlippageExceeded. " +
+          "Error Number: 6000. Error Message: Slippage tolerance exceeded.",
+      ],
+    });
+
+    await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      details: { reason: "slippage_exceeded" },
+      message: expect.stringContaining("slippage"),
+    });
+
+    expect(await tableCount("earn_movements")).toBe(0);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("depositIntoVault — approved-operation effect fencing", () => {
@@ -968,5 +1083,303 @@ describe("earn vault project attribution", () => {
       .all<{ project_id: string | null }>();
     expect(position?.project_id).toBeNull();
     expect(movements.results.map((row) => row.project_id)).toEqual([null, otherProject]);
+  });
+
+  /**
+   * Who is owed the share-ATA rent back. Recorded at DEPOSIT time because the
+   * exit that closes the account may be months later and under a different fee
+   * mode, and nothing on chain records who paid.
+   */
+  describe("share-ATA rent funder", () => {
+    const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
+
+    /**
+     * Read by POSITION ID, not `LIMIT 1`. An unscoped read makes the two
+     * expect-null cases pass vacuously if the row is ever absent, which is the
+     * failure they exist to catch.
+     */
+    async function recordedFunder(positionId: string): Promise<string | null> {
+      const row = await getDb(env)
+        .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+        .bind(positionId)
+        .first<{ share_ata_rent_funder: string | null }>();
+      if (!row) throw new Error(`missing position fixture ${positionId}`);
+      return row.share_ata_rent_funder ?? null;
+    }
+
+    function sponsored() {
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+    }
+
+    it("records the sponsor when this deposit creates the account", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+
+      const result = await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+    });
+
+    /**
+     * The actual bug this feature fixed. Fees were already sponsorable; the
+     * `rentPayer` inside the instructions still defaulted to the owner, so a
+     * wallet holding zero SOL could not make a first deposit. Nothing else
+     * asserts that the resolved sponsor reaches the builder.
+     */
+    it("hands the sponsor to the builder as the rent payer", async () => {
+      sponsored();
+
+      await depositIntoVault(env, depositInput());
+
+      expect(buildVaultDeposit.mock.calls[0]?.[1]).toMatchObject({ rentPayer: SPONSOR });
+    });
+
+    it("names no rent payer when the wallet pays its own fees", async () => {
+      await depositIntoVault(env, depositInput());
+
+      expect(buildVaultDeposit.mock.calls[0]?.[1]).not.toHaveProperty("rentPayer");
+    });
+
+    /**
+     * The case that protects the customer. Account creation is idempotent, so a
+     * sponsored deposit into a vault the wallet already holds pays no rent.
+     * Recording a funder here would later refund a sponsor with lamports the
+     * customer had put up.
+     */
+    it("records nothing when the account already existed", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: false }));
+
+      const result = await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    it("records nothing when the wallet funds its own rent", async () => {
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+
+      const result = await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    async function failMovement(movementId: string): Promise<void> {
+      await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+        movementId,
+        organizationId: ORG,
+        toStatus: "failed",
+        failureReason: "Transaction blockhash expired before confirmation",
+      });
+    }
+
+    /**
+     * The attribution is a PROJECTION, so it repairs itself. A movement that
+     * observed the account missing and then never landed charged no rent, and
+     * leaving its claim standing would send the close's 2,039,280 lamports to a
+     * party that paid nothing, for as long as the position lives.
+     */
+    it("drops the claim when the creating movement fails", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+      const result = await depositIntoVault(env, depositInput());
+      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+
+      await failMovement(result.movement.id);
+
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    /**
+     * And it falls back rather than to a guess: an earlier surviving claim is
+     * the truth once a later one fails, because the account it created is the
+     * one still on chain.
+     */
+    it("falls back to the earlier surviving claim", async () => {
+      const SPONSOR_LATER = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+      const first = await depositIntoVault(env, depositInput());
+
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR_LATER,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+      signVaultPlan.mockResolvedValue({
+        bytes: new Uint8Array([2]),
+        signature: "sig_second_claim",
+        lastValidBlockHeight: "12345",
+      });
+      const second = await depositIntoVault(
+        env,
+        depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
+      );
+      expect(second.position.id).toBe(first.position.id);
+      expect(await recordedFunder(first.position.id)).toBe(SPONSOR_LATER);
+
+      await failMovement(second.movement.id);
+
+      expect(await recordedFunder(first.position.id)).toBe(SPONSOR);
+    });
+
+    /**
+     * The loser of the insert race must not attribute rent. Its bytes never
+     * broadcast, so it pays nothing, and it is not merely sometimes-last: the
+     * claim upsert holds the position row's lock, so the loser is serialised
+     * second and its funder would overwrite the winner's every time.
+     *
+     * Reachable because the idempotency fingerprint omits the fee mode, so two
+     * same-key requests that resolved different sponsors replay-match instead
+     * of conflicting. A rolling deploy (the flag is per-revision) or a
+     * round-robin Kora signer pool is enough to skew them.
+     */
+    it("keeps the winner's funder when identical requests race under different fee modes", async () => {
+      const SPONSOR_ROTATED = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
+      let releaseBuilds: (() => void) | undefined;
+      const bothBuilding = new Promise<void>((resolve) => {
+        releaseBuilds = resolve;
+      });
+      let resolvedCount = 0;
+      resolveVaultSponsorship.mockImplementation(async () => {
+        resolvedCount += 1;
+        return {
+          kind: "sponsored",
+          sponsor: resolvedCount === 1 ? SPONSOR : SPONSOR_ROTATED,
+          feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+        };
+      });
+      let buildCount = 0;
+      buildVaultDeposit.mockImplementation(async () => {
+        buildCount += 1;
+        if (buildCount === 2) releaseBuilds?.();
+        await bothBuilding;
+        return plan({ createsShareAccount: true });
+      });
+      const sponsorBySignature = new Map<string, string>();
+      signVaultPlan.mockImplementation(
+        async (_env: unknown, input: { fee: { sponsor: string } }) => {
+          const signature = `sig_fee_mode_${sponsorBySignature.size + 1}`;
+          sponsorBySignature.set(signature, input.fee.sponsor);
+          return { bytes: new Uint8Array([1]), signature, lastValidBlockHeight: "12345" };
+        }
+      );
+
+      const results = await Promise.all([
+        depositIntoVault(env, depositInput()),
+        depositIntoVault(env, depositInput()),
+      ]);
+
+      // One insert won, both callers see that movement, and only it broadcast.
+      expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+      expect(await tableCount("earn_movements")).toBe(1);
+      expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+      // Two sponsors were resolved, so the assertion below is not vacuous.
+      expect(new Set(sponsorBySignature.values()).size).toBe(2);
+      // The refund is owed to whoever signed the bytes that can land.
+      const winner = results.find((result) => !result.replayed);
+      expect(await recordedFunder(results[0].position.id)).toBe(
+        sponsorBySignature.get(winner?.movement.signature ?? "")
+      );
+    });
+  });
+});
+
+describe("depositIntoVault — swap-funded (Jupiter)", () => {
+  // Devnet USDG; the route validates membership, this service only carries it.
+  const SOURCE_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+
+  function swapLeg(overrides: Record<string, unknown> = {}) {
+    return {
+      instructions: [
+        {
+          programAddress: "11111111111111111111111111111111",
+          accounts: [],
+          data: Buffer.from("swap-leg", "utf8").toString("base64"),
+        },
+      ],
+      lookupTableAddresses: ["D1ZN9Wj1fRSUQfCjhvnu1hqDMT7hzjzBBpi12nVniYD6"],
+      sourceAmount: "10",
+      quotedAmount: "9.99",
+      minOutAmount: "9.95",
+      priceImpactPct: "0.0001",
+      routeLabels: ["Whirlpool"],
+      slippageBps: 50,
+      ...overrides,
+    };
+  }
+
+  function swapInput() {
+    return depositInput({
+      amount: "10",
+      swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 50 },
+    });
+  }
+
+  beforeEach(() => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(plan({ accepted: { amount: "9.95" } }));
+  });
+
+  it("sizes the deposit to the swap floor, prepends the leg, and never sponsors", async () => {
+    const result = await depositIntoVault(env, swapInput());
+
+    // The provider built for the swap's guaranteed output, not the source amount.
+    expect(buildVaultDeposit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ amount: "9.95" })
+    );
+    // Jupiter programs are not paymaster-allowlisted; a swap-funded deposit
+    // must not even ask.
+    expect(resolveVaultSponsorship).not.toHaveBeenCalled();
+
+    // The signed plan runs a LOCALLY built compute-unit limit (the probe's
+    // consumption was unreported by the mocked simulation, so the maximum),
+    // then swap → provider deposit → request memo, with the swap's lookup
+    // tables carried along.
+    const signedPlan = signVaultPlan.mock.calls[0]?.[1]?.plan;
+    expect(signedPlan.instructions[0].programAddress).toBe(
+      "ComputeBudget111111111111111111111111111111"
+    );
+    const datas = signedPlan.instructions
+      .slice(1)
+      .map((instruction: { data: string }) =>
+        Buffer.from(instruction.data, "base64").toString("utf8")
+      );
+    expect(datas[0]).toBe("swap-leg");
+    expect(datas.at(-1)).toMatch(/^sdp:earn:vault-deposit:/);
+    expect(signedPlan.lookupTables).toContain("D1ZN9Wj1fRSUQfCjhvnu1hqDMT7hzjzBBpi12nVniYD6");
+
+    // The ledger row claims the DEPOSIT amount in the deposit token.
+    expect(result.movement.amount_requested).toBe("9.95");
+    expect(result.movement.denomination).toBe(TOKEN_MINT);
+  });
+
+  it("keys idempotency on the funding token: same key, swap vs no swap, is a conflict", async () => {
+    buildVaultDeposit.mockResolvedValueOnce(plan({ accepted: { amount: "10" } }));
+    await depositIntoVault(env, depositInput({ amount: "10" }));
+    await expect(depositIntoVault(env, swapInput())).rejects.toThrowError(
+      /different request payload|conflict/i
+    );
+  });
+
+  it("re-routes once for compactness and refuses when the transaction still cannot fit", async () => {
+    signVaultPlan.mockRejectedValue(new VaultTransactionTooLargeError(1400, false));
+
+    await expect(depositIntoVault(env, swapInput())).rejects.toThrowError(
+      /cannot fit in one Solana transaction/
+    );
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
+    expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
+    // The refusal signed nothing durable and broadcast nothing.
+    expect(await tableCount("earn_movements")).toBe(0);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 });

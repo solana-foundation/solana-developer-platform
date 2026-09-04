@@ -5,8 +5,10 @@ import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/t
 import { describe, expect, it } from "vitest";
 import {
   buildMaximumWithdrawalBalanceGuard,
+  buildShareAccountCloseInstruction,
   buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
+  isShareAtaCloseInstruction,
   KVAULT_BURN_ALL_SHARES_SENTINEL,
   KVAULT_SHARE_REDEEMING_DISCRIMINATORS,
   type RoleTaggedInstruction,
@@ -200,5 +202,139 @@ describe("buildShareAccountConsolidation", () => {
     expect(result.totalBaseUnits).toBe(KVAULT_BURN_ALL_SHARES_SENTINEL);
     expect(result.postConsolidationAtaBaseUnits).toBe(KVAULT_BURN_ALL_SHARES_SENTINEL);
     expect(result.instructions).toHaveLength(3);
+  });
+});
+
+describe("buildShareAccountCloseInstruction", () => {
+  const OWNER = createNoopSigner(address("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"));
+  const SHARE_ATA = address("7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx");
+  const SPONSOR = address("4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q");
+
+  function close(overrides: Record<string, unknown> = {}) {
+    return buildShareAccountCloseInstruction({
+      shareAta: SHARE_ATA,
+      owner: OWNER,
+      ataBaseUnitsBeforeExit: 500n,
+      redeemedBaseUnits: 500n,
+      ownerTotalBaseUnits: 500n,
+      ...overrides,
+    } as Parameters<typeof buildShareAccountCloseInstruction>[0]);
+  }
+
+  it("refunds the recorded funder when the exit empties the account", () => {
+    const instruction = close({ refundTo: SPONSOR });
+
+    expect(instruction).not.toBeNull();
+    const accounts = (instruction?.accounts ?? []).map((account) => String(account.address));
+    // SPL CloseAccount orders them account, destination, owner.
+    expect(accounts).toEqual([SHARE_ATA, SPONSOR, OWNER.address]);
+    expect(String(instruction?.programAddress)).toBe(String(TOKEN_PROGRAM_ADDRESS));
+  });
+
+  it("refunds the owner when no funder was recorded", () => {
+    expect((close()?.accounts ?? []).map((account) => String(account.address))[1]).toBe(
+      OWNER.address
+    );
+  });
+
+  /**
+   * `CloseAccount` fails on a non-zero balance and rides the same transaction as
+   * the redemptions, so closing on a partial exit would not strand rent, it would
+   * fail the customer's withdrawal.
+   */
+  it.each([
+    [
+      "a partial exit leaves shares in the ATA",
+      { ataBaseUnitsBeforeExit: 500n, redeemedBaseUnits: 200n, ownerTotalBaseUnits: 500n },
+    ],
+    [
+      "redeeming more than the ATA holds",
+      { ataBaseUnitsBeforeExit: 200n, redeemedBaseUnits: 500n, ownerTotalBaseUnits: 500n },
+    ],
+  ])("returns null when %s", (_case, overrides) => {
+    expect(close({ ...overrides, refundTo: SPONSOR })).toBeNull();
+  });
+
+  /**
+   * The case Greptile flagged, and the reason the condition is not just
+   * "is the ATA empty". Consolidation can leave the ATA holding exactly the
+   * request while auxiliary accounts still hold shares. Closing there would be
+   * closing an account the NEXT withdrawal has to recreate and pay rent for, at
+   * which point the funder recorded against the position describes a previous
+   * instance of the account and its refund goes to the wrong party.
+   */
+  it("returns null when auxiliary accounts still hold shares", () => {
+    expect(
+      close({
+        ataBaseUnitsBeforeExit: 500n,
+        redeemedBaseUnits: 500n,
+        ownerTotalBaseUnits: 900n,
+        refundTo: SPONSOR,
+      })
+    ).toBeNull();
+  });
+
+  it("closes a zero-balance account that redeems nothing", () => {
+    expect(
+      close({ ataBaseUnitsBeforeExit: 0n, redeemedBaseUnits: 0n, ownerTotalBaseUnits: 0n })
+    ).not.toBeNull();
+  });
+});
+
+describe("isShareAtaCloseInstruction", () => {
+  const SHARE_ATA = address("6cugf3w232LzY17wXHHWXKwv4oGAgpHbkp7mmHx5FnPL");
+  const OWNER_ADDRESS = address("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
+
+  /** The exact shape klend-sdk 10.0.0 emits in `postWithdrawIxs` on a full exit. */
+  function sdkClose(overrides: Partial<Instruction> = {}): Instruction {
+    return {
+      programAddress: TOKEN_PROGRAM_ADDRESS,
+      accounts: [
+        { address: SHARE_ATA, role: 1 },
+        { address: OWNER_ADDRESS, role: 1 },
+        { address: OWNER_ADDRESS, role: 2 },
+      ],
+      data: Uint8Array.from([9]),
+      ...overrides,
+    } as Instruction;
+  }
+
+  it("matches the SDK's own close of the share ATA", () => {
+    expect(isShareAtaCloseInstruction(sdkClose(), SHARE_ATA)).toBe(true);
+  });
+
+  it("matches SDP's own close builder output, so the strip-then-append order is load-bearing", async () => {
+    const built = buildShareAccountCloseInstruction({
+      shareAta: SHARE_ATA,
+      owner: createNoopSigner(OWNER_ADDRESS),
+      ataBaseUnitsBeforeExit: 500n,
+      redeemedBaseUnits: 500n,
+      ownerTotalBaseUnits: 500n,
+    });
+    expect(built).not.toBeNull();
+    expect(isShareAtaCloseInstruction(built as Instruction, SHARE_ATA)).toBe(true);
+  });
+
+  it("ignores a close of a DIFFERENT account: not SDP's to own", () => {
+    expect(isShareAtaCloseInstruction(sdkClose(), OWNER_ADDRESS)).toBe(false);
+  });
+
+  it("ignores other token instructions on the share ATA", () => {
+    expect(
+      isShareAtaCloseInstruction(
+        sdkClose({ data: Uint8Array.from([3, 0, 0, 0, 0, 0, 0, 0, 0]) }),
+        SHARE_ATA
+      )
+    ).toBe(false);
+  });
+
+  it("ignores a CloseAccount-shaped instruction from another program", () => {
+    expect(
+      isShareAtaCloseInstruction(sdkClose({ programAddress: KVAULT_PROGRAM }), SHARE_ATA)
+    ).toBe(false);
+  });
+
+  it("ignores an instruction with no data", () => {
+    expect(isShareAtaCloseInstruction(sdkClose({ data: undefined }), SHARE_ATA)).toBe(false);
   });
 });

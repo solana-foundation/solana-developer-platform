@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createCommitOnBranch, githubGraphqlRequest } from "./github-commit-on-branch.mjs";
+import { autoMergeNeedsRearm } from "./release-automerge.mjs";
 import { nextReleaseVersion, releaseCommitSemantics } from "./release-version.mjs";
 
 const mode = process.argv[2];
@@ -397,7 +398,39 @@ async function createReleaseBranchCommit(version) {
   return commit.oid;
 }
 
+async function armedAutoMergeHeadline(pullRequestId) {
+  const query = `
+    query ReleaseAutoMergeState($pullRequestId: ID!) {
+      node(id: $pullRequestId) {
+        ... on PullRequest {
+          autoMergeRequest {
+            commitHeadline
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await githubGraphqlRequest({ query, variables: { pullRequestId }, token });
+  return data?.node?.autoMergeRequest?.commitHeadline ?? null;
+}
+
+async function disableAutoMerge(pullRequestId) {
+  const query = `
+    mutation DisableReleaseAutoMerge($pullRequestId: ID!) {
+      disablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId }) {
+        pullRequest {
+          number
+        }
+      }
+    }
+  `;
+
+  await githubGraphqlRequest({ query, variables: { pullRequestId }, token });
+}
+
 async function enableAutoMerge(pullRequestId, version) {
+  const commitHeadline = `chore(main): release ${version}`;
   const query = `
     mutation EnableReleaseAutoMerge($pullRequestId: ID!, $commitHeadline: String!) {
       enablePullRequestAutoMerge(input: {
@@ -415,21 +448,34 @@ async function enableAutoMerge(pullRequestId, version) {
     }
   `;
 
+  const arm = () =>
+    githubGraphqlRequest({ query, variables: { pullRequestId, commitHeadline }, token });
+
   try {
-    await githubGraphqlRequest({
-      query,
-      variables: {
-        pullRequestId,
-        commitHeadline: `chore(main): release ${version}`,
-      },
-      token,
-    });
+    await arm();
+    return;
   } catch (error) {
-    if (error.message.includes("Auto merge is already enabled")) {
-      return;
+    if (!error.message.includes("Auto merge is already enabled")) {
+      throw error;
     }
-    throw error;
   }
+
+  // Already armed, which on this repository usually means armed at an earlier
+  // version: this pull request is recreated on every push to main, and the
+  // headline GitHub squash-merges with is frozen at arming time even though the
+  // title is updated. Left alone, the release commit lands on main naming the
+  // wrong version and `publish` refuses it, taking the production deploy with
+  // it. See release-automerge.mjs for the full reasoning.
+  const armedHeadline = await armedAutoMergeHeadline(pullRequestId);
+  if (!autoMergeNeedsRearm(armedHeadline, commitHeadline)) {
+    return;
+  }
+
+  console.log(
+    `Re-arming auto-merge: headline was ${JSON.stringify(armedHeadline)}, expected ${JSON.stringify(commitHeadline)}`
+  );
+  await disableAutoMerge(pullRequestId);
+  await arm();
 }
 
 async function ensureReleasePrSettings() {

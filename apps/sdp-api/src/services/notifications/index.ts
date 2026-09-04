@@ -23,6 +23,7 @@ export {
   notifyMemberJoined,
   notifyMemberRemoved,
   notifyRampSettled,
+  notifyRampSettledFromEnv,
   notifyRecurringPaymentFailed,
   notifyWorkflowRunFailed,
 } from "./producers";

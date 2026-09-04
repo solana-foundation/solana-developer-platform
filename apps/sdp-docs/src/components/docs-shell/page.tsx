@@ -15,13 +15,14 @@ type DocsPageProps = {
   children: ReactNode;
   toc?: TocItem[];
   full?: boolean;
+  tocFooter?: ReactNode;
 };
 
-export function DocsPage({ children, toc, full }: DocsPageProps) {
+export function DocsPage({ children, toc, full, tocFooter }: DocsPageProps) {
   return (
     <div className={full ? "launch-docs-page is-full" : "launch-docs-page"}>
       <article className="launch-docs-article">{children}</article>
-      {toc && toc.length > 0 ? <TableOfContents items={toc} /> : null}
+      {toc && toc.length > 0 ? <TableOfContents items={toc}>{tocFooter}</TableOfContents> : null}
     </div>
   );
 }

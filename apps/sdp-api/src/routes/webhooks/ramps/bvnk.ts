@@ -5,10 +5,10 @@ import {
   type BvnkOnrampPaymentRuleState,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
+  parseBvnkCustomerExternalReference,
   parseBvnkOfframpWalletName,
   parseBvnkOnrampWalletName,
   pendingBvnkOnrampPaymentRuleKeys,
-  readBvnkCustomer,
   readBvnkOfframpReference,
   readBvnkOnrampPaymentRuleState,
   withBvnkOfframpWalletStatus,
@@ -18,6 +18,7 @@ import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/paym
 import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import {
+  createPostgresCounterpartyProviderAccountsRepository,
   createSystemCounterpartiesRepository,
   createSystemPaymentsRepository,
 } from "@/db/repositories";
@@ -25,9 +26,10 @@ import type {
   CounterpartiesRepository,
   CounterpartyRow,
 } from "@/db/repositories/counterparty.repository";
+import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
-import { ensureBvnkPaymentRule } from "@/routes/payments/handlers/ramps/bvnk";
+import { ensureBvnkPaymentRule, readBvnkCustomerLink } from "@/routes/payments/handlers/ramps/bvnk";
 import { getLogger } from "@/runtime/logger";
 import { notifyRampSettled } from "@/services/notifications";
 import { emitRampSettled } from "@/services/workflows/payment-events";
@@ -52,13 +54,19 @@ export type BvnkWebhookEvent =
     }
   | {
       kind: "bvnk:customers:status-change";
-      customerReference?: string;
+      customerReference: string;
       customerStatus?: string;
     }
   | {
       kind: "bvnk:platform:customer:update";
-      customerReference?: string;
-      verificationUrl?: string;
+      customerReference: string;
+    }
+  | {
+      kind: "bvnk:customers:agreements:status-change";
+      customerReference: string;
+      agreementId: string;
+      agreementStatus: string;
+      respondedAt?: string;
     }
   | {
       kind: "bvnk:payment:payin:status-change";
@@ -92,6 +100,7 @@ const HANDLED_BVNK_EVENTS = {
   "bvnk:ledger:wallet:create": true,
   "bvnk:customers:status-change": true,
   "bvnk:platform:customer:update": true,
+  "bvnk:customers:agreements:status-change": true,
   "bvnk:payment:payin:status-change": true,
   "bvnk:payment:channel:transaction-detected": true,
   "bvnk:payment:channel:transaction-confirmed": true,
@@ -174,6 +183,7 @@ async function updateBvnkOnrampPaymentRuleState(
   onrampPaymentRuleKey: string,
   paymentRule: Partial<BvnkOnrampPaymentRuleState>
 ): Promise<void> {
+  // TODO(PRO-1823): Move BVNK on-ramp state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
@@ -196,9 +206,10 @@ async function handleProviderOnrampSettlementWebhook(
     return;
   }
   const repo = createSystemCounterpartiesRepository(c.env);
-  const counterparty = await repo.findActiveCounterpartyByBvnkCustomerReference(
-    event.customerReference
-  );
+  const counterparty = await repo.findActiveCounterpartyByProviderCustomerReference({
+    provider: "bvnk",
+    providerCustomerReference: event.customerReference,
+  });
   if (!counterparty) {
     throw internalError(
       `BVNK webhook customer ${event.customerReference} was not found or is not active`
@@ -279,7 +290,7 @@ async function handleProviderOnrampSettlementWebhook(
     };
     // Rules are project-scoped; a project-less transfer still notifies admins below.
     if (transfer.project_id) {
-      emitRampSettled(c, { ...settled, projectId: transfer.project_id });
+      emitRampSettled(c.env, { ...settled, projectId: transfer.project_id });
     }
     // Admin notification + counterparty settlement receipt (idempotent on transferId).
     notifyRampSettled(c, settled);
@@ -296,35 +307,23 @@ async function applyBvnkCustomerRequirementWebhook(
     { kind: "bvnk:customers:status-change" | "bvnk:platform:customer:update" }
   >
 ): Promise<void> {
-  const current = readBvnkCustomer(counterparty.provider_data);
-  const customer: Partial<
-    Pick<BvnkCustomerResolution, "status" | "verificationStatus" | "verificationUrl">
-  > = {};
+  const link = await readBvnkCustomerLink(c, counterparty);
+  if (!link?.customerReference) {
+    getLogger().info(`[bvnk webhook] "${event.kind}" for ${counterparty.id} has no customer link`);
+    return;
+  }
+  const customer: Partial<Pick<BvnkCustomerResolution, "customerReference" | "status">> = {
+    customerReference: link.customerReference,
+  };
   if (event.kind === "bvnk:customers:status-change" && event.customerStatus) {
     customer.status = event.customerStatus.toUpperCase();
   }
-  if (event.kind === "bvnk:platform:customer:update" && event.verificationUrl) {
-    customer.verificationUrl = event.verificationUrl;
-  }
-  const nextStatus = typeof customer.status === "string" ? customer.status : current.status;
-  const nextUrl =
-    typeof customer.verificationUrl === "string"
-      ? customer.verificationUrl
-      : current.verificationUrl;
-  if (!nextUrl && !isBvnkCustomerVerified(nextStatus)) {
-    if (!current.customerReference) {
-      return;
-    }
-    const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getBvnkCustomer(
+  if (!isBvnkCustomerVerified(customer.status)) {
+    const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(
       webhookRampContext(c, environment),
-      { reference: current.customerReference }
+      { id: link.customerReference }
     );
     customer.status = latest.status.toUpperCase();
-    customer.verificationStatus = latest.verificationStatus;
-    if (latest.verificationUrl) customer.verificationUrl = latest.verificationUrl;
-  }
-  if (Object.keys(customer).length === 0) {
-    return;
   }
   await repo.upsertBvnkCustomerProviderData({
     counterpartyId: counterparty.id,
@@ -332,6 +331,63 @@ async function applyBvnkCustomerRequirementWebhook(
     projectId: counterparty.project_id,
     customer,
   });
+}
+
+/**
+ * Applies a BVNK agreement status webhook to stored customer-link metadata.
+ *
+ * @param c - Request context used for repository access.
+ * @param event - Parsed BVNK agreement status event.
+ * @returns Nothing.
+ */
+async function applyBvnkAgreementStatusWebhook(
+  c: AppContext,
+  event: Extract<BvnkWebhookEvent, { kind: "bvnk:customers:agreements:status-change" }>
+): Promise<void> {
+  const repo = createSystemCounterpartiesRepository(c.env);
+  const counterparty = await repo.findActiveCounterpartyByProviderCustomerReference({
+    provider: "bvnk",
+    providerCustomerReference: event.customerReference,
+  });
+  if (!counterparty) return;
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const account = await accounts.getProviderAccount({
+    organizationId: counterparty.organization_id,
+    projectId: counterparty.project_id,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+  });
+  if (!account) return;
+  const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(account.metadata);
+  if (!metadata.agreements) return;
+  if (!(event.agreementId in metadata.agreements.entries)) {
+    getLogger().info(
+      `[bvnk webhook] "${event.kind}" for ${counterparty.id} names agreement ${event.agreementId} outside the persisted working set`
+    );
+    return;
+  }
+  const updated = await accounts.patchAccountMetadata({
+    organizationId: counterparty.organization_id,
+    projectId: counterparty.project_id,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+    id: account.id,
+    set: {
+      agreements: {
+        ...metadata.agreements,
+        entries: {
+          ...metadata.agreements.entries,
+          [event.agreementId]: {
+            ...metadata.agreements.entries[event.agreementId],
+            status: event.agreementStatus,
+            ...(event.respondedAt === undefined ? {} : { respondedAt: event.respondedAt }),
+          },
+        },
+      },
+    },
+    unset: [],
+  });
+  if (!updated) throw internalError("BVNK agreement status update escaped its tenant scope.");
 }
 
 async function provisionPendingBvnkOnramps(
@@ -347,7 +403,8 @@ async function provisionPendingBvnkOnramps(
       `BVNK webhook counterparty ${counterparty.id} was not found or is not active`
     );
   }
-  if (!isBvnkCustomerVerified(readBvnkCustomer(currentCounterparty.provider_data).status)) {
+  const customer = await readBvnkCustomerLink(c, currentCounterparty);
+  if (!customer || !isBvnkCustomerVerified(customer.status)) {
     return;
   }
   const pendingKeys = pendingBvnkOnrampPaymentRuleKeys(currentCounterparty.provider_data);
@@ -368,7 +425,7 @@ async function provisionPendingBvnkOnramps(
         ctx,
         reloadedCounterparty,
         reloadedCounterparty.project_id,
-        readBvnkCustomer(reloadedCounterparty.provider_data),
+        customer,
         entry.request,
         repo
       );
@@ -403,9 +460,22 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
         getLogger().info(`[bvnk webhook] "${event.kind}" has no customer reference`);
         return;
       }
-      const counterparty = await repo.findActiveCounterpartyByBvnkCustomerReference(
-        event.customerReference
-      );
+      // Customer events arrive in two id spaces: `customerId` on
+      // status-change is BVNK's native customer UUID, while
+      // platform:customer:update carries the `cp_…` externalReference SDP
+      // sent outbound. Resolve natively first, then via the reversible
+      // external reference; BVNK's API is only ever addressed with the
+      // row's stored native id.
+      let counterparty = await repo.findActiveCounterpartyByProviderCustomerReference({
+        provider: "bvnk",
+        providerCustomerReference: event.customerReference,
+      });
+      if (!counterparty) {
+        const counterpartyId = parseBvnkCustomerExternalReference(event.customerReference);
+        if (counterpartyId !== null) {
+          counterparty = await repo.findActiveCounterpartyById(counterpartyId);
+        }
+      }
       if (!counterparty) {
         throw internalError(
           `BVNK webhook customer ${event.customerReference} was not found or is not active`
@@ -465,6 +535,7 @@ async function handleProviderOfframpCounterpartyRequirementWebhook(
       `BVNK webhook counterparty ${wallet.counterpartyId} was not found or is not active`
     );
   }
+  // TODO(PRO-1824): Move BVNK merchant-wallet state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
@@ -544,7 +615,7 @@ async function handleProviderOfframpSettlementWebhook(
     };
     // Rules are project-scoped; a project-less transfer still notifies admins below.
     if (updated.project_id) {
-      emitRampSettled(c, { ...settled, projectId: updated.project_id });
+      emitRampSettled(c.env, { ...settled, projectId: updated.project_id });
     }
     // Admin notification + counterparty settlement receipt (idempotent on transferId).
     notifyRampSettled(c, settled);
@@ -609,18 +680,55 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
     }
 
     switch (event) {
-      case "bvnk:customers:status-change":
+      case "bvnk:customers:status-change": {
+        const customerReference = readString(data.customerId);
+        if (!customerReference) {
+          throw badRequest(`BVNK webhook "${event}" is missing customerId`, {
+            provider: this.provider,
+          });
+        }
         return {
           kind: event,
-          customerReference: readString(data.customerId),
+          customerReference,
           customerStatus: readString(data.status),
         };
-      case "bvnk:platform:customer:update":
+      }
+      case "bvnk:platform:customer:update": {
+        const customerReference = readString(data.reference);
+        if (!customerReference) {
+          throw badRequest(`BVNK webhook "${event}" is missing a customer reference`, {
+            provider: this.provider,
+          });
+        }
+        return { kind: event, customerReference };
+      }
+      case "bvnk:customers:agreements:status-change": {
+        const customerReference = readString(data.customerId);
+        if (!customerReference) {
+          throw badRequest(`BVNK webhook "${event}" is missing customerId`, {
+            provider: this.provider,
+          });
+        }
+        const agreementId = readString(data.agreementId);
+        if (!agreementId) {
+          throw badRequest(`BVNK webhook "${event}" is missing agreementId`, {
+            provider: this.provider,
+          });
+        }
+        const agreementStatus = readString(data.status);
+        if (!agreementStatus) {
+          throw badRequest(`BVNK webhook "${event}" is missing status`, {
+            provider: this.provider,
+          });
+        }
         return {
           kind: event,
-          customerReference: readString(data.reference),
-          verificationUrl: readString(readRecord(data.verification)?.url),
+          customerReference,
+          agreementId,
+          agreementStatus,
+          respondedAt: readString(data.respondedAt),
         };
+      }
       case "ledger:v2:wallet:status-change": {
         const wallet = parseBvnkWebhookFiatWallet(data);
         return {
@@ -691,6 +799,8 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
       case "bvnk:customers:status-change":
       case "bvnk:platform:customer:update":
         return handleProviderOnrampCounterpartyRequirementWebhook(c, environment, event);
+      case "bvnk:customers:agreements:status-change":
+        return applyBvnkAgreementStatusWebhook(c, event);
       case "ledger:v2:wallet:status-change":
       case "bvnk:ledger:wallet:create":
         if (event.walletName?.startsWith("sdp:offramp:")) {

@@ -48,7 +48,7 @@ import viDashboardPrivateChannels from "../../messages/vi/dashboard-private-chan
 import viShared from "../../messages/vi/shared.json";
 import vi from "../../messages/vi.json";
 
-const enMessages = {
+export const englishSourceMessages = {
   ...en,
   ...dashboardApprovals,
   ...dashboardCustody,
@@ -62,7 +62,7 @@ const enMessages = {
   Shared: shared,
 };
 
-export type Messages = typeof enMessages;
+export type Messages = typeof englishSourceMessages;
 
 type LocalizedMessages<TValue> = {
   [TKey in keyof TValue]?: TValue[TKey] extends string ? string : LocalizedMessages<TValue[TKey]>;
@@ -75,9 +75,25 @@ export function mergeLocalizedMessages<TValue>(
   return mergeLocalizedValue(fallback, localized) as TValue;
 }
 
-function mergeLocalizedValue(fallback: unknown, localized: unknown): unknown {
+export function mergeLocalizedMessagesWithEmbeddedYieldBrand<TValue>(
+  fallback: TValue,
+  localized: LocalizedMessages<TValue> | undefined
+): TValue {
+  // Temporary bridge: remove this variant after the translation release PR
+  // replaces legacy Earn brand references in every localized catalog.
+  return mergeLocalizedValue(fallback, localized, true) as TValue;
+}
+
+function mergeLocalizedValue(
+  fallback: unknown,
+  localized: unknown,
+  preserveEmbeddedYieldBrand = false
+): unknown {
   if (typeof fallback === "string") {
-    return typeof localized === "string" ? localized : fallback;
+    const resolved = typeof localized === "string" ? localized : fallback;
+    return preserveEmbeddedYieldBrand && fallback.includes("Embedded Yield")
+      ? resolved.replace(/\bEarn\b/g, "Embedded Yield")
+      : resolved;
   }
   if (!fallback || typeof fallback !== "object" || Array.isArray(fallback)) {
     return fallback;
@@ -90,7 +106,7 @@ function mergeLocalizedValue(fallback: unknown, localized: unknown): unknown {
   return Object.fromEntries(
     Object.entries(fallback).map(([key, fallbackValue]) => [
       key,
-      mergeLocalizedValue(fallbackValue, localizedRecord[key]),
+      mergeLocalizedValue(fallbackValue, localizedRecord[key], preserveEmbeddedYieldBrand),
     ])
   );
 }
@@ -106,7 +122,7 @@ const esCatalog = {
   Shared: esShared,
 } satisfies LocalizedMessages<Messages>;
 
-const esMessages = mergeLocalizedMessages(enMessages, esCatalog);
+const esMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, esCatalog);
 
 const frCatalog = {
   ...fr,
@@ -118,7 +134,7 @@ const frCatalog = {
   Shared: frShared,
 } satisfies LocalizedMessages<Messages>;
 
-const frMessages = mergeLocalizedMessages(enMessages, frCatalog);
+const frMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, frCatalog);
 
 const ptCatalog = {
   ...pt,
@@ -131,7 +147,7 @@ const ptCatalog = {
   Shared: ptShared,
 } satisfies LocalizedMessages<Messages>;
 
-const ptMessages = mergeLocalizedMessages(enMessages, ptCatalog);
+const ptMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, ptCatalog);
 
 const viCatalog = {
   ...vi,
@@ -145,7 +161,7 @@ const viCatalog = {
   Shared: viShared,
 } satisfies LocalizedMessages<Messages>;
 
-const viMessages = mergeLocalizedMessages(enMessages, viCatalog);
+const viMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, viCatalog);
 
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""
@@ -159,7 +175,7 @@ export type MessageKey = MessageKeyFor<Messages>;
 export type TranslationValues = Record<string, string | number>;
 
 const messagesByLocale: Record<AppLocale, Messages> = {
-  en: enMessages,
+  en: englishSourceMessages,
   es: esMessages,
   fr: frMessages,
   pt: ptMessages,

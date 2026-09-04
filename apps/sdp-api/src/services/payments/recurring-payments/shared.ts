@@ -17,9 +17,14 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { createTokenRepository } from "@/db/repositories";
+import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { AppError, badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
+import {
+  type SignedSubmissionStore,
+  submitSignedPaymentTransaction,
+} from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -78,6 +83,27 @@ export function generateProgramPlanId(): string {
   return value.toString();
 }
 
+export function assertRecurringPaymentSourceWallet(
+  recurringPayment: Pick<
+    PaymentRecurringPaymentRow,
+    "source_custody_wallet_id" | "source_wallet_id" | "source_address"
+  >,
+  sourceWallet: Pick<CustodyWallet, "id" | "walletId" | "publicKey">
+): void {
+  if (!recurringPayment.source_custody_wallet_id) {
+    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+  }
+  if (recurringPayment.source_custody_wallet_id !== sourceWallet.id) {
+    throw badRequest("Recurring payment exact source wallet does not match request");
+  }
+  if (recurringPayment.source_wallet_id !== sourceWallet.walletId) {
+    throw badRequest("Recurring payment source wallet does not match request");
+  }
+  if (recurringPayment.source_address !== sourceWallet.publicKey) {
+    throw badRequest("Recurring payment source address does not match wallet");
+  }
+}
+
 export async function sendSubscriptionInstructions(input: {
   env: Env;
   organizationId: string;
@@ -86,14 +112,15 @@ export async function sendSubscriptionInstructions(input: {
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
+  submissionStore?: SignedSubmissionStore;
 }): Promise<Signature> {
   const signer =
     input.sourceSigner ??
-    (await solanaServices.createOrgSigner(
+    (await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.walletId
+      input.sourceWallet.id
     ));
 
   if (signer.address !== input.sourceWallet.publicKey) {
@@ -117,7 +144,15 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return feePayment.signAndSend(txBytes);
+  return input.submissionStore
+    ? submitSignedPaymentTransaction({
+        feePayment,
+        rpc,
+        transaction: txBytes,
+        lastValidBlockHeight,
+        store: input.submissionStore,
+      })
+    : feePayment.signAndSend(txBytes);
 }
 
 export async function confirmSubscriptionSignature(

@@ -1,14 +1,7 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
-import {
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  LibraryIcon,
-  LockIcon,
-  PanelLeftIcon,
-  Settings2Icon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -24,6 +17,7 @@ import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
 } from "@/app/dashboard/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
 import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
@@ -35,7 +29,9 @@ import {
 } from "@/app/dashboard/issuance/webhooks/webhook-page-skeletons";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
-  EarnProgramSkeleton,
+  EarnIntegrationGuideSkeleton,
+  EmbeddedYieldPortfolioSkeleton,
+  MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/markets/markets-route-skeletons";
 import {
@@ -78,21 +74,23 @@ import {
   type DashboardSubnavKey,
   dashboardSubnavId,
   dashboardSubnavStorageKey,
-  docsHref,
   getNavSections,
   type NavItem,
   type NavSection,
+  withSubnavOpen,
+  withSubnavToggled,
 } from "@/components/dashboard-nav";
+import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
-import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
+import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SelectOrganizationPanel } from "@/components/select-organization-panel";
-import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
+import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
 import {
-  DASHBOARD_SIDE_NAV_HREFS,
   type DashboardLoadingRoute,
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
@@ -137,6 +135,8 @@ function resolvePageLoadingComponent(
       return IntegrationsSkeleton;
     case "integration-detail":
       return IntegrationDetailSkeleton;
+    case "private-channels-setup":
+      return PrivateChannelsSetupSkeleton;
     case "token-holdings":
       return TokenHoldingsLoading;
     case "wallets-overview":
@@ -161,10 +161,16 @@ function resolvePageLoadingComponent(
       return IssuanceDetailSkeleton;
     case "payments-overview":
       return PaymentsPageSkeleton;
+    case "markets-landing":
+      return MarketsLandingSkeleton;
     case "treasury-solutions":
       return TreasurySolutionsSkeleton;
-    case "earn-program":
-      return EarnProgramSkeleton;
+    case "embedded-yield-portfolio":
+      return EmbeddedYieldPortfolioSkeleton;
+    case "embedded-yield-configure":
+      return EarnIntegrationGuideSkeleton;
+    case "embedded-yield-integrate":
+      return EarnIntegrationGuideSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
     case "payments-pay":
@@ -222,6 +228,7 @@ function SidebarGroup({
   showTopSeparator,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
   variant,
 }: {
   title: string;
@@ -232,6 +239,12 @@ function SidebarGroup({
   showTopSeparator: boolean;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  /**
+   * Open a section without closing it again. Following a top-level item is a
+   * request to go there, so it reveals the section's pages; toggling would
+   * collapse the submenu of the page being navigated to (HOO-1218).
+   */
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
@@ -266,7 +279,15 @@ function SidebarGroup({
               <div className="relative flex items-center">
                 <Link
                   href={item.href}
-                  onClick={onNavigate}
+                  onClick={() => {
+                    // The chevron still toggles. This only ever opens, so a
+                    // second click on the section you are already in does not
+                    // hide its pages.
+                    if (subnavKey) {
+                      onSubnavOpen(subnavKey);
+                    }
+                    onNavigate?.();
+                  }}
                   title={isCollapsed ? item.label : undefined}
                   aria-label={
                     isCollapsed && item.badge
@@ -376,7 +397,7 @@ function SidebarGroup({
 }
 
 function DashboardSidebarContent({
-  bottomNavItems,
+  canManageOrgSettings,
   navSections,
   pathname,
   onNavigate,
@@ -386,8 +407,9 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
+  onSubnavOpen,
 }: {
-  bottomNavItems: NavItem[];
+  canManageOrgSettings: boolean;
   navSections: NavSection[];
   pathname: string;
   onNavigate?: () => void;
@@ -397,6 +419,7 @@ function DashboardSidebarContent({
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
+  onSubnavOpen: (key: DashboardSubnavKey) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -437,57 +460,82 @@ function DashboardSidebarContent({
             showTopSeparator={idx > 0}
             openSubnavs={openSubnavs}
             onSubnavToggle={onSubnavToggle}
+            onSubnavOpen={onSubnavOpen}
             variant={variant}
           />
         ))}
       </div>
-      <div className="shrink-0 space-y-0.5 px-3 pb-1">
-        <SentryFeedbackWidget collapsed={isCollapsed} />
-        {bottomNavItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href}
-              target={item.external ? "_blank" : undefined}
-              rel={item.external ? "noopener noreferrer" : undefined}
-              onClick={onNavigate}
-              title={isCollapsed ? item.label : undefined}
-              aria-label={isCollapsed ? item.label : undefined}
-              className={cn(
-                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
-                isCollapsed && "justify-center"
-              )}
-            >
-              <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-              {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
-            </Link>
-          );
-        })}
-        {variant === "desktop" ? <NetworkDebugToggle collapsed={isCollapsed} /> : null}
+      <div className="shrink-0 px-3 pb-3">
+        <SidebarUserMenu
+          collapsed={isCollapsed}
+          canManageOrgSettings={canManageOrgSettings}
+          // The mobile slide-over is a 288px column, so the popover only has
+          // room above the trigger there.
+          menuSide={variant === "desktop" ? "right" : "top"}
+        />
       </div>
     </>
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
+function clipsDashboardHorizontalOverflow(pathname: string): boolean {
+  return (
+    pathname === "/dashboard/payments" ||
+    pathname === "/dashboard/payments/transactions" ||
+    (pathname.startsWith("/dashboard/payments/") &&
+      !pathname.startsWith("/dashboard/payments/counterparty"))
+  );
+}
+
+function usesWorkspaceViewport(pathname: string): boolean {
+  const isWalletDetailRoute =
+    (pathname.startsWith("/dashboard/wallets/") &&
+      pathname !== "/dashboard/wallets/setup" &&
+      pathname !== "/dashboard/wallets/switch") ||
+    (pathname.startsWith("/dashboard/custody/") &&
+      pathname !== "/dashboard/custody/setup" &&
+      pathname !== "/dashboard/custody/switch");
+  const isWalletSetupRoute =
+    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
+
+  return (
+    pathname === "/dashboard/issuance" ||
+    pathname === "/dashboard/issuance/create" ||
+    pathname === "/dashboard/policies" ||
+    pathname === "/dashboard/api-keys" ||
+    pathname === "/dashboard/api-keys/new" ||
+    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
+    pathname.startsWith("/dashboard/payments") ||
+    pathname.startsWith("/dashboard/markets") ||
+    pathname === "/dashboard/wallets" ||
+    pathname === "/dashboard/custody" ||
+    isWalletSetupRoute ||
+    pathname === "/dashboard/onboarding" ||
+    pathname.startsWith("/dashboard/integrations/private-channels") ||
+    pathname.startsWith("/dashboard/issuance/webhooks") ||
+    pathname.startsWith("/dashboard/approvals") ||
+    isWalletDetailRoute
+  );
+}
+
+/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing shell orchestration */ /* react-doctor-disable-next-line no-high-complexity-react-function -- this change only supplies Private Channels route configuration */
 export function DashboardShell({
-  assetProfilesEnabled,
   children,
-  earnEnabled,
-  heliusRingsEnabled,
-  marketsEnabled,
+  flags,
   onboardingStatus,
-  privateChannelsEnabled,
 }: {
-  assetProfilesEnabled: boolean;
   children: ReactNode;
-  earnEnabled: boolean;
-  heliusRingsEnabled: boolean;
-  marketsEnabled: boolean;
+  flags: DashboardFlags;
   onboardingStatus: OrganizationOnboardingStatus | null;
-  privateChannelsEnabled: boolean;
 }) {
+  const {
+    assetProfiles: assetProfilesEnabled,
+    earn: earnEnabled,
+    heliusRings: heliusRingsEnabled,
+    markets: marketsEnabled,
+    payments: paymentsEnabled,
+    privateChannels: privateChannelsEnabled,
+  } = flags;
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
@@ -526,26 +574,10 @@ export function DashboardShell({
     earnEnabled,
     heliusRingsEnabled,
     marketsEnabled,
+    paymentsEnabled,
     pendingApprovalCount,
     privateChannelsEnabled,
   });
-  const bottomNavItems: NavItem[] = [
-    {
-      label: t("Shared.dashboardShell.apiDocs"),
-      href: docsHref,
-      icon: LibraryIcon,
-      external: true,
-    },
-    ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [
-          {
-            label: t("Shared.dashboardShell.settings"),
-            href: DASHBOARD_SIDE_NAV_HREFS.settings,
-            icon: Settings2Icon,
-          },
-        ]
-      : []),
-  ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction
@@ -555,43 +587,16 @@ export function DashboardShell({
     />
   ) : null;
   const headerTabs = pageConfig.headerTabs;
-  const hasHeaderTabs = Boolean(headerTabs);
+  const routeTabs = pageConfig.routeTabs;
+  const hasHeaderTabs = Boolean(headerTabs || routeTabs);
+  const isMarketsHeader = pageConfig.headerVariant === "markets";
   const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder =
     (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs;
-  const shouldClipHorizontalOverflow =
-    pathname === "/dashboard/payments" ||
-    pathname === "/dashboard/payments/transactions" ||
-    (pathname.startsWith("/dashboard/payments/") &&
-      !pathname.startsWith("/dashboard/payments/counterparty"));
-  const isWalletDetailRoute =
-    (pathname.startsWith("/dashboard/wallets/") &&
-      pathname !== "/dashboard/wallets/setup" &&
-      pathname !== "/dashboard/wallets/switch") ||
-    (pathname.startsWith("/dashboard/custody/") &&
-      pathname !== "/dashboard/custody/setup" &&
-      pathname !== "/dashboard/custody/switch");
-  const isWalletSetupRoute =
-    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
+  const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
   const isOrganizationOnboardingRoute = pathname === "/dashboard/onboarding";
-  const shouldUseWorkspaceViewport =
-    pathname === "/dashboard/issuance" ||
-    pathname === "/dashboard/issuance/create" ||
-    pathname === "/dashboard/policies" ||
-    pathname === "/dashboard/api-keys" ||
-    pathname === "/dashboard/api-keys/new" ||
-    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
-    pathname.startsWith("/dashboard/payments") ||
-    pathname.startsWith("/dashboard/markets") ||
-    pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody" ||
-    isWalletSetupRoute ||
-    isOrganizationOnboardingRoute ||
-    pathname.startsWith("/dashboard/approvals") ||
-    pathname.startsWith("/dashboard/issuance/webhooks") ||
-    isWalletDetailRoute;
-  const shouldLockViewportScroll = shouldUseWorkspaceViewport;
+  const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
   const shouldRedirectToOnboarding = shouldRedirectToOrganizationOnboarding(
     onboardingStatus,
@@ -618,14 +623,33 @@ export function DashboardShell({
     subnavHydratedRef.current = true;
   }, []);
 
+  const persistSubnav = (key: DashboardSubnavKey, open: boolean) => {
+    if (subnavHydratedRef.current) {
+      window.localStorage.setItem(dashboardSubnavStorageKey(key), String(open));
+    }
+  };
+
+  // Both handlers compute the next state from the rendered value and write to
+  // storage outside the setter. React may replay a state updater, so a
+  // localStorage write placed inside one runs more than once.
   const toggleSubnav = (key: DashboardSubnavKey) => {
-    setOpenSubnavs((current) => {
-      const next = { ...current, [key]: !current[key] };
-      if (subnavHydratedRef.current) {
-        window.localStorage.setItem(dashboardSubnavStorageKey(key), String(next[key]));
-      }
-      return next;
-    });
+    const next = withSubnavToggled(openSubnavs, key);
+    setOpenSubnavs(next);
+    persistSubnav(key, next[key]);
+  };
+
+  /**
+   * Following a top-level item opens its section (HOO-1218). Persisted like a
+   * toggle, because a section opened by navigating is still the reader's last
+   * expressed preference and should survive a reload.
+   */
+  const openSubnav = (key: DashboardSubnavKey) => {
+    const next = withSubnavOpen(openSubnavs, key);
+    if (next === openSubnavs) {
+      return;
+    }
+    setOpenSubnavs(next);
+    persistSubnav(key, true);
   };
 
   useEffect(() => {
@@ -754,7 +778,7 @@ export function DashboardShell({
           className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
         >
           <DashboardSidebarContent
-            bottomNavItems={bottomNavItems}
+            canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
             navSections={navSections}
             pathname={pathname}
             onNavigate={undefined}
@@ -764,6 +788,7 @@ export function DashboardShell({
             onOrganizationSwitchingChange={setOrganizationSwitching}
             openSubnavs={openSubnavs}
             onSubnavToggle={toggleSubnav}
+            onSubnavOpen={openSubnav}
           />
           <button
             type="button"
@@ -787,7 +812,11 @@ export function DashboardShell({
         {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
             duplicate of every destination would otherwise sit behind the overlay. */}
         {isMobileSidebarOpen || isMoreSheetOpen ? null : (
-          <DashboardBottomNav pathname={pathname} onOpenMore={() => setMoreSheetOpen(true)} />
+          <DashboardBottomNav
+            pathname={pathname}
+            paymentsEnabled={paymentsEnabled}
+            onOpenMore={() => setMoreSheetOpen(true)}
+          />
         )}
 
         {isMoreSheetOpen ? (
@@ -812,7 +841,7 @@ export function DashboardShell({
             />
             <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
-                bottomNavItems={bottomNavItems}
+                canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                 navSections={navSections}
                 pathname={pathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
@@ -822,6 +851,7 @@ export function DashboardShell({
                 onOrganizationSwitchingChange={setOrganizationSwitching}
                 openSubnavs={openSubnavs}
                 onSubnavToggle={toggleSubnav}
+                onSubnavOpen={openSubnav}
               />
             </div>
           </div>
@@ -839,12 +869,14 @@ export function DashboardShell({
               shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
             ].join(" ")}
           >
-            <div className="shrink-0 space-y-4">
+            <div className={cn("shrink-0", !isMarketsHeader && "space-y-4")}>
               <div
                 className={cn(
                   shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
                   shouldLockViewportScroll
-                    ? "px-3 pt-5 md:px-6 md:pt-6"
+                    ? isMarketsHeader
+                      ? "px-4 pt-8 md:px-8 md:pt-10 xl:px-16 xl:pt-11"
+                      : "px-3 pt-5 md:px-6 md:pt-6"
                     : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6"
                 )}
               >
@@ -856,6 +888,7 @@ export function DashboardShell({
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
+                  alignTitleWithTabs={hasHeaderTabs && !isMarketsHeader}
                 />
               </div>
 
@@ -869,6 +902,12 @@ export function DashboardShell({
                   <div className="flex items-end px-3 md:px-6">
                     <DashboardHeaderTabs {...headerTabs} />
                   </div>
+                </div>
+              ) : null}
+
+              {routeTabs ? (
+                <div className="mt-6 border-b border-border-default px-4 md:px-8 xl:px-16">
+                  <DashboardRouteTabs {...routeTabs} pathname={pathname} />
                 </div>
               ) : null}
             </div>

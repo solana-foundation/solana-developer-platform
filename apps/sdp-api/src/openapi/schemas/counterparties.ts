@@ -1,14 +1,10 @@
-import { COUNTERPARTY_ENTITY_TYPES, RAMP_PROVIDERS } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES, RAMP_PROVIDERS } from "@sdp/types";
 import {
-  counterpartyAddressSchema as counterpartyAddressSchemaBase,
-  counterpartyBusinessIdentitySchema as counterpartyBusinessIdentitySchemaBase,
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
-  counterpartyIdentitySchema as counterpartyIdentitySchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
   counterpartyRequirementsQuerySchema as counterpartyRequirementsQuerySchemaBase,
   counterpartyStatusSchema as counterpartyStatusSchemaBase,
-  createBusinessCounterpartySchema as createBusinessCounterpartySchemaBase,
-  createIndividualCounterpartySchema as createIndividualCounterpartySchemaBase,
+  createCounterpartySchema as createCounterpartySchemaBase,
   listCounterpartiesQuerySchema as listCounterpartiesQuerySchemaBase,
   updateCounterpartyObjectSchema as updateCounterpartyObjectSchemaBase,
 } from "../../routes/counterparties/schemas";
@@ -19,9 +15,9 @@ import {
   listCounterpartyAccountsQuerySchema as listCounterpartyAccountsQuerySchemaBase,
   updateCounterpartyAccountObjectSchema as updateCounterpartyAccountSchemaBase,
 } from "../../routes/counterparty-accounts/schemas";
+import { listCounterpartyProviderAccountsQuerySchema as listCounterpartyProviderAccountsQuerySchemaBase } from "../../routes/counterparty-provider-accounts/schemas";
 import { rampDirectionSchema as rampDirectionSchemaBase } from "../../routes/payments/schemas";
 import {
-  isoDateSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
@@ -34,7 +30,7 @@ export const counterpartyIdParamSchema = withOpenApi(
   counterpartyIdParamsSchemaBase.shape.counterpartyId,
   {
     description: "Counterparty identifier.",
-    example: "cp_example",
+    example: "cpty_example",
   }
 );
 
@@ -48,15 +44,18 @@ export const counterpartyStatusSchema = withOpenApi(counterpartyStatusSchemaBase
   example: "active",
 });
 
-const [onrampRequirementsQuerySchema, offrampRequirementsQuerySchema] =
+const [onrampRequirementsQuerySchema, offrampRequirementsProviderQuerySchema] =
   counterpartyRequirementsQuerySchemaBase.options;
+const [lightsparkOfframpRequirementsQuerySchema, otherOfframpRequirementsQuerySchema] =
+  offrampRequirementsProviderQuerySchema.options;
 
 export const counterpartyRequirementsQuerySchema = z
   .object({
     provider: withOpenApi(
       z.union([
         onrampRequirementsQuerySchema.shape.provider,
-        offrampRequirementsQuerySchema.shape.provider,
+        lightsparkOfframpRequirementsQuerySchema.shape.provider,
+        otherOfframpRequirementsQuerySchema.shape.provider,
       ]),
       { description: "Ramp provider to evaluate.", example: "moonpay" }
     ),
@@ -79,32 +78,96 @@ export const counterpartyRequirementsQuerySchema = z
         example: "privy_wallet_123",
       }
     ),
+    destinationCountry: withOpenApi(z.string().optional(), {
+      description:
+        "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
+      example: "US",
+    }),
   })
   .openapi({
     description:
       "Ramp provider, direction, asset pair, and (for onramps) destination wallet used to evaluate counterparty requirements.",
   });
 
+const requirementTextFieldSchema = z.object({
+  kind: z.literal("text"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  pattern: z.string().optional(),
+  minLength: z.number().int().nonnegative().optional(),
+  maxLength: z.number().int().nonnegative().optional(),
+  placeholder: z.string().optional(),
+  mask: z.string().optional(),
+});
+
+const requirementSelectFieldSchema = z.object({
+  kind: z.literal("select"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  options: z.array(z.object({ value: z.string(), label: z.string() })),
+});
+
+const requirementCountryFieldSchema = z.object({
+  kind: z.literal("country"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+});
+
+const requirementDateFieldSchema = z.object({
+  kind: z.literal("date"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  before: z.string().optional(),
+});
+
 const requirementFieldSchema = z.discriminatedUnion("kind", [
+  requirementTextFieldSchema,
+  requirementSelectFieldSchema,
+  requirementCountryFieldSchema,
+  requirementDateFieldSchema,
   z.object({
-    kind: z.literal("text"),
+    kind: z.literal("address"),
     key: z.string(),
     label: z.string(),
     required: z.boolean(),
-    pattern: z.string().optional(),
-    minLength: z.number().int().nonnegative().optional(),
-    maxLength: z.number().int().nonnegative().optional(),
-    placeholder: z.string().optional(),
-    mask: z.string().optional(),
-  }),
-  z.object({
-    kind: z.literal("select"),
-    key: z.string(),
-    label: z.string(),
-    required: z.boolean(),
-    options: z.array(z.object({ value: z.string(), label: z.string() })),
+    fields: z.array(
+      z.discriminatedUnion("kind", [
+        requirementTextFieldSchema,
+        requirementSelectFieldSchema,
+        requirementCountryFieldSchema,
+        requirementDateFieldSchema,
+      ])
+    ),
   }),
 ]);
+
+const countryCodeDocSchema = withOpenApi(z.string(), {
+  description:
+    "ISO 3166-1 alpha-2 country code. Documented as a string; the API validates against the supported country set.",
+  example: "US",
+});
+
+const payoutRequirementTreeSchema = z.object({
+  countryRails: z.record(
+    countryCodeDocSchema,
+    z.array(z.object({ value: z.string(), label: z.string() }))
+  ),
+  railFields: z.record(z.string(), z.array(requirementFieldSchema)),
+  accounts: z.array(
+    z.object({
+      id: z.string(),
+      destinationCountry: countryCodeDocSchema,
+      paymentRail: z.string().nullable(),
+      status: z.string(),
+      bankName: z.string().optional(),
+      accountNumberLast4: z.string().optional(),
+    })
+  ),
+});
 
 const requirementBase = {
   direction: withOpenApi(rampDirectionSchemaBase, {
@@ -122,8 +185,20 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
   z.union([
     z.object({
       ...requirementBase,
-      provider: z.enum(RAMP_PROVIDERS),
+      provider: z.enum(RAMP_PROVIDERS).exclude(["lightspark"]),
       status: z.literal("ready"),
+    }),
+    z.object({
+      direction: z.literal("onramp"),
+      provider: z.literal("lightspark"),
+      status: z.literal("ready"),
+    }),
+    z.object({
+      direction: z.literal("offramp"),
+      provider: z.literal("lightspark"),
+      status: z.literal("ready"),
+      providerAccountId: z.string(),
+      payout: payoutRequirementTreeSchema.optional(),
     }),
     z.object({
       ...requirementBase,
@@ -133,13 +208,31 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
+      provider: z.literal("lightspark"),
+      status: z.literal("collect_counterparty"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("collect_counterparty"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("lightspark"),
+      status: z.literal("collect_account"),
+      payout: payoutRequirementTreeSchema,
+    }),
+    z.object({
+      ...requirementBase,
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("unsupported"),
       reason: z.string(),
     }),
     z.object({
       ...requirementBase,
-      provider: z.enum(["lightspark", "bvnk", "mural"]),
+      provider: z.enum(["lightspark", "mural"]),
       status: z.literal("onboarding_not_started"),
     }),
     z.object({
@@ -150,6 +243,23 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("customer_agreement_required"),
+      agreements: z.array(
+        z.object({
+          id: z.string(),
+          filename: z.string(),
+          downloadUrl: z.url(),
+        })
+      ),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("customer_pending_agreement_acceptance"),
+    }),
+    z.object({
+      ...requirementBase,
       provider: z.enum(["bvnk", "mural"]),
       status: z.literal("customer_verification_required"),
       verificationUrl: z.url(),
@@ -157,16 +267,22 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     z.object({
       ...requirementBase,
       provider: z.enum(["bvnk", "mural"]),
-      status: z.enum([
-        "customer_verifying",
-        "customer_verification_failed",
-        "funding_account_provisioning",
-      ]),
+      status: z.enum(["customer_verifying", "customer_verification_failed"]),
     }),
     z.object({
       ...requirementBase,
       provider: z.literal("bvnk"),
-      status: z.literal("provisioning_failed"),
+      status: z.literal("customer_funding_account_provisioning"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("mural"),
+      status: z.literal("funding_account_provisioning"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("customer_funding_account_provisioning_failed"),
     }),
   ]),
   {
@@ -183,79 +299,6 @@ export const counterpartyAccountKindSchema = withOpenApi(counterpartyAccountKind
 export const counterpartyAccountStatusSchema = z
   .enum(["active", "archived"])
   .openapi({ description: "Counterparty account status.", example: "active" });
-
-export const counterpartyAddressSchema = withOpenApi(
-  counterpartyAddressSchemaBase.extend({
-    line1: withOpenApi(counterpartyAddressSchemaBase.shape.line1, {
-      description: "Street address line 1.",
-      example: "123 Main St",
-    }),
-    line2: withOpenApi(counterpartyAddressSchemaBase.shape.line2, {
-      description: "Street address line 2.",
-      example: "Apt 4B",
-    }),
-    city: withOpenApi(counterpartyAddressSchemaBase.shape.city, {
-      description: "City.",
-      example: "San Francisco",
-    }),
-    postalCode: withOpenApi(counterpartyAddressSchemaBase.shape.postalCode, {
-      description: "Postal or ZIP code.",
-      example: "94105",
-    }),
-    countryCode: withOpenApi(counterpartyAddressSchemaBase.shape.countryCode, {
-      description: "ISO 3166-1 country code.",
-      example: "US",
-    }),
-    subdivisionCode: withOpenApi(counterpartyAddressSchemaBase.shape.subdivisionCode, {
-      description:
-        "Subdivision code (state, province, region) — bare 2-letter code (e.g. `CA`); ISO 3166-2 (`US-CA`) is also accepted, but some providers require the bare form.",
-      example: "CA",
-    }),
-  }),
-  { description: "Postal address for a counterparty." }
-);
-
-export const counterpartyIdentitySchema = withOpenApi(
-  counterpartyIdentitySchemaBase.extend({
-    firstName: withOpenApi(counterpartyIdentitySchemaBase.shape.firstName, {
-      description: "Given name.",
-      example: "Jane",
-    }),
-    middleName: withOpenApi(counterpartyIdentitySchemaBase.shape.middleName, {
-      description: "Middle name.",
-      example: "Q",
-    }),
-    lastName: withOpenApi(counterpartyIdentitySchemaBase.shape.lastName, {
-      description: "Family name.",
-      example: "Doe",
-    }),
-    secondLastName: withOpenApi(counterpartyIdentitySchemaBase.shape.secondLastName, {
-      description: "Second family name (used in some locales).",
-      example: "Garcia",
-    }),
-    dateOfBirth: withOpenApi(isoDateSchema, {
-      description: "Date of birth (YYYY-MM-DD).",
-      example: "1990-01-15",
-    }),
-    phone: withOpenApi(counterpartyIdentitySchemaBase.shape.phone, {
-      description: "Contact phone number in E.164 format.",
-      example: "+14155551234",
-    }),
-    address: counterpartyAddressSchema,
-  }),
-  {
-    description: "Personal identity details for an individual counterparty.",
-  }
-);
-
-export const counterpartyBusinessIdentitySchema = withOpenApi(
-  counterpartyBusinessIdentitySchemaBase.extend({
-    address: counterpartyAddressSchema,
-  }),
-  {
-    description: "Business identity details: the registered address.",
-  }
-);
 
 export const counterpartySchema = withOpenApi(
   z.object({
@@ -275,14 +318,6 @@ export const counterpartySchema = withOpenApi(
         "Human-readable, searchable display name. Keep it minimal because this indexed field is not application-encrypted.",
       example: "Jane Doe",
     }),
-    email: withOpenApi(z.string(), {
-      description: "Primary contact email.",
-      example: "jane@example.com",
-    }),
-    identity: withOpenApi(
-      z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]),
-      { description: "Identity details; shape depends on entityType." }
-    ),
     status: counterpartyStatusSchema,
     createdBy: withOpenApi(userIdSchema.nullable(), {
       description: "User who created the counterparty. Null when created via API key.",
@@ -310,7 +345,7 @@ export const counterpartyAccountPathParamsSchema = counterpartyAccountParamsSche
   .extend({
     counterpartyId: withOpenApi(counterpartyAccountParamsSchemaBase.shape.counterpartyId, {
       description: "Counterparty identifier.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: withOpenApi(
       counterpartyAccountParamsSchemaBase.shape.counterpartyAccountId,
@@ -430,7 +465,6 @@ export const counterpartyFieldOptionsResponseSchema = withOpenApi(
     fields: z.object({
       entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)),
       countries: z.array(countrySchema),
-      usStates: z.array(countrySchema),
     }),
   }),
   {
@@ -475,46 +509,140 @@ export const listCounterpartyAccountsQuerySchema = listCounterpartyAccountsQuery
   })
   .openapi({ description: "Counterparty account list filters." });
 
+export const counterpartyProviderAccountSchema = withOpenApi(
+  z.object({
+    id: withOpenApi(z.string(), {
+      description: "Counterparty provider-account row identifier.",
+      example: "counterparty_provider_account_example",
+    }),
+    provider: withOpenApi(z.enum(RAMP_PROVIDERS), {
+      description: "Ramp provider owning the account.",
+      example: "lightspark",
+    }),
+    kind: withOpenApi(
+      z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
+      {
+        description: "Provider-account resource kind.",
+        example: "payout_account",
+      }
+    ),
+    fiatCurrency: withOpenApi(z.string().nullable(), {
+      description: "Fiat currency for the provider account corridor. Null on customer-link rows.",
+      example: "USD",
+    }),
+    destinationCountry: withOpenApi(z.enum(COUNTRY_CODES).nullable(), {
+      description:
+        "Destination country for the provider account corridor. Null on customer-link rows.",
+      example: "US",
+    }),
+    paymentRail: withOpenApi(z.string().nullable(), {
+      description: "Payment rail selected for the corridor row.",
+      example: "ACH",
+    }),
+    status: counterpartyAccountStatusSchema,
+    providerStatus: withOpenApi(z.string().nullable(), {
+      description: "Current provider-side account status when known.",
+      example: "ACTIVE",
+    }),
+    createdAt: withOpenApi(isoDateTimeSchema, {
+      description: "SDP row creation timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    bankName: withOpenApi(z.string().optional(), {
+      description: "Bank name returned by the provider when available.",
+      example: "Example Bank",
+    }),
+    accountNumberLast4: withOpenApi(z.string().optional(), {
+      description: "Last four digits of the provider account number.",
+      example: "6789",
+    }),
+    paymentRails: withOpenApi(z.array(z.string()).optional(), {
+      description: "Payment rails returned by the provider when available.",
+      example: ["ACH", "WIRE"],
+    }),
+    customerLink: withOpenApi(
+      z
+        .object({
+          id: withOpenApi(z.string(), {
+            description: "Customer-link row identifier.",
+            example: "counterparty_provider_account_customer",
+          }),
+          providerCustomerReference: withOpenApi(z.string(), {
+            description: "Provider-side customer identifier for the counterparty.",
+            example: "Customer:0193b2c4",
+          }),
+          status: counterpartyAccountStatusSchema,
+          providerStatus: withOpenApi(z.string().nullable(), {
+            description: "Provider-side customer status when known.",
+            example: "ACTIVE",
+          }),
+          createdAt: withOpenApi(isoDateTimeSchema, {
+            description: "Customer-link row creation timestamp.",
+            example: "2025-01-01T00:00:00.000Z",
+          }),
+        })
+        .optional(),
+      {
+        description:
+          "The counterparty's provider customer link, present when the provider customer exists.",
+      }
+    ),
+  }),
+  { description: "Counterparty provider-account row with optional JIT provider details." }
+);
+
+export const listCounterpartyProviderAccountsResponseSchema = withOpenApi(
+  z.object({
+    accounts: withOpenApi(z.array(counterpartyProviderAccountSchema), {
+      description: "External provider accounts for the counterparty.",
+    }),
+  }),
+  { description: "Counterparty provider-account list." }
+);
+
+export const listCounterpartyProviderAccountsQuerySchema =
+  listCounterpartyProviderAccountsQuerySchemaBase
+    .extend({
+      provider: withOpenApi(listCounterpartyProviderAccountsQuerySchemaBase.shape.provider, {
+        description: "Filter by ramp provider.",
+        example: "lightspark",
+      }),
+      fiatCurrency: withOpenApi(
+        listCounterpartyProviderAccountsQuerySchemaBase.shape.fiatCurrency,
+        {
+          description: "Filter by fiat currency.",
+          example: "USD",
+        }
+      ),
+      destinationCountry: withOpenApi(
+        listCounterpartyProviderAccountsQuerySchemaBase.shape.destinationCountry,
+        {
+          description: "Filter by ISO 3166-1 alpha-2 destination country.",
+          example: "US",
+        }
+      ),
+    })
+    .openapi({ description: "Counterparty provider-account list filters." });
+
 const createCounterpartyDocFields = {
-  externalId: withOpenApi(createIndividualCounterpartySchemaBase.shape.externalId, {
+  externalId: withOpenApi(createCounterpartySchemaBase.shape.externalId, {
     description:
       "Caller-supplied opaque identifier for cross-system reference. Do not place personal data in this indexed field.",
     example: "customer_42",
   }),
-  displayName: withOpenApi(createIndividualCounterpartySchemaBase.shape.displayName, {
+  entityType: withOpenApi(createCounterpartySchemaBase.shape.entityType, {
+    description: "Counterparty entity type.",
+    example: "individual",
+  }),
+  displayName: withOpenApi(createCounterpartySchemaBase.shape.displayName, {
     description:
       "Human-readable, searchable display name. Keep it minimal because this indexed field is not application-encrypted.",
     example: "Jane Doe",
   }),
-  email: withOpenApi(createIndividualCounterpartySchemaBase.shape.email, {
-    description: "Primary contact email.",
-    example: "jane@example.com",
-  }),
 };
 
 export const createCounterpartyRequestSchema = withOpenApi(
-  z.discriminatedUnion("entityType", [
-    createIndividualCounterpartySchemaBase.extend({
-      ...createCounterpartyDocFields,
-      entityType: withOpenApi(createIndividualCounterpartySchemaBase.shape.entityType, {
-        description: "Counterparty entity type.",
-        example: "individual",
-      }),
-      identity: withOpenApi(counterpartyIdentitySchema, {
-        description: "Personal identity details, required for individual counterparties.",
-      }),
-    }),
-    createBusinessCounterpartySchemaBase.extend({
-      ...createCounterpartyDocFields,
-      entityType: withOpenApi(createBusinessCounterpartySchemaBase.shape.entityType, {
-        description: "Counterparty entity type.",
-        example: "business",
-      }),
-      identity: withOpenApi(counterpartyBusinessIdentitySchema, {
-        description: "Business identity details: the registered address.",
-      }),
-    }),
-  ]),
+  createCounterpartySchemaBase.extend(createCounterpartyDocFields),
   { description: "Create counterparty request body." }
 );
 
@@ -561,17 +689,6 @@ export const updateCounterpartyRequestSchema = withOpenApi(
       description: "Updated searchable display name. Keep it minimal.",
       example: "Jane Q. Doe",
     }),
-    email: withOpenApi(updateCounterpartyObjectSchemaBase.shape.email, {
-      description: "Updated contact email.",
-      example: "jane.doe@example.com",
-    }),
-    identity: withOpenApi(
-      z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]).optional(),
-      {
-        description:
-          "Updated identity details. Replaces the existing identity object and must match the counterparty's entityType.",
-      }
-    ),
   }),
   {
     description: "Update counterparty request body. At least one field must be provided.",

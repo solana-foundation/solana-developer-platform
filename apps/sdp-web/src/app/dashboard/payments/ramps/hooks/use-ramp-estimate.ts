@@ -4,6 +4,7 @@ import type { RampDirection, RampProviderEstimateResult } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { useMemo } from "react";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { useTranslations } from "@/i18n/provider";
 import type { SelectedRampPair } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
@@ -33,13 +34,12 @@ export function useRampEstimate({
 
   const { data, isValidating } = useSWR(
     hasAmount
-      ? ([
-          "ramp-estimate",
+      ? paymentsQueryKeys.rampEstimate({
           direction,
-          selectedPair.fiatCurrency,
-          selectedPair.assetRail,
-          debouncedAmount,
-        ] as const)
+          fiatCurrency: selectedPair.fiatCurrency,
+          assetRail: selectedPair.assetRail,
+          amount: debouncedAmount,
+        })
       : null,
     () =>
       fetchRampEstimates(

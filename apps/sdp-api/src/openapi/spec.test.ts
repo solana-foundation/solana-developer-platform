@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
+  anyOf?: TestJsonSchema[];
   example?: unknown;
   items?: TestJsonSchema;
-  not?: { required?: string[] };
+  not?: TestJsonSchema;
   oneOf?: TestJsonSchema[];
   properties?: Record<string, TestJsonSchema>;
   required?: string[];
@@ -46,6 +47,79 @@ describe("OpenAPI spec", () => {
     const refreshPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/supply/refresh"]?.post;
     expect(refreshPath).toBeDefined();
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
+  });
+
+  it("documents private-channel probe deployment addresses as a pair", () => {
+    const doc = createOpenApiDocument();
+    const probeSchema = getJsonSchema(doc.paths?.["/v1/private-channels/probe"]?.post?.requestBody);
+
+    expect(probeSchema.oneOf).toEqual([
+      { required: ["escrowProgramId", "escrowInstanceAddr"] },
+      {
+        not: {
+          anyOf: [{ required: ["escrowProgramId"] }, { required: ["escrowInstanceAddr"] }],
+        },
+      },
+    ]);
+  });
+
+  it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
+    const internal = createOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument();
+
+    expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "JWT",
+    });
+
+    // Removed with the UI builder: neither document may resurrect them.
+    for (const doc of [internal, publicDocument]) {
+      expect(doc.paths?.["/v1/earn/button-configurations/current"]).toBeUndefined();
+      expect(doc.paths?.["/v1/earn/button-configurations/public/{publicToken}"]).toBeUndefined();
+    }
+    expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
+
+    for (const path of [
+      "/v1/earn/vault-deposit-previews",
+      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/external-wallet/deposits",
+      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/external-wallet/withdrawals",
+    ]) {
+      const publicOperation = publicDocument.paths?.[path]?.post;
+      expect(publicOperation?.operationId).toBeDefined();
+      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }]);
+
+      const internalOperation = internal.paths?.[path]?.post;
+      expect(internalOperation?.security).toEqual([
+        { apiKeyAuth: [] },
+        { clerkBearerAuth: [] },
+        { sessionCookie: [] },
+      ]);
+    }
+
+    const depositPreviewRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.requestBody
+    );
+    expect(depositPreviewRequest.required).toEqual(
+      expect.arrayContaining(["strategyId", "amount"])
+    );
+    expect(
+      JSON.stringify(
+        publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
+      )
+    ).toContain("sharesOut");
+
+    const submitRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
+    );
+    const signedTransactionExample = submitRequest.properties?.signedTransaction?.example;
+    expect(signedTransactionExample).toEqual(expect.any(String));
+    expect(signedTransactionExample).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+    expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
+      signedTransactionExample
+    );
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {
@@ -224,10 +298,29 @@ describe("OpenAPI spec", () => {
   it("documents counterparty ramp requirements", () => {
     const doc = createOpenApiDocument();
 
-    const requirementsPath = doc.paths?.["/v1/counterparties/{counterpartyId}/requirements"]?.get;
-    expect(requirementsPath).toBeDefined();
-    expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
-    expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
+    const paths = doc.paths;
+    if (paths === undefined) {
+      expect.fail("Expected OpenAPI paths");
+    }
+    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/requirements"];
+    if (requirementsPathItem === undefined) {
+      expect.fail("Expected counterparty requirements path");
+    }
+    const requirementsPath = requirementsPathItem.get;
+    if (requirementsPath === undefined) {
+      expect.fail("Expected counterparty requirements GET operation");
+    }
+    expect(requirementsPath.operationId).toBe("getCounterpartyRequirements");
+    const parameters = requirementsPath.parameters;
+    if (parameters === undefined) {
+      expect.fail("Expected counterparty requirements parameters");
+    }
+    expect(
+      parameters
+        .filter((parameter) => "in" in parameter && parameter.in === "query")
+        .map((parameter) => ("name" in parameter ? parameter.name : undefined))
+    ).toContain("destinationCountry");
+    expect(requirementsPath.responses["200"]).toMatchSnapshot();
   });
 
   it("documents every supported public wallet policy rule kind", () => {
@@ -270,6 +363,7 @@ describe("OpenAPI spec", () => {
       "Counterparties",
       "Asset Profiles",
       "Webhook Endpoints",
+      "Earn",
     ]);
 
     expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();

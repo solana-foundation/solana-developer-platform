@@ -2,18 +2,21 @@ import {
   createFeePaymentAdapter,
   FeePaymentError,
   type FeePaymentPort,
+  resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
+import type { Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
-import { BudgetedFeePayment } from "./sponsorship-budget.service";
+import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
 
 export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
@@ -24,6 +27,54 @@ export interface SponsorshipScope {
   actor: {
     type: SponsorshipActorType;
     id: string;
+  };
+}
+
+export interface OwnedSignedSubmission {
+  signedTransaction: Uint8Array;
+  signature: Signature;
+}
+
+export interface PreparedOwnedSubmission extends OwnedSignedSubmission {
+  releaseDefinitelyUnbroadcast(error: unknown): Promise<void>;
+}
+
+export interface OwnedSubmissionLifecycle {
+  persistSigned(submission: OwnedSignedSubmission): Promise<void>;
+  markStarted(): Promise<void>;
+  hasStarted(): Promise<boolean>;
+}
+
+/** App-local extension for SDP-owned submission flows. */
+export interface SponsorshipFeePayment extends FeePaymentPort {
+  prepareOwnedSubmission(
+    transaction: Uint8Array,
+    lifecycle: OwnedSubmissionLifecycle
+  ): Promise<PreparedOwnedSubmission>;
+}
+
+function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeePayment {
+  const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
+  return {
+    providerId: provider.providerId,
+    getFeePayer: () => provider.getFeePayer(),
+    signAsFeePayer: (transaction) => provider.signAsFeePayer(transaction),
+    signAndSend: (transaction) => provider.signAndSend(transaction),
+    ...(getSponsorshipConfiguration
+      ? {
+          getSponsorshipConfiguration: () => getSponsorshipConfiguration.call(provider),
+        }
+      : {}),
+    async prepareOwnedSubmission(transaction, lifecycle) {
+      const signedTransaction = await provider.signAsFeePayer(transaction);
+      const submission = {
+        ...getFullySignedSubmission(signedTransaction),
+        releaseDefinitelyUnbroadcast: async () => {},
+      };
+      await lifecycle.persistSigned(submission);
+      await lifecycle.markStarted();
+      return submission;
+    },
   };
 }
 
@@ -58,16 +109,27 @@ export function buildKoraUserId(scope: SponsorshipScope): string {
 }
 
 /** Owned application boundary for constructing a fee-payment provider. */
-export function createSponsorshipFeePayment(env: Env, scope: SponsorshipScope): FeePaymentPort {
-  const provider = createFeePaymentAdapter(env, buildKoraUserId(scope));
-  return isSelfHostedDeployment(env) ? provider : new BudgetedFeePayment(env, scope, provider);
+export function createSponsorshipFeePayment(
+  env: Env,
+  scope: SponsorshipScope
+): SponsorshipFeePayment {
+  const provider = instrumentVendorPort(
+    resolveFeePaymentProvider(env),
+    createFeePaymentAdapter(env, buildKoraUserId(scope))
+  );
+  return isSelfHostedDeployment(env)
+    ? withOwnedSubmissionLifecycle(provider)
+    : new BudgetedFeePayment(env, scope, provider);
 }
 
 /** Read Kora security configuration through the same owned construction boundary. */
 export async function getManagedSponsorshipProviderConfiguration(
   env: Env
 ): Promise<SponsorshipProviderConfiguration> {
-  const provider = createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation");
+  const provider = instrumentVendorPort(
+    resolveFeePaymentProvider(env),
+    createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation")
+  );
   if (!provider.getSponsorshipConfiguration) {
     throw new FeePaymentError(
       "Managed sponsorship provider does not expose fail-closed configuration",
@@ -85,7 +147,7 @@ export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
       "Managed sponsorship requires a trusted organization or project scope"
     );
   }
-  return createFeePaymentAdapter(env);
+  return instrumentVendorPort(resolveFeePaymentProvider(env), createFeePaymentAdapter(env));
 }
 
 /** Resolve a scope exclusively from trusted request middleware state. */
@@ -110,11 +172,11 @@ export function resolveAuthenticatedSponsorshipScope(c: AppContext): Sponsorship
   };
 }
 
-export function createRequestSponsorshipFeePayment(c: AppContext): FeePaymentPort {
+export function createRequestSponsorshipFeePayment(c: AppContext): SponsorshipFeePayment {
   return createSponsorshipFeePayment(c.env, resolveRequestSponsorshipScope(c));
 }
 
-export function createAuthenticatedSponsorshipFeePayment(c: AppContext): FeePaymentPort {
+export function createAuthenticatedSponsorshipFeePayment(c: AppContext): SponsorshipFeePayment {
   return createSponsorshipFeePayment(c.env, resolveAuthenticatedSponsorshipScope(c));
 }
 
@@ -130,7 +192,7 @@ export async function createProjectSponsorshipFeePayment(
     projectId: string;
     actor: SponsorshipScope["actor"];
   }
-): Promise<FeePaymentPort> {
+): Promise<SponsorshipFeePayment> {
   const project = await new ProjectService(getDb(env)).getProject(input.projectId);
   if (!project || project.organizationId !== input.organizationId || project.status !== "active") {
     throw new AppError("FORBIDDEN", "Sponsorship project is not active or accessible");

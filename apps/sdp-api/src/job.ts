@@ -1,8 +1,12 @@
 import { pathToFileURL } from "node:url";
+import * as solanaRpc from "@sdp/rpc/solana";
 
-import * as Sentry from "@sentry/node";
-import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
-import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
+import { parse as parseCron, validate as validateCron } from "node-cron";
+import { EARN_CATALOGUE_SYNC_MONITOR, runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
+import {
+  EARN_METRICS_REFRESH_MONITOR,
+  runEarnMetricsRefreshTick,
+} from "@/cron/earn-metrics-refresh";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
@@ -10,6 +14,7 @@ import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { runRetentionPurgeIfDue } from "@/cron/retention-purge";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
+import { runWithCronRunEvent } from "@/cron/run-event";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
@@ -21,12 +26,13 @@ import {
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
-import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
-import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
+import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
@@ -34,32 +40,28 @@ import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import type { Env } from "@/types/env";
 
-/**
- * The Cloud Scheduler cadence this job runs on. Every monitored tick declares
- * THIS schedule rather than the reconciler's in-process crontab: on managed
- * deployments this job is the monitor's only reporter, and declaring a faster
- * cadence than the job can deliver makes Sentry alert on missed check-ins
- * between perfectly healthy executions.
- */
-const MANAGED_JOB_CRON = "*/5 * * * *";
+const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
 
 /**
  * One-shot reconciliation entrypoint for the managed Cloud Run Job — the only
  * cron tick a managed deployment gets, since web replicas skip the in-process
- * scheduler under K_SERVICE (cron/runner.ts). Cloud Scheduler runs it every
- * five minutes; each execution is a fresh process, so it closes every pool and
- * flushes Sentry on the way out.
+ * scheduler under K_SERVICE (cron/runner.ts). Each execution is a fresh
+ * process, so it closes every pool on the way out. Absence detection is the
+ * Loki dead-man on the per-tick `sdp_cron_run` events.
  *
  * Failure semantics: every tick runs on every execution — a failing tick never
  * blocks the ticks after it, so one persistently broken reconciler cannot
- * starve the rest. Each tick reports to its own Sentry monitor and each
- * failure is logged with its monitor slug, so the failing tick is identifiable
- * even with Sentry disabled. Fatal ticks' failures are collected and rethrown
+ * starve the rest. Each tick emits `sdp_cron_run` under its monitor slug and
+ * each failure is logged with that slug, so the failing tick is identifiable
+ * from logs alone. Fatal ticks' failures are collected and rethrown
  * once everything has run (as an AggregateError when more than one failed, and
  * logged with full causes at the process exit below), failing the job loudly;
  * non-fatal ticks' failures are swallowed after their log. The next execution
- * retries everything.
+ * retries everything. Workflow secret retirements and Earn metrics refresh are
+ * intentionally the only ticks whose failures do not enter the final failure
+ * collection.
  *
  * The sequence:
  *
@@ -69,21 +71,17 @@ const MANAGED_JOB_CRON = "*/5 * * * *";
  *    so one failing never hides the other. Fatal.
  * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
- *    job's five-minute schedule matches its crontab exactly, so no Redis slot
- *    is needed to hold the cadence.
+ *    deployment-provided Managed Reconciliation Cadence is its effective
+ *    cadence, so no Redis slot is needed.
  * 3. **Private-channel deposit and withdrawal reconcilers** (gated on
  *    `PRIVATE_CHANNELS_ENABLED`) — siblings, not stages: concurrent under
- *    their own monitors so a failing leg never skips the other. The job's
- *    five-minute schedule is the effective cadence, the same degradation from
- *    the per-minute crontab that pending-transfers accepts. Fatal.
+ *    their own monitors so a failing leg never skips the other. The Managed
+ *    Reconciliation Cadence is their effective cadence, the same degradation
+ *    from the per-minute crontab that pending-transfers accepts. Fatal.
  * 4. **Rings indexing poll** — behind no gate here, because the job itself
- *    early-returns unless the rings flag is on AND `HELIUS_RINGS_ADAPTER` is
- *    `http`, which is why the in-process runner also schedules it
- *    unconditionally. This job is the poll's only tick on managed deployments;
- *    without it an operation that reached `indexing` would neither complete nor
- *    ever time out. The five-minute schedule sits well inside the 30-minute
- *    indexing budget, so the degradation from the per-minute crontab costs
- *    nothing. Fatal.
+ *    early-returns unless the rings flag is on. This job is the poll's only tick
+ *    on managed deployments; without it an operation that reached `indexing`
+ *    would neither complete nor ever time out. Fatal.
  * 5. **Earn vault-movement reconciliation** — deliberately outside the Earn
  *    gate: signed vault intents are an outbox, not feature state, so disabling
  *    new deposits cannot strand old ones. Fatal.
@@ -115,41 +113,60 @@ export async function runCronJob(): Promise<void> {
   if (!env.REDIS_URL?.trim()) {
     throw new Error("REDIS_URL is required for the reconciliation job");
   }
+  assertCustodyEncryptionScheme(env);
+  getManagedReconciliationCron(env);
+  getManagedReconciliationMaxRuntimeMinutes(env);
   assertSigningProviderAllowed(env);
 
-  initNodeSentry(getSentryOptions(env));
-
-  const sentryEnabled = isSentryEnabled(env);
-  const monitored = async (monitor: string, work: () => Promise<unknown>) => {
-    try {
-      await (sentryEnabled
-        ? nodeObservability.withMonitor(monitor, work, {
-            schedule: { type: "crontab", value: MANAGED_JOB_CRON },
-          })
-        : work());
-    } catch (error) {
-      getLogger().error(
-        { monitor, error: error instanceof Error ? error.message : String(error) },
-        "reconciliation job: tick failed"
+  let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
+  try {
+    probeRpc = solanaRpc.createRpc(env, { requestTimeoutMs: 5_000 });
+  } catch {
+    // No RPC endpoint configured (some self-hosted setups): nothing to probe.
+  }
+  if (probeRpc) {
+    const rpc = probeRpc;
+    const egress = await waitForEgress({
+      probe: () => rpc.getBlockHeight({ commitment: "confirmed" }).send(),
+      deadlineMs: 120_000,
+      intervalMs: 5_000,
+    });
+    if (egress.ready) {
+      getLogger().info(
+        { elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
+        "reconciliation job: egress ready"
       );
-      throw error;
+    } else {
+      getLogger().error(
+        { elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
+        "reconciliation job: egress warmup deadline reached, running ticks anyway"
+      );
     }
-  };
+  }
 
-  const failures: unknown[] = [];
-  const collect = async (tick: Promise<unknown>) => {
-    try {
-      await tick;
-    } catch (error) {
-      failures.push(error);
-    }
-  };
+  const privateChannelsEnabled = isPrivateChannelsEnabled(env);
+  const assetProfilesEnabled = isAssetProfilesEnabled(env);
+  const earnEnabled = isEarnEnabled(env);
 
   try {
+    const monitored = createManagedTickRunner();
+    const failures: unknown[] = [];
+    const collect = async (tick: Promise<unknown>) => {
+      try {
+        await tick;
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+
     await collect(
       monitored(PENDING_TRANSFERS_MONITOR, async () => {
         const outcomes = await Promise.allSettled([
           (async () => {
+            // Security sweep first so payment reconciliation failures cannot
+            // starve it: repairs revoked API keys whose cache write failed
+            // post-commit.
+            await reconcileRevokedApiKeyCache(env);
             await trackPendingTransfers(env);
             await recoverApprovedWalletOperations(env);
           })(),
@@ -161,49 +178,128 @@ export async function runCronJob(): Promise<void> {
     await collect(
       monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () => collectDueRecurringPayments(env))
     );
-    if (isPrivateChannelsEnabled(env)) {
+    if (privateChannelsEnabled) {
       const outcomes = await Promise.allSettled([
         monitored(PENDING_DEPOSITS_MONITOR, () => trackPendingDeposits(env)),
         monitored(PENDING_WITHDRAWALS_MONITOR, () => trackPendingWithdrawals(env)),
       ]);
       failures.push(...rejectionReasons(outcomes));
+    } else {
+      await monitored(PENDING_DEPOSITS_MONITOR, async () => undefined);
+      await monitored(PENDING_WITHDRAWALS_MONITOR, async () => undefined);
     }
     await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
     await collect(monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env)));
-    if (isAssetProfilesEnabled(env)) {
+    if (assetProfilesEnabled) {
       await collect(monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env)));
+    } else {
+      await monitored(WORKFLOW_EXECUTIONS_MONITOR, async () => undefined);
     }
     await monitored(WORKFLOW_SECRET_RETIREMENTS_MONITOR, () =>
       retireOrphanedActionSecrets(env)
     ).catch(() => undefined);
-    if (isEarnEnabled(env)) {
-      await runEarnMetricsRefreshTick(env, sentryEnabled ? nodeObservability : undefined).catch(
-        (error: unknown) => {
-          getLogger().error(
-            { error: error instanceof Error ? error.message : String(error) },
-            "reconciliation job: earn metrics refresh failed"
-          );
-        }
+    if (earnEnabled) {
+      await monitored(EARN_METRICS_REFRESH_MONITOR, () =>
+        runEarnMetricsRefreshTick(env, undefined)
+      ).catch(() => undefined);
+      await collect(
+        runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
+          runEarnCatalogueSyncIfDue(env, undefined)
+        )
       );
-      await collect(runEarnCatalogueSyncIfDue(env, sentryEnabled ? nodeObservability : undefined));
+    } else {
+      await monitored(EARN_METRICS_REFRESH_MONITOR, async () => undefined);
+      await collect(
+        runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
+          runEarnCatalogueSyncIfDue(env, undefined, { workEnabled: false })
+        )
+      );
     }
     // Daily retention purge behind a Redis date slot (the job itself ticks every five
     // minutes). Non-fatal for the same reason as the secret sweep: housekeeping must
     // never fail the reconciliation this job exists for — hence before the collected
     // throw below, which is the tick's last act.
-    await runRetentionPurgeIfDue(env, sentryEnabled ? nodeObservability : undefined).catch(
-      (error: unknown) => {
-        getLogger().error(
-          { error: error instanceof Error ? error.message : String(error) },
-          "reconciliation job: retention purge failed"
-        );
-      }
-    );
+    await runRetentionPurgeIfDue(env).catch((error: unknown) => {
+      getLogger().error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "reconciliation job: retention purge failed"
+      );
+    });
     throwCollected(failures, "reconciliation job had multiple tick failures");
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);
-    await Sentry.close(2000);
   }
+}
+
+function createManagedTickRunner(): <T>(monitor: string, work: () => Promise<T>) => Promise<T> {
+  return async <T>(monitor: string, work: () => Promise<T>): Promise<T> => {
+    const monitorSlug = getManagedMonitorSlug(monitor);
+    try {
+      return await runWithCronRunEvent(monitorSlug, work);
+    } catch (error) {
+      getLogger().error(
+        {
+          monitor: monitorSlug,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "reconciliation job: tick failed"
+      );
+      throw error;
+    }
+  };
+}
+
+export function getManagedMonitorSlug(monitor: string): string {
+  const prefix = "sdp-api-";
+  return `sdp-api-managed-${monitor.startsWith(prefix) ? monitor.slice(prefix.length) : monitor}`;
+}
+
+export function getManagedReconciliationCron(
+  env: Pick<Env, "SDP_MANAGED_RECONCILIATION_CRON">
+): string {
+  const value = env.SDP_MANAGED_RECONCILIATION_CRON?.trim();
+  if (!value) {
+    throw new Error("SDP_MANAGED_RECONCILIATION_CRON is required for the reconciliation job");
+  }
+  if (value.split(/\s+/).length !== 5 || !validateCron(value)) {
+    throw new Error("SDP_MANAGED_RECONCILIATION_CRON must be a valid crontab");
+  }
+  const parsed = parseCron(value);
+  if (
+    getMaximumMinuteGap(parsed.minute) > MAX_MANAGED_SCHEDULER_GAP_MINUTES ||
+    parsed.hour.length !== 24 ||
+    parsed.dayOfMonth.length !== 31 ||
+    parsed.month.length !== 12 ||
+    parsed.dayOfWeek.length !== 7
+  ) {
+    throw new Error(
+      `SDP_MANAGED_RECONCILIATION_CRON must run at least once every ${MAX_MANAGED_SCHEDULER_GAP_MINUTES} minutes of every hour for the hourly Earn catalogue monitor`
+    );
+  }
+  return value;
+}
+
+function getMaximumMinuteGap(minutes: readonly number[]): number {
+  if (minutes.length === 0) return Number.POSITIVE_INFINITY;
+  const sorted = [...minutes].sort((left, right) => left - right);
+  return Math.max(
+    ...sorted.map((minute, index) => {
+      const next = sorted[(index + 1) % sorted.length];
+      return next > minute ? next - minute : next + 60 - minute;
+    })
+  );
+}
+
+function getManagedReconciliationMaxRuntimeMinutes(
+  env: Pick<Env, "SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS">
+): number {
+  const seconds = Number(env.SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS?.trim());
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(
+      "SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS must be a positive number for the reconciliation job"
+    );
+  }
+  return Math.ceil(seconds / 60);
 }
 
 /**
