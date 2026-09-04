@@ -7,7 +7,7 @@ import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
 import { TransactionsResultsSkeleton } from "../payments-route-skeletons";
 import { fetchTransactionsPage } from "./transactions-page.data";
-import { parseTransactionFilters } from "./transactions-query";
+import { hasRemovedTransactionWalletFilter, parseTransactionFilters } from "./transactions-query";
 import { TransactionsResults } from "./transactions-results";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
@@ -20,7 +20,26 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const filters = parseTransactionFilters((await searchParams) ?? {});
+  const rawSearchParams = (await searchParams) ?? {};
+  const filters = parseTransactionFilters(rawSearchParams);
+  if (hasRemovedTransactionWalletFilter(rawSearchParams)) {
+    return (
+      <TransactionsWorkspace disableCsvExport filters={filters}>
+        <TransactionsResults
+          result={{
+            transfers: [],
+            total: 0,
+            page: filters.page,
+            pageSize: filters.pageSize,
+            hasMore: false,
+            error: "Removed wallet filter",
+          }}
+          serverFilters={filters}
+          issuedTokenSymbolsByMint={{}}
+        />
+      </TransactionsWorkspace>
+    );
+  }
   const trace = createTimedTrace("dashboard.payments.transactions.page");
   const apiClientPromise = trace.step("create_sdp_api_client", () =>
     createSdpApiClient(trace.childContext("dashboard.payments.transactions.api"))

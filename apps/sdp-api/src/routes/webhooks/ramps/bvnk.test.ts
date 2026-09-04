@@ -14,7 +14,7 @@ describe("BvnkWebhookProcessor.parse", () => {
         data: {
           id: "wallet_1",
           status: "COMPLETED",
-          walletName: buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY),
+          walletName: buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY),
           customerReference: "customer_1",
           ledgers: [{ type: "FIAT", accountNumber: "900368997705", code: "101019644" }],
         },
@@ -23,7 +23,7 @@ describe("BvnkWebhookProcessor.parse", () => {
       kind: "bvnk:ledger:wallet:create",
       customerReference: "customer_1",
       walletId: "wallet_1",
-      walletName: "sdp:onramp:counterparty_123:USD:USDC_SOLANA:dest",
+      walletName: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
       walletStatus: "COMPLETED",
       bankAccount: { accountNumber: "900368997705" },
     });
@@ -49,6 +49,45 @@ describe("BvnkWebhookProcessor.parse", () => {
       status: "COMPLETED",
       amount: "100",
     });
+  });
+
+  it("parses an agreement status-change webhook with the customer reference", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "bvnk:customers:agreements:status-change",
+        data: {
+          customerId: "customer_1",
+          agreementId: "agreement_1",
+          status: "ACCEPTED",
+          respondedAt: "2026-09-02T00:00:00.000Z",
+        },
+      })
+    ).toEqual({
+      kind: "bvnk:customers:agreements:status-change",
+      customerReference: "customer_1",
+      agreementId: "agreement_1",
+      agreementStatus: "ACCEPTED",
+      respondedAt: "2026-09-02T00:00:00.000Z",
+    });
+  });
+
+  it.each(["customerId", "agreementId"])("rejects an agreement event missing %s", (field) => {
+    const processor = new BvnkWebhookProcessor();
+    const data = {
+      customerId: "customer_1",
+      agreementId: "agreement_1",
+      status: "ACCEPTED",
+    };
+    delete data[field as keyof typeof data];
+
+    expect(() =>
+      processor.parse({
+        event: "bvnk:customers:agreements:status-change",
+        data,
+      })
+    ).toThrow(/missing (customerId|agreementId)/);
   });
 
   it("parses a channel transaction SDP did not create without throwing", () => {

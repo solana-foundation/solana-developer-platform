@@ -10,6 +10,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
+const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
 
 const TEST_ORG = {
   id: "org_pc_test",
@@ -123,6 +124,13 @@ describe("Private Channels routes", () => {
     originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";
     probeConnectionMock.mockReset();
+    spcRegisterMock.mockReset();
+    spcRegisterMock.mockResolvedValue({
+      id: "spc_default_principal",
+      username: "default-test",
+      role: "user",
+      createdAt: "2026-08-31T12:00:00.000Z",
+    });
     await seedTestDatabase(env);
     await seedAuth();
   });
@@ -206,6 +214,41 @@ describe("Private Channels routes", () => {
     expect(body.error.details?.activeInstance?.id).toMatch(/^pci_/);
     // The re-probe path shouldn't have been reached: the active check runs first.
     expect(probeConnectionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("PATCH /instance re-probes and updates the active instance in place", async () => {
+    probeConnectionMock.mockResolvedValue(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const gatewayUrl = "http://34.71.147.163:9900";
+
+    const updated = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...SANDBOX_DEFAULTS,
+          instanceId: createdBody.data.instance.id,
+          gatewayUrl,
+        }),
+      },
+      env
+    );
+
+    expect(updated.status).toBe(200);
+    const updatedBody = (await updated.json()) as {
+      data: { instance: { id: string; gatewayUrl: string } };
+    };
+    expect(updatedBody.data.instance).toMatchObject({
+      id: createdBody.data.instance.id,
+      gatewayUrl,
+    });
+    expect(probeConnectionMock).toHaveBeenCalledTimes(2);
   });
 
   it("POST /instance/disconnect flips is_active and returns the row", async () => {

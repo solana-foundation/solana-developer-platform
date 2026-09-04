@@ -11,7 +11,29 @@ import { createPostgresPaymentsRepository } from "./payments.repository.postgres
 const TEST_PROJECT_ID = "prj_payments_repo_test";
 const OTHER_PROJECT_ID = "prj_payments_repo_test_other";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
+const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
 const CANCELABLE = ["pending", "awaiting_payment"] as const;
+
+async function seedExactWallet(): Promise<void> {
+  const db = getDb(env);
+  await db
+    .prepare(
+      `INSERT INTO custody_configs
+         (id, organization_id, project_id, provider, config_encrypted)
+       VALUES ('cfg_payments_repo_exact', ?, NULL, 'test_payments_repo_exact', 'encrypted')
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(TEST_ORG.id)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+       VALUES (?, 'cfg_payments_repo_exact', ?, 'Source111')
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(TEST_CUSTODY_WALLET_ID, TEST_WALLET_ID)
+    .run();
+}
 
 /** Wipes payment_transfers and re-upserts the test organization for filter suites. */
 async function resetPaymentTransfers(): Promise<void> {
@@ -23,13 +45,26 @@ async function resetPaymentTransfers(): Promise<void> {
     )
     .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
     .run();
+  await seedExactWallet();
 }
 
-function transferInput(overrides: { suffix: string; token?: string; walletId?: string }) {
-  const { suffix, token = "SOL", walletId = TEST_WALLET_ID } = overrides;
+function transferInput(overrides: {
+  suffix: string;
+  token?: string;
+  custodyWalletId?: string;
+  walletId?: string;
+}) {
+  const {
+    suffix,
+    token = "SOL",
+    custodyWalletId = TEST_CUSTODY_WALLET_ID,
+    walletId = TEST_WALLET_ID,
+  } = overrides;
   return {
+    id: `xfr_${suffix}`,
     organizationId: TEST_ORG.id,
     projectId: null,
+    custodyWalletId,
     walletId,
     counterpartyId: null,
     sourceAddress: `Source${suffix}`,
@@ -69,9 +104,9 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
     await db.prepare("DELETE FROM custody_scope_defaults").run();
+    await db.prepare("DELETE FROM payment_transfers").run();
     await db.prepare("DELETE FROM custody_wallets").run();
     await db.prepare("DELETE FROM custody_configs").run();
-    await db.prepare("DELETE FROM payment_transfers").run();
     await db.prepare("DELETE FROM projects").run();
 
     await db
@@ -95,6 +130,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
         .run();
     }
+    await seedExactWallet();
 
     repo = createPostgresPaymentsRepository(db);
   });
@@ -179,6 +215,127 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     expect(updated?.status).toBe("canceled");
     expect(await readStatus("xfr_guard_ok")).toBe("canceled");
+  });
+
+  it("claims an unoccupied off-ramp row for its on-chain deposit", async () => {
+    const depositAddress = "DepositAddress111";
+    const transfer = await repo.createTransfer({
+      ...transferInput({ suffix: "ramp-onchain" }),
+      destinationAddress: null,
+      type: "offramp",
+      status: "awaiting_payment",
+      provider: "moonpay",
+      providerData: {
+        cryptoDeposit: { destinationAddress: depositAddress, amount: "1.0" },
+      },
+    });
+    if (!transfer) throw new Error("Expected off-ramp transfer creation to succeed");
+
+    await expect(
+      repo.updateOnchainTransferForRamp({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        custodyWalletId: "cwlt_other",
+        walletId: TEST_WALLET_ID,
+        sourceAddress: "Sourceramp-onchain",
+        destinationAddress: depositAddress,
+        token: "SOL",
+        amount: "1",
+        initiatedByKeyId: "key_ramp_onchain",
+        updatedAt: "2026-08-31T10:00:00.000Z",
+      })
+    ).resolves.toBeNull();
+
+    const updated = await repo.updateOnchainTransferForRamp({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      sourceAddress: "Sourceramp-onchain",
+      destinationAddress: depositAddress,
+      token: "SOL",
+      amount: "1",
+      initiatedByKeyId: "key_ramp_onchain",
+      updatedAt: "2026-08-31T10:00:00.000Z",
+    });
+
+    expect(updated).toMatchObject({
+      id: transfer.id,
+      destination_address: depositAddress,
+      initiated_by_key_id: "key_ramp_onchain",
+      status: "processing",
+    });
+  });
+
+  it("does not claim an off-ramp row whose on-chain fields are occupied", async () => {
+    const depositAddress = "DepositAddress222";
+    const transfer = await repo.createTransfer({
+      ...transferInput({ suffix: "ramp-occupied" }),
+      destinationAddress: null,
+      type: "offramp",
+      status: "awaiting_payment",
+      provider: "moonpay",
+      providerData: {
+        cryptoDeposit: { destinationAddress: depositAddress, amount: "1" },
+      },
+      signature: "existing-ramp-signature",
+    });
+    if (!transfer) throw new Error("Expected off-ramp transfer creation to succeed");
+
+    await expect(
+      repo.updateOnchainTransferForRamp({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        sourceAddress: "Sourceramp-occupied",
+        destinationAddress: depositAddress,
+        token: "SOL",
+        amount: "1",
+        initiatedByKeyId: "key_ramp_occupied",
+        updatedAt: "2026-08-31T10:00:00.000Z",
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("sets a provider reference once and permits only an exact replay", async () => {
+    const transfer = await repo.createTransfer({
+      ...transferInput({ suffix: "provider-reference-binding" }),
+      type: "offramp",
+      status: "pending",
+      provider: "moonpay",
+      providerReference: null,
+    });
+    if (!transfer) throw new Error("Expected MoonPay transfer creation to succeed");
+
+    const input = {
+      transferId: transfer.id,
+      provider: "moonpay" as const,
+      providerReference: "moonpay-transaction-1",
+      updatedAt: "2026-08-31T11:00:00.000Z",
+    };
+    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+      provider_reference: "moonpay-transaction-1",
+    });
+    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+      provider_reference: "moonpay-transaction-1",
+    });
+    await expect(
+      repo.setProviderReferenceIfEmpty({
+        ...input,
+        providerReference: "moonpay-transaction-2",
+        updatedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).resolves.toBeNull();
+    await expect(
+      repo.setProviderReferenceIfEmpty({
+        ...input,
+        provider: "coinbase",
+      })
+    ).resolves.toBeNull();
   });
 
   it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
@@ -326,8 +483,10 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("persists idempotency metadata and looks it up by (org, key)", async () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const created = await repo.createTransfer({
+      id: "xfr_idempotency_metadata",
       organizationId: TEST_ORG.id,
       projectId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
       sourceAddress: "Source111",
@@ -352,6 +511,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       idempotencyFingerprint: "fp-1",
     });
     expect(created?.idempotency_key).toBe("key-abc");
+    expect(created?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
 
     const found = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
@@ -362,10 +522,213 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     expect(found?.idempotency_fingerprint).toBe("fp-1");
   });
 
+  it("persists a signed transfer before submission starts", async () => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: "signed-outbox" }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+
+    const signed = await repo.persistSignedTransfer({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      signature: "signed-outbox-signature",
+      signedTransaction: "AQID",
+      lastValidBlockHeight: "18446744073709551615",
+      updatedAt: "2026-08-21T10:00:00.000Z",
+    });
+
+    expect(signed).toMatchObject({
+      signature: "signed-outbox-signature",
+      signed_transaction: "AQID",
+      last_valid_block_height: "18446744073709551615",
+      submission_started_at: null,
+    });
+  });
+
+  it.each([
+    ["a scaled integer", "1234.0", "scaled"],
+    ["a fractional value", "1234.5", "fractional"],
+    ["a negative value", "-1", "negative"],
+    ["a value above u64", "18446744073709551616", "above-u64"],
+  ])("rejects %s as a last valid block height", async (_label, height, suffix) => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: `height-${suffix}` }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+
+    await expect(
+      repo.persistSignedTransfer({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        signature: `height-${suffix}-signature`,
+        signedTransaction: "AQID",
+        lastValidBlockHeight: height,
+        updatedAt: "2026-08-21T10:00:00.000Z",
+      })
+    ).rejects.toMatchObject({
+      code: "23514",
+      constraint: "payment_transfers_last_valid_block_height_check",
+    });
+
+    await expect(
+      repo.getTransferById({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      })
+    ).resolves.toMatchObject({
+      signature: null,
+      signed_transaction: null,
+      last_valid_block_height: null,
+      submission_started_at: null,
+    });
+  });
+
+  it("marks submission started only after the signed transfer is persisted", async () => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: "submission-start" }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+
+    await expect(
+      repo.markTransferSubmissionStarted({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        startedAt: "2026-08-21T10:01:00.000Z",
+      })
+    ).resolves.toBeNull();
+
+    await repo.persistSignedTransfer({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      signature: "submission-start-signature",
+      signedTransaction: "BAUG",
+      lastValidBlockHeight: "1000",
+      updatedAt: "2026-08-21T10:00:00.000Z",
+    });
+    const started = await repo.markTransferSubmissionStarted({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      startedAt: "2026-08-21T10:01:00.000Z",
+    });
+
+    expect(started).toMatchObject({
+      signature: "submission-start-signature",
+      signed_transaction: "BAUG",
+      last_valid_block_height: "1000",
+      submission_started_at: "2026-08-21T10:01:00.000Z",
+      updated_at: "2026-08-21T10:01:00.000Z",
+    });
+  });
+
+  it("does not overwrite an already persisted signed transfer", async () => {
+    const transfer = await repo.createTransfer(transferInput({ suffix: "signed-cas" }));
+    if (!transfer) throw new Error("Expected transfer creation to succeed");
+    const scope = {
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+    };
+
+    await repo.persistSignedTransfer({
+      ...scope,
+      signature: "original-signature",
+      signedTransaction: "BwgJ",
+      lastValidBlockHeight: "2000",
+      updatedAt: "2026-08-21T10:02:00.000Z",
+    });
+    const replacement = await repo.persistSignedTransfer({
+      ...scope,
+      signature: "replacement-signature",
+      signedTransaction: "CgsM",
+      lastValidBlockHeight: "3000",
+      updatedAt: "2026-08-21T10:03:00.000Z",
+    });
+    const persisted = await repo.getTransferById(scope);
+
+    expect(replacement).toBeNull();
+    expect(persisted).toMatchObject({
+      signature: "original-signature",
+      signed_transaction: "BwgJ",
+      last_valid_block_height: "2000",
+      updated_at: "2026-08-21T10:02:00.000Z",
+    });
+  });
+
+  it("does not change submission state after the transfer leaves processing", async () => {
+    const unsigned = await repo.createTransfer(transferInput({ suffix: "terminal-unsigned" }));
+    const signed = await repo.createTransfer(transferInput({ suffix: "terminal-signed" }));
+    if (!unsigned || !signed) throw new Error("Expected transfer creation to succeed");
+
+    await repo.updateTransfer({
+      transferId: unsigned.id,
+      status: "failed",
+      updatedAt: "2026-08-21T10:04:00.000Z",
+    });
+    await expect(
+      repo.persistSignedTransfer({
+        transferId: unsigned.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        signature: "too-late-signature",
+        signedTransaction: "DQ4P",
+        lastValidBlockHeight: "4000",
+        updatedAt: "2026-08-21T10:05:00.000Z",
+      })
+    ).resolves.toBeNull();
+
+    await repo.persistSignedTransfer({
+      transferId: signed.id,
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      signature: "signed-before-terminal",
+      signedTransaction: "EBES",
+      lastValidBlockHeight: "5000",
+      updatedAt: "2026-08-21T10:06:00.000Z",
+    });
+    await repo.updateTransfer({
+      transferId: signed.id,
+      status: "failed",
+      updatedAt: "2026-08-21T10:07:00.000Z",
+    });
+    await expect(
+      repo.markTransferSubmissionStarted({
+        transferId: signed.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        startedAt: "2026-08-21T10:08:00.000Z",
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("keeps legacy transfers without signed-outbox fields valid", async () => {
+    const legacy = await repo.createTransfer({
+      ...transferInput({ suffix: "legacy-submission" }),
+      signature: "legacy-signature",
+      serializedTx: "legacy-serialized-transaction",
+    });
+    if (!legacy) throw new Error("Expected transfer creation to succeed");
+
+    const confirmed = await repo.updateTransfer({
+      transferId: legacy.id,
+      status: "confirmed",
+      updatedAt: "2026-08-21T10:09:00.000Z",
+    });
+
+    expect(confirmed).toMatchObject({
+      signature: "legacy-signature",
+      serialized_tx: "legacy-serialized-transaction",
+      signed_transaction: null,
+      last_valid_block_height: null,
+      submission_started_at: null,
+      status: "confirmed",
+    });
+  });
+
   it("scopes idempotency to project — same org+key in different projects do not collide", async () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const base = {
       organizationId: TEST_ORG.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
       sourceAddress: "Source111",
@@ -389,8 +752,12 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       idempotencyFingerprint: "fp-1",
       idempotencyKey: "shared-key",
     };
-    const orgLevel = await repo.createTransfer({ ...base, projectId: null });
-    const projectScoped = await repo.createTransfer({ ...base, projectId: TEST_PROJECT_ID });
+    const orgLevel = await repo.createTransfer({ ...base, id: "xfr_org_level", projectId: null });
+    const projectScoped = await repo.createTransfer({
+      ...base,
+      id: "xfr_project_scoped",
+      projectId: TEST_PROJECT_ID,
+    });
     expect(orgLevel?.id).not.toBe(projectScoped?.id);
 
     const foundOrg = await repo.findTransferByIdempotency({
@@ -412,6 +779,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const base = {
       organizationId: TEST_ORG.id,
       projectId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
       sourceAddress: "Source111",
@@ -434,10 +802,10 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       initiatedByKeyId: null,
       idempotencyFingerprint: "fp-1",
     };
-    await repo.createTransfer({ ...base, idempotencyKey: "dup-key" });
-    await expect(repo.createTransfer({ ...base, idempotencyKey: "dup-key" })).rejects.toSatisfy(
-      (err: unknown) => isPostgresUniqueViolation(err)
-    );
+    await repo.createTransfer({ ...base, id: "xfr_dup_key_first", idempotencyKey: "dup-key" });
+    await expect(
+      repo.createTransfer({ ...base, id: "xfr_dup_key_second", idempotencyKey: "dup-key" })
+    ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
   });
 });
 
@@ -511,6 +879,8 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
 describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   const WALLET_A = "wallet_allowlist_a";
   const WALLET_B = "wallet_allowlist_b";
+  const CUSTODY_WALLET_A = "cwlt_allowlist_a";
+  const CUSTODY_WALLET_B = "cwlt_allowlist_b";
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -523,10 +893,42 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   beforeEach(resetPaymentTransfers);
 
   async function seedTwoWallets() {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cfg_payments_exact_allowlist', ?, NULL, 'test_exact_allowlist', 'encrypted')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(TEST_ORG.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key)
+         VALUES
+           (?, 'cfg_payments_exact_allowlist', ?, 'Sourcea-1'),
+           (?, 'cfg_payments_exact_allowlist', ?, 'Sourceb-1')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(CUSTODY_WALLET_A, WALLET_A, CUSTODY_WALLET_B, WALLET_B)
+      .run();
     const repo = createPostgresPaymentsRepository(getDb(env));
-    await repo.createTransfer(transferInput({ walletId: WALLET_A, suffix: "a-1" }));
-    await repo.createTransfer(transferInput({ walletId: WALLET_A, suffix: "a-2" }));
-    await repo.createTransfer(transferInput({ walletId: WALLET_B, suffix: "b-1" }));
+    await repo.createTransfer(
+      transferInput({ custodyWalletId: CUSTODY_WALLET_A, walletId: WALLET_A, suffix: "a-1" })
+    );
+    const legacy = await repo.createTransfer(
+      transferInput({ custodyWalletId: CUSTODY_WALLET_A, walletId: WALLET_A, suffix: "a-2" })
+    );
+    if (!legacy) throw new Error("Expected legacy transfer fixture creation to succeed");
+    await db
+      .prepare("UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?")
+      .bind(legacy.id)
+      .run();
+    await repo.createTransfer(
+      transferInput({ custodyWalletId: CUSTODY_WALLET_B, walletId: WALLET_B, suffix: "b-1" })
+    );
     return repo;
   }
 
@@ -559,5 +961,48 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     const all = await repo.listTransfers({ ...listArgs, walletIds: undefined });
 
     expect(all.rows).toHaveLength(3);
+  });
+
+  it("filters by one exact wallet", async () => {
+    const repo = await seedTwoWallets();
+
+    const selected = await repo.listTransfers({
+      ...listArgs,
+      custodyWalletId: CUSTODY_WALLET_A,
+    });
+
+    expect(selected.rows.map((row) => row.id)).toHaveLength(1);
+    expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
+  });
+
+  it("authorizes exact rows by custody ID and legacy null rows by Provider ID", async () => {
+    const repo = await seedTwoWallets();
+
+    const authorized = await repo.listTransfers({
+      ...listArgs,
+      walletAuthorization: {
+        custodyWalletIds: [CUSTODY_WALLET_B],
+        providerWalletIds: [WALLET_A],
+      },
+    });
+    const denied = await repo.listTransfers({
+      ...listArgs,
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
+    });
+
+    expect(authorized.rows).toHaveLength(2);
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({
+        custody_wallet_id: CUSTODY_WALLET_B,
+        wallet_id: WALLET_B,
+      })
+    );
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({ custody_wallet_id: null, wallet_id: WALLET_A })
+    );
+    expect(authorized.rows).not.toContainEqual(
+      expect.objectContaining({ custody_wallet_id: CUSTODY_WALLET_A })
+    );
+    expect(denied).toEqual({ rows: [], total: 0 });
   });
 });

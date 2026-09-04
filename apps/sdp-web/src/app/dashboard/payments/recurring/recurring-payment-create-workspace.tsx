@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { TokenMark } from "@/components/token-mark";
 import type { BadgeVariant } from "@/components/ui/badge";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -32,10 +33,7 @@ import {
 import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
-import {
-  PAYMENTS_ACTION_WALLETS_KEY,
-  usePaymentsActionWallets,
-} from "../ramps/hooks/use-payments-action-wallets";
+import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
 
@@ -54,7 +52,7 @@ type SchedulePreset = "24" | "168" | "720" | "custom";
 interface RecurringPaymentCreateFields {
   counterpartyId: string;
   counterpartyAccountId: string;
-  walletId: string;
+  sourceCustodyWalletId: string;
   token: string;
   amount: string;
   schedulePreset: SchedulePreset;
@@ -64,8 +62,6 @@ interface RecurringPaymentCreateFields {
 }
 
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
-
-const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
 function resolveAccountAddress(account: CounterpartyAccount | null): string {
   if (!account) {
@@ -280,7 +276,7 @@ export function RecurringPaymentCreateWorkspace({
   const [fields, setFields] = useState<RecurringPaymentCreateFields>({
     counterpartyId: "",
     counterpartyAccountId: "",
-    walletId: "",
+    sourceCustodyWalletId: "",
     token: "",
     amount: "",
     schedulePreset: "24",
@@ -290,7 +286,7 @@ export function RecurringPaymentCreateWorkspace({
   });
 
   const { data: liveCounterpartiesResult, mutate: mutateCounterparties } = useSWR(
-    PAYMENTS_ACTION_COUNTERPARTIES_KEY,
+    paymentsQueryKeys.actionCounterparties(),
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
@@ -308,7 +304,9 @@ export function RecurringPaymentCreateWorkspace({
     isLoading: accountsLoading,
     mutate: mutateAccounts,
   } = useSWR(
-    fields.counterpartyId ? ["counterparty-accounts", fields.counterpartyId] : null,
+    fields.counterpartyId
+      ? paymentsQueryKeys.counterpartyAccounts({ counterpartyId: fields.counterpartyId })
+      : null,
     ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
@@ -337,7 +335,7 @@ export function RecurringPaymentCreateWorkspace({
   const selectedAccount =
     cryptoAccounts.find((account) => account.id === fields.counterpartyAccountId) ?? null;
   const selectedWallet =
-    availableWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null;
+    availableWallets.find((wallet) => wallet.id === fields.sourceCustodyWalletId) ?? null;
 
   const assetOptions = useMemo<ComboboxOption[]>(
     () => recurringPaymentAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
@@ -395,7 +393,7 @@ export function RecurringPaymentCreateWorkspace({
   const currentStep = createSteps[stepIndex];
 
   useEffect(() => {
-    if (!fields.walletId) {
+    if (!fields.sourceCustodyWalletId) {
       return;
     }
 
@@ -408,7 +406,7 @@ export function RecurringPaymentCreateWorkspace({
     }
 
     setFields((current) => ({ ...current, token: nextToken }));
-  }, [assetOptions, fields.token, fields.walletId]);
+  }, [assetOptions, fields.token, fields.sourceCustodyWalletId]);
 
   const setField = <TKey extends keyof RecurringPaymentCreateFields>(
     key: TKey,
@@ -426,19 +424,21 @@ export function RecurringPaymentCreateWorkspace({
     }));
     setFormError(null);
     if (counterpartyId) {
-      void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }, t));
-      void preload(["counterparty-accounts", counterpartyId], () =>
+      void preload(paymentsQueryKeys.actionWallets(), () =>
+        fetchWallets({ includeBalances: true }, t)
+      );
+      void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId }), () =>
         fetchCounterpartyAccounts(counterpartyId, t)
       );
     }
   };
 
-  const selectWallet = (walletId: string) => {
-    const wallet = availableWallets.find((entry) => entry.walletId === walletId) ?? null;
+  const selectWallet = (sourceCustodyWalletId: string) => {
+    const wallet = availableWallets.find((entry) => entry.id === sourceCustodyWalletId) ?? null;
     const nextAssets = recurringPaymentAssetOptions(wallet, issuedTokenSymbolsByMint, t);
     setFields((current) => ({
       ...current,
-      walletId,
+      sourceCustodyWalletId,
       token: nextAssets.some((asset) => asset.value === current.token)
         ? current.token
         : (nextAssets[0]?.value ?? ""),
@@ -477,7 +477,7 @@ export function RecurringPaymentCreateWorkspace({
     }
     if (currentStep.id === "details") {
       return Boolean(
-        fields.walletId &&
+        fields.sourceCustodyWalletId &&
           fields.token &&
           selectedAssetBalance &&
           amountValidationError === null &&
@@ -547,7 +547,7 @@ export function RecurringPaymentCreateWorkspace({
     try {
       const recurringPayment = await createRecurringPayment(
         {
-          sourceWalletId: fields.walletId,
+          sourceCustodyWalletId: fields.sourceCustodyWalletId,
           counterpartyId: fields.counterpartyId,
           counterpartyAccountId: fields.counterpartyAccountId,
           token: selectedAssetBalance.mint,
@@ -716,10 +716,10 @@ export function RecurringPaymentCreateWorkspace({
         <div className="space-y-5">
           <Combobox
             label={t("DashboardPayments.recurring.fundingWallet")}
-            value={fields.walletId || null}
+            value={fields.sourceCustodyWalletId || null}
             onChange={selectWallet}
             options={availableWallets.map((wallet) => ({
-              value: wallet.walletId,
+              value: wallet.id,
               label: wallet.label ?? wallet.walletId,
               description: shortenAddress(wallet.publicKey),
             }))}
@@ -773,18 +773,18 @@ export function RecurringPaymentCreateWorkspace({
               onChange={(value) => setField("token", value)}
               options={assetSelectOptions}
               placeholder={
-                fields.walletId
+                fields.sourceCustodyWalletId
                   ? assetOptions.length === 0
                     ? t("DashboardPayments.recurring.noTokenBalances")
                     : t("DashboardPayments.recurring.selectAsset")
                   : t("DashboardPayments.recurring.selectWalletFirst")
               }
               searchable={false}
-              disabled={!fields.walletId || assetSelectOptions.length === 0}
+              disabled={!fields.sourceCustodyWalletId || assetSelectOptions.length === 0}
               size="xl"
             />
           </div>
-          {fields.walletId && assetOptions.length === 0 ? (
+          {fields.sourceCustodyWalletId && assetOptions.length === 0 ? (
             <FieldHint tone="error">
               {nonSolBalanceCount > 0
                 ? t("DashboardPayments.recurring.unresolvedTokenBalances")

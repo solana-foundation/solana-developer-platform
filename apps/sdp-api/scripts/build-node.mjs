@@ -33,19 +33,29 @@ function resolveOrcaWasm() {
 }
 
 /**
- * Resolve bigint-buffer's browser build, which is its pure-JavaScript
- * implementation and never attempts to load the vulnerable native binding.
+ * `@solana-program/token-2022`'s confidential-transfer helpers hardcode
+ * `import ... from "@solana/zk-sdk/bundler"` — a wasm-bindgen build meant for
+ * bundlers with a native `.wasm` asset loader (webpack, Vite), which esbuild
+ * doesn't have: it fails with "No loader is configured for '.wasm' files"
+ * rather than producing a broken runtime.
  *
- * The package is transitive, so walk the real klend -> Raydium -> buffer-layout
- * dependency path instead of relying on pnpm hoisting. If that graph moves, the
- * build fails here and the dependency-boundary check must be reviewed too.
+ * `@solana/zk-sdk` also ships a `/node` build that is functionally identical
+ * but loads its wasm the same way Orca's does above — `readFileSync` at
+ * module scope — so this plugin redirects the `/bundler` import to `/node`
+ * for every entry point that reaches it, and the wasm is then copied beside
+ * the bundle like Orca's.
  */
-function resolveSafeBigintBuffer() {
-  const kaminoAnchor = path.resolve("../../packages/sdp-kamino/package.json");
-  const klend = createRequire(kaminoAnchor).resolve("@kamino-finance/klend-sdk");
-  const raydium = createRequire(klend).resolve("@raydium-io/raydium-sdk-v2");
-  const bufferLayoutUtils = createRequire(raydium).resolve("@solana/buffer-layout-utils");
-  return createRequire(bufferLayoutUtils).resolve("bigint-buffer/dist/browser.js");
+function zkSdkNodeWasmPlugin(resolvedEntries) {
+  return {
+    name: "zk-sdk-node-wasm",
+    setup(build) {
+      build.onResolve({ filter: /^@solana\/zk-sdk\/bundler$/ }, (args) => {
+        const resolved = createRequire(args.importer).resolve("@solana/zk-sdk/node");
+        resolvedEntries.add(resolved);
+        return { path: resolved };
+      });
+    },
+  };
 }
 
 // CJS interop banner for ESM output: pg and other native-backed deps still
@@ -65,11 +75,13 @@ const entryPoints = {
   migrate: "scripts/migrate-postgres.mjs",
   // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
   "custody-backfill": "scripts/migrate-custody-encryption.ts",
-  // counterparty-pii-migrate.js performs the gated PII backfill/cutover lifecycle.
-  "counterparty-pii-migrate": "scripts/counterparty-pii-migrate.ts",
   // configure.js generates a self-hosted .env in the terminal from the prebuilt image.
   configure: "scripts/configure.ts",
+  // ephemeral-db.js creates/drops per-PR databases from the prebuilt image (PRO-1767).
+  "ephemeral-db": "scripts/ephemeral-db.mjs",
 };
+
+const zkSdkNodeEntries = new Set();
 
 await esbuild.build({
   entryPoints,
@@ -79,18 +91,13 @@ await esbuild.build({
   format: "esm",
   outdir: "dist",
   external: ["pg-native", "@sentry/profiling-node"],
-  // bigint-buffer@1.1.5 has no patched release. Its browser entry is the
-  // package's pure-JS implementation, so execution can be registered without
-  // placing the vulnerable native loader in any API artifact.
-  alias: { "bigint-buffer": resolveSafeBigintBuffer() },
   banner: { js: banner },
+  plugins: [zkSdkNodeWasmPlugin(zkSdkNodeEntries)],
 });
 
-// klend-sdk's dependency graph declares bigint-buffer@1.1.5, whose native
-// binding has GHSA-3gc7-fjrx-p6mg and no patched release. The alias above forces
-// its pure-JS browser implementation. Keep that replacement honest: fail the
-// build if a future graph change pulls the native loader into ANY shipped
-// JavaScript entry point.
+// The workspace override for bigint-buffer is pure JavaScript and has no native
+// loader. Keep that replacement honest: fail the build if a future graph change
+// pulls the vulnerable loader from GHSA-3gc7-fjrx-p6mg into any shipped entry.
 for (const entryPoint of Object.keys(entryPoints)) {
   const output = path.join("dist", `${entryPoint}.js`);
   // The safe browser implementation can retain a harmless generated variable
@@ -113,3 +120,15 @@ if (!existsSync(wasmSource)) {
   );
 }
 copyFileSync(wasmSource, path.join("dist", path.basename(wasmSource)));
+
+for (const zkSdkNodeEntry of zkSdkNodeEntries) {
+  const zkSdkWasmSource = path.join(path.dirname(zkSdkNodeEntry), "index_bg.wasm");
+  if (!existsSync(zkSdkWasmSource)) {
+    throw new Error(
+      `Expected the zk-sdk wasm binary at ${zkSdkWasmSource}. token-2022's confidential-transfer ` +
+        "helpers load it at module scope, so a missing file here means the built image dies on " +
+        "startup. Check whether @solana/zk-sdk moved or renamed its /node build's wasm output."
+    );
+  }
+  copyFileSync(zkSdkWasmSource, path.join("dist", path.basename(zkSdkWasmSource)));
+}

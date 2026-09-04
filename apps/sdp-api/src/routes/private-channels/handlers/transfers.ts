@@ -6,7 +6,10 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createChannelTransfer, mapPrivateChannelError } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import type { AppContext } from "../context";
-import { getPrivateChannelTransferRepository } from "../context";
+import {
+  getPrivateChannelTransferRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "../context";
 import {
   type createTransferBodySchema,
   transferChannelIdParamSchema,
@@ -50,18 +53,20 @@ export async function createPrivateChannelTransfer(
       projectId: context.projectId,
       userId: context.auth.userId,
     });
+    const projectRpc = await loadPrivateChannelProjectRpcClient(c);
     const transfer = await createChannelTransfer(c.env, {
       instance: context.instance,
       organizationId: context.auth.organizationId,
       projectId: context.projectId,
       channelId,
-      sdpUserId: context.actor.user_id,
+      sdpUserId: context.auth.id,
       wallet: context.wallet,
       signer: context.signer,
       recipient: context.recipient,
       amount: body.amount,
       mint: body.mint,
       gatewayAuth,
+      projectRpc,
     });
     return success(c, transfer);
   } catch (error) {

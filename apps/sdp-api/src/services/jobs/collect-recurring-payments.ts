@@ -2,7 +2,7 @@ import { getDb } from "@/db";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import { createSigningService } from "@/services/domain/signing.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
   DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
   parsePositiveIntegerConfig,
@@ -11,6 +11,7 @@ import {
   activateRecurringPayment,
   cancelRecurringPayment,
   collectRecurringPayment,
+  journalAutomatedCollectionFailure,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -26,6 +27,14 @@ export interface CollectDueRecurringPaymentsResult {
   failed: number;
   skipped: number;
 }
+
+type StaleRecurringPaymentUpdateRow = Pick<
+  PaymentRecurringPaymentRow,
+  "id" | "organization_id" | "project_id" | "updated_at"
+> & {
+  oldest_updated_at: string;
+  stale_count: number;
+};
 
 function batchSize(env: Env): number {
   return Math.min(
@@ -61,12 +70,43 @@ async function resolveSourceWallet(
   env: Env,
   row: PaymentRecurringPaymentRow
 ): Promise<CustodyWallet | null> {
-  const wallet = await createSigningService(env).getWalletById(
-    row.organization_id,
-    row.project_id,
-    row.source_wallet_id
-  );
-  if (!wallet || wallet.publicKey !== row.source_address) {
+  if (!row.source_custody_wallet_id) {
+    getLogger().warn(
+      {
+        organization_id: row.organization_id,
+        project_id: row.project_id,
+        recurring_payment_id: row.id,
+        reason: "unresolved_source_wallet",
+      },
+      "collectDueRecurringPayments: recurring payment has no exact source wallet"
+    );
+    return null;
+  }
+
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(env),
+    env,
+    new Map()
+  ).findOperationalWalletById({
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    custodyWalletId: row.source_custody_wallet_id,
+  });
+  if (
+    !wallet ||
+    wallet.walletId !== row.source_wallet_id ||
+    wallet.publicKey !== row.source_address
+  ) {
+    getLogger().warn(
+      {
+        organization_id: row.organization_id,
+        project_id: row.project_id,
+        recurring_payment_id: row.id,
+        custody_wallet_id: row.source_custody_wallet_id,
+        reason: "source_wallet_mismatch",
+      },
+      "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
+    );
     return null;
   }
   return wallet;
@@ -95,6 +135,19 @@ async function collectRow(
   try {
     const sourceWallet = await resolveSourceWallet(env, row);
     if (!sourceWallet) {
+      await journalAutomatedCollectionFailure({
+        env,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        recurringPayment: row,
+        initiatedByKeyId: null,
+        error: new AppError(
+          "CONFLICT",
+          row.source_custody_wallet_id
+            ? "Recurring payment source wallet does not match its pin"
+            : "Recurring payment source wallet is unresolved"
+        ),
+      });
       return "failed";
     }
     await collectRecurringPayment({
@@ -211,6 +264,43 @@ export async function collectDueRecurringPayments(
     addOutcome(result, await recoverLifecycleRow(env, row), "recovered");
   }
 
+  // Report only. Retrying the same update recovers it; automatic replay is
+  // separate reliability work because an on-chain stage may already have run.
+  const staleUpdatePayments = await getDb(env)
+    .prepare(
+      `SELECT organization_id,
+              project_id,
+              id,
+              updated_at,
+              COUNT(*) OVER () AS stale_count,
+              MIN(updated_at) OVER () AS oldest_updated_at
+         FROM payment_recurring_payments
+      WHERE status = 'updating'
+        AND updated_at <= ?
+      ORDER BY updated_at DESC, id DESC
+      LIMIT ?`
+    )
+    .bind(staleBefore, limit)
+    .all<StaleRecurringPaymentUpdateRow>();
+  const newestStaleUpdate = staleUpdatePayments.rows[0];
+  if (newestStaleUpdate) {
+    getLogger().warn(
+      {
+        oldest_updated_at: newestStaleUpdate.oldest_updated_at,
+        reason: "stale_recurring_payment_updates",
+        recurring_payments: staleUpdatePayments.rows.map((row) => ({
+          organization_id: row.organization_id,
+          project_id: row.project_id,
+          recurring_payment_id: row.id,
+          updated_at: row.updated_at,
+        })),
+        stale_count: newestStaleUpdate.stale_count,
+        truncated: newestStaleUpdate.stale_count > staleUpdatePayments.rows.length,
+      },
+      "collectDueRecurringPayments: recurring payment updates are stale; collections stay paused until callers retry the same updates"
+    );
+  }
+
   const staleCollectionPayments = await rowsForQuery(
     env,
     `SELECT *
@@ -230,10 +320,13 @@ export async function collectDueRecurringPayments(
           AND a.project_id = rp.project_id
           AND a.subscription_id = rp.subscription_id
           AND a.due_at = rp.next_collection_due_at
-        WHERE rp.status = 'active'
+        WHERE rp.status IN ('active', 'canceling', 'canceled')
           AND rp.next_collection_due_at IS NOT NULL
           AND a.status IN ('processing', 'confirmed')
-          AND (a.status = 'confirmed' OR a.updated_at <= ?)
+          AND (
+            (a.status = 'processing' AND a.updated_at <= ?)
+            OR (rp.status = 'active' AND a.status = 'confirmed')
+          )
        ) recoverable_attempts
       WHERE attempt_rank = 1
       ORDER BY attempt_updated_at ASC

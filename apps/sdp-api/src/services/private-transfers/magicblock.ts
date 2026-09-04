@@ -176,7 +176,8 @@ function parseUnsignedTransaction(payload: unknown): MagicBlockUnsignedTransacti
     typeof record.transactionBase64 !== "string" ||
     typeof record.recentBlockhash !== "string" ||
     typeof record.lastValidBlockHeight !== "number" ||
-    !Number.isInteger(record.lastValidBlockHeight) ||
+    !Number.isSafeInteger(record.lastValidBlockHeight) ||
+    record.lastValidBlockHeight <= 0 ||
     typeof record.instructionCount !== "number" ||
     !Number.isInteger(record.instructionCount) ||
     !Array.isArray(record.requiredSigners) ||

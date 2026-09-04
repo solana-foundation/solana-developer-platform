@@ -3,6 +3,7 @@
  */
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
+import type { CountryCode } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 
@@ -207,7 +208,7 @@ export function notFound(resource?: string): AppError {
 export function walletNotFound(): AppError {
   return new AppError(
     "NOT_FOUND",
-    "Wallet not found. Pass the `walletId` field returned by GET /v1/wallets — the wallet record `id` and the public key are not accepted."
+    "Wallet not found. Verify the wallet identifier supplied to this endpoint."
   );
 }
 
@@ -287,6 +288,24 @@ export function counterpartyNotProvisioned(
 }
 
 /**
+ * Creates the error returned when more than one active external account matches a payout corridor.
+ *
+ * @param provider - Ramp provider owning the external accounts.
+ * @param fiatCurrency - Fiat currency of the payout corridor.
+ * @param destinationCountry - Destination country of the payout corridor.
+ * @returns A bad-request error describing the ambiguous corridor.
+ */
+export function counterpartyExternalAccountAmbiguous(
+  provider: RampProviderId,
+  fiatCurrency: string,
+  destinationCountry: CountryCode
+): AppError {
+  return badRequest(
+    `Counterparty has multiple active ${provider} external accounts for ${fiatCurrency} to ${destinationCountry}; explicit external-account selection is required.`
+  );
+}
+
+/**
  * Resolves a promise whose expected miss is signalled by throwing a specific
  * error class.
  *
@@ -307,4 +326,27 @@ export async function nullOnExpected<T>(
     }
     throw err;
   }
+}
+
+export function redactErrorForCapture(err: Error): Error {
+  const sanitized = new Error(redactCredentialString(err.message));
+  sanitized.name = err.name;
+  sanitized.stack = err.stack ? redactCredentialString(err.stack) : undefined;
+
+  const source = err as Error & {
+    context?: unknown;
+    cause?: unknown;
+  };
+  const target = sanitized as Error & {
+    context?: unknown;
+    cause?: unknown;
+  };
+  if (source.context !== undefined) {
+    target.context = redactCredentialSecrets(source.context);
+  }
+  if (source.cause !== undefined) {
+    target.cause = redactCredentialSecrets(source.cause);
+  }
+
+  return sanitized;
 }

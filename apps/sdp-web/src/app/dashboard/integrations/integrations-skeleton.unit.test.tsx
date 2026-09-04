@@ -28,6 +28,20 @@ describe("integration detail skeleton", () => {
     expect(markup.match(/rounded-2xl/g)).toHaveLength(5);
   });
 
+  it("lets the header wrap the way the loaded one does", () => {
+    // The loaded header is `flex flex-wrap` with no fixed height, so on a
+    // narrow viewport it wraps and grows. A skeleton pinned to one row held
+    // 104px while the page it handed over to came in at 150px, which is a jump
+    // from the element whose whole job is to stop the page jumping.
+    const markup = renderToStaticMarkup(<IntegrationDetailSkeleton />);
+    const header = markup.slice(markup.indexOf("<div", markup.indexOf("data-loading-layout")));
+
+    expect(header).toContain("flex-wrap");
+    // A floor, not a fixed height: it still reserves the desktop row.
+    expect(header).toContain("min-h-[104px]");
+    expect(header).not.toContain("h-[104px] items-center");
+  });
+
   it("reserves one catalog section per family the page renders", () => {
     const markup = renderToStaticMarkup(<IntegrationsSkeleton />);
     // A fixed count drifted to half the page once already.
@@ -44,11 +58,13 @@ describe("integration detail skeleton", () => {
   it("reserves a card per provider the catalog actually lists", () => {
     // Four per section left the placeholder 22% shorter than the page: custody
     // alone renders ten. Measured at 1832px page against 1820px skeleton.
+    const privacyCards = 1;
     const expected =
       CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length +
       (ORGANIZATION_RPC_PROVIDERS.length - 1) +
       RAMP_PROVIDERS.length +
-      COMPLIANCE_PROVIDERS.length;
+      COMPLIANCE_PROVIDERS.length +
+      privacyCards;
 
     const markup = renderToStaticMarkup(<IntegrationsSkeleton />);
     expect(markup.match(/h-\[120px\]/g)).toHaveLength(expected);

@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
 import type { PrivateChannelBalance } from "@sdp/types";
 import {
   type Address,
@@ -45,7 +46,6 @@ const CHANNEL_ID = "pch_transfer_test";
 const RECIPIENT_PC_USER_ID = "pcu_transfer_recipient";
 const RECIPIENT_VERIFIED_WALLET_ID = "pcvw_transfer_recipient";
 const GATEWAY_URL = "https://gateway.example";
-const CHAIN_RPC_URL = "https://api.devnet.solana.com";
 const MINT = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 const SIGNATURE = "1".repeat(64) as Signature;
 const GATEWAY_RPC = { kind: "gateway-rpc" };
@@ -88,7 +88,8 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     instance: {
       id: INSTANCE_ID,
       gatewayUrl: GATEWAY_URL,
-      chainRpcUrl: CHAIN_RPC_URL,
+      escrowProgramId: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
+      escrowInstanceAddr: senderSigner.address,
     },
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -104,6 +105,16 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     },
     amount: "1.25",
     gatewayAuth: auth,
+    projectRpc: {
+      cluster: "devnet" as const,
+      rpc: {
+        getAccountInfo: () => ({
+          send: async () => ({ value: { owner: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } }),
+        }),
+      } as never,
+      target: {} as never,
+      probe: vi.fn(),
+    },
     ...overrides,
   };
 }

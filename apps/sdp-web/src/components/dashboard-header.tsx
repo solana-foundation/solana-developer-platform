@@ -1,16 +1,16 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
+import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NotificationBell } from "@/components/notification-bell";
-import { Badge } from "@/components/ui/badge";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 import { webhooksOriginHref, webhooksOriginTokenId } from "@/lib/webhooks-origin";
 
@@ -23,6 +23,8 @@ type DashboardPageConfig = {
    */
   titlePosition?: "left" | "center";
   headerTabs?: DashboardHeaderTabsConfig;
+  routeTabs?: DashboardRouteTabsConfig;
+  headerVariant?: "default" | "markets";
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
@@ -40,6 +42,7 @@ type DashboardTopBarProps = {
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
+  alignTitleWithTabs?: boolean;
   // Notifications ship with the asset-profiles feature (its only producer today).
   showNotifications?: boolean;
 };
@@ -174,25 +177,15 @@ export function DashboardTopBar({
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
+  alignTitleWithTabs = hasHeaderTabs,
   showNotifications = false,
 }: DashboardTopBarProps) {
-  const t = useTranslations();
-  const { sdpEnvironment } = useDashboardWorkspace();
-  const isSandbox = sdpEnvironment === "sandbox";
-  const sandboxBadge = isSandbox ? (
-    <>
-      <span aria-hidden="true" className="hidden h-4 w-px bg-fill-strong sm:block" />
-      <Badge className="hidden sm:inline-flex">{t("Shared.dashboardShell.sandbox")}</Badge>
-    </>
-  ) : null;
   const centersPageTitle =
     !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
       {showNotifications ? <NotificationBell /> : null}
-      <UserButton />
-      {sandboxBadge}
     </>
   );
 
@@ -218,7 +211,7 @@ export function DashboardTopBar({
     <StandardDashboardTopBar
       hideTitle={hideTitle}
       title={title}
-      alignTitleWithTabs={hasHeaderTabs}
+      alignTitleWithTabs={alignTitleWithTabs}
       leadingContent={
         <>
           <SidebarToggle
@@ -265,7 +258,7 @@ function privateChannelsSubPageTitle(
   segment: string
 ): string {
   switch (segment) {
-    case "instance":
+    case "setup":
       return t("DashboardPrivateChannels.tabs.instance");
     case "channels":
       return t("DashboardPrivateChannels.tabs.channels");
@@ -295,32 +288,87 @@ function getPrivateChannelsRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (!pathname.startsWith("/dashboard/payments/private-channels")) {
+  if (!pathname.startsWith("/dashboard/integrations/private-channels")) {
     return null;
   }
-  const isHub =
-    pathname === "/dashboard/payments/private-channels" ||
-    pathname.startsWith("/dashboard/payments/private-channels/overview");
+  if (pathname === "/dashboard/integrations/private-channels") {
+    return {
+      title: t("Shared.dashboardShell.integrations"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/integrations/private-channels/setup") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: "/dashboard/integrations/private-channels",
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  const privateChannelsSegments = pathname.split("/");
+  const instanceId = privateChannelsSegments[4];
+  const instanceRoute =
+    instanceId && !["overview", "setup", "channels", "members", "wallets"].includes(instanceId);
+  const instanceSubpage = privateChannelsSegments[5];
+  const instanceNestedPage = privateChannelsSegments[6];
+  if (instanceRoute && instanceSubpage === "setup") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: privateChannelsInstancePath(instanceId),
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (instanceRoute && instanceSubpage === "channels" && instanceNestedPage === "new") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.directory.setupChannel"),
+      backHref: privateChannelsInstancePath(instanceId),
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (instanceRoute && instanceSubpage === "channels") {
+    return {
+      title: t("Shared.dashboardShell.privateChannels"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: privateChannelsInstancePath(instanceId),
+        label: t("Shared.dashboardShell.backToPrivateChannels"),
+      },
+    };
+  }
+  if (instanceRoute && !instanceSubpage) {
+    return {
+      title: t("Shared.dashboardShell.privateChannels"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
+    };
+  }
+  const isHub = pathname.startsWith("/dashboard/integrations/private-channels/overview");
   if (isHub) {
     return {
       title: t("Shared.dashboardShell.privateChannels"),
       contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/integrations",
+        label: t("Shared.integrations.backToIntegrations"),
+      },
     };
   }
-  // The segment layout draws the Private Channels tab strip — and its bottom
-  // rule — directly under the top bar. `backAction` would add the top bar's own
-  // divider above it and double the rule, so the back link rides as plain
-  // leading content instead, the same way header-tab pages suppress that border.
   return {
     title: privateChannelsSubPageTitle(t, pathname.split("/")[4] ?? ""),
     contentWidthClass: "max-w-none",
-    topBarLeadingContent: (
-      <HeaderBackAction
-        href="/dashboard/payments/private-channels/overview"
-        label={t("Shared.dashboardShell.backToPrivateChannels")}
-        compactOnMobile
-      />
-    ),
+    backAction: {
+      href: "/dashboard/integrations/private-channels/overview",
+      label: t("Shared.dashboardShell.backToPrivateChannels"),
+    },
   };
 }
 
@@ -353,21 +401,41 @@ function getMarketsRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (pathname === "/dashboard/markets/treasury-solutions") {
+  if (pathname === "/dashboard/markets") {
     return {
-      title: t("Shared.dashboardShell.treasurySolutions"),
+      title: t("Shared.dashboardShell.markets"),
       titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname === "/dashboard/markets/earn") {
+  if (
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram
+  ) {
     return {
-      title: t("Shared.dashboardShell.earnProgram"),
-      titlePosition: "center",
+      title: t("Shared.dashboardShell.markets"),
+      titlePosition: "left",
+      headerVariant: "markets",
+      routeTabs: {
+        ariaLabel: t("Shared.dashboardShell.markets"),
+        tabs: [
+          {
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
+            label: t("Shared.dashboardShell.treasurySolutions"),
+          },
+          {
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+            label: t("Shared.dashboardShell.earnProgram"),
+          },
+        ],
+      },
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname === "/dashboard/markets/earn/button-builder") {
+  if (
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`
+  ) {
     return {
       title: t("Shared.dashboardShell.configureEarnButton"),
       titlePosition: "center",
@@ -565,6 +633,7 @@ function getIntegrationsPageConfig(
           { id: "rpc", label: t("Shared.integrations.rpcTitle") },
           { id: "ramps", label: t("Shared.integrations.rampsTitle") },
           { id: "compliance", label: t("Shared.integrations.complianceTitle") },
+          { id: "privacy", label: t("Shared.integrations.privacyTitle") },
         ],
         hideOnMobile: false,
       },

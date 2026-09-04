@@ -192,7 +192,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update wallet policy",
     operationId: "updatePaymentWalletPolicy",
     description:
-      "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
+      "Updates payment policy rules for a custody wallet, activating a new control-profile revision. Supply expectedRevisionId to reject the update with 409 when another update has activated a revision since the policy was read. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -207,7 +207,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Wallet policy updated",
         content: jsonContent(walletPolicyResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -222,7 +222,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original transfer, while reusing the key for a different request returns 409.",
+      "Executes a transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -236,7 +236,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer executed",
         content: jsonContent(transferResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -246,7 +246,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "List transfers",
     operationId: "listPaymentTransfers",
-    description: "Lists payment transfers for the authenticated organization or project scope.",
+    description:
+      "Lists persisted payment transfers for the authenticated scope. Set custodyWalletId to select one exact SDP wallet; observed address history is opt-in with includeObserved=true.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -257,7 +258,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer list",
         content: jsonContent(transferListResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -289,7 +290,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -314,7 +315,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -349,7 +350,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch list",
         content: jsonContent(transferBatchListResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -480,7 +481,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
     description:
-      "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state.",
+      "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -502,7 +503,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
     description:
-      "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time.",
+      "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -510,7 +511,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Recurring payment collected",
+        description: "Recurring payment collection result",
         content: jsonContent(paymentRecurringPaymentCollectionResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),

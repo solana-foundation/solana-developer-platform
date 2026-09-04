@@ -4,8 +4,8 @@ import type { SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { AppContext, WebhookProcessor } from "./processor";
-import { applyRampSettlementEvent } from "./settlements";
 
 const STRIPE_SESSION_STATUS = {
   requires_payment: "awaiting_payment",
@@ -180,6 +180,6 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
       getLogger().info(`[stripe webhook] ignored event: ${event.reason}`);
       return;
     }
-    await applyRampSettlementEvent(c, event);
+    await applyRampSettlementEvent(c.env, event);
   }
 }

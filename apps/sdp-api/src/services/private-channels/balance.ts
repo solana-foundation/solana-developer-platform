@@ -14,14 +14,14 @@
 
 import { getChannelTokenBalance } from "@sdp/private-channels";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { PrivateChannelBalance, PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelBalance, PrivateChannelInstance, SolanaCluster } from "@sdp/types";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
-import { inferCluster, knownMintToken, resolveChannelToken } from "./mint";
+import { knownMintToken, resolveRegisteredChannelToken } from "./mint";
 
-/** The instance fields the balance read needs: gateway URL + a cluster hint. */
-type BalanceInstance = Pick<PrivateChannelInstance, "gatewayUrl" | "chainRpcUrl">;
+/** The instance fields the balance read needs. */
+type BalanceInstance = Pick<PrivateChannelInstance, "gatewayUrl">;
 
 /**
  * Read an owner's channel token balance through the gateway → wire DTO.
@@ -36,11 +36,20 @@ export async function getChannelBalance(
     owner,
     mint,
     auth,
-  }: { instance: BalanceInstance; owner: string; mint?: string; auth: SpcAuthContext }
+    cluster,
+  }: {
+    instance: BalanceInstance;
+    owner: string;
+    mint?: string;
+    auth: SpcAuthContext;
+    cluster: SolanaCluster;
+  }
 ): Promise<PrivateChannelBalance> {
-  const cluster = inferCluster(instance.chainRpcUrl);
   const ownerAddress = assertValidAddress(owner, "owner");
-  const mintAddress = assertValidAddress(mint ?? resolveChannelToken(cluster).mint, "mint");
+  const mintAddress = assertValidAddress(
+    mint ?? resolveRegisteredChannelToken(cluster).mint,
+    "mint"
+  );
 
   // This stays a GENERAL read: an explicitly-passed mint need not be on the
   // instance's allowlist, unlike the write paths. The allowlist only supplies the

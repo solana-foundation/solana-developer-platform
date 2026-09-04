@@ -18,9 +18,9 @@
  *     `TRANSFER_STUCK_WARNING` (debounced via `context.lastStuckWarningAt`),
  *     never auto-`failed` — the balance is already burned.
  *
- * The reconciler always reads the CURRENT instance row for RPC endpoints, so an
- * operator repointing a stale endpoint doesn't strand in-flight intents. The
- * audit context on each withdrawal is never consulted here.
+ * The release reconciler resolves the project's CURRENT RPC connection each
+ * tick, so provider changes and credential rotations apply to in-flight intents.
+ * The audit context on each withdrawal is never consulted here.
  *
  * All status transitions are compare-and-swap (`expectedStatus`) so a concurrent
  * worker can't regress state. Release attribution is by content
@@ -44,7 +44,12 @@ import {
   type PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
-import { inferCluster, knownMintToken } from "@/services/private-channels/mint";
+import { knownMintToken } from "@/services/private-channels/mint";
+import {
+  loadProjectRpcClient,
+  type PrivateChannelProjectRpcClient,
+} from "@/services/private-channels/project-rpc";
+import { describeTransactionErr } from "@/services/private-channels/tx-error";
 import { emitWithdrawalEvent } from "@/services/private-channels/withdraw-events";
 import type { Env } from "@/types/env";
 
@@ -67,6 +72,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   }
 
   const instances = new Map<string, PrivateChannelInstanceRow | null>();
+  const projectRpcs = new Map<string, Promise<PrivateChannelProjectRpcClient>>();
   const loadInstance = async (id: string) => {
     if (instances.has(id)) {
       return instances.get(id) ?? null;
@@ -74,6 +80,18 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
     const row = await instanceRepo.getById(id);
     instances.set(id, row);
     return row;
+  };
+  const loadProjectRpc = (instance: PrivateChannelInstanceRow) => {
+    const key = `${instance.organization_id}:${instance.project_id}`;
+    const cached = projectRpcs.get(key);
+    if (cached) return cached;
+    const loaded = loadProjectRpcClient({
+      env,
+      organizationId: instance.organization_id,
+      projectId: instance.project_id,
+    });
+    projectRpcs.set(key, loaded);
+    return loaded;
   };
 
   const now = Date.now();
@@ -121,20 +139,29 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
     }
   }
 
-  for (const group of groups.values()) {
-    try {
-      await reconcileReleaseGroup(env, repo, observationRepo, group, now);
-    } catch (err) {
-      getLogger().error(
-        {
-          instanceId: group.instance.id,
-          mint: group.mint,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "trackPendingWithdrawals: failed to reconcile release group"
-      );
-    }
-  }
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      try {
+        await reconcileReleaseGroup(
+          env,
+          repo,
+          observationRepo,
+          group,
+          await loadProjectRpc(group.instance),
+          now
+        );
+      } catch (err) {
+        getLogger().error(
+          {
+            instanceId: group.instance.id,
+            mint: group.mint,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "trackPendingWithdrawals: failed to reconcile release group"
+        );
+      }
+    })
+  );
 }
 
 interface ReleaseGroup {
@@ -245,7 +272,9 @@ async function reconcileSubmitted(
   }
 
   if (status.err) {
-    const reason = JSON.stringify(status.err);
+    // Verbatim by policy (tx-error.ts: operators need the real variant), but a
+    // bare JSON.stringify throws on bigint-carrying errors.
+    const reason = describeTransactionErr(status.err, "transaction failed");
     const failed = await repo.updateWithdrawal({
       id: withdrawal.id,
       status: "failed",
@@ -295,6 +324,7 @@ async function reconcileReleaseGroup(
   repo: PrivateChannelWithdrawalRepository,
   observationRepo: PrivateChannelSettlementObservationRepository,
   group: ReleaseGroup,
+  projectRpc: PrivateChannelProjectRpcClient,
   now: number
 ): Promise<void> {
   const withdrawals = group.withdrawals;
@@ -302,7 +332,7 @@ async function reconcileReleaseGroup(
     return;
   }
 
-  const cluster = inferCluster(group.instance.chain_rpc_url);
+  const cluster = projectRpc.cluster;
   const mint = address(group.mint);
 
   // Content matching needs this mint's own scale AND its owning token program: the
@@ -322,8 +352,7 @@ async function reconcileReleaseGroup(
     tokenProgram,
   });
 
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: group.instance.chain_rpc_url });
-  const sigInfos = await solanaRpc.getSignaturesForAddress(rpc, vaultAta, {
+  const sigInfos = await solanaRpc.getSignaturesForAddress(projectRpc.rpc, vaultAta, {
     limit: RELEASE_SCAN_LIMIT,
   });
 
@@ -331,7 +360,7 @@ async function reconcileReleaseGroup(
   // transfers keep their index so batched releases don't collide on the
   // settlement_observations PK.
   const releases = await collectReleases(
-    rpc,
+    projectRpc.rpc,
     sigInfos.filter((s) => !s.err).map((s) => ({ signature: s.signature, blockTime: s.blockTime }))
   );
 

@@ -1,1 +1,25 @@
-*    @solana-foundation/sdp-maintainers
+*                                                       @solana-foundation/foundation-product-team
+
+# Custody and signing
+/packages/sdp-custody/                                  @solana-foundation/foundation-product-team
+/apps/sdp-api/src/services/adapters/signing/            @solana-foundation/foundation-product-team
+/apps/sdp-api/src/services/domain/signing/              @solana-foundation/foundation-product-team
+
+# Payments and ramps
+/packages/sdp-payments/                                 @solana-foundation/foundation-product-team
+/apps/sdp-api/src/routes/payments/                      @solana-foundation/foundation-product-team
+
+# Issuance
+/packages/sdp-issuance/                                 @solana-foundation/foundation-product-team
+/apps/sdp-api/src/routes/issuance/                      @solana-foundation/foundation-product-team
+
+# Authentication and authorization
+/apps/sdp-api/src/middleware/                           @solana-foundation/foundation-product-team
+/apps/sdp-api/src/lib/auth.ts                           @solana-foundation/foundation-product-team
+
+# Database migrations
+/apps/sdp-api/src/db/migrations/                        @solana-foundation/foundation-product-team
+
+# CI/CD, release, and deploy machinery
+/.github/                                               @solana-foundation/foundation-product-team
+/scripts/                                               @solana-foundation/foundation-product-team

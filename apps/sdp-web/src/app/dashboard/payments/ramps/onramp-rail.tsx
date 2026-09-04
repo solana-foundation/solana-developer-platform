@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { OnrampStepContent } from "./components/onramp-step-content";
+import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
+import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OnrampWizard, useOnrampWizard } from "./hooks/use-onramp-wizard";
-import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 import type { RailProps } from "./ramp-action-page";
+import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";
 
 function onrampPrimaryLabel(
@@ -35,7 +38,7 @@ function onrampPrimaryAction(
 ): () => void {
   switch (true) {
     case verificationUrl !== undefined:
-      return () => window.open(verificationUrl, "_blank", "noopener");
+      return () => openExternalRampUrl(verificationUrl);
     case wizard.isLastStep:
       return wizard.finish;
     default:
@@ -46,6 +49,7 @@ function onrampPrimaryAction(
 export function OnrampRail({
   wallets,
   walletsError,
+  enabledRampProviders,
   rampProviderAccess,
   counterpartiesResult,
   selectedCounterparty,
@@ -59,6 +63,7 @@ export function OnrampRail({
   const wizard = useOnrampWizard({
     wallets,
     walletsError,
+    enabledRampProviders,
     rampProviderAccess,
     counterpartiesResult,
     selectedCounterparty,
@@ -75,15 +80,25 @@ export function OnrampRail({
   const verificationPending =
     wizard.currentStepId === "PROVIDER" &&
     (wizard.onboarding?.status === "customer_verifying" ||
+      wizard.onboarding?.status === "customer_funding_account_provisioning" ||
       wizard.onboarding?.status === "funding_account_provisioning");
 
-  const transferTerminal = wizard.transferStatus
-    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
-    : false;
+  const summaryDetails = [
+    ...preStepSummaryDetails(t, counterpartyName, methodLabel),
+    ...wizard.summaryDetails,
+  ];
+  const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
+  const showInlineStatus = wizard.onTransactionStage && Boolean(wizard.quote);
+  const transferState = getRampTransferState(wizard.transferStatus?.status);
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
+      completionTitle={
+        wizard.transferStatus?.status === "completed"
+          ? t("DashboardPayments.ramps.depositComplete")
+          : undefined
+      }
       primaryDisabled={
         wizard.hostedQuoteLoading ||
         verificationPending ||
@@ -98,20 +113,32 @@ export function OnrampRail({
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
       summary={
-        <WizardSummaryList
-          details={[
-            ...preStepSummaryDetails(t, counterpartyName, methodLabel),
-            ...wizard.summaryDetails,
-          ]}
-        />
+        wizard.fields.provider === null ? undefined : <WizardSummaryList details={summaryDetails} />
+      }
+      summaryTrigger={
+        wizard.fields.provider === null ? undefined : (
+          <ProviderSummaryTrigger provider={wizard.fields.provider} />
+        )
+      }
+      header={
+        showInlineStatus ? (
+          <RampStatusInline
+            direction="onramp"
+            hosted={hostedStage}
+            transfer={wizard.transferStatus}
+          />
+        ) : undefined
       }
       secondaryLabel={
-        wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined
+        wizard.onTransactionStage && transferState.cancelable
+          ? t("DashboardPayments.counterparty.cancel")
+          : undefined
       }
-      confirmSecondary={wizard.onTransactionStage}
-      secondaryDisabled={wizard.isCanceling}
+      confirmSecondary={wizard.onTransactionStage && transferState.cancelable}
+      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
+      hideSecondary={wizard.onTransactionStage && !transferState.cancelable}
       footerActions={
-        transferTerminal ? (
+        transferState.terminal ? (
           <Button asChild type="button">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               {t("DashboardPayments.goToTransaction")}

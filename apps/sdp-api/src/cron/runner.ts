@@ -16,30 +16,52 @@ import {
   isPrivateChannelsEnabled,
 } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
+import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
-import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
-import { EARN_METRICS_REFRESH_CRON, runEarnMetricsRefresh } from "./earn-metrics-refresh";
+import {
+  EARN_CATALOGUE_SYNC_CRON,
+  EARN_CATALOGUE_SYNC_MONITOR,
+  runEarnCatalogueSync,
+} from "./earn-catalogue-sync";
+import {
+  EARN_METRICS_REFRESH_CRON,
+  EARN_METRICS_REFRESH_MONITOR,
+  runEarnMetricsRefresh,
+} from "./earn-metrics-refresh";
 import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
-import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
+import {
+  PENDING_DEPOSITS_CRON,
+  PENDING_DEPOSITS_MONITOR,
+  runPendingDepositsReconciliation,
+} from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import {
   PENDING_WITHDRAWALS_CRON,
+  PENDING_WITHDRAWALS_MONITOR,
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import {
+  REVOKED_API_KEY_CACHE_CRON,
+  runRevokedApiKeyCacheReconciliation,
+} from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
-import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
+import { runWithCronRunEvent } from "./run-event";
+import {
+  runWorkflowExecutions,
+  WORKFLOW_EXECUTIONS_CRON,
+  WORKFLOW_EXECUTIONS_MONITOR,
+} from "./workflow-executions";
 import {
   runWorkflowSecretRetirements,
   WORKFLOW_SECRET_RETIREMENTS_CRON,
@@ -77,10 +99,28 @@ function isCronDisabled(env: Env): boolean {
   );
 }
 
+const IN_PROCESS_CHECKIN_MARGIN_MINUTES = 3;
+
+function withCheckinMargin(observability: Observability): Observability {
+  return {
+    captureException: (error) => observability.captureException(error),
+    withScope: (callback) => observability.withScope(callback),
+    withMonitor: (slug, work, options) =>
+      observability.withMonitor(slug, () => runWithCronRunEvent(slug, work), {
+        checkinMargin: IN_PROCESS_CHECKIN_MARGIN_MINUTES,
+        ...options,
+      }),
+  };
+}
+
 export function startCron(deps: CronDeps): CronHandle | null {
   if (isCronDisabled(deps.env)) {
     return null;
   }
+  deps = {
+    ...deps,
+    observability: withCheckinMargin(deps.observability ?? noopObservability),
+  };
 
   // node-cron's `task.stop()` halts future scheduling but doesn't promise
   // to interrupt a tick already mid-flight. A `stopping` flag short-circuits
@@ -89,6 +129,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
   let stopping = false;
 
   const tasks: ScheduledTask[] = [];
+
+  // Feature-gated ticks keep emitting their sdp_cron_run proof-of-life while
+  // the flag is off, mirroring the managed job (job.ts): the staleness alert
+  // counts distinct monitors per window, so a disabled feature must read as a
+  // healthy no-op, not as the silence that means the scheduler died.
+  const scheduleDisabledTickProofOfLife = (cron: string, monitor: string) => {
+    tasks.push(
+      schedule(cron, () => {
+        if (stopping) {
+          return;
+        }
+        deps.bg.run(runWithCronRunEvent(monitor, async () => undefined));
+      })
+    );
+  };
 
   tasks.push(
     schedule(APPROVED_WALLET_OPERATIONS_CRON, () => {
@@ -109,6 +164,22 @@ export function startCron(deps: CronDeps): CronHandle | null {
         return;
       }
       runPendingTransfersReconciliation({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  // Unconditional: repairs cached credentials for keys Postgres already
+  // revoked. Feature-gating this would leave deployments without the only
+  // recovery path for a revocation whose cache write failed post-commit.
+  tasks.push(
+    schedule(REVOKED_API_KEY_CACHE_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRevokedApiKeyCacheReconciliation({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,
@@ -142,6 +213,8 @@ export function startCron(deps: CronDeps): CronHandle | null {
         });
       })
     );
+  } else {
+    scheduleDisabledTickProofOfLife(WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR);
   }
 
   if (isPrivateChannelsEnabled(deps.env)) {
@@ -169,6 +242,9 @@ export function startCron(deps: CronDeps): CronHandle | null {
         });
       })
     );
+  } else {
+    scheduleDisabledTickProofOfLife(PENDING_DEPOSITS_CRON, PENDING_DEPOSITS_MONITOR);
+    scheduleDisabledTickProofOfLife(PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR);
   }
 
   // Cheap to schedule unconditionally: the job early-returns unless the rings
@@ -215,6 +291,9 @@ export function startCron(deps: CronDeps): CronHandle | null {
         });
       })
     );
+  } else {
+    scheduleDisabledTickProofOfLife(EARN_CATALOGUE_SYNC_CRON, EARN_CATALOGUE_SYNC_MONITOR);
+    scheduleDisabledTickProofOfLife(EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR);
   }
 
   // Deliberately outside every feature gate, and in particular outside the asset-profiles

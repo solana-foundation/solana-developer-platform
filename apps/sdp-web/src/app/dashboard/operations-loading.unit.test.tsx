@@ -92,21 +92,10 @@ describe("operations route loading states", () => {
     ).toBe(true);
   });
 
-  it("draws the issuance overview skeleton in the stored grid ⇄ list view", () => {
-    const grid = renderToStaticMarkup(<IssuancePageSkeleton assetProfilesEnabled view="grid" />);
-    const list = renderToStaticMarkup(<IssuancePageSkeleton assetProfilesEnabled view="list" />);
-
-    expect([...grid.matchAll(/data-loading-card="issuance-token"/g)]).toHaveLength(6);
-    expect(grid).not.toContain('data-loading-row="issuance-token"');
-    expect([...list.matchAll(/data-loading-row="issuance-token"/g)]).toHaveLength(6);
-    expect(list).not.toContain('data-loading-card="issuance-token"');
-    expect(list).toContain('data-loading-view="list"');
-  });
-
-  it("falls back to the grid skeleton when no view preference is stored", () => {
+  it("draws the issuance overview skeleton as a grid of cards", () => {
     const markup = renderToStaticMarkup(<IssuancePageSkeleton assetProfilesEnabled />);
 
-    expect(markup).toContain('data-loading-view="grid"');
+    expect([...markup.matchAll(/data-loading-card="issuance-token"/g)]).toHaveLength(6);
   });
 
   it("reserves the settled issuance-detail tab rail geometry", () => {
@@ -127,33 +116,19 @@ describe("operations route loading states", () => {
   it("reserves the settled issuance-detail header shell, mark and actions", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
 
-    // The card the settled header is, with the mark clipped by its own edge.
-    expect(markup).toContain("relative isolate overflow-hidden rounded-2xl");
-    // 208px hanging 40px off the left edge above lg; the same mark as a 56px
-    // avatar in flow below it, so neither width is left unreserved.
-    expect(markup).toContain("size-52");
-    expect(markup).toContain("-left-10");
-    expect(markup).toMatch(/size-14[^"]*rounded-full lg:hidden/);
-    // The ticker, beside the mark above lg and under the name below it.
-    expect(markup).toContain("left-[172px]");
-    expect(markup).toMatch(/h-8 w-20 rounded-full lg:hidden/);
-    // Actions float into the far corner above lg, in flow under a divider below.
-    expect(markup).toContain("border-border-subtle pt-4 lg:hidden");
-    expect(markup).toMatch(/absolute right-5 bottom-5 hidden[^"]*lg:flex/);
+    // The 44px mark beside the name and ticker chip, in the settled header's card.
+    expect(markup).toMatch(/size-11[^"]*rounded-full/);
+    expect(markup).toContain("h-8 w-52 max-w-full");
+    expect(markup).toContain("h-5 w-16 rounded-md");
+    // The two action buttons in the top-right corner.
+    expect(markup.match(/h-8 w-\d+ rounded-lg/g)).toHaveLength(2);
   });
 
   it("reserves both identifier rows in the issuance-detail header", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
-    const metaLine = markup.match(/<div class="([^"]*)" data-loading-meta-line="issuance-detail">/);
-    const metaClasses = metaLine?.[1] ?? "";
 
-    expect(metaLine).not.toBeNull();
-    // Address and token id are both elided to one line, so the row is two stacked
-    // lines below sm and one from sm up — no wrapping id to reserve for any more.
-    expect(metaClasses).toContain("min-h-12");
-    expect(metaClasses).toContain("flex-col");
-    expect(metaClasses).toContain("sm:min-h-5");
-    expect(metaClasses).toContain("sm:flex-row");
+    expect(markup).toContain('data-loading-meta-line="issuance-detail"');
+    // Mint and token id, each elided to one line with its own copy button.
     expect(markup).toContain("data-loading-address-row");
     expect(markup).toContain("data-loading-token-id-row");
   });
@@ -170,7 +145,6 @@ describe("operations route loading states", () => {
     // form leaves a gap that never fills.
     expect(markup).not.toContain("data-loading-settings-form");
     expect(markup).toContain("data-loading-settings-members");
-    expect(markup).toContain("data-loading-settings-appearance");
     expect(markup.match(/data-loading-summary-rail/g)).toHaveLength(3);
     expect(markup.match(/data-loading-action-bar/g)).toHaveLength(3);
   });

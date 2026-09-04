@@ -13,7 +13,11 @@ export const privateChannelInstanceSchema = z
     organizationId: z.string(),
     projectId: z.string(),
     gatewayUrl: z.string().openapi({ example: "http://34.71.147.163:8899" }),
-    chainRpcUrl: z.string().openapi({ example: "https://devnet.helius-rpc.com/?api-key=…" }),
+    chainRpcUrl: z.string().openapi({
+      description:
+        "Deprecated compatibility field. Private Channels execution uses the project's RPC integration.",
+      example: "https://devnet.helius-rpc.com/?api-key=…",
+    }),
     escrowProgramId: solanaAddressSchema,
     withdrawProgramId: solanaAddressSchema,
     escrowInstanceAddr: solanaAddressSchema,
@@ -28,7 +32,10 @@ export const privateChannelInstanceSchema = z
 export const privateChannelInstanceInputSchema = z
   .object({
     gatewayUrl: z.string(),
-    chainRpcUrl: z.string(),
+    chainRpcUrl: z.string().optional().openapi({
+      description:
+        "Deprecated and ignored for execution. Configure RPC on the SDP project instead.",
+    }),
     escrowProgramId: solanaAddressSchema,
     withdrawProgramId: solanaAddressSchema,
     escrowInstanceAddr: solanaAddressSchema,
@@ -39,6 +46,35 @@ export const privateChannelInstanceInputSchema = z
     }),
   })
   .openapi({ description: "Connect request body." });
+
+export const privateChannelInstanceUpdateSchema = privateChannelInstanceInputSchema
+  .omit({ confirmReactivate: true })
+  .extend({
+    instanceId: z.string().openapi({
+      description:
+        "The active instance being updated. Prevents stale setup pages overwriting a replacement.",
+      example: "pci_01HXYZ",
+    }),
+  })
+  .openapi({ description: "Verified update for the active Private Channels instance." });
+
+export const privateChannelTokenEligibilityListSchema = z.object({
+  tokens: z.array(
+    z.object({
+      symbol: z.string(),
+      mint: solanaAddressSchema,
+      decimals: z.number().int().nonnegative(),
+      tokenProgram: solanaAddressSchema,
+      enabled: z.boolean(),
+      exclusionReasons: z.array(
+        z.object({
+          code: z.enum(["NOT_ALLOWED_BY_INSTANCE", "ALLOWLIST_UNAVAILABLE"]),
+          message: z.string(),
+        })
+      ),
+    })
+  ),
+});
 
 export const privateChannelHealthSchema = z
   .discriminatedUnion("status", [
@@ -59,13 +95,35 @@ export const privateChannelHealthQuerySchema = z.object({
     }),
 });
 
+const privateChannelProbeDeploymentConstraint = {
+  oneOf: [
+    { required: ["escrowProgramId", "escrowInstanceAddr"] },
+    {
+      not: {
+        anyOf: [{ required: ["escrowProgramId"] }, { required: ["escrowInstanceAddr"] }],
+      },
+    },
+  ],
+};
+
 export const privateChannelProbeBodySchema = z
   .object({
     gatewayUrl: z.string().min(1),
-    chainRpcUrl: z.string().min(1),
     authUrl: z.string().min(1),
+    escrowProgramId: solanaAddressSchema.optional().openapi({
+      description:
+        "Escrow program to verify through the project RPC. Supply with escrowInstanceAddr; omit both for a legacy connectivity-only probe.",
+    }),
+    escrowInstanceAddr: solanaAddressSchema.optional().openapi({
+      description:
+        "Escrow instance to verify through the project RPC. Supply with escrowProgramId; omit both for a legacy connectivity-only probe.",
+    }),
   })
-  .openapi({ description: "Probe request body: the three URLs the connect flow re-probes." });
+  .meta(privateChannelProbeDeploymentConstraint)
+  .openapi({
+    description:
+      "Probe request body. When deployment addresses are supplied, the selected project's configured RPC verifies them automatically.",
+  });
 
 const gatewayProbeResponseSchema = z.object({
   status: z.number(),
@@ -308,6 +366,14 @@ export const privateChannelVerifyWalletParamSchema = z.object({
     }),
 });
 
+export const privateChannelVerifyWalletBodySchema = z.object({
+  principalId: z.string().min(1).optional().openapi({
+    description:
+      "Project principal that will own the verified wallet. Defaults to the default principal.",
+    example: "pcu_9f1c...",
+  }),
+});
+
 export const privateChannelDeleteWalletParamSchema = z.object({
   pubkey: z
     .string()
@@ -416,7 +482,7 @@ export const privateChannelTransferSchema = z
     createdAt: z.string(),
     updatedAt: z.string(),
   })
-  .openapi({ description: "A transfer between verified wallets of channel members." });
+  .openapi({ description: "A transfer between verified wallets of channel principals." });
 
 export const privateChannelTransferListSchema = z.object({
   transfers: z.array(privateChannelTransferSchema),
@@ -430,15 +496,15 @@ const privateChannelTransferRecipientSchema = z
       description: "User-assigned custody wallet name, when available.",
     }),
     privateChannelUserId: z.string().openapi({
-      description: "Opaque private-channel member id that owns this verified wallet.",
+      description: "Opaque private-channel principal id that owns this verified wallet.",
     }),
     isSelf: z.boolean().openapi({
-      description: "True when the wallet belongs to the requesting member.",
+      description: "True when the wallet belongs to the requesting project principal.",
     }),
   })
   .openapi({
     description:
-      "One verified wallet that may receive a transfer. A member holding several verified wallets appears once per wallet. Owner identity (email, SDP user id, display name) is not included.",
+      "One verified wallet that may receive a transfer. A principal holding several verified wallets appears once per wallet. Owner identity is not included.",
   });
 
 export const privateChannelTransferRecipientListSchema = z.object({
@@ -448,7 +514,7 @@ export const privateChannelTransferRecipientListSchema = z.object({
 export const createPrivateChannelTransferBodySchema = z
   .object({
     walletId: z.string().min(1).openapi({
-      description: "Verified SDP custody wallet controlled by the acting member.",
+      description: "Verified SDP custody wallet controlled by the project's default principal.",
       example: "wallet_123",
     }),
     recipientVerifiedWalletId: z.string().min(1).openapi({
@@ -465,7 +531,7 @@ export const createPrivateChannelTransferBodySchema = z
         "Token mint to transfer. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
     }),
   })
-  .openapi({ description: "Create a verified member-to-member channel transfer." });
+  .openapi({ description: "Create a verified principal-to-principal channel transfer." });
 
 export const privateChannelTransferChannelIdParamSchema = z.object({
   channelId: z
@@ -538,7 +604,7 @@ export const privateChannelEventReferencesSchema = z
   .object({
     references: z.record(z.string(), z.string()).openapi({
       description:
-        "Flat id→name dictionary for event enrichment. Keys are channel ids, wallet pubkeys/ids, private-channel-user ids, SDP user ids, instance ids, and issued-token mint addresses.",
+        "Flat id→name dictionary for event enrichment. Keys are channel ids, wallet pubkeys/ids, private-channel-principal ids, instance ids, and issued-token mint addresses.",
       example: {
         pch_treasury: "Treasury",
         TreasuryPubkey1111111111111111111111111: "Treasury Wallet",
@@ -550,7 +616,7 @@ export const privateChannelEventReferencesSchema = z
   })
   .openapi({
     description:
-      "Display-name references for Private Channels events (channels, wallets, members, instances, tokens).",
+      "Display-name references for Private Channels events (channels, wallets, principals, instances, tokens).",
   });
 
 export const privateChannelEventsQuerySchema = z.object({

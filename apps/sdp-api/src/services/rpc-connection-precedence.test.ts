@@ -70,31 +70,38 @@ function resolve(
 }
 
 describe("tenant RPC connection precedence", () => {
-  it("prefers a project connection over an organization one", async () => {
-    const target = await resolve(
-      lookupReturning({
-        prj_1: activeConnection("rconn_project"),
-        __organization__: activeConnection("rconn_org"),
-      }),
-      { authProjectId: "prj_1" }
-    );
+  it("resolves the project connection and never consults the organization", async () => {
+    const connections = lookupReturning({
+      prj_1: activeConnection("rconn_project"),
+      __organization__: activeConnection("rconn_org"),
+    });
+    const target = await resolve(connections, { authProjectId: "prj_1" });
 
     expect(target.selectionMode).toBe("project_connection");
     expect(target.connectionId).toBe("rconn_project");
+    // A live project connection short-circuits, so the organization scope is
+    // not even read.
+    const scopeKeys = (connections.resolve as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => call[0].scopeKey
+    );
+    expect(scopeKeys).toEqual(["prj_1"]);
   });
 
-  it("falls to the organization connection when the project has none", async () => {
-    const target = await resolve(
-      lookupReturning({ __organization__: activeConnection("rconn_org") }),
-      { authProjectId: "prj_1" }
-    );
-
-    expect(target.selectionMode).toBe("organization_connection");
-    expect(target.connectionId).toBe("rconn_org");
+  it("refuses to route when the connection is still organization-scoped", async () => {
+    // HOO-1226 moved connections onto projects. The rows made before that are
+    // no longer a rail, and answering on platform keys instead would be the
+    // silent downgrade the tenant is paying their own provider to avoid.
+    await expect(
+      resolve(lookupReturning({ __organization__: activeConnection("rconn_org") }), {
+        authProjectId: "prj_1",
+      })
+    ).rejects.toThrow(/no longer used/i);
   });
 
   it("never carries the tenant key in the label it exposes", async () => {
-    const target = await resolve(lookupReturning({ __organization__: activeConnection("rconn") }));
+    const target = await resolve(lookupReturning({ prj_1: activeConnection("rconn") }), {
+      authProjectId: "prj_1",
+    });
 
     expect(target.endpointLabel).not.toContain("secret");
     expect(target.endpointLabel).toContain("***");
@@ -113,14 +120,16 @@ describe("tenant RPC connection precedence", () => {
     ).rejects.toThrow(/project.*not active/i);
   });
 
-  it("fails closed on an unusable organization connection", async () => {
+  it("fails closed on a stranded organization connection that is also broken", async () => {
+    // Broken or working, it is stranded either way: the point is that neither
+    // state quietly resolves to a platform provider.
     await expect(
       resolve(
         lookupReturning({
           __organization__: { kind: "unusable", reason: "credential unavailable" },
         })
       )
-    ).rejects.toThrow(/organization.*not active/i);
+    ).rejects.toThrow(/no longer used/i);
   });
 
   it("falls through to platform selection when no connection is configured", async () => {
@@ -129,8 +138,31 @@ describe("tenant RPC connection precedence", () => {
     await expect(resolve(lookupReturning({}))).rejects.toThrow(FELL_THROUGH);
   });
 
+  it("refuses to answer on platform keys for an organization that is byok", async () => {
+    // The organization has said its RPC leaves on its own credentials. Reaching
+    // a platform provider here would be SDP paying for, and seeing, traffic
+    // somebody deliberately moved off us.
+    const connections = {
+      ...lookupReturning({}),
+      credentialMode: async () => "byok" as const,
+    };
+
+    await expect(resolve(connections, { authProjectId: "prj_1" })).rejects.toThrow(
+      /runs RPC on its own credentials/i
+    );
+  });
+
+  it("still falls through for an organization left on managed", async () => {
+    const connections = {
+      ...lookupReturning({}),
+      credentialMode: async () => "managed" as const,
+    };
+
+    await expect(resolve(connections, { authProjectId: "prj_1" })).rejects.toThrow(FELL_THROUGH);
+  });
+
   it("scopes every lookup to the caller's organization", async () => {
-    const connections = lookupReturning({ __organization__: activeConnection("rconn_org") });
+    const connections = lookupReturning({ prj_1: activeConnection("rconn_project") });
     await resolve(connections, { authProjectId: "prj_1" });
 
     for (const call of (connections.resolve as ReturnType<typeof vi.fn>).mock.calls) {
@@ -140,9 +172,9 @@ describe("tenant RPC connection precedence", () => {
   });
 
   it("re-reads the connection on every request so a rotation takes effect", async () => {
-    const connections = lookupReturning({ __organization__: activeConnection("rconn_v1") });
-    await resolve(connections);
-    await resolve(connections);
+    const connections = lookupReturning({ prj_1: activeConnection("rconn_v1") });
+    await resolve(connections, { authProjectId: "prj_1" });
+    await resolve(connections, { authProjectId: "prj_1" });
 
     // No caching layer to invalidate: two requests, two reads.
     expect((connections.resolve as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
@@ -169,14 +201,14 @@ describe("tenant RPC connection precedence", () => {
       kv,
       db,
       organizationId: "org_1",
-      authProjectId: null,
+      authProjectId: "prj_1",
       requestedProjectId: null,
-      connections: lookupReturning({ __organization__: activeConnection("rconn_org") }),
+      connections: lookupReturning({ prj_1: activeConnection("rconn_project") }),
     });
 
     expect(targets).toHaveLength(1);
-    expect(targets[0].selectionMode).toBe("organization_connection");
-    expect(targets[0].connectionId).toBe("rconn_org");
+    expect(targets[0].selectionMode).toBe("project_connection");
+    expect(targets[0].connectionId).toBe("rconn_project");
   });
 
   it("fails the faucet path closed on an unusable connection", async () => {
@@ -186,10 +218,10 @@ describe("tenant RPC connection precedence", () => {
         kv,
         db,
         organizationId: "org_1",
-        authProjectId: null,
+        authProjectId: "prj_1",
         requestedProjectId: null,
         connections: lookupReturning({
-          __organization__: { kind: "unusable", reason: "no active default connection" },
+          prj_1: { kind: "unusable", reason: "no active default connection" },
         }),
       })
     ).rejects.toThrow(/not active/i);

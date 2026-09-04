@@ -15,7 +15,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
-  earnProgram: "/dashboard/markets/earn",
+  earnProgram: "/dashboard/markets/embedded-yield",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -25,7 +25,6 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   deposit: "/dashboard/payments/deposit",
   requests: "/dashboard/payments/requests",
   recurring: "/dashboard/payments/recurring",
-  privateChannels: "/dashboard/payments/private-channels",
 } as const;
 
 export type DashboardLoadingRoute =
@@ -42,8 +41,11 @@ export type DashboardLoadingRoute =
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
+  | "markets-landing"
   | "treasury-solutions"
-  | "earn-program"
+  | "embedded-yield-portfolio"
+  | "embedded-yield-configure"
+  | "embedded-yield-integrate"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -65,6 +67,7 @@ export type DashboardLoadingRoute =
   | "settings"
   | "integrations"
   | "integration-detail"
+  | "private-channels-setup"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -105,17 +108,18 @@ function resolveAccessControlLoadingRoute(pathname: string): DashboardLoadingRou
 }
 
 function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
-  if (
-    pathname === DASHBOARD_SIDE_NAV_HREFS.markets ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions
-  ) {
+  if (pathname === DASHBOARD_SIDE_NAV_HREFS.markets) {
+    return "markets-landing";
+  }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
     return "treasury-solutions";
   }
-  if (
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`
-  ) {
-    return "earn-program";
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) return "embedded-yield-portfolio";
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`) {
+    return "embedded-yield-configure";
+  }
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`) {
+    return "embedded-yield-integrate";
   }
   return null;
 }
@@ -161,6 +165,12 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
 
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === "/dashboard/integrations") return "integrations";
+  if (pathname === "/dashboard/integrations/private-channels/setup") {
+    return "private-channels-setup";
+  }
+  if (pathname.startsWith("/dashboard/integrations/private-channels")) {
+    return "integration-detail";
+  }
   if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 

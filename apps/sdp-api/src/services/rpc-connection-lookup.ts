@@ -4,7 +4,11 @@ import {
   isByokRpcProvider,
   maskTenantEndpoint,
 } from "@sdp/rpc/byok";
-import type { TenantRpcConnectionLookup, TenantRpcConnectionResolution } from "@sdp/rpc/relay";
+import type {
+  RpcCredentialMode,
+  TenantRpcConnectionLookup,
+  TenantRpcConnectionResolution,
+} from "@sdp/rpc/relay";
 import type { RpcConnectionNetwork } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import {
@@ -33,6 +37,17 @@ export function createTenantRpcConnectionLookup(
   const store = new RpcConnectionStore(db);
 
   return {
+    async credentialMode(organizationId): Promise<RpcCredentialMode> {
+      // Unknown organization reads as `managed`: this decides whether to fail
+      // a request closed, and a missing row is not evidence that somebody
+      // asked to be on their own keys.
+      const row = await db.queryOne<{ rpc_credential_mode: string }>(
+        `SELECT rpc_credential_mode FROM organizations WHERE id = ?`,
+        [organizationId]
+      );
+      return row?.rpc_credential_mode === "byok" ? "byok" : "managed";
+    },
+
     async resolve({ organizationId, scopeKey, network }): Promise<TenantRpcConnectionResolution> {
       if (!isRpcConnectionNetwork(network)) {
         return { kind: "none" };

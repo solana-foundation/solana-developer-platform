@@ -5,6 +5,7 @@ import {
   decimalFixedPoint,
   decimalFixedPointToString,
   divideDecimalFixedPoint,
+  subtractDecimalFixedPoint,
 } from "@solana/fixed-points";
 import { badRequest } from "./errors";
 
@@ -59,6 +60,28 @@ export function divideDecimalAmounts(numerator: string, denominator: string): st
 
 export function addDecimalAmounts(left: string, right: string): string {
   return sumDecimalAmounts([left, right]);
+}
+
+/**
+ * Subtracts `right` from `left` exactly, returning a plain decimal string
+ * that carries a leading `-` when the difference is negative. Both inputs
+ * are unsigned amount strings, same as every other helper here; the sign
+ * appears only on the way out, for derived figures (earnings, deltas) that
+ * are legitimately signed.
+ */
+export function subtractDecimalAmounts(left: string, right: string): string {
+  if (compareDecimalAmounts(left, right) >= 0) {
+    return unsignedDifference(left, right);
+  }
+  const difference = unsignedDifference(right, left);
+  return difference === "0" ? "0" : `-${difference}`;
+}
+
+function unsignedDifference(larger: string, smaller: string): string {
+  const scale = Math.max(decimalScale(larger), decimalScale(smaller));
+  return decimalFixedPointToString(
+    subtractDecimalFixedPoint(parseAmount(larger, scale), parseAmount(smaller, scale))
+  );
 }
 
 /**

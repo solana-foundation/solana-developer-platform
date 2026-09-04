@@ -62,7 +62,12 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     category: "tokenized_security",
     labelKey: cfg("comboRegulatedSecurity"),
     descriptionKey: cfg("comboRegulatedSecurityDescription"),
-    settings: ["scaledUiAmount"],
+    // No scaledUiAmount. This is the DEFAULT preset for a tokenized security, so
+    // anything listed here lands on every security issued without the wizard
+    // being touched — and a mint carrying scaledUiAmount is rejected outright by
+    // the DvP settlement program. It was never part of this preset's stated
+    // purpose either, which is the compliance base described below.
+    settings: [],
     capacities: ["kyc", "transferApprovals", "investorReporting", "restrictTradingHours"],
     // The compliance base every tokenized security needs: verified investors on an
     // on-chain allowlist, reviewed transfers, market-hours trading, and reporting.
@@ -73,7 +78,11 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     category: "tokenized_security",
     labelKey: cfg("comboFundOperations"),
     descriptionKey: cfg("comboFundOperationsDescription"),
-    settings: ["scaledUiAmount"],
+    // No scaledUiAmount here either, same reason. This preset is opt-in rather
+    // than default, but balance-display scaling is not part of subscriptions and
+    // redemptions, and bundling it would make picking this preset quietly cost
+    // the issuer DvP settlement. Still reachable as an advanced setting.
+    settings: [],
     capacities: ["kyc", "redemptionApprovals", "issueRetireControls"],
     // A complementary lifecycle layer — subscriptions/redemptions with issuer-managed
     // supply. Same allowlist as the base, so it stacks onto regulatedSecurity (giving a

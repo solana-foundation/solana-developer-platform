@@ -130,6 +130,8 @@
     },
     "header": {
       "notDeployed": "Not deployed",
+      "mint": "Mint",
+      "deployedOn": "Deployed {date}",
       "copyTokenAddress": "Copy token address",
       "onchainAddress": "Onchain address",
       "tokenId": "Token ID",
@@ -517,7 +519,8 @@
       "cancel": "Cancel",
       "runningAction": "Running action...",
       "tokenListUnavailable": "Token list unavailable",
-      "search": "Search",
+      "search": "Search by name, symbol, mint address, or token ID",
+      "clearSearch": "Clear search",
       "createDraft": "Create draft",
       "addNewToken": "Add new token",
       "noTokensMatch": "No assets match your current search or filters.",

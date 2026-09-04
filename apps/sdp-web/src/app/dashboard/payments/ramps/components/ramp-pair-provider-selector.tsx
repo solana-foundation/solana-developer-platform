@@ -1,35 +1,37 @@
 "use client";
 
-import type { Counterparty, CounterpartyEntityType, PaymentsDashboardWallet } from "@sdp/types";
-import {
-  RAMP_PROVIDER_SUPPORT_DETAILS,
-  type RampFiatCurrency,
-} from "@sdp/types/generated/ramp-support";
+import type {
+  Counterparty,
+  CounterpartyEntityType,
+  PaymentsDashboardWallet,
+  RampProviderId,
+  SdpEnvironment,
+} from "@sdp/types";
+import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
-  countryDisplayName,
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
-  rampProviderServesCountry,
 } from "@sdp/types/payment-rails";
-import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
+import type { ProviderAvailabilityEntry } from "@sdp/types/provider-access";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/modal";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
-  OFFRAMP_PAIRS,
-  ONRAMP_PAIRS,
+  offrampPairs,
+  onrampPairs,
   RAMP_PROVIDER_LOGOS,
-  RAMP_PROVIDER_OPTIONS,
   type RampDirection,
   type RampPair,
   type RampProviderOption,
   rampPairKey,
   type SelectedRampPair,
+  surfacedRampProviderOptions,
 } from "@/lib/ramps";
 import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
@@ -38,6 +40,7 @@ import { RampSelectionProvider } from "./ramp-selection-context";
 
 interface RampPairProviderSelectorProps {
   direction: RampDirection;
+  enabledRampProviders: readonly RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   selectedCounterparty: Counterparty | null;
   wallets: readonly PaymentsDashboardWallet[];
@@ -71,24 +74,29 @@ function getDirectionSupport(
   return RAMP_PROVIDER_SUPPORT_DETAILS[provider][direction];
 }
 
-function pairsForDirection(direction: RampDirection): readonly RampPair[] {
+/**
+ * Returns the available ramp pairs for a direction.
+ *
+ * @param direction - The ramp direction.
+ * @param environment - The dashboard environment.
+ * @param enabledRampProviders - The providers enabled for the current request.
+ * @returns The available ramp pairs.
+ */
+function pairsForDirection(
+  direction: RampDirection,
+  environment: SdpEnvironment,
+  enabledRampProviders: readonly RampProviderId[]
+): readonly RampPair[] {
   switch (direction) {
     case "onramp":
-      return ONRAMP_PAIRS;
+      return onrampPairs(environment, enabledRampProviders);
     case "offramp":
-      return OFFRAMP_PAIRS;
+      return offrampPairs(environment, enabledRampProviders);
     default: {
       const exhaustive: never = direction;
       return exhaustive;
     }
   }
-}
-
-function getCounterpartyCountry(counterparty: Counterparty | null): string | null {
-  if (counterparty === null) {
-    return null;
-  }
-  return counterparty.identity.address.countryCode;
 }
 
 function providerAccessReason(access: ProviderAvailabilityEntry): string | null {
@@ -163,7 +171,6 @@ function buildProviderExclusion(args: {
   selectedPairSupport: RampPair | null;
   selectedPair: SelectedRampPair;
   selectedCounterparty: Counterparty | null;
-  selectedCountry: string | null;
   amount: string;
 }): ProviderExclusion | null {
   const {
@@ -173,7 +180,6 @@ function buildProviderExclusion(args: {
     selectedPairSupport,
     selectedPair,
     selectedCounterparty,
-    selectedCountry,
     amount,
   } = args;
   const provider = option.id;
@@ -196,17 +202,6 @@ function buildProviderExclusion(args: {
     reasons.push(unsupportedPairReason(direction, selectedPair));
   }
 
-  if (selectedCountry !== null) {
-    const countryServed = rampProviderServesCountry(
-      support.countrySupport,
-      selectedCountry,
-      selectedPair.fiatCurrency
-    );
-    if (countryServed === false) {
-      reasons.push(`Not available in ${countryDisplayName(selectedCountry)}`);
-    }
-  }
-
   if (selectedCounterparty !== null && support.entityTypes.length > 0) {
     if (!support.entityTypes.includes(selectedCounterparty.entityType)) {
       reasons.push(`Supports ${formatEntityTypes(support.entityTypes)} counterparties only`);
@@ -224,6 +219,7 @@ function buildProviderExclusion(args: {
 
 export function RampPairProviderSelector({
   direction,
+  enabledRampProviders,
   rampProviderAccess,
   selectedCounterparty,
   wallets,
@@ -239,23 +235,20 @@ export function RampPairProviderSelector({
   onPairChange,
   onProviderSelect,
 }: RampPairProviderSelectorProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
-  const pairs = pairsForDirection(direction);
+  const pairs = pairsForDirection(direction, sdpEnvironment, enabledRampProviders);
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]
   );
-  const selectedCountry = useMemo(
-    () => getCounterpartyCountry(selectedCounterparty),
-    [selectedCounterparty]
-  );
   const directionProviderOptions = useMemo(
     () =>
-      RAMP_PROVIDER_OPTIONS.filter(
+      surfacedRampProviderOptions(sdpEnvironment, enabledRampProviders).filter(
         (option) => Object.keys(getDirectionSupport(option.id, direction).currencies).length > 0
       ),
-    [direction]
+    [direction, enabledRampProviders, sdpEnvironment]
   );
   const providerExclusions = useMemo(
     () =>
@@ -267,7 +260,6 @@ export function RampPairProviderSelector({
           selectedPairSupport,
           selectedPair,
           selectedCounterparty,
-          selectedCountry,
           amount,
         });
         return exclusion ? [exclusion] : [];
@@ -278,7 +270,6 @@ export function RampPairProviderSelector({
       directionProviderOptions,
       rampProviderAccess,
       selectedCounterparty,
-      selectedCountry,
       selectedPair,
       selectedPairSupport,
     ]

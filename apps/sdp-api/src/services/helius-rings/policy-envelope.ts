@@ -31,6 +31,8 @@ export interface BuildRingsWalletOperationInput {
   /** The reserved operation id, kept with the raw payload for audit. */
   operationId: string;
   intentKey: string;
+  /** The ring the operation was pinned to; null = default ring. */
+  ringProgramId: string | null;
 }
 
 export function buildRingsWalletOperationInput(
@@ -58,6 +60,8 @@ export function buildRingsWalletOperationInput(
       // counterparty is undisclosed, so reviewers see the mode explicitly.
       transferMode: operation.transferMode ?? null,
       zoneId: operation.zoneId ?? null,
+      // The resolved ring, so a reviewer sees which pool the notes bind to.
+      ringProgramId: input.ringProgramId,
     },
     providerExtensions: {},
     rawPayload: {

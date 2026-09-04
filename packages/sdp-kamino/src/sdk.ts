@@ -1,11 +1,14 @@
 import {
   getKvaultGlobalConfigPda,
+  KaminoReserve,
   KaminoVault,
   KaminoVaultClient,
   KVaultGlobalConfig,
+  Reserve,
 } from "@kamino-finance/klend-sdk";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction } from "@solana/kit";
+import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import Decimal from "decimal.js";
 import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { vaultAssetIdentityFromState } from "./asset-identity";
@@ -24,8 +27,10 @@ import type {
 } from "./types";
 import {
   buildMaximumWithdrawalBalanceGuard,
+  buildShareAccountCloseInstruction,
   buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
+  isShareAtaCloseInstruction,
   type RoleTaggedInstruction,
   resolveBurnAllSentinel,
 } from "./withdraw-instructions";
@@ -133,6 +138,78 @@ async function bindVault(
   return { client, vault, state, config, rpc, assetIdentity };
 }
 
+/**
+ * Load reserve account state without requiring a price oracle.
+ *
+ * klend-sdk's `loadVaultReserves` always resolves a live oracle for every
+ * reserve. Deposit instruction construction only reads the reserve's lending
+ * market, while withdrawal planning reads its on-chain liquidity and
+ * collateral exchange state. Neither operation prices the asset. Some valid
+ * devnet reserves intentionally have no usable oracle, so the priced loader
+ * prevents otherwise valid deposits and exits from being built.
+ *
+ * The placeholder is explicitly invalid and its price throws if a future SDK
+ * version tries to use it. That keeps this seam fail-closed for valuation while
+ * allowing the state-only instruction paths we audit below.
+ */
+async function loadStateOnlyReserves(
+  runtime: KaminoRuntime,
+  vaultAddress: Address,
+  client: Kit2,
+  state: Kit2,
+  rpc: Kit2,
+  klendProgramId: Address,
+  slotDurationMs: number
+): Promise<Kit2> {
+  const reserveAddresses = client.getVaultReserves(state) as Address[];
+  let reserveStates: Array<Kit2 | null>;
+  try {
+    reserveStates = await Reserve.fetchMultiple(
+      rpc,
+      reserveAddresses as Kit2,
+      klendProgramId as Kit2
+    );
+  } catch (cause) {
+    throw vaultUnreadable(vaultAddress, runtime.cluster, cause);
+  }
+
+  return new Map(
+    reserveAddresses.map((reserveAddress, index) => {
+      const reserveState = reserveStates[index];
+      if (!reserveState) {
+        throw vaultUnreadable(
+          vaultAddress,
+          runtime.cluster,
+          `allocated reserve ${reserveAddress} was not found`
+        );
+      }
+      const unavailableOracle = {
+        mintAddress: reserveState.liquidity.mintPubkey,
+        decimals: new Decimal(reserveState.liquidity.mintDecimals.toString()),
+        get price(): never {
+          throw vaultUnreadable(
+            vaultAddress,
+            runtime.cluster,
+            `state-only reserve access attempted to price reserve ${reserveAddress}`
+          );
+        },
+        timestamp: 0n,
+        valid: false,
+      };
+      return [
+        reserveAddress,
+        new KaminoReserve(
+          reserveState,
+          reserveAddress as Kit2,
+          unavailableOracle as Kit2,
+          rpc,
+          slotDurationMs
+        ),
+      ];
+    })
+  );
+}
+
 /** Decimal strings are the boundary currency; `Decimal` never escapes this file. */
 function toDecimal(value: string, label: string): Decimal {
   if (!isDecimalString(value)) throw invalidAmount(label, value);
@@ -182,7 +259,7 @@ export async function buildKaminoDepositPlan(
   input: KaminoDepositInput,
   assertActive: AssertActive = alwaysActive
 ): Promise<KaminoInstructionPlan> {
-  const { client, vault, state, config, assetIdentity } = await bindVault(
+  const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
     runtime,
     input.vault,
     assertActive
@@ -200,7 +277,37 @@ export async function buildKaminoDepositPlan(
   const amount = toDecimal(acceptedAmount, "amount");
 
   assertActive();
-  const reserves = await client.loadVaultReserves(state);
+  // Whether this deposit CREATES the share ATA decides who is owed its rent
+  // back, and it cannot be inferred from the instructions: `createAtasIdempotent`
+  // emits the same create either way and charges nothing when the account is
+  // already there. Only a chain read distinguishes them, so it happens here,
+  // concurrently with the reserve load rather than as an extra serial trip.
+  const [reserves, shareAccountsResponse, [shareAta]] = await Promise.all([
+    loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    ),
+    rpc
+      .getTokenAccountsByOwner(
+        input.owner.address,
+        { mint: assetIdentity.shareMint },
+        { encoding: "jsonParsed" }
+      )
+      .send(),
+    findAssociatedTokenPda({
+      owner: input.owner.address,
+      mint: assetIdentity.shareMint,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    }),
+  ]);
+  const createsShareAccount = !parseShareTokenAccountBalances(shareAccountsResponse?.value).some(
+    (account) => account.address === shareAta
+  );
   assertActive();
 
   let acceptedMinSharesOut: string | undefined;
@@ -246,6 +353,7 @@ export async function buildKaminoDepositPlan(
       amount: acceptedAmount,
       ...(acceptedMinSharesOut === undefined ? {} : { minSharesOut: acceptedMinSharesOut }),
     },
+    createsShareAccount,
   });
 }
 
@@ -295,7 +403,15 @@ export async function buildKaminoWithdrawPlan(
         { encoding: "jsonParsed" }
       )
       .send(),
-    client.loadVaultReserves(state),
+    loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    ),
     (async () => {
       const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
       return KVaultGlobalConfig.fetch(rpc, globalConfigAddress, config.kvaultProgramId as Kit2);
@@ -419,7 +535,16 @@ export async function buildKaminoWithdrawPlan(
       role: "post" as const,
       sharesBaseUnits: null,
     })),
-  ];
+  ]
+    // klend-sdk 10.0.0 closes the emptied share ATA itself on a full exit
+    // (rides in `postWithdrawIxs`), refunding the OWNER unconditionally. SDP
+    // owns that close — the refund destination is attribution-aware (rent a
+    // sponsor funded goes back to the sponsor; see
+    // `buildShareAccountCloseInstruction` below) — so the SDK's copy is
+    // removed and the close appended at the end of this function stays the
+    // plan's ONE close. Keeping both fails the exit outright: SPL CloseAccount
+    // meets an already-closed account and dies with InvalidAccountData.
+    .filter((entry) => !isShareAtaCloseInstruction(entry.instruction, consolidation.shareAta));
 
   const maximumBalanceGuard = await buildMaximumWithdrawalBalanceGuard({
     requestedBaseUnits,
@@ -473,12 +598,54 @@ export async function buildKaminoWithdrawPlan(
     );
   }
 
+  // Give the share ATA's rent back, but ONLY when this exit provably empties it.
+  //
+  // SPL `CloseAccount` fails on a non-zero balance, and a failed close fails the
+  // whole withdrawal, so this condition has to be exact rather than optimistic.
+  // It is: the redemptions above are asserted to encode exactly
+  // `requestedBaseUnits`, and consolidation reports what the ATA will hold when
+  // they run, so equality means the account ends at zero. A partial exit
+  // correctly leaves the account open, still holding shares and still holding
+  // its rent.
+  //
+  // Appended AFTER the share-encoding assertion on purpose. A close redeems no
+  // shares, and folding it in earlier would invite a future edit to count it.
+  // It is last in the instruction order because it must follow every redemption.
+  // Did THIS exit create the share account? If so it also paid the rent, and
+  // that beats whatever the caller recorded from an earlier movement: a single
+  // transaction can create the account, consolidate into it, redeem everything
+  // and close it, and in that case the party owed the refund is the one who
+  // funded it moments earlier in the same transaction. Only when the account
+  // pre-dates this exit does the recorded funder describe who paid for it.
+  const createsShareAccount = !shareAccounts.some(
+    (account) => account.address === consolidation.shareAta
+  );
+  const rentRefundTo = createsShareAccount ? input.rentPayer?.address : input.rentRefundTo;
+  const closeShareAccountInstruction = buildShareAccountCloseInstruction({
+    shareAta: consolidation.shareAta,
+    owner: input.owner,
+    ...(rentRefundTo === undefined ? {} : { refundTo: rentRefundTo }),
+    ataBaseUnitsBeforeExit: consolidation.postConsolidationAtaBaseUnits,
+    redeemedBaseUnits: requestedBaseUnits,
+    ownerTotalBaseUnits: consolidation.totalBaseUnits,
+  });
+
   return assertPlanTargetsCluster({
     cluster: config.cluster,
-    instructions: tagged.map((entry) => entry.instruction),
+    instructions: [
+      ...tagged.map((entry) => entry.instruction),
+      ...(closeShareAccountInstruction ? [closeShareAccountInstruction] : []),
+    ],
     lookupTables: Object.keys(lookupTables) as Address[],
     assetIdentity,
     accepted: { shares: acceptedShares },
+    // An EXIT can create the share ATA too, and charge its rent to `rentPayer`:
+    // consolidation emits an idempotent create, and klend interleaves its own
+    // ATA prerequisites into the withdraw bundle. So the same observation the
+    // deposit path makes has to be reported here, or an exit that paid the rent
+    // would leave the position naming whoever funded a PREVIOUS instance of the
+    // account, and the next close would refund the wrong party.
+    createsShareAccount,
   });
 }
 
@@ -557,7 +724,7 @@ export async function readKaminoPosition(
   input: { vault: Address; owner: Address; slot: bigint },
   assertActive: AssertActive = alwaysActive
 ): Promise<KaminoPosition> {
-  const { vault, state, config, rpc, assetIdentity } = await bindVault(
+  const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
     runtime,
     input.vault,
     assertActive
@@ -590,7 +757,21 @@ export async function readKaminoPosition(
   let tokenValue: string | undefined;
   let rawRate: unknown;
   try {
-    rawRate = await vault.getExchangeRate(input.slot as Kit2);
+    const reserves = await loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    );
+    rawRate = await client.getTokensPerShareSingleVault(
+      state,
+      input.slot as Kit2,
+      reserves,
+      input.slot as Kit2
+    );
   } catch {
     rawRate = undefined;
   }

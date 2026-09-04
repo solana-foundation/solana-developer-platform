@@ -8,9 +8,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { HeightReveal } from "@/components/ui/height-reveal";
-import { HoldButton } from "@/components/ui/hold-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -33,9 +33,15 @@ const NETWORK_OPTIONS = CRYPTO_ACCOUNT_NETWORKS.map((value) => ({
 interface CryptoAccountFormProps {
   counterpartyId: string;
   onAdded?: (account: CounterpartyAccount) => void;
+  /** Rendered at the start of the form's action row (e.g. the phase's Skip/Done button). */
+  footerStart?: ReactNode;
 }
 
-export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountFormProps) {
+export function CryptoAccountForm({
+  counterpartyId,
+  onAdded,
+  footerStart,
+}: CryptoAccountFormProps) {
   const t = useTranslations();
   const [label, setLabel] = useState("");
   const [network, setNetwork] = useState<CryptoAccountNetwork>("solana");
@@ -43,6 +49,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
 
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<AddPhase>("idle");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<ComplianceSnapshot | null>(null);
   const [screenUnavailable, setScreenUnavailable] = useState(false);
   const [complianceNotEnabled, setComplianceNotEnabled] = useState(false);
@@ -58,6 +65,11 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       ]
     : [];
   const hasRisk = problems.length > 0 || screenUnavailable;
+  const riskMessage = complianceNotEnabled
+    ? t("DashboardPayments.workspace.complianceNotEnabled")
+    : screenUnavailable
+      ? t("DashboardPayments.counterparty.screeningUnavailable")
+      : t("DashboardPayments.counterparty.screeningWarning");
 
   const buttonState = ((): { label: string; icon: ReactNode } => {
     switch (phase) {
@@ -217,25 +229,22 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       <AnimatePresence>
         {phase === "ready" && hasRisk && (
           <HeightReveal key="risk-warning" durationSeconds={0.25}>
-            <p className="text-sm text-error">
-              {complianceNotEnabled
-                ? t("DashboardPayments.workspace.complianceNotEnabled")
-                : screenUnavailable
-                  ? t("DashboardPayments.counterparty.screeningUnavailable")
-                  : t("DashboardPayments.counterparty.screeningWarning")}
-            </p>
+            <p className="text-sm text-error">{riskMessage}</p>
           </HeightReveal>
         )}
       </AnimatePresence>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        {footerStart ? <div className="mr-auto">{footerStart}</div> : null}
         {phase === "ready" && hasRisk ? (
-          <HoldButton
-            iconLeft={<ShieldAlertIcon className="size-3.5" />}
-            onHoldComplete={() => void createAccount()}
+          <Button
+            type="button"
+            variant="secondary"
+            iconLeft={<ShieldAlertIcon />}
+            onClick={() => setConfirmOpen(true)}
           >
-            {t("DashboardPayments.counterparty.holdToAddAnyway")}
-          </HoldButton>
+            {t("DashboardPayments.counterparty.addAnyway")}
+          </Button>
         ) : (
           <Button
             type="button"
@@ -247,6 +256,39 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
           </Button>
         )}
       </div>
+
+      <Modal
+        isOpen={confirmOpen}
+        ariaLabel={t("DashboardPayments.counterparty.addAnywayTitle")}
+        onClose={() => setConfirmOpen(false)}
+        size="sm"
+      >
+        <div className="space-y-5 p-6">
+          <div className="space-y-1">
+            <h2 className="text-lg font-medium tracking-tight text-primary">
+              {t("DashboardPayments.counterparty.addAnywayTitle")}
+            </h2>
+            <p className="text-sm text-secondary">{riskMessage}</p>
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
+              {t("DashboardPayments.counterparty.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              iconLeft={<ShieldAlertIcon />}
+              onClick={() => {
+                setConfirmOpen(false);
+                void createAccount();
+              }}
+            >
+              {t("DashboardPayments.counterparty.addAnyway")}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

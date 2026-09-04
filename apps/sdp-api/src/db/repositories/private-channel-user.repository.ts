@@ -1,7 +1,7 @@
-// Owns two tables:
-//   - `private_channel_users`        (workspace-level invite + SPC credential)
-//   - `private_channel_memberships`  (channel × user junction)
-// Rows FK to `users(id)`; SDP-native user identity stays in the `users` table.
+// Owns two compatibility-named tables:
+//   - `private_channel_users`        (project identity + SPC credential)
+//   - `private_channel_memberships`  (channel × identity junction)
+// New identities are project-scoped and do not belong to an SDP user.
 
 import type { RepositoryDbClient } from "./base";
 
@@ -17,10 +17,18 @@ export interface PrivateChannelUserRow {
   id: string;
   organization_id: string;
   project_id: string;
-  user_id: string;
+  /** Legacy SDP-user link. New project principals do not belong to a human. */
+  user_id: string | null;
+  instance_id: string | null;
+  name: string;
+  is_default: boolean;
+  disabled_at: string | null;
+  created_by: string | null;
+  verified_wallet_count?: number;
   spc_user_id: string | null;
   spc_username: string | null;
   spc_credential_ciphertext: string | null;
+  provisioned_at: string | null;
   invited_by: string | null;
   invite_token: string | null;
   invited_at: string;
@@ -31,7 +39,7 @@ export interface PrivateChannelUserRow {
 
 /** Row + joined columns from `users` (denormalized display fields) + verified-wallet count. */
 export interface PrivateChannelUserWithIdentityRow extends PrivateChannelUserRow {
-  user_email: string;
+  user_email: string | null;
   user_name: string | null;
   /** Number of wallets this member has verified (from private_channel_verified_wallets). */
   verified_wallet_count: number;
@@ -67,6 +75,22 @@ export interface CreatePrivateChannelUserInput extends ProjectScope {
   inviteToken: string | null;
 }
 
+export interface ReservePrivateChannelPrincipalInput extends ProjectScope {
+  instanceId: string;
+  name: string;
+  isDefault: boolean;
+  createdBy: string | null;
+  spcUsername: string;
+  spcCredentialCiphertext: string;
+}
+
+export interface CompletePrivateChannelPrincipalInput extends ProjectScope {
+  id: string;
+  spcUserId: string | null;
+  spcUsername: string;
+  spcCredentialCiphertext: string;
+}
+
 export interface AddMembershipInput {
   channelId: string;
   privateChannelUserId: string;
@@ -78,6 +102,38 @@ export interface PrivateChannelUserRepositoryContext {
 }
 
 export interface PrivateChannelUserRepository {
+  /** Project principals for one connected instance, including disabled rows. */
+  listPrincipals(scope: ProjectScope, instanceId: string): Promise<PrivateChannelUserRow[]>;
+
+  /** The active default principal for an instance. */
+  findDefaultPrincipal(
+    scope: ProjectScope,
+    instanceId: string
+  ): Promise<PrivateChannelUserRow | null>;
+
+  /** The active default principal for the project's active instance. */
+  findDefaultPrincipalByProject(scope: ProjectScope): Promise<PrivateChannelUserRow | null>;
+
+  /** Reserve the unique local identity before creating its upstream SPC user. */
+  reservePrincipal(input: ReservePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
+
+  /** Find an incomplete reservation so provisioning can resume its credentials. */
+  findPrincipalReservation(
+    input: Pick<
+      ReservePrivateChannelPrincipalInput,
+      "organizationId" | "projectId" | "instanceId" | "name"
+    >
+  ): Promise<PrivateChannelUserRow | null>;
+
+  /** Attach the successfully registered SPC credentials to a reservation. */
+  completePrincipal(input: CompletePrivateChannelPrincipalInput): Promise<PrivateChannelUserRow>;
+
+  /** Remove a reservation that never received an SPC user. */
+  deletePrincipalReservation(scope: ProjectScope, id: string): Promise<boolean>;
+
+  /** Disable a non-default principal without erasing operation history. */
+  disablePrincipal(scope: ProjectScope, id: string): Promise<boolean>;
+
   /** Project-scoped list, joined with `users` for display fields. */
   listByProject(scope: ProjectScope): Promise<PrivateChannelUserWithIdentityRow[]>;
 
@@ -109,8 +165,11 @@ export interface PrivateChannelUserRepository {
     privateChannelUserId: string
   ): Promise<PrivateChannelMembershipWithChannelRow[]>;
 
-  /** Insert-if-not-exists. Returns the row (existing or newly created). */
-  addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow>;
+  /**
+   * Insert-if-not-exists while holding the principal row lock. Returns null
+   * when the principal is disabled before the insert can commit.
+   */
+  addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow | null>;
 
   /** Remove a user from a channel. Returns true if a row was deleted. */
   removeMembership(channelId: string, privateChannelUserId: string): Promise<boolean>;

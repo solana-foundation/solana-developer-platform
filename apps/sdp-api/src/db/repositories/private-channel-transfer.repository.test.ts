@@ -131,12 +131,12 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     await db
       .prepare(
         `INSERT INTO private_channel_instances (
-           id, organization_id, project_id, gateway_url, chain_rpc_url,
+           id, organization_id, project_id, gateway_url,
            escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
          ) VALUES
-           (?, ?, ?, 'https://gateway.example', 'https://rpc.example',
+           (?, ?, ?, 'https://gateway.example',
             'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE),
-           (?, ?, ?, 'https://other-gateway.example', 'https://other-rpc.example',
+           (?, ?, ?, 'https://other-gateway.example',
             'other_escrow_program', 'other_withdraw_program', 'other_escrow_instance',
             'https://other-auth.example', TRUE)`
       )

@@ -8,10 +8,9 @@
  * (`confirmation.err`) is a terminal failure.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import { confirmTransaction, type SolanaRpc } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import type { PrivateChannelDepositRepository, PrivateChannelDepositRow } from "@/db/repositories";
-import type { Env } from "@/types/env";
 
 /**
  * Confirm a broadcast deposit on its chain and persist the outcome:
@@ -24,13 +23,11 @@ import type { Env } from "@/types/env";
  * observable. `settled` becomes reachable when SPC ships events.
  */
 export async function confirmAndPersistDeposit(
-  env: Env,
   repo: PrivateChannelDepositRepository,
-  input: { depositId: string; chainRpcUrl: string; signature: Signature }
+  input: { depositId: string; rpc: SolanaRpc; signature: Signature }
 ): Promise<PrivateChannelDepositRow | null> {
   try {
-    const chainRpc = solanaRpc.createRpc(env, { rpcUrl: input.chainRpcUrl });
-    const confirmation = await solanaRpc.confirmTransaction(chainRpc, input.signature, {
+    const confirmation = await confirmTransaction(input.rpc, input.signature, {
       commitment: "confirmed",
     });
     if (confirmation.err) {

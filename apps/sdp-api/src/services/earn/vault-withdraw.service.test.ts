@@ -11,6 +11,7 @@ const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
+const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
@@ -28,6 +29,12 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
   createOrgSignerForCustodyWallet,
+}));
+
+// `vaultRentPayer` stays real: it only reads whatever this mock returns.
+vi.mock("./vault-sponsorship", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./vault-sponsorship")>()),
+  resolveVaultSponsorship,
 }));
 
 const { withdrawFromVault } = await import("./vault-withdraw.service");
@@ -120,6 +127,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
   resolveVaultWithdrawClient.mockReturnValue({ buildVaultWithdrawal });
   buildVaultWithdrawal.mockResolvedValue(plan());
+  // Matches the real resolver with the flag unset, the default everywhere here.
+  resolveVaultSponsorship.mockResolvedValue({ kind: "wallet-pays" });
   simulateVaultPlan.mockResolvedValue({ ok: true });
   createOrgSignerForCustodyWallet.mockResolvedValue({ address: WALLET_ADDRESS });
   signVaultPlan.mockResolvedValue({
@@ -162,6 +171,8 @@ describe("withdrawFromVault", () => {
     expect(resolveVaultWithdrawClient).not.toHaveBeenCalled();
     expect(signVaultPlan).not.toHaveBeenCalled();
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    // Exit safety: an exit replay must answer during a paymaster outage.
+    expect(resolveVaultSponsorship).not.toHaveBeenCalled();
   });
 
   it("rejects the same requestId with a different payload", async () => {
@@ -207,10 +218,86 @@ describe("withdrawFromVault", () => {
     });
   });
 
+  /**
+   * Refuses BEFORE the build, because the position is where the rent-refund
+   * destination comes from. Falling back to the owner would hand the customer
+   * lamports a sponsor put up.
+   */
   it("refuses a position the organization does not hold", async () => {
     await expect(
       withdrawFromVault(env, input({ positionId: generateEarnPositionId() }))
     ).rejects.toThrow();
+    expect(buildVaultWithdrawal).not.toHaveBeenCalled();
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Rent recovery. The share ATA's rent is refunded to whoever the DEPOSIT
+   * recorded, not to whoever sponsors today: the fee mode can flip between
+   * entering and exiting a position, and refunding a sponsor for rent the
+   * customer paid would take the customer's lamports.
+   */
+  describe("share-ATA rent refund", () => {
+    const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
+
+    it("refunds the funder recorded on the position", async () => {
+      await getDb(env)
+        .prepare("UPDATE earn_positions SET share_ata_rent_funder = ? WHERE id = ?")
+        .bind(SPONSOR, positionId)
+        .run();
+
+      await withdrawFromVault(env, input());
+
+      expect(buildVaultWithdrawal.mock.calls[0]?.[1]).toMatchObject({ rentRefundTo: SPONSOR });
+    });
+
+    it("names no refund destination when the wallet funded its own rent", async () => {
+      await withdrawFromVault(env, input());
+
+      expect(buildVaultWithdrawal.mock.calls[0]?.[1]).not.toHaveProperty("rentRefundTo");
+    });
+  });
+});
+
+describe("withdrawFromVault — the exit slippage floor", () => {
+  it("cross-checks the encoded minAmountOut against the request in both directions", async () => {
+    // Requested floor the builder silently dropped: fail closed, sign nothing.
+    buildVaultWithdrawal.mockResolvedValue(plan());
+    await expect(
+      withdrawFromVault(env, input({ minAmountOut: "9.9", requestId: crypto.randomUUID() }))
+    ).rejects.toThrow("omitted the canonical minAmountOut");
+
+    // Floor the builder invented without a request: equally fail closed.
+    buildVaultWithdrawal.mockResolvedValue(
+      plan({ accepted: { shares: "10", minAmountOut: "9.9" } })
+    );
+    await expect(withdrawFromVault(env, input({ requestId: crypto.randomUUID() }))).rejects.toThrow(
+      "does not match the policy-approved slippage floor"
+    );
+
+    // Matching floor signs and records it.
+    const result = await withdrawFromVault(
+      env,
+      input({ minAmountOut: "9.9", requestId: crypto.randomUUID() })
+    );
+    expect(result.movement).toMatchObject({ status: "submitted" });
+    expect(buildVaultWithdrawal.mock.calls.at(-1)?.[1]).toMatchObject({
+      shares: "10",
+      minAmountOut: "9.9",
+    });
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a provider exit refusal into the caller's 400, in the provider's words", async () => {
+    const { SdpVedaError } = await import("@sdp/veda");
+    buildVaultWithdrawal.mockRejectedValue(
+      new SdpVedaError("WITHDRAW_REFUSED", "Shares are locked until the unlock timestamp")
+    );
+
+    await expect(withdrawFromVault(env, input({ minAmountOut: "9.9" }))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("Shares are locked"),
+    });
+    expect(signVaultPlan).not.toHaveBeenCalled();
   });
 });

@@ -48,6 +48,18 @@ vi.mock("@sdp/rpc/solana", () => ({
   getTransaction,
 }));
 
+const { loadProjectRpcClient } = vi.hoisted(() => {
+  const PROJECT_RPC = { __projectRpc: true };
+  return {
+    loadProjectRpcClient: vi.fn(async () => ({
+      cluster: "devnet",
+      rpc: PROJECT_RPC,
+      target: { endpoint: "https://project-rpc.example" },
+    })),
+  };
+});
+vi.mock("@/services/private-channels/project-rpc", () => ({ loadProjectRpcClient }));
+
 // Deterministic ATA derivation: an owner's ATA is `ata:<owner>`.
 const { findAssociatedTokenPda } = vi.hoisted(() => ({
   findAssociatedTokenPda: vi.fn(async ({ owner }: { owner: string }) => [`ata:${owner}`, 255]),
@@ -98,7 +110,6 @@ function instanceRow(overrides: Record<string, unknown> = {}) {
     organization_id: "org",
     project_id: "proj",
     gateway_url: "http://gw",
-    chain_rpc_url: "https://api.devnet.solana.com",
     escrow_program_id: "esc",
     withdraw_program_id: "wdp",
     escrow_instance_addr: ESCROW_INSTANCE,

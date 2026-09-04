@@ -6,12 +6,17 @@ import type {
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
-import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
+import type {
+  CollectedFieldData,
+  PayoutRequirementAccount,
+  RampDirection,
+} from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import type { z } from "zod";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   type CounterpartiesResult,
   cancelRampTransfer,
@@ -34,14 +39,7 @@ import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 
-const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-export function isTerminalRampTransferStatus(status: string) {
-  return (
-    status === "completed" || status === "failed" || status === "expired" || status === "canceled"
-  );
-}
 
 export type RampWizardStep<TId extends string = string> = {
   id: TId;
@@ -51,10 +49,14 @@ export type RampWizardStep<TId extends string = string> = {
 
 export interface RampQuotePayloadArgs {
   fields: RampFields;
+  selectedWallet: PaymentsDashboardWallet;
   provider: RampProviderId;
   selectedRampPair: SelectedRampPair;
   cryptoToken: string;
   collectedData: CollectedFieldData;
+  selectedProviderAccountId: string | null;
+  /** Explicitly picked saved payout account; its corridor overrides the collected destination country. */
+  selectedPayoutAccount: PayoutRequirementAccount | null;
   rampsMemo: Record<string, string>;
 }
 
@@ -63,29 +65,25 @@ export interface RampWizardConfig<TId extends string = string> {
   steps: readonly RampWizardStep<TId>[];
   /** Per-step validation gate, keyed by step id. Steps absent here have no gate. */
   stepSchemas: Partial<Record<TId, z.ZodTypeAny>>;
-  /** Step at which the quote is created; the wizard then advances to the next step. */
+  /** Step whose primary action submits the requirements advance (provisioning); the wizard then advances to the next step. */
   quoteStepId: TId;
   memoStepId?: TId;
   selectionSchema: z.ZodTypeAny;
   quoteEndpoint: string;
   buildQuotePayload: (args: RampQuotePayloadArgs) => Record<string, unknown>;
   /**
-   * Optional provider-driven step, inserted after `insertAfter` only when the
-   * chosen provider reports `status: "collect"` for the counterparty. The quote
-   * then fires at this step (carrying `collectedData`) instead of `quoteStepId`.
+   * Provider-driven requirements flow. The collect step is inserted after
+   * `insertAfter` only when the chosen provider reports `status: "collect"`;
+   * the collect (or quote) step advances provider onboarding via POST
+   * /requirements. The quote embeds the memo, so it fires only once the user
+   * has passed the memo step AND the lifecycle has reached `ready` — whichever
+   * of the two happens last triggers it.
    */
-  requirements?: {
+  requirements: {
     step: RampWizardStep<TId>;
     insertAfter: TId;
     direction: RampDirection;
   };
-  /**
-   * When set, the quote step advances provider onboarding via POST /requirements
-   * (provisioning) instead of firing the quote; this hook then fires the
-   * provisioning-free quote once the lifecycle reaches `ready`. Used by on-ramp
-   * and off-ramp.
-   */
-  advanceRequirementsBeforeQuote?: boolean;
   onQuoteCreated?: (quote: PaymentRampQuote) => void;
 }
 
@@ -93,14 +91,14 @@ async function createRampQuote(
   endpoint: string,
   payload: Record<string, unknown>,
   t: Translate
-): Promise<PaymentRampQuote> {
+): Promise<{ quote: PaymentRampQuote; transferId: string }> {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const body = (await response.json().catch(() => ({}))) as {
-    data?: { quote?: PaymentRampQuote };
+    data?: { quote?: PaymentRampQuote; transferId?: string };
     error?: { message?: string };
   };
 
@@ -113,16 +111,17 @@ async function createRampQuote(
     );
   }
 
-  if (!body.data?.quote) {
+  if (!body.data?.quote || !body.data.transferId) {
     throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
   }
 
-  return body.data.quote;
+  return { quote: body.data.quote, transferId: body.data.transferId };
 }
 
 export interface UseRampWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
+  enabledRampProviders: RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
   selectedCounterparty: Counterparty | null;
@@ -136,6 +135,7 @@ export function useRampWizard<TId extends string>(
   {
     wallets,
     walletsError,
+    enabledRampProviders,
     rampProviderAccess,
     counterpartiesResult,
     selectedCounterparty,
@@ -150,7 +150,12 @@ export function useRampWizard<TId extends string>(
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedRampPair, setSelectedRampPair] = useState<SelectedRampPair>(DEFAULT_RAMP_PAIR);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
-  const [quote, setQuote] = useState<PaymentRampQuote | null>(null);
+  const [createdQuote, setCreatedQuote] = useState<{
+    quote: PaymentRampQuote;
+    transferId: string;
+  } | null>(null);
+  const quote = createdQuote === null ? null : createdQuote.quote;
+  const quoteTransferId = createdQuote === null ? null : createdQuote.transferId;
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [memoRows, setMemoRows] = useState<MemoRow[]>([]);
@@ -161,40 +166,69 @@ export function useRampWizard<TId extends string>(
     counterpartyId: initialCounterpartyId,
   });
 
-  const requirementsConfig = config.requirements;
-  const requirements = useCounterpartyRequirements(
-    requirementsConfig
-      ? {
-          counterpartyId: fields.counterpartyId,
-          provider: fields.provider,
-          direction: requirementsConfig.direction,
-          cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
-          fiatCurrency: selectedRampPair.fiatCurrency,
-          destinationWallet: fields.walletId,
-        }
-      : null
-  );
+  const { mutate: mutateSwrCache } = useSWRConfig();
+  const selectProvider = (provider: RampProviderId) => {
+    void mutateSwrCache(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
+      revalidate: true,
+    });
+    setField("provider", provider);
+  };
+
+  const selectedProviderField = fields.provider;
+  useEffect(() => {
+    if (selectedProviderField === null) return;
+    const pair = findRampPair(config.pairs, selectedRampPair);
+    if (!pair?.providers.includes(selectedProviderField)) {
+      setField("provider", null);
+    }
+  }, [config.pairs, selectedRampPair, selectedProviderField, setField]);
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,
     walletsError
   );
 
+  const selectedWallet = useMemo(
+    () => liveWallets.find((wallet) => wallet.id === fields.walletId) ?? null,
+    [liveWallets, fields.walletId]
+  );
+
+  const requirementsConfig = config.requirements;
+  const requirements = useCounterpartyRequirements({
+    counterpartyId: fields.counterpartyId,
+    provider: fields.provider,
+    direction: requirementsConfig.direction,
+    cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+    fiatCurrency: selectedRampPair.fiatCurrency,
+    destinationWallet: selectedWallet?.walletId ?? "",
+  });
+
   const { mutate: mutateCounterparties } = useSWR(
-    PAYMENTS_ACTION_COUNTERPARTIES_KEY,
+    paymentsQueryKeys.actionCounterparties(),
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
     }
   );
 
-  const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null,
-    [liveWallets, fields.walletId]
-  );
+  // Once inserted, the requirements step is pinned for the provider's lifetime in
+  // this wizard: an advance answering `ready` flips needsCollection off, but the
+  // step the user is standing on must not vanish under them.
+  const [requirementsPin, setRequirementsPin] = useState<{
+    provider: RampProviderId | null;
+    pinned: boolean;
+  }>({ provider: fields.provider, pinned: false });
+  if (requirementsPin.provider !== fields.provider) {
+    setRequirementsPin({ provider: fields.provider, pinned: false });
+  } else if (requirements.needsCollection && !requirementsPin.pinned) {
+    setRequirementsPin({ provider: fields.provider, pinned: true });
+  }
+  const includeRequirementsStep =
+    requirements.needsCollection ||
+    (requirementsPin.provider === fields.provider && requirementsPin.pinned);
 
   const steps = useMemo<readonly RampWizardStep<TId>[]>(() => {
-    if (!requirementsConfig || !requirements.needsCollection) {
+    if (!includeRequirementsStep) {
       return config.steps;
     }
     const insertIndex = config.steps.findIndex(
@@ -205,19 +239,17 @@ export function useRampWizard<TId extends string>(
       requirementsConfig.step,
       ...config.steps.slice(insertIndex + 1),
     ];
-  }, [config.steps, requirementsConfig, requirements.needsCollection]);
+  }, [config.steps, requirementsConfig, includeRequirementsStep]);
 
   const currentStepId = steps[stepIndex].id;
-  const isRequirementsStep =
-    requirementsConfig !== undefined && currentStepId === requirementsConfig.step.id;
-  const quoteStepId: TId =
-    requirementsConfig && requirements.needsCollection
-      ? requirementsConfig.step.id
-      : config.quoteStepId;
+  const isRequirementsStep = currentStepId === requirementsConfig.step.id;
+  const quoteStepId: TId = includeRequirementsStep
+    ? requirementsConfig.step.id
+    : config.quoteStepId;
   const stepSchema = config.stepSchemas[currentStepId];
   const canProceed = useMemo(() => {
     if (isRequirementsStep) {
-      return requirements.isComplete;
+      return requirements.isComplete && requirements.blockReason === null;
     }
     // Block leaving the step that precedes the requirements insertion until the
     // requirements answer has resolved AND isn't a blocker (fetch error, or an
@@ -251,47 +283,39 @@ export function useRampWizard<TId extends string>(
 
   const isLastStep = stepIndex === steps.length - 1;
 
-  const createQuoteAndAdvance = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
-      return;
+  const createQuoteForCurrentSelection = async (
+    providerAccountId: string | null
+  ): Promise<{
+    quote: PaymentRampQuote;
+    transferId: string;
+  } | null> => {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
+      return null;
     }
+    const created = await createRampQuote(
+      config.quoteEndpoint,
+      config.buildQuotePayload({
+        fields,
+        selectedWallet,
+        provider: fields.provider,
+        selectedRampPair,
+        cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+        collectedData: requirements.collectedData,
+        selectedProviderAccountId: providerAccountId,
+        selectedPayoutAccount: requirements.selectedPayoutAccount,
+        rampsMemo: memoRowsToRecord(memoRows),
+      }),
+      t
+    );
+    setCreatedQuote(created);
+    return created;
+  };
 
-    setHostedQuoteLoading(true);
-    const toastId = toast.loading(t("DashboardPayments.ramps.creatingQuote"), {
-      position: "bottom-right",
-    });
-
+  const refreshQuote = async () => {
     try {
-      const created = await createRampQuote(
-        config.quoteEndpoint,
-        config.buildQuotePayload({
-          fields,
-          provider: fields.provider,
-          selectedRampPair,
-          cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
-          collectedData: requirements.collectedData,
-          rampsMemo: memoRowsToRecord(memoRows),
-        }),
-        t
-      );
-
-      setQuote(created);
-      config.onQuoteCreated?.(created);
-      setStepIndex((current) => current + 1);
-      setHostedQuoteLoading(false);
-      toast.success(
-        created.deliveryMode === "hosted"
-          ? t("DashboardPayments.ramps.widgetReady")
-          : t("DashboardPayments.ramps.quoteReady"),
-        {
-          id: toastId,
-          position: "bottom-right",
-        }
-      );
+      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
     } catch (error) {
-      setHostedQuoteLoading(false);
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
-        id: toastId,
         description:
           error instanceof Error ? error.message : t("DashboardPayments.ramps.quoteRequestFailed"),
         position: "bottom-right",
@@ -299,42 +323,52 @@ export function useRampWizard<TId extends string>(
     }
   };
 
-  const refreshQuote = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
-      return;
-    }
-    try {
-      const created = await createRampQuote(
-        config.quoteEndpoint,
-        config.buildQuotePayload({
-          fields,
-          provider: fields.provider,
-          selectedRampPair,
-          cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
-          collectedData: requirements.collectedData,
-          rampsMemo: memoRowsToRecord(memoRows),
-        }),
-        t
-      );
-      setQuote(created);
-    } catch {}
-  };
-
   // Only auto-fire the quote while the user sits on the transaction stage —
   // stepping back to edit selections must not create a quote from mid-edit state.
-  useSWR(
-    config.advanceRequirementsBeforeQuote &&
-      isLastStep &&
-      requirements.onboarding?.status === "ready" &&
-      quote === null
-      ? ([requirementsConfig?.direction ?? "ramp", "ready-quote"] as const)
-      : null,
-    () => refreshQuote(),
-    { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
-  );
+  // Once per wizard instance, held in local state (never a shared cache: a
+  // remounted wizard — cancel and come back — must fire its own quote); the
+  // quote POST persists the transfer and the transfer-status poll owns the
+  // flow from there. A failed attempt surfaces through quoteCreationError
+  // with an explicit retry.
+  const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
+  const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
+  const quoteCreationAttempted = useRef(false);
+  const runQuoteCreation = async (providerAccountId: string | null) => {
+    setQuoteCreationRetrying(true);
+    try {
+      await createQuoteForCurrentSelection(providerAccountId);
+      setQuoteCreationError(null);
+    } catch (error) {
+      setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      setQuoteCreationRetrying(false);
+    }
+  };
+  const retryQuoteCreation = () => void runQuoteCreation(requirements.selectedProviderAccountId);
+  const maybeCreateQuote = (providerAccountId: string | null) => {
+    if (quoteCreationAttempted.current) {
+      return;
+    }
+    quoteCreationAttempted.current = true;
+    void runQuoteCreation(providerAccountId);
+  };
+
+  // Readiness observed by the status poll while the user sits on the transaction
+  // stage fires the deferred quote. Readiness is derived corridor-addressed data,
+  // so a stale corridor can never reach here; `maybeCreateQuote` still guarantees
+  // at most one quote per wizard instance. A genuine network side effect on data
+  // arrival — not derived state — hence the effect.
+  const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
+  const resolvedProviderAccountId = requirements.resolvedProviderAccountId;
+  useEffect(() => {
+    if (!isLastStep || onboardingStatus !== "ready") {
+      return;
+    }
+    maybeCreateQuote(resolvedProviderAccountId);
+  });
 
   const advanceRequirementsAndProceed = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
       return;
     }
     setHostedQuoteLoading(true);
@@ -344,19 +378,26 @@ export function useRampWizard<TId extends string>(
     try {
       const result = await requirements.submitRequirements({
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
-        destinationWallet: fields.walletId,
+        destinationWallet: selectedWallet.walletId,
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);
-      if (result.status === "collect" || result.status === "unsupported") {
-        toast.error(
-          result.status === "unsupported"
-            ? result.reason
-            : t("DashboardPayments.ramps.moreDetailsNeeded"),
-          { id: toastId, position: "bottom-right" }
-        );
+      if (result.status === "unsupported") {
+        toast.error(result.reason, { id: toastId, position: "bottom-right" });
         return;
       }
+      if (
+        result.status === "collect" ||
+        result.status === "collect_counterparty" ||
+        result.status === "collect_account"
+      ) {
+        // Progressive collection: the provider accepted this step and returned
+        // the next field set, which the step re-renders in place.
+        toast.dismiss(toastId);
+        return;
+      }
+      // Reaching the transaction stage with derived readiness fires the quote
+      // through the single readiness effect above.
       setStepIndex((current) => current + 1);
       toast.dismiss(toastId);
     } catch (error) {
@@ -377,17 +418,16 @@ export function useRampWizard<TId extends string>(
       return;
     }
     if (currentStepId === quoteStepId) {
-      if (config.advanceRequirementsBeforeQuote) {
-        await advanceRequirementsAndProceed();
-      } else {
-        await createQuoteAndAdvance();
-      }
+      await advanceRequirementsAndProceed();
       return;
     }
     if (isLastStep) {
       toast.info(t("DashboardPayments.ramps.nextStepSoon"));
       return;
     }
+    // Leaving the memo (last input) step lands on the transaction stage; the
+    // readiness effect fires the deferred quote there, whether provisioning is
+    // already ready or the status poll observes it later.
     setStepIndex((current) => current + 1);
   };
 
@@ -404,7 +444,7 @@ export function useRampWizard<TId extends string>(
   const onTransactionStage = isLastStep && quote !== null;
 
   const cancelTransfer = async () => {
-    if (!quote) {
+    if (!quote || quoteTransferId === null) {
       throw new Error(t("DashboardPayments.ramps.cannotCancelWithoutQuote"));
     }
     if (isCanceling) {
@@ -415,7 +455,7 @@ export function useRampWizard<TId extends string>(
       position: "bottom-right",
     });
     try {
-      await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id }, t);
+      await cancelRampTransfer({ transferId: quoteTransferId }, t);
       toast.success(t("DashboardPayments.ramps.transactionCanceled"), {
         id: toastId,
         position: "bottom-right",
@@ -462,6 +502,7 @@ export function useRampWizard<TId extends string>(
   };
 
   return {
+    enabledRampProviders,
     rampProviderAccess,
     selectedCounterparty,
     stepIndex,
@@ -474,6 +515,9 @@ export function useRampWizard<TId extends string>(
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
+    selectedProviderAccountId: requirements.selectedProviderAccountId,
+    payoutAccounts: requirements.payoutAccounts,
+    selectPayoutAccount: requirements.selectPayoutAccount,
     requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,
@@ -482,10 +526,15 @@ export function useRampWizard<TId extends string>(
     selectedRampPair,
     fields,
     setField,
+    selectProvider,
     quote,
+    quoteTransferId,
     memoRows,
     setMemoRows,
     refreshQuote,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
     retryOnboarding: requirements.retryOnboarding,

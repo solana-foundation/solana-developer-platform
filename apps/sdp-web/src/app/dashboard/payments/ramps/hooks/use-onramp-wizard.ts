@@ -9,14 +9,17 @@ import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
-  fetchTransferByProviderReference,
+  fetchTransferById,
   simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { onrampPairs, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
+import { getRampTransferState } from "../ramp-transfer-state";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
 import {
   memoSummaryDetails,
@@ -24,12 +27,7 @@ import {
   providerSummaryDetail,
   summaryAmount,
 } from "../wizard-summary";
-import {
-  isTerminalRampTransferStatus,
-  type RampWizardStep,
-  type UseRampWizardProps,
-  useRampWizard,
-} from "./use-ramp-wizard";
+import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type OnrampStepId = "DEPOSIT" | "MEMO" | "PROVIDER" | "REQUIREMENTS";
@@ -63,34 +61,40 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: ONRAMP_PAIRS,
+    pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositAmountSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {
       step: getOnrampRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "DEPOSIT",
       direction: "onramp",
     },
-    advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
+    buildQuotePayload: ({
+      fields,
+      selectedWallet,
+      provider,
+      selectedRampPair,
+      cryptoToken,
+      rampsMemo,
+    }) =>
       ({
         provider,
         counterpartyId: fields.counterpartyId,
-        destinationWallet: fields.walletId,
+        destinationWallet: selectedWallet.walletId,
         cryptoToken,
         fiatCurrency: selectedRampPair.fiatCurrency,
         fiatAmount: fields.amount.trim(),
-        redirectUrl: `${window.location.origin}/dashboard/payments`,
         // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
         domain: window.location.hostname,
         rampsMemo,
@@ -122,16 +126,15 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     ...memoSummaryDetails(t, wizard.memoRows),
   ];
 
-  const transferStatusKey = wizard.quote
-    ? (["onramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
+  const transferStatusKey = wizard.quoteTransferId
+    ? paymentsQueryKeys.onrampTransferStatus({ transferId: wizard.quoteTransferId })
     : null;
   const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
     transferStatusKey,
-    ([, provider, providerReference]): Promise<PaymentTransferSummary | null> =>
-      fetchTransferByProviderReference({ provider, providerReference }, t),
+    ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
       refreshInterval: (transfer) =>
-        transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,
+        transfer && getRampTransferState(transfer.status).terminal ? 0 : 3000,
       revalidateOnFocus: true,
       dedupingInterval: 0,
     }
@@ -144,6 +147,9 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       quote?.provider !== "bvnk" &&
       quote?.provider !== "mural"
     ) {
+      return;
+    }
+    if (!wizard.selectedWallet) {
       return;
     }
 
@@ -190,7 +196,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
               amount: Number(wizard.fields.amount.trim()),
               fiatCurrency: wizard.selectedRampPair.fiatCurrency,
               cryptoToken: toRampCryptoToken(wizard.selectedRampPair.assetRail),
-              destinationWallet: wizard.fields.walletId,
+              destinationWallet: wizard.selectedWallet.walletId,
             },
           },
           t

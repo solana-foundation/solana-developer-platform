@@ -139,7 +139,9 @@
       "copyTokenId": "Sao chép ID Token",
       "explorer": "Explorer",
       "deploy": "Deploy",
-      "unpause": "Bỏ tạm dừng"
+      "unpause": "Bỏ tạm dừng",
+      "mint": "Mint",
+      "deployedOn": "Đã Deploy {date}"
     },
     "create": {
       "title": "Tạo Draft Token mới",
@@ -499,7 +501,8 @@
       "sortNameDesc": "Tên Z–A",
       "clearFilters": "Xóa tất cả",
       "noTokensOnPage": "Không có Asset trên trang này.",
-      "loadingAssets": "Đang tải Assets…"
+      "loadingAssets": "Đang tải Assets…",
+      "clearSearch": "Xóa tìm kiếm"
     },
     "list": {
       "toggleDetails": "Bật/tắt chi tiết {name}",

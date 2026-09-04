@@ -1,6 +1,7 @@
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { COINBASE_HOSTED_APPROVED_HOSTS, checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { divideDecimalAmounts, sumDecimalAmounts } from "../../../decimal";
@@ -17,12 +18,12 @@ import {
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -184,35 +185,35 @@ export class CoinbaseRampClient implements RampProvider {
     return readyCounterparty(this.id, options.direction);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {
-    const apiKeyName = requireEnv(env, "COINBASE_CDP_API_KEY_ID");
-    const apiKeySecret = requireEnv(env, "COINBASE_CDP_API_KEY_SECRET");
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    if (!context.offline) {
+      const { env, fetchJson, writeDump } = context;
+      const apiKeyName = requireEnv(env, "COINBASE_CDP_API_KEY_ID");
+      const apiKeySecret = requireEnv(env, "COINBASE_CDP_API_KEY_SECRET");
 
-    const jwt = await generateJwt({
-      apiKeyId: apiKeyName,
-      apiKeySecret,
-      requestMethod: "GET",
-      requestHost: new URL(CDP_V1_API_BASE_URL).host,
-      requestPath: "/onramp/v1/buy/options",
-    });
+      const jwt = await generateJwt({
+        apiKeyId: apiKeyName,
+        apiKeySecret,
+        requestMethod: "GET",
+        requestHost: new URL(CDP_V1_API_BASE_URL).host,
+        requestPath: "/onramp/v1/buy/options",
+      });
 
-    await writeDump(
-      RAMP_RAIL_DUMPS.coinbase.buyOptions.name,
-      await fetchJson(
-        this.id,
-        "GET /onramp/v1/buy/options",
-        `${CDP_V1_API_BASE_URL}/onramp/v1/buy/options?country=US&networks=solana`,
-        { headers: { Authorization: `Bearer ${jwt}` } }
-      )
+      await writeDump(
+        RAMP_RAIL_DUMPS.coinbase.buyOptions.name,
+        await fetchJson(
+          this.id,
+          "GET /onramp/v1/buy/options",
+          `${CDP_V1_API_BASE_URL}/onramp/v1/buy/options?country=US&networks=solana`,
+          { headers: { Authorization: `Bearer ${jwt}` } }
+        )
+      );
+    }
+    return distillCoinbaseRailSupport(
+      await context.readDump(RAMP_RAIL_DUMPS.coinbase.buyOptions.file)
     );
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
-    return distillCoinbaseRailSupport(await readDump(RAMP_RAIL_DUMPS.coinbase.buyOptions.file));
   }
 
   async estimateOnramp(
@@ -299,14 +300,13 @@ export class CoinbaseRampClient implements RampProvider {
     }
     if (!input.email || !input.phone) {
       throw badRequest(
-        "Coinbase Onramp requires the counterparty to have an email and phone number.",
+        "Coinbase onramp requires identity fields that are no longer stored; JIT collection is not wired yet",
         { provider: this.id }
       );
     }
 
     const now = new Date().toISOString();
     const partnerUserRef = `sandbox-${input.externalCustomerId}`;
-    // Coinbase wants strict E.164; strip any formatting the counterparty phone was stored with.
     const phoneNumber = input.phone.replace(/[\s()-]/g, "");
 
     const { order, paymentLink } = await this.request<CoinbaseCreateOrderResponse>(
@@ -328,7 +328,16 @@ export class CoinbaseRampClient implements RampProvider {
       }
     );
 
-    const hostedUrl = new URL(paymentLink.url);
+    // The dashboard iframes this URL and trusts its origin for postMessage
+    // events, so anything but HTTPS on the approved payment-link host fails closed.
+    const destination = checkRampDestination(paymentLink.url, [...COINBASE_HOSTED_APPROVED_HOSTS]);
+    if (!destination.ok) {
+      throw providerUnavailable("Coinbase returned an untrusted payment link URL.", {
+        provider: this.id,
+        reason: destination.reason,
+      });
+    }
+    const hostedUrl = destination.url;
     hostedUrl.searchParams.set("useApplePaySandbox", "true");
 
     // The payment link URL is a signed, time-limited credential — never log it.

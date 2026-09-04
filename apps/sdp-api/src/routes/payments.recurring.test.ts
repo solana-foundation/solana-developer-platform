@@ -11,18 +11,25 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
+import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import app from "@/index";
+import { AppError } from "@/lib/errors";
+import { rootLogger } from "@/runtime/logger";
+import { SigningService } from "@/services/domain/signing.service";
+import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
   createFeePaymentAdapterMock,
+  createOrgSignerForCustodyWalletMock,
   createOrgSignerMock,
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionDelegationMock,
+  fullySignTestTransaction,
   getAccountInfoMock,
   getRecentBlockhashMock,
   getTransactionMock,
@@ -32,7 +39,11 @@ import {
   recurringCollectionTransactionForSignature,
   seedCachedKey,
   seedCounterparty,
+  sendTransactionMock,
+  sendTransactionPreflightError,
   TEST_API_KEY,
+  TEST_CONFIG_ID,
+  TEST_CUSTODY_WALLET_ID,
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
@@ -117,14 +128,15 @@ async function seedIssuedTokenMint(params: {
   projectId: string;
   mintAddress: string;
   status: TokenStatus;
-}): Promise<void> {
+}): Promise<string> {
+  const tokenId = `tok_${crypto.randomUUID()}`;
   await getDb(env)
     .prepare(
       `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, name, symbol, decimals, status, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
-      `tok_${crypto.randomUUID()}`,
+      tokenId,
       params.projectId,
       TEST_ORG.id,
       params.mintAddress,
@@ -135,6 +147,7 @@ async function seedIssuedTokenMint(params: {
       TEST_USER.id
     )
     .run();
+  return tokenId;
 }
 
 function expectPreparedSubscriptionTransaction(
@@ -179,7 +192,7 @@ async function createRecurringPaymentForActivation(headers: Record<string, strin
       method: "POST",
       headers,
       body: JSON.stringify({
-        sourceWalletId: TEST_WALLET_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
         counterpartyId,
         counterpartyAccountId,
         token: DEVNET_USDC_MINT,
@@ -224,8 +237,302 @@ async function activateRecurringPaymentForTest(headers: Record<string, string>) 
   return activateBody.data.recurringPayment;
 }
 
+async function activateRecurringPaymentForRuntimeDenialTest(headers: Record<string, string>) {
+  const sourceSigner = await generateKeyPairSigner();
+  await updateSeededWalletPublicKey(sourceSigner.address);
+  createOrgSignerMock.mockResolvedValue(sourceSigner);
+  mockRecurringActivationRpc();
+  return activateRecurringPaymentForTest(headers);
+}
+
+function recurringExecutionCallCounts() {
+  return {
+    feePaymentAdapter: createFeePaymentAdapterMock.mock.calls.length,
+    custodySigner: createOrgSignerForCustodyWalletMock.mock.calls.length,
+    providerSigner: createOrgSignerMock.mock.calls.length,
+    accountInfo: getAccountInfoMock.mock.calls.length,
+    blockhash: getRecentBlockhashMock.mock.calls.length,
+    confirmation: confirmTransactionMock.mock.calls.length,
+    transaction: getTransactionMock.mock.calls.length,
+    send: sendTransactionMock.mock.calls.length,
+    delegation: fetchMaybeSubscriptionDelegationMock.mock.calls.length,
+  };
+}
+
+function denyRecurringRuntimeExecution() {
+  return vi.spyOn(SigningService.prototype, "admitRuntimeExecution").mockRejectedValue(
+    new AppError("CONFLICT", "Custody wallet is unavailable", {
+      reason: "runtime_execution_unavailable",
+    })
+  );
+}
+
+async function recurringExecutionSnapshot(recurringPaymentId: string) {
+  return getDb(env)
+    .prepare(
+      `SELECT to_jsonb(rp) AS recurring_payment,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payments) AS recurring_payments,
+              (SELECT to_jsonb(ps)
+                 FROM payment_subscriptions ps
+                WHERE ps.id = rp.subscription_id) AS subscription,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_activation_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS activation_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_update_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS update_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_lifecycle_attempts a
+                WHERE a.recurring_payment_id = rp.id) AS lifecycle_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_recurring_payment_update_events e
+                WHERE e.recurring_payment_id = rp.id) AS update_events,
+              (SELECT COUNT(*)::int
+                 FROM payment_subscription_collection_attempts a
+                WHERE a.subscription_id = rp.subscription_id) AS collection_attempts,
+              (SELECT COUNT(*)::int
+                 FROM payment_transfers t
+                WHERE t.provider_data->>'recurringPaymentId' = rp.id) AS collection_transfers,
+              (SELECT COUNT(*)::int
+                 FROM policy_evaluations) AS policy_evaluations,
+              (SELECT COUNT(*)::int
+                 FROM approval_requests) AS approval_requests,
+              (SELECT COUNT(*)::int
+                 FROM wallet_operations) AS all_wallet_operations,
+              (SELECT COUNT(*)::int
+                 FROM wallet_operations wo
+                WHERE wo.organization_id = rp.organization_id
+                  AND wo.project_id = rp.project_id
+                  AND wo.raw_payload->>'recurringPaymentId' = rp.id) AS wallet_operations
+         FROM payment_recurring_payments rp
+        WHERE rp.id = ?`
+    )
+    .bind(recurringPaymentId)
+    .first();
+}
+
+async function expectRuntimeAdmissionDenialWithoutWrites(input: {
+  recurringPaymentId: string;
+  path: string;
+  method: "PATCH" | "POST";
+  headers: Record<string, string>;
+  body: string;
+}) {
+  const before = await recurringExecutionSnapshot(input.recurringPaymentId);
+  const executionCalls = recurringExecutionCallCounts();
+  const admission = denyRecurringRuntimeExecution();
+
+  try {
+    const response = await app.request(
+      input.path,
+      { method: input.method, headers: input.headers, body: input.body },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(admission).toHaveBeenCalledOnce();
+    expect(admission).toHaveBeenCalledWith(TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID);
+  } finally {
+    admission.mockRestore();
+  }
+
+  expect(await recurringExecutionSnapshot(input.recurringPaymentId)).toEqual(before);
+  expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+}
+
+const UNBOUND_CUSTODY_WALLET_ID = "cwlt_recurring_unbound";
+const UNBOUND_WALLET_ID = "wal_recurring_unbound";
+const RECURRING_HEADERS = {
+  Authorization: `Bearer ${TEST_API_KEY.raw}`,
+  "Content-Type": "application/json",
+};
+
+interface SeededPendingRecurringPayment {
+  id: string;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+}
+
+async function seedUnboundWallet(): Promise<void> {
+  const unboundWallet = await generateKeyPairSigner();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO custody_wallets
+         (id, custody_config_id, wallet_id, public_key, status)
+       VALUES (?, ?, ?, ?, 'active')`
+    )
+    .bind(UNBOUND_CUSTODY_WALLET_ID, TEST_CONFIG_ID, UNBOUND_WALLET_ID, unboundWallet.address)
+    .run();
+}
+
+async function bindApiKeyToWallet(walletId: string, custodyWalletId: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+       VALUES (?, ?, ?, '["*"]')`
+    )
+    .bind(`akw_${custodyWalletId}`, TEST_API_KEY.id, walletId)
+    .run();
+  await seedCachedKey({
+    walletScope: "selected",
+    signingWalletId: walletId,
+    signingWalletIds: [walletId],
+    walletBindings: [{ walletId, custodyWalletId, permissions: ["*"] }],
+  });
+}
+
+async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPayment> {
+  const recurringPaymentId = await createRecurringPaymentForActivation(RECURRING_HEADERS);
+  const response = await app.request(
+    `/v1/payments/recurring-payments/${recurringPaymentId}`,
+    { headers: RECURRING_HEADERS },
+    env
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    data: { recurringPayment: SeededPendingRecurringPayment };
+  };
+  return body.data.recurringPayment;
+}
+
+const unboundWalletCases: Array<{
+  route: string;
+  expectedStatus: number;
+  expectedMessage: string;
+  request: (payment: SeededPendingRecurringPayment) => {
+    path: string;
+    method?: string;
+    body: Record<string, unknown>;
+  };
+}> = [
+  {
+    route: "create",
+    expectedStatus: 403,
+    expectedMessage: "API key is not authorized for the requested wallet",
+    request: (payment) => ({
+      path: "/v1/payments/recurring-payments",
+      body: {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        counterpartyId: payment.counterpartyId,
+        counterpartyAccountId: payment.counterpartyAccountId,
+        token: DEVNET_USDC_MINT,
+        amount: "25.00",
+        periodHours: 24,
+      },
+    }),
+  },
+  {
+    route: "update",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}`,
+      method: "PATCH",
+      body: { amount: "26.00" },
+    }),
+  },
+  {
+    route: "activate",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/activate`,
+      body: {},
+    }),
+  },
+  {
+    route: "cancel",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/cancel`,
+      body: {},
+    }),
+  },
+  {
+    route: "collect",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/collect`,
+      body: {},
+    }),
+  },
+  {
+    route: "resume",
+    expectedStatus: 404,
+    expectedMessage: "Recurring payment not found",
+    request: (payment) => ({
+      path: `/v1/payments/recurring-payments/${payment.id}/resume`,
+      body: {},
+    }),
+  },
+];
+
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
+
+  beforeEach(() => {
+    createOrgSignerForCustodyWalletMock.mockImplementation((signerEnv, orgId, projectId) =>
+      createOrgSignerMock(signerEnv, orgId, projectId)
+    );
+  });
+
+  it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "ambiguous_recurring_wallet",
+    });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_ambiguous_recurring', ?, ?, 'privy', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_ambiguous_recurring', 'cust_cfg_ambiguous_recurring', ?, ?, 'active')`
+        )
+        .bind(TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
+    ]);
+
+    const response = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(201);
+    expect(
+      await getDb(env)
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments")
+        .first<{ source_custody_wallet_id: string }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
+  });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
     const headers = {
@@ -244,7 +551,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -260,7 +567,8 @@ describe("Payments routes — recurring", () => {
       data: {
         recurringPayment: {
           id: string;
-          sourceWalletId: string;
+          sourceCustodyWalletId: string;
+          sourceProviderWalletId: string;
           counterpartyId: string;
           counterpartyAccountId: string;
           destinationAddress: string;
@@ -271,7 +579,8 @@ describe("Payments routes — recurring", () => {
       };
     };
     expect(createBody.data.recurringPayment.id).toMatch(/^prp_/);
-    expect(createBody.data.recurringPayment.sourceWalletId).toBe(TEST_WALLET_ID);
+    expect(createBody.data.recurringPayment.sourceCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(createBody.data.recurringPayment.sourceProviderWalletId).toBe(TEST_WALLET_ID);
     expect(createBody.data.recurringPayment.counterpartyId).toBe(counterpartyId);
     expect(createBody.data.recurringPayment.counterpartyAccountId).toBe(counterpartyAccountId);
     expect(createBody.data.recurringPayment.destinationAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
@@ -304,6 +613,98 @@ describe("Payments routes — recurring", () => {
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
   });
 
+  it("fails closed before signing when a recurring payment has no exact wallet pin", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL WHERE id = ?")
+      .bind(recurringPaymentId)
+      .run();
+    const signerCalls = createOrgSignerForCustodyWalletMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
+  });
+
+  it("does not claim activation when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId,
+      path: `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
+  it("does not claim an active update when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}`,
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ metadataUri: "https://example.com/recurring/blocked.json" }),
+    });
+  });
+
+  it("does not claim cancellation when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
+  it("does not claim resume when runtime admission denies the source wallet", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForRuntimeDenialTest(headers);
+    const cancelResponse = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(cancelResponse.status).toBe(200);
+
+    await expectRuntimeAdmissionDenialWithoutWrites({
+      recurringPaymentId: activated.id,
+      path: `/v1/payments/recurring-payments/${activated.id}/resume`,
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  });
+
   it("restricts recurring payment tokens to USD stablecoins and project-issued tokens", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -322,7 +723,7 @@ describe("Payments routes — recurring", () => {
           method: "POST",
           headers,
           body: JSON.stringify({
-            sourceWalletId: TEST_WALLET_ID,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             counterpartyId,
             counterpartyAccountId,
             token,
@@ -416,7 +817,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -437,7 +838,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -594,7 +995,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -681,7 +1082,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -764,6 +1165,25 @@ describe("Payments routes — recurring", () => {
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
+    const replacementCustodyWalletId = "cwlt_recurring_replacement";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_replacement', ?, ?, 'active')`
+        )
+        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
+    ]);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
     const replacementPlanSignature =
@@ -787,7 +1207,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -801,12 +1221,107 @@ describe("Payments routes — recurring", () => {
       .bind(firstCollectionAt, activated.id)
       .run();
 
+    const approvalOperationId = "wop_recurring_source_change_fence";
+    const approvalRequestId = "appr_recurring_source_change_fence";
+    const policyEvaluationId = "peval_recurring_source_change_fence";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO wallet_operations
+             (id, organization_id, project_id, custody_wallet_id, wallet_id, source,
+              operation_family, operation_type, raw_payload, status)
+           VALUES (?, ?, ?, ?, ?, 'api', 'payment', 'recurring_payment_collection',
+                   ?::jsonb, 'pending_approval')`
+        )
+        .bind(
+          approvalOperationId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_CUSTODY_WALLET_ID,
+          TEST_WALLET_ID,
+          JSON.stringify({
+            recurringPaymentId: activated.id,
+            collectionDueAt: activated.nextCollectionDueAt,
+          })
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO approval_requests
+             (id, organization_id, project_id, wallet_operation_id, status)
+           VALUES (?, ?, ?, ?, 'pending')`
+        )
+        .bind(approvalRequestId, TEST_ORG.id, TEST_PROJECT.id, approvalOperationId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO policy_evaluations
+             (id, wallet_operation_id, decision, reason_code, requires_approval,
+              approval_request_id)
+           VALUES (?, ?, 'approval_required', 'test_source_change_fence', true, ?)`
+        )
+        .bind(policyEvaluationId, approvalOperationId, approvalRequestId),
+    ]);
+
+    const replacementRequest = {
+      sourceCustodyWalletId: replacementCustodyWalletId,
+      amount: "35.00",
+      periodHours: 48,
+      nextCollectionDueAt: null,
+    };
+    const signerCallsBeforeFence = createOrgSignerForCustodyWalletMock.mock.calls.length;
+    const providerCallsBeforeFence = signAndSendMock.mock.calls.length;
+    const blockedUpdateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(replacementRequest),
+      },
+      env
+    );
+    expect(blockedUpdateRes.status).toBe(409);
+    const blockedUpdateBody = (await blockedUpdateRes.json()) as {
+      error: {
+        details: {
+          walletOperationId: string;
+          policyEvaluationId: string;
+          approvalRequestId: string;
+        };
+      };
+    };
+    expect(blockedUpdateBody.error.details).toEqual({
+      walletOperationId: approvalOperationId,
+      policyEvaluationId,
+      approvalRequestId,
+    });
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCallsBeforeFence);
+    expect(signAndSendMock).toHaveBeenCalledTimes(providerCallsBeforeFence);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT COUNT(*)::int AS count
+             FROM wallet_operations
+            WHERE operation_type = 'recurring_payment_update'`
+        )
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    expect(
+      await getDb(env)
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ source_custody_wallet_id: string | null }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
+
+    await getDb(env)
+      .prepare("UPDATE approval_requests SET status = 'rejected' WHERE id = ?")
+      .bind(approvalRequestId)
+      .run();
+
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
       {
         method: "PATCH",
         headers,
-        body: JSON.stringify({ amount: "35.00", periodHours: 48, nextCollectionDueAt: null }),
+        body: JSON.stringify(replacementRequest),
       },
       env
     );
@@ -816,6 +1331,7 @@ describe("Payments routes — recurring", () => {
       data: {
         recurringPayment: {
           status: string;
+          sourceCustodyWalletId: string;
           amount: string;
           periodHours: number;
           planId: string;
@@ -827,6 +1343,7 @@ describe("Payments routes — recurring", () => {
     };
     expect(updateBody.data.recurringPayment).toMatchObject({
       status: "active",
+      sourceCustodyWalletId: replacementCustodyWalletId,
       amount: "35.00",
       periodHours: 48,
       authorizationSignature: replacementAuthSignature,
@@ -846,7 +1363,8 @@ describe("Payments routes — recurring", () => {
       .first<{ status: string }>();
     const attempt = await getDb(env)
       .prepare(
-        `SELECT mode, status, stage, plan_creation_signature, authorization_signature, old_cancel_signature
+        `SELECT mode, status, stage, new_source_custody_wallet_id,
+                plan_creation_signature, authorization_signature, old_cancel_signature
            FROM payment_recurring_payment_update_attempts
           WHERE recurring_payment_id = ?`
       )
@@ -855,6 +1373,7 @@ describe("Payments routes — recurring", () => {
         mode: string;
         status: string;
         stage: string;
+        new_source_custody_wallet_id: string | null;
         plan_creation_signature: string | null;
         authorization_signature: string | null;
         old_cancel_signature: string | null;
@@ -865,6 +1384,7 @@ describe("Payments routes — recurring", () => {
       mode: "replacement",
       status: "confirmed",
       stage: "finalize",
+      new_source_custody_wallet_id: replacementCustodyWalletId,
       plan_creation_signature: replacementPlanSignature,
       authorization_signature: replacementAuthSignature,
       old_cancel_signature: oldCancelSignature,
@@ -890,6 +1410,168 @@ describe("Payments routes — recurring", () => {
     );
   });
 
+  it("lets a collection claim win over a concurrent source-wallet change", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    const replacementCustodyWalletId = "cwlt_recurring_race_replacement";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_race_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_race_replacement', ?, ?, 'active')`
+        )
+        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
+    ]);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(
+        "4hVxsReplac3Plan11111111111111111111111111111111111111111111" as Signature
+      )
+      .mockResolvedValueOnce(
+        "4hVxsReplac3Auth11111111111111111111111111111111111111111111" as Signature
+      )
+      .mockResolvedValueOnce(
+        "4hVxsOldCanc3l111111111111111111111111111111111111111111111" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, activated.id),
+      getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, activated.subscriptionId),
+    ]);
+
+    let releaseUpdate: (() => void) | undefined;
+    let signalUpdatePaused: (() => void) | undefined;
+    const updatePaused = new Promise<void>((resolve) => {
+      signalUpdatePaused = resolve;
+    });
+    const updateReleased = new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    });
+    const admission = vi
+      .spyOn(SigningService.prototype, "admitRuntimeExecution")
+      .mockImplementationOnce(async () => {
+        signalUpdatePaused?.();
+        await updateReleased;
+      });
+    const pendingRequests: Array<Promise<Response>> = [];
+    let updateRes: Response | undefined;
+    let collectRes: Response | undefined;
+    let releaseCollection: (() => void) | undefined;
+    try {
+      const updatePromise = Promise.resolve(
+        app.request(
+          `/v1/payments/recurring-payments/${activated.id}`,
+          {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({
+              sourceCustodyWalletId: replacementCustodyWalletId,
+              nextCollectionDueAt: null,
+            }),
+          },
+          env
+        )
+      );
+      pendingRequests.push(updatePromise);
+      await updatePaused;
+
+      let signalCollectionClaimed: (() => void) | undefined;
+      const collectionClaimed = new Promise<void>((resolve) => {
+        signalCollectionClaimed = resolve;
+      });
+      const collectionReleased = new Promise<void>((resolve) => {
+        releaseCollection = resolve;
+      });
+      createOrgSignerForCustodyWalletMock.mockImplementationOnce(async () => {
+        signalCollectionClaimed?.();
+        await collectionReleased;
+        return sourceSigner;
+      });
+      const collectPromise = Promise.resolve(
+        app.request(
+          `/v1/payments/recurring-payments/${activated.id}/collect`,
+          { method: "POST", headers, body: "{}" },
+          env
+        )
+      );
+      pendingRequests.push(collectPromise);
+      await collectionClaimed;
+
+      releaseUpdate?.();
+      updateRes = await updatePromise;
+      releaseCollection?.();
+      collectRes = await collectPromise;
+    } finally {
+      releaseUpdate?.();
+      releaseCollection?.();
+      admission.mockRestore();
+      await Promise.allSettled(pendingRequests);
+    }
+
+    expect(updateRes?.status).toBe(409);
+    expect(collectRes?.status).toBe(200);
+    expect(
+      await getDb(env)
+        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ source_custody_wallet_id: string | null }>()
+    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT status
+             FROM payment_subscription_collection_attempts
+            WHERE subscription_id = ? AND due_at = ?`
+        )
+        .bind(activated.subscriptionId, dueAt)
+        .first<{ status: string }>()
+    ).toEqual({ status: "confirmed" });
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+        )
+        .bind(activated.id)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
+  });
+
   it("rejects active replacement next due dates before replacement transactions are submitted", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -907,7 +1589,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1007,7 +1689,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1094,7 +1776,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1216,7 +1898,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1273,7 +1955,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1388,7 +2070,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1471,7 +2153,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1570,7 +2252,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1654,7 +2336,7 @@ describe("Payments routes — recurring", () => {
     });
   });
 
-  it("blocks recurring payment cancellation while a fresh collection is processing", async () => {
+  it("cancels future collections while the current collection is processing", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1666,12 +2348,15 @@ describe("Payments routes — recurring", () => {
       )
       .mockResolvedValueOnce(
         "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(
+        "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe" as Signature
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1681,6 +2366,7 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentForTest(headers);
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     const now = new Date().toISOString();
+    const attemptId = `psca_${crypto.randomUUID()}`;
     await getDb(env)
       .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
       .bind(dueAt, activated.id)
@@ -1708,7 +2394,7 @@ describe("Payments routes — recurring", () => {
          ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
       )
       .bind(
-        `psca_${crypto.randomUUID()}`,
+        attemptId,
         TEST_ORG.id,
         TEST_PROJECT.id,
         activated.subscriptionId,
@@ -1727,19 +2413,42 @@ describe("Payments routes — recurring", () => {
       )
       .run();
 
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ metadataUri: "https://example.com/recurring/wait.json" }),
+      },
+      env
+    );
+    expect(updateRes.status).toBe(409);
+
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
       { method: "POST", headers, body: "{}" },
       env
     );
 
-    expect(cancelRes.status).toBe(409);
+    expect(cancelRes.status).toBe(200);
     const row = await getDb(env)
-      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .prepare("SELECT status, next_collection_due_at FROM payment_recurring_payments WHERE id = ?")
       .bind(activated.id)
+      .first<{ status: string; next_collection_due_at: string }>();
+    expect(row).toMatchObject({ status: "canceled", next_collection_due_at: dueAt });
+    const attempt = await getDb(env)
+      .prepare("SELECT status FROM payment_subscription_collection_attempts WHERE id = ?")
+      .bind(attemptId)
       .first<{ status: string }>();
-    expect(row?.status).toBe("active");
-    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(attempt?.status).toBe("processing");
+
+    const resumeRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(resumeRes.status).toBe(409);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
   it("resets recurring payment cancellation claims when subscription validation fails", async () => {
@@ -1759,7 +2468,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1804,7 +2513,7 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
-  it("recovers confirmed recurring payment collections before cancellation", async () => {
+  it("cancels without waiting for confirmed collection finalization", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1826,7 +2535,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1939,9 +2648,7 @@ describe("Payments routes — recurring", () => {
       data: { recurringPayment: { status: string; nextCollectionDueAt: string } };
     };
     expect(cancelBody.data.recurringPayment.status).toBe("canceled");
-    expect(new Date(cancelBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
-      new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
-    );
+    expect(cancelBody.data.recurringPayment.nextCollectionDueAt).toBe(dueAt);
     const recoveredAttempt = await getDb(env)
       .prepare(
         "SELECT status, signature FROM payment_subscription_collection_attempts WHERE id = ?"
@@ -1955,13 +2662,12 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
-  it("collects due recurring payments through SDP API routes", async () => {
+  it("collects with the exact custody wallet when a Provider wallet ID could select another signer", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
-    const collectionSignature =
-      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+    const signAsFeePayerMock = vi.fn().mockImplementation(fullySignTestTransaction);
     const signAndSendMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1969,13 +2675,12 @@ describe("Payments routes — recurring", () => {
       )
       .mockResolvedValueOnce(
         "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
-      )
-      .mockResolvedValueOnce(collectionSignature);
+      );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: signAsFeePayerMock,
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1993,6 +2698,10 @@ describe("Payments routes — recurring", () => {
     const activateBody = (await activateRes.json()) as {
       data: { recurringPayment: { subscriptionId: string } };
     };
+    const duplicateProviderWalletSigner = await generateKeyPairSigner();
+    createOrgSignerMock.mockResolvedValue(duplicateProviderWalletSigner);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const providerSignerCallsBeforeCollection = createOrgSignerMock.mock.calls.length;
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     await getDb(env)
       .prepare(
@@ -2057,9 +2766,9 @@ describe("Payments routes — recurring", () => {
     );
     expect(collectBody.data.collectionAttempt).toMatchObject({
       status: "confirmed",
-      signature: collectionSignature,
       dueAt,
     });
+    expect(collectBody.data.collectionAttempt.signature).toBeTruthy();
     const manualAttempt = await getDb(env)
       .prepare("SELECT metadata FROM payment_subscription_collection_attempts WHERE id = ?")
       .bind(collectBody.data.collectionAttempt.id)
@@ -2071,20 +2780,47 @@ describe("Payments routes — recurring", () => {
     expect(collectBody.data.transfer).toMatchObject({
       id: collectBody.data.collectionAttempt.transferId,
       status: "confirmed",
-      signature: collectionSignature,
+      signature: collectBody.data.collectionAttempt.signature,
       source: sourceSigner.address,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
     });
-    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(signAsFeePayerMock).toHaveBeenCalledTimes(1);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_CUSTODY_WALLET_ID
+    );
+    expect(createOrgSignerMock).toHaveBeenCalledTimes(providerSignerCallsBeforeCollection);
+    const submission = await getDb(env)
+      .prepare(
+        `SELECT custody_wallet_id, signed_transaction, last_valid_block_height,
+                submission_started_at
+           FROM payment_transfers
+          WHERE id = ?`
+      )
+      .bind(collectBody.data.transfer.id)
+      .first<{
+        custody_wallet_id: string | null;
+        signed_transaction: string | null;
+        last_valid_block_height: string | null;
+        submission_started_at: string | null;
+      }>();
+    expect(submission).toMatchObject({
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      last_valid_block_height: "1000",
+    });
+    expect(submission?.signed_transaction).toBeTruthy();
+    expect(submission?.submission_started_at).toBeTruthy();
   });
 
-  it("does not advance billing when the confirmed pull amount differs", async () => {
+  it("rolls back the collection transfer when attempt linking fails", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
-    const collectionSignature =
-      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
     const signAndSendMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -2092,13 +2828,12 @@ describe("Payments routes — recurring", () => {
       )
       .mockResolvedValueOnce(
         "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
-      )
-      .mockResolvedValueOnce(collectionSignature);
+      );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2115,13 +2850,296 @@ describe("Payments routes — recurring", () => {
       .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
       .bind(dueAt, activated.subscriptionId)
       .run();
-    getTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+
+    const createSubscriptionsRepository =
+      paymentSubscriptionsRepositoryPostgres.createPostgresPaymentSubscriptionsRepository;
+    const subscriptionsRepositorySpy = vi
+      .spyOn(paymentSubscriptionsRepositoryPostgres, "createPostgresPaymentSubscriptionsRepository")
+      .mockImplementation((db) => {
+        const repository = createSubscriptionsRepository(db);
+        return {
+          ...repository,
+          updateCollectionAttempt: vi.fn(async (input) => {
+            if (input.transferId && input.status === "processing") {
+              throw new Error("collection attempt link unavailable");
+            }
+            return repository.updateCollectionAttempt(input);
+          }),
+        };
+      });
+    let collectRes: Response;
+    try {
+      collectRes = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers, body: "{}" },
+        env
+      );
+    } finally {
+      subscriptionsRepositorySpy.mockRestore();
+    }
+
+    expect(collectRes.status).toBe(500);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, transfer_id
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ? AND due_at = ?`
+      )
+      .bind(activated.subscriptionId, dueAt)
+      .first<{ status: string; transfer_id: string | null }>();
+    expect(attempt).toEqual({ status: "failed", transfer_id: null });
+    const transfers = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::integer AS count
+           FROM payment_transfers
+          WHERE organization_id = ?
+            AND project_id = ?
+            AND provider_data ->> 'recurringPaymentId' = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, activated.id)
+      .first<{ count: number }>();
+    expect(transfers?.count).toBe(0);
+  });
+
+  it("keeps ambiguous collections processing and rejects corrupt recovery signatures", async () => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+    sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(200);
+    const collectBody = (await collectRes.json()) as {
+      data: {
+        collectionAttempt: { id: string; status: string; signature: string };
+        transfer: { id: string; status: string; signature: string };
+      };
+    };
+    expect(collectBody.data.collectionAttempt).toMatchObject({ status: "processing" });
+    expect(collectBody.data.collectionAttempt.signature).toBeTruthy();
+    expect(collectBody.data.transfer).toMatchObject({
+      status: "processing",
+      signature: collectBody.data.collectionAttempt.signature,
+    });
+    const recurringPayment = await getDb(env)
+      .prepare("SELECT next_collection_due_at FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ next_collection_due_at: string }>();
+    expect(recurringPayment?.next_collection_due_at).toBe(dueAt);
+    const attempt = await getDb(env)
+      .prepare(
+        "SELECT status FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+      )
+      .bind(activated.subscriptionId)
+      .first<{ status: string }>();
+    expect(attempt?.status).toBe("processing");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_payment_submission_unresolved",
+        flow: "recurring",
+        reason: "submission_unconfirmed",
+        organization_id: TEST_ORG.id,
+        project_id: TEST_PROJECT.id,
+        transfer_id: collectBody.data.transfer.id,
+        signature: collectBody.data.transfer.signature,
+        error: "RPC response lost",
+      }),
+      "sdp_api_payment_submission_unresolved"
+    );
+
+    const submittedSignature = collectBody.data.collectionAttempt.signature;
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_collection_attempts SET signature = ? WHERE id = ?")
+      .bind("not-a-solana-signature", collectBody.data.collectionAttempt.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET signature = ? WHERE id = ?")
+      .bind("not-a-solana-signature", collectBody.data.transfer.id)
+      .run();
+    confirmTransactionMock.mockClear();
+    getTransactionMock.mockClear();
+
+    const invalidRecoveryRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(invalidRecoveryRes.status).toBe(500);
+    expect(confirmTransactionMock).not.toHaveBeenCalled();
+    expect(getTransactionMock).not.toHaveBeenCalled();
+    const invalidAttempt = await getDb(env)
+      .prepare("SELECT status FROM payment_subscription_collection_attempts WHERE id = ?")
+      .bind(collectBody.data.collectionAttempt.id)
+      .first<{ status: string }>();
+    const invalidTransfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(collectBody.data.transfer.id)
+      .first<{ status: string }>();
+    expect(invalidAttempt?.status).toBe("processing");
+    expect(invalidTransfer?.status).toBe("processing");
+
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_collection_attempts SET signature = ? WHERE id = ?")
+      .bind(submittedSignature, collectBody.data.collectionAttempt.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET signature = ? WHERE id = ?")
+      .bind(submittedSignature, collectBody.data.transfer.id)
+      .run();
+
+    const recoveredRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(recoveredRes.status).toBe(200);
+    const recoveredBody = (await recoveredRes.json()) as {
+      data: { collectionAttempt: { status: string; signature: string } };
+    };
+    expect(recoveredBody.data.collectionAttempt).toMatchObject({
+      status: "confirmed",
+      signature: collectBody.data.collectionAttempt.signature,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("fails a collection when first-attempt preflight proves its account is frozen", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+        ),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+    sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError(17));
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(400);
+    await expect(collectRes.json()).resolves.toMatchObject({ error: { code: "ACCOUNT_FROZEN" } });
+    const attempt = await getDb(env)
+      .prepare(
+        "SELECT status, transfer_id FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+      )
+      .bind(activated.subscriptionId)
+      .first<{ status: string; transfer_id: string | null }>();
+    expect(attempt?.status).toBe("failed");
+    const transfer = await getDb(env)
+      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+      .bind(attempt?.transfer_id)
+      .first<{ status: string; signature: string | null }>();
+    expect(transfer?.status).toBe("failed");
+    expect(transfer?.signature).toBeTruthy();
+  });
+
+  it("does not advance billing when the confirmed pull amount differs", async () => {
+    const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+    getTransactionMock.mockImplementation(async (_rpc, signature) => {
       const transaction = await recurringCollectionTransactionForSignature(signature);
-      if (!transaction) {
-        return null;
-      }
-      const instruction = transaction.instructions[0];
-      if (!instruction?.data) {
+      const instruction = transaction?.instructions[0];
+      if (!transaction || !instruction?.data) {
         throw new Error("Expected recurring-payment transfer instruction data");
       }
       const decoded = subscriptionsProgram
@@ -2153,34 +3171,159 @@ describe("Payments routes — recurring", () => {
     );
 
     expect(collectRes.status).toBe(409);
-    const collectBody = (await collectRes.json()) as { error: { message: string } };
+    const collectBody = (await collectRes.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(collectBody.error).toMatchObject({ code: "CONFLICT" });
     expect(collectBody.error.message).toContain("does not prove");
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT id, transfer_id, status, signature, error
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ? AND due_at = ?`
+      )
+      .bind(activated.subscriptionId, dueAt)
+      .first<{
+        id: string;
+        transfer_id: string;
+        status: string;
+        signature: string | null;
+        error: string | null;
+      }>();
+    expect(attempt).toMatchObject({ status: "processing", error: null });
+    expect(attempt?.signature).toBeTruthy();
+    const transfer = await getDb(env)
+      .prepare(
+        `SELECT status, signature, signed_transaction, submission_started_at, error
+           FROM payment_transfers
+          WHERE id = ?`
+      )
+      .bind(attempt?.transfer_id)
+      .first<{
+        status: string;
+        signature: string | null;
+        signed_transaction: string | null;
+        submission_started_at: string | null;
+        error: string | null;
+      }>();
+    expect(transfer).toMatchObject({
+      status: "processing",
+      signature: attempt?.signature,
+      error: null,
+    });
+    expect(transfer?.signed_transaction).toBeTruthy();
+    expect(transfer?.submission_started_at).toBeTruthy();
     const recurringPayment = await getDb(env)
       .prepare("SELECT next_collection_due_at FROM payment_recurring_payments WHERE id = ?")
       .bind(activated.id)
       .first<{ next_collection_due_at: string }>();
     expect(recurringPayment?.next_collection_due_at).toBe(dueAt);
-    const attempt = await getDb(env)
+
+    const createSubscriptionsRepository =
+      paymentSubscriptionsRepositoryPostgres.createPostgresPaymentSubscriptionsRepository;
+    const updateCollectionAttempt = vi
+      .fn()
+      .mockRejectedValue(new Error("collection journal unavailable"));
+    const subscriptionsRepositorySpy = vi
+      .spyOn(paymentSubscriptionsRepositoryPostgres, "createPostgresPaymentSubscriptionsRepository")
+      .mockImplementation((db) => ({
+        ...createSubscriptionsRepository(db),
+        updateCollectionAttempt,
+      }));
+    let recoveryRes: Response;
+    try {
+      recoveryRes = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers, body: "{}" },
+        env
+      );
+    } finally {
+      subscriptionsRepositorySpy.mockRestore();
+    }
+    expect(recoveryRes.status).toBe(409);
+    const recoveryBody = (await recoveryRes.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(recoveryBody.error).toMatchObject({ code: "CONFLICT" });
+    expect(recoveryBody.error.message).toContain("does not prove");
+    expect(updateCollectionAttempt).toHaveBeenCalledOnce();
+    const recoveredAttempt = await getDb(env)
       .prepare(
-        "SELECT status FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+        "SELECT status, signature, error FROM payment_subscription_collection_attempts WHERE id = ?"
       )
-      .bind(activated.subscriptionId)
-      .first<{ status: string }>();
-    expect(attempt?.status).toBe("processing");
+      .bind(attempt?.id)
+      .first<{ status: string; signature: string | null; error: string | null }>();
+    const recoveredTransfer = await getDb(env)
+      .prepare("SELECT status, signature, error FROM payment_transfers WHERE id = ?")
+      .bind(attempt?.transfer_id)
+      .first<{ status: string; signature: string | null; error: string | null }>();
+    expect(recoveredAttempt).toMatchObject({
+      status: "processing",
+      signature: attempt?.signature,
+      error: null,
+    });
+    expect(recoveredTransfer).toMatchObject({
+      status: "processing",
+      signature: attempt?.signature,
+      error: null,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    const proofMismatchEvents = errorLog.mock.calls.filter(
+      ([payload]) =>
+        (payload as { event?: string }).event ===
+        "sdp_api_recurring_payment_collection_proof_mismatch"
+    );
+    expect(proofMismatchEvents).toHaveLength(2);
+    for (const [payload, message] of proofMismatchEvents) {
+      expect(payload).toEqual(
+        expect.objectContaining({
+          event: "sdp_api_recurring_payment_collection_proof_mismatch",
+          reason: "on_chain_instruction_mismatch",
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT.id,
+          recurring_payment_id: activated.id,
+          subscription_id: activated.subscriptionId,
+          attempt_id: attempt?.id,
+          transfer_id: attempt?.transfer_id,
+          signature: attempt?.signature,
+        })
+      );
+      expect(message).toBe("sdp_api_recurring_payment_collection_proof_mismatch");
+    }
+    errorLog.mockRestore();
   });
 
   it.each([
-    { journaledRecord: "transfer", attemptHasSignature: false, transferHasSignature: true },
-    { journaledRecord: "attempt", attemptHasSignature: true, transferHasSignature: false },
+    {
+      journaledRecord: "transfer",
+      attemptHasSignature: false,
+      transferHasSignature: true,
+      signaturesConflict: false,
+    },
+    {
+      journaledRecord: "attempt",
+      attemptHasSignature: true,
+      transferHasSignature: false,
+      signaturesConflict: false,
+    },
+    {
+      journaledRecord: "conflicting attempt and transfer",
+      attemptHasSignature: true,
+      transferHasSignature: true,
+      signaturesConflict: true,
+    },
   ])(
-    "recovers submitted recurring payment collection attempts from the $journaledRecord journal",
-    async ({ attemptHasSignature, transferHasSignature }) => {
+    "handles submitted recurring payment collection attempts from the $journaledRecord journal",
+    async ({ attemptHasSignature, transferHasSignature, signaturesConflict }) => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerMock.mockResolvedValue(sourceSigner);
       mockRecurringActivationRpc();
       const submittedSignature =
         "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+      const conflictingSignature =
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
       const signAndSendMock = vi
         .fn()
         .mockResolvedValueOnce(
@@ -2193,7 +3336,7 @@ describe("Payments routes — recurring", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-        signAsFeePayer: vi.fn(),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
       const headers = {
@@ -2294,7 +3437,11 @@ describe("Payments routes — recurring", () => {
           dueAt,
           now,
           "processing",
-          attemptHasSignature ? submittedSignature : null,
+          attemptHasSignature
+            ? signaturesConflict
+              ? conflictingSignature
+              : submittedSignature
+            : null,
           JSON.stringify({ recurringPaymentId }),
           now,
           now
@@ -2305,12 +3452,44 @@ describe("Payments routes — recurring", () => {
         tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
         mint: address(DEVNET_USDC_MINT),
       });
+      const errorLog = signaturesConflict
+        ? vi.spyOn(rootLogger, "error").mockImplementation(() => undefined)
+        : null;
+      confirmTransactionMock.mockClear();
+      getTransactionMock.mockClear();
 
       const collectRes = await app.request(
         `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
         { method: "POST", headers, body: "{}" },
         env
       );
+
+      if (signaturesConflict) {
+        expect(collectRes.status).toBe(409);
+        const body = (await collectRes.json()) as { error: { code: string; message: string } };
+        expect(body.error).toMatchObject({ code: "CONFLICT" });
+        expect(body.error.message).toContain("signatures do not match");
+        expect(confirmTransactionMock).not.toHaveBeenCalled();
+        expect(getTransactionMock).not.toHaveBeenCalled();
+        expect(errorLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "sdp_api_recurring_payment_collection_proof_mismatch",
+            reason: "persisted_evidence_mismatch",
+            mismatch: "attempt_transfer_signature",
+            organization_id: TEST_ORG.id,
+            project_id: TEST_PROJECT.id,
+            recurring_payment_id: recurringPaymentId,
+            subscription_id: activateBody.data.recurringPayment.subscriptionId,
+            attempt_id: attemptId,
+            transfer_id: transferId,
+            attempt_signature: conflictingSignature,
+            transfer_signature: submittedSignature,
+          }),
+          "sdp_api_recurring_payment_collection_proof_mismatch"
+        );
+        errorLog?.mockRestore();
+        return;
+      }
 
       expect(collectRes.status).toBe(200);
       const collectBody = (await collectRes.json()) as {
@@ -2475,7 +3654,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2495,6 +3674,7 @@ describe("Payments routes — recurring", () => {
     };
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     const now = new Date().toISOString();
+    const staleAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     const transferId = `xfr_${crypto.randomUUID()}`;
     const attemptId = `psca_${crypto.randomUUID()}`;
     await getDb(env)
@@ -2550,15 +3730,15 @@ describe("Payments routes — recurring", () => {
         "25.00",
         "transfer",
         "outbound",
-        "confirmed",
+        "processing",
         JSON.stringify({
           recurringPaymentId,
           subscriptionId: activateBody.data.recurringPayment.subscriptionId,
           collectionDueAt: dueAt,
         }),
         submittedSignature,
-        now,
-        now
+        staleAt,
+        staleAt
       )
       .run();
     await getDb(env)
@@ -2590,17 +3770,40 @@ describe("Payments routes — recurring", () => {
         "25.00",
         dueAt,
         now,
-        "confirmed",
+        "processing",
         submittedSignature,
         JSON.stringify({
           recurringPaymentId,
           subscriptionId: activateBody.data.recurringPayment.subscriptionId,
           collectionDueAt: dueAt,
         }),
-        now,
-        now
+        staleAt,
+        staleAt
       )
       .run();
+
+    getTransactionMock.mockResolvedValueOnce(null);
+    const uncertainRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(uncertainRes.status).toBe(502);
+    const uncertainAttempt = await getDb(env)
+      .prepare(
+        `SELECT status, signature, updated_at
+           FROM payment_subscription_collection_attempts
+          WHERE id = ?`
+      )
+      .bind(attemptId)
+      .first<{ status: string; signature: string | null; updated_at: string }>();
+    expect(uncertainAttempt).toMatchObject({
+      status: "processing",
+      signature: submittedSignature,
+    });
+    expect(new Date(uncertainAttempt?.updated_at ?? 0).getTime()).toBeGreaterThan(
+      new Date(staleAt).getTime()
+    );
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
@@ -2638,8 +3841,8 @@ describe("Payments routes — recurring", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
-    const retrySignature =
-      "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe" as Signature;
+    const abandonedSignature =
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
     const signAndSendMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -2647,13 +3850,12 @@ describe("Payments routes — recurring", () => {
       )
       .mockResolvedValueOnce(
         "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
-      )
-      .mockResolvedValueOnce(retrySignature);
+      );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2702,9 +3904,12 @@ describe("Payments routes — recurring", () => {
            status,
            provider_data,
            signature,
+           signed_transaction,
+           last_valid_block_height,
+           submission_started_at,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?::numeric, NULL, ?, ?)`
       )
       .bind(
         transferId,
@@ -2724,7 +3929,9 @@ describe("Payments routes — recurring", () => {
           subscriptionId: activateBody.data.recurringPayment.subscriptionId,
           collectionDueAt: dueAt,
         }),
-        null,
+        abandonedSignature,
+        "AQ==",
+        "1000",
         staleAt,
         staleAt
       )
@@ -2770,6 +3977,35 @@ describe("Payments routes — recurring", () => {
       )
       .run();
 
+    confirmTransactionMock.mockRejectedValueOnce(new Error("Signature is not confirmed"));
+    getTransactionMock.mockResolvedValueOnce(null);
+    const beforeExpiryRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(beforeExpiryRes.status).toBe(502);
+    expect(
+      (
+        await getDb(env)
+          .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+          .bind(transferId)
+          .first<{ status: string }>()
+      )?.status
+    ).toBe("processing");
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const abandonedLookupsBeforeExpiry = getTransactionMock.mock.calls.filter(
+      ([, signature]) => signature === abandonedSignature
+    ).length;
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET status = 'failed' WHERE id = ?")
+      .bind(transferId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_collection_attempts SET updated_at = ? WHERE id = ?")
+      .bind(staleAt, attemptId)
+      .run();
+
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
       { method: "POST", headers, body: "{}" },
@@ -2785,12 +4021,12 @@ describe("Payments routes — recurring", () => {
     };
     expect(collectBody.data.collectionAttempt).toMatchObject({
       status: "confirmed",
-      signature: retrySignature,
     });
+    expect(collectBody.data.collectionAttempt.signature).toBeTruthy();
     expect(collectBody.data.collectionAttempt.id).not.toBe(attemptId);
     expect(collectBody.data.transfer).toMatchObject({
       status: "confirmed",
-      signature: retrySignature,
+      signature: collectBody.data.collectionAttempt.signature,
     });
     expect(collectBody.data.transfer.id).not.toBe(transferId);
     const staleAttempt = await getDb(env)
@@ -2802,7 +4038,7 @@ describe("Payments routes — recurring", () => {
       .bind(attemptId)
       .first<{ status: string; error: string | null; metadata: { retryAfterAt?: string } }>();
     expect(staleAttempt?.status).toBe("failed");
-    expect(staleAttempt?.error).toContain("interrupted before submission");
+    expect(staleAttempt?.error).toContain("interrupted before broadcast");
     expect(staleAttempt?.metadata.retryAfterAt).toBeTruthy();
     const staleTransfer = await getDb(env)
       .prepare("SELECT status, error, signature FROM payment_transfers WHERE id = ?")
@@ -2810,10 +4046,14 @@ describe("Payments routes — recurring", () => {
       .first<{ status: string; error: string | null; signature: string | null }>();
     expect(staleTransfer).toMatchObject({
       status: "failed",
-      signature: null,
+      signature: abandonedSignature,
     });
-    expect(staleTransfer?.error).toContain("interrupted before submission");
-    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+    expect(staleTransfer?.error).toContain("interrupted before broadcast");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    expect(
+      getTransactionMock.mock.calls.filter(([, signature]) => signature === abandonedSignature)
+    ).toHaveLength(abandonedLookupsBeforeExpiry);
   });
 
   it("does not fail fresh transferless recurring payment attempts during recovery", async () => {
@@ -2833,7 +4073,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2937,7 +4177,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3086,8 +4326,6 @@ describe("Payments routes — recurring", () => {
     mockRecurringActivationRpc();
     const submittedSignature =
       "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
-    const retrySignature =
-      "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe" as Signature;
     const signAndSendMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -3095,13 +4333,12 @@ describe("Payments routes — recurring", () => {
       )
       .mockResolvedValueOnce(
         "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
-      )
-      .mockResolvedValueOnce(retrySignature);
+      );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3254,68 +4491,70 @@ describe("Payments routes — recurring", () => {
     expect(failedTransfer?.error).toContain("collection failed on-chain");
     expect(collectBody.data.collectionAttempt).toMatchObject({
       status: "confirmed",
-      signature: retrySignature,
     });
+    expect(collectBody.data.collectionAttempt.signature).toBeTruthy();
     expect(collectBody.data.collectionAttempt.id).not.toBe(attemptId);
     expect(collectBody.data.transfer).toMatchObject({
       status: "confirmed",
-      signature: retrySignature,
+      signature: collectBody.data.collectionAttempt.signature,
     });
-    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
-  it("recovers confirmed collection transfers without reopening the due period", async () => {
-    const sourceSigner = await generateKeyPairSigner();
-    await updateSeededWalletPublicKey(sourceSigner.address);
-    createOrgSignerMock.mockResolvedValue(sourceSigner);
-    mockRecurringActivationRpc();
-    const submittedSignature =
-      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
-    const signAndSendMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
-      )
-      .mockResolvedValueOnce(
-        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
-      );
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
-      signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
-    const headers = {
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Content-Type": "application/json",
-    };
-    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+  it.each(["confirmed", "finalized"] as const)(
+    "recovers %s collection transfers without reopening the due period",
+    async (transferStatus) => {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValue(sourceSigner);
+      mockRecurringActivationRpc();
+      const submittedSignature =
+        "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+        )
+        .mockResolvedValueOnce(
+          "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+        );
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+      };
+      const recurringPaymentId = await createRecurringPaymentForActivation(headers);
 
-    const activateRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers, body: "{}" },
-      env
-    );
-    expect(activateRes.status).toBe(200);
-    const activateBody = (await activateRes.json()) as {
-      data: { recurringPayment: { subscriptionId: string } };
-    };
-    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
-    const now = new Date().toISOString();
-    const transferId = `xfr_${crypto.randomUUID()}`;
-    const attemptId = `psca_${crypto.randomUUID()}`;
-    await getDb(env)
-      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
-      .bind(dueAt, recurringPaymentId)
-      .run();
-    await getDb(env)
-      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
-      .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers (
+      const activateRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+        { method: "POST", headers, body: "{}" },
+        env
+      );
+      expect(activateRes.status).toBe(200);
+      const activateBody = (await activateRes.json()) as {
+        data: { recurringPayment: { subscriptionId: string } };
+      };
+      const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+      const now = new Date().toISOString();
+      const transferId = `xfr_${crypto.randomUUID()}`;
+      const attemptId = `psca_${crypto.randomUUID()}`;
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPaymentId)
+        .run();
+      await getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
            id,
            organization_id,
            project_id,
@@ -3334,33 +4573,33 @@ describe("Payments routes — recurring", () => {
            created_at,
            updated_at
          ) VALUES (?, ?, ?, ?, (SELECT counterparty_id FROM payment_recurring_payments WHERE id = ?), ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
-      )
-      .bind(
-        transferId,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_WALLET_ID,
-        recurringPaymentId,
-        sourceSigner.address,
-        TEST_SOLANA_ADDRESSES.wallet2,
-        DEVNET_USDC_MINT,
-        "25.00",
-        "transfer",
-        "outbound",
-        "confirmed",
-        JSON.stringify({
+        )
+        .bind(
+          transferId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_WALLET_ID,
           recurringPaymentId,
-          subscriptionId: activateBody.data.recurringPayment.subscriptionId,
-          collectionDueAt: dueAt,
-        }),
-        submittedSignature,
-        now,
-        now
-      )
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_subscription_collection_attempts (
+          sourceSigner.address,
+          TEST_SOLANA_ADDRESSES.wallet2,
+          DEVNET_USDC_MINT,
+          "25.00",
+          "transfer",
+          "outbound",
+          transferStatus,
+          JSON.stringify({
+            recurringPaymentId,
+            subscriptionId: activateBody.data.recurringPayment.subscriptionId,
+            collectionDueAt: dueAt,
+          }),
+          submittedSignature,
+          now,
+          now
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_subscription_collection_attempts (
            id,
            organization_id,
            project_id,
@@ -3376,66 +4615,67 @@ describe("Payments routes — recurring", () => {
            created_at,
            updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
-      )
-      .bind(
-        attemptId,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        activateBody.data.recurringPayment.subscriptionId,
-        transferId,
-        DEVNET_USDC_MINT,
-        "25.00",
-        dueAt,
-        now,
-        "processing",
-        submittedSignature,
-        JSON.stringify({ recurringPaymentId }),
-        now,
-        now
-      )
-      .run();
-    confirmTransactionMock.mockRejectedValue(
-      new Error("Transaction history expired from the status cache")
-    );
-    const collectRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers, body: "{}" },
-      env
-    );
+        )
+        .bind(
+          attemptId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activateBody.data.recurringPayment.subscriptionId,
+          transferId,
+          DEVNET_USDC_MINT,
+          "25.00",
+          dueAt,
+          now,
+          "processing",
+          submittedSignature,
+          JSON.stringify({ recurringPaymentId }),
+          now,
+          now
+        )
+        .run();
+      confirmTransactionMock.mockRejectedValue(
+        new Error("Transaction history expired from the status cache")
+      );
+      const collectRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+        { method: "POST", headers, body: "{}" },
+        env
+      );
 
-    expect(collectRes.status).toBe(200);
-    const collectBody = (await collectRes.json()) as {
-      data: {
-        recurringPayment: { nextCollectionDueAt: string };
-        collectionAttempt: { id: string; status: string; signature: string };
-        transfer: { id: string; status: string; signature: string };
+      expect(collectRes.status).toBe(200);
+      const collectBody = (await collectRes.json()) as {
+        data: {
+          recurringPayment: { nextCollectionDueAt: string };
+          collectionAttempt: { id: string; status: string; signature: string };
+          transfer: { id: string; status: string; signature: string };
+        };
       };
-    };
-    expect(collectBody.data.collectionAttempt).toMatchObject({
-      id: attemptId,
-      status: "confirmed",
-      signature: submittedSignature,
-    });
-    expect(collectBody.data.transfer).toMatchObject({
-      id: transferId,
-      status: "confirmed",
-      signature: submittedSignature,
-    });
-    expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
-      new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
-    );
-    expect(confirmTransactionMock).toHaveBeenCalledWith(
-      expect.anything(),
-      submittedSignature,
-      expect.objectContaining({ commitment: "confirmed" })
-    );
-    const attempt = await getDb(env)
-      .prepare("SELECT status, error FROM payment_subscription_collection_attempts WHERE id = ?")
-      .bind(attemptId)
-      .first<{ status: string; error: string | null }>();
-    expect(attempt).toMatchObject({ status: "confirmed", error: null });
-    expect(signAndSendMock).toHaveBeenCalledTimes(2);
-  });
+      expect(collectBody.data.collectionAttempt).toMatchObject({
+        id: attemptId,
+        status: "confirmed",
+        signature: submittedSignature,
+      });
+      expect(collectBody.data.transfer).toMatchObject({
+        id: transferId,
+        status: transferStatus,
+        signature: submittedSignature,
+      });
+      expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
+        new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
+      );
+      expect(confirmTransactionMock).toHaveBeenCalledWith(
+        expect.anything(),
+        submittedSignature,
+        expect.objectContaining({ commitment: "confirmed" })
+      );
+      const attempt = await getDb(env)
+        .prepare("SELECT status, error FROM payment_subscription_collection_attempts WHERE id = ?")
+        .bind(attemptId)
+        .first<{ status: string; error: string | null }>();
+      expect(attempt).toMatchObject({ status: "confirmed", error: null });
+      expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("rejects early recurring payment collection", async () => {
     const sourceSigner = await generateKeyPairSigner();
@@ -3454,7 +4694,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3503,7 +4743,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3568,6 +4808,246 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("journals an unresolved automated collection once per cooldown", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPayment = await activateRecurringPaymentForTest(headers);
+    const now = new Date();
+    const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET source_custody_wallet_id = NULL, next_collection_due_at = ?
+            WHERE id = ?`
+        )
+        .bind(dueAt, recurringPayment.id),
+      getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPayment.subscriptionId),
+    ]);
+
+    expect(await collectDueRecurringPayments(env, now)).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 1,
+      skipped: 0,
+    });
+    expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 0,
+      skipped: 0,
+    });
+
+    const attempts = await getDb(env)
+      .prepare(
+        `SELECT status, error, metadata, transfer_id
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?`
+      )
+      .bind(recurringPayment.subscriptionId)
+      .all<{
+        status: string;
+        error: string | null;
+        metadata: { collectionSource?: string; retryAfterAt?: string };
+        transfer_id: string | null;
+      }>();
+    expect(attempts.results).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        transfer_id: null,
+        metadata: expect.objectContaining({
+          collectionSource: "automated",
+          retryAfterAt: expect.any(String),
+        }),
+      }),
+    ]);
+    expect(attempts.results[0]?.error).toContain("source wallet is unresolved");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("journals one automated collection attempt when runtime admission denies the wallet", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPayment = await activateRecurringPaymentForTest(headers);
+    const workflowTokenId = await seedIssuedTokenMint({
+      projectId: TEST_PROJECT.id,
+      mintAddress: sourceSigner.address,
+      status: "active",
+    });
+    const workflowId = `awf_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare(
+        `INSERT INTO asset_workflows
+           (id, organization_id, project_id, token_id, trigger_type, action_type,
+            definition, review_mode, created_by)
+         VALUES (?, ?, ?, ?, 'recurring_payment_failed', 'record', ?::jsonb, 'auto', ?)`
+      )
+      .bind(
+        workflowId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        workflowTokenId,
+        JSON.stringify({
+          condition: null,
+          action: { type: "record", params: {} },
+          retryPolicy: { maxAttempts: 1, retryAfterMinutes: 1 },
+        }),
+        TEST_USER.id
+      )
+      .run();
+    const now = new Date();
+    const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPayment.id),
+      getDb(env)
+        .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+        .bind(dueAt, recurringPayment.subscriptionId),
+    ]);
+
+    let admissionCalls = 0;
+    let releaseAdmission!: () => void;
+    const bothCollectorsReady = new Promise<void>((resolve) => {
+      releaseAdmission = resolve;
+    });
+    const admission = vi
+      .spyOn(SigningService.prototype, "admitRuntimeExecution")
+      .mockImplementation(async () => {
+        admissionCalls += 1;
+        if (admissionCalls === 2) releaseAdmission();
+        await bothCollectorsReady;
+        throw new AppError("CONFLICT", "Custody wallet is unavailable", {
+          reason: "runtime_execution_unavailable",
+        });
+      });
+    try {
+      const runs = await Promise.all([
+        collectDueRecurringPayments(env, now),
+        collectDueRecurringPayments(env, now),
+      ]);
+      expect(runs).toEqual([
+        { recovered: 0, collected: 0, failed: 0, skipped: 1 },
+        { recovered: 0, collected: 0, failed: 0, skipped: 1 },
+      ]);
+      expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 0,
+      });
+      expect(admission).toHaveBeenCalledTimes(2);
+    } finally {
+      admission.mockRestore();
+    }
+
+    const attempts = await getDb(env)
+      .prepare(
+        `SELECT id, status, error, metadata, transfer_id
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?`
+      )
+      .bind(recurringPayment.subscriptionId)
+      .all<{
+        id: string;
+        status: string;
+        error: string | null;
+        metadata: { collectionSource?: string; retryAfterAt?: string };
+        transfer_id: string | null;
+      }>();
+    expect(attempts.results).toHaveLength(1);
+    expect(attempts.results[0]).toMatchObject({
+      status: "failed",
+      transfer_id: null,
+      metadata: { collectionSource: "automated" },
+    });
+    expect(attempts.results[0]?.error).toContain("Custody wallet is unavailable");
+    expect(attempts.results[0]?.metadata.retryAfterAt).toBeTruthy();
+
+    const collectionOperations = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM wallet_operations
+          WHERE operation_type = 'recurring_payment_collection'`
+      )
+      .first<{ count: number }>();
+    const collectionTransfers = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM payment_transfers
+          WHERE provider_data->>'recurringPaymentId' = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ count: number }>();
+    expect(collectionOperations).toEqual({ count: 0 });
+    expect(collectionTransfers).toEqual({ count: 0 });
+    const workflowExecutions = await getDb(env)
+      .prepare(
+        `SELECT trigger_type, idempotency_key, trigger_payload
+           FROM workflow_executions
+          WHERE workflow_id = ?`
+      )
+      .bind(workflowId)
+      .all<{
+        trigger_type: string;
+        idempotency_key: string;
+        trigger_payload: { recurringPaymentId?: string; attemptId?: string };
+      }>();
+    expect(workflowExecutions.results).toHaveLength(1);
+    expect(workflowExecutions.results[0]).toMatchObject({
+      trigger_type: "recurring_payment_failed",
+      trigger_payload: { recurringPaymentId: recurringPayment.id },
+    });
+    expect(workflowExecutions.results[0]?.idempotency_key).toBe(
+      `recurring_payment_failed:${attempts.results[0]?.id}`
+    );
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
   it("journals failed activation attempts and allows activation retry", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -3587,7 +5067,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3608,7 +5088,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -3682,7 +5162,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3703,7 +5183,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -3870,7 +5350,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3891,7 +5371,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4040,7 +5520,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     confirmTransactionMock
@@ -4074,7 +5554,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -4172,7 +5652,7 @@ describe("Payments routes — recurring", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -4193,7 +5673,7 @@ describe("Payments routes — recurring", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          sourceWalletId: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           counterpartyId,
           counterpartyAccountId,
           token: DEVNET_USDC_MINT,
@@ -5014,5 +6494,64 @@ describe("Payments routes — recurring", () => {
     };
     expect(attemptsBody.data.collectionAttempts).toEqual([]);
     expect(attemptsBody.data.total).toBe(0);
+  });
+
+  it.each(unboundWalletCases)(
+    "rejects a selected-wallet API key bound to another wallet on $route",
+    async ({ expectedStatus, expectedMessage, request }) => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(UNBOUND_WALLET_ID, UNBOUND_CUSTODY_WALLET_ID);
+      const before = await recurringExecutionSnapshot(payment.id);
+      const executionCalls = recurringExecutionCallCounts();
+
+      const { path, method = "POST", body } = request(payment);
+      const response = await app.request(
+        path,
+        { method, headers: RECURRING_HEADERS, body: JSON.stringify(body) },
+        env
+      );
+
+      expect(response.status).toBe(expectedStatus);
+      const responseBody = (await response.json()) as { error: { message: string } };
+      expect(responseBody.error.message).toBe(expectedMessage);
+      expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+      expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+    }
+  );
+
+  it("rejects a source change to a wallet outside the API key bindings", async () => {
+    await seedUnboundWallet();
+    const payment = await seedPendingRecurringPayment();
+    await bindApiKeyToWallet(TEST_WALLET_ID, TEST_CUSTODY_WALLET_ID);
+
+    const allowedResponse = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ amount: "26.00" }),
+      },
+      env
+    );
+    expect(allowedResponse.status).toBe(200);
+    const before = await recurringExecutionSnapshot(payment.id);
+    const executionCalls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    const responseBody = (await response.json()) as { error: { message: string } };
+    expect(responseBody.error.message).toBe("API key is not authorized for the requested wallet");
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
   });
 });

@@ -1,9 +1,6 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import type { ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import type { AuthorityRoleKey } from "./asset-overview-hero";
 import {
   buildOverviewHeroData,
@@ -12,19 +9,10 @@ import {
   getTokenChips,
   type IssuanceTokenView,
 } from "./issuance-token-fields";
-import { IssuanceTokenList } from "./issuance-token-list";
 import { toWalletIdentity } from "./wallet-identity";
 
 const messages = getMessages("en");
 const t = (key: MessageKey, values?: TranslationValues) => translate(messages, key, values);
-
-function renderWithI18n(children: ReactNode) {
-  return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={messages}>
-      {children}
-    </I18nProvider>
-  );
-}
 
 function baseToken(overrides: Partial<IssuanceTokenView> = {}): IssuanceTokenView {
   return {
@@ -378,69 +366,5 @@ describe("toWalletIdentity", () => {
     expect(toWalletIdentity(null, null, { unresolvedAs: "external", unlabeled })).toEqual({
       state: "none",
     });
-  });
-});
-
-describe("IssuanceTokenList", () => {
-  it("renders each token's symbol, name and a manage affordance without crashing", () => {
-    const markup = renderWithI18n(
-      <IssuanceTokenList
-        tokens={[baseToken({ assetProfile: stablecoinProfile })]}
-        signerWallets={[]}
-        openIds={new Set()}
-        onToggle={() => undefined}
-        onCreate={() => undefined}
-      />
-    );
-    expect(markup).toContain("vUSD");
-    expect(markup).toContain("Veritas Finance");
-    expect(markup).toContain(t("DashboardIssuance.workspace.manage"));
-    // Collapsed row shows the taxonomy chip.
-    expect(markup).toContain(t("DashboardIssuance.taxonomy.fiatBacked"));
-    // …and keeps Decimals: the row's stat cells are a column, so every row states the
-    // same fact there. Per-asset data belongs to the grid tile, which has no column.
-    expect(markup).toContain(t("DashboardIssuance.list.decimals"));
-  });
-
-  it("renders the footer inside the list so it can be displaced with the rows", () => {
-    const markup = renderWithI18n(
-      <IssuanceTokenList
-        tokens={[baseToken({ assetProfile: stablecoinProfile })]}
-        signerWallets={[]}
-        openIds={new Set()}
-        onToggle={() => undefined}
-        onCreate={() => undefined}
-        footer={<span data-testid="list-footer">pager</span>}
-      />
-    );
-    // Expanded panels are absolute and the rows below only translate, so the list's
-    // box never grows: a footer rendered *after* the list would be stranded
-    // mid-list once a row opened. It has to be inside, carrying the same translate
-    // as the rows — and on the ladder's top rung, so the last row's panel slides
-    // out from under it.
-    expect(markup).toMatch(
-      /<div style="margin-top:-10px;transform:translateY\(0px\);transition:transform \d+ms [^"]*;z-index:1"><span data-testid="list-footer"/
-    );
-  });
-
-  it("keeps closed detail panels out of the keyboard tab order", () => {
-    // Panels stay mounted for the compositor-only reveal, so each closed one must
-    // carry `inert`; opacity and pointer-events hide it visually but leave its
-    // explorer/Manage links tabbable. Asserted against the markup string because
-    // this suite runs in the `node` environment — there is no DOM to focus-test.
-    const markup = renderWithI18n(
-      <IssuanceTokenList
-        tokens={[baseToken(), baseToken({ id: "tok_2", symbol: "vEUR", name: "Veritas Euro" })]}
-        signerWallets={[]}
-        openIds={new Set()}
-        onToggle={() => undefined}
-        onCreate={() => undefined}
-      />
-    );
-    expect(markup.match(/inert=""/g) ?? []).toHaveLength(2);
-    // The Manage link lives inside the panel, i.e. after its inert attribute.
-    expect(markup.indexOf(t("DashboardIssuance.list.manageThisAsset"))).toBeGreaterThan(
-      markup.indexOf('inert=""')
-    );
   });
 });

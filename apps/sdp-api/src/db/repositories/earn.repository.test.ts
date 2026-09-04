@@ -48,11 +48,10 @@ describe("EarnRepository (postgres)", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    // The unified ledger the repository mirrors into (PRO-1705) references both
-    // the withdrawal's holding and the program wallet, so it is cleared first.
+    // The ledger references both the withdrawal's holding and the program
+    // wallet, so it is cleared first.
     await db.prepare("DELETE FROM earn_movements").run();
     await db.prepare("DELETE FROM earn_positions").run();
-    await db.prepare("DELETE FROM earn_program_withdrawals").run();
     await db.prepare("DELETE FROM earn_strategies").run();
     await db.prepare("DELETE FROM earn_provider_wallets").run();
     await db.prepare("DELETE FROM projects").run();
@@ -430,6 +429,100 @@ describe("EarnRepository (postgres)", () => {
       expect(deleted).toEqual([]);
       expect((await repo.getStrategyById(row.id))?.status).toBe("active");
     });
+
+    it("tears down exactly one cluster sub-shelf on an AUTHORIZED empty keep set", async () => {
+      // The mirror lane's convergence path (PRO-1742): when its truth source
+      // reliably answers "nothing is listed", the browse-only mainnet sub-shelf
+      // empties rather than serving orphaned rows forever. The devnet shelf and
+      // operator-stopped rows stay untouched.
+      const devnetRow = await seedStrategy({
+        provider: "ground",
+        providerReference: "devnet-vault",
+      });
+      const mirroredMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "orphaned-mainnet-vault",
+        hostCluster: "mainnet-beta",
+      });
+      const pausedMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "paused-mainnet-vault",
+        hostCluster: "mainnet-beta",
+        status: "paused",
+      });
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        listedProviderReferences: [],
+        allowEmptyKeepSet: true,
+      });
+
+      expect(deleted).toEqual(["orphaned-mainnet-vault"]);
+      expect(await repo.getStrategyById(mirroredMainnet.id)).toBeNull();
+      expect((await repo.getStrategyById(devnetRow.id))?.status).toBe("active");
+      expect((await repo.getStrategyById(pausedMainnet.id))?.status).toBe("paused");
+    });
+
+    it("refuses an authorized-empty delist without a cluster scope", async () => {
+      // An empty keep set may tear down one sub-shelf, never an environment.
+      await expect(
+        repo.deleteUnlistedStrategies({
+          provider: "ground",
+          environment: "sandbox",
+          listedProviderReferences: [],
+          allowEmptyKeepSet: true,
+        })
+      ).rejects.toThrow("allowEmptyKeepSet requires a cluster scope");
+    });
+
+    it("scopes a cluster-lane delist to its sub-shelf, counting NULL host_cluster as the environment's own", async () => {
+      // The PRO-1742 shape: a sandbox environment holds its own devnet shelf
+      // plus the mirrored mainnet one, each converged by its own lane.
+      const devnetKept = await seedStrategy({
+        provider: "ground",
+        providerReference: "devnet-kept",
+      });
+      const devnetStale = await seedStrategy({
+        provider: "ground",
+        providerReference: "devnet-stale",
+      });
+      const mirroredMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "mainnet-vault",
+        hostCluster: "mainnet-beta",
+      });
+      // A row a pre-0057 writer left unset reads as the environment's own
+      // cluster (mapStrategyRow), so the devnet lane must govern it too.
+      await getDb(env)
+        .prepare(`UPDATE earn_strategies SET host_cluster = NULL WHERE id = ?`)
+        .bind(devnetStale.id)
+        .run();
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "devnet",
+        listedProviderReferences: ["devnet-kept"],
+      });
+
+      // The devnet lane deletes its own stale row — the NULL one included —
+      // and never reaches the mirrored shelf its keep set knows nothing about.
+      expect(deleted).toEqual(["devnet-stale"]);
+      expect((await repo.getStrategyById(devnetKept.id))?.status).toBe("active");
+      expect((await repo.getStrategyById(mirroredMainnet.id))?.status).toBe("active");
+
+      // And the mirror lane converges its own shelf without touching devnet.
+      const mirrorDeleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        listedProviderReferences: ["a-mainnet-ref-still-listed"],
+      });
+      expect(mirrorDeleted).toEqual(["mainnet-vault"]);
+      expect((await repo.getStrategyById(devnetKept.id))?.status).toBe("active");
+    });
   });
 
   describe("listStrategies pagination", () => {
@@ -470,6 +563,192 @@ describe("EarnRepository (postgres)", () => {
         offset: 0,
       });
       expect(all.total).toBe(2);
+    });
+  });
+
+  /**
+   * The PRD ranks the shelf by deposit size (PRO-1732): TVL descending, read
+   * out of the riskMetadata JSON, with no-TVL rows last — never first, and
+   * never fabricated as zero. The order must also be TOTAL, or OFFSET paging
+   * repeats and skips rows across equal-TVL and no-TVL runs.
+   */
+  describe("listStrategies deposit-size ranking", () => {
+    it("orders TVL descending with no-TVL rows last", async () => {
+      const mid = await seedStrategy({
+        providerReference: "vault-mid",
+        riskMetadata: { tvlUsd: 40_000_000 },
+      });
+      const unsized = await seedStrategy({
+        providerReference: "vault-unsized",
+        riskMetadata: {},
+      });
+      const big = await seedStrategy({
+        providerReference: "vault-big",
+        riskMetadata: { tvlUsd: 251_000_000 },
+      });
+      const small = await seedStrategy({
+        providerReference: "vault-small",
+        riskMetadata: { tvlUsd: 3_000_000 },
+      });
+      await freezeCreatedAt("earn_strategies", [mid.id, unsized.id, big.id, small.id]);
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        limit: 10,
+        offset: 0,
+      });
+      expect(total).toBe(4);
+      expect(rows.map((row) => row.id)).toEqual([big.id, mid.id, small.id, unsized.id]);
+    });
+
+    /**
+     * `risk_metadata` is an open bag and the schema only CHECKs that the whole
+     * value is an object, so "tvlUsd is a JSON number or absent" is a provider
+     * convention rather than a constraint. A bare `::numeric` cast would turn
+     * one bad row into a 500 on every read for that environment; the ordering's
+     * `jsonb_typeof` guard demotes it to unsized instead.
+     */
+    it("treats a non-numeric tvlUsd as unsized rather than failing the whole read", async () => {
+      const sized = await seedStrategy({
+        providerReference: "vault-sized",
+        riskMetadata: { tvlUsd: 5_000_000 },
+      });
+      const malformed = await seedStrategy({
+        providerReference: "vault-malformed",
+        riskMetadata: { tvlUsd: "12M" },
+      });
+      const bool = await seedStrategy({
+        providerReference: "vault-bool",
+        riskMetadata: { tvlUsd: true },
+      });
+      await freezeCreatedAt("earn_strategies", [sized.id, malformed.id, bool.id]);
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(3);
+      // The sized row still leads; the two unparseable ones sort last among
+      // themselves by the id tiebreaker.
+      expect(rows[0]?.id).toBe(sized.id);
+      expect(
+        rows
+          .slice(1)
+          .map((row) => row.id)
+          .sort()
+      ).toEqual([bool.id, malformed.id].sort());
+    });
+
+    it("pages the ordered set exactly once across equal-TVL and no-TVL runs", async () => {
+      // Three rows tied at one TVL, one above, and two with none — every shape
+      // the tiebreaker has to keep total. created_at is frozen shared, so only
+      // the id tiebreaker separates the ties.
+      const tied: string[] = [];
+      for (let i = 0; i < 3; i += 1) {
+        tied.push(
+          (
+            await seedStrategy({
+              providerReference: `vault-tied-${i}`,
+              riskMetadata: { tvlUsd: 10_000_000 },
+            })
+          ).id
+        );
+      }
+      const top = await seedStrategy({
+        providerReference: "vault-top",
+        riskMetadata: { tvlUsd: 90_000_000 },
+      });
+      const unsized: string[] = [];
+      for (let i = 0; i < 2; i += 1) {
+        unsized.push(
+          (await seedStrategy({ providerReference: `vault-none-${i}`, riskMetadata: {} })).id
+        );
+      }
+      const all = [...tied, top.id, ...unsized];
+      await freezeCreatedAt("earn_strategies", all);
+
+      const expected = [top.id, ...[...tied].sort().reverse(), ...[...unsized].sort().reverse()];
+
+      const seen: string[] = [];
+      for (let offset = 0; offset < expected.length; offset += 2) {
+        const { rows, total } = await repo.listStrategies({
+          environment: "sandbox",
+          limit: 2,
+          offset,
+        });
+        expect(total).toBe(expected.length);
+        seen.push(...rows.map((row) => row.id));
+      }
+      // Windows tile the TVL-DESC order exactly: no duplicates, no gaps.
+      expect(seen).toEqual(expected);
+    });
+  });
+
+  /**
+   * The PRO-1742 read scope: a non-production environment stores two cluster
+   * sub-shelves, and the strategies route lists exactly one per request —
+   * the environment's own by default, the mirrored one on explicit opt-in.
+   */
+  describe("listStrategies cluster scope", () => {
+    it("restricts to one cluster's sub-shelf, and total moves with the rows", async () => {
+      const devnet = await seedStrategy({ providerReference: "devnet-vault" });
+      const mainnet = await seedStrategy({
+        providerReference: "mainnet-vault",
+        hostCluster: "mainnet-beta",
+      });
+
+      const devnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "devnet",
+        limit: 10,
+        offset: 0,
+      });
+      expect(devnetView.total).toBe(1);
+      expect(devnetView.rows.map((row) => row.id)).toEqual([devnet.id]);
+
+      const mainnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        limit: 10,
+        offset: 0,
+      });
+      expect(mainnetView.total).toBe(1);
+      expect(mainnetView.rows.map((row) => row.id)).toEqual([mainnet.id]);
+
+      // Omitted, the filter is off — the program-create keep set reads the
+      // whole environment and applies fundability itself.
+      const unfiltered = await repo.listStrategies({
+        environment: "sandbox",
+        limit: 10,
+        offset: 0,
+      });
+      expect(unfiltered.total).toBe(2);
+    });
+
+    it("counts a NULL host_cluster row as the environment's own cluster, matching the read rule", async () => {
+      const legacy = await seedStrategy({ providerReference: "legacy-vault" });
+      await getDb(env)
+        .prepare(`UPDATE earn_strategies SET host_cluster = NULL WHERE id = ?`)
+        .bind(legacy.id)
+        .run();
+
+      const devnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "devnet",
+        limit: 10,
+        offset: 0,
+      });
+      expect(devnetView.rows.map((row) => row.id)).toEqual([legacy.id]);
+
+      const mainnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        limit: 10,
+        offset: 0,
+      });
+      expect(mainnetView.total).toBe(0);
     });
   });
 
