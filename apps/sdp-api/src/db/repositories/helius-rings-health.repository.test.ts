@@ -31,7 +31,6 @@ describe("mapHeliusRingsHealthRows", () => {
       rpc: "red",
       prover: "red",
       photon: "red",
-      gateway: "red",
     });
   });
 
@@ -46,7 +45,6 @@ describe("mapHeliusRingsHealthRows", () => {
       rpc: "green",
       prover: "amber",
       photon: "red",
-      gateway: "red",
     });
   });
 
@@ -153,7 +151,7 @@ describe("HeliusRingsHealthRepository (postgres)", () => {
     const health = mapHeliusRingsHealthRows(
       await repo.listHealthByProject({ projectId: TEST_PROJECT_ID })
     );
-    expect(health).toMatchObject({ rpc: "green", photon: "amber", prover: "red", gateway: "red" });
+    expect(health).toMatchObject({ rpc: "green", photon: "amber", prover: "red" });
   });
 
   it("rejects a component outside the known set", async () => {

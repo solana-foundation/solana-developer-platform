@@ -62,6 +62,7 @@ export async function seedCachedApiKey(
     JSON.stringify({
       ...data,
       rotationDeadline: data.rotationDeadline ?? null,
+      organizationStatus: data.organizationStatus ?? "active",
       walletScope:
         data.walletScope ??
         ((data.walletBindings?.length ?? 0) > 0 || data.signingWalletId ? "selected" : "all"),
@@ -122,8 +123,15 @@ export async function seedRateLimit(
  * @returns The current bucket's count, or 0 when the bucket does not exist.
  */
 export async function readRateLimitCount(env: Env, identifier: string): Promise<number> {
+  // Raw, unweighted sum of charges across the two live buckets — NOT the
+  // limiter's time-weighted sliding-window estimate. Tests assert "how many
+  // charges were recorded", and reading only the current bucket made a charge
+  // just before a window rollover read back as 0.
   const windowStart = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
   const kv = createKVStoreSet(env);
-  const raw = await kv.rateLimits.get(`ratelimit:${identifier}:${windowStart}`);
-  return raw === null ? 0 : Number(raw);
+  const [current, previous] = await Promise.all([
+    kv.rateLimits.get(`ratelimit:${identifier}:${windowStart}`),
+    kv.rateLimits.get(`ratelimit:${identifier}:${windowStart - RATE_LIMIT_WINDOW_MS}`),
+  ]);
+  return (current === null ? 0 : Number(current)) + (previous === null ? 0 : Number(previous));
 }

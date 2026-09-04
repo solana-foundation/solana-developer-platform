@@ -86,7 +86,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        source: walletA.walletId,
+        sourceCustodyWalletId: walletA.id,
         destination: DESTINATION_A,
         token: "SOL",
         amount: "0.001",
@@ -101,7 +101,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        source: walletB.walletId,
+        sourceCustodyWalletId: walletB.id,
         destination: DESTINATION_B,
         token: "SOL",
         amount: "0.001",
@@ -119,12 +119,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
     expect(listed.data.some((transfer) => transfer.id === transferB.data.transfer.id)).toBe(false);
 
     const walletAListRes = await scopedRequest(
-      `/v1/payments/transfers?wallet=${encodeURIComponent(walletA.walletId)}`
+      `/v1/payments/transfers?custodyWalletId=${encodeURIComponent(walletA.id)}`
     );
     expect(walletAListRes.status).toBe(200);
 
     const walletBListRes = await scopedRequest(
-      `/v1/payments/transfers?wallet=${encodeURIComponent(walletB.walletId)}`
+      `/v1/payments/transfers?custodyWalletId=${encodeURIComponent(walletB.id)}`
     );
     expect(walletBListRes.status).toBe(403);
     const walletBListBody = (await walletBListRes.json()) as { error: { code: string } };

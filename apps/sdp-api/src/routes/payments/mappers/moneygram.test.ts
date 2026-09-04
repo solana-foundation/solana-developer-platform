@@ -7,6 +7,7 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     id: "xfr_moneygram",
     organization_id: "org_test",
     project_id: "prj_test",
+    custody_wallet_id: null,
     wallet_id: "wal_test",
     counterparty_id: "cpty_test",
     source_address: "8nb762111111111111111111111111111111hnis",

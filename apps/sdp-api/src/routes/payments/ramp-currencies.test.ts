@@ -1,3 +1,4 @@
+import { isRampProviderSurfaced, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
@@ -17,7 +18,7 @@ type CurrenciesResponse = {
   providerDetails: Record<string, unknown>;
 };
 
-function buildApp() {
+function buildApp(environment: "sandbox" | "production" = "sandbox") {
   const app = new Hono<{ Bindings: Env }>();
 
   app.use("*", async (c, next) => {
@@ -27,7 +28,7 @@ function buildApp() {
       projectId: "prj_ramp_currency_test",
       role: "api_admin",
       permissions: ["payments:read"],
-      environment: "sandbox",
+      environment,
       signingWalletId: null,
     });
     await next();
@@ -121,5 +122,53 @@ describe("ramp currency provider details", () => {
 
     expect(data.pairs).toEqual([{ source: "usdc.solana", dest: "USD", providers: ["bvnk"] }]);
     expect(Object.keys(data.providerDetails).sort()).toEqual(["bvnk"]);
+  });
+
+  it("omits un-surfaced providers from listings even when the support matrix includes them", async () => {
+    for (const direction of ["onramp", "offramp"] as const) {
+      const response = await buildApp().request(
+        `/v1/payments/ramps/${direction}/currency`,
+        {},
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const data = await responseData(response);
+
+      for (const unsurfaced of RAMP_PROVIDERS.filter(
+        (p) => !isRampProviderSurfaced(p, "sandbox")
+      )) {
+        expect(sortedProvidersFromPairs(data.pairs)).not.toContain(unsurfaced);
+        expect(data.providerDetails).not.toHaveProperty(unsurfaced);
+      }
+    }
+  });
+
+  it("returns no pairs when the provider query filter names a provider un-surfaced in this environment", async () => {
+    const response = await buildApp("production").request(
+      "/v1/payments/ramps/onramp/currency?provider=moneygram",
+      {},
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const data = await responseData(response);
+
+    expect(data.pairs).toEqual([]);
+    expect(data.providerDetails).toEqual({});
+  });
+
+  it("returns pairs for the same provider where its environment surfaces it", async () => {
+    const response = await buildApp("sandbox").request(
+      "/v1/payments/ramps/onramp/currency?provider=moneygram",
+      {},
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const data = await responseData(response);
+
+    expect(data.pairs.length).toBeGreaterThan(0);
+    expect(data.providerDetails).toHaveProperty("moneygram");
   });
 });

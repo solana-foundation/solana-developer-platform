@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { useEffect } from "react";
 import { docsHref } from "@/components/dashboard-nav";
+import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -225,8 +226,15 @@ export function DashboardMoreSheet({
         </div>
 
         <div className="space-y-6 px-5 pt-2">
-          <div className="rounded-2xl border border-border-default p-2">
+          <div className="space-y-2 rounded-2xl border border-border-default p-2">
             <WorkspaceSwitcher collapsed={false} onOrganizationSwitchingChange={() => {}} />
+            {/* The account menu lives in the sidebar footer, which has no mobile
+                counterpart — this is where phones reach sign-out and feedback. */}
+            <SidebarUserMenu
+              collapsed={false}
+              canManageOrgSettings={canManageOrgSettings}
+              menuSide="top"
+            />
           </div>
 
           {groups.map((group) => (

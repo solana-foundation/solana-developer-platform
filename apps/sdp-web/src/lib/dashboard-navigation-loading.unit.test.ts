@@ -32,8 +32,9 @@ describe("dashboard loading route", () => {
     ["/dashboard/payments/recurring/payment-1", "recurring-payment-detail"],
     ["/dashboard/markets", "markets-landing"],
     ["/dashboard/markets/treasury-solutions", "treasury-solutions"],
-    ["/dashboard/markets/earn", "earn-program"],
-    ["/dashboard/markets/earn/button-builder", "earn-program"],
+    ["/dashboard/markets/embedded-yield", "embedded-yield-portfolio"],
+    ["/dashboard/markets/embedded-yield/configure", "embedded-yield-configure"],
+    ["/dashboard/markets/embedded-yield/integrate", "embedded-yield-integrate"],
     ["/dashboard/tokens", "token-holdings"],
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
@@ -44,6 +45,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/settings", "settings"],
     ["/dashboard/integrations", "integrations"],
     ["/dashboard/integrations/privy", "integration-detail"],
+    ["/dashboard/integrations/private-channels/setup", "private-channels-setup"],
     ["/dashboard/allowlist", "allowlist"],
   ])("maps %s to its exact route skeleton", (pathname, route) => {
     expect(resolveDashboardLoadingRoute(pathname)).toBe(route);
@@ -75,8 +77,8 @@ describe("integrations route", () => {
 describe("dashboard navigation active state", () => {
   it.each([
     "/dashboard/markets/treasury-solutions",
-    "/dashboard/markets/earn",
-    "/dashboard/markets/earn/button-builder",
+    "/dashboard/markets/embedded-yield",
+    "/dashboard/markets/embedded-yield/integrate",
   ])("keeps Markets active at %s", (pathname) => {
     expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
   });
@@ -89,7 +91,10 @@ describe("dashboard navigation active state", () => {
       )
     ).toBe(true);
     expect(
-      isDashboardNavItemActive("/dashboard/markets/earn", "/dashboard/markets/treasury-solutions")
+      isDashboardNavItemActive(
+        "/dashboard/markets/embedded-yield",
+        "/dashboard/markets/treasury-solutions"
+      )
     ).toBe(false);
   });
 

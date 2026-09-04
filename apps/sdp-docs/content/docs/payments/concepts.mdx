@@ -9,7 +9,9 @@ SDP payments move value between Solana accounts: a custody wallet sends tokens t
 
 Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp quote endpoints use the same shape for every provider: `destinationWallet` (onramp) or `sourceWallet` (offramp) is a custody wallet you control, passed as its wallet ID or its Solana address. Provider-specific identifiers (customer id, payout account) are resolved server-side from the **Counterparty**'s Provider Requirements, not passed on the request — see [Ramps](/docs/payments/ramps).
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
+
+Ramp quote endpoints use the same public shape for every provider: `destinationWallet` (onramp) or `sourceWallet` (offramp) identifies a custody wallet you control by its provider wallet ID or Solana address. Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements — see [Ramps](/docs/payments/ramps).
 
 ## Tokens and token accounts
 
@@ -48,7 +50,7 @@ Outbound wallet transfers start at `processing` and move to `confirmed` → `fin
 
 ## What SDP does and does not give you
 
-SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: status polling, filtered lists, wallet-level balances, and a UNIQUE `signature` on the transfer record for client-side dedup (see [Basic payment → Deduplication](/docs/payments/send-basic-payment#deduplication)). It does **not** ship higher-level commerce primitives — there is no checkout session, payment intent, or invoice object in the API today, no webhooks for settlement events, and payment endpoints do not honor an `Idempotency-Key` header (unlike issuance endpoints). The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
+SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: status polling, filtered lists, wallet-level balances, exact-wallet `Idempotency-Key` replay, and a unique on-chain `signature` once populated (see [Basic payment → Deduplication](/docs/payments/send-basic-payment#deduplication)). It does **not** ship higher-level commerce primitives such as a checkout session or invoice object. The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
 
 ## Related
 

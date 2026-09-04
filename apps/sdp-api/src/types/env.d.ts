@@ -68,9 +68,6 @@ export interface Env {
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
   SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
   SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
-  SENTRY_DSN?: string;
-  SENTRY_TRACES_SAMPLE_RATE?: string;
-
   // Email configuration
   EMAIL_FROM?: string;
   RESEND_API_KEY?: string;
@@ -109,6 +106,15 @@ export interface Env {
   /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
+  /**
+   * Jupiter Swap API (swap-funded Earn deposits). Fail-closed: with no key
+   * present, a deposit that names a `sourceTokenMint` is refused before any
+   * network request — the same posture as an absent provider credential.
+   * The URL defaults to the keyed production base; override it only to pin a
+   * different deployment (e.g. a mock in tests).
+   */
+  JUPITER_SWAP_API_URL?: string;
+  JUPITER_SWAP_API_KEY?: string;
   SOLANA_RPC_ALCHEMY_URL?: string;
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;
@@ -236,6 +242,10 @@ export interface Env {
   HELIUS_RINGS_INDEXER_URL?: string;
   HELIUS_RINGS_PROVER_URL?: string;
 
+  // Helius ring RPC, which mints custom-ring auditor keys. Only ring bring-up
+  // needs it; absent, submitting a ring program id fails with config_error.
+  HELIUS_RINGS_RING_RPC_URL?: string;
+
   // Permits plain-http Rings upstreams; opt-in per environment because over
   // plaintext an indexer response reveals which notes an identity owns.
   HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
@@ -316,8 +326,6 @@ export interface Env {
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
 
   // Earn vault-infra provider configuration
-  VEDA_API_KEY?: string;
-  VEDA_SANDBOX_API_KEY?: string;
   UPSHIFT_API_KEY?: string;
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;

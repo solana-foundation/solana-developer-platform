@@ -9,6 +9,7 @@ import { createPostgresPaymentRequestsRepository } from "./payment-requests.repo
 
 const TEST_PROJECT_ID = "prj_preq_repo_test";
 const OTHER_PROJECT_ID = "prj_preq_repo_test_other";
+const TEST_CUSTODY_WALLET_ID = "cwlt_preq_repo_test";
 
 describe("PaymentRequestsRepository (postgres)", () => {
   let repo: PaymentRequestsRepository;
@@ -51,6 +52,23 @@ describe("PaymentRequestsRepository (postgres)", () => {
         .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
         .run();
     }
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cfg_preq_repo_exact', ?, NULL, 'test_preq_exact', 'encrypted')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(TEST_ORG.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+         VALUES (?, 'cfg_preq_repo_exact', 'wlt_receiving', 'OurWallet')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(TEST_CUSTODY_WALLET_ID)
+      .run();
 
     repo = createPostgresPaymentRequestsRepository(db);
   });
@@ -92,6 +110,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: "wlt_receiving",
       destinationAddress: "OurWallet",
       token: "USDC",
@@ -112,9 +131,18 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(row?.id).toMatch(/^preq_/);
       expect(row?.counterparty_id).toBe(counterparty.id);
       expect(row?.amount).toBe("25.00");
+      expect(row?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
       expect(row?.status).toBe("awaiting_payment");
       expect(row?.fulfilled_by_transfer_id).toBeNull();
       expect(row?.canceled_by).toBeNull();
+    });
+
+    it("persists an explicitly selected exact wallet", async () => {
+      const row = await repo.createPaymentRequest(
+        createInput({ custodyWalletId: TEST_CUSTODY_WALLET_ID })
+      );
+
+      expect(row.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     });
 
     it("seeds the lifecycle log with the creation event", async () => {

@@ -1,7 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
@@ -10,7 +10,6 @@ import { rootLogger } from "@/runtime/logger";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
-import type { Env } from "@/types/env";
 
 const THROW_PATH = "/__internal_error_test_throw";
 const VALIDATED_BODY_PATH = "/__internal_error_test_validated_body";
@@ -157,55 +156,22 @@ describe("createApp plugin registration", () => {
   });
 });
 
-describe("createApp onError Sentry guard", () => {
+describe("createApp onError capture", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("NODE_ENV", "production");
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("calls observability.captureException when SENTRY_DSN is set", async () => {
+  it("captures unexpected errors through the injected observability", async () => {
     const { obs, captureException, withScope } = makeObservability();
     const app = buildApp(obs);
-    const env: Env = { ...baseEnv, SENTRY_DSN: "https://test@sentry.example/1" };
 
-    const res = await app.request(THROW_PATH, {}, env);
+    const res = await app.request(THROW_PATH, {}, baseEnv);
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INTERNAL_ERROR");
     expect(withScope).toHaveBeenCalledTimes(1);
     expect(captureException).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not invoke observability under a development NODE_ENV (local dev)", async () => {
-    vi.stubEnv("NODE_ENV", "development");
-    const { obs, captureException, withScope } = makeObservability();
-    const app = buildApp(obs);
-    const env: Env = { ...baseEnv, SENTRY_DSN: "https://test@sentry.example/1" };
-
-    const res = await app.request(THROW_PATH, {}, env);
-
-    expect(res.status).toBe(500);
-    expect(withScope).not.toHaveBeenCalled();
-    expect(captureException).not.toHaveBeenCalled();
-  });
-
-  it("does not invoke observability when SENTRY_DSN is unset", async () => {
-    const { obs, captureException, withScope } = makeObservability();
-    const app = buildApp(obs);
-    const env: Env = { ...baseEnv, SENTRY_DSN: undefined };
-
-    const res = await app.request(THROW_PATH, {}, env);
-
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
-    expect(withScope).not.toHaveBeenCalled();
-    expect(captureException).not.toHaveBeenCalled();
   });
 
   it("maps fee payment program errors to product-safe messages", async () => {
@@ -299,11 +265,7 @@ describe("createApp onError Sentry guard", () => {
     const { obs, captureException } = makeObservability();
     const app = buildApp(obs);
 
-    await app.request(
-      SECRET_UNEXPECTED_ERROR_PATH,
-      {},
-      { ...baseEnv, SENTRY_DSN: "https://x@y/1" }
-    );
+    await app.request(SECRET_UNEXPECTED_ERROR_PATH, {}, baseEnv);
 
     const logged = JSON.stringify(consoleError.mock.calls);
     const captured = JSON.stringify(captureException.mock.calls);

@@ -42,14 +42,27 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
+  ArchiveExternalAccountInput,
+  CompleteExternalAccountInput,
+  CounterpartyProviderAccountKind,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  GetAccountByKindAndCurrencyInput,
+  GetCounterpartyProviderAccountInput,
+  GetExternalAccountByIdInput,
+  GetFundingWalletByOnrampKeyInput,
+  InsertPendingExternalAccountInput,
+  InsertProviderResourceAccountInput,
+  ListActiveExternalAccountsInput,
+  ListExternalAccountsInput,
+  ListProviderAccountsInput,
+  PatchAccountMetadataInput,
+  UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 export type {
   DeleteUnlistedEarnStrategiesInput,
-  EarnButtonConfigurationRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -57,14 +70,9 @@ export type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnStrategyMetricsInput,
-  UpsertEarnButtonConfigurationInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-export {
-  generateEarnButtonConfigurationId,
-  generateEarnButtonConfigurationPublicToken,
-  generateEarnStrategyId,
-} from "./earn.repository";
+export { generateEarnStrategyId } from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
 export type {
   HeliusRingsAssetAllowlistRow,
@@ -125,6 +133,20 @@ export {
   mapHeliusRingsOperationSummaryRow,
 } from "./helius-rings-operation.repository";
 export { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
+export type {
+  HeliusRingsProjectRingRepository,
+  HeliusRingsProjectRingRow,
+  HeliusRingsRingKey,
+  MarkHeliusRingsProjectRingActiveInput,
+  MarkHeliusRingsProjectRingFailedInput,
+  RecordHeliusRingsLookupTableInput,
+  ReserveHeliusRingsProjectRingInput,
+} from "./helius-rings-project-ring.repository";
+export {
+  generateHeliusRingsProjectRingId,
+  mapHeliusRingsProjectRingRow,
+} from "./helius-rings-project-ring.repository";
+export { createPostgresHeliusRingsProjectRingRepository } from "./helius-rings-project-ring.repository.postgres";
 export type {
   CreateHeliusRingsWalletInput,
   HeliusRingsProjectScope,
@@ -381,6 +403,7 @@ export {
 export { createPostgresPrivateChannelTransferRepository } from "./private-channel-transfer.repository.postgres";
 export type {
   AddMembershipInput,
+  CompletePrivateChannelPrincipalInput,
   CreatePrivateChannelUserInput,
   PrivateChannelMembershipRow,
   PrivateChannelMembershipWithChannelRow,
@@ -388,6 +411,7 @@ export type {
   PrivateChannelUserRepositoryContext,
   PrivateChannelUserRow,
   PrivateChannelUserWithIdentityRow,
+  ReservePrivateChannelPrincipalInput,
 } from "./private-channel-user.repository";
 export {
   generatePrivateChannelMembershipId,
@@ -435,6 +459,7 @@ export {
   createHeliusRingsHealthRepository,
   createHeliusRingsKeyRefRepository,
   createHeliusRingsOperationRepository,
+  createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createHeliusRingsZoneRepository,
   createKycWalletsRepository,

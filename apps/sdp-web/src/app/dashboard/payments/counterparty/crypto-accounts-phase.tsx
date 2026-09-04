@@ -43,37 +43,39 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
       </ul>
     ) : null;
 
+  const finishLabel =
+    accounts.length > 0
+      ? t("DashboardPayments.counterparty.done")
+      : t("DashboardPayments.counterparty.skip");
+
   const accountForm = (
     <CryptoAccountForm
       counterpartyId={createdCounterparty.id}
       onAdded={(account) => setAccounts((previous) => [account, ...previous])}
+      footerStart={
+        embedded ? (
+          <Button type="button" variant="outline" onClick={finish}>
+            {finishLabel}
+          </Button>
+        ) : undefined
+      }
     />
   );
 
   if (!embedded) {
-    const accountSteps = [
-      ...steps,
-      {
-        label: t("DashboardPayments.counterparty.cryptoWallet"),
-        title: t("DashboardPayments.counterparty.addCryptoAccount"),
-      },
-    ];
-
     return (
       <WizardFrame
-        steps={accountSteps}
-        currentStep={steps.length}
+        steps={steps}
+        currentStep={steps.length - 1}
         progressLabel={t("DashboardPayments.counterparty.stepProgress", {
-          current: accountSteps.length,
-          total: accountSteps.length,
+          current: steps.length,
+          total: steps.length,
         })}
         description={t("DashboardPayments.counterparty.addCryptoAccountDescription")}
         footer={
           <div className="flex justify-end">
             <Button type="button" onClick={finish}>
-              {accounts.length > 0
-                ? t("DashboardPayments.counterparty.done")
-                : t("DashboardPayments.counterparty.skip")}
+              {finishLabel}
             </Button>
           </div>
         }
@@ -96,7 +98,7 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
   }
 
   return (
-    <div className="mx-auto flex h-[70vh] max-w-xl flex-col py-4">
+    <div className="space-y-6">
       <div className="flex items-center gap-2 text-success">
         <CheckCircle2Icon className="size-5" />
         <span className="text-sm font-medium">
@@ -104,27 +106,17 @@ export function CryptoAccountsPhase({ embedded, steps }: CryptoAccountsPhaseProp
         </span>
       </div>
 
-      <div className="mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-medium tracking-tight text-primary">
-            {t("DashboardPayments.counterparty.addCryptoAccount")}
-          </h2>
-          <p className="text-sm text-secondary">
-            {t("DashboardPayments.counterparty.addCryptoAccountDescription")}
-          </p>
-        </div>
-
-        {accountList}
-        {accountForm}
+      <div className="space-y-1">
+        <h2 className="text-2xl font-medium tracking-tight text-primary">
+          {t("DashboardPayments.counterparty.addCryptoAccount")}
+        </h2>
+        <p className="text-sm text-secondary">
+          {t("DashboardPayments.counterparty.addCryptoAccountDescription")}
+        </p>
       </div>
 
-      <div className="mt-6 flex items-center justify-between gap-3">
-        <Button type="button" variant="outline" onClick={finish}>
-          {accounts.length > 0
-            ? t("DashboardPayments.counterparty.done")
-            : t("DashboardPayments.counterparty.skip")}
-        </Button>
-      </div>
+      {accountList}
+      {accountForm}
     </div>
   );
 }

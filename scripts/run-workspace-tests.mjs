@@ -102,14 +102,19 @@ try {
       ...forwardedArgs,
     ]);
   } else {
-    const filter =
-      mode === "integration" ? "--filter=@sdp/api-integration" : "--filter=!@sdp/api-integration";
+    const changedSince = mode === "unit" ? process.env.TEST_CHANGED_SINCE?.trim() : undefined;
+    const filters =
+      mode === "integration"
+        ? ["--filter=@sdp/api-integration"]
+        : changedSince
+          ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
+          : ["--filter=!@sdp/api-integration"];
     await run("pnpm", [
       "exec",
       "turbo",
       "run",
       "test",
-      filter,
+      ...filters,
       ...(forwardedArgs.length > 0 ? ["--", ...forwardedArgs] : []),
     ]);
   }

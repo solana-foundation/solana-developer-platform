@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { decimalStringFromNumber, divideDecimalAmounts, sumDecimalAmounts } from "./decimal";
+import {
+  decimalStringFromNumber,
+  divideDecimalAmounts,
+  subtractDecimalAmounts,
+  sumDecimalAmounts,
+} from "./decimal";
 
 describe("sumDecimalAmounts", () => {
   it("sums without float artifacts", () => {
@@ -11,6 +16,22 @@ describe("sumDecimalAmounts", () => {
   it("handles mixed scales and empty input", () => {
     assert.equal(sumDecimalAmounts(["1.5", "2", "0.000000001"]), "3.500000001");
     assert.equal(sumDecimalAmounts([]), "0");
+  });
+});
+
+describe("subtractDecimalAmounts", () => {
+  it("subtracts without float artifacts", () => {
+    assert.equal(subtractDecimalAmounts("110.5", "100"), "10.5");
+    assert.equal(subtractDecimalAmounts("0.3", "0.1"), "0.2");
+  });
+
+  it("signs a genuinely negative difference and never signs zero", () => {
+    assert.equal(subtractDecimalAmounts("9", "10"), "-1");
+    assert.equal(subtractDecimalAmounts("1.25", "1.250"), "0");
+  });
+
+  it("handles mixed scales exactly", () => {
+    assert.equal(subtractDecimalAmounts("2", "0.000000001"), "1.999999999");
   });
 });
 

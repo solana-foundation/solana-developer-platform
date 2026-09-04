@@ -202,6 +202,7 @@ ELLIPTIC_API_TOKEN=your_token
 # Fiat ramps
 MOONPAY_API_KEY=pk_...
 MOONPAY_SECRET_KEY=sk_...
+
 ```
 
 ## Running Tests

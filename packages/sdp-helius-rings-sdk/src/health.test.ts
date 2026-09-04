@@ -58,7 +58,7 @@ describe("probeRingsHealth", () => {
   it("reports every component green and omits detail when all three answer", async () => {
     const health = await probeRingsHealth(input());
 
-    expect(health).toEqual({ rpc: "green", photon: "green", prover: "green", gateway: "green" });
+    expect(health).toEqual({ rpc: "green", photon: "green", prover: "green" });
     expect(health.detail).toBeUndefined();
   });
 
@@ -119,6 +119,22 @@ describe("probeRingsHealth", () => {
     );
     expect(errored.photon).toBe("amber");
     expect(errored.detail?.photon).toBe("reported unhealthy");
+  });
+
+  it("passes the indexer's own lag message through when present", async () => {
+    const health = await probeRingsHealth(
+      input({
+        fetch: fetchStub({
+          indexer: () =>
+            Promise.resolve(
+              jsonResponse({ error: { code: -32600, message: "Node is behind 57132 slots" } })
+            ),
+        }),
+      })
+    );
+
+    expect(health.photon).toBe("amber");
+    expect(health.detail?.photon).toBe("Node is behind 57132 slots");
   });
 
   it("calls an unreachable or erroring upstream red", async () => {
@@ -205,19 +221,5 @@ describe("probeRingsHealth", () => {
       photon: "timed out",
       prover: "unreachable",
     });
-  });
-
-  it("keeps the in-process gateway green even when every upstream is down", async () => {
-    const health = await probeRingsHealth(
-      input({
-        client: { getLatestBlockhash: () => Promise.reject(new Error("no")) },
-        fetch: fetchStub({
-          indexer: () => Promise.reject(new Error("no")),
-          prover: () => Promise.reject(new Error("no")),
-        }),
-      })
-    );
-
-    expect(health.gateway).toBe("green");
   });
 });

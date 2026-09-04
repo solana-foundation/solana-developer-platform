@@ -21,7 +21,6 @@ export {
   type HeliusRingsTenant,
   type PrepareOperationContext,
   type ProvisionPrivateWalletInput,
-  type SyncWalletResult,
   type WalletIdentityResult,
 } from "./service";
 export { signRingsOuterTransaction } from "./signer-adapter";

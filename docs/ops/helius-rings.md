@@ -1,67 +1,37 @@
 # Helius Rings — operations reference
 
-Helius Rings is SDP's devnet-only shielded-wallet module: private wallets bound
-to SDP custody wallets, with shielded transfers built on Zolana. This document
-covers the architecture an operator needs: the state machine, failure codes,
-configuration, and which money flows are built. Shield — the public-to-private
-deposit — is the one that is. Transfer, withdraw and merge are not.
+Devnet-only shielded wallets bound to SDP custody. Shield (deposit) and withdraw
+(SOL spend) are built; transfer and merge are not.
 
-Behind the port sits `@sdp/helius-rings-sdk`, running in the API process. That
-is the only implementation — there is no adapter switch and no sidecar.
+The SDK runs in-process behind `RingsGatewayPort`. No adapter switch, no sidecar.
 
 ## Architecture
 
 ```
-routes (/v1/helius-rings)               flag-gated, real policy enforcement
-  └─ HeliusRingsService                 devnet guard, intent reservation,
-       │                                prepare-through-policy, retry lineage
-       ├─ repositories (Postgres)       wallets, operations+timelocks,
-       │                                key refs, zones, events, health
-       ├─ signer adapter                custody signer resolved from the
-       │                                identity's owner public key
-       ├─ RPC adapter                   shared sendTransaction path
-       └─ RingsGatewayPort              THE seam. @sdp/helius-rings-sdk runs
-                                        behind it, in this process.
+routes (/v1/helius-rings)
+  └─ HeliusRingsService
+       ├─ repositories (Postgres)
+       ├─ signer / RPC adapters
+       └─ RingsGatewayPort → @sdp/helius-rings-sdk
 ```
-
-`RingsGatewayPort` is the only place external Rings infrastructure (Solana RPC,
-Photon indexer, prover, key authority) is called. Everything on the SDP side of
-the port is real and fully tested. Behind it, `@sdp/helius-rings-sdk` — the
-Zolana SDK in this process — answers health probes, identity provisioning,
-shielded balance reads, and shield deposits. Transfer, withdraw and merge still
-throw `gateway_unavailable`. There is no adapter selector and no HTTP sidecar:
-the SDK is the implementation. Until an operator sets the four upstream
-variables the port answers with a reporter that names what is missing, and no
-mock ships at all.
-
-A shield is the cheapest money flow to build and the cheapest to reason about:
-it creates a note rather than spending one, so there is no proof to request, no
-wallet sync, and no note selection. The owner's Ed25519 signature on the outer
-transaction is the whole of the authorization, exactly as it is for
-registration. Everything harder is still ahead.
 
 ## Configuration
 
-| Variable | Values | Meaning |
-| --- | --- | --- |
-| `HELIUS_RINGS_ENABLED` | `false` (default) / `true` | Gates the API routes, the dashboard workspace, and the indexing-poll job. |
-| `HELIUS_RINGS_RPC_URL` | URL | Helius Solana RPC the Rings SDK reads and submits through, API key already applied. Required once Rings is enabled. |
-| `HELIUS_RINGS_INDEXER_URL` | URL | Photon indexer. Required once Rings is enabled. |
-| `HELIUS_RINGS_PROVER_URL` | URL | Proving service. Required once Rings is enabled. |
-| `HELIUS_RINGS_ALLOW_INSECURE_HTTP` | `false` (default) / `true` | Permits plain-http upstreams. The public devnet indexer and prover are http on a real host, and the SDK refuses to dial them without this. In plaintext an indexer response reveals which notes an identity owns, so it is opt-in per environment rather than inferred from the URL. |
-| `SOLANA_NETWORK` | must be `devnet` | `HeliusRingsService` refuses to construct on any other network, and the schema pins `helius_rings_wallets.network` to `'devnet'`. Going to mainnet is a deliberate forward migration, not a config flip. |
+| Variable | Meaning |
+| --- | --- |
+| `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
+| `HELIUS_RINGS_RPC_URL` | Solana RPC (API key in URL). Required when enabled. |
+| `HELIUS_RINGS_INDEXER_URL` | Photon indexer. Required when enabled. |
+| `HELIUS_RINGS_PROVER_URL` | Proving service. Required when enabled. |
+| `HELIUS_RINGS_RING_RPC_URL` | Helius ring RPC that mints custom-ring auditor keys. Optional: absent, recording a custom ring fails `config_error` while everything else keeps working. |
+| `HELIUS_RINGS_ALLOW_INSECURE_HTTP` | Opt-in plain HTTP for devnet upstreams. |
+| `SOLANA_NETWORK` | Must be `devnet`. |
 
-> **The seed is public.** Shielded identities are derived from
-> `INSECURE_TEST_SEED_DEVNET_ONLY!!`, hardcoded in
-> `packages/sdp-helius-rings-sdk/src/deterministic-ka/seed.ts`. Anyone with the
-> source derives the same keys, so a shielded balance here is not private. The
-> API logs a warning on first derivation, and this is why `SOLANA_NETWORK` must
-> be `devnet`.
+> **The seed is public.** Identities derive from `INSECURE_TEST_SEED_DEVNET_ONLY!!`
+> in `packages/sdp-helius-rings-sdk/src/deterministic-ka/seed.ts`. Devnet only.
 
-Enabling Rings without all three upstream values does not throw at construction.
-The health board reports every component red naming the missing variables, and
-every other gateway method fails with `config_error`. Throwing would 500 the
-health endpoint an operator reaches for first.
+Missing upstreams → health red, port methods fail with `config_error` (not a throw at
+construction).
 
 ## State machine
 
@@ -70,177 +40,283 @@ draft → preparing → approval_required → proving → ready_to_sign
       → submitted → indexing → completed
 ```
 
-Every non-terminal state has one typed fail edge; `failed` rows always carry
-`failure_code`, `failure_message`, and `retryable` together (DB CHECK). All
-transitions run compare-and-swap under `SELECT … FOR UPDATE`, so two workers
-cannot advance the same operation twice.
+Terminal: `completed`, `failed`, `voided`.
 
-States an operator will actually observe at rest: `approval_required`
-(waiting on a reviewer), `indexing` (waiting on Photon), `completed`, and
-`failed`. The remaining states are transient — the prepare pipeline drives
-through them in one pass.
+`failed` rows carry `failure_code`, `failure_message`, `retryable` (DB CHECK).
+Transitions are CAS under `SELECT … FOR UPDATE`.
 
 ## Failure codes
 
-| Code | Fails from | Retryable | Meaning |
-| --- | --- | --- | --- |
-| `policy_denied` | preparing | no | Wallet/API-key policy denied the operation. |
-| `approval_rejected` | approval_required | no | The approval request was rejected, canceled, or expired. |
-| `proof_failed` | proving | yes | Prover returned an error. |
-| `signer_failed` | ready_to_sign | varies | Custody signing failed; `WALLET_NOT_FOUND`-class errors are non-retryable. Also how the sweep ages out an operation abandoned before its signature was recorded (`RINGS_SIGNING_TIMEOUT_MS`, 10 minutes) — nothing was broadcast in that window, so retrying is safe. |
-| `submit_failed` | submitted | yes | Raised by the RPC adapter, and taken only by provisioning, which re-reads the user record and so cannot register twice. The operation pipeline does **not** fail on it: see "Broadcast ambiguity". |
-| `indexing_timeout` | indexing | yes | Photon did not index within 30 minutes (`RINGS_INDEXING_TIMEOUT_MS`). |
-| `gateway_unavailable` | any port call | yes | The gateway seam is unreachable, unconfigured, or asked for a flow that is not built (transfer, withdraw, merge). |
-| `invalid_input` | preparing | varies | Policy evaluation threw, or an inconsistent row was found. |
+| Code | Retryable | Meaning |
+| --- | --- | --- |
+| `policy_denied` | no | Policy denied the operation. |
+| `approval_rejected` | no | Approval rejected, canceled, or expired. |
+| `proof_failed` | yes | Prover error. |
+| `signer_failed` | varies | Custody signing failed; also used when `ready_to_sign` ages out (10 min) before a signature was recorded. |
+| `submit_failed` | yes | RPC submit error (provisioning only in practice). |
+| `indexing_timeout` | yes | Unsigned rows: Photon did not index within 30 minutes. |
+| `manual_reconciliation_required` | no | Signed bytes exist and neither the indexer nor the chain has a record of them. Operator rechecks or voids. |
+| `config_error` | no | Upstreams missing or gateway misconfigured. |
+| `gateway_unavailable` | yes | Port unreachable or transient upstream failure. |
+| `invalid_input` | varies | Bad input or inconsistent row. |
+| `insufficient_balance` | no | Not enough shielded balance. |
 
-### Broadcast ambiguity
+## Withdraw (SOL)
 
-An RPC that throws on submit has not told you the transaction failed. It can
-time out or 503 after the node accepted it, and since only the signature is
-persisted — never the signed bytes — nothing available afterwards separates
-"never left" from "landed, and we lost the acknowledgement".
+Spends consume notes and need a proof. The pipeline:
 
-Failing the operation there would be the dangerous reading. `submit_failed` is
-retryable, a retry files a fresh operation under a new client nonce, and a new
-nonce means a new intent key, a newly built transaction and a second broadcast.
-Whenever the first one did land, that shields the amount twice. **The intent key
-does not protect this**: it deduplicates a replayed identical request, which is
-not the same property as making a resubmission safe.
+1. **Prepare** — spend-slot preflight; reserve intent.
+2. **Build + prove** — sync wallet at `requireSlot`, select notes, prove in one port call.
+3. **Persist outbox** — `signed_transaction`, `last_valid_block_height`, `input_notes` before broadcast.
+4. **Sign + submit** — custody signs; `submission_started_at` set; broadcast.
+5. **Index** — Photon completes the operation.
 
-So the pipeline does not take the failure. It carries the signature into
-`indexing` and lets Photon adjudicate, which is exactly how the identical
-ambiguity after a process crash was already handled. A transaction that truly
-never left is indexed by nobody and ends at `indexing_timeout` — retryable, but
-only after Photon has had the full 30 minutes to disagree. The operation's
-`transaction.submitted` event records `broadcast: "unconfirmed"` so the timeline
-says which reading applied.
+Rebuilds pass `pinnedInputs` from stored `input_notes`.
+
+Partial unique indexes serialize one in-flight spend (or unsettled signed deposit) per
+wallet. A signed failure holds the slot until completed or voided.
+
+### Recheck and manual void
+
+A row reaches `manual_reconciliation_required` (non-retryable) only once the
+sweep has asked both the indexer and the chain and neither accounts for its
+signature. The row then offers two actions:
+
+- **Recheck** — `POST /operations/:id/recheck`, no body. Asks the indexer again
+  and completes the row on a hit. It can never conclude absence, so it is safe
+  to press repeatedly, and an indexer lagging the chain is the likelier
+  explanation than a transaction that never landed.
+- **Void** — `POST /operations/:id/void` with `{ signature }` matching
+  `outer_tx_signature`. Asserts the transaction never landed: CAS
+  `failed → voided`, releasing the spend slot. A fresh indexer read backs the
+  assertion at commit time and refuses the void if the transaction turns up.
+
+Never void a signature the chain confirms; wait the indexer out instead.
+
+## SPL follow-up
+
+This PR is SOL-only. SPL withdraw is reachable: `WithdrawalTarget.spl` and
+`getSplAssetVaultAddress(mint)` are exported; re-derive the vault PDA with seeds
+`["spl_asset_vault", mint]` and assert it equals the exported address to recover
+the bump. SPL also needs an idempotent create-ATA instruction.
+
+## Broadcast ambiguity (shield)
+
+RPC submit errors do not prove failure. For **unsigned** shield rows the pipeline
+still advances to indexing when possible. Rows **with signed bytes** persist the
+outbox first so the same bytes can be resubmitted after a lost RPC response.
 
 ## Idempotency and retries
 
-- `intent_key = sha256(walletId, opType, canonical(input), clientNonce)` with a
-  unique index. A replayed prepare returns the operation already reserved —
-  never a duplicate.
-- A retry files a **new** operation with a new client nonce, linked via
-  `retry_of_operation_id`, and re-runs the full policy path — a retry re-earns
-  its verdict, never inherits one. Chains are capped at 5; the original failed
-  row is never mutated (lineage is audit evidence).
-- Approval verdicts are read from the stored approval request server-side.
-  `POST /operations/:id/execute` carries no trusted body.
+- `intent_key = sha256(walletId, opType, canonical(input), clientNonce)` — replay
+  returns the existing operation.
+- Retry files a **new** operation (`retry_of_operation_id`), re-runs policy, cap 5
+  deep. Never retry a signed failure — void or reconcile instead.
+- The link is returned on both the summary and the detail, so Activity names each
+  end ("Retry of …", "Retried as …") and stops offering Retry on a failure that
+  already has one. The cap counts ancestors, not siblings, so nothing server-side
+  refuses a second retry of the same failure.
+- `POST /operations/:id/execute` and `POST /operations/:id/recheck` have no
+  trusted body.
 
-## Secret handling
+## Settling an operation
 
-- Viewing keys, nullifier keys, and proof internals travel as `SecretRef<T>`
-  (`toJSON`/`toString` → `"[REDACTED]"`). `scripts/check-secretref-serialization.mjs`
-  fails CI when a `reveal()` result — direct or via alias — reaches a logger,
-  `JSON.stringify`, `String()`, or a template literal.
-- The pino redaction registry (`apps/sdp-api/src/runtime/log-redaction.ts`)
-  censors `viewingKey`, `nullifierKey`, `ringsMetadata`, `proof.ref`,
-  `proof.internal`, and `keyRefs[*].material`.
-- Event payloads are redacted at write time (arbitrary depth), so the timeline
-  table cannot accumulate secret material.
-- Key material is not persisted by the service, and there is nothing to seal
-  into `helius_rings_key_refs`: the deterministic key authority recomputes
-  every identity from the hardcoded seed on demand and stores none of it.
-  Provisioning reports only which kind of material it used. Not storing the
-  keys is not the same as their being secret — see the warning above.
-- Provisioning signs the registry's `register` instruction and nothing else.
-  The record is read first to decide whether to build at all, and the built
-  transaction is then decoded before custody sees it — one instruction, the
-  user registry, discriminator `0` — because the SDK's builder reads the record
-  again for itself and switches to `update_keys` without saying so if one
-  appeared in between. `update_keys` re-keys a published identity on the
-  owner's Ed25519 signature alone; SDP refuses it, because taking it would
-  orphan every note encrypted to the old keys. Either guard refusing is a
-  `409` naming the owner.
+`runPipeline` returns as soon as the broadcast succeeds, so an operation ends
+the request in `indexing`. Only `executeOperation` completes it, by asking
+Photon, and two things call it:
 
-## Identity rotation
+- The dashboard, every 4s while a row is `indexing` and the page is open. This
+  is what makes the UI track the chain rather than the cron.
+- `poll-rings-indexing`, as the backstop when no one is watching.
 
-**SDP does not offer it, and this is settled rather than pending.**
-
-Re-keying is permitted on chain: `update_keys` accepts the owner's Ed25519
-signature alone, with no proof that the incoming keys can read anything the
-outgoing ones could. What an operator would need before taking it is the safety
-check — *does the old identity still hold notes?* — and that check cannot be
-built. Reading those notes requires the old viewing **secret**. SDP never held
-it for a record registered by someone else, and once the derivation seed or
-path has changed it cannot reconstruct the one it did derive. A rotation would
-therefore always be a blind write, and the
-blindness is the whole risk: whatever the old identity still holds becomes
-unspendable at the moment it succeeds.
-
-So an owner whose address is already registered to keys SDP cannot derive is
-resolved by **binding a different custody wallet** to the private wallet. That
-address is spent for Rings — SDP will not take it back — and the operator pays
-one wallet, not an unrecoverable balance. Provisioning surfaces the conflict as
-a `409` naming the owner, which is the signal to bind elsewhere.
+Without the first, settlement latency is the sweep's period, not the chain's:
+up to a minute in-process and up to five on Cloud Run, on an operation that
+confirmed in seconds. The dashboard nudges `indexing` only — on a `ready_to_sign`
+row with no bytes the same call concludes signing died and fails it.
 
 ## Background jobs
 
-`poll-rings-indexing` runs every minute in-process (`cron/runner.ts`) and once
-per managed-job execution every five minutes (`src/job.ts`, the only tick a
-Cloud Run deployment gets — web replicas skip the in-process scheduler under
-`K_SERVICE`). Registered unconditionally in both, inert unless
-`HELIUS_RINGS_ENABLED=true` **and** every upstream variable is set. The second
-half is not redundant: the sweep catches per operation, so an enabled but
-half-configured deployment would otherwise log one warning per in-flight
-operation every minute.
+`poll-rings-indexing` (every minute in-process; every 5 min on Cloud Run) runs
+three passes per tick:
 
-1. Operations in `submitted` are advanced to `indexing` and polled in the same
-   call. This is the crash-recovery path: the broadcast happens inside
-   `submitted`, so a process that dies before the indexing transition commits
-   leaves a live transaction there. The signed bytes are not persisted, so
-   there is nothing to resubmit — the signature is handed to Photon and the
-   indexing budget settles it either way.
-2. Operations in `indexing` poll `verifyIndexed` through the port; a hit
-   completes them.
-3. Operations stuck in `indexing` past 30 minutes fail as `indexing_timeout`
-   (retryable). The budget is not applied to a resumed `submitted` row: it
-   measures how long Photon has been asked, and that row has not been asked
-   yet.
-4. Operations stuck in `ready_to_sign` past 10 minutes fail as `signer_failed`
-   (retryable). This one reconciles nothing, because there is nothing to
-   reconcile: the pipeline broadcasts only after the transition out of
-   `ready_to_sign` commits, so an operation that died in that window never
-   reached an RPC. The row is stale state rather than a lost payment, which is
-   what makes failing it outright safe and retrying it free of duplication
-   risk. The budget is short because the window covers one custody signature
-   and a decode, not a wait on anyone else.
+1. **Expired bytes** — signed rows past `last_valid_block_height` get one Photon
+   check, then a `getSignatureStatuses` check with history search, and only a
+   signature the chain cannot account for becomes
+   `manual_reconciliation_required` (non-retryable). A transaction the chain
+   confirms stays in `indexing` however far behind the indexer has fallen, and
+   one the chain could not be asked about waits for the next tick. The whole
+   pass is skipped when the chain height is unavailable.
+
+   The chain check is what makes the pass safe on a shield, which records only
+   a floor for its expiry because the SDK builder fetches its own later
+   blockhash and so reaches this pass while still valid. Without it, an indexer
+   stalled behind the chain failed finalized deposits as unresolvable.
+2. **Indexed failures** — a signed failure Photon now holds is completed. Never
+   the reverse: absence from the indexer never voids anything.
+3. **In-flight** — advance `submitted` → poll (crash recovery) and poll
+   `indexing` via `verifyIndexed`. A crashed `proving` rebuilds; a
+   `ready_to_sign` resends its bytes, or fails `signer_failed` (retryable) if it
+   has none. Stale `indexing` then times out: unsigned → `indexing_timeout`
+   (retryable); signed → `manual_reconciliation_required` (non-retryable), and
+   only once the same chain check has spared whatever the chain vouches for.
+
+   Reads `proving` onward only. `preparing` and `approval_required` hold no
+   spend slot and block nothing, and an approval waits on a person, so including
+   them would let rows the sweep cannot advance fill its 100-row budget
+   oldest-first and starve the ones it exists to settle.
+
+   A row with no signed bytes is skipped until it is older than
+   `RINGS_UNSIGNED_GRACE_MS` (2 min). The pipeline builds, proves and signs
+   inline and takes no lease, so without the grace a tick landing mid-request
+   fails the operation out from under it — a live withdrawal reports "signing
+   did not complete" while custody is still holding the request. Rows with
+   bytes have no grace: resending them is idempotent.
+
+Enabled when `HELIUS_RINGS_ENABLED=true`.
+
+## What ships
+
+| Flow | Upstreams unset | Configured |
+| --- | --- | --- |
+| Provisioning | 503, wallet `pending` | On-chain register, wallet `ready` |
+| Sync | 503 | On-demand from dashboard |
+| Shield | `failed:config_error` or `gateway_unavailable` | Build, sign, broadcast, index |
+| Shield (custom ring) | same; also needs `HELIUS_RINGS_RING_RPC_URL` and an active ring | Ring-bound deposit through the ring program |
+| Withdraw (SOL) | same | Note selection, prove, outbox, sign, broadcast, index |
+| Withdraw / transfer (custom ring, SOL) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed |
+| Merge | not exposed | not exposed |
+
+## Custom rings
+
+Named custom rings, no fixed cap per project. A custom ring is its own
+on-chain program: deposits into it are ring-bound, so only that ring's own
+instructions can ever spend the notes, and every ring transfer carries a
+message the ring's auditor key can decrypt. Ring membership is a property of
+each note, not of a wallet — one private wallet holds default-ring notes and
+notes of several rings side by side. SDP operates a ring but does not deploy
+its program.
+
+### Ops runbook: deploying a project's ring program
+
+The whole sequence is scripted: `scripts/deploy-custom-ring.sh` creates a
+custody wallet through the API, deploys the release ring binary (sha256
+pinned), hands the upgrade authority to that wallet, and funds it for
+bring-up. It needs a project API key with `custody:admin` (not wallet-scoped)
+and resumes from where it stopped on re-run:
+
+```
+SDP_API_KEY=sk_... scripts/deploy-custom-ring.sh <ring-label>
+```
+
+Then record the printed program id under a name in the dashboard's *Custom
+rings* card. The manual steps below are the reference for what the script
+does.
+
+1. Get the `zolana-ring` CLI from the `custom-rings` release of
+   [`helius-labs/zolana`](https://github.com/helius-labs/zolana).
+   `zolana-ring new` writes the ring's `ring.toml` and program keypair —
+   each ring gets a distinct program id.
+2. Deploy to devnet with `zolana-ring deploy`. The CLI deploys under the
+   operator's own keypair, hash-verifies the released binary before deploying
+   and the on-chain bytes after; it cannot set a foreign upgrade authority,
+   and its `authority transfer` refuses to run before `init`. Do not run
+   `zolana-ring init` — bring-up is SDP's init, and a ring initialized by the
+   operator keypair can never be adopted by custody. Hand the program to
+   custody with the Solana CLI instead:
+
+   ```
+   solana program set-upgrade-authority <program-id> \
+     --new-upgrade-authority <custody wallet address> \
+     --skip-new-upgrade-authority-signer-check
+   ```
+
+   Copy the custody address exactly — only the current authority can ever
+   change it again. Bring-up signs as that authority through custody, so a
+   program whose authority custody does not hold cannot be brought up. Fund
+   the wallet with devnet SOL first — it fee-pays every bring-up transaction
+   and rents the config, ring-auth, reader-record, and lookup-table accounts.
+3. Hand the program id to the project admin. They enter it with a name in the
+   dashboard's *Custom rings* card (or `POST /v1/helius-rings/rings`).
+
+SDP then completes bring-up through the SDK: an auditor key from the ring RPC
+(`HELIUS_RINGS_RING_RPC_URL`), the ring's create-config instruction, its
+shielded-pool registration, a read grant naming the config authority as the
+ring's initial reader, and the ring's address lookup table — each signed
+through custody and confirmed on chain. The table holds exactly
+`ringLookupTableAddresses(ring, tree)` (custody refuses to sign any other
+extend, and the wire policy re-derives that list locally for every ring
+spend); the chain requires it to be at least one slot old before a spend
+compresses through it, which bring-up and a first spend being human-time apart
+always satisfies. The recorded ring row moves `pending → active`, with any
+failure recorded on the row.
+
+### Semantics worth knowing
+
+- **Per-operation selection, by name.** Every enabled operation may name a
+  ring (`ring: "<name>"`, omitted or `"default"` = the default ring). On a
+  shield the ring is the destination; on a withdraw or private transfer it is
+  the source of funds — the spend consumes only that ring's notes, through the
+  ring's own transact instruction. Default-ring operations and sync are never
+  blocked by any ring's state. An unknown name is a `400` and a recorded but
+  not-yet-active ring a `503` (`config_error`); the resolved program id is
+  pinned on the operation row at prepare time and never re-resolved, so an
+  approval granted days later — and any retry — runs against the ring the
+  reviewer saw. The pinned ring also joins the intent key: the same operation
+  aimed at a different ring is a second operation, not a replay.
+- **Ring spends have no pinned-input contract.** The SDK's one-call ring
+  builders select same-ring notes internally on every build, so `input_notes`
+  persists empty and a pre-sign rebuild may spend different notes than the
+  failed attempt (default-ring spends keep their deterministic
+  pinned-notes rebuild). Duplicate payment stays gated by the signed-bytes
+  line: once bytes are signed, recovery only ever resends them.
+- **What custody's wire gate can and cannot prove on a ring spend.** It proves
+  the right ring program, the right tree, the ring's pinned lookup table, the
+  exact account universe, a single owner signature, and the public settlement
+  (none on a transfer; exactly the approved recipient and amount on a
+  withdraw). On a ring TRANSFER the recipient and amount live inside encrypted
+  outputs and cannot be re-derived from the wire — the pre-encryption
+  prepared-intent check that binds them on default spends is bypassed because
+  the one-call builders never expose the prepared transfer. Accepted because
+  the transaction is built in-process against the approved persisted intent
+  and the recipient is a same-tenant wallet's shielded address.
+- **Resume, never re-key.** Bring-up is idempotent against on-chain state:
+  re-submitting the same name and program id resumes from whatever already
+  landed. An existing on-chain config is adopted as it stands — re-keying a
+  live ring would orphan its auditor — but only when the program's upgrade
+  authority IS the config authority: a program another party can upgrade
+  could swap the code the notes deposit under, so it is refused with a `409`.
+  Adopting a fully-registered ring lands no ring-program transaction, so
+  custody additionally proves it holds the config authority by signing a
+  challenge; a ring administered by someone else's key is the same `409`. A
+  recorded lookup table is adopted when live and complete; one that exists
+  but lacks the ring's addresses was not created by this bring-up and is
+  refused.
+- **No re-pointing once active.** Re-submitting a recorded name with a
+  different program id replaces a ring that never went active (a mistyped id
+  binds no notes, so correcting it strands nothing) and is a `409` once the
+  ring is active. Names and program ids are both unique per project: a name
+  resolving to two programs would pin the wrong ring, and one program under
+  two names would split one ring's audit trail.
+- **Balances are tagged per ring.** Sync returns every unspent note the wallet
+  holds, grouped by `ringProgramId` (`null` = the default ring). The
+  groups never merge into one number: value cannot cross a ring boundary
+  inside a spend, so a merged figure would overstate what any single operation
+  can move.
+- **Auditor key.** Held by the Helius ring RPC, never by SDP; the config's
+  public half is recorded on the ring row and echoed by `GET /rings`.
+
+Follow-up work, deliberately out of scope: ring → default-ring exits (the SDK
+exposes only a low-level `sendDefaultRing`), cross-ring transfers (impossible
+in one transaction at the protocol level — value routes through the default
+ring in two hops), SPL ring spends (the withdrawal builder is SOL-only in
+0.1.2-alpha), audit reads and grants to further readers (bring-up's initial
+grant makes the custody-held config authority the ring's only reader, so
+serving decrypted reads or granting a third-party reader needs a future
+custody-signed endpoint), and `GET /rings/:name` point reads.
 
 ## Diagnostics
 
-- `GET /v1/helius-rings/health` probes the gateway and records one row per
-  component (`rpc`, `prover`, `photon`, `gateway`) in
-  `helius_rings_runtime_health`. A component that has never been observed
-  reads **red**, not green.
-- The dashboard workspace (`/dashboard/helius-rings`) renders the health
-  board, wallets with their shielded balance in the table, composers, activity,
-  the operation detail timeline, and the recovery card. Degraded states render
-  honestly: a wallet whose provisioning was refused stays `pending` and shows
-  the server's reason; a partial indexer read is labelled partial rather than
-  presented as the balance; a holding whose mint the gateway cannot label
-  reports no scale at all, and its amount renders as an exact base-unit count
-  labelled as one rather than at a guessed scale; failed operations show their
-  code verbatim.
-
-## What stays dark
-
-| Surface | Upstreams unset | Upstreams configured |
-| --- | --- | --- |
-| Wallet provisioning | `503` naming the unset variables; wallet stays `pending`. | Registers the identity on chain; the wallet becomes `ready`. |
-| Balances / Photon sync | `503`; no cursor ever advances. | Read on demand from the workspace's refresh action, never on a timer. |
-| Health board | Every component red, each naming the unset variables. | One probe per upstream; `gateway` green, because the SDK runs in this process. |
-| Shield | `failed:gateway_unavailable` (retryable). | Builds, signs through custody, broadcasts, and completes once Photon indexes it. |
-| Transfer / withdraw / merge | `failed:gateway_unavailable` (retryable). | `failed:gateway_unavailable` (retryable). |
-
-The last row is the one that does not move. `buildOperation` refuses any
-`opType` but `shield`, so those three flows fail identically whether or not the
-upstreams are configured, and the dashboard composer offers only `shield` rather
-than presenting choices that cannot complete.
-
-Every window a crash can land in is now swept. `submitted` was the dangerous
-one, because the broadcast happens inside it and a crash there could strand a
-live transaction: the sweep picks those rows up and `executeOperation` treats
-`submitted` as executable, so a stranded broadcast either completes on a Photon
-hit or fails retryably at the indexing budget. `ready_to_sign` is the harmless
-one — nothing has been broadcast yet — and it ages out at its own shorter budget
-rather than waiting for someone to notice it.
+- `GET /v1/helius-rings/health` — component probes in `helius_rings_runtime_health`.
+- Dashboard — health board, balances, composer (shield + withdraw), and Activity
+  with each row's action inline: execute, retry, or recheck and void for
+  `manual_reconciliation_required`.

@@ -1,15 +1,44 @@
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 
 export const paymentsQueryKeys = {
   actionCounterparties: () => "payments-action-counterparties",
   actionWallets: () => "payments-action-wallets",
+  createTransfer: () => "payments-create-transfer",
   onrampTransferStatus: ({ transferId }: { transferId: string }) =>
     ["onramp-transfer-status", transferId] as const,
   offrampTransferStatus: ({ transferId }: { transferId: string }) =>
     ["offramp-transfer-status", transferId] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
+  isCounterpartyRequirementsKey: (key: unknown) =>
+    Array.isArray(key) && key[0] === "counterparty-requirements",
+  counterpartyRequirements: ({
+    counterpartyId,
+    provider,
+    direction,
+    cryptoToken,
+    fiatCurrency,
+    destinationWallet,
+  }: {
+    counterpartyId: string;
+    provider: RampProviderId;
+    direction: RampDirection;
+    cryptoToken: string;
+    fiatCurrency: RampFiatCurrency;
+    destinationWallet: string;
+  }) =>
+    [
+      "counterparty-requirements",
+      counterpartyId,
+      provider,
+      direction,
+      cryptoToken,
+      fiatCurrency,
+      destinationWallet,
+    ] as const,
   rampEstimate: ({
     direction,
     fiatCurrency,
@@ -23,6 +52,8 @@ export const paymentsQueryKeys = {
   }) => ["ramp-estimate", direction, fiatCurrency, assetRail, amount] as const,
   counterpartyAccounts: ({ counterpartyId }: { counterpartyId: string }) =>
     ["counterparty-accounts", counterpartyId] as const,
+  counterpartyProviderAccounts: ({ counterpartyId }: { counterpartyId: string }) =>
+    ["counterparty-provider-accounts", counterpartyId] as const,
   counterpartyRecentTransfers: ({ counterpartyId }: { counterpartyId: string }) =>
     ["counterparty-recent-transfers", counterpartyId] as const,
   batchRecipients: ({ page, search }: { page: number; search: string }) =>

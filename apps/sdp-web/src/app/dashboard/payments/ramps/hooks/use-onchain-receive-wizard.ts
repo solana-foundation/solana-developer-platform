@@ -59,7 +59,7 @@ export function useOnchainReceiveWizard({
   );
 
   const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.walletId === walletId) ?? null,
+    () => liveWallets.find((wallet) => wallet.id === walletId) ?? null,
     [liveWallets, walletId]
   );
 

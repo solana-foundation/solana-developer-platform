@@ -28,18 +28,28 @@ test("automatic production deploys are called from the protected main release fl
   assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
 });
 
-test("manual production redeploy always skips builds and migrations", () => {
+test("release deploys verify and promote the signed image; manual redeploys skip migrations", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
+  assert.doesNotMatch(workflow, /docker build/);
   assert.match(
     workflow,
-    /- name: Build and push image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+    /- name: Verify and promote release image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
   assert.match(
     workflow,
     /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
-  assert.match(workflow, /--build-arg GIT_SHA="\$\{DEPLOY_IMAGE_SHA\}"/);
-  assert.match(workflow, /sdp-api-public:\$\{DEPLOY_IMAGE_SHA\}/);
+  assert.match(workflow, /cosign verify "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
+  assert.match(workflow, /cosign copy --force "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
+  assert.match(workflow, /--certificate-github-workflow-sha "\$\{DEPLOY_IMAGE_SHA\}"/);
+  assert.match(workflow, /\$\{DEST_BASE\}:\$\{DEPLOY_IMAGE_SHA\}/);
+});
+
+test("manual redeploys verify the promoted image signature before rollout", () => {
+  assert.match(
+    workflow,
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
+  );
 });
 
 test("candidate is revision-specific and Cloud Run-ready before promotion", () => {
@@ -140,6 +150,178 @@ test("service and cron use the resolved digest", () => {
     workflow,
     /gcloud run jobs update "\$\{JOB\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
   );
-  assert.match(workflow, /timeout-minutes: 90/);
+  assert.match(workflow, /timeout-minutes: 150/);
   assert.match(workflow, /- name: Promote service and cron with rollback\n\s+timeout-minutes: 10/);
+});
+
+test("merge deploys promote signed per-merge images and never migrate", () => {
+  assert.match(
+    workflow,
+    /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch'\)\) && 'true' \|\| 'false' \}\}/
+  );
+  assert.match(
+    workflow,
+    /- name: Verify and promote merge image\n\s+if: \$\{\{ inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' \}\}/
+  );
+  assert.match(
+    workflow,
+    /certificate-identity "https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/release-images\.yml@refs\/heads\/main"/
+  );
+  assert.doesNotMatch(workflow, /- name: Build and push image/);
+  assert.match(
+    workflow,
+    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+  );
+  assert.match(workflow, /- name: Gate merge deploys on pending migrations/);
+  assert.match(
+    workflow,
+    /git diff --quiet "\$\{last_release\}"\.\.HEAD -- apps\/sdp-api\/src\/db\/migrations/
+  );
+});
+
+test("merge mode skips the internal smoke gate but requires the caller's", () => {
+  assert.match(
+    workflow,
+    /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-stage-smoke\.yml/
+  );
+  assert.match(
+    workflow,
+    /\(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' && needs\.smoke\.result == 'skipped'\)/
+  );
+});
+
+test("rollback verification accepts release-tag and merge-to-main identities", () => {
+  assert.match(
+    workflow,
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
+  );
+  assert.match(workflow, /refs\/tags\/v\.\+\|refs\/heads\/main/);
+});
+
+test("no static Doppler token remains in the deploy pipeline", () => {
+  assert.doesNotMatch(workflow, /DOPPLER_TOKEN_CI/);
+  assert.match(workflow, /- name: Doppler OIDC login/);
+});
+
+test("the orchestrator grants every permission the prod workflow requests", () => {
+  const orchestrator = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/deploy.yml"),
+    "utf8"
+  );
+  const permissionsBlock = workflow.match(/^permissions:\n((?: {2}[a-z-]+: [a-z-]+\n)+)/m);
+  assert.ok(permissionsBlock, "prod workflow must declare a top-level permissions block");
+  const requested = permissionsBlock[1]
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  assert.ok(requested.length >= 3, "expected at least contents, id-token, and packages grants");
+  const callerJob = orchestrator.match(
+    /deploy-api-prod:[\s\S]*?permissions:\n((?: {6}[a-z-]+: [a-z-]+\n)+)/
+  )[1];
+  for (const grant of requested) {
+    assert.ok(
+      callerJob.includes(grant),
+      `deploy.yml's deploy-api-prod must grant "${grant}" or the run fails at startup`
+    );
+  }
+});
+
+test("candidate verification accepts the signed index digest or its child manifests, nothing else", () => {
+  assert.match(workflow, /accepted_digests="\$\{expected_digest\}"/);
+  assert.match(workflow, /crane manifest "\$\{IMAGE\}"/);
+  assert.match(workflow, /grep -qxF "\$\{revision_digest##\*@\}" <<<"\$\{accepted_digests\}"/);
+});
+
+// Execute the actual digest-selection block from the workflow against stubbed
+// registries, so CI fails when the shell behavior breaks even if the text
+// fragments above still match.
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const blockMatch = workflow.match(
+  /(accepted_digests="\$\{expected_digest\}"[\s\S]*?or a manifest of that signed index\." >&2\n\s*exit 1\n\s*fi)/
+);
+assert.ok(blockMatch, "digest-selection block not found in workflow");
+const digestBlock = blockMatch[1];
+
+const INDEX_DIGEST = "sha256:aaaa000000000000000000000000000000000000000000000000000000000000";
+const CHILD_DIGEST = "sha256:bbbb000000000000000000000000000000000000000000000000000000000000";
+const OTHER_DIGEST = "sha256:cccc000000000000000000000000000000000000000000000000000000000000";
+const INDEX_JSON = JSON.stringify({
+  mediaType: "application/vnd.oci.image.index.v1+json",
+  manifests: [
+    { digest: CHILD_DIGEST },
+    { digest: "sha256:dddd000000000000000000000000000000000000000000000000000000000000" },
+  ],
+});
+const BARE_JSON = JSON.stringify({ mediaType: "application/vnd.oci.image.manifest.v1+json" });
+
+function runDigestBlock({ craneScript, revisionDigest }) {
+  const dir = mkdtempSync(join(tmpdir(), "digest-guard-"));
+  const cranePath = join(dir, "crane");
+  writeFileSync(cranePath, craneScript);
+  chmodSync(cranePath, 0o755);
+  const script = [
+    "set -euo pipefail",
+    `expected_digest="${INDEX_DIGEST}"`,
+    `IMAGE="registry.example/repo@${INDEX_DIGEST}"`,
+    'candidate_revision="rev-test"',
+    `revision_digest="registry.example/repo@${revisionDigest}"`,
+    digestBlock,
+    "echo GUARD_PASSED",
+  ].join("\n");
+  try {
+    const out = execFileSync("bash", ["-c", script], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      encoding: "utf8",
+    });
+    return { code: 0, out };
+  } catch (err) {
+    return { code: err.status, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+  }
+}
+
+const craneOk = `#!/usr/bin/env bash\nprintf '%s' '${INDEX_JSON}'\n`;
+const craneBare = `#!/usr/bin/env bash\nprintf '%s' '${BARE_JSON}'\n`;
+const craneFail = "#!/usr/bin/env bash\necho 'UNAUTHORIZED' >&2\nexit 1\n";
+
+test("digest guard passes for the signed index's child manifest", () => {
+  const r = runDigestBlock({ craneScript: craneOk, revisionDigest: CHILD_DIGEST });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /GUARD_PASSED/);
+});
+
+test("digest guard passes for the pinned index digest itself", () => {
+  const r = runDigestBlock({ craneScript: craneOk, revisionDigest: INDEX_DIGEST });
+  assert.equal(r.code, 0, r.out);
+});
+
+test("digest guard rejects a digest outside the signed index", () => {
+  const r = runDigestBlock({ craneScript: craneOk, revisionDigest: OTHER_DIGEST });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /or a manifest of that signed index/);
+});
+
+test("digest guard fails loudly, not with a mismatch, when the registry fetch fails", () => {
+  const r = runDigestBlock({ craneScript: craneFail, revisionDigest: CHILD_DIGEST });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Failed to fetch the pinned manifest/);
+  assert.doesNotMatch(r.out, /or a manifest of that signed index/);
+});
+
+test("digest guard still accepts an exact match on a bare (non-index) manifest", () => {
+  const r = runDigestBlock({ craneScript: craneBare, revisionDigest: INDEX_DIGEST });
+  assert.equal(r.code, 0, r.out);
+});
+
+test("rollback verification falls back to the signing origin at the same pinned digest", () => {
+  assert.match(workflow, /if cosign verify "\$\{IMAGE\}" "\$\{verify_flags\[@\]\}"/);
+  assert.match(
+    workflow,
+    /ORIGIN_IMAGE="ghcr\.io\/\$\{\{ github\.repository_owner \}\}\/sdp\/sdp-api@\$\{IMAGE##\*@\}"/
+  );
+  assert.match(workflow, /cosign verify "\$\{ORIGIN_IMAGE\}" "\$\{verify_flags\[@\]\}"/);
 });
