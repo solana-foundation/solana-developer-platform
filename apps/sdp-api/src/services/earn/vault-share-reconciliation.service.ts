@@ -1,4 +1,5 @@
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import type { VaultDeadline } from "@/services/earn/vault-deadline";
 
 /**
  * Reconcile custody-wallet share balances against recorded vault claims
@@ -45,6 +46,8 @@ export interface ReconcilableShareMintedStrategy {
   provider_reference: string;
   name: string;
   share_mint: string | null;
+  status: string;
+  created_at: string;
 }
 
 export interface UnrecordedVaultHolding {
@@ -59,6 +62,13 @@ export interface UnrecordedVaultHolding {
   shares: string;
   decimals: number;
   uiShares: string;
+  /**
+   * True when more than one catalogued vault identity claims this share mint,
+   * so the attribution above is the best candidate rather than the only one.
+   * `share_mint` carries no uniqueness rule, and a paused or deprecated row
+   * stays in the inventory next to its re-listed successor.
+   */
+  ambiguousAttribution: boolean;
 }
 
 export interface UnbackedVaultPosition {
@@ -85,22 +95,63 @@ export interface VaultShareReconciliationReport {
 /** Same bound the positions hydration fan-out uses for per-owner reads. */
 const BALANCE_READ_CONCURRENCY = 8;
 
+/**
+ * All catalogue rows claiming one share mint, with the attribution the report
+ * names resolved up front: an `active` row beats a paused or deprecated one
+ * (the live catalogue truth beats a predecessor kept for its operator record),
+ * newest first within a status, id as the total-order tiebreak. The holding is
+ * flagged ambiguous only when the candidates disagree on the VAULT identity
+ * (provider + reference): a re-listed vault leaves two rows for one identity,
+ * and that is a superseded row, not an ambiguous mint.
+ */
+function resolveShareMintAttributions(
+  strategies: ReadonlyArray<ReconcilableShareMintedStrategy>
+): Map<string, { attributed: ReconcilableShareMintedStrategy; ambiguous: boolean }> {
+  const candidatesByMint = new Map<string, ReconcilableShareMintedStrategy[]>();
+  for (const strategy of strategies) {
+    if (!strategy.share_mint) continue;
+    const candidates = candidatesByMint.get(strategy.share_mint);
+    if (candidates) candidates.push(strategy);
+    else candidatesByMint.set(strategy.share_mint, [strategy]);
+  }
+
+  const attributions = new Map<
+    string,
+    { attributed: ReconcilableShareMintedStrategy; ambiguous: boolean }
+  >();
+  for (const [mint, candidates] of candidatesByMint) {
+    const ranked = [...candidates].sort((a, b) => {
+      const aActive = a.status === "active" ? 0 : 1;
+      const bActive = b.status === "active" ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      if (a.created_at !== b.created_at) return b.created_at.localeCompare(a.created_at);
+      return b.id.localeCompare(a.id);
+    });
+    const attributed = ranked[0];
+    if (!attributed) continue;
+    const identities = new Set(
+      candidates.map((candidate) => `${candidate.provider}\n${candidate.provider_reference}`)
+    );
+    attributions.set(mint, { attributed, ambiguous: identities.size > 1 });
+  }
+  return attributions;
+}
+
 export async function reconcileVaultShareHoldings(input: {
   wallets: ReadonlyArray<ReconcilableVaultWallet>;
   claims: ReadonlyArray<ReconcilableVaultClaim>;
   strategies: ReadonlyArray<ReconcilableShareMintedStrategy>;
   readBalances: VaultShareBalanceReader;
+  /**
+   * One absolute budget for the whole pass. The wallet count is data-driven,
+   * so without this a large tenant turns the endpoint into unbounded
+   * request-length RPC waves; with it, a wallet whose read cannot start or
+   * finish inside the budget lands in `unreadableWallets` (claims unjudged),
+   * never a hung request and never a silently skipped wallet.
+   */
+  deadline: VaultDeadline;
 }): Promise<VaultShareReconciliationReport> {
-  // First catalogue row wins a mint. Rows are unique per (provider, reference,
-  // environment) and one vault mints one share token, so a collision would be
-  // a catalogue defect; deterministic first-wins keeps the report stable
-  // rather than flapping between attributions.
-  const strategiesByShareMint = new Map<string, ReconcilableShareMintedStrategy>();
-  for (const strategy of input.strategies) {
-    if (strategy.share_mint && !strategiesByShareMint.has(strategy.share_mint)) {
-      strategiesByShareMint.set(strategy.share_mint, strategy);
-    }
-  }
+  const strategiesByShareMint = resolveShareMintAttributions(input.strategies);
 
   const claimsByWalletId = new Map<string, ReconcilableVaultClaim[]>();
   for (const claim of input.claims) {
@@ -118,7 +169,9 @@ export async function reconcileVaultShareHoldings(input: {
 
   const wallets = [...input.wallets];
   const settled = await mapSettledWithConcurrency(wallets, BALANCE_READ_CONCURRENCY, (wallet) =>
-    input.readBalances(wallet.publicKey)
+    input.deadline.run(`vault share balance read for ${wallet.publicKey}`, () =>
+      input.readBalances(wallet.publicKey)
+    )
   );
 
   wallets.forEach((wallet, index) => {
@@ -138,19 +191,20 @@ export async function reconcileVaultShareHoldings(input: {
     );
 
     for (const balance of outcome.value) {
-      const strategy = strategiesByShareMint.get(balance.mint);
-      if (!strategy || recordedShareMints.has(balance.mint)) continue;
+      const attribution = strategiesByShareMint.get(balance.mint);
+      if (!attribution || recordedShareMints.has(balance.mint)) continue;
       report.unrecordedHoldings.push({
         custodyWalletId: wallet.id,
         walletAddress: wallet.publicKey,
-        provider: strategy.provider,
-        strategyId: strategy.id,
-        strategyName: strategy.name,
-        vaultAddress: strategy.provider_reference,
+        provider: attribution.attributed.provider,
+        strategyId: attribution.attributed.id,
+        strategyName: attribution.attributed.name,
+        vaultAddress: attribution.attributed.provider_reference,
         shareMint: balance.mint,
         shares: balance.amount,
         decimals: balance.decimals,
         uiShares: balance.uiAmount,
+        ambiguousAttribution: attribution.ambiguous,
       });
     }
 

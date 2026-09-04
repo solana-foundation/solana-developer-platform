@@ -10,6 +10,7 @@ import {
   earnClusterFor,
   resolveClusterRpcUrl,
 } from "@/services/earn/execution-registry";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconciliation.service";
 import type { AppContext } from "../context";
 import { getEarnRepository, resolveSdpEnvironment } from "../context";
@@ -36,7 +37,10 @@ import { listReadableEarnVaultWallets } from "./vault";
  * wrong-cluster RPC must fail the whole pass (positions untouched, failure
  * reported as an error) rather than read the wrong chain and report every
  * position unbacked. Per-wallet read failures degrade instead to a named
- * `unreadableWallets` entry, and that wallet's claims go unjudged.
+ * `unreadableWallets` entry, and that wallet's claims go unjudged. The whole
+ * pass shares one `VaultDeadline`, the same absolute budget every vault
+ * workflow runs under, so a data-driven wallet count bounds what gets read,
+ * never how long the request runs.
  */
 export async function getEarnVaultShareReconciliation(c: AppContext) {
   const environment = resolveSdpEnvironment(c);
@@ -75,6 +79,7 @@ export async function getEarnVaultShareReconciliation(c: AppContext) {
     strategies,
     readBalances: (ownerAddress) =>
       getSplTokenBalances(rpc, assertValidAddress(ownerAddress, "custodyWallet")),
+    deadline: createVaultDeadline(),
   });
 
   return success(c, report);

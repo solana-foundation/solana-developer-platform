@@ -677,8 +677,11 @@ organization's own custody wallets.
   `unrecordedHoldings` (held shares of a catalogued vault with no visible claim)
   and `unbackedPositions` (a visible claim whose wallet holds none of its
   shares; a claim with an unsettled movement is excluded — the ledger already
-  explains that disagreement and the sweep settles it). **Report-only in both
-  directions**: it writes, adopts, and closes nothing — an org-level custody
+  explains that disagreement and the sweep settles it). A duplicated share mint
+  attributes to the active-then-newest row and sets `ambiguousAttribution` when
+  the candidates disagree on the vault identity — `share_mint` carries no
+  uniqueness rule, and a re-listed vault leaves its predecessor row behind.
+  **Report-only in both directions**: it writes, adopts, and closes nothing — an org-level custody
   config is shared by sibling projects, so adoption would guess attribution,
   and a scan that writes money records fabricates claims the moment it has a
   bug. Claim visibility is the positions read's EXACT predicate by construction
@@ -688,7 +691,11 @@ organization's own custody wallets.
   org already holds). The endpoint is genesis-proven before any balance read — a
   wrong-cluster RPC would report every position unbacked — and a per-wallet
   read failure degrades to a named `unreadableWallets` entry whose claims go
-  unjudged, never a zero-share finding.
+  unjudged, never a zero-share finding. The whole pass runs under one
+  `VaultDeadline`, so a data-driven wallet count bounds what gets READ, never
+  how long the request runs: an over-budget wallet is unreadable, not a hung
+  request and not a silent skip. Registered in the INTERNAL OpenAPI document
+  only — partners hold no custody wallets for this read to reconcile.
 
 - `POST /vault-withdrawal-previews` — the exit QUOTE the dashboard derives its
   `minAmountOut` floor from (`supportsVaultWithdrawQuote`; 501 for a provider

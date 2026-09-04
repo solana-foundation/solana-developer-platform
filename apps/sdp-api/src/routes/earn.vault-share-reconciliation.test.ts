@@ -29,6 +29,20 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   resolveClusterRpcUrl,
 }));
 
+// Lets one test shrink the pass budget to prove the deadline posture; null
+// keeps the handler's real default.
+const { deadlineTimeoutOverride } = vi.hoisted(() => ({
+  deadlineTimeoutOverride: { ms: null as number | null },
+}));
+vi.mock("@/services/earn/vault-deadline", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/services/earn/vault-deadline")>();
+  return {
+    ...original,
+    createVaultDeadline: (timeoutMs?: number) =>
+      original.createVaultDeadline(deadlineTimeoutOverride.ms ?? timeoutMs),
+  };
+});
+
 const ORG = "org_share_reconciliation";
 const USER = "usr_share_reconciliation";
 const PROJECT_A = "prj_share_reconciliation_a";
@@ -235,6 +249,7 @@ beforeEach(async () => {
   await clearKVStores(env);
   await seedScope();
   vi.clearAllMocks();
+  deadlineTimeoutOverride.ms = null;
   assertClusterEndpoint.mockResolvedValue(undefined);
   resolveClusterRpcUrl.mockReturnValue("http://127.0.0.1:8899");
   getSplTokenBalances.mockResolvedValue([]);
@@ -261,10 +276,47 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
         shares: "500",
         decimals: 6,
         uiShares: "500",
+        ambiguousAttribution: false,
       },
     ]);
     expect(body.data.unbackedPositions).toEqual([]);
     expect(body.data.unreadableWallets).toEqual([]);
+  });
+
+  it("prefers the active catalogue row for a duplicated share mint and flags the ambiguity", async () => {
+    const active = await seedStrategy({ providerReference: "vault-active" });
+    await seedStrategy({ providerReference: "vault-superseded", status: "deprecated" });
+    getSplTokenBalances.mockResolvedValue([balance(SHARE_MINT_CATALOGUED, "500")]);
+
+    const response = await getReconciliation();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as ReportBody;
+
+    expect(body.data.unrecordedHoldings).toEqual([
+      expect.objectContaining({
+        strategyId: active.id,
+        vaultAddress: "vault-active",
+        ambiguousAttribution: true,
+      }),
+    ]);
+  });
+
+  it("reports wallets the request budget could not read instead of hanging or skipping them", async () => {
+    const claim = await createPosition({ shareMint: SHARE_MINT_EMPTY });
+    await finalizeMovement(claim.movement.id);
+    deadlineTimeoutOverride.ms = 1;
+    getSplTokenBalances.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve([]), 100))
+    );
+
+    const response = await getReconciliation();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as ReportBody;
+
+    expect(body.data.unreadableWallets).toEqual([
+      { custodyWalletId: WALLET_A, walletAddress: PUBLIC_KEY_A },
+    ]);
+    expect(body.data.unbackedPositions).toEqual([]);
   });
 
   it("reports a settled claim whose wallet holds none of its shares, and not one that is backed", async () => {
