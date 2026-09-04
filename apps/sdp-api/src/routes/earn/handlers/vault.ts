@@ -342,15 +342,10 @@ export async function extractEarnVaultDepositPolicyCandidate(
     );
   }
 
-  // Jupiter's official Earn instructions do not encode a caller-supplied share
-  // floor. Retain the production floor guard for providers that support one;
-  // their dashboard flow derives it from a live quote and rejects stale quotes
-  // by TTL (PRO-1691), while Jupiter must remain callable on mainnet.
-  if (
-    environment === "production" &&
-    strategy.provider !== "jupiter_lend" &&
-    body.minSharesOut === undefined
-  ) {
+  // Every production deposit carries a caller-chosen share floor. The
+  // dashboard derives it from a live quote and rejects stale quotes by TTL
+  // (PRO-1691); the provider builder enforces the exact value on-chain.
+  if (environment === "production" && body.minSharesOut === undefined) {
     throw badRequest(
       "minSharesOut is required for this production vault deposit because the provider supports a share floor."
     );

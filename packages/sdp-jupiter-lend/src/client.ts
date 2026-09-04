@@ -1,8 +1,10 @@
 import {
   getDepositContext,
-  getDepositIxs,
-  getRedeemIxs,
+  getLendingProgram,
+  getLendingTokenDetails,
+  getOrCreateATAInstruction,
   getUserLendingPositionByAsset,
+  getWithdrawContext,
 } from "@jup-ag/lend/earn";
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
@@ -10,16 +12,23 @@ import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter_lend/client";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
+  EarnVaultDepositQuote,
+  EarnVaultDepositQuoteInput,
+  EarnVaultDepositQuoteProvider,
   EarnVaultInstruction,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
   EarnVaultWithdrawInput,
   EarnVaultWithdrawProvider,
+  EarnVaultWithdrawQuote,
+  EarnVaultWithdrawQuoteInput,
+  EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import BN from "bn.js";
 import { fromAtoms, toAtoms } from "./amounts";
 import { SdpJupiterLendError } from "./errors";
 import { assertJupiterLendPlanPrograms, permittedJupiterLendPrograms } from "./guards";
@@ -73,7 +82,10 @@ function toEarnInstruction(instruction: TransactionInstruction): EarnVaultInstru
 
 export class JupiterLendVaultDirectClient
   extends JupiterLendEarnClient
-  implements EarnVaultWithdrawProvider
+  implements
+    EarnVaultWithdrawProvider,
+    EarnVaultDepositQuoteProvider,
+    EarnVaultWithdrawQuoteProvider
 {
   constructor(
     private readonly resolveProvenRpcUrl: (
@@ -124,17 +136,80 @@ export class JupiterLendVaultDirectClient
     }
   }
 
+  private async lendingTokenDetails(connection: Connection) {
+    const details = await getLendingTokenDetails({
+      lendingToken: new PublicKey(JUPITER_LEND_USDT.shareMint),
+      connection,
+      market: "main",
+    });
+    if (
+      details.address.toBase58() !== JUPITER_LEND_USDT.shareMint ||
+      details.asset.toBase58() !== JUPITER_LEND_USDT.assetMint ||
+      details.decimals !== JUPITER_LEND_USDT.decimals ||
+      details.convertToShares.lten(0) ||
+      details.convertToAssets.lten(0)
+    ) {
+      throw new SdpJupiterLendError(
+        "PROGRAM_MISMATCH",
+        "Jupiter Lend returned accounting outside SDP's admitted USDT market"
+      );
+    }
+    return details;
+  }
+
+  async quoteVaultDeposit(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultDepositQuoteInput
+  ): Promise<EarnVaultDepositQuote> {
+    this.asset(input.providerReference);
+    const amount = toAtoms("amount", input.amount, JUPITER_LEND_USDT.decimals);
+
+    try {
+      return await this.withConnection(
+        ctx,
+        "Quoting the Jupiter Lend deposit",
+        async (connection) => {
+          const details = await this.lendingTokenDetails(connection);
+          const scale = new BN(10).pow(new BN(details.decimals));
+          const sharesOut = amount.mul(details.convertToShares).div(scale);
+          if (sharesOut.isZero()) {
+            throw new SdpJupiterLendError(
+              "INVALID_AMOUNT",
+              "Jupiter Lend deposit amount is too small to mint one share atom"
+            );
+          }
+          return {
+            sharesOut: fromAtoms(sharesOut, details.decimals),
+            shareDecimals: details.decimals,
+            blockingIssues: [],
+          };
+        }
+      );
+    } catch (error) {
+      if (error instanceof SdpJupiterLendError) throw error;
+      throw new SdpJupiterLendError(
+        "MARKET_UNREADABLE",
+        "Could not quote the Jupiter Lend USDT deposit",
+        { cause: error }
+      );
+    }
+  }
+
   async buildVaultDeposit(
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositInput
   ): Promise<EarnVaultTransactionPlan> {
-    if (input.minSharesOut !== undefined) {
-      throw badRequest("Jupiter Lend deposit instructions do not encode minSharesOut");
+    if (input.minSharesOut === undefined) {
+      throw new SdpJupiterLendError(
+        "INVALID_AMOUNT",
+        "Jupiter Lend deposits require minSharesOut: SDP will not choose a slippage floor on the caller's behalf."
+      );
     }
     const asset = this.asset(input.providerReference);
     const owner = publicKey("owner", input.owner);
     const rentPayer = publicKey("rentPayer", input.rentPayer ?? input.owner);
     const amount = toAtoms("amount", input.amount, JUPITER_LEND_USDT.decimals);
+    const minSharesOut = toAtoms("minSharesOut", input.minSharesOut, JUPITER_LEND_USDT.decimals);
 
     try {
       return await this.withConnection(
@@ -148,21 +223,24 @@ export class JupiterLendVaultDirectClient
             market: "main",
           });
           this.assertShareMint(context.fTokenMint);
-          const createsShareAccount =
-            (await connection.getAccountInfo(context.recipientTokenAccount)) === null;
+          const ataIxs = await getOrCreateATAInstruction(owner, context.fTokenMint, connection);
+          const createsShareAccount = ataIxs.length > 0;
           assertActive();
-          const { ixs } = await getDepositIxs({
-            amount,
-            asset,
-            signer: owner,
+          // `getDepositIxs` still emits the legacy unbounded `deposit(assets)`
+          // instruction. Build through the same SDK's current IDL so the floor
+          // is checked atomically by Jupiter, not merely before submission.
+          const depositIx = await getLendingProgram({
             connection,
             market: "main",
-            includeWrapSol: false,
-          });
+            signer: owner,
+          })
+            .methods.depositWithMinAmountOut(amount, minSharesOut)
+            .accounts(context)
+            .instruction();
           assertActive();
           return assertJupiterLendPlanPrograms({
             cluster: "mainnet-beta",
-            instructions: ixs
+            instructions: [...ataIxs, depositIx]
               .map((ix) => rewriteAtaPayer(ix, owner, rentPayer))
               .map(toEarnInstruction),
             lookupTables: [],
@@ -170,7 +248,10 @@ export class JupiterLendVaultDirectClient
               depositTokenMint: asset.toBase58(),
               shareMint: context.fTokenMint.toBase58(),
             },
-            accepted: { amount: fromAtoms(amount, JUPITER_LEND_USDT.decimals) },
+            accepted: {
+              amount: fromAtoms(amount, JUPITER_LEND_USDT.decimals),
+              minSharesOut: fromAtoms(minSharesOut, JUPITER_LEND_USDT.decimals),
+            },
             createsShareAccount,
           });
         }
@@ -189,37 +270,47 @@ export class JupiterLendVaultDirectClient
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan> {
-    if (input.minAmountOut !== undefined) {
-      throw badRequest("Jupiter Lend redeem instructions do not encode minAmountOut");
+    if (input.minAmountOut === undefined) {
+      throw new SdpJupiterLendError(
+        "INVALID_AMOUNT",
+        "Jupiter Lend withdrawals require minAmountOut: SDP will not choose a slippage floor on the caller's behalf."
+      );
     }
     const asset = this.asset(input.providerReference);
     const owner = publicKey("owner", input.owner);
     const rentPayer = publicKey("rentPayer", input.rentPayer ?? input.owner);
     const shares = toAtoms("shares", input.shares, JUPITER_LEND_USDT.decimals);
+    const minAmountOut = toAtoms("minAmountOut", input.minAmountOut, JUPITER_LEND_USDT.decimals);
 
     try {
       return await this.withConnection(
         ctx,
         "Building the Jupiter Lend withdrawal",
         async (connection, assertActive) => {
-          const context = await getDepositContext({
+          const context = await getWithdrawContext({
             asset,
             signer: owner,
             connection,
             market: "main",
           });
           this.assertShareMint(context.fTokenMint);
-          const { ixs } = await getRedeemIxs({
-            shares,
-            asset,
-            signer: owner,
+          const ataIxs = await getOrCreateATAInstruction(owner, asset, connection);
+          assertActive();
+          // `getRedeemIxs` has the same legacy behavior on exits. The guarded
+          // instruction compares the actual assets returned with this exact
+          // caller-selected floor inside the transaction.
+          const redeemIx = await getLendingProgram({
             connection,
             market: "main",
-          });
+            signer: owner,
+          })
+            .methods.redeemWithMinAmountOut(shares, minAmountOut)
+            .accounts(context)
+            .instruction();
           assertActive();
           return assertJupiterLendPlanPrograms({
             cluster: "mainnet-beta",
-            instructions: ixs
+            instructions: [...ataIxs, redeemIx]
               .map((ix) => rewriteAtaPayer(ix, owner, rentPayer))
               .map(toEarnInstruction),
             lookupTables: [],
@@ -227,7 +318,10 @@ export class JupiterLendVaultDirectClient
               depositTokenMint: asset.toBase58(),
               shareMint: context.fTokenMint.toBase58(),
             },
-            accepted: { shares: fromAtoms(shares, JUPITER_LEND_USDT.decimals) },
+            accepted: {
+              shares: fromAtoms(shares, JUPITER_LEND_USDT.decimals),
+              minAmountOut: fromAtoms(minAmountOut, JUPITER_LEND_USDT.decimals),
+            },
           });
         }
       );
@@ -236,6 +330,44 @@ export class JupiterLendVaultDirectClient
       throw new SdpJupiterLendError(
         "MARKET_UNREADABLE",
         "Could not build the Jupiter Lend USDT withdrawal",
+        { cause: error }
+      );
+    }
+  }
+
+  async quoteVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawQuoteInput
+  ): Promise<EarnVaultWithdrawQuote> {
+    this.asset(input.providerReference);
+    const shares = toAtoms("shares", input.shares, JUPITER_LEND_USDT.decimals);
+
+    try {
+      return await this.withConnection(
+        ctx,
+        "Quoting the Jupiter Lend withdrawal",
+        async (connection) => {
+          const details = await this.lendingTokenDetails(connection);
+          const scale = new BN(10).pow(new BN(details.decimals));
+          const assetsOut = shares.mul(details.convertToAssets).div(scale);
+          if (assetsOut.isZero()) {
+            throw new SdpJupiterLendError(
+              "INVALID_AMOUNT",
+              "Jupiter Lend share amount is too small to redeem one asset atom"
+            );
+          }
+          return {
+            assetsOut: fromAtoms(assetsOut, details.decimals),
+            assetDecimals: details.decimals,
+            blockingIssues: [],
+          };
+        }
+      );
+    } catch (error) {
+      if (error instanceof SdpJupiterLendError) throw error;
+      throw new SdpJupiterLendError(
+        "MARKET_UNREADABLE",
+        "Could not quote the Jupiter Lend USDT withdrawal",
         { cause: error }
       );
     }

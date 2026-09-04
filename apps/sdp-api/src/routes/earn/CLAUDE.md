@@ -429,9 +429,11 @@ organization's own custody wallets.
     Jupiter Lend on production/mainnet; Kamino and Veda on sandbox/devnet. The
     dashboard reads the same map, so it never advertises an action the API will
     refuse.
-  - `minSharesOut` remains required for a production provider whose builder
-    supports a share floor. Jupiter Lend is the explicit exception because its
-    official Earn instruction has no such parameter; passing one is rejected.
+  - `minSharesOut` is required for every production deposit. Slippage-capable
+    providers quote the live share rate, and their builders encode the caller's
+    exact floor in the provider instruction. Jupiter Lend uses
+    `depositWithMinAmountOut`; its withdrawal twin uses
+    `redeemWithMinAmountOut` with the caller's `minAmountOut`.
   - `Idempotency-Key` is **REQUIRED** and body `requestId` is rejected. There is
     no provider-side dedupe to fall back on: the chain will happily accept the
     same transfer twice. The header value is stored with a canonical

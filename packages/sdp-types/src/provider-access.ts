@@ -212,8 +212,7 @@ export function earnDepositStyle(provider: string): EarnDepositStyle {
  * Dashboard slippage-floor policy for `vault_direct` deposits.
  *
  * An entry says the provider's deposit builder REQUIRES an explicit
- * `minSharesOut` — it refuses an implicit tolerance (Veda's SDK throws
- * `SLIPPAGE_PROTECTION_REQUIRED`) — and that the provider quotes deposits
+ * `minSharesOut` — it refuses an implicit tolerance — and that the provider quotes deposits
  * (`supportsVaultDepositQuote`), so the dashboard derives the floor from a
  * LIVE quote: `quotedShares × (1 − toleranceBps/10⁴)`. Never from the deposit
  * amount — that arithmetic is only right while the share rate happens to be
@@ -231,7 +230,7 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
-  jupiter_lend: null,
+  jupiter_lend: { defaultToleranceBps: 10 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -257,7 +256,7 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
-  jupiter_lend: null,
+  jupiter_lend: { defaultToleranceBps: 10 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */

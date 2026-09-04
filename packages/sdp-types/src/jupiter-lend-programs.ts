@@ -1,6 +1,13 @@
 import type { SolanaCluster } from "./well-known-tokens";
 
-/** Official Jupiter Lend Earn program. Jupiter Lend has no devnet deployment. */
+/**
+ * Jupiter Lend Earn program admitted by SDP's pinned SDK integration.
+ *
+ * Jupiter now publishes devnet program ids, but `@jup-ag/lend@0.2.0` has no
+ * cluster selector or devnet USDT market identity: its `main` context derives
+ * mainnet PDAs. Keep devnet closed until the SDK can build that market
+ * end-to-end instead of admitting one program id with mainnet accounts.
+ */
 export const JUPITER_LEND_EARN_PROGRAM_IDS = {
   devnet: undefined,
   // biome-ignore lint/security/noSecrets: public Solana program address

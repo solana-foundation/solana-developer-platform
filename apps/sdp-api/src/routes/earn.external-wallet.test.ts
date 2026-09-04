@@ -751,7 +751,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(body.error.message).toContain("production");
   });
 
-  it("opens Jupiter Lend only from production without inventing minSharesOut", async () => {
+  it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
     const strategy = await seedStrategy({
       provider: "jupiter_lend",
@@ -763,9 +763,17 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       hostCluster: "mainnet-beta",
       environment: "production",
     });
-    const res = await post(
+    const missingFloor = await post(
       "deposit-transactions",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(missingFloor.status).toBe(400);
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "24.9" },
       { apiKey: PROD_API_KEY.raw }
     );
 
@@ -775,7 +783,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       expect.objectContaining({
         environment: "production",
         provider: "jupiter_lend",
-        minSharesOut: undefined,
+        minSharesOut: "24.9",
       })
     );
   });

@@ -38,7 +38,41 @@ const {
 
 const ENABLED = process.env.JUPITER_LEND_SURFPOOL_E2E === "true";
 const DEPOSIT_AMOUNT = "5";
+const SLIPPAGE_TOLERANCE_BPS = 10;
 const api = requestWithApiKey();
+
+interface DepositPreview {
+  sharesOut: string;
+  shareDecimals: number;
+  blockingIssues: Array<{ code: string; message: string }>;
+}
+
+interface WithdrawalPreview {
+  assetsOut: string;
+  assetDecimals: number;
+  blockingIssues: Array<{ code: string; message: string }>;
+}
+
+function decimalAtoms(value: string, decimals: number): bigint {
+  const [whole = "0", fraction = ""] = value.split(".");
+  return BigInt(`${whole}${fraction.padEnd(decimals, "0")}`);
+}
+
+function decimalFromAtoms(atoms: bigint, decimals: number): string {
+  const digits = atoms.toString().padStart(decimals + 1, "0");
+  const whole = digits.slice(0, -decimals);
+  const rawFraction = digits.slice(-decimals);
+  let fractionEnd = rawFraction.length;
+  while (fractionEnd > 0 && rawFraction.charCodeAt(fractionEnd - 1) === 48) fractionEnd -= 1;
+  const fraction = rawFraction.slice(0, fractionEnd);
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+function floorFromQuote(value: string, decimals: number): string {
+  const floor = (decimalAtoms(value, decimals) * BigInt(10_000 - SLIPPAGE_TOLERANCE_BPS)) / 10_000n;
+  if (floor <= 0n) throw new Error("Jupiter Lend quote is too small for a positive slippage floor");
+  return decimalFromAtoms(floor, decimals);
+}
 
 async function post<T>(
   path: string,
@@ -61,6 +95,21 @@ async function post<T>(
     );
   }
   return payload.data;
+}
+
+async function expectSlippageRefusal(path: string, body: Record<string, unknown>): Promise<void> {
+  const response = await api(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": crypto.randomUUID(),
+    },
+    body: JSON.stringify(body),
+    timeoutMs: 120_000,
+  });
+  const payload = (await response.json()) as { error?: { details?: { reason?: string } } };
+  expect(response.status).toBe(400);
+  expect(payload.error?.details?.reason).toBe("slippage_exceeded");
 }
 
 async function cheat(method: string, params: unknown[]): Promise<unknown> {
@@ -198,12 +247,27 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const wallet = await createFundedIntegrationWallet({ label: "Jupiter treasury" });
     await fundUsdt(wallet.publicKey);
 
+    const depositPreview = await post<DepositPreview>("/v1/earn/vault-deposit-previews", {
+      strategyId,
+      amount: DEPOSIT_AMOUNT,
+    });
+    expect(depositPreview.blockingIssues).toEqual([]);
+    const minSharesOut = floorFromQuote(depositPreview.sharesOut, depositPreview.shareDecimals);
+
+    await expectSlippageRefusal("/v1/earn/vault-deposits", {
+      strategyId,
+      custodyWalletId: wallet.id,
+      amount: DEPOSIT_AMOUNT,
+      minSharesOut: "1000000",
+    });
+
     const deposited = await post<EarnVaultDeposit>(
       "/v1/earn/vault-deposits",
       {
         strategyId,
         custodyWalletId: wallet.id,
         amount: DEPOSIT_AMOUNT,
+        minSharesOut,
       },
       true
     );
@@ -212,11 +276,28 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const holding = await waitForShares(wallet.publicKey, false);
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
+    const withdrawalPreview = await post<WithdrawalPreview>("/v1/earn/vault-withdrawal-previews", {
+      positionId: deposited.positionId,
+      shares: holding?.shares ?? "0",
+    });
+    expect(withdrawalPreview.blockingIssues).toEqual([]);
+    const minAmountOut = floorFromQuote(
+      withdrawalPreview.assetsOut,
+      withdrawalPreview.assetDecimals
+    );
+
+    await expectSlippageRefusal("/v1/earn/vault-withdrawals", {
+      positionId: deposited.positionId,
+      shares: holding?.shares ?? "0",
+      minAmountOut: "1000000",
+    });
+
     const withdrawn = await post<EarnVaultWithdrawalResponse>(
       "/v1/earn/vault-withdrawals",
       {
         positionId: deposited.positionId,
         shares: holding?.shares ?? "0",
+        minAmountOut,
       },
       true
     );
@@ -230,9 +311,16 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     await fundSol(ownerAddress);
     await fundUsdt(ownerAddress);
 
+    const depositPreview = await post<DepositPreview>("/v1/earn/vault-deposit-previews", {
+      strategyId,
+      amount: DEPOSIT_AMOUNT,
+    });
+    expect(depositPreview.blockingIssues).toEqual([]);
+    const minSharesOut = floorFromQuote(depositPreview.sharesOut, depositPreview.shareDecimals);
+
     const depositBuild = await post<EarnExternalWalletDepositTransactionResponse>(
       "/v1/earn/external-wallet/deposit-transactions",
-      { strategyId, ownerAddress, amount: DEPOSIT_AMOUNT }
+      { strategyId, ownerAddress, amount: DEPOSIT_AMOUNT, minSharesOut }
     );
     const depositResult = await post<EarnExternalWalletDepositResponse>(
       "/v1/earn/external-wallet/deposits",
@@ -247,11 +335,22 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const holding = await waitForShares(ownerAddress, false);
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
+    const withdrawalPreview = await post<WithdrawalPreview>(
+      "/v1/earn/external-wallet/withdrawal-previews",
+      { positionId: depositResult.deposit.positionId, shares: holding?.shares ?? "0" }
+    );
+    expect(withdrawalPreview.blockingIssues).toEqual([]);
+    const minAmountOut = floorFromQuote(
+      withdrawalPreview.assetsOut,
+      withdrawalPreview.assetDecimals
+    );
+
     const withdrawalBuild = await post<EarnExternalWalletWithdrawalTransactionResponse>(
       "/v1/earn/external-wallet/withdrawal-transactions",
       {
         positionId: depositResult.deposit.positionId,
         shares: holding?.shares ?? "0",
+        minAmountOut,
       }
     );
     const withdrawalResult = await post<EarnExternalWalletWithdrawalResponse>(

@@ -779,8 +779,20 @@ describe("Earn strategy reads — shipped V1 curation", () => {
 
     const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
     expect(list.status).toBe(200);
-    const body = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
     expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([jupiter.id]);
+    expect(body.data.strategies[0]).toMatchObject({
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
     expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(200);
   });
 });

@@ -21,15 +21,21 @@ import {
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 /**
- * The vault program's own words for "your floor was too high", as Anchor
- * writes them into simulation logs (`Error Code: SlippageExceeded. … Error
- * Message: Slippage tolerance exceeded.`). Matched on the NAMED error, never
- * the bare custom-error number: 6000 is every Anchor program's first error
- * code, so the number alone would relabel unrelated failures.
+ * Vault programs' own words for "your floor was too high", as Anchor writes
+ * them into simulation logs. Veda reports `SlippageExceeded`; Jupiter Lend
+ * reports `FTokenMinAmountOut`. Matched on NAMED errors, never bare custom
+ * error numbers: the same number can mean unrelated things across programs.
  */
-const SLIPPAGE_SIMULATION_MARKERS = ["SlippageExceeded", "Slippage tolerance exceeded"] as const;
+const SLIPPAGE_SIMULATION_MARKERS = [
+  "SlippageExceeded",
+  "Slippage tolerance exceeded",
+  // biome-ignore lint/security/noSecrets: public Jupiter Lend Anchor error name.
+  "FTokenMinAmountOut",
+  // biome-ignore lint/security/noSecrets: public Jupiter Lend Anchor error name.
+  "fTokenMinAmountOut",
+] as const;
 
-function isSlippageSimulationFailure(error: string, logs: readonly string[]): boolean {
+export function isSlippageSimulationFailure(error: string, logs: readonly string[]): boolean {
   return SLIPPAGE_SIMULATION_MARKERS.some(
     (marker) => error.includes(marker) || logs.some((log) => log.includes(marker))
   );

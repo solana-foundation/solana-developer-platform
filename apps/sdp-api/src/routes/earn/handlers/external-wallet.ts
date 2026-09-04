@@ -555,13 +555,9 @@ export async function createEarnExternalWalletDepositTransaction(
     );
   }
 
-  // Jupiter's official Earn instructions have no minSharesOut parameter. Other
-  // providers retain the production floor guard if their environment is opened.
-  if (
-    environment === "production" &&
-    provider !== "jupiter_lend" &&
-    body.minSharesOut === undefined
-  ) {
+  // Every production deposit carries a caller-chosen share floor derived from
+  // the provider's live quote and enforced by its on-chain instruction.
+  if (environment === "production" && body.minSharesOut === undefined) {
     throw badRequest(
       "minSharesOut is required for this production vault deposit because the provider supports a share floor."
     );

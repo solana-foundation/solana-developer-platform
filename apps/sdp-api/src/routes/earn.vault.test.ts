@@ -365,7 +365,7 @@ afterEach(() => {
 });
 
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
-  it("opens Jupiter Lend only from production without inventing minSharesOut", async () => {
+  it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
     await seedWallet({
       configId: "cfg_earn_vault_jupiter",
@@ -384,11 +384,24 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
       environment: "production",
     });
 
+    const missingFloor = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_jupiter",
+        amount: "10",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+    expect(missingFloor.status).toBe(400);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
         custodyWalletId: "cwlt_earn_vault_jupiter",
         amount: "10",
+        minSharesOut: "9.99",
       },
       crypto.randomUUID(),
       PROD_API_KEY.raw
@@ -400,7 +413,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
       expect.objectContaining({
         environment: "production",
         provider: "jupiter_lend",
-        minSharesOut: undefined,
+        minSharesOut: "9.99",
       }),
       expect.anything()
     );
