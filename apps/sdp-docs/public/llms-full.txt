@@ -3622,46 +3622,77 @@ Notes:
 ### Ramps
 Source: https://platform.solana.com/docs/payments/ramps
 
-> Fiat on-ramps and off-ramps — discover corridors, price a Ramp Quote just-in-time, and hand off to the provider's own execution flow.
+> Fiat on-ramps and off-ramps. Let a customer buy crypto with fiat, or cash out from a wallet you custody, through one set of endpoints.
 
-SDP wraps ramp providers behind a single pricing step: a **Ramp Quote**, priced just-in-time against the provider. There is no execute endpoint — SDP quotes the ramp and hands the end-user to the provider's own flow (hosted redirect or funding instructions) to complete it.
+A ramp is a fiat-to-crypto or crypto-to-fiat conversion run by a provider (MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, or Stripe). SDP puts all seven behind the same endpoints, so your integration reads one contract and branches on the response rather than on the provider name.
 
-Every quote is tied to a **Counterparty** — the KYC subject for the ramp — and a custody wallet you control. For per-provider configuration, see [Ramp providers](/docs/payments/ramps-providers).
+The flow is the same in both directions:
 
-## Prerequisites
+1. Discover which fiat currencies pair with which Solana rails, and which providers serve each pair.
+2. Price the conversion with `estimate`. It commits you to nothing.
+3. Make sure the counterparty (the person or business on the other side) has cleared the provider's requirements.
+4. Request a quote. This creates the ramp, creates a transfer record, and returns what the provider needs from the end user.
+5. Track the transfer until it settles.
 
-1. **A Counterparty.** Create one with `POST /v1/counterparties` before requesting a quote.
-2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready`.
-3. **A custody wallet you control**, used as the crypto leg — the onramp destination or the offramp source.
+Two things trip people up. `estimate` and `quote` are separate calls, and no call does both. And every quote needs a counterparty that the provider has accepted; a wallet alone is not enough.
 
-## Discovering corridors
+This page assumes you have an API key with `payments:read` and `payments:write`, and at least one custody wallet from `GET /v1/wallets`. For per-provider configuration and credentials, see [Ramp providers](/docs/payments/ramps-providers).
 
-`GET /v1/payments/ramps/onramp/currency` and `GET /v1/payments/ramps/offramp/currency` list the fiat/crypto pairs SDP supports and which providers cover each one — the **Corridor** dimensions (currency, country coverage, entity type).
+## Discover available corridors
 
-<Tabs items={["curl"]}>
-<Tab value="curl">
-```bash title="Terminal"
+A corridor is a fiat currency paired with a Solana rail, for example `USD` to `usdc.solana`. Not every combination exists, and the providers that serve a corridor vary by corridor.
+
+```bash
 curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana" \
   -H "Authorization: Bearer sk_test_..."
 ```
-</Tab>
-</Tabs>
 
-| Query param | Notes |
-| --- | --- |
-| `source` | Onramp: fiat currency (ISO code). Offramp: crypto rail (`usdc.solana`, `sol.solana`, …). |
-| `dest` | Onramp: crypto rail. Offramp: fiat currency. |
-| `provider` | Narrow to one provider. |
+```json
+{
+  "data": {
+    "currencies": {
+      "sources": ["USD"],
+      "destinations": ["usdc.solana"]
+    },
+    "pairs": [
+      {
+        "source": "USD",
+        "dest": "usdc.solana",
+        "providers": ["lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"]
+      }
+    ],
+    "providerDetails": {
+      "lightspark": {
+        "currencies": { "USD": { "min": "1", "max": "10000" } },
+        "countrySupport": { "coverage": "unreported" },
+        "entityTypes": ["business", "individual"]
+      },
+      "mural": {
+        "currencies": { "USD": { "min": null, "max": null } },
+        "countrySupport": { "coverage": "by-country", "countries": { "US": ["USD"] } },
+        "entityTypes": ["business"]
+      }
+    },
+    "supportHash": "d253b18a629c6403c4617cc256ea9a530d013569c4a2c04364a6edd264ecbc0f"
+  }
+}
+```
 
-The response's `pairs` list which providers cover each source/dest combination; `providerDetails` gives each provider's country coverage and supported entity types for the direction.
+The response has four parts. `pairs` is the one to read: each entry is a real corridor with the providers that serve it. `currencies` lists the sources and destinations that appear in `pairs` after your filters are applied. `providerDetails` gives each provider's amount bounds, country coverage, and the counterparty entity types it accepts for this direction. `supportHash` identifies the support matrix the API is running, which is useful when you cache the result.
 
-## Estimating a rate
+<Callout type="warn">
+Read `pairs`, not the cross product of `sources` and `destinations`. Most combinations of the two arrays are not corridors. `USD` pairs with `usdc.solana` through six providers and with `sol.solana` through four, and those two lists overlap only partly.
+</Callout>
 
-`POST /v1/payments/ramps/onramp/estimate` and `.../offramp/estimate` return a rate preview without creating anything — no counterparty or wallet required. SDP calls every provider on the corridor concurrently and returns one result per provider: `ok` (with the estimate), `unsupported`, or `error`.
+All three query parameters are optional. On the on-ramp endpoint `source` is a fiat code and `dest` is a rail. On `GET /v1/payments/ramps/offramp/currency` the direction flips: `source` is the rail and `dest` is the fiat code. `provider` narrows either one to a single provider.
+
+## Price the conversion
+
+`estimate` needs no counterparty and creates nothing. It asks every provider that serves the corridor and returns each answer separately.
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash title="Terminal"
+```bash
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/estimate \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -3673,13 +3704,13 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/estimate \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript title="estimate-onramp.ts"
+```typescript
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/estimate",
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      Authorization: "Bearer sk_test_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -3690,298 +3721,781 @@ const response = await fetch(
   }
 );
 const { data } = await response.json();
-// data.estimates — one entry per provider on the corridor
+const priced = data.estimates.filter((entry) => entry.status === "ok");
 ```
 </Tab>
 </Tabs>
 
-Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate`, and `fees` when `status` is `ok`. Use this to show the user a rate before they commit to a quote.
+```json
+{
+  "data": {
+    "estimates": [
+      {
+        "provider": "moneygram",
+        "status": "ok",
+        "estimate": {
+          "provider": "moneygram",
+          "direction": "onramp",
+          "fiatCurrency": "USD",
+          "assetRail": "usdc.solana",
+          "fiatAmount": "104.00",
+          "cryptoAmount": "100.000000",
+          "exchangeRate": "1",
+          "fees": { "currency": "USD", "total": "4.00", "provider": "4.00" }
+        }
+      },
+      {
+        "provider": "bvnk",
+        "status": "error",
+        "error": "BVNK request failed with status 404"
+      }
+    ]
+  }
+}
+```
 
-## Requesting a quote
+Each entry has one of three statuses. `ok` carries the estimate. `unsupported` means the provider serves the corridor but can't give an indicative price up front; you learn the rate at quote time. `error` carries the provider's error text; an organization that isn't entitled to a provider sees that provider as `error` here rather than as a top-level 403.
 
-`POST /v1/payments/ramps/onramp/quote` (fiat → crypto) and `POST /v1/payments/ramps/offramp/quote` (crypto → fiat) create the actual **Ramp Quote** against the named provider. This is the step that talks to the provider and, for most providers, produces a provider-side record — unlike estimate, it requires a resolved counterparty and wallet.
+<Callout type="warn">
+Treat `estimates` as a partial result. Filter to `status === "ok"` before comparing prices, and don't assume any particular provider will be present. A corridor that no provider serves returns `estimates: []` with HTTP 200, not an error.
+</Callout>
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
+`POST /v1/payments/ramps/offramp/estimate` takes the same shape with `cryptoAmount` in place of `fiatAmount`. `fiatCurrency` is required on both.
+
+### Estimate request fields
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `assetRail` | yes | The Solana rail, for example `usdc.solana`. One of `sol.solana`, `usdc.solana`, `usdt.solana`, `usdg.solana`, `pyusd.solana`. |
+| `fiatCurrency` | yes | ISO 4217 code. |
+| `fiatAmount` | on-ramp | Decimal string greater than zero. |
+| `cryptoAmount` | off-ramp | Decimal string greater than zero. |
+
+The quote step names the asset differently, as a bare token symbol (`USDC`, not `usdc.solana`). Take the part before the dot and upper-case it.
+
+## Provision the counterparty
+
+A quote is tied to a counterparty, the customer or business on the fiat side of the conversion. Create one if you haven't:
+
+```bash
+curl -X POST https://api.solana.com/v1/counterparties \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entityType": "individual",
+    "displayName": "Amara N. Okafor",
+    "externalId": "CUST-2087"
+  }'
+```
+
+That is the whole body. SDP does not store names, emails, dates of birth, or addresses on the counterparty; providers that need identity details collect them in their own flows. The response carries an `id` of the form `cpty_...`, which is what `counterpartyId` takes below.
+
+Before a quote will succeed, the counterparty has to satisfy the provider's requirements for that corridor. Requirements depend on the provider, the direction, the token, and the currency, so all of those are part of the request. On-ramp requests also need the destination wallet, and a Lightspark off-ramp request can carry the `destinationCountry` the payout is going to.
+
+```bash
+curl "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements\
+?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+Every response carries `provider`, `direction`, and a `status`. `ready` means quote now. Any other status says what to do next, and the rest of the response is shaped by it. The full list is in the table further down. A Lightspark off-ramp walks through most of the flow, so it is the worked example here: identity fields first, then a payout account.
+
+### Step 1: identity fields
+
+A counterparty the provider has never seen returns `collect_counterparty` with the fields the provider needs to create its customer record. Lightspark and BVNK both do this, in both directions, each with its own list. For an individual counterparty Lightspark asks for:
+
+```json
+{
+  "data": {
+    "provider": "lightspark",
+    "direction": "offramp",
+    "status": "collect_counterparty",
+    "fields": [
+      { "kind": "text", "key": "customer.fullName", "label": "Full name", "required": true, "maxLength": 256 },
+      { "kind": "date", "key": "customer.birthDate", "label": "Date of birth", "required": true, "before": "2026-09-03" },
+      { "kind": "country", "key": "customer.nationality", "label": "Nationality", "required": true },
+      { "kind": "country", "key": "customer.region", "label": "Region", "required": true },
+      {
+        "kind": "text",
+        "key": "customer.email",
+        "label": "Email",
+        "required": true,
+        "maxLength": 320,
+        "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+        "placeholder": "name@example.com"
+      },
+      {
+        "kind": "address",
+        "key": "customer.address",
+        "label": "Residential address",
+        "required": true,
+        "fields": [
+          { "kind": "text", "key": "customer.address.line1", "label": "Address line 1", "required": true },
+          { "kind": "text", "key": "customer.address.city", "label": "City", "required": true },
+          { "kind": "text", "key": "customer.address.subdivisionCode", "label": "State / region", "required": false },
+          { "kind": "text", "key": "customer.address.postalCode", "label": "Postal code", "required": true },
+          { "kind": "country", "key": "customer.address.countryCode", "label": "Country", "required": true }
+        ]
+      },
+      {
+        "kind": "select",
+        "key": "purposeOfPayment",
+        "label": "Purpose of payment",
+        "required": true,
+        "options": [{ "value": "...", "label": "..." }]
+      }
+    ]
+  }
+}
+```
+
+Each field has a `kind` that tells you what to render and what to send back:
+
+| `kind` | Render | Submit under the field's `key` |
+| --- | --- | --- |
+| `text` | A text input. `pattern`, `minLength`, `maxLength`, `placeholder`, and `mask` are hints the API also enforces. | The string. |
+| `select` | The listed `options`. | One option's `value`. |
+| `country` | A country picker. No options are sent. | An ISO 3166-1 alpha-2 code such as `US`. Anything else is rejected. |
+| `date` | A date picker. `before` is the exclusive upper bound, so a birth date must fall before today. | `YYYY-MM-DD`. |
+| `address` | Its nested `fields` as a group. | Each nested field separately, under its own dotted key. |
+
+Submit what you collected to the same path. Values go in `collectedData`, keyed exactly as the field's `key`:
+
+```bash
+curl -X POST "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements" \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "lightspark",
+    "direction": "offramp",
+    "cryptoToken": "USDC",
+    "fiatCurrency": "USD",
+    "collectedData": {
+      "customer.fullName": "Ada Lovelace",
+      "customer.birthDate": "1990-12-10",
+      "customer.nationality": "US",
+      "customer.region": "US",
+      "customer.email": "ada@example.com",
+      "customer.address.line1": "1 Main St",
+      "customer.address.city": "New York",
+      "customer.address.subdivisionCode": "NY",
+      "customer.address.postalCode": "10001",
+      "customer.address.countryCode": "US",
+      "purposeOfPayment": "..."
+    }
+  }'
+```
+
+A submission that leaves out a required field comes back as `collect_counterparty` again, listing only what is still missing. A complete one creates the provider-side customer and moves on: an on-ramp answers `ready`, an off-ramp answers `collect_account`.
+
+### Step 2, off-ramp only: the payout account
+
+`collect_account` carries a `payout` tree instead of a flat field list, because the bank fields depend on where the money is going:
+
+```json
+{
+  "data": {
+    "provider": "lightspark",
+    "direction": "offramp",
+    "status": "collect_account",
+    "payout": {
+      "countryRails": {
+        "US": [
+          { "value": "ACH", "label": "ACH" },
+          { "value": "WIRE", "label": "Wire" },
+          { "value": "RTP", "label": "RTP" },
+          { "value": "FEDNOW", "label": "FedNow" }
+        ]
+      },
+      "railFields": {
+        "ACH": [
+          { "kind": "text", "key": "bankAccount.accountNumber", "label": "Account number", "required": true, "minLength": 1, "maxLength": 34, "placeholder": "12345678" },
+          {
+            "kind": "select",
+            "key": "bankAccount.bankAccountType",
+            "label": "Account type",
+            "required": false,
+            "options": [{ "value": "CHECKING", "label": "Checking" }, { "value": "SAVINGS", "label": "Savings" }]
+          },
+          { "kind": "text", "key": "bankAccount.routingNumber", "label": "Routing number", "required": true, "pattern": "^[0-9]{9}$", "minLength": 9, "maxLength": 9, "placeholder": "021000021" }
+        ]
+      },
+      "accounts": []
+    }
+  }
+}
+```
+
+`countryRails` has one entry per country that can receive this currency, each listing the rails available there. `railFields` has the fields for every rail that appeared. `accounts` lists payout accounts this counterparty already has for the currency, empty on the first pass. The example is trimmed to the required ACH fields plus one optional one; the live tree carries the other rails and their optional fields too.
+
+Let the user pick a country, then a rail from that country's list, then render `railFields[rail]`. Submit all three in one `collectedData`:
+
+```bash
+curl -X POST "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements" \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "lightspark",
+    "direction": "offramp",
+    "cryptoToken": "USDC",
+    "fiatCurrency": "USD",
+    "collectedData": {
+      "destinationCountry": "US",
+      "paymentRails": "ACH",
+      "bankAccount.routingNumber": "021000021",
+      "bankAccount.accountNumber": "000123456789"
+    }
+  }'
+```
+
+That creates the payout account with the provider and answers `ready` with its id:
+
+```json
+{
+  "data": {
+    "provider": "lightspark",
+    "direction": "offramp",
+    "status": "ready",
+    "providerAccountId": "counterparty_provider_account_93809134-1b2c-4d5e-8f90-a1b2c3d4e5f6"
+  }
+}
+```
+
+Keep `providerAccountId`. The off-ramp quote takes it to pin the payout to that account, and it is how you tell accounts apart once a counterparty has more than one.
+
+### Reusing a payout account
+
+The account persists, so the next time you call the `GET` with the destination country on the query string, the API resolves it for you:
+
+```bash
+curl "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID/requirements\
+?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+A country with exactly one active account answers `ready` with that account's `providerAccountId`, plus the `payout` tree in case the user wants to send somewhere else. Inside the tree, `accounts` now lists what exists: `id`, `destinationCountry`, `paymentRail`, `status`, and where the provider reports them, `bankName` and `accountNumberLast4`. A country with no account answers `collect_account` as above. A country with two or more active accounts answers `400` until you choose one, which you do by submitting `providerAccountId` alongside `collectedData: { "destinationCountry": "US" }`; the `POST` verifies the account belongs to this counterparty and corridor and answers `ready`. Without `destinationCountry` the `GET` returns the tree and lets you pick.
+
+Every provider account a counterparty holds, across providers, is listed at `GET /v1/counterparties/{counterpartyId}/provider-accounts`, filterable by `provider`, `fiatCurrency`, and `destinationCountry`. `destinationCountry` on a requirements `GET` is accepted for Lightspark off-ramps only; other providers reject it with `400`.
+
+### Other providers
+
+The `POST` body varies by provider. Lightspark and BVNK take `collectedData`; BVNK additionally takes `agreementConsent: true` once it has shown you its agreements. MoonPay, MoneyGram, Coinbase, and Stripe take only `provider` and `direction` and answer `ready` at once. Mural takes the corridor fields and no `collectedData`. Repeat the `GET` until `status` reads `ready`.
+
+The statuses you will see:
+
+| `status` | Providers | Meaning |
+| --- | --- | --- |
+| `ready` | all | Quote now. A Lightspark off-ramp also returns `providerAccountId`. |
+| `collect_counterparty` | Lightspark, BVNK | Submit the identity `fields`. |
+| `collect_account` | Lightspark off-ramp | Pick a country and rail from `payout` and submit that rail's fields. |
+| `collect` | BVNK off-ramp | Submit the bank `fields` for the beneficiary. |
+| `unsupported` | all | The provider won't serve this counterparty for this corridor. `reason` says why: a currency it can't pay out, or an entity type it doesn't take. |
+| `onboarding_not_started` | Lightspark, Mural | The provider-side customer does not exist yet. For Mural, see the warning below. |
+| `customer_agreement_required` | BVNK | Show the listed `agreements` (each has a `downloadUrl`, minted per response) and resubmit with `agreementConsent: true`. |
+| `customer_pending_agreement_acceptance` | BVNK | Wait and poll again. |
+| `customer_verification_required` | BVNK, Mural | Send the customer to `verificationUrl` to complete KYC. The link is minted per response. |
+| `terms_of_service_required` | Mural | Send the customer to `termsOfServiceUrl`. |
+| `customer_verifying`, `customer_funding_account_provisioning`, `funding_account_provisioning` | BVNK, Mural | Wait and poll again. |
+| `customer_verification_failed`, `customer_funding_account_provisioning_failed` | BVNK, Mural | The provider rejected the customer or could not open the account. Polling will not change it; the provider-side status has to. |
+
+Three seams still fail because SDP no longer stores the identity fields the provider wants at that moment, and just-in-time collection is not wired for that call. Each returns `400` with a message ending in `requires identity fields that are no longer stored; JIT collection is not wired yet`. A Coinbase on-ramp quote fails this way for a counterparty Coinbase has not seen, even after requirements reported `ready`; counterparties Coinbase already knows keep working. A Mural requirements call fails this way for a counterparty with no Mural organization yet, so `onboarding_not_started` cannot currently advance. A BVNK off-ramp quote fails this way for every counterparty today, because the party details BVNK wants on the quote are rebuilt from fields that are no longer stored; the BVNK on-ramp is not affected, since its identity fields now arrive through `collect_counterparty`.
+
+## Request a quote
+
+A quote creates the ramp with the provider and returns what the end user has to do next.
+
+<Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash title="Terminal"
+```bash
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "moonpay",
-    "counterpartyId": "cp_...",
-    "destinationWallet": "wal_...",
+    "provider": "lightspark",
+    "counterpartyId": "cpty_52f96f7f-4e90-47a3-a824-a38f62b86188",
+    "destinationWallet": "privy_grfk86kwihjlny3d6zr3jxyv",
     "cryptoToken": "USDC",
     "fiatCurrency": "USD",
-    "fiatAmount": "100.00"
+    "fiatAmount": "10.00",
+    "rampsMemo": { "orderId": "ord_4821" }
   }'
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript title="onramp-quote.ts"
+```typescript
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/quote",
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      Authorization: "Bearer sk_test_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      provider: "moonpay",
-      counterpartyId: "cp_...",
-      destinationWallet: "wal_...",
+      provider: "lightspark",
+      counterpartyId: "cpty_52f96f7f-4e90-47a3-a824-a38f62b86188",
+      destinationWallet: "privy_grfk86kwihjlny3d6zr3jxyv",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
-      fiatAmount: "100.00",
+      fiatAmount: "10.00",
+      rampsMemo: { orderId: "ord_4821" },
     }),
   }
 );
 const { data } = await response.json();
-// data.quote.deliveryMode tells you what to do next — see below
-```
-</Tab>
-<Tab value="Java">
-```java title="OnrampQuote.java"
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/quote"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "provider": "moonpay",
-          "counterpartyId": "cp_...",
-          "destinationWallet": "wal_...",
-          "cryptoToken": "USDC",
-          "fiatCurrency": "USD",
-          "fiatAmount": "100.00"
-        }"""))
-    .build();
+// data.transferId is the record to poll
+// data.quote.deliveryMode tells you what to show the user
 ```
 </Tab>
 </Tabs>
 
-### Request fields
+The response has two top-level keys under `data`: `quote`, the provider-shaped payment details, and `transferId`, the SDP transfer record created for this ramp. Keep both. `transferId` is how you find out whether the money arrived.
+
+### Quote request fields
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. |
-| `counterpartyId` | yes | An existing Counterparty. Provider-side customer and payout-account state is resolved server-side from it, not passed on the request. Counterparties do not store identity or email fields. |
-| `destinationWallet` (onramp) / `sourceWallet` (offramp) | yes | A custody wallet you control — its `walletId` or its Solana address, resolved against your API key's wallet scope. Same shape for every provider. |
-| `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, `SOL`, …). |
-| `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow (MoneyGram) can omit it on offramp. |
-| `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |
-| `rampsMemo` | no | Up to 20 key/value string pairs stored on the resulting transfer for your own correlation. |
+| `provider` | yes | One of the providers in the corridor's `providers` list. SDP does not choose for you. |
+| `counterpartyId` | yes | A `cpty_...` id whose requirements are `ready` for this provider and corridor. |
+| `destinationWallet` | on-ramp | The `walletId` from `GET /v1/wallets` (for example `privy_...`) or that wallet's public key. It has to resolve to one of your wallets; an unrelated Solana address is rejected with `destinationWallet must reference an SDP wallet.` The `cwlt_...` custody wallet `id` is not accepted here. |
+| `sourceWallet` | off-ramp | The wallet you are cashing out from. Same forms, same restriction. |
+| `destinationCountry` | off-ramp, Lightspark | ISO 3166-1 alpha-2 code of the country the payout goes to. Required for Lightspark; it selects the payout account's corridor together with `fiatCurrency`. Other providers do not take it. |
+| `providerAccountId` | off-ramp, Lightspark, optional | The payout account to settle to, from the requirements flow above or `GET /v1/counterparties/{counterpartyId}/provider-accounts`. Omitted, SDP uses the counterparty's single active account for the corridor; two or more active accounts return `400` naming the ambiguity, and none returns `409`. An id that belongs to another counterparty, another corridor, or an inactive account is rejected with `400`, never silently swapped. The account used is recorded on the transfer. |
+| `cryptoToken` | yes | Token symbol, for example `USDC`. Passing the rail form (`usdc.solana`) is rejected with `Invalid ramp currency code` on `cryptoToken`. |
+| `fiatCurrency` | on-ramp; in practice off-ramp too | Required on on-ramp. The off-ramp schema marks it optional, but Lightspark and BVNK reject an off-ramp quote without it, so treat it as required unless you have checked your provider. |
+| `fiatAmount` | on-ramp | Decimal string greater than zero. |
+| `cryptoAmount` | off-ramp | Decimal string greater than zero. |
+| `rampsMemo` | no | Up to 20 string key-value pairs stored on the transfer for your own correlation. |
+| `domain` | no | Coinbase only. The browser origin host for its Apple Pay payment link. |
 
-The quote also creates the underlying **Payment Transfer** record for the ramp; log the returned `quote.id` (the transfer's `providerReference`) for your own records.
+SDP does not enforce provider amount bounds. The `min` and `max` in `providerDetails` are advisory, and an out-of-range amount fails at the provider with that provider's message. Lightspark's sandbox, for example, caps on-ramp requests at 10 USD and says so in its error.
 
-### Delivery mode
+### Idempotency works differently here
 
-`quote.deliveryMode` tells you how to complete the flow with the named provider:
+The `Idempotency-Key` header that protects `POST /v1/payments/transfers` is accepted on quote routes but ignored. Replay protection for ramps is the provider reference instead: if a provider hands back a quote or session reference SDP has already seen, the request returns the existing transfer when every field matches and `409` with `Provider quote/session reference is already bound to a different ramp transfer.` when any field differs. A Lightspark or MoneyGram reference past its expiry returns `409` with `Provider quote/session reference has expired; create a new quote.` Retrying a failed quote request is safe; retrying it with different amounts is not a retry.
 
-| Provider | `deliveryMode` | What to do |
-| --- | --- | --- |
-| MoonPay | `hosted` | Redirect the user to `quote.hostedUrl`. |
-| Lightspark | `manual_instructions` | Display the funding instructions in `quote.paymentInstructions` (bank or wallet details to send fiat to). |
-| BVNK | `manual_instructions` | Same — display `quote.paymentInstructions`. |
-| MoneyGram | `session_widget` | Mount `quote.widgetUrl` using `quote.sessionToken`. Onramp and offramp both. |
-| Coinbase | `hosted` | Redirect the user to `quote.hostedUrl`. Onramp only; quote creation is sandbox-only today. |
-| Mural | `manual_instructions` | Display `quote.paymentInstructions`. Onramp only. |
-| Stripe | `session_widget` | Mount the session with `quote.clientSecret` and `quote.publishableKey`. Onramp only. |
+## Handle the delivery mode
 
-There is no further SDP endpoint to call after this — the provider owns settlement from here. Watch for the resulting on-chain transfer on the destination wallet via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing), or watch the provider's own side (dashboard or their webhook) for offramp payout confirmation.
+Every quote carries a `deliveryMode`. It tells you how the end user pays, and it determines which other fields are present. Branch on this field, not on the provider name: BVNK, for one, can return either of two modes.
 
-## Canceling a quote
+### `manual_instructions`
 
-`POST /v1/payments/ramps/transfers/cancel` cancels the transfer behind a quote while it is still `pending` or `awaiting_payment` — before the provider has moved money.
+The user moves money themselves from their own bank or wallet. `paymentInstructions` says where. Display it and wait for settlement.
 
-```bash title="Terminal"
+The instruction differs by direction. An on-ramp quote tells the user where to send fiat. This is a Lightspark on-ramp quote for 10 USD:
+
+```json
+{
+  "data": {
+    "quote": {
+      "id": "Quote:01a0581f-b6cf-5246-0000-f15a37c2912a",
+      "provider": "lightspark",
+      "status": "pending",
+      "deliveryMode": "manual_instructions",
+      "paymentInstructions": [
+        {
+          "provider": "lightspark",
+          "accountOrWalletInfo": {
+            "accountType": "USD_ACCOUNT",
+            "accountNumber": "1111222233331111",
+            "routingNumber": "021000021",
+            "paymentRails": ["ACH", "WIRE", "RTP", "FEDNOW"],
+            "reference": "539d61d1-f4f4-4754-bf11-48fac4d7e045"
+          }
+        }
+      ],
+      "totalSendingAmount": 1000,
+      "sendingCurrency": { "code": "USD", "decimals": 2, "name": "US Dollar", "symbol": "$" },
+      "totalReceivingAmount": 10000000,
+      "receivingCurrency": { "code": "USDC", "decimals": 6, "name": "USD Coin", "symbol": "usdc" },
+      "feesIncluded": 0,
+      "feeCurrency": { "code": "USD", "decimals": 2, "name": "US Dollar", "symbol": "$" },
+      "exchangeRate": 1,
+      "expiresAt": "2026-08-31T14:04:08.559627Z"
+    },
+    "transferId": "xfr_69b4436f-877f-4528-a1e1-5755886ac426"
+  }
+}
+```
+
+Amounts on Lightspark quotes are integers in the currency's minor units: `totalSendingAmount: 1000` with `decimals: 2` is 10.00 USD, and `totalReceivingAmount: 10000000` with `decimals: 6` is 10 USDC. The `reference` is what the bank transfer has to carry for the provider to match it.
+
+An off-ramp quote tells the user where to send crypto. The same provider, cashing out 1 USDC:
+
+```json
+{
+  "data": {
+    "quote": {
+      "id": "Quote:01a05820-2a47-5246-0000-f7d55dcfb891",
+      "provider": "lightspark",
+      "status": "pending",
+      "deliveryMode": "manual_instructions",
+      "paymentInstructions": [
+        {
+          "provider": "lightspark",
+          "kind": "crypto_deposit",
+          "destinationAddress": "CtLDz9CE3XKQS18j3EaJnMhJuDhgJRLP9bqHrbkCN3s7",
+          "cryptoCurrency": "USDC",
+          "network": "SOLANA",
+          "accountOrWalletInfo": {
+            "accountType": "SOLANA_WALLET",
+            "address": "CtLDz9CE3XKQS18j3EaJnMhJuDhgJRLP9bqHrbkCN3s7",
+            "assetType": "USDC"
+          }
+        }
+      ],
+      "expiresAt": "2026-08-31T14:04:37.687850Z"
+    },
+    "transferId": "xfr_aa1eecf6-8d7f-46f5-be13-c7b0e3e82b5a"
+  }
+}
+```
+
+When `kind` is `crypto_deposit`, fund the ramp by sending `cryptoCurrency` to `destinationAddress` from the `sourceWallet` you quoted with, through `POST /v1/payments/transfers` like any other transfer. Do it before `expiresAt`; Lightspark's window is about three minutes. If the off-ramp transfer already carries a deposit instruction of its own (MoonPay sets one through its settlement events), pass the ramp's `transferId` in that transfer request and SDP records the on-chain send on the same transfer instead of creating a second one.
+
+### `hosted`
+
+The provider runs the whole payment journey on its own page. Send the user to `hostedUrl`.
+
+```json
+{
+  "data": {
+    "quote": {
+      "id": "ramp_quote_589ffbef-2c4e-4a41-9c33-7a0e1b6f0d21",
+      "provider": "moonpay",
+      "status": "pending",
+      "deliveryMode": "hosted",
+      "hostedUrl": "https://buy-sandbox.moonpay.com/?apiKey=pk_test_...&currencyCode=sol&baseCurrencyAmount=30"
+    },
+    "transferId": "xfr_f335fd8c-91a2-4d6b-8e0f-3b7c2a5d1e90"
+  }
+}
+```
+
+Coinbase quotes use the same mode and add the order economics (`paymentSubtotal`, `paymentTotal`, `purchaseAmount`, `fees`) beside the URL.
+
+### `session_widget`
+
+The provider's widget is embedded in your own interface, authenticated by a short-lived credential. This is a MoneyGram on-ramp quote:
+
+```json
+{
+  "data": {
+    "quote": {
+      "id": "a549daae-5300-4361-adfe-53c7650ef805",
+      "provider": "moneygram",
+      "status": "pending",
+      "deliveryMode": "session_widget",
+      "sessionToken": "eyJhbGciOiJIUzI1NiJ9...",
+      "sessionId": "a549daae-5300-4361-adfe-53c7650ef805",
+      "widgetUrl": "https://playground.xramps.moneygram.com/sdk/widget.html?mode=on-ramp",
+      "expiresAt": "2026-08-31T15:01:39.000Z"
+    },
+    "transferId": "xfr_d6e46a12-d3ae-420e-90ea-557990074757"
+  }
+}
+```
+
+Stripe uses the same mode with `clientSecret`, `sessionId`, and `publishableKey` in place of the token and widget URL.
+
+`sessionToken` and `clientSecret` are bearer credentials. Pass them to the widget and don't log or persist them. MoneyGram's session lasts one hour, which is the `expiresAt` on the quote.
+
+Request the quote when the user is ready to pay rather than earlier in your flow. Lightspark and MoneyGram quotes carry `expiresAt`; the other providers' quotes don't expire on SDP's side, but their hosted sessions do on the provider's.
+
+## Track the transfer
+
+Every quote creates a transfer, and `data.transferId` names it. Poll it:
+
+```bash
+curl https://api.solana.com/v1/payments/transfers/xfr_69b4436f-877f-4528-a1e1-5755886ac426 \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```json
+{
+  "data": {
+    "transfer": {
+      "id": "xfr_69b4436f-877f-4528-a1e1-5755886ac426",
+      "type": "onramp",
+      "direction": "inbound",
+      "status": "awaiting_payment",
+      "provider": "lightspark",
+      "providerReference": "Quote:01a0581f-b6cf-5246-0000-f15a37c2912a",
+      "deliveryMode": "manual_instructions",
+      "fiatAmount": "10",
+      "fiatCurrency": "USD",
+      "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "amount": null,
+      "signature": null,
+      "counterpartyId": "cpty_52f96f7f-4e90-47a3-a824-a38f62b86188",
+      "rampsMemo": { "orderId": "ord_4821" },
+      "createdAt": "2026-08-31T14:01:08.412Z"
+    }
+  }
+}
+```
+
+Read it like this:
+
+- `type` is `onramp` or `offramp`; `direction` is `inbound` for on-ramps and `outbound` for off-ramps.
+- `providerReference` equals the quote's `id`. It is the key for the cancel endpoint and for provider support tickets.
+- `token` is the mint address, not the symbol. `amount` is the crypto amount and is `null` on an on-ramp until it settles; `fiatAmount` is what the user pays or receives.
+- `signature` is set only when the ramp settles with an on-chain transaction. Providers that settle off-chain complete with `signature: null`, which is expected, not a failure.
+
+A ramp transfer moves through these statuses:
+
+| `status` | Meaning |
+| --- | --- |
+| `awaiting_payment` | Created. Waiting for the user to pay (manual instructions) or for the provider to report payment. |
+| `pending`, `processing` | The provider has started the ramp but not yet taken payment. |
+| `settling` | Payment received; the provider is delivering the other side. |
+| `completed` | Done. `amount` (on-ramp) or `fiatAmount` (off-ramp) now reflects what the provider actually delivered. |
+| `failed` | The provider reported failure. Terminal. |
+| `expired` | The quote lapsed before payment. Not terminal: a late provider event can still move it. |
+| `canceled` | You cancelled it. Terminal. |
+
+To find ramp transfers in bulk, list with `category=ramp`, and add `provider` and `providerReference` to look one up by its quote id:
+
+```bash
+curl "https://api.solana.com/v1/payments/transfers?category=ramp&provider=lightspark&providerReference=Quote:01a0581f-b6cf-5246-0000-f15a37c2912a" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+`providerReference` requires `provider` alongside it. Settlement events also reach the Workflow Builder as `onramp_settled` and `offramp_settled` triggers, which is how to get a webhook to your own system; the API has no ramp-specific webhook subscription. See [Index transfers](/docs/payments/accept-indexing) for pagination and the other filters.
+
+## Cancel a ramp
+
+Cancel a ramp the user abandoned, using the provider and the quote id:
+
+```bash
 curl -X POST https://api.solana.com/v1/payments/ramps/transfers/cancel \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "bvnk",
-    "providerReference": "..."
+    "provider": "lightspark",
+    "providerReference": "Quote:01a0581f-b6cf-5246-0000-f15a37c2912a"
   }'
 ```
 
-A transfer past that window (already funded or settling) returns an error instead of canceling.
+The response is the transfer with `status: "canceled"`. Only `pending` and `awaiting_payment` transfers can be cancelled. Anything past that point, including an already-cancelled one, returns `400` with `Transfer can no longer be canceled (status: <status>).` Treat that as terminal, not as something to retry.
 
-## Status field
+## In the dashboard
 
-`quote.status` is one of `pending`, `processing`, `completed`, `failed`, reflecting the provider's reported state **at the moment the quote is created** — SDP does not subsequently poll the provider to refresh it, and there is no dedicated read endpoint for the quote itself. For the on-chain side of a successful onramp, observe the resulting **inbound transfer** on the destination wallet, surfaced via [Accept payments](/docs/payments/accept-overview).
+The same flow is available without code. In the dashboard, **Payments → Deposit → Deposit with fiat** runs an on-ramp and **Payments → Pay → Pay with fiat** runs an off-ramp. Each wizard walks the steps on this page in order: pick the counterparty, pick the currency pair, compare the live estimates (providers that don't serve the pair are listed as unavailable), clear any provider requirements, then request the quote. Hosted pages and widgets open inside the wizard, and manual instructions render as a funding panel; in sandbox, Lightspark's panel has a **Simulate** button that stands in for the bank transfer.
 
-## Rate limits
+The wizard creates the same transfer record the API does. It appears under **Payments → Transactions** with the statuses in the table above, and you can cancel a pending one from there. Payments in the dashboard is enabled per organization, so if the section is missing from your sidebar, ask your SDP contact to turn it on. Each ramp provider can also be hidden from the wizards individually; a provider that is hidden there is still served by the API, so what the dashboard offers can be a subset of what the `currency` endpoints report.
 
-Estimate and quote calls carry fail-closed quotas: estimate fans out one live call per provider on the corridor, quote creates a provider-side record.
+## Test without moving money
 
-| Endpoint | Per-key limit | Per-org limit |
+Which provider environment a request hits is decided by the environment of the API key you call with (sandbox keys start with `sk_test_`, production keys with `sk_live_`), or by the project's environment for dashboard sessions. Sandbox and production share the same host. A provider that isn't configured for the resolved environment returns `503` with `<provider> is not configured for sandbox mode.`
+
+`POST /v1/payments/ramps/sandbox/simulate` pushes a sandbox ramp through its provider-side states so you can exercise your settlement handling without a real payment. It works for Lightspark, BVNK, and Mural, and it returns `403` outside sandbox. The body is provider-specific. For Lightspark, pass the quote id:
+
+```bash
+curl -X POST https://api.solana.com/v1/payments/ramps/sandbox/simulate \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "lightspark",
+    "payload": { "quoteId": "Quote:01a0581f-b6cf-5246-0000-f15a37c2912a" }
+  }'
+```
+
+BVNK takes `{ "counterpartyId", "amount", "fiatCurrency", "cryptoToken", "destinationWallet" }` and Mural takes `{ "counterpartyId", "amount", "fiatCurrency" }` in `payload`. The response is the provider's own simulation record, passed through unchanged. Poll the transfer afterwards; it should reach `completed`.
+
+MoonPay, MoneyGram, Coinbase, and Stripe have no simulate route. Test those through their sandbox widgets and hosted pages.
+
+## Errors and limits
+
+Errors come back as `{ "error": { "code", "message", "details"? }, "meta": { "requestId" } }`. The ones specific to ramps:
+
+| HTTP | `code` | When |
 | --- | --- | --- |
-| `.../estimate` | 30 / minute | 120 / minute |
-| `.../quote` | 20 / minute | 60 / minute |
+| 400 | `UNSUPPORTED_CORRIDOR` | The provider does not serve this fiat and rail pair. `details.supportedProviders` lists the ones that do. |
+| 400 | `BAD_REQUEST` | Validation: the rail form in `cryptoToken`, a `destinationWallet` that isn't one of your wallets, a missing off-ramp `fiatCurrency`, or a first-time counterparty on BVNK or Coinbase. |
+| 403 | `FORBIDDEN` | Your organization is not entitled to the provider, or you called `simulate` outside sandbox. |
+| 404 | `NOT_FOUND` | Unknown `counterpartyId` or transfer. |
+| 409 | `CONFLICT` | The counterparty is not provisioned for this provider and direction (Lightspark, Mural on-ramp, BVNK off-ramp), the provider reference is bound to a different transfer, or the quote has expired. |
+| 429 | `RATE_LIMITED` | See the limits below. |
+| 503 | `PROVIDER_NOT_CONFIGURED`, `PROVIDER_UNAVAILABLE` | The provider has no credentials for this environment, or returned something SDP could not use. |
 
-## Provider selection
+Estimate and quote carry their own quotas:
 
-You always pass `provider` explicitly; SDP does not auto-select. Choose based on:
+| Endpoint | Per API key | Per organization |
+| --- | --- | --- |
+| `.../estimate` | 30 per minute | 120 per minute |
+| `.../quote` | 20 per minute | 60 per minute |
 
-- **Coverage** — which providers your org has [Provider Availability](/docs/payments/ramps-providers#provider-gating) for.
-- **Corridor** — currency, country, and entity type; check with the currency-discovery endpoints above.
-- **Sandbox needs** — sandbox vs production is chosen per request from the calling API key's environment (see [Sandbox vs production](/docs/payments/ramps-providers#sandbox-vs-production-selection)).
+The current allowance is returned on every response in `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
 
-## Fiat currency support
+## What the API reference covers
 
-Fiat currency support is corridor-specific, not a fixed allowlist — use `GET /v1/payments/ramps/onramp/currency` and `.../offramp/currency` to see which fiat currencies a given provider covers for a given crypto rail.
+The [Payments reference](/docs/reference/api/payments) documents `currency` (both directions), the on-ramp `quote`, and `simulate`. The off-ramp `quote`, both `estimate` endpoints, `transfers/cancel`, and the requirements `POST` are live but not yet in the published reference; this page is their documentation until they are.
+
+Requests on this page were run against `api.solana.com` on 31 August 2026.
 
 ## Related
 
-- [Ramp providers](/docs/payments/ramps-providers) — per-provider configuration and capability matrix.
-- [Accept overview](/docs/payments/accept-overview) — how onramp deliveries show up as inbound transfers.
-- [Provider onboarding](/docs/reference/provider-onboarding) — how providers are activated for an organization.
+- [Ramp providers](/docs/payments/ramps-providers) for per-provider credentials, directions, and delivery modes.
+- [Index transfers](/docs/payments/accept-indexing) for reading ramp transfers back.
+- [Provider onboarding](/docs/reference/provider-onboarding) for activating a provider on an organization.
 
 ---
 
 ### Ramp providers
 Source: https://platform.solana.com/docs/payments/ramps-providers
 
-> MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, and Stripe — capability matrix, configuration, and per-provider notes.
+> The seven ramp providers SDP integrates, what each one can do, how each is configured, and how to find out which ones your organization can use today.
 
-SDP currently integrates seven ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
+SDP integrates seven ramp providers: MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, and Stripe. Each is configured with its own credentials on the SDP API deployment, and each is gated per organization. The same `provider` string selects between them on every ramp endpoint.
 
-## Sandbox vs production selection
+<Callout type="warn">
+Don't build against a provider table, including the one on this page. Which providers you can use depends on the corridor, on your organization's entitlements, and on the provider's own availability at the moment of the call. Ask the API: `GET /v1/payments/ramps/{onramp,offramp}/currency` returns a `providers` list per corridor and a `providerDetails` block per provider, and `POST .../estimate` returns a per-provider result where entries succeed or fail independently. See [Ramps](/docs/payments/ramps).
+</Callout>
 
-The sandbox/production mode is chosen **per request**, not at deployment time:
+## What each provider does
 
-- Non-production SDP deployments (`ENVIRONMENT !== "production"`) always use sandbox credentials.
-- In production deployments, the calling API key's environment picks the mode — `sk_test_` keys use sandbox, `sk_live_` use production.
+Directions and counterparty types come from the API's support matrix; delivery modes come from how each provider's quote is built. Use this to decide where to start, then confirm with `currency`.
 
-Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment — MoonPay, Lightspark, BVNK, and Mural read separate sandbox and production credentials this way. Coinbase and Stripe use a single credential pair regardless of the resolved mode (see their sections below); MoneyGram only has sandbox credentials today.
-
-## Capability matrix
-
-| Provider | Onramp | Offramp | Sandbox | Delivery mode | Notes |
+| Provider | On-ramp | Off-ramp | `deliveryMode` | Counterparty types | Sandbox `simulate` |
 | --- | --- | --- | --- | --- | --- |
-| MoonPay | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
-| Lightspark | ✓ | ✓ | ✓ | `manual_instructions` | Grid API. Same per-request sandbox/production selection as MoonPay. |
-| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
-| MoneyGram | ✓ | ✓ | ✓ | `session_widget` | Sandbox-only pilot integration — there is no production credential path yet. |
-| Coinbase | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Rate estimates work in production; order creation is sandbox-only. Onramp only. |
-| Mural | ✓ | ✗ (estimate only) | ✓ | `manual_instructions` | Off-ramp rate estimate works; off-ramp quote creation is not implemented yet. |
-| Stripe | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | No separate sandbox credentials — supply a Stripe test-mode secret key. Onramp only. |
+| MoonPay | yes | yes | `hosted` | individual | no |
+| Lightspark | yes | yes | `manual_instructions` | individual, business | yes |
+| BVNK | yes | yes | `manual_instructions` or `hosted` | individual (on-ramp); individual, business (off-ramp) | yes |
+| MoneyGram | yes | yes | `session_widget` | individual | no |
+| Coinbase | yes | no | `hosted` | individual | no |
+| Mural | yes | no | `manual_instructions` | business | yes |
+| Stripe | yes | no | `session_widget` | individual | no |
+
+Corridors are narrower than directions. On `USD` to `usdc.solana`, six providers answer and MoonPay is not one of them; MoonPay's on-ramp corridors go to `sol.solana` and `pyusd.solana`. On `usdc.solana` to `USD`, three do: Lightspark, BVNK, and MoneyGram. Read `pairs` for the corridor you need rather than the direction columns above.
+
+An off-ramp quote for Coinbase or Stripe returns `400` (`Coinbase Onramp does not support off-ramp.`, `Stripe off-ramp is not supported.`). Mural's off-ramp quote is not built yet and currently returns `500` with `Mural off-ramp quote is not implemented yet.`, though its off-ramp `estimate` works.
+
+## Sandbox and production credentials
+
+Every provider that supports both modes takes two credential sets, and the mode is chosen per request rather than at deploy time. The environment of the calling API key decides (sandbox keys start with `sk_test_`, production keys with `sk_live_`); dashboard and session callers get their project's environment. A request that resolves to a mode the provider has no credentials for returns `503` with `<provider> is not configured for <mode> mode.`
+
+Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment. Coinbase and Stripe carry a single credential set; use their test-mode keys for sandbox. MoneyGram has sandbox credentials only.
 
 ## MoonPay
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `MOONPAY_API_KEY` | conditional | Production API key. Required when the request resolves to production. |
-| `MOONPAY_SECRET_KEY` | conditional | Production secret used to sign onramp / offramp URLs. Paired with `MOONPAY_API_KEY`. |
-| `MOONPAY_SANDBOX_API_KEY` | conditional | Sandbox API key. Required when the request resolves to sandbox. |
-| `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Sandbox secret. Paired with `MOONPAY_SANDBOX_API_KEY`. |
-| `MOONPAY_ONRAMP_URL` | no | Override the onramp host. Defaults to MoonPay's standard URLs; the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). |
-| `MOONPAY_OFFRAMP_URL` | no | Same idea for offramp. |
+| `MOONPAY_API_KEY` | conditional | Production API key. |
+| `MOONPAY_SECRET_KEY` | conditional | Production secret, used to sign on-ramp and off-ramp URLs. |
+| `MOONPAY_SANDBOX_API_KEY` | conditional | Sandbox API key. |
+| `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Sandbox secret. |
+| `MOONPAY_ONRAMP_URL` | no | Override the on-ramp host. |
+| `MOONPAY_OFFRAMP_URL` | no | Override the off-ramp host. |
+| `MOONPAY_WEBHOOK_KEY` | no | Verifies production webhook signatures. |
+| `MOONPAY_SANDBOX_WEBHOOK_KEY` | no | Verifies sandbox webhook signatures. |
 
-MoonPay normalizes token symbols internally — `USDC` is mapped to `usdc_sol`, `USDT` to `usdt_sol` — so you pass plain symbols on the request and SDP handles the mapping.
+MoonPay maps token symbols internally (`USDC` to `usdc_sol`, `USDT` to `usdt_sol`), so you pass plain symbols on the request. The corridor matrix is discovered with the sandbox key and keeps only the assets MoonPay's sandbox flags as test-mode capable, which is why MoonPay appears on `sol.solana` and `pyusd.solana` corridors but not on `usdc.solana`. A production key inherits the same matrix.
+
+Counterparties need no provider-side setup: requirements report `ready` in both directions. Quotes return `deliveryMode: "hosted"` with a signed `hostedUrl`; MoonPay geo-blocks the hosted page by the end user's location before any KYC step, so test it from a supported country. Settlement arrives through MoonPay's webhook, and on off-ramps that webhook supplies the deposit wallet the user has to fund.
 
 ## Lightspark
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `LIGHTSPARK_GRID_CLIENT_ID` | conditional | Production Grid API client identifier. Required when the request resolves to production. |
+| `LIGHTSPARK_GRID_CLIENT_ID` | conditional | Production Grid API client identifier. |
 | `LIGHTSPARK_GRID_CLIENT_SECRET` | conditional | Production Grid API client secret. |
-| `LIGHTSPARK_GRID_SANDBOX_CLIENT_ID` | conditional | Sandbox Grid API client identifier. Required when the request resolves to sandbox. |
+| `LIGHTSPARK_GRID_SANDBOX_CLIENT_ID` | conditional | Sandbox Grid API client identifier. |
 | `LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET` | conditional | Sandbox Grid API client secret. |
+| `LIGHTSPARK_GRID_API_BASE_URL` | no | Override the Grid API host. |
+| `LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY` | no | Verifies production webhook signatures. |
+| `LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY` | no | Verifies sandbox webhook signatures. |
 
-Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). `destinationWallet` / `sourceWallet` are your own custody wallet, same as every other provider — Lightspark's customer id and payout account are resolved server-side from the counterparty's Provider Requirements, not passed on the quote request.
+Lightspark is integrated against the Grid API. A new counterparty first answers `collect_counterparty` in both directions: identity fields (name, date of birth, nationality, email, residential address, purpose of payment) that create the Grid customer. After that an on-ramp is `ready`. An off-ramp goes on to `collect_account`, where the fields depend on the destination country and rail rather than on the counterparty: a USD payout to the US asks for a rail (ACH, Wire, RTP, or FedNow) plus a routing number and an account number. The resulting payout account is reused on later requests for the same country and currency, and an off-ramp quote names it with `providerAccountId`. A quote for a counterparty that hasn't been provisioned returns `409`.
 
-Counterparties no longer store identity or email fields. Existing Lightspark customers continue to resolve from provider data, but first-time customer creation currently fails with a clear error until just-in-time identity collection is connected.
-
-Lightspark quotes always return `deliveryMode: "manual_instructions"` — the response carries funding instructions to display to the payer, not a redirect URL.
+Quotes return `deliveryMode: "manual_instructions"` and carry `expiresAt`, about three minutes out. On-ramp instructions are bank funding details (`accountType: "USD_ACCOUNT"` with a `reference` the transfer must carry); off-ramp instructions are a `crypto_deposit` to a Solana address. Lightspark's sandbox caps stablecoin on-ramp requests at 10 USD per request and returns its own error above that.
 
 ## BVNK
 
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `BVNK_WALLET_ID` | conditional | Production BVNK-side wallet used for settlement. |
-| `BVNK_HAWK_AUTH_ID` | conditional | Production Hawk auth id. Paired with `BVNK_HAWK_SECRET_KEY`. |
+| `BVNK_HAWK_AUTH_ID` | conditional | Production Hawk auth id. |
 | `BVNK_HAWK_SECRET_KEY` | conditional | Production Hawk secret key. |
-| `BVNK_SANDBOX_WALLET_ID` | conditional | Sandbox BVNK wallet. Required when the request resolves to sandbox. |
+| `BVNK_SANDBOX_WALLET_ID` | conditional | Sandbox BVNK wallet. |
 | `BVNK_SANDBOX_HAWK_AUTH_ID` | conditional | Sandbox Hawk auth id. |
 | `BVNK_SANDBOX_HAWK_SECRET_KEY` | conditional | Sandbox Hawk secret key. |
-| `BVNK_API_BASE_URL` | no | Override the default BVNK host. Defaults to `https://api.bvnk.com` for production and `https://api.sandbox.bvnk.com` for sandbox; the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). |
+| `BVNK_API_BASE_URL` | no | Override the BVNK host. |
+| `BVNK_SIGNING_HOST` | no | Host used when computing the Hawk signature. |
+| `BVNK_WEBHOOK_SECRET` | no | Verifies production webhook signatures. |
+| `BVNK_SANDBOX_WEBHOOK_SECRET` | no | Verifies sandbox webhook signatures. |
 
-BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
+BVNK uses Hawk authentication. Bearer-token auth is not supported. `BVNK_WALLET_ID` configures BVNK's settlement wallet on the provider side and is unrelated to the `sourceWallet` and `destinationWallet` fields on a quote request.
 
-BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. Counterparties no longer store those fields, so customer creation, payment-rule creation, and off-ramp compliance payloads currently fail with a clear error at the pending just-in-time collection seam.
+BVNK is a travel-rule provider and needs party details (name, address) to create a customer. Requirements collect them: a new counterparty answers `collect_counterparty` with the identity fields, and submitting them creates the BVNK customer. From there requirements can report `customer_agreement_required` with agreements to show and accept (`agreementConsent: true` on the resubmit), `customer_verification_required` with a `verificationUrl` to send the customer to, and the `customer_verifying` and `customer_funding_account_provisioning` waits. Off-ramp requirements then ask for a bank account and routing number through `collect`. The off-ramp quote itself is the remaining gap: it rebuilds BVNK's party details from identity fields SDP no longer stores, so today it returns `400` with `BVNK offramp requires identity fields ... that are no longer stored; JIT collection is not wired yet` for every counterparty, including ones BVNK already knows.
 
-BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
+BVNK can return either `deliveryMode: "manual_instructions"` (on on-ramp, a fiat virtual account for the customer to fund) or `deliveryMode: "hosted"`. Branch on the response.
 
 ## MoneyGram
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `MONEYGRAM_SANDBOX_PUBLIC_KEY` | conditional | Sandbox public key, sent as `x-api-key` on the rail-discovery (currency list) call. |
-| `MONEYGRAM_SANDBOX_SECRET_KEY` | conditional | Sandbox secret key, sent as `x-api-key` on estimate, quote, and session calls. |
+| `MONEYGRAM_SANDBOX_PUBLIC_KEY` | conditional | Sandbox public key. |
+| `MONEYGRAM_SANDBOX_SECRET_KEY` | conditional | Sandbox secret key. |
 
-MoneyGram is a sandbox-only pilot integration today — the client always calls MoneyGram's sandbox host and throws if a request resolves to production; there is no production credential pair to configure yet.
+MoneyGram is sandbox-only in the SDP configuration surface today. No production credential pair exists, so a production request for MoneyGram returns `503` as not configured.
 
-MoneyGram quotes always return `deliveryMode: "session_widget"`: both onramp and offramp create a session against the same endpoint and return a `widgetUrl` (with `mode=on-ramp` or `mode=off-ramp`) plus a short-lived `sessionToken` to mount. It requires no Provider Requirements collection — every counterparty is treated as ready.
+Counterparties need no provider-side setup. Quotes return `deliveryMode: "session_widget"` with a `sessionToken`, a `sessionId`, a `widgetUrl`, and an `expiresAt` one hour out. The widget URL has to sit on MoneyGram's approved host or the quote fails closed, and a widget event that arrives after the session token has expired is rejected.
+
+MoneyGram does not send SDP a provider webhook, which is why no webhook secret appears above. The widget reports progress through the authenticated `POST /v1/payments/ramps/moneygram/events` route instead, and SDP treats those events as advisory: a MoneyGram transfer rests at `settling` until the cash side is confirmed.
 
 ## Coinbase
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `COINBASE_CDP_API_KEY_ID` | conditional | CDP Secret API Key id. Same key is used for sandbox and production — sandbox is flagged per-request, not by a separate credential. |
-| `COINBASE_CDP_API_KEY_SECRET` | conditional | CDP Secret API Key secret. Paired with `COINBASE_CDP_API_KEY_ID`; used to sign a per-request JWT. |
+| `COINBASE_CDP_API_KEY_ID` | conditional | CDP API key identifier. |
+| `COINBASE_CDP_API_KEY_SECRET` | conditional | CDP API key secret. |
+| `COINBASE_CDP_WALLET_ID` | conditional | CDP wallet used for settlement. |
+| `COINBASE_CDP_WALLET_SECRET` | conditional | Secret for that wallet. |
+| `COINBASE_CDP_API_BASE_URL` | no | Override the CDP host. |
+| `COINBASE_CDP_NETWORK` | no | Target network. |
+| `COINBASE_CDP_ACCOUNT_NAMESPACE` | no | Namespace for provisioned accounts. |
+| `COINBASE_CDP_RAMPS_WEBHOOK_SECRET` | no | Verifies webhook signatures. |
 
-Coinbase is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject with "Coinbase Onramp does not support off-ramp." Onramp quotes always return `deliveryMode: "hosted"`: SDP creates a guest-checkout Apple Pay order and returns its payment link as `hostedUrl`.
+Coinbase is on-ramp only, for individual counterparties. Quotes accept an optional `domain` field, the browser origin host used to embed its Apple Pay payment link, and return `deliveryMode: "hosted"` with the order economics (`paymentSubtotal`, `paymentTotal`, `purchaseAmount`, `fees`) beside the URL.
 
-Order creation (the quote step) is sandbox-only today — it requires buyer agreement and phone-OTP attestation timestamps that SDP's production flow does not yet collect, so a non-sandbox request fails loudly instead of sending a false attestation. Rate estimates have no such restriction and work in both modes. Coinbase also requires email and phone values; quote creation currently fails at the pending just-in-time collection seam.
+Requirements report `ready` for a new counterparty, but the quote itself needs an email and phone number that SDP no longer stores, so a first-time quote returns `400` with `Coinbase onramp requires identity fields that are no longer stored; JIT collection is not wired yet`. Coinbase reports settlement through an inbound provider webhook and also accepts the authenticated `POST /v1/payments/ramps/coinbase/events` route.
 
 ## Mural
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `MURAL_PAY_API_KEY` | conditional | Production API key for organization, account, and payin calls. |
-| `MURAL_PAY_SANDBOX_API_KEY` | conditional | Sandbox equivalent. Required when the request resolves to sandbox. |
-| `MURAL_PAY_TRANSFER_API_KEY` | conditional | Production transfer-scoped key, sent as a separate header on payout-execute calls. |
-| `MURAL_PAY_SANDBOX_TRANSFER_API_KEY` | conditional | Sandbox equivalent of the transfer key. |
+| `MURAL_PAY_API_KEY` | conditional | Production API key. |
+| `MURAL_PAY_TRANSFER_API_KEY` | conditional | Production transfer API key, used for payout operations. |
+| `MURAL_PAY_SANDBOX_API_KEY` | conditional | Sandbox API key. |
+| `MURAL_PAY_SANDBOX_TRANSFER_API_KEY` | conditional | Sandbox transfer API key. |
+| `MURAL_PAY_WEBHOOK_PUBLIC_KEY` | no | Verifies production webhook signatures. |
+| `MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY` | no | Verifies sandbox webhook signatures. |
 
-Mural onramp is business-counterparty only (no individual entity type). A quote requires the counterparty's Mural organization and payin account already provisioned — through Provider Requirements onboarding (organization creation, terms-of-service acceptance, verification) — and returns `deliveryMode: "manual_instructions"` built from that account's active payin method; the quote step itself makes no live Mural call.
+Mural requires two keys per environment: a general API key and a separate transfer key. It serves business counterparties only, on-ramp only.
 
-Existing Mural organizations continue to resolve from provider data. First-time organization creation currently fails with a clear error until just-in-time identity collection is connected.
-
-Off-ramp rate estimates work today (a real call to Mural's fees endpoint), but off-ramp quote creation always throws — it is not implemented yet.
+A Mural quote needs the counterparty's Mural organization and pay-in account provisioned first. Requirements walk through that: `onboarding_not_started`, then `terms_of_service_required` with a `termsOfServiceUrl`, then `customer_verification_required` with a `verificationUrl`, then `customer_verifying` and `funding_account_provisioning` until `ready`. First-time organization creation for a new counterparty currently fails at the same just-in-time identity seam as Coinbase: the requirements call returns `400` with `Mural organization creation requires identity fields that are no longer stored; JIT collection is not wired yet`, so a counterparty that has no Mural organization cannot leave `onboarding_not_started` today. Quotes return `deliveryMode: "manual_instructions"` built from the account's active pay-in method. Sandbox `simulate` accepts `USD`, `MXN`, `BRL`, and `ARS`.
 
 ## Stripe
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `STRIPE_SECRET_KEY` | conditional | Secret key, sent as the username on HTTP Basic auth. A single key serves both modes — use a `sk_test_…` key to sandbox it, `sk_live_…` for production. |
-| `STRIPE_PUBLISHABLE_KEY` | conditional | Publishable key, echoed back on the quote for the client to mount the onramp session. |
+| `STRIPE_SECRET_KEY` | conditional | Secret key. One key serves both modes; use a Stripe test-mode key for sandbox. |
+| `STRIPE_PUBLISHABLE_KEY` | conditional | Publishable key, returned to the client on the quote for widget initialization. |
+| `STRIPE_WEBHOOK_SECRET` | no | Verifies webhook signatures. |
 
-Stripe is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject as unsupported. Onramp is also limited to `usdc.solana` and `sol.solana` as destination assets. Quotes always return `deliveryMode: "session_widget"`: a `clientSecret` and `publishableKey` to mount Stripe's crypto onramp session, plus an optional `redirectUrl`.
+Stripe is on-ramp only, for individual counterparties, and needs no provider-side counterparty setup. Quotes return `deliveryMode: "session_widget"` with a `clientSecret`, a `sessionId`, and the `publishableKey` to mount Stripe's crypto on-ramp session. Stripe's redirect destinations are validated against an approved host list on the way back; a redirect to anything else fails closed.
 
 ## Provider gating
 
-Even when all seven providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call — if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
+Populating a provider's credentials is not sufficient on its own. Every ramp call checks the organization's entitlements, and a request for a provider the organization is not entitled to returns `403`. On `estimate`, where SDP fans out to every provider on the corridor, that provider comes back as `status: "error"` inside the 200 instead. To change entitlements for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
 
-## Choosing a provider
-
-| Need | Lean towards |
-| --- | --- |
-| Fastest sandbox iteration | MoonPay or BVNK. |
-| Travel-rule / compliance party metadata | BVNK. |
-| Lightning-aware fiat settlement | Lightspark. |
-| Broadest payment-method coverage | MoonPay (corridor-dependent). |
-| Business-entity onramp counterparties | Mural (its only supported entity type). |
-| Widget/session-embedded onramp UI | MoneyGram or Stripe. |
-| Onramp only, no off-ramp needed | Coinbase or Stripe. |
-
-For self-hosted deployments where only a subset of providers will ever be configured, see [Providers optional for self-hosted SDP](/docs/reference/provider-onboarding) — SDP supports running with any single provider active.
+Self-hosted deployments do not need every provider. Configure the ones you have credentials for and leave the rest unset. An unset provider still appears in `pairs`, because the corridor matrix is static, but any request that names it returns `503` and its `estimate` entry reads `status: "error"`.
 
 ## Related
 
-- [Ramps](/docs/payments/ramps) — onramp and offramp endpoints and request shape.
-- [Provider onboarding](/docs/reference/provider-onboarding) — activation flow.
+- [Ramps](/docs/payments/ramps) for the endpoints, the quote flow, and delivery modes.
+- [Provider onboarding](/docs/reference/provider-onboarding) for activating a provider on an organization.
 
 ---
 
