@@ -323,6 +323,24 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       isConfigured: (env) =>
         hasAllEnv(env, ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"]),
     },
+    hercle: {
+      label: "Hercle",
+      isConfigured: (env, testMode) => {
+        const prod = hasAllEnv(env, [
+          "HERCLE_CLIENT_ID",
+          "HERCLE_CLIENT_SECRET",
+          "HERCLE_API_BASE_URL",
+        ]);
+        const sandbox = hasAllEnv(env, [
+          "HERCLE_SANDBOX_CLIENT_ID",
+          "HERCLE_SANDBOX_CLIENT_SECRET",
+          "HERCLE_SANDBOX_API_BASE_URL",
+        ]);
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
+    },
   },
   earn: {
     // Keyless like Kamino, though for a cluster reason rather than Kamino's

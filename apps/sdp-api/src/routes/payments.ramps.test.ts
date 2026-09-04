@@ -14,6 +14,7 @@ import {
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
+  TEST_HERCLE_CLIENT_ID,
   TEST_MOONPAY_API_KEY,
   TEST_MOONPAY_OFFRAMP_URL,
   TEST_MOONPAY_ONRAMP_URL,
@@ -957,6 +958,621 @@ describe("Payments routes — ramps", () => {
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("CONFLICT");
+  });
+
+  function hercleOfframpOrderResponse(params: {
+    orderId: string;
+    depositAddress: string;
+    reference: string;
+    expiresAt?: string;
+  }): Response {
+    return new Response(
+      JSON.stringify({
+        orderId: params.orderId,
+        depositAddress: params.depositAddress,
+        reference: params.reference,
+        expiresAt: params.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  /**
+   * Hercle state is provider-account rows: the customer link carries the sub-account id and the
+   * verification lifecycle; the payout account carries the rail status. No bank detail is stored.
+   */
+  async function seedHercleCounterparty(input: {
+    externalId: string;
+    accountId: string;
+    verificationStatus: "verification_required" | "verifying" | "verification_failed" | "ready";
+    payoutAccountStatus?: "pending" | "active" | "refused";
+  }): Promise<string> {
+    const counterpartyId = await seedCounterparty({
+      externalId: input.externalId,
+      entityType: "business",
+      displayName: "Acme Ltd",
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, kind, status, metadata
+         ) VALUES (?, ?, ?, ?, 'hercle', ?, 'customer_link', 'active', ?)`
+      )
+      .bind(
+        `counterparty_provider_account_${crypto.randomUUID()}`,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        counterpartyId,
+        input.accountId,
+        JSON.stringify({
+          externalReference: input.externalId,
+          verificationStatus: input.verificationStatus,
+        })
+      )
+      .run();
+    if (input.payoutAccountStatus !== undefined) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, external_account_reference, fiat_currency,
+             destination_country, payment_rail, provider_status, status, metadata
+           ) VALUES (?, ?, ?, ?, 'hercle', ?, 'payout_account', ?, 'EUR', 'DE', 'sepa', ?, 'active', '{}')`
+        )
+        .bind(
+          `counterparty_provider_account_${crypto.randomUUID()}`,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          counterpartyId,
+          input.accountId,
+          `payee_address_${input.externalId}`,
+          input.payoutAccountStatus
+        )
+        .run();
+    }
+    return counterpartyId;
+  }
+
+  async function seedReadyHercleCounterparty(accountId: string): Promise<string> {
+    return seedHercleCounterparty({
+      externalId: "hercle_customer_1",
+      accountId,
+      verificationStatus: "ready",
+      payoutAccountStatus: "active",
+    });
+  }
+
+  it("creates a Hercle off-ramp quote and persists the deposit instruction with it", async () => {
+    const accountId = "4a1d9fcb-cd3d-1e3f-6995-132e3aa13ac5";
+    const counterpartyId = await seedReadyHercleCounterparty(accountId);
+    const depositAddress = TEST_SOLANA_ADDRESSES.wallet2;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      hercleOfframpOrderResponse({
+        orderId: "e67b1be2-2bba-40db-9571-3a3612b865ef",
+        depositAddress,
+        reference: "HRC-E67B1BE22BBA",
+      })
+    );
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          counterpartyId,
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "EUR",
+          cryptoAmount: "500",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        transferId: string;
+        quote: {
+          id: string;
+          provider: string;
+          deliveryMode: string;
+          paymentInstructions: { kind: string; destinationAddress: string }[];
+        };
+      };
+    };
+
+    expect(body.data.quote.provider).toBe("hercle");
+    expect(body.data.quote.deliveryMode).toBe("manual_instructions");
+    expect(body.data.quote.paymentInstructions[0]).toMatchObject({
+      kind: "crypto_deposit",
+      destinationAddress: depositAddress,
+    });
+
+    // The in-app send is authorised against this stored instruction, not against the
+    // quote response — a transfer created without it can never be funded (it fails as
+    // "Transfer does not match the off-ramp deposit instruction").
+    const stored = await getDb(env)
+      .prepare(
+        "SELECT provider, provider_reference, provider_data FROM payment_transfers WHERE id = ?"
+      )
+      .bind(body.data.transferId)
+      .first<{ provider: string; provider_reference: string; provider_data: unknown }>();
+
+    expect(stored?.provider).toBe("hercle");
+    expect(stored?.provider_reference).toBe("e67b1be2-2bba-40db-9571-3a3612b865ef");
+
+    const providerData =
+      typeof stored?.provider_data === "string"
+        ? (JSON.parse(stored.provider_data) as Record<string, unknown>)
+        : ((stored?.provider_data ?? {}) as Record<string, unknown>);
+    expect(providerData.cryptoDeposit).toEqual({
+      destinationAddress: depositAddress,
+      amount: "500",
+    });
+
+    // The order is opened on behalf of the sub-account; without it Hercle refuses with
+    // OBO_NOT_LINKED, which is invisible until a real call is made.
+    const [, requestInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(requestInit.headers);
+    expect(headers.get("on-behalf-of")).toBe(accountId);
+    expect(headers.get("X-Hercle-Client")).toBe(TEST_HERCLE_CLIENT_ID);
+    expect(headers.get("X-Hercle-Signature")).toBeTruthy();
+
+    // TS-BANK-10 OD#9: the declared source wallet feeds Hercle's screening, and our transfer id
+    // makes the order's idempotency key unique per transfer instead of per customer-and-amount.
+    const sentBody = JSON.parse(requestInit.body as string) as Record<string, unknown>;
+    expect(sentBody.sourceWalletAddress).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+    expect(sentBody.externalReference).toBe(body.data.transferId);
+
+    fetchSpy.mockRestore();
+  });
+
+  it("creates a Hercle on-ramp quote with the issued funding instructions", async () => {
+    const accountId = "4a1d9fcb-cd3d-1e3f-6995-132e3aa13ac5";
+    const counterpartyId = await seedReadyHercleCounterparty(accountId);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          orderId: "0e936582-c524-4fc4-9927-2fd0667b1bfe",
+          fiatCurrency: "EUR",
+          fiatAmount: "1000.00",
+          bankAccount: {
+            iban: "CH9300762011623852957",
+            bic: "HERCCHZZXXX",
+            bankName: "Hercle (simulated)",
+            accountHolder: "Hercle Financial AG",
+            paymentReference: "HRC-0E936582C524",
+          },
+          expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "EUR",
+          fiatAmount: "1000.00",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        quote: {
+          provider: string;
+          deliveryMode: string;
+          paymentInstructions: { kind: string; bankAccount?: { paymentReference?: string } }[];
+        };
+      };
+    };
+
+    expect(body.data.quote.provider).toBe("hercle");
+    expect(body.data.quote.deliveryMode).toBe("manual_instructions");
+    // Without the reference on the wire Hercle cannot attribute the incoming transfer,
+    // so settlement stalls until someone reconciles by hand.
+    expect(body.data.quote.paymentInstructions[0]).toMatchObject({
+      kind: "fiat_funding",
+      bankAccount: { paymentReference: "HRC-0E936582C524" },
+    });
+
+    const [, requestInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(requestInit.headers).get("on-behalf-of")).toBe(accountId);
+
+    fetchSpy.mockRestore();
+  });
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const hercleCollectedData = {
+    registrationNumber: "CHE-123.456.789",
+    registrationCountry: "CH",
+    registeredAddressLine1: "Bahnhofstrasse 1",
+    registeredAddressCity: "Zurich",
+    registeredAddressPostalCode: "8001",
+    payoutIban: "CH93 0076 2011 6238 5295 7",
+    payoutBic: "UBSWCHZH80A",
+    payoutAccountHolder: "Acme Ltd",
+  };
+
+  async function advanceHercle(counterpartyId: string): Promise<Response> {
+    return app.request(
+      `/v1/counterparties/${counterpartyId}/requirements`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          direction: "offramp",
+          collectedData: hercleCollectedData,
+        }),
+      },
+      env
+    );
+  }
+
+  it("provisions the Hercle account, its payout account and the KYB verification in one requirements stage", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "hercle_customer_new",
+      entityType: "business",
+      displayName: "Acme Ltd",
+    });
+    const accountId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        jsonResponse(201, {
+          accountId,
+          externalReference: counterpartyId,
+          verificationStatus: "UNVERIFIED",
+          replayed: false,
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(201, {
+          payoutAccountId: "payee_address_42",
+          currency: "EUR",
+          iban: "CH93 **** **** **** *295 7",
+          bic: "UBSWCHZH80A",
+          accountHolder: "Acme Ltd",
+          status: "pending",
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          status: "action_required",
+          verificationUrl: "https://verify.hercle.test/x",
+        })
+      );
+
+    const res = await advanceHercle(counterpartyId);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({
+      provider: "hercle",
+      direction: "offramp",
+      status: "customer_verification_required",
+      verificationUrl: "https://verify.hercle.test/x",
+    });
+
+    // Fiat is first-party only, so the payout account is registered once, with the registration
+    // data, and never chosen per order (TS-BANK-10.5).
+    const calledPaths = fetchSpy.mock.calls.map(([url]) => new URL(String(url)).pathname);
+    expect(calledPaths).toEqual([
+      "/partner/v1/accounts",
+      `/partner/v1/accounts/${accountId}/payout-account`,
+      `/partner/v1/accounts/${accountId}/verifications`,
+    ]);
+    const [, payoutInit] = fetchSpy.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(payoutInit.body as string)).toEqual({
+      currency: "EUR",
+      iban: "CH9300762011623852957",
+      bic: "UBSWCHZH80A",
+      accountHolder: "Acme Ltd",
+    });
+
+    // State lands as provider-account rows — references and statuses only. The bank details went to
+    // Hercle and nowhere else, and the hosted verification link is minted per read, never stored.
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT kind, provider_customer_reference, external_account_reference, fiat_currency,
+                destination_country, payment_rail, provider_status, metadata
+           FROM counterparty_provider_accounts
+          WHERE counterparty_id = ? AND provider = 'hercle'
+          ORDER BY kind`
+      )
+      .bind(counterpartyId)
+      .all<Record<string, unknown>>();
+    const normalised = rows.results.map((row) => ({
+      ...row,
+      metadata: typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata,
+    }));
+    expect(normalised).toEqual([
+      {
+        kind: "customer_link",
+        provider_customer_reference: accountId,
+        external_account_reference: null,
+        fiat_currency: null,
+        destination_country: null,
+        payment_rail: null,
+        provider_status: null,
+        metadata: {
+          externalReference: counterpartyId,
+          verificationStatus: "verification_required",
+        },
+      },
+      {
+        kind: "payout_account",
+        provider_customer_reference: accountId,
+        external_account_reference: "payee_address_42",
+        fiat_currency: "EUR",
+        destination_country: "CH",
+        payment_rail: "sepa",
+        provider_status: "pending",
+        metadata: {},
+      },
+    ]);
+    expect(JSON.stringify(rows.results)).not.toContain("6238");
+    const stored = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{ provider_data: unknown }>();
+    expect(JSON.stringify(stored?.provider_data ?? {})).not.toContain("hercle");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("surfaces Hercle's first-party refusal of the payout account as the user's error", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "hercle_customer_third_party",
+      entityType: "business",
+      displayName: "Acme Ltd",
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        jsonResponse(201, {
+          accountId: "6f1b2c3d-0000-4000-8000-000000000002",
+          externalReference: counterpartyId,
+          verificationStatus: "UNVERIFIED",
+          replayed: false,
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(422, {
+          code: "BENEFICIARY_NOT_FIRST_PARTY",
+          message: "accountHolder must be the business itself (Acme Ltd)",
+          traceId: "t",
+        })
+      );
+
+    const res = await advanceHercle(counterpartyId);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toBe(
+      "accountHolder must be the business itself (Acme Ltd)"
+    );
+    // Verification is not started for a business that cannot be paid.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    fetchSpy.mockRestore();
+  });
+
+  it("answers the Hercle requirements GET from the rows and mints the verification link per read", async () => {
+    const accountId = "6f1b2c3d-0000-4000-8000-000000000003";
+    const counterpartyId = await seedHercleCounterparty({
+      externalId: "hercle_customer_get",
+      accountId,
+      verificationStatus: "verification_required",
+      payoutAccountStatus: "pending",
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, { status: "pending" }));
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements?provider=hercle&direction=offramp&cryptoToken=USDC&fiatCurrency=EUR`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    // Hercle moved the applicant to review since the last read; the stored lifecycle follows.
+    expect((await res.json()).data).toEqual({
+      provider: "hercle",
+      direction: "offramp",
+      status: "customer_verifying",
+    });
+    expect(fetchSpy.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      `/partner/v1/accounts/${accountId}/verification`,
+    ]);
+    const link = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+          WHERE counterparty_id = ? AND provider = 'hercle' AND kind = 'customer_link'`
+      )
+      .bind(counterpartyId)
+      .first<{ metadata: unknown }>();
+    const metadata =
+      typeof link?.metadata === "string" ? JSON.parse(link.metadata) : (link?.metadata ?? {});
+    expect(metadata).toEqual({
+      externalReference: "hercle_customer_get",
+      verificationStatus: "verifying",
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  it("polls the Hercle payout account on the requirements GET while the verified business waits for the rail", async () => {
+    const accountId = "6f1b2c3d-0000-4000-8000-000000000005";
+    const counterpartyId = await seedHercleCounterparty({
+      externalId: "hercle_customer_rail_pending",
+      accountId,
+      verificationStatus: "ready",
+      payoutAccountStatus: "pending",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(200, {
+        payoutAccountId: "payee_address_hercle_customer_rail_pending",
+        currency: "EUR",
+        iban: "DE89 **** **** **** **30 00",
+        bic: "COBADEFFXXX",
+        accountHolder: "Acme Ltd",
+        status: "pending",
+        registeredAt: "2026-09-03T14:00:00.0000000Z",
+      })
+    );
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements?provider=hercle&direction=offramp&cryptoToken=USDC&fiatCurrency=EUR`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({
+      provider: "hercle",
+      direction: "offramp",
+      status: "funding_account_provisioning",
+    });
+    // The verdict is already in, so only the rail is asked.
+    expect(fetchSpy.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      `/partner/v1/accounts/${accountId}/payout-account`,
+    ]);
+
+    fetchSpy.mockRestore();
+  });
+
+  it("flips the Hercle counterparty to ready on the requirements GET once the rail activates the payout account", async () => {
+    const accountId = "6f1b2c3d-0000-4000-8000-000000000006";
+    const counterpartyId = await seedHercleCounterparty({
+      externalId: "hercle_customer_rail_active",
+      accountId,
+      verificationStatus: "ready",
+      payoutAccountStatus: "pending",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(200, {
+        payoutAccountId: "payee_address_hercle_customer_rail_active",
+        currency: "EUR",
+        iban: "DE89 **** **** **** **30 00",
+        bic: "COBADEFFXXX",
+        accountHolder: "Acme Ltd",
+        status: "active",
+        registeredAt: "2026-09-03T14:00:00.0000000Z",
+      })
+    );
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements?provider=hercle&direction=offramp&cryptoToken=USDC&fiatCurrency=EUR`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({
+      provider: "hercle",
+      direction: "offramp",
+      status: "ready",
+    });
+    // Hercle sends no webhook for this transition, so the row is what remembers it.
+    const row = await getDb(env)
+      .prepare(
+        `SELECT provider_status FROM counterparty_provider_accounts
+          WHERE counterparty_id = ? AND provider = 'hercle' AND kind = 'payout_account'`
+      )
+      .bind(counterpartyId)
+      .first<{ provider_status: string }>();
+    expect(row?.provider_status).toBe("active");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("re-collects only the bank details for a Hercle account provisioned before the payout account existed", async () => {
+    const counterpartyId = await seedHercleCounterparty({
+      externalId: "hercle_customer_legacy",
+      accountId: "6f1b2c3d-0000-4000-8000-000000000004",
+      verificationStatus: "ready",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements?provider=hercle&direction=offramp&cryptoToken=USDC&fiatCurrency=EUR`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()).data as { status: string; fields: { key: string }[] };
+    expect(body.status).toBe("collect");
+    expect(body.fields.map((field) => field.key)).toEqual([
+      "payoutIban",
+      "payoutBic",
+      "payoutAccountHolder",
+    ]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("refuses a Hercle off-ramp quote until the counterparty is verified", async () => {
+    const counterpartyId = await seedHercleCounterparty({
+      externalId: "hercle_customer_2",
+      accountId: "23bd557b-83f8-ec8b-a766-c65894e269f8",
+      verificationStatus: "verifying",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          counterpartyId,
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "EUR",
+          cryptoAmount: "500",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   async function seedRampTransfer(input: {

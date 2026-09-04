@@ -1,3 +1,4 @@
+import { HERCLE_SETTLEMENT_STATUSES } from "@sdp/payments/ramps/providers/hercle/provider-data";
 import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
@@ -732,6 +733,11 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     }),
   ]),
   z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
+  z.object({
+    provider: z.literal("hercle"),
+    direction: rampDirectionSchema,
+    collectedData: collectedDataSchema,
+  }),
 ]);
 
 const offrampQuoteBaseShape = {
@@ -754,6 +760,11 @@ export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
     provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "coinbase", "stripe"]),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema.optional(),
+  }),
+  z.object({
+    provider: z.literal("hercle"),
+    ...offrampQuoteBaseShape,
+    fiatCurrency: rampFiatCurrencySchema,
   }),
 ]);
 
@@ -818,10 +829,19 @@ const simulateMuralSandboxPayinPayloadSchema = z.object({
   fiatCurrency: z.enum(MURAL_SANDBOX_PAYIN_CURRENCIES),
 });
 
+const simulateHercleSandboxSettlementPayloadSchema = z.object({
+  orderId: z.string().min(1),
+  status: z.enum(HERCLE_SETTLEMENT_STATUSES).default("settled"),
+});
+
 export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("lightspark"),
     payload: simulateLightsparkSandboxTransferPayloadSchema,
+  }),
+  z.object({
+    provider: z.literal("hercle"),
+    payload: simulateHercleSandboxSettlementPayloadSchema,
   }),
   z.object({
     provider: z.literal("bvnk"),

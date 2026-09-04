@@ -19,6 +19,7 @@ export const RAMP_PROVIDERS = [
   "coinbase",
   "mural",
   "stripe",
+  "hercle",
 ] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
@@ -322,6 +323,9 @@ export const RAMP_PROVIDER_SURFACING = {
   coinbase: true,
   mural: true,
   stripe: true,
+  // Sandbox only: the wire contract is proven end to end, but settlement still runs on
+  // simulated bank rails, so a production surface would offer a corridor that cannot settle.
+  hercle: "sandbox",
 } as const satisfies Record<RampProviderId, RampProviderSurfacing>;
 
 export function isRampProviderSurfaced(provider: string, environment: SdpEnvironment): boolean {

@@ -1,8 +1,15 @@
 import type { RampProviderId } from "@sdp/types";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { LucideIcon } from "lucide-react";
+import type { SandboxTransferSimulationInput } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
+import {
+  getHercleOnboardingCopy,
+  getHercleProvisioningDetail,
+  getHercleSimulateLabels,
+  hercleOfframpSettlementSimulation,
+} from "./hercle";
 import {
   getLightsparkOnboardingCopy,
   getLightsparkProvisioningDetail,
@@ -24,6 +31,7 @@ export interface OnboardingCopy {
 type BvnkRequirements = Extract<CounterpartyRequirements, { provider: "bvnk" }>;
 type LightsparkRequirements = Extract<CounterpartyRequirements, { provider: "lightspark" }>;
 type MuralRequirements = Extract<CounterpartyRequirements, { provider: "mural" }>;
+type HercleRequirements = Extract<CounterpartyRequirements, { provider: "hercle" }>;
 type ReadyRequirement = Extract<CounterpartyRequirements, { status: "ready" }>;
 
 export type BvnkOnboardingPanelStatus = Exclude<
@@ -38,6 +46,10 @@ export type MuralOnboardingPanelStatus = Exclude<
   MuralRequirements["status"] | ReadyRequirement["status"],
   "collect" | "onboarding_not_started" | "unsupported"
 >;
+export type HercleOnboardingPanelStatus = Exclude<
+  HercleRequirements["status"] | ReadyRequirement["status"],
+  "collect" | "unsupported"
+>;
 
 type BvnkPanelOnboardingRequirements =
   | Extract<CounterpartyRequirements, { provider: "bvnk"; status: BvnkOnboardingPanelStatus }>
@@ -51,10 +63,14 @@ type LightsparkPanelOnboardingRequirements =
 type MuralPanelOnboardingRequirements =
   | Extract<CounterpartyRequirements, { provider: "mural"; status: MuralOnboardingPanelStatus }>
   | (ReadyRequirement & { provider: "mural" });
+type HerclePanelOnboardingRequirements =
+  | Extract<CounterpartyRequirements, { provider: "hercle"; status: HercleOnboardingPanelStatus }>
+  | (ReadyRequirement & { provider: "hercle" });
 type PanelOnboardingRequirements =
   | BvnkPanelOnboardingRequirements
   | LightsparkPanelOnboardingRequirements
-  | MuralPanelOnboardingRequirements;
+  | MuralPanelOnboardingRequirements
+  | HerclePanelOnboardingRequirements;
 
 const BVNK_ONBOARDING_PANEL_STATUSES = new Set<BvnkOnboardingPanelStatus>([
   "customer_pending_agreement_acceptance",
@@ -70,6 +86,14 @@ const LIGHTSPARK_ONBOARDING_PANEL_STATUSES = new Set<LightsparkOnboardingPanelSt
 
 const MURAL_ONBOARDING_PANEL_STATUSES = new Set<MuralOnboardingPanelStatus>([
   "terms_of_service_required",
+  "customer_verification_required",
+  "customer_verifying",
+  "customer_verification_failed",
+  "funding_account_provisioning",
+  "ready",
+]);
+
+const HERCLE_ONBOARDING_PANEL_STATUSES = new Set<HercleOnboardingPanelStatus>([
   "customer_verification_required",
   "customer_verifying",
   "customer_verification_failed",
@@ -96,6 +120,10 @@ export function isOnboardingPanelStatus(
       );
     case "mural":
       return MURAL_ONBOARDING_PANEL_STATUSES.has(requirements.status as MuralOnboardingPanelStatus);
+    case "hercle":
+      return HERCLE_ONBOARDING_PANEL_STATUSES.has(
+        requirements.status as HercleOnboardingPanelStatus
+      );
     default:
       return false;
   }
@@ -115,7 +143,12 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
  * never render the onboarding panel, so callers must gate on this before rendering it.
  */
 export function hasOnboardingLifecycle(provider: RampProviderId): boolean {
-  return provider === "bvnk" || provider === "lightspark" || provider === "mural";
+  return (
+    provider === "bvnk" ||
+    provider === "lightspark" ||
+    provider === "mural" ||
+    provider === "hercle"
+  );
 }
 
 /**
@@ -136,6 +169,8 @@ export function onboardingCopy(
       return getLightsparkOnboardingCopy(t)[onboarding.status];
     case "mural":
       return getMuralOnboardingCopy(t)[onboarding.status];
+    case "hercle":
+      return getHercleOnboardingCopy(t)[onboarding.status];
   }
   const exhaustive: never = onboarding;
   throw new Error(`No onboarding copy for ramp provider: ${String(exhaustive)}`);
@@ -153,6 +188,24 @@ export function simulateActionLabels(
       return getLightsparkSimulateLabels(t);
     case "mural":
       return getMuralSimulateLabels(t);
+    case "hercle":
+      return getHercleSimulateLabels(t);
+    default:
+      return null;
+  }
+}
+
+/**
+ * Sandbox settlement simulation for an off-ramp still awaiting its crypto, keyed on the quote id
+ * (the provider's order id). Null for providers whose sandbox settles on its own.
+ */
+export function offrampSettlementSimulation(
+  provider: RampProviderId,
+  orderId: string
+): SandboxTransferSimulationInput | null {
+  switch (provider) {
+    case "hercle":
+      return hercleOfframpSettlementSimulation(orderId);
     default:
       return null;
   }
@@ -171,6 +224,8 @@ export function provisioningDetail(
       return getLightsparkProvisioningDetail(t)[direction];
     case "mural":
       return getMuralProvisioningDetail(t)[direction];
+    case "hercle":
+      return getHercleProvisioningDetail(t)[direction];
     default:
       throw new Error(`No provisioning detail for ramp provider: ${provider}`);
   }

@@ -356,6 +356,7 @@
     "rampCoinbaseDescription": "On-ramp và off-ramp fiat qua tài khoản Coinbase.",
     "rampMuralDescription": "Rails chi trả Stablecoin và lập hóa đơn.",
     "rampStripeDescription": "On-ramp fiat qua Stripe checkout.",
+    "rampHercleDescription": "Cổng nạp/rút EUR được cấp phép cho tài khoản doanh nghiệp qua Hercle.",
     "complianceRangeDescription": "Sàng lọc giao dịch và giám sát rủi ro cho Solana.",
     "complianceEllipticDescription": "Phân tích blockchain và sàng lọc giao dịch.",
     "complianceTrmDescription": "Tình báo rủi ro và giám sát compliance.",

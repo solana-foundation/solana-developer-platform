@@ -12,6 +12,13 @@ describe("ramp provider surfacing", () => {
     expect(isRampProviderSurfaced("moonpay", "production")).toBe(true);
   });
 
+  it("surfaces hercle only in sandbox while settlement is simulated", () => {
+    expect(isRampProviderSurfaced("hercle", "sandbox")).toBe(true);
+    expect(isRampProviderSurfaced("hercle", "production")).toBe(false);
+    expect(surfacedRampProviders("sandbox")).toContain("hercle");
+    expect(surfacedRampProviders("production")).not.toContain("hercle");
+  });
+
   it("fails closed for unknown ids and prototype keys", () => {
     expect(isRampProviderSurfaced("not-a-provider", "sandbox")).toBe(false);
     expect(isRampProviderSurfaced("toString", "sandbox")).toBe(false);

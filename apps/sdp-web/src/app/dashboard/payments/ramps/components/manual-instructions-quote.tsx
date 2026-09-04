@@ -215,6 +215,7 @@ function ManualQuoteSummary({
 type LightsparkInstructionType = Extract<PaymentRampInstruction, { provider: "lightspark" }>;
 type BvnkInstructionType = Extract<PaymentRampInstruction, { provider: "bvnk" }>;
 type MuralInstructionType = Extract<PaymentRampInstruction, { provider: "mural" }>;
+type HercleInstructionType = Extract<PaymentRampInstruction, { provider: "hercle" }>;
 
 function humanizeFieldLabel(key: string): string {
   const spaced = key.replace(/([A-Z])/g, " $1").trim();
@@ -488,6 +489,89 @@ function BvnkInstruction({
   );
 }
 
+function HercleInstruction({
+  instruction,
+  showAction,
+  action,
+}: {
+  instruction: HercleInstructionType;
+  showAction: boolean;
+  action?: InstructionAction;
+}) {
+  const t = useTranslations();
+  if (instruction.kind === "crypto_deposit") {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <InstructionBadges>
+            <InstructionBadge>
+              {t("DashboardPayments.manualInstructions.cryptoDeposit", {
+                currency: instruction.cryptoCurrency,
+              })}
+            </InstructionBadge>
+            <InstructionBadge>{instruction.network}</InstructionBadge>
+          </InstructionBadges>
+          {showAction && action ? <InstructionActionButton action={action} /> : null}
+        </div>
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.depositAddress")}
+          value={instruction.destinationAddress}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.reference")}
+          value={instruction.reference}
+        />
+        <div className="rounded-xl bg-fill-subtle px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+            {t("DashboardPayments.manualInstructions.notes")}
+          </p>
+          <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const bank = instruction.bankAccount;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <InstructionBadges>
+          <InstructionBadge>
+            {t("DashboardPayments.manualInstructions.virtualAccount", {
+              currency: instruction.fiatCurrency,
+            })}
+          </InstructionBadge>
+        </InstructionBadges>
+        {showAction && action ? <InstructionActionButton action={action} /> : null}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.bankName")}
+          value={bank.bankName}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.accountNumber")}
+          value={bank.iban}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.bankCode")}
+          value={bank.bic}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.paymentReference")}
+          value={bank.paymentReference}
+        />
+      </div>
+      <div className="rounded-xl bg-fill-subtle px-4 py-3">
+        <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+          {t("DashboardPayments.manualInstructions.notes")}
+        </p>
+        <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
+      </div>
+    </div>
+  );
+}
+
 function MuralInstruction({
   instruction,
   showAction,
@@ -558,6 +642,17 @@ export function ManualInstructionsQuote({
     ) : instruction.provider === "mural" ? (
       <MuralInstruction
         key={`mural-${instruction.fiatCurrency}`}
+        instruction={instruction}
+        showAction={index === 0}
+        action={action}
+      />
+    ) : instruction.provider === "hercle" ? (
+      <HercleInstruction
+        key={
+          instruction.kind === "crypto_deposit"
+            ? instruction.destinationAddress
+            : `hercle-${instruction.fiatCurrency}`
+        }
         instruction={instruction}
         showAction={index === 0}
         action={action}

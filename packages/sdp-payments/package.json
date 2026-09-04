@@ -119,6 +119,21 @@
       "import": "./src/ramps/providers/lightspark/provider-data.ts",
       "default": "./src/ramps/providers/lightspark/provider-data.ts"
     },
+    "./ramps/providers/hercle/client": {
+      "types": "./src/ramps/providers/hercle/client.ts",
+      "import": "./src/ramps/providers/hercle/client.ts",
+      "default": "./src/ramps/providers/hercle/client.ts"
+    },
+    "./ramps/providers/hercle/counterparty": {
+      "types": "./src/ramps/providers/hercle/counterparty.ts",
+      "import": "./src/ramps/providers/hercle/counterparty.ts",
+      "default": "./src/ramps/providers/hercle/counterparty.ts"
+    },
+    "./ramps/providers/hercle/provider-data": {
+      "types": "./src/ramps/providers/hercle/provider-data.ts",
+      "import": "./src/ramps/providers/hercle/provider-data.ts",
+      "default": "./src/ramps/providers/hercle/provider-data.ts"
+    },
     "./ramps/providers/mural/client": {
       "types": "./src/ramps/providers/mural/client.ts",
       "import": "./src/ramps/providers/mural/client.ts",

@@ -376,6 +376,7 @@
     "rampCoinbaseDescription": "Onramp y offramp de fiat a través de cuentas de Coinbase.",
     "rampMuralDescription": "Rails de pagos salientes e invoicing con stablecoins.",
     "rampStripeDescription": "Onramp de fiat a través del checkout de Stripe.",
+    "rampHercleDescription": "On/off-ramps regulados en EUR para cuentas de empresa a través de Hercle.",
     "complianceRangeDescription": "Screening de transacciones y monitoreo de riesgo para Solana.",
     "complianceEllipticDescription": "Analítica de blockchain y screening de transacciones.",
     "complianceTrmDescription": "Inteligencia de riesgo y monitoreo de cumplimiento.",

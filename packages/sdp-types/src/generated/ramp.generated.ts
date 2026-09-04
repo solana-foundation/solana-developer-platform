@@ -15,7 +15,7 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "162bddc6552318446b36e54fa23f968dd13011dc580d15c722089092508a9ea4" as const;
+  "7a3d2df011c15216e80dfb01f583170c7529e2c59d8ba4a99ddae9316e8503af" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -32,6 +32,8 @@ export const RAMP_PROVIDER_SUPPORT_HASHES = {
   mural: "0cb8effa8f7edb6a8d64c9b774abc47f52b17493dad7cda61f6b317b05633d95",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   stripe: "65c17177d0f4125644b82e65dcbe495380d891c220e171a5106654f4b17a35e6",
+  // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
+  hercle: "22af01421bbc94f8ebb6825f7da8f1188a7508cc1eaf471fca2ec7f77cdb3322",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_SUPPORT_COUNTS = {
@@ -42,6 +44,7 @@ export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   coinbase: { onramp: 3, offramp: 0 },
   mural: { onramp: 11, offramp: 0 },
   stripe: { onramp: 2, offramp: 0 },
+  hercle: { onramp: 2, offramp: 2 },
 } as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
 
 export const RAMP_FIAT_CURRENCIES = [
@@ -2511,6 +2514,22 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
       entityTypes: [],
     },
   },
+  hercle: {
+    onramp: {
+      currencies: {
+        EUR: { min: null, max: null },
+      },
+      countrySupport: { coverage: "unreported" },
+      entityTypes: ["business"],
+    },
+    offramp: {
+      currencies: {
+        EUR: { min: null, max: null },
+      },
+      countrySupport: { coverage: "unreported" },
+      entityTypes: ["business"],
+    },
+  },
 } as const satisfies Record<
   RampProviderId,
   {
@@ -2544,8 +2563,8 @@ export const ONRAMP_SUPPORT = [
   { source: "DOP", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "EGP", dest: "sol.solana", providers: ["moonpay"] },
   { source: "EGP", dest: "pyusd.solana", providers: ["moonpay"] },
-  { source: "EUR", dest: "sol.solana", providers: ["moonpay", "bvnk"] },
-  { source: "EUR", dest: "usdc.solana", providers: ["bvnk", "mural"] },
+  { source: "EUR", dest: "sol.solana", providers: ["moonpay", "bvnk", "hercle"] },
+  { source: "EUR", dest: "usdc.solana", providers: ["bvnk", "mural", "hercle"] },
   { source: "EUR", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "EUR", dest: "usdg.solana", providers: ["bvnk"] },
   { source: "EUR", dest: "pyusd.solana", providers: ["moonpay"] },
@@ -2636,7 +2655,7 @@ export const OFFRAMP_SUPPORT = [
   { source: "sol.solana", dest: "EGP", providers: ["moonpay", "bvnk"] },
   { source: "sol.solana", dest: "ERN", providers: ["bvnk"] },
   { source: "sol.solana", dest: "ETB", providers: ["bvnk"] },
-  { source: "sol.solana", dest: "EUR", providers: ["moonpay", "bvnk"] },
+  { source: "sol.solana", dest: "EUR", providers: ["moonpay", "bvnk", "hercle"] },
   { source: "sol.solana", dest: "GBP", providers: ["moonpay", "bvnk"] },
   { source: "sol.solana", dest: "GEL", providers: ["bvnk"] },
   { source: "sol.solana", dest: "GHS", providers: ["bvnk"] },
@@ -2748,7 +2767,7 @@ export const OFFRAMP_SUPPORT = [
   { source: "usdc.solana", dest: "EGP", providers: ["lightspark", "bvnk", "moneygram"] },
   { source: "usdc.solana", dest: "ERN", providers: ["bvnk", "moneygram"] },
   { source: "usdc.solana", dest: "ETB", providers: ["bvnk", "moneygram"] },
-  { source: "usdc.solana", dest: "EUR", providers: ["lightspark", "bvnk", "moneygram"] },
+  { source: "usdc.solana", dest: "EUR", providers: ["lightspark", "bvnk", "moneygram", "hercle"] },
   { source: "usdc.solana", dest: "FJD", providers: ["moneygram"] },
   { source: "usdc.solana", dest: "FKP", providers: ["moneygram"] },
   { source: "usdc.solana", dest: "GBP", providers: ["lightspark", "bvnk", "moneygram"] },

@@ -70,6 +70,7 @@ const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
   coinbase: "Shared.integrations.rampCoinbaseDescription",
   mural: "Shared.integrations.rampMuralDescription",
   stripe: "Shared.integrations.rampStripeDescription",
+  hercle: "Shared.integrations.rampHercleDescription",
 };
 
 const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
@@ -93,6 +94,7 @@ export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   coinbase: "Coinbase",
   mural: "Mural",
   stripe: "Stripe",
+  hercle: "Hercle",
 };
 
 export const COMPLIANCE_PROVIDER_LABELS: Record<ComplianceProviderId, string> = {

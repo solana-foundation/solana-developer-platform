@@ -199,3 +199,4 @@ export const rampProviderMoneygram = rampProviderFlag("moneygram", "MoneyGram");
 export const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
 export const rampProviderMural = rampProviderFlag("mural", "Mural Pay");
 export const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
+export const rampProviderHercle = rampProviderFlag("hercle", "Hercle");

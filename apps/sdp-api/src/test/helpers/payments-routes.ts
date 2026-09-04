@@ -187,6 +187,12 @@ export const TEST_MONEYGRAM_PUBLIC_KEY = "moneygram_sandbox_public_key";
 
 export const TEST_MONEYGRAM_SECRET_KEY = "moneygram_sandbox_secret_key";
 
+export const TEST_HERCLE_CLIENT_ID = "hpk_test_hercle_client";
+
+const TEST_HERCLE_CLIENT_SECRET = "hercle_client_secret";
+
+export const TEST_HERCLE_API_BASE_URL = "https://api.sandbox.hercle.test";
+
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
@@ -228,6 +234,18 @@ let originalMagicBlockAuthToken: string | undefined;
 let originalMoneygramSandboxPublicKey: string | undefined;
 
 let originalMoneygramSandboxSecretKey: string | undefined;
+
+let originalHercleSandboxClientId: string | undefined;
+
+let originalHercleSandboxClientSecret: string | undefined;
+
+let originalHercleSandboxApiBaseUrl: string | undefined;
+
+let originalHercleClientId: string | undefined;
+
+let originalHercleClientSecret: string | undefined;
+
+let originalHercleApiBaseUrl: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -333,6 +351,8 @@ export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
   providerData?: Record<string, unknown>;
+  entityType?: "individual" | "business";
+  displayName?: string;
 }): Promise<string> {
   const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
   const externalId = params?.externalId ?? null;
@@ -356,8 +376,8 @@ export async function seedCounterparty(params?: {
       TEST_ORG.id,
       TEST_PROJECT.id,
       externalId,
-      "individual",
-      "MoonPay Test Counterparty",
+      params?.entityType ?? "individual",
+      params?.displayName ?? "MoonPay Test Counterparty",
       providerData,
       TEST_USER.id
     )
@@ -638,6 +658,12 @@ export function installPaymentsRouteTestHooks(): void {
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
     originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
     originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
+    originalHercleSandboxClientId = env.HERCLE_SANDBOX_CLIENT_ID;
+    originalHercleSandboxClientSecret = env.HERCLE_SANDBOX_CLIENT_SECRET;
+    originalHercleSandboxApiBaseUrl = env.HERCLE_SANDBOX_API_BASE_URL;
+    originalHercleClientId = env.HERCLE_CLIENT_ID;
+    originalHercleClientSecret = env.HERCLE_CLIENT_SECRET;
+    originalHercleApiBaseUrl = env.HERCLE_API_BASE_URL;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -660,6 +686,12 @@ export function installPaymentsRouteTestHooks(): void {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
+    env.HERCLE_SANDBOX_CLIENT_ID = TEST_HERCLE_CLIENT_ID;
+    env.HERCLE_SANDBOX_CLIENT_SECRET = TEST_HERCLE_CLIENT_SECRET;
+    env.HERCLE_SANDBOX_API_BASE_URL = TEST_HERCLE_API_BASE_URL;
+    env.HERCLE_CLIENT_ID = undefined;
+    env.HERCLE_CLIENT_SECRET = undefined;
+    env.HERCLE_API_BASE_URL = undefined;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -687,6 +719,12 @@ export function installPaymentsRouteTestHooks(): void {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
+    env.HERCLE_SANDBOX_CLIENT_ID = originalHercleSandboxClientId;
+    env.HERCLE_SANDBOX_CLIENT_SECRET = originalHercleSandboxClientSecret;
+    env.HERCLE_SANDBOX_API_BASE_URL = originalHercleSandboxApiBaseUrl;
+    env.HERCLE_CLIENT_ID = originalHercleClientId;
+    env.HERCLE_CLIENT_SECRET = originalHercleClientSecret;
+    env.HERCLE_API_BASE_URL = originalHercleApiBaseUrl;
 
     await clearKVStores(env);
   });

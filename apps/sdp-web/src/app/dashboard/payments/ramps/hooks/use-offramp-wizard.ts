@@ -18,12 +18,15 @@ import {
   type CreateTransferInput,
   createTransfer,
   fetchTransferById,
+  simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { offrampPairs, toRampCryptoToken } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
+import { offrampSettlementSimulation } from "../components/providers";
+import { isTerminalTransferStatus } from "../components/ramp-status-panel";
 import { getRampTransferState } from "../ramp-transfer-state";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
 import {
@@ -83,6 +86,8 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   const t = useTranslations();
   const locale = useLocale();
   const [quoteExpired, setQuoteExpired] = useState(false);
+  const [settlementSimulationLoading, setSettlementSimulationLoading] = useState(false);
+  const [settlementSimulationSucceeded, setSettlementSimulationSucceeded] = useState(false);
   const {
     trigger: triggerCreateTransfer,
     data: onchainSendResult,
@@ -308,6 +313,46 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     }
   };
 
+  // The quote id is the provider's order id, which is what a settlement simulation is keyed on.
+  const settlementSimulation = wizard.quote
+    ? offrampSettlementSimulation(wizard.quote.provider, wizard.quote.id)
+    : null;
+  const canSimulateSettlement =
+    settlementSimulation !== null &&
+    onchainSendResult !== undefined &&
+    !isTerminalTransferStatus(transferStatus?.status);
+
+  const simulateSettlement = async () => {
+    if (!settlementSimulation || settlementSimulationLoading) {
+      return;
+    }
+
+    setSettlementSimulationLoading(true);
+    const toastId = toast.loading(t("DashboardPayments.ramps.simulatingQuoteFunding"), {
+      position: "bottom-right",
+    });
+
+    try {
+      await simulateSandboxTransfer(settlementSimulation, t);
+      setSettlementSimulationSucceeded(true);
+      toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
+        id: toastId,
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error(t("DashboardPayments.ramps.quoteSimulationFailed"), {
+        id: toastId,
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.ramps.sandboxSimulationFailed"),
+        position: "bottom-right",
+      });
+    } finally {
+      setSettlementSimulationLoading(false);
+    }
+  };
+
   return {
     ...wizard,
     summaryDetails,
@@ -321,6 +366,10 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     onchainSendResult: onchainSendResult ?? null,
     sendCryptoToDeposit,
     quoteExpired,
+    canSimulateSettlement,
+    settlementSimulationLoading,
+    settlementSimulationSucceeded,
+    simulateSettlement,
   };
 }
 
