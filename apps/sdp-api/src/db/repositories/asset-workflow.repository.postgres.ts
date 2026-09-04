@@ -1,5 +1,6 @@
 import type { ReviewMode, WorkflowActionType, WorkflowTriggerType } from "@sdp/types";
 import type { AppDb } from "@/db";
+import { serviceUnavailable } from "@/lib/errors";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import {
   type AssetWorkflowDefinition,
@@ -10,7 +11,7 @@ import {
   type UpdateAssetWorkflowInput,
 } from "./asset-workflow.repository";
 import {
-  deleteWorkflowSecretRetirement,
+  cancelUnclaimedWorkflowSecretRetirement,
   insertWorkflowSecretRetirement,
 } from "./workflow-secret-retirement.repository.postgres";
 
@@ -31,7 +32,12 @@ async function clearQueuedSecret(
   if (stored?.storageBackend !== "gcp_secret_manager" || !stored.secretVersionRef) {
     return;
   }
-  await deleteWorkflowSecretRetirement(exec, stored.secretVersionRef);
+  const cleared = await cancelUnclaimedWorkflowSecretRetirement(exec, stored.secretVersionRef);
+  if (!cleared) {
+    throw serviceUnavailable(
+      "The action credential was retired while this request was still running; nothing was saved — retry the request"
+    );
+  }
 }
 
 async function queueOrphanedSecret(
