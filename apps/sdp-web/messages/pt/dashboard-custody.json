@@ -851,6 +851,13 @@
     "connectionWalletsUnavailable": "Wallets indisponíveis no momento",
     "connectionsLoadError": "Não foi possível carregar as conexões",
     "connectionsLoadErrorDescription": "Algo deu errado ao ler as conexões deste projeto. Tente novamente em instantes.",
-    "policyAmountPlaceholder": "0.00"
+    "policyAmountPlaceholder": "0.00",
+    "integrationRpcDefaultDescription": "Use a infraestrutura de RPC gerenciada pela SDP, sem nenhuma credencial para configurar.",
+    "integrationRpcAlchemyDescription": "Encaminhe as solicitações Solana pela sua conexão Alchemy configurada.",
+    "integrationRpcHeliusDescription": "Use a infraestrutura da Helius para solicitações de RPC da Solana.",
+    "integrationRpcNoditDescription": "Use a Nodit para o seu tráfego de RPC da Solana.",
+    "integrationRpcQuickNodeDescription": "Use o seu endpoint QuickNode configurado para RPC da Solana.",
+    "integrationRpcTritonDescription": "Encaminhe as solicitações Solana pela infraestrutura da Triton.",
+    "integrationRpcValidationCloudDescription": "Use a Validation Cloud para o seu tráfego de RPC da Solana."
   }
 }

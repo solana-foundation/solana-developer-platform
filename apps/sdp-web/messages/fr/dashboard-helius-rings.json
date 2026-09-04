@@ -108,7 +108,9 @@
       "working": "En cours de règlement",
       "retryOf": "Nouvelle tentative de {id}",
       "retriedAs": "Relancée en tant que {id}",
-      "state_voided": "Annulée"
+      "state_voided": "Annulée",
+      "ring": "Ring",
+      "ringDefault": "Ring par défaut"
     },
     "errors": {
       "loadFailed": "Impossible de charger les données Helius Rings. Réessayez dans un instant.",
@@ -154,7 +156,13 @@
       "recipientPrivateWallet": "Wallet privé du destinataire",
       "recipientPrivateWalletPlaceholder": "Sélectionnez un wallet privé",
       "privateTransferNoRecipients": "Aucun autre wallet privé provisionné dans ce projet vers lequel effectuer un transfert.",
-      "started": "Opération lancée. Suivez-la dans la section Activité ci-dessous."
+      "started": "Opération lancée. Suivez-la dans la section Activité ci-dessous.",
+      "ring": "Ring",
+      "ringDefault": "Ring par défaut",
+      "ringShieldHint": "Le ring dans lequel aboutissent les notes shielded.",
+      "ringSpendHint": "La source des fonds : seules les notes liées au ring choisi peuvent être dépensées par lui.",
+      "ringNoneActive": "Aucun ring n'est encore actif ; terminez la mise en service dans la carte Rings personnalisés avant d'en cibler un.",
+      "summaryRing": "Ring"
     },
     "zones": {
       "title": "Zones",
@@ -207,7 +215,11 @@
       "executing": "Exécution…",
       "void": "Annuler",
       "voiding": "Annulation…",
-      "voidConfirm": "Void atteste que cette transaction signée n'est jamais arrivée on-chain et libère le slot de dépense du Wallet. Continuez uniquement si vous avez rapproché la signature et confirmé son absence."
+      "voidConfirm": "Void atteste que cette transaction signée n'est jamais arrivée on-chain et libère le slot de dépense du Wallet. Continuez uniquement si vous avez rapproché la signature et confirmé son absence.",
+      "recheck": "Vérifier l'indexeur",
+      "rechecking": "Vérification…",
+      "recheckFound": "L'indexeur a rattrapé son retard — cette opération est désormais terminée.",
+      "recheckStillMissing": "L'indexeur n'a toujours aucune trace de cette transaction. Il est peut-être en retard sur la chaîne ; vérifiez à nouveau avant d'annuler."
     },
     "workspace": {
       "selectPrompt": "Sélectionnez un wallet privé ci-dessus pour afficher ses détails, ses opérations et son activité."
@@ -218,7 +230,33 @@
       "empty": "0",
       "notProvisioned": "Pas encore provisionné.",
       "unpriced": "—",
-      "privateBalanceLabel": "Solde privé"
+      "privateBalanceLabel": "Solde privé",
+      "defaultRing": "Ring par défaut",
+      "customRing": "Ring personnalisé {id}"
+    },
+    "ring": {
+      "title": "Rings personnalisés",
+      "description": "Rings personnalisés nommés pour ce projet. Les Ops déploient chaque programme de ring et en remettent l'id ; enregistrer ici un nom et un id termine la mise en service (clé d'audit, configuration du ring, accès en lecture, lookup table) via custody. Une fois actif, toute opération peut cibler le ring par son nom — les opérations du ring par défaut n'en sont jamais bloquées.",
+      "none": "Aucun ring personnalisé enregistré. Toutes les opérations utilisent le ring par défaut.",
+      "openList": "Voir les rings personnalisés",
+      "dialogDescription": "Sélectionnez un ring pour voir son programme, sa clé d'audit et sa lookup table.",
+      "nameLabel": "Nom du ring",
+      "namePlaceholder": "trésorerie",
+      "programIdLabel": "Id du programme du ring",
+      "programIdPlaceholder": "Id du programme Base58 issu du déploiement ops",
+      "programId": "Programme du ring",
+      "auditorKey": "Clé publique de l'auditeur",
+      "lookupTable": "Lookup table",
+      "submit": "Enregistrer et mettre en service",
+      "submitting": "Mise en service…",
+      "retry": "Réessayer la mise en service",
+      "repointHint": "Re-soumettre un nom déjà enregistré reprend sa mise en service. Saisir un id différent sous ce nom remplace son programme, ce qui n'est possible que tant que le ring n'a jamais été actif.",
+      "submitFailed": "La mise en service du ring a échoué.",
+      "status_pending": "En attente",
+      "status_active": "Actif",
+      "status_failed": "Échec",
+      "explain_pending": "La mise en service n'est pas terminée. Les opérations ne peuvent pas encore cibler ce ring ; les opérations du ring par défaut ne sont pas affectées.",
+      "explain_failed": "La mise en service a échoué ; les opérations ne peuvent pas cibler ce ring tant qu'une nouvelle tentative n'a pas réussi. Les opérations du ring par défaut ne sont pas affectées."
     }
   }
 }

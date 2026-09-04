@@ -143,7 +143,9 @@
     "done": "Terminé",
     "time": "Heure",
     "unknownToken": "Inconnu",
-    "sdpMintedToken": "Minté par SDP"
+    "sdpMintedToken": "Minté par SDP",
+    "selectExistingOrganizationDescription": "Choisissez une organisation existante pour continuer.",
+    "loadMore": "Charger plus"
   },
   "dashboardShell": {
     "workspace": "Espace de travail",

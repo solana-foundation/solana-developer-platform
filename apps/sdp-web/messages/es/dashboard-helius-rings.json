@@ -108,7 +108,9 @@
       "working": "Aún en liquidación",
       "retryOf": "Reintento de {id}",
       "retriedAs": "Reintentada como {id}",
-      "state_voided": "Anulada"
+      "state_voided": "Anulada",
+      "ring": "Ring",
+      "ringDefault": "Ring predeterminado"
     },
     "errors": {
       "loadFailed": "No se pudieron cargar los datos de Helius Rings. Inténtalo de nuevo en un momento.",
@@ -154,7 +156,13 @@
       "recipientPrivateWallet": "Wallet privada destinataria",
       "recipientPrivateWalletPlaceholder": "Selecciona una Wallet privada",
       "privateTransferNoRecipients": "No hay otras Wallets privadas aprovisionadas en este proyecto a las que enviar.",
-      "started": "Operación iniciada. Síguela en Activity abajo."
+      "started": "Operación iniciada. Síguela en Activity abajo.",
+      "ring": "Ring",
+      "ringDefault": "Ring predeterminado",
+      "ringShieldHint": "El ring en el que aterrizan las notas blindadas.",
+      "ringSpendHint": "La fuente de fondos: solo las notas vinculadas al ring elegido pueden gastarse a través de él.",
+      "ringNoneActive": "Aún no hay ningún ring activo; completa el bring-up en la tarjeta de Rings personalizados antes de apuntar a uno.",
+      "summaryRing": "Ring"
     },
     "zones": {
       "title": "Zonas",
@@ -207,7 +215,11 @@
       "executing": "Ejecutando…",
       "void": "Anular",
       "voiding": "Anulando…",
-      "voidConfirm": "Anular declara que esta transacción firmada nunca se registró en la cadena y libera el espacio de gasto de la Wallet. Continúa solo si has conciliado la firma y confirmado su ausencia."
+      "voidConfirm": "Anular declara que esta transacción firmada nunca se registró en la cadena y libera el espacio de gasto de la Wallet. Continúa solo si has conciliado la firma y confirmado su ausencia.",
+      "recheck": "Verificar indexador",
+      "rechecking": "Verificando…",
+      "recheckFound": "El indexador se ha puesto al día: esta operación ahora está completa.",
+      "recheckStillMissing": "El indexador aún no tiene registro de esta transacción. Puede estar detrás de la cadena; vuelve a verificar antes de anular."
     },
     "workspace": {
       "selectPrompt": "Selecciona una Wallet privada arriba para ver sus detalles, operaciones y actividad."
@@ -218,7 +230,33 @@
       "empty": "0",
       "notProvisioned": "Aún no se ha aprovisionado.",
       "unpriced": "—",
-      "privateBalanceLabel": "Saldo privado"
+      "privateBalanceLabel": "Saldo privado",
+      "defaultRing": "Ring predeterminado",
+      "customRing": "Ring personalizado {id}"
+    },
+    "ring": {
+      "title": "Rings personalizados",
+      "description": "Rings personalizados con nombre para este proyecto. Ops despliega cada programa de ring y entrega su id; registrar aquí un nombre y un id completa el bring-up (clave del auditor, configuración del ring, acceso de lectura, lookup table) mediante custody. Una vez activo, cualquier operación puede apuntar al ring por nombre; las operaciones del ring predeterminado nunca se ven bloqueadas por él.",
+      "none": "No hay rings personalizados registrados. Todas las operaciones usan el ring predeterminado.",
+      "openList": "Ver rings personalizados",
+      "dialogDescription": "Selecciona un ring para ver su programa, la clave del auditor y la lookup table.",
+      "nameLabel": "Nombre del ring",
+      "namePlaceholder": "treasury",
+      "programIdLabel": "Id del programa del ring",
+      "programIdPlaceholder": "Id de programa Base58 del despliegue de ops",
+      "programId": "Programa del ring",
+      "auditorKey": "Clave pública del auditor",
+      "lookupTable": "Lookup table",
+      "submit": "Registrar y completar el bring-up",
+      "submitting": "Completando el bring-up…",
+      "retry": "Reintentar bring-up",
+      "repointHint": "Reenviar un nombre ya registrado reanuda su bring-up. Introducir un id diferente bajo ese nombre reemplaza su programa, lo cual solo es posible mientras el ring nunca haya estado activo.",
+      "submitFailed": "El bring-up del ring falló.",
+      "status_pending": "Pendiente",
+      "status_active": "Activo",
+      "status_failed": "Fallido",
+      "explain_pending": "El bring-up no se ha completado. Las operaciones aún no pueden apuntar a este ring; las operaciones del ring predeterminado no se ven afectadas.",
+      "explain_failed": "El bring-up falló; las operaciones no pueden apuntar a este ring hasta que un reintento tenga éxito. Las operaciones del ring predeterminado no se ven afectadas."
     }
   }
 }

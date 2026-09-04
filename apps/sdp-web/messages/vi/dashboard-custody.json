@@ -836,6 +836,13 @@
     "connectionWalletsUnavailable": "Wallets hiện không khả dụng",
     "connectionsLoadError": "Không tải được connections",
     "connectionsLoadErrorDescription": "Đã xảy ra lỗi khi đọc connections của project này. Hãy thử lại sau.",
-    "policyAmountPlaceholder": "0.00"
+    "policyAmountPlaceholder": "0.00",
+    "integrationRpcDefaultDescription": "Sử dụng cơ sở hạ tầng RPC do SDP quản lý, không cần cấu hình credentials.",
+    "integrationRpcAlchemyDescription": "Định tuyến các yêu cầu Solana qua kết nối Alchemy đã cấu hình.",
+    "integrationRpcHeliusDescription": "Sử dụng cơ sở hạ tầng Helius cho các yêu cầu RPC Solana.",
+    "integrationRpcNoditDescription": "Sử dụng Nodit cho lưu lượng RPC Solana.",
+    "integrationRpcQuickNodeDescription": "Sử dụng endpoint QuickNode đã cấu hình cho RPC Solana.",
+    "integrationRpcTritonDescription": "Định tuyến các yêu cầu Solana qua cơ sở hạ tầng của Triton.",
+    "integrationRpcValidationCloudDescription": "Sử dụng Validation Cloud cho lưu lượng RPC Solana."
   }
 }
