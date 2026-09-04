@@ -351,6 +351,72 @@ export const earnVaultDepositPreviewResponse = successResponseSchema(
   })
 );
 
+export const earnVaultShareReconciliationResponse = successResponseSchema(
+  z.object({
+    unrecordedHoldings: z
+      .array(
+        z.object({
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z
+            .string()
+            .openapi({ example: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" }),
+          provider: z.string().openapi({ example: "kamino" }),
+          strategyId: z.string().openapi({ example: "earn_strategy_example" }),
+          strategyName: z.string().openapi({ example: "USDC Prime Vault" }),
+          vaultAddress: z.string().openapi({
+            description: "The catalogued vault the held share mint attributes to.",
+          }),
+          shareMint: z.string(),
+          shares: z.string().openapi({
+            description: "Raw share-token amount in base units.",
+            example: "500",
+          }),
+          decimals: z.number().int().openapi({ example: 6 }),
+          uiShares: z.string().openapi({ example: "0.0005" }),
+          ambiguousAttribution: z.boolean().openapi({
+            description:
+              "True when more than one catalogued vault identity claims this share mint, so " +
+              "the attribution is the best candidate rather than the only one.",
+          }),
+        })
+      )
+      .openapi({
+        description:
+          "Share balances the custody wallet holds for catalogued vaults with no recorded " +
+          "open position behind them (for example, shares acquired by signing outside SDP).",
+      }),
+    unbackedPositions: z
+      .array(
+        z.object({
+          positionId: z.string().openapi({ example: "earn_position_example" }),
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z.string(),
+          provider: z.string().openapi({ example: "kamino" }),
+          vaultAddress: z.string().nullable(),
+          shareMint: z.string().nullable(),
+          label: z.string(),
+        })
+      )
+      .openapi({
+        description:
+          "Recorded open positions whose wallet holds none of their shares. Positions with an " +
+          "unsettled movement are excluded: the ledger already explains that disagreement.",
+      }),
+    unreadableWallets: z
+      .array(
+        z.object({
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z.string(),
+        })
+      )
+      .openapi({
+        description:
+          "Wallets whose balance read failed or ran out of the request budget. Their claims " +
+          "are unjudged in this report, never closed or marked unbacked.",
+      }),
+  })
+);
+
 export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema(
   z.object({
     positionId: z.string().openapi({ example: "earn_position_example" }),
