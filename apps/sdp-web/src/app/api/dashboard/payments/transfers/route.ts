@@ -12,6 +12,7 @@ import { createSdpApiClient, getSelectedProjectId, proxyToSdpApi } from "@/lib/s
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const hasDirectTransferFilter = [
+    "custodyWalletId",
     "wallet",
     "walletAddress",
     "provider",

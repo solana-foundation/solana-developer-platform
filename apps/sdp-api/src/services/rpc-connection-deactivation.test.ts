@@ -41,7 +41,11 @@ function serviceContext() {
 async function seedActiveConnection(
   connectionId: string,
   credentialId: string,
-  backend: "gcp_secret_manager" | "encrypted_db" = "gcp_secret_manager"
+  backend: "gcp_secret_manager" | "encrypted_db" = "gcp_secret_manager",
+  // One live connection per provider per scope, so a case that leaves its row
+  // behind needs a provider of its own rather than colliding with an earlier
+  // test's (there is no per-test reset in this file).
+  provider = "helius"
 ): Promise<void> {
   const db = getDb(appEnv);
   await db
@@ -50,12 +54,13 @@ async function seedActiveConnection(
          id, organization_id, project_id, provider, label, scope, source,
          storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
          status, created_by
-       ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
+       ) VALUES (?, ?, NULL, ?, 'Tenant credential', 'organization', 'stored',
                  ?, ?, ?, ?, 'active', ?)`
     )
     .bind(
       credentialId,
       ORG_ID,
+      provider,
       backend,
       backend === "gcp_secret_manager" ? "projects/p/secrets/sdp-provider-credentials-x" : null,
       backend === "gcp_secret_manager" ? SECRET_VERSION_REF : null,
@@ -69,7 +74,7 @@ async function seedActiveConnection(
     id: connectionId,
     organizationId: ORG_ID,
     projectId: null,
-    provider: "helius",
+    provider,
     providerCredentialId: credentialId,
     providerCredentialScopeKey: "__organization__",
     network: "devnet",
@@ -207,7 +212,13 @@ describe("deactivateRpcConnection", () => {
 
   it("refuses a second deactivation", async () => {
     const connectionId = `${CONNECTION_ID}_repeat`;
-    await seedActiveConnection(connectionId, `${CREDENTIAL_ID}_repeat`);
+    // Its own provider: earlier cases in this file leave a live helius row.
+    await seedActiveConnection(
+      connectionId,
+      `${CREDENTIAL_ID}_repeat`,
+      "gcp_secret_manager",
+      "triton"
+    );
 
     await deactivateRpcConnection(serviceContext(), connectionId);
 

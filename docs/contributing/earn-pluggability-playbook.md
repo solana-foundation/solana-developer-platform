@@ -15,6 +15,40 @@ The ramp analog for tone and rules is
 | Vault-infra provider | Compiler-guided code change | Add the id, follow the type errors |
 | Custodian | Custody family, not Earn | Signing seam documented below |
 
+## Provider definition of done
+
+A provider is not pluggable just because its client compiles. Before surfacing
+it, prove all of these as one change set:
+
+1. Its id, surfacing decision, deposit style, payout tokens, and both slippage
+   policies are explicit in the exhaustive maps in `provider-access.ts`.
+2. Its catalogue client, availability model, exports, and any credentials are
+   registered and covered by the drift tests.
+3. A `vault_direct` provider has a cluster-specific deployment registry, a
+   separate execution client, both API registry entries, and a provider-derived
+   sponsorship program list. A custodial provider implements the complete
+   portfolio-wallet capability instead.
+4. Every strategy snapshot states the real `hostCluster`; sandbox money-in is
+   proven against devnet, never inferred from a provider's HTTP environment.
+5. Every required quote is public API surface. The strategy advertises the
+   matching `depositSlippage` or `withdrawalSlippage` policy, and both treasury
+   and external-wallet builders enforce the same floor semantics.
+6. The generated OpenAPI reference, Embedded Yield guide, dashboard integration
+   snippets, and AI discovery files describe the same request and response
+   shapes. Regenerate them rather than hand-editing generated output.
+7. Test both signer modes that apply: wallet-paid and caller-provided fee payer
+   on the external-wallet surface, plus SDP paymaster sponsorship on the
+   treasury surface. For a surfaced devnet provider, finish with a live
+   deposit, terminal movement poll, live position read, withdrawal, and second
+   terminal poll.
+8. Provider failures use the shared vault error codes. Caller or vault
+   refusals become 400s, `VAULT_UNREADABLE` becomes a sanitized retryable 503,
+   and unknown failures remain 500s for investigation. Test the mapping with
+   the provider's real error class and a simulated RPC outage or rate limit.
+
+Do not flip `EARN_PROVIDER_SURFACING` to `true` until this checklist passes.
+Registration may land dormant; customer exposure may not land half-wired.
+
 ## 1. Add or update a curator — zero code
 
 Curators (Gauntlet, Steakhouse, Sentora, ...) are catalogue data, not
@@ -171,30 +205,41 @@ reference strategies by provider reference.
 
 `EarnProviderId` is a closed union, so adding the id breaks the build until
 every registration point is filled — the type errors are the checklist, and
-two tests guard the registration points the compiler can't see.
+the tests listed at the end of this section guard the registration points the
+compiler can't see.
 
-**Two worked examples**, and which one you copy depends on how the provider
-holds the money:
+**Three worked examples**, and which one you copy depends on how the provider
+holds the money and who signs:
 
-- **Ground — custodial portfolio.** `ground` id, `GroundEarnClient`,
+- **Ground: custodial portfolio.** `ground` id, `GroundEarnClient`,
   `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY`; a live `listStrategies` plus the
   portfolio-wallet capability (§4b). Copy this when SDP provisions a wallet and
   moves funds through the provider.
-- **Kamino — catalogue-only, and keyless.** `kamino` id, `KaminoEarnClient`, no
-  credential at all; the base contract plus the live-metrics capability (§4c)
-  and *none* of the portfolio-wallet surface. Copy this when the provider's
-  vaults are non-custodial — the customer's own wallet deposits on-chain, so
-  there is nothing for SDP to provision, and `supportsPortfolioWallets`
-  returning false is the finished answer rather than a TODO. Every program route
-  then answers 501 by capability detection, with no dispatch edits.
+- **Kamino: executing vault-direct, and keyless.** `kamino` id,
+  `KaminoEarnClient` (catalogue, no credential), the live-metrics capability
+  (§4c), and *none* of the portfolio-wallet surface: the vaults are
+  non-custodial, so `supportsPortfolioWallets` returning false is the finished
+  answer rather than a TODO, and every program route answers 501 by capability
+  detection with no dispatch edits. What Kamino has instead is an EXECUTING
+  client, `KaminoVaultDirectClient` in `packages/sdp-kamino`. SDP builds,
+  signs and submits vault deposits and withdrawals from the organization's own
+  custody wallet (§4d). Copy this for any provider SDP executes for.
+- **Veda: executing vault-direct with required live quotes.** Surfaced on
+  devnet, keyless, and executable through `VedaVaultDirectClient` in
+  `packages/sdp-veda`. Its deployment registry has one confirmed devnet Test
+  Vault and a deliberately null mainnet entry. Both builders require explicit
+  quote-derived floors, declared through the deposit and withdrawal slippage
+  maps. Copy this when a provider's SDK refuses implicit slippage.
 
-Steps 5–8 below are the **credentialed** path. A provider on a public API skips
-most of them — see the keyless variant under the table.
+Steps 5–8 below are the **credentialed** path; a provider on a public API
+skips most of them (see the keyless variant under the table). Step 10 and §4d
+apply only to providers SDP executes for.
 
 | Step | File | What you add (Ground precedent) |
 |---|---|---|
 | 1. Declare the id | `packages/sdp-types/src/provider-access.ts` | Append to `EARN_PROVIDERS`. Earn entitlements are override-only (`createBooleanRecord(EARN_PROVIDERS, [])`): every org gets the provider disabled until an explicit `providerOverrides.earn.<id>` — there is no tier-default list to join. |
 | 1b. Decide if it is OFFERED | `packages/sdp-types/src/provider-access.ts` | Add the id to `EARN_PROVIDER_SURFACING` — it is exhaustive over `EarnProviderId`, so step 1 does not compile without it. `true` = customers see its strategies and may open programs with it; `false` = fully integrated but not offered (§6). Start a work-in-progress integration at `false`. |
+| 1c. Declare the policy maps | `packages/sdp-types/src/provider-access.ts` | Same file; the id now demands an entry in every remaining exhaustive map: `EARN_PROVIDER_DEPOSIT_STYLE` (`custodial` or `vault_direct`; load-bearing in the UI, and the drift test in `provider-availability.drift.test.ts` pins it to the client's `supportsPortfolioWallets` answer), `EARN_PROGRAM_SOLANA_PAYOUT_TOKENS` (`[]` unless the provider pays custodial withdrawals to Solana addresses), and `EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR` / `EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR` (`null` unless the provider quotes and its builders REQUIRE an explicit floor, as Veda's do). The compiler forces all of them; this row is a map of what you are deciding, not a reminder to look. |
 | 2. Client class | `packages/sdp-earn/src/providers/<id>/client.ts` | Subclass `StubEarnClient` (`packages/sdp-earn/src/providers/stub.ts`) carrying only the `provider` literal and `declaredSupport`. Every operation throws `NOT_IMPLEMENTED` until you override it — the integration lands method-by-method, with `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) as the HTTP core. |
 | 3. Registry | `packages/sdp-earn/src/index.ts` | `<id>: new <Id>EarnClient()` in `EARN_PROVIDER_CLIENTS` + the class re-export. |
 | 4. Subpath export | `packages/sdp-earn/package.json` | A `"./providers/<id>/client"` exports entry. |
@@ -202,9 +247,11 @@ most of them — see the keyless variant under the table.
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
 | 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
-| 9. Kora allowlist (executing providers only) | `infra/kora/kora.toml` + sdp-infra `kora/cloud-run/kora.{devnet,mainnet}.toml` | A vault-direct client must implement `sponsoredPrograms(cluster)`, a REQUIRED member of `EarnVaultDirectProvider`, and every id it returns has to be in all three allowlists or Kora rejects the whole sponsored transaction. `vault-sponsorship-allowlist.test.ts` fails CI on the local file; the deployed pair is covered by the live Kora smoke suite, which is opt-in until sdp-infra#64 deploys. Catalogue-only providers skip this step. |
+| 9. Sponsorship contract (executing providers only) | `infra/kora/kora.toml` + sdp-infra `kora/cloud-run/kora.{devnet,mainnet}.toml` | A vault-direct client must implement `sponsoredPrograms(cluster)`, a REQUIRED member of `EarnVaultDirectProvider`. For SDP-sponsored treasury flows, every returned id must be in the Kora allowlists or the whole transaction is rejected. `vault-sponsorship-allowlist.test.ts` pins the local file; the conditional `Kora / Live Smoke` shard checks the deployed devnet service when its secrets are present. External-wallet sponsorship is separate: a partner passes its own `feePayer`, both wallets sign, and no Kora allowlist is involved. Test that the provider applies the same caller-provided address as transaction fee payer and `rentPayer`; Veda's ATA payer swap is the precedent. Mainnet Kora remains non-live because Earn paymaster sponsorship is cluster-gated to devnet. Non-executing providers skip this step. |
+| 10. Execution wiring (executing providers only) | `packages/sdp-<id>` + `apps/sdp-api/src/services/earn-provider-registry.ts` + `apps/sdp-api/src/services/earn/execution-registry.ts` | The executing client lives in its own workspace package and registers TWICE in the API: the composition-root overlay in `earn-provider-registry.ts` (capability resolution for routes) and a branch in `resolveEarnExecutionClient` (the one place a provider id maps to an executing client; everything downstream narrows by capability, so no route edits). Plus workspace plumbing: `apps/sdp-api/package.json` and the Dockerfile's explicit package COPY list. Full walk in §4d. |
+| 11. Error contract (executing providers only) | Provider package error type + `apps/sdp-api/src/services/earn/vault-refusals.ts` | Emit the shared provider-neutral codes. Use `INVALID_AMOUNT`, `DEPOSIT_REFUSED`, `WITHDRAW_REFUSED`, or `COMPLIANCE_APPROVAL_REQUIRED` only for caller-actionable failures. Use `VAULT_UNREADABLE` for RPC outages, rate limits, missing live state, and other retryable read failures. The API maps those families to 400 and sanitized 503 responses respectively; unknown codes stay 500s. Never put RPC URLs, credentials, or raw transport messages in the public response. |
 
-### The keyless variant (public API — Kamino)
+### The keyless variant (public API or on-chain state: Kamino and Veda)
 
 A provider whose data API takes no credential does steps 1–4 unchanged, then:
 
@@ -220,6 +267,10 @@ A provider whose data API takes no credential does steps 1–4 unchanged, then:
   provider-availability.service.ts. That type is what stops
   `keyPairCredentialDefinition` from requiring a `keyof Env` entry that will
   never exist.
+- **Add the id to `KEYLESS_EARN_PROVIDERS`** in
+  `provider-availability.drift.test.ts`. The drift suite's inverse guard fails
+  any provider that declares no credential keys unless it is named in that
+  set, so going keyless stays a decision someone makes on purpose.
 
 Entitlement is unaffected: a keyless provider still defaults to disabled, since
 entitlement and configuration are separate gates. A catalogue-only provider
@@ -294,7 +345,19 @@ missed):
   credential key an availability definition actually READS appears in
   `turbo.json` `globalEnv` and `scripts/secret-keys.mjs` (step 7), plus an
   inverse guard so a credentialed provider cannot slip through by declaring no
-  keys at all.
+  keys at all (`KEYLESS_EARN_PROVIDERS` names the deliberate exceptions), plus
+  the deposit-style pin: `EARN_PROVIDER_DEPOSIT_STYLE` must agree with each
+  client's `supportsPortfolioWallets` answer (step 1c).
+- `apps/sdp-api/src/services/earn/vault-sponsorship-allowlist.test.ts`: every
+  program an executing provider's `sponsoredPrograms` declares must be in the
+  local Kora harness allowlist (step 9's local half; the deployed DEVNET
+  service is asserted by the `Kora / Live Smoke` shard on secret-bearing
+  runs, which fork PRs and unconfigured environments skip, and mainnet has
+  no live check yet). It iterates the execution registry, so a new executing
+  provider enrolls with no test edit.
+- `apps/sdp-api/src/services/earn/vault-refusals.test.ts`: the shared error
+  vocabulary maps caller refusals to 400, unavailable live state to a sanitized
+  503, and unknown provider failures to the global 500 boundary (step 11).
 
 Verify with `pnpm --filter @sdp/earn typecheck && pnpm --filter @sdp/earn test`
 plus the API vitest suite. Rules carried over from the ramp skills: no
@@ -428,6 +491,83 @@ Why this writes to the DB rather than reading live at request time:
 `GET /strategies` reads exactly ONE source for the state it reports (ADR 0002,
 2026-08-11 addendum). Freshness is cadence, not blending.
 
+## 4d. Implementing vault-direct execution: one runtime, two signer surfaces
+
+A `vault_direct` provider's instruments are non-custodial on-chain programs.
+The provider builds the same neutral plans for two API surfaces. Treasury uses
+the organization's custody signer. Embedded Yield returns an unsigned
+transaction for the end user's wallet and an optional partner `feePayer` to
+co-sign, then SDP verifies, records, and broadcasts the submitted bytes. Both
+flows use the same movement ledger and reconciler. What a new executing
+provider adds:
+
+1. **A second client, in its own package.** The catalogue client from step 2
+   stays in `@sdp/earn` and SDK-free, because the catalogue cron must keep its
+   small dependency surface. The executing client wraps the chain SDK in its
+   own workspace package (`packages/sdp-kamino`, `packages/sdp-veda`) and
+   implements `EarnVaultDirectProvider` (`packages/sdp-earn/src/types.ts`):
+   the build/quote members plus `sponsoredPrograms(cluster)`, which is
+   REQUIRED (PRO-1736). A client that cannot name its programs answers false
+   to `supportsVaultDirect`, and its routes 501.
+2. **A per-cluster deployment registry in `@sdp/types`.** The verified address
+   table (`kamino-programs.ts`, `veda-programs.ts`) declares the provider's
+   program ids per cluster. Both the client's plan-target guard and
+   `sponsoredPrograms` derive from it, so what is declared to the paymaster
+   cannot drift from what the builder emits. An all-null registry is the
+   shipping-dormant state: the client resolves, catalogues nothing, sponsors
+   nothing and executes nothing. Veda uses this state on mainnet while its
+   confirmed devnet deployment is live. Program ids are PER-CLUSTER;
+   never paste a mainnet id into a devnet list (see `kamino-programs.ts` on
+   why the wrong one fails silently rather than loudly).
+3. **Two API registration points.** Overlay the catalogue entry with the
+   executing singleton in
+   `apps/sdp-api/src/services/earn-provider-registry.ts`, and add the branch
+   in `resolveEarnExecutionClient`
+   (`apps/sdp-api/src/services/earn/execution-registry.ts`), the one place a
+   provider id maps to an executing client. Everything downstream narrows by
+   capability (`supportsVaultDirect`, `supportsVaultWithdraw`), so routes, the
+   movement ledger and the reconciliation sweep need zero edits.
+4. **Workspace plumbing.** Add the package to `apps/sdp-api/package.json`, and
+   to `apps/sdp-api/Dockerfile` + `Dockerfile.dockerignore`; the image COPYs
+   each workspace package.json explicitly, so a missing line surfaces as a
+   build failure.
+5. **Sponsorship, tying back to step 9.** Treasury sponsorship compiles the
+   provider's instructions with the Kora signer as fee payer, so every program
+   `sponsoredPrograms` returns must appear in all three allowlists:
+   `infra/kora/kora.toml` (the local/CI harness, pinned by
+   `vault-sponsorship-allowlist.test.ts`, which iterates the execution
+   registry and enrolls a new provider with no test edit) and sdp-infra's
+   `kora/cloud-run/kora.devnet.toml` + `kora.mainnet.toml` (the deployed
+   services). Deployed coverage is DEVNET-only today, and conditional: the
+   `Kora / Live Smoke` shard asserts the running devnet service's
+   `getConfig`, which catches an allowlist merged in sdp-infra but not yet
+   rolled out as a new revision, but the step is skipped on fork PRs and the
+   suite skips without `KORA_RPC_URL` + `RUN_INTEGRATION_TESTS`, so after
+   changing programs confirm it actually ran (or run
+   `pnpm kora:devnet:test`). The mainnet toml has no live check, so keep it
+   correct by hand. That is
+   future-proofing rather than live exposure: Earn sponsorship is
+   cluster-gated to devnet (`EARN_VAULT_SPONSORSHIP_CLUSTERS` in
+   `apps/sdp-api/src/lib/feature-flags.ts`), and extending live coverage to
+   mainnet belongs with the PRO-1736 opening. Miss an allowlist and Kora
+   rejects the whole sponsored transaction at request time. Embedded Yield's
+   caller-provided `feePayer` does not use Kora: the provider plan must accept
+   that address as its `rentPayer`, the partner and owner both sign, and submit
+   verifies both signatures. Exercise both modes in provider execution tests.
+
+Wiring done, three gates still stand between the provider and moving money,
+in order:
+
+- **Entitlement**: every org starts disabled; it takes an explicit
+  `providerOverrides.earn.<id>` (step 1's note).
+- **Surfacing**: `EARN_PROVIDER_SURFACING` must say `true` (step 1b, and §6
+  to reverse it).
+- **Environment**: `vault_direct` deposits open per environment via
+  `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` (`@sdp/types/provider-access`),
+  sandbox-only until PRO-1703 lands and PRO-1635's launch checklist adds
+  `"production"`. Exits never consult it: a withdrawal works in every
+  environment a position exists in (ADR 0002's exit-safety rule).
+
 ## 5. Custodian seam — "add Anchorage/Fireblocks to Earn"
 
 Custodians are **not** Earn providers. They live in the custody family:
@@ -443,20 +583,19 @@ payments can sign for Earn with zero Earn-side code.
 What that means in practice:
 
 - **Fireblocks** (and every other `FULL_SIGNING_CUSTODY_PROVIDERS` member) is
-  already Earn-capable: once the execution endpoints land, its wallets sign
-  Earn transactions through the same adapter they use today.
+  already Earn-capable: its wallets sign treasury Earn transactions through
+  the same adapter they use today.
 - **Anchorage** is currently lifecycle-only: `supportsSigning: false` in
   `CUSTODY_PROVIDER_CAPABILITIES`, absent from
   `FULL_SIGNING_CUSTODY_PROVIDERS`, and mapped to `LifecycleOnlyAdapter` in
   the adapter factory. Giving Anchorage-custodied wallets Earn means giving
   Anchorage signing — a custody-family change (real adapter + both
   registries), after which Earn rides along for free.
-- **The one known gap:** `SigningMetadata.operationType` is a closed union at
-  `packages/sdp-custody/src/signing.ts:99`
-  (`"deploy" | "mint" | "burn" | "freeze" | "thaw" | "transfer"`). It must
-  gain Earn operations (e.g. `"earn_deposit" | "earn_withdrawal"`) when
-  execution lands, so policy evaluation and audit can discriminate Earn
-  signing from transfers instead of mislabeling it.
+- **Policy identity is already explicit.** Treasury vault writes enter policy
+  evaluation as operation family `program` with operation types
+  `earn_vault_deposit` and `earn_vault_withdrawal` before custody signing.
+  Preserve those values when adding another custodian; do not collapse Earn
+  into a generic transfer policy.
 
 ## 6. Un-surface a provider — stop offering it without deleting it
 
@@ -529,7 +668,8 @@ create anything.
 
 `tsc` passes (the types are right), unit tests pass (they mock the module), lint
 is silent. **Only a browser catches it**, so finish a surfacing change by loading
-`/dashboard/markets/earn` and `/dashboard/markets/earn/deposit` for real.
+`/dashboard/markets/embedded-yield` and
+`/dashboard/markets/embedded-yield/integrate` for real.
 
 ### Tests
 

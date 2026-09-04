@@ -86,10 +86,13 @@ async function probePhoton(input: RingsHealthInput, timeoutMs: number): Promise<
           return { status: "red", reason: `http ${response.status}` } as const;
         }
 
-        const body = (await response.json()) as { result?: unknown; error?: unknown };
+        const body = (await response.json()) as {
+          result?: unknown;
+          error?: { message?: unknown };
+        };
         if (body.error !== undefined) {
-          // Answering at all means the indexer is up; its state is what is off.
-          return { status: "amber", reason: "reported unhealthy" } as const;
+          const upstream = typeof body.error.message === "string" ? body.error.message : undefined;
+          return { status: "amber", reason: upstream ?? "reported unhealthy" } as const;
         }
 
         return body.result === "ok"
@@ -129,11 +132,7 @@ async function probeProver(input: RingsHealthInput, timeoutMs: number): Promise<
   }
 }
 
-/**
- * Reports one status per upstream the shielded flows depend on. `gateway` is
- * always green because the adapter runs in this process; it stays on the
- * response because the dashboard is written against four components.
- */
+/** Reports one status per upstream the shielded flows depend on. */
 export async function probeRingsHealth(input: RingsHealthInput): Promise<RuntimeHealth> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -158,7 +157,6 @@ export async function probeRingsHealth(input: RingsHealthInput): Promise<Runtime
     rpc: rpc.status,
     photon: photon.status,
     prover: prover.status,
-    gateway: "green",
   };
 
   return Object.keys(detail).length === 0 ? health : { ...health, detail };

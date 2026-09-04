@@ -1,15 +1,11 @@
 import { isAddress } from "@sdp/solana/address";
 import {
-  DEFAULT_EARN_BUTTON_ACCENT_COLOR,
   EARN_APY_TYPES,
-  EARN_BUTTON_ACCENT_COLOR_PATTERN,
-  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
-  EARN_BUTTON_PUBLIC_TOKEN_PATTERN,
-  EARN_BUTTON_STYLES,
   EARN_LIQUIDITY_TERMS,
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
   EARN_STRATEGY_SOURCE_KINDS,
+  EARN_SWAP_MAX_SLIPPAGE_BPS,
   SOLANA_CLUSTERS,
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
@@ -35,22 +31,6 @@ export const listEarnStrategiesQuerySchema = z.object({
   // environment's own cluster — the shelf the caller can act on. Naming the
   // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
   cluster: z.enum(SOLANA_CLUSTERS).optional(),
-});
-
-export const earnButtonConfigurationSchema = z.object({
-  strategyId: z.string().min(1).max(128),
-  style: z.enum(EARN_BUTTON_STYLES),
-  accentColor: z
-    .string()
-    .regex(EARN_BUTTON_ACCENT_COLOR_PATTERN)
-    .default(DEFAULT_EARN_BUTTON_ACCENT_COLOR),
-});
-
-export const earnButtonConfigurationPublicParamsSchema = z.object({
-  publicToken: z
-    .string()
-    .length(EARN_BUTTON_PUBLIC_TOKEN_LENGTH)
-    .regex(EARN_BUTTON_PUBLIC_TOKEN_PATTERN, "Invalid Earn button integration token"),
 });
 
 // ---------------------------------------------------------------------------
@@ -243,6 +223,32 @@ export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend(
 export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);
 
 /**
+ * The swap-funding fields both deposit surfaces share (custody and
+ * external-wallet): pay in one supported stablecoin, let a Jupiter swap close
+ * the gap to the vault's own token inside the same transaction. Which mints
+ * are supported is a per-cluster fact the HANDLER checks against
+ * `earnSwapSourceTokens` — the schema only pins the address shape, the same
+ * split the owner address follows.
+ */
+export const earnDepositSwapShape = {
+  /**
+   * Fund the deposit in this stablecoin instead of the vault's own token.
+   * Equal to the strategy's deposit mint, it is a no-op (no swap is built),
+   * so pickers may always send their selection.
+   */
+  sourceTokenMint: z
+    .preprocess(
+      (value) => (typeof value === "string" ? value.trim() : value),
+      z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
+        message: "sourceTokenMint must be a base58 Solana address",
+      })
+    )
+    .optional(),
+  /** Swap slippage tolerance in basis points; the service default applies when omitted. */
+  swapSlippageBps: z.number().int().min(1).max(EARN_SWAP_MAX_SLIPPAGE_BPS).optional(),
+} as const;
+
+/**
  * Open a position in a NON-CUSTODIAL vault, or add to one, from an SDP custody
  * wallet.
  *
@@ -256,7 +262,10 @@ export const earnVaultDepositSchema = z.object({
   strategyId: z.string().min(1),
   /** SDP custody-wallet row that signs and holds the shares (`id`, not provider `walletId`). */
   custodyWalletId: z.string().min(1),
-  /** Deposit amount in the vault token's units, as a decimal string. */
+  /**
+   * Deposit amount as a decimal string — the vault token's units, or the
+   * SOURCE token's units when `sourceTokenMint` requests a swap-funded build.
+   */
   amount: z
     .string()
     .max(128)
@@ -269,6 +278,7 @@ export const earnVaultDepositSchema = z.object({
     .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
     .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
     .optional(),
+  ...earnDepositSwapShape,
   /**
    * Retired on this route: the chain has no request dedupe to anchor a body
    * key to, so the `Idempotency-Key` header is the only accepted source.
@@ -278,6 +288,23 @@ export const earnVaultDepositSchema = z.object({
   requestId: z
     .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
     .optional(),
+});
+
+/**
+ * Quote what a vault deposit would mint right now — a read, no side effects,
+ * so no wallet and no idempotency key. Same amount grammar as the deposit
+ * itself: the quote exists to derive that deposit's floor, and quoting an
+ * amount the deposit route would refuse answers a question nobody can act on.
+ */
+export const earnVaultDepositPreviewSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
 });
 
 /**
@@ -331,15 +358,30 @@ export const earnVaultDepositsQuerySchema = earnVaultMovementsQuerySchema;
  * intent-time fact a withdrawal has; the position read reports the balance
  * that serves as the ceiling.
  */
+const earnWithdrawalPositionIdSchema = z.string().min(1).max(128);
+const earnWithdrawalSharesSchema = z
+  .string()
+  .max(128)
+  .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
+  .refine((value) => /[1-9]/.test(value), "shares must be greater than zero");
+const earnMinAmountOutSchema = z
+  .string()
+  .max(128)
+  .regex(/^\d+(\.\d+)?$/, "minAmountOut must be a decimal string")
+  .refine((value) => /[1-9]/.test(value), "minAmountOut must be greater than zero")
+  .optional();
+
 export const earnVaultWithdrawalSchema = z.object({
   /** The `earn_positions` row being exited. */
-  positionId: z.string().min(1).max(128),
+  positionId: earnWithdrawalPositionIdSchema,
   /** Shares to redeem, decimal string in share units. */
-  shares: z
-    .string()
-    .max(128)
-    .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
-    .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
+  shares: earnWithdrawalSharesSchema,
+  /**
+   * Optional exit slippage floor: the minimum deposit-token amount to accept,
+   * as a decimal string in the token's own units. Providers whose builder
+   * refuses an implicit tolerance (Veda) refuse its absence with a typed 400.
+   */
+  minAmountOut: earnMinAmountOutSchema,
   /**
    * Retired on this route for the same reason as the deposit's: the chain has
    * no request dedupe to anchor a body key to, so the `Idempotency-Key` header
@@ -352,6 +394,21 @@ export const earnVaultWithdrawalSchema = z.object({
 
 /** One recorded withdrawal; org-scoped lookup answers 404 for foreign rows. */
 export const earnVaultWithdrawalParamsSchema = earnVaultMovementParamsSchema;
+
+/**
+ * Quote what redeeming these shares would pay right now — a read, no side
+ * effects, so no idempotency key. The exit twin of the deposit preview.
+ */
+export const earnVaultWithdrawalPreviewSchema = z.object({
+  /** The `earn_positions` row being exited. */
+  positionId: z.string().min(1).max(128),
+  /** Shares to redeem, decimal string in share units. */
+  shares: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
+});
 
 /**
  * Bounded keyset page over recorded withdrawals, newest first. The same
@@ -369,12 +426,32 @@ export const earnVaultWithdrawalsQuerySchema = earnVaultMovementsQuerySchema;
 // ---------------------------------------------------------------------------
 
 /** Same trim + isAddress convention as the payments destination schema. */
-const solanaOwnerAddressSchema = z.preprocess(
+export const solanaOwnerAddressSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim() : value),
   z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
     message: "ownerAddress must be a base58 Solana address",
   })
 );
+
+/** The partner fee payer on the build routes; same shape rule as the owner. */
+const solanaFeePayerAddressSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim() : value),
+  z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
+    message: "feePayer must be a base58 Solana address",
+  })
+);
+
+/**
+ * The fee-payer field both external-wallet BUILD bodies share. Optional: the
+ * owner pays everything when absent (the launch behavior). Present, the
+ * partner's wallet pays the network fee — and the share-ATA rent an account
+ * creation needs, the one-identity rule — and the built transaction requires
+ * its signature alongside the owner's: co-sign server-side before submitting.
+ * Sending the owner's own address is accepted and means the default.
+ */
+export const earnExternalWalletFeePayerShape = {
+  feePayer: solanaFeePayerAddressSchema.optional(),
+} as const;
 
 /**
  * Build one unsigned deposit transaction for an external wallet. Shares the
@@ -384,9 +461,13 @@ const solanaOwnerAddressSchema = z.preprocess(
 export const earnExternalWalletDepositTransactionSchema = z.object({
   /** Catalogue strategy id, resolved to a vault address server-side. */
   strategyId: z.string().min(1),
-  /** The external wallet that will sign, own the shares, and pay the fee. */
+  /** The external wallet that will sign and own the shares. */
   ownerAddress: solanaOwnerAddressSchema,
-  /** Deposit amount in the vault token's units, as a decimal string. */
+  ...earnExternalWalletFeePayerShape,
+  /**
+   * Deposit amount as a decimal string — the vault token's units, or the
+   * SOURCE token's units when `sourceTokenMint` requests a swap-funded build.
+   */
   amount: z
     .string()
     .max(128)
@@ -399,6 +480,7 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
     .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
     .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
     .optional(),
+  ...earnDepositSwapShape,
 });
 
 /**
@@ -408,13 +490,12 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
  */
 export const earnExternalWalletWithdrawalTransactionSchema = z.object({
   /** The `earn_positions` row being exited. */
-  positionId: z.string().min(1).max(128),
+  positionId: earnWithdrawalPositionIdSchema,
   /** Shares to redeem, decimal string in share units. */
-  shares: z
-    .string()
-    .max(128)
-    .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
-    .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
+  shares: earnWithdrawalSharesSchema,
+  /** Same explicit output floor contract as the custody withdrawal builder. */
+  minAmountOut: earnMinAmountOutSchema,
+  ...earnExternalWalletFeePayerShape,
 });
 
 /**
@@ -438,6 +519,50 @@ export const earnExternalWalletSubmitSchema = z.object({
     .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
     .optional(),
 });
+
+/**
+ * One external wallet's holdings, newest first. The owner rides the query on
+ * EVERY per-owner external-wallet read (movements, positions, earnings) —
+ * one addressing style for one concept, and no literal segment (`summary`)
+ * can ever collide with a path parameter.
+ */
+export const earnExternalWalletPositionsQuerySchema = z
+  .object({
+    ownerAddress: solanaOwnerAddressSchema,
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const earnExternalWalletPositionSummaryQuerySchema = z.object({}).strict();
+
+/**
+ * One external wallet's activity, newest first (PRO-1772). The owner is a
+ * REQUIRED query filter rather than a path segment so the collection keeps its
+ * `:movementId` detail route unambiguous; direction/status are the same
+ * equality filters the cross-provider feed takes, and `status` stays an open
+ * string for the same reason — an unknown value matches nothing, which is the
+ * honest answer.
+ */
+export const earnExternalWalletMovementsQuerySchema = z
+  .object({
+    ownerAddress: solanaOwnerAddressSchema,
+    direction: z.enum(EARN_MOVEMENT_DIRECTIONS).optional(),
+    status: z.string().min(1).max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z.string().min(1).optional(),
+  })
+  .strict();
+
+/** The recorded external-wallet movement a partner polls to a terminal state. */
+export const earnExternalWalletMovementParamsSchema = z
+  .object({ movementId: z.string().min(1).max(128) })
+  .strict();
+
+/** Balance + earned for one external wallet (PRO-1772); the owner filter is the only knob. */
+export const earnExternalWalletEarningsQuerySchema = z
+  .object({ ownerAddress: solanaOwnerAddressSchema })
+  .strict();
 
 /**
  * The cross-provider movement feed.

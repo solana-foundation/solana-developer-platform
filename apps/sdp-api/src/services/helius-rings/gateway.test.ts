@@ -43,10 +43,10 @@ function capturingCreate() {
 /** Every method a caller could reach for, so none of them can be forgotten. */
 const allMethods: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
   ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "owner" })],
+  ["provisionRing", (g) => g.provisionRing({ ringProgramId: "ring" })],
   ["readIdentity", (g) => g.readIdentity({ walletId: "hrw_1", owner: "owner" })],
-  ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "owner", cursor: null })],
-  ["buildOperation", (g) => g.buildOperation({ operation: {} as never, keyRefs: [] })],
-  ["requestProof", (g) => g.requestProof({ operationId: "hro_1", ringsMetadata: {} as never })],
+  ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "owner" })],
+  ["buildOperation", (g) => g.buildOperation({ operation: {} as never, owner: "owner" })],
   ["verifyIndexed", (g) => g.verifyIndexed("sig")],
 ];
 
@@ -139,7 +139,7 @@ describe("resolveRingsGateway", () => {
       const config = captured[0];
       if (!config) throw new Error("no gateway config was captured");
 
-      await expect(config.submitTransaction("signed")).rejects.toThrow(/devnet SOL for the fee/);
+      await expect(config.submitTransaction("signed")).rejects.toThrow(/devnet SOL/);
       await expect(config.submitTransaction("signed")).rejects.not.toThrow(/api-key/);
     });
 
@@ -157,6 +157,66 @@ describe("resolveRingsGateway", () => {
       if (!config) throw new Error("no gateway config was captured");
 
       await expect(config.submitTransaction("signed")).rejects.toBeInstanceOf(TypeError);
+    });
+
+    it("passes the ring RPC URL through only when it is set", () => {
+      const withUrl = capturingCreate();
+      resolveRingsGateway(envOf({ HELIUS_RINGS_RING_RPC_URL: "https://ring.invalid" }), tenant, {
+        createGateway: withUrl.createGateway,
+      });
+      expect(withUrl.captured[0]).toMatchObject({ ringRpcUrl: "https://ring.invalid" });
+
+      // Absent (or blank) stays absent: the resolver refuses ring bring-up
+      // itself rather than dialling an empty string.
+      const without = capturingCreate();
+      resolveRingsGateway(envOf({ HELIUS_RINGS_RING_RPC_URL: "  " }), tenant, {
+        createGateway: without.createGateway,
+      });
+      expect(without.captured[0]).not.toHaveProperty("ringRpcUrl");
+    });
+
+    it("refuses ring bring-up by naming the env var when the ring RPC URL is unset", async () => {
+      const resolved = resolveRingsGateway(envOf(), tenant, {
+        createGateway: capturingCreate().createGateway,
+      });
+
+      const error = await resolved.provisionRing({ ringProgramId: "ring" }).then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+      expect(error).toBeInstanceOf(HeliusRingsError);
+      expect(error).toMatchObject({
+        code: "config_error",
+        message:
+          "ring bring-up needs HELIUS_RINGS_RING_RPC_URL; every other rings operation runs without it",
+      });
+    });
+
+    it("binds the message-signing callback to the tenant and the named owner", async () => {
+      const { captured, createGateway } = capturingCreate();
+      const calls: unknown[] = [];
+
+      resolveRingsGateway(envOf(), tenant, {
+        createGateway,
+        signMessage: async (input) => {
+          calls.push(input);
+          return "message-signature";
+        },
+      });
+
+      const config = captured[0];
+      if (!config) throw new Error("no gateway config was captured");
+      await expect(config.signMessage?.("attestation", "OwnerPublicKey")).resolves.toBe(
+        "message-signature"
+      );
+
+      expect(calls[0]).toMatchObject({
+        organizationId: tenant.organizationId,
+        projectId: tenant.projectId,
+        owner: "OwnerPublicKey",
+        messageBase64: "attestation",
+      });
     });
 
     it("binds the signing and submission callbacks to the tenant and the named owner", async () => {
@@ -204,7 +264,7 @@ describe("resolveRingsGateway", () => {
 
       expect(gateway).toBeInstanceOf(UnconfiguredRingsGateway);
       const health = await gateway.probeHealth();
-      expect(health.detail?.gateway).toContain(key);
+      expect(health.detail?.rpc).toContain(key);
       expect(ringsUpstreamsConfigured(env)).toBe(false);
     });
 
@@ -214,7 +274,7 @@ describe("resolveRingsGateway", () => {
       const gateway = resolveRingsGateway(env, tenant);
 
       expect(gateway).toBeInstanceOf(UnconfiguredRingsGateway);
-      expect((await gateway.probeHealth()).detail?.gateway).toContain("HELIUS_RINGS_PROVER_URL");
+      expect((await gateway.probeHealth()).detail?.rpc).toContain("HELIUS_RINGS_PROVER_URL");
       expect(ringsUpstreamsConfigured(env)).toBe(false);
     });
 
@@ -251,8 +311,8 @@ describe("UnconfiguredRingsGateway", () => {
   it("reports every component red naming the missing variables", async () => {
     const health = await gateway.probeHealth();
 
-    expect(health).toMatchObject({ rpc: "red", photon: "red", prover: "red", gateway: "red" });
-    for (const component of ["rpc", "photon", "prover", "gateway"] as const) {
+    expect(health).toMatchObject({ rpc: "red", photon: "red", prover: "red" });
+    for (const component of ["rpc", "photon", "prover"] as const) {
       expect(health.detail?.[component]).toContain("HELIUS_RINGS_INDEXER_URL");
       expect(health.detail?.[component]).toContain("HELIUS_RINGS_PROVER_URL");
     }
@@ -274,6 +334,6 @@ describe("UnconfiguredRingsGateway", () => {
   it("reads as singular when only one variable is missing", async () => {
     const health = await new UnconfiguredRingsGateway(["HELIUS_RINGS_RPC_URL"]).probeHealth();
 
-    expect(health.detail?.gateway).toContain("HELIUS_RINGS_RPC_URL is not configured");
+    expect(health.detail?.rpc).toContain("HELIUS_RINGS_RPC_URL is not configured");
   });
 });

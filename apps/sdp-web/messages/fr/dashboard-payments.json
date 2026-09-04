@@ -244,8 +244,31 @@
         "updated": "Statut du transfert mis à jour",
         "currentProviderStatus": "Statut actuel du fournisseur : {status}.",
         "preparing": "Préparation du statut du transfert",
-        "preparingDescription": "Nous attendons l’enregistrement du transfert lié à ce devis."
-      }
+        "preparingDescription": "Nous attendons l’enregistrement du transfert lié à ce devis.",
+        "waitingForPayment": "En attente de paiement",
+        "waitingForPaymentHostedDescription": "Terminez le paiement dans la fenêtre du fournisseur ci-dessus. Ce dépôt se met à jour automatiquement dès que le fournisseur le confirme."
+      },
+      "untrustedProviderUrl": "Le fournisseur a renvoyé une URL non fiable, elle n'a donc pas été chargée. Créez un nouveau devis ou contactez le support.",
+      "destinationCountry": "Pays de destination",
+      "paymentRail": "Rail de paiement",
+      "requirementGroupDestinationTitle": "Destination",
+      "requirementGroupDestinationDescription": "Choisissez où le paiement arrive et le rail de paiement local utilisé pour l'acheminer.",
+      "requirementGroupBankAccountTitle": "Compte bancaire",
+      "requirementGroupBankAccountDescription": "Les coordonnées bancaires du destinataire pour ce rail. Elles sont transmises au fournisseur lors de l'exécution du paiement et ne sont jamais stockées.",
+      "requirementGroupCustomerTitle": "Détails du destinataire",
+      "requirementGroupCustomerDescription": "Lightspark utilise ces informations pour vérifier l'identité du destinataire. Elles sont transmises lors de la soumission et ne sont jamais stockées.",
+      "checkoutPoweredBy": "Propulsé par",
+      "addressRequirementDescription": "Recherchez pour pré-remplir automatiquement les champs d'adresse, ou saisissez-les manuellement.",
+      "useExistingAccount": "Utiliser le compte existant",
+      "useExistingAccountDescription": "Un compte de paiement actif est déjà enregistré pour cette destination. Nous l'utiliserons pour ce paiement.",
+      "success": "Succès",
+      "depositTransaction": "Transaction de dépôt",
+      "onchainTransaction": "Transaction on-chain",
+      "addressSearchPlaceholder": "Rechercher une adresse",
+      "addressAutocompleteFailed": "Impossible de rechercher des adresses. Réessayez.",
+      "addressDetailsFailed": "Impossible de charger cette adresse. Essayez une autre recherche.",
+      "payoutAccountsTitle": "Comptes de paiement enregistrés",
+      "payoutAccountsDescription": "Choisissez le compte de destination de ce paiement, ou renseignez les informations ci-dessous pour effectuer un paiement vers un nouveau compte."
     },
     "onchainSend": {
       "noAssets": "Ce Wallet n'a aucun élément disponible à envoyer.",
@@ -302,7 +325,9 @@
       "offrampProvisioningDetail": "Mise à disposition d'un paiement BVNK dédié Wallet pour cette devise.",
       "simulateDeposit": "Simuler un dépôt",
       "simulating": "Simuler...",
-      "depositSimulated": "Dépôt simulé"
+      "depositSimulated": "Dépôt simulé",
+      "agreementPendingTitle": "Confirmation de votre accord",
+      "agreementPendingDescription": "Nous enregistrons votre acceptation auprès de BVNK — cela ne prend qu'un instant."
     },
     "lightspark": {
       "verificationRequiredTitle": "Vérifiez votre identité",
@@ -618,7 +643,22 @@
       "details": "Détails",
       "transactions": "Opérations",
       "copyAddress": "Copier l'adresse",
-      "addressCopied": "Adresse copiée"
+      "addressCopied": "Adresse copiée",
+      "addAnyway": "Ajouter quand même",
+      "addAnywayTitle": "Ajouter l'adresse signalée ?",
+      "providerAccounts": "Comptes fournisseur",
+      "loadingProviderAccounts": "Chargement des comptes fournisseur…",
+      "noProviderAccounts": "Aucun compte fournisseur pour le moment.",
+      "providerAccountsMissing": "La réponse concernant les comptes fournisseur était vide.",
+      "providerAccountCorridor": "Corridor",
+      "providerAccountRail": "Rail",
+      "providerAccountBank": "Banque",
+      "providerAccountNumber": "Compte",
+      "providerAccountCustomer": "Client",
+      "providerAccountStatus": "Statut",
+      "copyCustomerId": "Copier l'ID client",
+      "customerIdCopied": "ID client copié",
+      "noPayoutAccounts": "Aucun compte de paiement pour le moment."
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -688,7 +728,10 @@
       "solanaSignature": "Solana signature",
       "moneygramError": "Erreur MoneyGram",
       "lastUpdated": "Dernière mise à jour",
-      "copy": "Copier {label}"
+      "copy": "Copier {label}",
+      "viewReceipt": "Afficher le reçu",
+      "receipt": "Reçu",
+      "failureReason": "Raison de l'échec"
     },
     "requestFailed": "La demande a échoué.",
     "submitting": "Envoi...",
@@ -896,7 +939,9 @@
       "openAccount": "Ouvrir le compte dans l'explorateur",
       "editPaymentDescription": "Mettez à jour les wallets, le montant et la planification du paiement.",
       "paymentUpdated": "Paiement Recurring mis à jour.",
-      "noChangesToSave": "Aucune modification à enregistrer."
+      "noChangesToSave": "Aucune modification à enregistrer.",
+      "sourceWalletUnresolved": "Wallet source indisponible",
+      "sourceWalletUnresolvedDescription": "Ce paiement Recurring n'est lié à aucun Wallet SDP précis, ses actions sont donc indisponibles."
     },
     "requests": {
       "loadFailed": "Impossible de charger les demandes de paiement",

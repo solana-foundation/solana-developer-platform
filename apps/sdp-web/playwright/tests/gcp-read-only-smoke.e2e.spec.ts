@@ -103,7 +103,11 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     if (!env.useExternalApi) {
       throw new Error("GCP smoke must run in explicit external mode");
     }
-    expect(env.sdpApiBaseUrl).toBe("https://api-dev.solana.com");
+    expect([
+      "https://api-dev.solana.com",
+      "https://api-stage.solana.com",
+      "https://api-preview.solana.com",
+    ]).toContain(env.sdpApiBaseUrl);
 
     fixture = await provisionWithAdminSession(browser, async (session) => {
       expect(session.identity.email).toBe(env.clerkTestEmail);
@@ -248,6 +252,23 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     await proveDashboardHydrated(page, fixture.project.name);
     await assertExactIdentityAndProject(page, fixture);
     expect(hydrationRequests).toEqual([]);
+    capture.assertClean();
+  });
+
+  test("wallet manage drill-down renders the wallet detail", async ({ page }) => {
+    const capture = capturePageFailures(page);
+
+    await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+    const walletCard = page
+      .locator("article")
+      .filter({ hasText: fixture.populatedWallet.publicKey })
+      .first();
+    await walletCard.getByRole("link", { name: "Manage" }).click();
+
+    await expect(page).toHaveURL(/\/dashboard\/wallets\/./, { timeout: 20_000 });
+    const walletIdentity = fixture.populatedWallet.label ?? fixture.populatedWallet.publicKey;
+    await expect(page.getByText(walletIdentity).first()).toBeVisible({ timeout: 20_000 });
+    await assertExactIdentityAndProject(page, fixture);
     capture.assertClean();
   });
 

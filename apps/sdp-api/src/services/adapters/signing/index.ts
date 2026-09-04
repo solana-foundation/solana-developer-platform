@@ -49,6 +49,7 @@ import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { instrumentVendorPort, signFailedResult } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -205,9 +206,17 @@ export async function createSigningAdapter(
   config?: SigningConfigRecord | null
 ): Promise<SigningPort> {
   if (config) {
-    return createSigningAdapterFromConfig(config, env);
+    return instrumentVendorPort(
+      config.provider,
+      await createSigningAdapterFromConfig(config, env),
+      signFailedResult
+    );
   }
-  return createSigningAdapterFromEnv(env);
+  return instrumentVendorPort(
+    env.SIGNING_PROVIDER ?? "local",
+    await createSigningAdapterFromEnv(env),
+    signFailedResult
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

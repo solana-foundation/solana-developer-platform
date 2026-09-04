@@ -4,6 +4,13 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
+import {
+  CHECK_VIOLATION,
+  expectSqlstate as expectSqlstateOn,
+  FK_VIOLATION,
+  seedOrgProject,
+  UNIQUE_VIOLATION,
+} from "@/test/helpers/migration-db";
 
 // The test database is already fully migrated by src/test/node-global-setup.ts,
 // so 0057's tables exist before this file runs. That makes the assertions here
@@ -29,52 +36,17 @@ const TABLES = [
 
 let client: Client;
 
-/** Postgres SQLSTATEs the constraint assertions below distinguish between. */
-const UNIQUE_VIOLATION = "23505";
-const FK_VIOLATION = "23503";
-const CHECK_VIOLATION = "23514";
+const expectSqlstate = (work: () => Promise<unknown>, sqlstate: string) =>
+  expectSqlstateOn(client, work, sqlstate);
 
-/**
- * Runs a statement expected to violate a constraint. The savepoint is taken
- * immediately before the statement — a failed statement poisons the whole
- * transaction, and rolling back to a savepoint created any earlier would
- * discard the fixtures the caller just seeded.
- *
- * Takes a thunk rather than a promise so the statement cannot be queued on the
- * client ahead of the SAVEPOINT.
- */
-async function expectSqlstate(work: () => Promise<unknown>, sqlstate: string): Promise<void> {
-  await client.query("SAVEPOINT probe");
-  await expect(work()).rejects.toMatchObject({ code: sqlstate });
-  await client.query("ROLLBACK TO SAVEPOINT probe");
-}
-
-/**
- * Seeds an org, project and Rings wallet, returning their ids. `tag` keeps the
- * org slug unique across tests since only the transaction is rolled back, not
- * the sequence of ids.
- */
+/** Seeds an org, project and Rings wallet, returning their ids. */
 async function seedWallet(tag: string): Promise<{
   organizationId: string;
   projectId: string;
   walletId: string;
 }> {
-  const organizationId = `org_${tag}`;
-  const projectId = `proj_${tag}`;
-  const userId = `user_${tag}`;
+  const { organizationId, projectId } = await seedOrgProject(client, tag);
   const walletId = `hrw_${tag}`;
-
-  await client.query("INSERT INTO organizations (id, name, slug) VALUES ($1, $1, $1)", [
-    organizationId,
-  ]);
-  await client.query("INSERT INTO users (id, email) VALUES ($1, $2)", [
-    userId,
-    `${tag}@example.test`,
-  ]);
-  await client.query(
-    "INSERT INTO projects (id, organization_id, name, slug, created_by) VALUES ($1, $2, $1, $1, $3)",
-    [projectId, organizationId, userId]
-  );
   await client.query(
     `INSERT INTO helius_rings_wallets (id, organization_id, project_id, sdp_wallet_id, name)
      VALUES ($1, $2, $3, $4, 'Treasury')`,

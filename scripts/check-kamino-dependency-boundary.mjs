@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { assertExactConsumers } from "./lib/dependency-boundary.mjs";
 
 const ROOT = process.cwd();
 const LOCKFILE = "pnpm-lock.yaml";
@@ -9,43 +10,6 @@ const API_DOCKERFILE = "apps/sdp-api/Dockerfile";
 const API_DOCKERIGNORE = "apps/sdp-api/Dockerfile.dockerignore";
 const SAFE_BIGINT_PACKAGE = "packages/bigint-buffer/package.json";
 const SAFE_BIGINT_RESOLUTION = "link:packages/bigint-buffer";
-
-function packageJsonFiles(parent) {
-  return readdirSync(path.join(ROOT, parent), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(parent, entry.name, "package.json"))
-    .filter((file) => {
-      try {
-        readFileSync(path.join(ROOT, file));
-        return true;
-      } catch {
-        return false;
-      }
-    });
-}
-
-const manifests = ["package.json", ...packageJsonFiles("apps"), ...packageJsonFiles("packages")];
-
-function directConsumers(dependency) {
-  return manifests.filter((file) => {
-    const manifest = JSON.parse(readFileSync(path.join(ROOT, file), "utf8"));
-    return [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies].some(
-      (dependencies) => dependencies && Object.hasOwn(dependencies, dependency)
-    );
-  });
-}
-
-function assertExactConsumers(dependency, expected) {
-  const actual = directConsumers(dependency).sort();
-  const wanted = [...expected].sort();
-  if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
-    throw new Error(
-      `${dependency} dependency boundary changed. Expected ${wanted.join(", ")}; found ${
-        actual.join(", ") || "none"
-      }.`
-    );
-  }
-}
 
 // Only the private Kamino package may own klend-sdk, and only the API may ship
 // that package. bigint-buffer itself is replaced workspace-wide so unbundled

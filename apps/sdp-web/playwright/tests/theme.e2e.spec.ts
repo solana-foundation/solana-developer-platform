@@ -20,29 +20,35 @@ async function clearThemePreferenceBeforeNavigation(page: Page) {
   );
 }
 
-/** fieldset + legend, so the group is exposed with role "group" named by its legend. */
-function themeGroup(page: Page) {
-  return page.getByRole("group", { name: "Color theme" });
+/** The account-menu trigger renders in both the desktop sidebar and the mobile
+ *  More sheet, so target whichever copy the current viewport actually shows. */
+function accountMenuTrigger(page: Page) {
+  return page.getByRole("button", { name: "Account menu" }).filter({ visible: true });
 }
 
-function themeOption(page: Page, preference: ThemePreference) {
-  return themeGroup(page).getByRole("radio", { name: preference, exact: true });
+async function openAccountMenu(page: Page) {
+  await accountMenuTrigger(page).click();
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  return menu;
 }
 
-/** The radio itself is sr-only, so drive the styled label a user actually clicks. */
-function themeOptionLabel(page: Page, preference: ThemePreference) {
-  return themeGroup(page)
-    .locator("label")
-    .filter({ hasText: new RegExp(`^${preference}$`) });
+async function closeAccountMenu(page: Page) {
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
 }
 
-/** The control now lives only in settings, so changing the theme means going there. */
+/** One of the three icon segments on the menu's Color theme row. */
+function themeSegment(page: Page, preference: ThemePreference) {
+  return page.getByRole("menu").getByRole("button", { name: preference, exact: true });
+}
+
+/** The control lives in the sidebar account menu; segment clicks keep it open. */
 async function setThemePreference(page: Page, preference: ThemePreference) {
-  await page.goto("/dashboard/settings");
-  const label = themeOptionLabel(page, preference);
-  await expect(label).toBeVisible();
-  await label.click();
-  await expect(themeOption(page, preference)).toBeChecked();
+  await openAccountMenu(page);
+  await themeSegment(page, preference).click();
+  await expect(themeSegment(page, preference)).toHaveAttribute("aria-pressed", "true");
+  await closeAccountMenu(page);
 }
 
 /** Only the toast test needs a wallet to copy an address from. Bootstrapping it for the
@@ -63,20 +69,26 @@ async function bootstrapWalletForToasts(browser: Browser, page: Page) {
 }
 
 test.describe("dashboard theme e2e", () => {
-  test("keeps the only theme control in settings, out of the dashboard chrome", async ({
+  test("keeps the only theme control in the account menu, off settings and the chrome", async ({
     page,
   }) => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 
-    // The sidebar/header toggle is gone: settings is the single home for this.
-    await expect(page.getByRole("switch", { name: "Color theme" })).toHaveCount(0);
-    await expect(themeGroup(page)).toHaveCount(0);
+    // Nothing theme-shaped in the page chrome until the account menu opens.
+    await expect(page.getByText("Color theme")).toHaveCount(0);
 
+    const menu = await openAccountMenu(page);
+    await expect(menu.getByText("Color theme")).toBeVisible();
+    for (const preference of ["System", "Light", "Dark"] as const) {
+      await expect(themeSegment(page, preference)).toBeVisible();
+    }
+    await closeAccountMenu(page);
+
+    // The settings card it used to live on is gone.
     await page.goto("/dashboard/settings");
-    await expect(themeGroup(page)).toHaveCount(1);
-    await expect(themeGroup(page).getByRole("radio")).toHaveCount(3);
+    await expect(page.getByRole("group", { name: "Color theme" })).toHaveCount(0);
   });
 
   test("defaults to system without a stored preference, and renders no hydration errors", async ({
@@ -94,9 +106,11 @@ test.describe("dashboard theme e2e", () => {
 
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.goto("/dashboard/settings");
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 
-    await expect(themeOption(page, "System")).toBeChecked();
+    await openAccountMenu(page);
+    await expect(themeSegment(page, "System")).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("html")).toHaveClass(/dark/);
     expect(reactRenderErrors).toEqual([]);
   });
@@ -104,12 +118,14 @@ test.describe("dashboard theme e2e", () => {
   test("persists an explicit choice across a reload", async ({ page }) => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
+    await page.goto("/dashboard");
     await setThemePreference(page, "Dark");
     await expect(page.locator("html")).toHaveClass(/dark/);
 
     await page.reload();
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await expect(themeOption(page, "Dark")).toBeChecked();
+    await openAccountMenu(page);
+    await expect(themeSegment(page, "Dark")).toHaveAttribute("aria-pressed", "true");
   });
 
   // The defect this whole change exists to fix: the old binary switch could only ever
@@ -119,6 +135,7 @@ test.describe("dashboard theme e2e", () => {
   }) => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
+    await page.goto("/dashboard");
     await setThemePreference(page, "Dark");
     await expect(page.locator("html")).toHaveClass(/dark/);
 
@@ -235,40 +252,45 @@ test.describe("dashboard theme e2e", () => {
   test("disables control transitions when reduced motion is requested", async ({ page }) => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
-    await page.goto("/dashboard/settings");
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 
-    // The radio itself is visually hidden; the styled label carries the transition.
     // Assert transition-property, not duration: `transition-none` clears the property
     // list but leaves the design system's --default-transition-duration in place, so a
     // duration assertion would pass or fail for reasons unrelated to reduced motion.
-    const styledLabel = themeOptionLabel(page, "Dark");
-    await expect(styledLabel).toBeVisible();
-    await expect(styledLabel).toHaveCSS("transition-property", "none");
+    await openAccountMenu(page);
+    const segment = themeSegment(page, "Dark");
+    await expect(segment).toBeVisible();
+    await expect(segment).toHaveCSS("transition-property", "none");
 
     // And prove the media query is what did it, rather than there being no transition at all.
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await expect(styledLabel).not.toHaveCSS("transition-property", "none");
+    await expect(segment).not.toHaveCSS("transition-property", "none");
   });
 
   test("lays the theme control out without overflow on a narrow viewport", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await clearThemePreferenceBeforeNavigation(page);
-    await page.goto("/dashboard/settings");
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 
-    const group = themeGroup(page);
-    await expect(group).toHaveCount(1);
+    // Below xl the account menu lives in the bottom bar's More sheet.
+    await page.getByRole("button", { name: "More" }).click();
+    await openAccountMenu(page);
 
-    // All three options stay on one row, inside the card, with no horizontal scroll.
-    const optionBoxes = await group.getByRole("radio").evaluateAll((radios) =>
-      radios.map((radio) => {
-        const label = radio.closest("label");
-        const box = (label ?? radio).getBoundingClientRect();
-        return { top: box.top, right: box.right, width: box.width };
-      })
-    );
-    expect(optionBoxes).toHaveLength(3);
-    for (const box of optionBoxes) {
-      expect(box.top).toBeCloseTo(optionBoxes[0].top, 0);
+    // All three segments stay on one row, inside the viewport, with no horizontal scroll.
+    const segmentBoxes = await page
+      .getByRole("menu")
+      .getByRole("button", { name: /^(System|Light|Dark)$/ })
+      .evaluateAll((segments) =>
+        segments.map((segment) => {
+          const box = segment.getBoundingClientRect();
+          return { top: box.top, right: box.right, width: box.width };
+        })
+      );
+    expect(segmentBoxes).toHaveLength(3);
+    for (const box of segmentBoxes) {
+      expect(box.top).toBeCloseTo(segmentBoxes[0].top, 0);
       expect(box.width).toBeGreaterThan(0);
       expect(box.right).toBeLessThanOrEqual(390);
     }

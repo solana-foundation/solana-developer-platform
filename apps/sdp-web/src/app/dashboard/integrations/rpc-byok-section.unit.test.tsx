@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import type { SafeRpcConnection } from "@sdp/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submitRpcConnectionAction = vi.fn();
@@ -215,15 +216,20 @@ describe("RpcByokSection", () => {
     expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
   });
 
-  it("still lets a stranded organization connection be deactivated", () => {
-    // The hold-to-confirm behaviour itself is covered by the button's own
-    // tests; what matters here is that the way out is still offered.
+  it("still lets a stranded organization connection be deactivated", async () => {
+    // The only way out of a row that cannot be rotated or checked. Gating this
+    // on "is live" instead of "is not already deactivated" strands it.
+    const user = userEvent.setup();
     renderSection({
       connections: [connection({ scope: "organization", projectId: null, isDefault: false })],
     });
 
-    expect(screen.getByRole("button", { name: /Deactivate/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Test key" })).toBeNull();
+
+    // One click, no confirmation: the design review asked for deactivate to be
+    // an ordinary control rather than a five second press-and-hold.
+    await user.click(screen.getByRole("button", { name: /Deactivate/ }));
+    expect(deactivateRpcConnectionAction).toHaveBeenCalledTimes(1);
   });
 
   it("offers delete on a deactivated connection and nothing that would error", async () => {
@@ -235,8 +241,110 @@ describe("RpcByokSection", () => {
     expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
     expect(screen.getByText(/stored key was destroyed/)).toBeTruthy();
 
+    // Delete asks before it acts now, so the row control opens the strip and
+    // the strip's own button is what actually deletes.
     await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(deleteRpcConnectionAction).not.toHaveBeenCalled();
+
+    // The confirming button names the connection. Two controls reading only
+    // "Delete" sit on the row while the strip is open, and the destructive one
+    // should not be the ambiguous one -- asking for it by the bare word here
+    // would match the opener instead.
+    const confirmation = screen.getByRole("alert");
+    await user.click(within(confirmation).getByRole("button", { name: "Delete Production key" }));
     expect(deleteRpcConnectionAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps what was typed when adding a connection is refused", async () => {
+    // Same reason the rotate form stays open on a refusal: the field holds a
+    // secret the reader pasted once. Clearing it on failure makes them go and
+    // find it again to retry.
+    const user = userEvent.setup();
+    submitRpcConnectionAction.mockResolvedValue({
+      status: "error",
+      message: "Provider rejected the key.",
+    });
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
+    await user.type(screen.getByLabelText(/API key/i), "tenant-key-9999");
+    await user.click(screen.getByRole("button", { name: "Save connection" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Provider rejected the key.", expect.anything());
+    const name = screen.getByRole("textbox", { name: /Connection name/i }) as HTMLInputElement;
+    expect(name.value).toBe("Prod");
+  });
+
+  it("keeps the rotate form open when the replacement key is refused", async () => {
+    // Rotation only closes on success, because the field holds the key the
+    // reader just typed. Closing on a refusal would throw it away and leave
+    // them to find it again.
+    const user = userEvent.setup();
+    rotateRpcConnectionAction.mockResolvedValue({
+      status: "error",
+      message: "Provider rejected the key.",
+    });
+    renderSection({ connections: [connection()] });
+
+    await user.click(screen.getByRole("button", { name: "Rotate key" }));
+    await user.type(screen.getByLabelText(/New API key/i), "replacement-key-1234");
+    // Exactly "Rotate": the row's own control reads "Rotate key".
+    await user.click(screen.getByRole("button", { name: "Rotate" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Provider rejected the key.", expect.anything());
+    expect(screen.getByLabelText(/New API key/i)).toBeTruthy();
+  });
+
+  it("surfaces why a refused delete did not happen", async () => {
+    // The row cannot tell the difference between a delete that did nothing and
+    // one that was refused, so the server's reason has to reach the reader
+    // rather than the strip just closing as though it worked.
+    const user = userEvent.setup();
+    deleteRpcConnectionAction.mockResolvedValue({
+      status: "error",
+      message: "Connection is still serving traffic.",
+    });
+    renderSection({
+      connections: [connection({ status: "deactivated", isDefault: false })],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = screen.getByRole("alert");
+    await user.click(within(confirmation).getByRole("button", { name: "Delete Production key" }));
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Connection is still serving traffic.",
+      expect.anything()
+    );
+  });
+
+  it("backs out of a delete without touching the connection", async () => {
+    const user = userEvent.setup();
+    renderSection({
+      connections: [connection({ status: "deactivated", isDefault: false })],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = screen.getByRole("alert");
+    await user.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+
+    expect(deleteRpcConnectionAction).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers deactivate or delete on a row, never both", () => {
+    renderSection({
+      connections: [
+        connection(),
+        connection({ id: "rconn_2", status: "deactivated", isDefault: false }),
+      ],
+    });
+
+    // A live row can be withdrawn but not removed; a withdrawn one is the
+    // other way round. Showing both would offer an action that always errors.
+    expect(screen.getAllByRole("button", { name: /Deactivate/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
   });
 
   it("asks for the replacement key instead of making people re-add", async () => {

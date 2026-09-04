@@ -18,7 +18,7 @@ Complete the [ramp intake](https://solanafoundation.typeform.com/to/sxTGbwXt) an
 
 ## Sequence
 
-Do them in this order. For unsupported directions, skip business-flow implementation but still satisfy the required `RampProvider` methods with empty rail/entity support and explicit typed rejection; only `createOnrampQuote` is optional today.
+Do them in this order. For unsupported directions, skip business-flow implementation but still satisfy the required `RampProvider` methods with empty rail/entity support and explicit typed rejection; only `createOnrampQuote` and `listExternalAccountDetails` are optional today.
 
 1. **register-provider** — add the id, package client, API schemas/dispatch, availability, setup registry, mode-keyed config, webhook registration decision, and dashboard catalog. Make the skeleton compile.
 2. **rail-discovery** — declare which fiat/crypto rails you support.
@@ -29,12 +29,25 @@ Do them in this order. For unsupported directions, skip business-flow implementa
 
 Adding the id breaks exhaustive registries and switches. Fix those failures without adding fallbacks, then follow `register-provider` for the non-exhaustive schemas, public quote types, translations, and UI catalogs the compiler cannot discover from the new union member alone.
 
+## Everything is discriminated on events
+
+Every provider-facing surface is a closed union keyed by provider id + event kind; integrating a provider means declaring exactly which events it emits and accepts in each family:
+
+1. **Requirement statuses** — `CounterpartyRequirements` arms per `(provider, status)` (`counterparty-requirements`).
+2. **Advance submissions** — `submitCounterpartyRequirementsSchema` arms, `collectedData` = the only PII channel (`counterparty-requirements`).
+3. **Webhook events** — `RampSettlementEvent` kinds, plus provider-specific provisioning events that auto-advance requirements (`integrate-webhook`).
+4. **Client session events** — `POST /v1/payments/ramps/<id>/events` kinds for `session_widget` providers.
+
+Provider-side state is `counterparty_provider_accounts` rows discriminated by `kind` (`customer_link`, `payout_account`, `funding_wallet`, `merchant_wallet`). **`counterparties.provider_data` is deprecated** — never add a provider key to it; PII flows only through advance-submission `collectedData`, JIT to the provider, never persisted.
+
 ## Reference selection
 
-- `lightspark`: manual instructions plus customer/payout provisioning.
-- `moonpay`: hosted quote with no provider-side counterparty provisioning.
-- `stripe` or `moneygram`: session-widget quote.
-- `bvnk` or `mural`: multi-step onboarding and provider-specific API-side state.
+Pick the existing provider closest to yours by archetype — all live under `packages/sdp-payments/src/ramps/providers/`:
+
+- manual instructions plus customer/payout provisioning;
+- hosted quote with no provider-side counterparty provisioning;
+- session-widget quote;
+- multi-step onboarding and provider-specific API-side state.
 
 ## Rules that aren't optional (shared by every step)
 

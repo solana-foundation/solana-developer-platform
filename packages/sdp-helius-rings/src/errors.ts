@@ -9,7 +9,9 @@ export type HeliusRingsErrorCode =
   | "not_found"
   | "conflict"
   | "gateway_unavailable"
-  | "config_error";
+  | "config_error"
+  | "insufficient_balance"
+  | "manual_reconciliation_required";
 
 export class HeliusRingsError extends Error {
   readonly code: HeliusRingsErrorCode;

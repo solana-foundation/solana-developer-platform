@@ -2,8 +2,9 @@
 
 import { toNumberAmount } from "@sdp/solana/amount";
 import type { MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
+import { address } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -12,6 +13,10 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
+import {
+  isTrustedRampDestination,
+  MONEYGRAM_WIDGET_APPROVED_HOSTS,
+} from "@/lib/trusted-ramp-destinations";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
@@ -187,6 +192,12 @@ export function MoneygramRampWidget({
       return;
     }
     const { sessionId, sessionToken, widgetUrl } = quote;
+    // The widget URL becomes the SDK's API base, so only HTTPS MoneyGram
+    // widget hosts may ever be mounted — anything else fails closed.
+    if (!isTrustedRampDestination(widgetUrl, MONEYGRAM_WIDGET_APPROVED_HOSTS)) {
+      setLoadError(t("DashboardPayments.ramps.untrustedProviderUrl"));
+      return;
+    }
     const mountPoint = document.createElement("div");
     mountPoint.className = "h-full w-full";
     container.appendChild(mountPoint);
@@ -240,9 +251,9 @@ export function MoneygramRampWidget({
             }
             const transfer = await createTransfer(
               {
-                source: sourceWalletId,
+                sourceCustodyWalletId: sourceWalletId,
                 destination: tx.to,
-                token: sourceTokenMint,
+                token: address(sourceTokenMint),
                 amount: tx.amount,
                 ...(tx.memo ? { memo: tx.memo } : {}),
               },

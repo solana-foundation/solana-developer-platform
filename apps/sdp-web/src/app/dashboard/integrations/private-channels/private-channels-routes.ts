@@ -12,5 +12,20 @@
 export const PRIVATE_CHANNELS_INTEGRATION_PATH = "/dashboard/integrations/private-channels";
 export const PRIVATE_CHANNELS_SETUP_PATH = `${PRIVATE_CHANNELS_INTEGRATION_PATH}/setup`;
 export const PRIVATE_CHANNELS_OVERVIEW_PATH = "/dashboard/integrations/private-channels/overview";
-export const PRIVATE_CHANNELS_CHANNELS_PATH = "/dashboard/integrations/private-channels/channels";
-export const PRIVATE_CHANNELS_WALLETS_PATH = "/dashboard/integrations/private-channels/wallets";
+
+/** An active Private Channels connection is a persisted, project-scoped instance. */
+export function privateChannelsInstancePath(instanceId: string): string {
+  return `${PRIVATE_CHANNELS_INTEGRATION_PATH}/${encodeURIComponent(instanceId)}`;
+}
+
+export function privateChannelsSetupPath(instanceId: string): string {
+  return `${privateChannelsInstancePath(instanceId)}/setup`;
+}
+
+export function privateChannelCreatePath(instanceId: string): string {
+  return `${privateChannelsInstancePath(instanceId)}/channels/new`;
+}
+
+export function privateChannelPath(instanceId: string, channelId: string): string {
+  return `${privateChannelsInstancePath(instanceId)}/channels/${encodeURIComponent(channelId)}`;
+}

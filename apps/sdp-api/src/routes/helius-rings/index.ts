@@ -5,6 +5,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  createRingsProjectRing,
   createRingsWallet,
   createRingsZone,
   executeRingsOperation,
@@ -13,19 +14,18 @@ import {
   getRingsWallet,
   getRingsWalletIdentity,
   listRingsOperations,
+  listRingsProjectRings,
   listRingsWallets,
   listRingsZones,
   prepareRingsOperation,
+  recheckRingsOperation,
   retryRingsOperation,
   syncRingsWallet,
+  voidRingsOperation,
 } from "./handlers";
 
 const heliusRings = new Hono<{ Bindings: Env }>();
 
-/**
- * Router-wide gate: 403 unless the feature flag is on. The devnet-only guard in
- * HeliusRingsService is the second lock.
- */
 async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isHeliusRingsEnabled(c.env)) {
     throw new AppError("FORBIDDEN", "Helius Rings is not enabled for this environment.");
@@ -39,13 +39,15 @@ heliusRings.use("*", projectContextMiddleware());
 
 heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
 
+heliusRings.get("/rings", requirePermissions("payments:read"), listRingsProjectRings);
+// Recording a ring runs bring-up (signed transactions through custody), so it
+// carries write.
+heliusRings.post("/rings", requirePermissions("payments:write"), createRingsProjectRing);
+
 heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallets);
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);
 heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRingsWallet);
-// A sync reads Photon but advances the wallet's recorded observation point, so
-// it carries write.
 heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
-// Records nothing, so unlike /sync it does not earn write.
 heliusRings.get(
   "/wallets/:walletId/identity",
   requirePermissions("payments:read"),
@@ -66,6 +68,18 @@ heliusRings.post(
   "/operations/:operationId/retry",
   requirePermissions("payments:write"),
   retryRingsOperation
+);
+// Write, not read: a recheck only observes the indexer, but a hit completes the
+// operation and advances the wallet's indexed slot.
+heliusRings.post(
+  "/operations/:operationId/recheck",
+  requirePermissions("payments:write"),
+  recheckRingsOperation
+);
+heliusRings.post(
+  "/operations/:operationId/void",
+  requirePermissions("payments:write"),
+  voidRingsOperation
 );
 
 export default heliusRings;

@@ -52,6 +52,7 @@ const providedEnv: Env = {
   REDIS_URL: workerRedisUrl(baseRedisUrl, workerId),
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
   CREDENTIAL_FINGERPRINT_PEPPER: "test-credential-fingerprint-pepper-for-unit-tests",
+  SPC_CREDENTIAL_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",
