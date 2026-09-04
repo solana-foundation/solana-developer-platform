@@ -302,20 +302,26 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       })
     ).toMatchObject({ id: counterparty.id });
 
+    // A second counterparty claiming the same reference is refused at write
+    // time by the 0080 unique index — the ambiguity the lookup used to fail
+    // closed on can no longer be created, and the original owner keeps
+    // resolving.
     const duplicateCounterparty = await seedCounterparty("cpacc_kind_filter_duplicate");
-    await repository.upsertProviderAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: duplicateCounterparty.id,
-      provider: "bvnk",
-      providerCustomerReference: "bvnk_customer_kind_filter",
-    });
+    await expect(
+      repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: duplicateCounterparty.id,
+        provider: "bvnk",
+        providerCustomerReference: "bvnk_customer_kind_filter",
+      })
+    ).rejects.toMatchObject({ code: "23505" });
     expect(
       await counterparties.findActiveCounterpartyByProviderCustomerReference({
         provider: "bvnk",
         providerCustomerReference: "bvnk_customer_kind_filter",
       })
-    ).toBeNull();
+    ).toMatchObject({ id: counterparty.id });
   });
 
   it("scopes external account lookup to the parent counterparty", async () => {
