@@ -5963,6 +5963,7 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
 | `GET` | `/v1/earn/strategies` | List yield strategies |
 | `GET` | `/v1/earn/strategies/{strategyId}` | Get one yield strategy |
+| `POST` | `/v1/earn/vault-deposit-previews` | Preview a direct vault deposit |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.
