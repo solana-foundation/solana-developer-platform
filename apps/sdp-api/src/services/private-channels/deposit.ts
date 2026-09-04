@@ -33,6 +33,7 @@ import {
   address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getSignatureFromTransaction,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -111,6 +112,13 @@ async function broadcastDeposit(
     recipient: Address;
     amountBaseUnits: bigint;
     projectRpc: PrivateChannelProjectRpcClient;
+    /**
+     * Called with the transaction's signature after signing and before the
+     * send, so the outcome of a request that dies mid-send stays resolvable:
+     * a persisted signature is what lets the reconciler ask the chain what
+     * happened instead of failing the row as never-broadcast.
+     */
+    onSigned: (signature: Signature) => Promise<void>;
   }
 ): Promise<Signature> {
   const signer = await solanaServices.createOrgSigner(
@@ -151,6 +159,7 @@ async function broadcastDeposit(
 
   // The custody wallet is the only signer (payer + user); fully sign and broadcast.
   const signed = await signTransactionMessageWithSigners(message);
+  await input.onSigned(getSignatureFromTransaction(signed));
   const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
   return solanaRpc.sendTransaction(input.projectRpc.rpc, signedBytes);
 }
@@ -292,6 +301,21 @@ export async function createChannelDeposit(
       recipient: address(recipient),
       amountBaseUnits,
       projectRpc: input.projectRpc,
+      // The reservation is still exclusively this request's (the CAS holds it),
+      // so record the signature on it before the bytes go out. If the write
+      // fails the send is aborted: better an unbroadcast failed deposit than an
+      // executed escrow transfer whose signature exists nowhere.
+      onSigned: async (signedAs) => {
+        const recorded = await repo.updateDeposit({
+          id: created.id,
+          status: "pending",
+          signature: signedAs,
+          expectedStatus: "pending",
+        });
+        if (!recorded) {
+          throw new AppError("CONFLICT", "Deposit reservation is no longer pending.");
+        }
+      },
     });
   } catch (error) {
     const failureReason = describeTxError(error, "Deposit submission failed.");
