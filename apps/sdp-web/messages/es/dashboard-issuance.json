@@ -527,7 +527,6 @@
       "noControlledWalletsAvailable": "No hay Wallets controladas disponibles para firmar esta acción.",
       "noSignerConfigured": "No hay ningún firmante configurado para esta acción.",
       "requiredSignerNotControlled": "El firmante requerido no es una de tus Wallets controladas.",
-      "requiredSignerAmbiguous": "Más de una Wallet controlada coincide con el firmante requerido. Resuelve el conflicto de Wallets antes de volver a intentarlo.",
       "mintAuthorityNotControlled": "Mint Authority no es una de tus Wallets controladas.",
       "permanentDelegateNotControlled": "Permanent Delegate Authority no es una de tus Wallets controladas.",
       "authority": "autoridad",

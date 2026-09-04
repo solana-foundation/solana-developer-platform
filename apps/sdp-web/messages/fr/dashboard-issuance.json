@@ -521,7 +521,6 @@
       "noControlledWalletsAvailable": "Aucun Wallet contrôlé ne peut signer cette action.",
       "noSignerConfigured": "Aucun Signer n'est configuré pour cette action.",
       "requiredSignerNotControlled": "Le Signer requis ne fait pas partie de vos Wallets contrôlés.",
-      "requiredSignerAmbiguous": "Plusieurs Wallets contrôlés correspondent au Signer requis. Résolvez le conflit de Wallets avant de réessayer.",
       "mintAuthorityNotControlled": "L'autorité Mint ne fait pas partie de vos Wallets contrôlés.",
       "permanentDelegateNotControlled": "L'autorité Permanent Delegate ne fait pas partie de vos Wallets contrôlés.",
       "authority": "autorité",
