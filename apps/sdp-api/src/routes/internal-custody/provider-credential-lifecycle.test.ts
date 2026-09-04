@@ -380,6 +380,74 @@ describe("provider credential lifecycle", () => {
     ]);
   });
 
+  it("fails closed when credential references change during provider validation", async () => {
+    const projectCId = "prj_provider_credential_lifecycle_c";
+    const connectionCId = "cconn_provider_credential_lifecycle_c";
+    await seedProject(projectCId, "c");
+
+    let markProviderCheckStarted: () => void = () => undefined;
+    let releaseProviderCheck: () => void = () => undefined;
+    const providerCheckStarted = new Promise<void>((resolve) => {
+      markProviderCheckStarted = resolve;
+    });
+    const providerCheckReleased = new Promise<void>((resolve) => {
+      releaseProviderCheck = resolve;
+    });
+    const providerFetch = vi.fn().mockImplementation(async () => {
+      markProviderCheckStarted();
+      await providerCheckReleased;
+      return Response.json({ data: [] });
+    });
+    vi.stubGlobal("fetch", providerFetch);
+
+    const rotation = lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-reference-race",
+      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+    });
+    await providerCheckStarted;
+    try {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_connections (
+             id, organization_id, project_id, provider, scope, provider_credential_id,
+             provider_credential_scope_key, provider_account_fingerprint, status, created_by
+           ) VALUES (?, ?, ?, 'privy', 'project', ?, '__organization__', ?, 'pending', ?)`
+        )
+        .bind(
+          connectionCId,
+          ORGANIZATION_ID,
+          projectCId,
+          CREDENTIAL_ID,
+          await getPrivyProviderAccountFingerprint(APP_ID),
+          USER_ID
+        )
+        .run();
+    } finally {
+      releaseProviderCheck();
+    }
+
+    expect((await rotation).status).toBe(409);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(
+      await getDb(env).queryMany<{ id: string; status: string }>(
+        "SELECT id, status FROM provider_credentials ORDER BY credential_version, id"
+      )
+    ).toEqual([
+      { id: CREDENTIAL_ID, status: "active" },
+      expect.objectContaining({ status: "pending" }),
+    ]);
+    expect(
+      await getDb(env).queryMany<{ provider_credential_id: string }>(
+        "SELECT provider_credential_id FROM custody_connections ORDER BY id"
+      )
+    ).toEqual([
+      { provider_credential_id: CREDENTIAL_ID },
+      { provider_credential_id: CREDENTIAL_ID },
+      { provider_credential_id: CREDENTIAL_ID },
+    ]);
+  });
+
   it("rejects only the candidate when Privy rejects the new credentials", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
 
