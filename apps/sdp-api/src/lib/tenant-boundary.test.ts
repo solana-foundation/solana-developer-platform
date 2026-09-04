@@ -73,6 +73,9 @@ describe("tenant data-access boundary", () => {
       "job.ts",
       "middleware/auth.ts",
       "middleware/clerk-auth.ts",
+      // Pre-link Clerk surface: resolves the Clerk-org mapping before any
+      // tenant exists, then narrows the request to the mapped organization.
+      "middleware/clerk-onboarding.ts",
       "middleware/session-auth.ts",
       "middleware/database-identity.ts",
       // The audit ledger's hash chain spans every organization by design; its
