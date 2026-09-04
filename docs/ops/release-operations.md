@@ -7,7 +7,7 @@ Last verified against the workflows on `main` at `15f49df1` (2026-09-04). When a
 ## If you are approving a release pull request
 
 1. **Approval is the release decision.** Auto-merge is armed. When the required approvals and checks are green, the pull request merges on its own and production deploys within about a minute. There is no later confirmation step.
-2. **It needs two approvals**, and the approver cannot be the last person who pushed to the branch. The release commits are authored by the release app, which the branch ruleset treats as unattributed changes.
+2. **It needs two approvals**: the release manager's and the designated second approver's. The release commits are authored by the release app, which the branch ruleset treats as unattributed changes, and the approver cannot be the last person who pushed to the branch.
 3. **Every merge to `main` dismisses the approvals.** The pull request is recreated on each push, so approve when no other merge is about to land.
 4. **Read the body before approving.** It lists every commit in the release. Look for migrations, runtime configuration changes, and anything that must happen outside the repository on release day.
 5. **Then watch the `Release Flow` run** until the production job finishes, and verify with the checklist in [Verify production](#5-verify-production). The release exists from the first job; production is only live after the last.
@@ -47,12 +47,12 @@ A continuous production deployment path exists in [`deploy.yml`](../../.github/w
 | Decision | Who | Enforced by |
 | --- | --- | --- |
 | A change joins the next release | The pull request author and reviewer, by merging to `main` | The release pull request is regenerated from `main` on every push |
-| The release ships | The release manager, by approving the release pull request, with a second maintainer's approval | Branch ruleset: one approval, re-approval after the last push, an extra approval for unattributed changes, auto-merge armed by the release app |
-| A deploy or release workflow changes | The workflow owners in `CODEOWNERS` (`.github/` and `scripts/`) | Code-owner review on those paths |
+| The release ships | The release manager, by approving the release pull request, together with the designated second approver | Branch ruleset: one approval, re-approval after the last push, an extra approval for unattributed changes, auto-merge armed by the release app |
+| A deploy or release workflow changes | The workflow owners in `CODEOWNERS` (`.github/` and `scripts/`) | `CODEOWNERS` requests their review on every change to those paths |
 | The branch rules change | The security owner, applied by an organization administrator | [Branch controls](./branch-controls.md) |
 | A feature becomes visible to users | A separate flag decision, made outside this runbook | Deploys are dark: new behaviour ships behind flags and stays off until it is turned on deliberately |
 
-If the release manager is unavailable, any two maintainers can approve. This page and the release pull request body are the whole procedure.
+The second approval is deliberate, not a formality: the designated second approver reviews every release alongside the release manager, so accountability for what ships sits with two people. This page and the release pull request body are the whole procedure.
 
 ## What the pipeline guarantees
 
@@ -125,7 +125,7 @@ Every run posts or updates one comment, so a missing comment means the job never
 Three consequences of the branch ruleset (see [Branch controls](./branch-controls.md)) shape how to approve:
 
 - Every push to `main` dismisses the approvals on the release pull request. Approve when nothing else is about to land, or agree a short pause on merging to `main` first.
-- The ruleset requires an extra approval for unattributed changes, and the release commits are authored by the release app. Plan for two approving reviews, and the approver cannot be the last person who pushed to the branch.
+- The ruleset requires an extra approval for unattributed changes, and the release commits are authored by the release app. The two approvals are the release manager's and the designated second approver's, in that order, and neither can be the last person who pushed to the branch.
 - Auto-merge is armed by the release app and re-armed whenever the version in the headline drifts. Once the required approvals and checks are green the pull request merges on its own and the production deployment starts within a minute. Approval on the release pull request is the release decision.
 
 ### 4. Watch the release
@@ -269,7 +269,7 @@ Then:
 1. **Failed before `Promote service and cron with rollback`.** Production is still serving the previous revision. If migrations ran, the schema is ahead of the serving code; check that the previous release tolerates it (see the schema rules above) and fix forward.
 2. **Failed during or after promote.** The `Roll back incomplete rollout` step restored the previous traffic split, cron image, and worker image. Confirm all three with `/health/ready` and the Cloud Run console. If that step itself failed, production may be split between revisions: treat it as an incident and reconcile the service, cron job, and worker by hand.
 3. **Canary failed.** Traffic is on the new revision and was not rolled back automatically, because the canary runs after promotion completes. Decide between a fix forward and [Roll back production](#roll-back-production).
-4. Whatever the cause, the GitHub release and tag already exist. Do not delete them; the next release supersedes them.
+4. Whatever the cause, the GitHub release and tag already exist. Leave them: the release planner treats a published version as done and moves on to the next one, and deleting the GitHub release would make it try to publish that version again on the next push to `main`.
 
 ### The stage smoke is red before a release
 
@@ -278,7 +278,7 @@ The release job gates on it and cannot skip it. Fix the cause, or if the failure
 ### The release pull request will not merge
 
 - **Approvals keep disappearing.** Every push to `main` recreates the pull request and dismisses its approvals. Approve when no other merge is imminent, or agree a short pause on merging to `main`.
-- **One approval is not enough.** The ruleset requires an extra approval for unattributed changes, and the release commit is authored by the release app. A second approving review from someone other than the last pusher is needed.
+- **One approval is not enough.** The ruleset requires an extra approval for unattributed changes, and the release commit is authored by the release app. The designated second approver's review is needed, and neither approver can be the last pusher.
 - **`publish-release` refused the commit** with `Release commit version X does not match package.json Y`. The squash headline the pull request merged with named an older version than it contained. The release app now re-arms auto-merge when the headline drifts, so this should not recur; if it does, no tag was created and nothing deployed. Land a correctly titled `chore(main): release Y` commit through a new pull request.
 
 ### The release image never appears in GHCR, or cosign verification fails
