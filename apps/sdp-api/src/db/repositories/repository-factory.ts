@@ -70,6 +70,10 @@ import type { TokenRepository } from "./token.repository";
 import { createPostgresTokenRepository } from "./token.repository.postgres";
 import type { WalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository";
 import { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
+import type { WebhookDeliveriesRepository } from "./webhook-delivery.repository";
+import { createPostgresWebhookDeliveriesRepository } from "./webhook-delivery.repository.postgres";
+import type { WebhookEndpointsRepository } from "./webhook-endpoint.repository";
+import { createPostgresWebhookEndpointsRepository } from "./webhook-endpoint.repository.postgres";
 import type { WorkflowExecutionsRepository } from "./workflow-execution.repository";
 import { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
 import type { WorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository";
@@ -236,6 +240,14 @@ export function createWorkflowSecretRetirementsRepository(
 
 export function createNotificationsRepository(env: Env): NotificationsRepository {
   return createPostgresNotificationsRepository(getDb(env));
+}
+
+export function createWebhookEndpointsRepository(env: Env): WebhookEndpointsRepository {
+  return createPostgresWebhookEndpointsRepository(getDb(env));
+}
+
+export function createWebhookDeliveriesRepository(env: Env): WebhookDeliveriesRepository {
+  return createPostgresWebhookDeliveriesRepository(getDb(env));
 }
 
 export function createEarnRepository(env: Env): EarnRepository {

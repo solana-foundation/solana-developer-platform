@@ -12,6 +12,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
+import { webhooksOriginHref, webhooksOriginTokenId } from "@/lib/webhooks-origin";
 
 type DashboardPageConfig = {
   title: string;
@@ -483,7 +484,8 @@ function getWalletRoutePageConfig(
 
 function getAccessControlPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  webhooksFrom?: string | null
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/api-keys") {
     return {
@@ -528,6 +530,31 @@ function getAccessControlPageConfig(
         href: "/dashboard/approvals",
         label: t("Shared.dashboardShell.backToApprovals"),
       },
+    };
+  }
+  if (pathname.startsWith("/dashboard/issuance/webhooks")) {
+    // The section is not in the sidebar, so both routes carry a way back. The list's
+    // target depends on which asset opened it (`?from=`); without one, the issuance list
+    // is the only destination we can name.
+    const origin = webhooksOriginTokenId(webhooksFrom);
+    return {
+      title: t("Shared.dashboardShell.webhooks"),
+      contentWidthClass: "max-w-none",
+      backAction:
+        pathname === "/dashboard/issuance/webhooks"
+          ? origin
+            ? {
+                href: webhooksOriginHref(origin),
+                label: t("Shared.dashboardShell.backToWorkflows"),
+              }
+            : {
+                href: "/dashboard/issuance",
+                label: t("Shared.dashboardShell.backToIssuance"),
+              }
+          : {
+              href: "/dashboard/issuance/webhooks",
+              label: t("Shared.dashboardShell.backToWebhooks"),
+            },
     };
   }
 
@@ -671,9 +698,12 @@ export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  // `?from=` on the webhooks list: the asset whose Workflows tab opened it. Optional so
+  // existing callers (and their tests) keep working.
+  webhooksFrom?: string | null
 ): DashboardPageConfig {
-  const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
+  const accessControlPageConfig = getAccessControlPageConfig(pathname, t, webhooksFrom);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
     // Home names itself: the sidebar marks it active and the page opens on a

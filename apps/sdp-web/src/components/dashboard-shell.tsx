@@ -3,7 +3,7 @@
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -23,6 +23,10 @@ import {
   IssuanceDetailSkeleton,
   IssuancePageSkeleton,
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
+import {
+  WebhookEndpointDetailSkeleton,
+  WebhookEndpointsListSkeleton,
+} from "@/app/dashboard/issuance/webhooks/webhook-page-skeletons";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
   EarnIntegrationGuideSkeleton,
@@ -199,6 +203,10 @@ function resolvePageLoadingComponent(
       return ApprovalInboxSkeleton;
     case "approval-detail":
       return ApprovalDetailSkeleton;
+    case "webhooks-list":
+      return WebhookEndpointsListSkeleton;
+    case "webhook-detail":
+      return WebhookEndpointDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
     case "allowlist":
@@ -504,6 +512,7 @@ function usesWorkspaceViewport(pathname: string): boolean {
     isWalletSetupRoute ||
     pathname === "/dashboard/onboarding" ||
     pathname.startsWith("/dashboard/integrations/private-channels") ||
+    pathname.startsWith("/dashboard/issuance/webhooks") ||
     pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute
   );
@@ -530,6 +539,7 @@ export function DashboardShell({
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
@@ -555,7 +565,9 @@ export function DashboardShell({
     pathname,
     t,
     assetProfilesEnabled,
-    privateChannelsEnabled
+    privateChannelsEnabled,
+    // The webhooks list's back action depends on the asset that opened it.
+    searchParams.get("from")
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,

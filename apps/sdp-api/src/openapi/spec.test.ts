@@ -362,6 +362,7 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
+      "Webhook Endpoints",
       "Earn",
     ]);
 
