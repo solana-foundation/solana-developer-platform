@@ -84,6 +84,12 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/types"],
   },
   {
+    name: "@sdp/dvp",
+    directory: "packages/sdp-dvp",
+    purpose: "Generated @solana/kit client for the DvP atomic swap program.",
+    allowedDependencies: [],
+  },
+  {
     name: "@sdp/earn",
     directory: "packages/sdp-earn",
     purpose: "Earn domain services, yield strategies, and vault-infra providers.",
