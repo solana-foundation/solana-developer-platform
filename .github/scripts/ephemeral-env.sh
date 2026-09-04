@@ -24,9 +24,49 @@ api_service="sdp-dev-api-pr-${pr}"
 worker_service="sdp-dev-worker-pr-${pr}"
 db_job="sdp-dev-api-pr-${pr}-db"
 db_name="sdp_api_pr_${pr}"
-redis_db=$(((pr % 15) + 1))
 
 run() { gcloud run "$@" --project "${PROJECT}" --region "${REGION}"; }
+
+list_redis_claims() { # prints "<pr> <db>" for every labeled job and service
+  local kind
+  for kind in jobs services; do
+    run "${kind}" list --filter 'metadata.labels.sdp-ephemeral-redis-db:*' \
+      --format 'value(metadata.labels.sdp-ephemeral-pr,metadata.labels.sdp-ephemeral-redis-db)'
+  done
+}
+
+# On a same-second race two PRs could pick the same slot; the offset scan makes
+# that need pr1 ≡ pr2 (mod 15), and verify_redis_claim (lower PR wins) turns the
+# residue into a loud failure whose rerun converges on a free slot.
+redis_db_taken() { # <claims> <db> — taken by a PR that outranks us?
+  awk -v pr="${pr}" -v db="$2" '$2 == db && $1 != pr && $1 < pr { found = 1 } END { exit !found }' <<<"$1"
+}
+
+allocate_redis_db() {
+  local claims own db i
+  claims="$(list_redis_claims)"
+  own="$(run jobs describe "${db_job}" \
+    --format 'value(metadata.labels.sdp-ephemeral-redis-db)' 2>/dev/null || true)"
+  if [[ -n "${own}" ]] && ! redis_db_taken "${claims}" "${own}"; then
+    echo "${own}"; return
+  fi
+  for i in $(seq 0 14); do
+    db=$(((pr + i) % 15 + 1))
+    if ! awk -v db="${db}" '$2 == db { found = 1 } END { exit !found }' <<<"${claims}"; then
+      echo "${db}"; return
+    fi
+  done
+  echo "all 15 redis logical dbs are claimed by live ephemeral environments; tear one down first" >&2
+  return 1
+}
+
+verify_redis_claim() { # after claiming: fail if a lower-numbered PR holds our db
+  local db="$1"
+  if redis_db_taken "$(list_redis_claims)" "${db}"; then
+    echo "redis db ${db} is claimed by an older ephemeral environment; rerun the deploy to pick a new slot" >&2
+    return 1
+  fi
+}
 
 yaml_to_json() {
   python3 -c 'import yaml, json, sys; json.dump(yaml.safe_load(sys.stdin), sys.stdout)'
@@ -45,6 +85,8 @@ deploy() {
   local image="${1:?image is required}"
   local tmp; tmp="$(mktemp -d)"
 
+  redis_db="$(allocate_redis_db)"
+
   export_json services "${BASE_API_SERVICE}" >"${tmp}/api.json"
 
   # Per-PR database job: the migrate-job clone re-pointed at the bundled
@@ -52,10 +94,12 @@ deploy() {
   # the job can flush the PR's redis db.
   export_json jobs "${BASE_MIGRATE_JOB}" | jq \
     --arg name "${db_job}" --arg pr "${pr}" --arg image "${image}" \
+    --arg redisdb "${redis_db}" \
     --argjson extra "$(ephemeral_env_json)" \
     --argjson redis "$(jq '[.spec.template.spec.containers[0].env[] | select(.name == "REDIS_URL")]' "${tmp}/api.json")" \
     '.metadata.name = $name
      | .metadata.labels["sdp-ephemeral-pr"] = $pr
+     | .metadata.labels["sdp-ephemeral-redis-db"] = $redisdb
      | .spec.template.spec.template.spec.containers[0].image = $image
      | .spec.template.spec.template.spec.containers[0].command = ["node", "ephemeral-db.js"]
      | .spec.template.spec.template.spec.containers[0].args = ["ensure"]
@@ -63,12 +107,15 @@ deploy() {
          ((.spec.template.spec.template.spec.containers[0].env // []) + $redis + $extra)
     ' >"${tmp}/${db_job}.json"
   run jobs replace "${tmp}/${db_job}.json" >/dev/null
+  verify_redis_claim "${redis_db}"
   run jobs execute "${db_job}" --wait
 
   jq --arg name "${api_service}" --arg pr "${pr}" --arg image "${image}" \
+    --arg redisdb "${redis_db}" \
     --argjson extra "$(ephemeral_env_json)" \
     '.metadata.name = $name
      | .metadata.labels["sdp-ephemeral-pr"] = $pr
+     | .metadata.labels["sdp-ephemeral-redis-db"] = $redisdb
      | .metadata.annotations["run.googleapis.com/ingress"] = "all"
      | del(.spec.traffic, .spec.template.metadata.name, .status)
      | .spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] = "0"
