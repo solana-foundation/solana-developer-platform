@@ -63,6 +63,11 @@
       "types": "./src/providers/kamino/client.ts",
       "import": "./src/providers/kamino/client.ts",
       "default": "./src/providers/kamino/client.ts"
+    },
+    "./providers/jupiter_lend/client": {
+      "types": "./src/providers/jupiter-lend/client.ts",
+      "import": "./src/providers/jupiter-lend/client.ts",
+      "default": "./src/providers/jupiter-lend/client.ts"
     }
   },
   "scripts": {

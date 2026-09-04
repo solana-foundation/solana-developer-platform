@@ -393,7 +393,7 @@ surface renders that reason:
 | `available` | this org can open this position, here, now |
 | `cluster_unavailable` | the instrument lives on another cluster (`fundable: false`) — checked FIRST, and the badge names the row's `hostCluster` ("Mainnet only") instead of collapsing into a bare "Unavailable" (PRO-1742) |
 | `strategy_unavailable` | inactive / not a `vault_direct` provider / provider not surfaced |
-| `environment_unavailable` | the environment has no vault-direct deposits (`isVaultDirectDepositEnabled`) |
+| `environment_unavailable` | that provider has no deposit deployment in the environment (`isVaultDirectDepositEnabled`) |
 | `access_unavailable` | provider access could not be resolved — **fails closed** |
 | `provider_unavailable` | resolved, but this org's provider entry is not enabled |
 

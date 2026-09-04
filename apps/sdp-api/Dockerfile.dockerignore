@@ -31,6 +31,7 @@ packages/*
 !packages/sdp-spc-escrow
 !packages/sdp-spc-withdraw
 !packages/sdp-kamino
+!packages/sdp-jupiter-lend
 !packages/bigint-buffer
 !packages/sdp-veda
 docs

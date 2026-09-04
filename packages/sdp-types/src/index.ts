@@ -11,6 +11,7 @@ export * from "./countries";
 export * from "./custody";
 export * from "./earn";
 export * from "./generated/ramp.generated";
+export * from "./jupiter-lend-programs";
 export * from "./kamino-programs";
 export * from "./kyc";
 export * from "./organizations";

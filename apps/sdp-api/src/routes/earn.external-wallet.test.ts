@@ -113,7 +113,9 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
         TEST_ORG.slug,
         "enterprise",
         "active",
-        entitled ? JSON.stringify({ providerOverrides: { earn: { kamino: true } } }) : "{}"
+        entitled
+          ? JSON.stringify({ providerOverrides: { earn: { kamino: true, jupiter_lend: true } } })
+          : "{}"
       ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
@@ -745,7 +747,45 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("not available in production");
+    expect(body.error.message).toContain("not available");
+    expect(body.error.message).toContain("production");
+  });
+
+  it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({
+      provider: "jupiter_lend",
+      providerReference: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      name: "Jupiter Lend USDT",
+      underlyingSource: "Jupiter Lend",
+      depositMints: ["Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"],
+      shareMint: "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A",
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+    const missingFloor = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(missingFloor.status).toBe(400);
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "24.9" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+
+    expect(res.status).toBe(200);
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        environment: "production",
+        provider: "jupiter_lend",
+        minSharesOut: "24.9",
+      })
+    );
   });
 });
 

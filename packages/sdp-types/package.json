@@ -44,6 +44,11 @@
       "import": "./src/kamino-programs.ts",
       "default": "./src/kamino-programs.ts"
     },
+    "./jupiter-lend-programs": {
+      "types": "./src/jupiter-lend-programs.ts",
+      "import": "./src/jupiter-lend-programs.ts",
+      "default": "./src/jupiter-lend-programs.ts"
+    },
     "./veda-programs": {
       "types": "./src/veda-programs.ts",
       "import": "./src/veda-programs.ts",

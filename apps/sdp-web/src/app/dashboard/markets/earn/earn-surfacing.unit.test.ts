@@ -63,4 +63,20 @@ describe("earnVaultDepositAvailability", () => {
       })
     ).toBe("cluster_unavailable");
   });
+
+  it("offers Jupiter Lend on production while its mirrored sandbox row stays browse-only", () => {
+    const jupiter = {
+      ...strategy,
+      provider: "jupiter_lend",
+      hostCluster: "mainnet-beta" as const,
+    };
+    const access = {
+      jupiter_lend: { entitled: true, configured: true, enabled: true },
+    };
+
+    expect(earnVaultDepositAvailability(jupiter, "production", access)).toBe("available");
+    expect(earnVaultDepositAvailability({ ...jupiter, fundable: false }, "sandbox", access)).toBe(
+      "cluster_unavailable"
+    );
+  });
 });

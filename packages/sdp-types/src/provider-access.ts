@@ -39,7 +39,14 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
  * public on-chain state, so the API availability service excludes them rather
  * than demanding keys that nothing reads.
  */
-export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground", "kamino"] as const;
+export const EARN_PROVIDERS = [
+  "veda",
+  "upshift",
+  "perena",
+  "ground",
+  "kamino",
+  "jupiter_lend",
+] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
 /**
@@ -56,6 +63,7 @@ export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
   perena: [],
   ground: ["usdc"],
   kamino: [],
+  jupiter_lend: [],
 } as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
 
 /** Fail closed for provider ids from open database read models. */
@@ -120,6 +128,10 @@ export const EARN_PROVIDER_SURFACING = {
   // read, re-target, withdrawal and ledger access untouched.
   ground: false,
   kamino: true,
+  // Jupiter Earn is a mainnet-only, public on-chain market. Its USDT row is
+  // visible in both product catalogues; the sandbox copy is browse-only while
+  // production projects may execute against the mainnet program.
+  jupiter_lend: true,
 } as const satisfies Record<EarnProviderId, boolean>;
 
 /**
@@ -179,6 +191,7 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
   perena: "vault_direct",
   ground: "custodial",
   kamino: "vault_direct",
+  jupiter_lend: "vault_direct",
 } as const satisfies Record<EarnProviderId, EarnDepositStyle>;
 
 /**
@@ -199,8 +212,7 @@ export function earnDepositStyle(provider: string): EarnDepositStyle {
  * Dashboard slippage-floor policy for `vault_direct` deposits.
  *
  * An entry says the provider's deposit builder REQUIRES an explicit
- * `minSharesOut` — it refuses an implicit tolerance (Veda's SDK throws
- * `SLIPPAGE_PROTECTION_REQUIRED`) — and that the provider quotes deposits
+ * `minSharesOut` — it refuses an implicit tolerance — and that the provider quotes deposits
  * (`supportsVaultDepositQuote`), so the dashboard derives the floor from a
  * LIVE quote: `quotedShares × (1 − toleranceBps/10⁴)`. Never from the deposit
  * amount — that arithmetic is only right while the share rate happens to be
@@ -218,6 +230,7 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
+  jupiter_lend: { defaultToleranceBps: 10 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -243,6 +256,7 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   perena: null,
   ground: null,
   kamino: null,
+  jupiter_lend: { defaultToleranceBps: 10 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -260,40 +274,38 @@ export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS
 );
 
 /**
- * Environments where a `vault_direct` deposit may be OPENED.
+ * Environments where each `vault_direct` provider may accept a NEW deposit.
  *
- * ── Why production is (still) closed ────────────────────────────────────────
- * The vault-withdraw path exists now (PRO-1702: `POST /v1/earn/vault-withdrawals`
- * plus the treasury exit action), and it deliberately does NOT consult this
- * constant — an exit works in every environment a position exists in. What
- * remains open is PRO-1703: the Active tab does not surface vault positions,
- * so a mainnet position would be held somewhere the customer's primary
- * portfolio view cannot show. Entitlement will not save us: it is org-scoped,
- * not environment-scoped, so an entitled org would otherwise reach mainnet
- * before the epic's launch checklist (PRO-1635) says it may.
+ * Jupiter publishes devnet program ids, but SDP's pinned SDK has no validated
+ * devnet USDT market identity or cluster selector. Its mirrored sandbox row
+ * therefore stays browse-only and only a production project may reach the
+ * integrated mainnet market. Existing devnet providers keep their sandbox-only
+ * launch posture.
+ * Withdrawals deliberately do not consult this map: an exit must remain open
+ * in every environment where a position can exist.
  *
- * Nothing here traps money that is already deposited — the SDP exit route
- * works in production, and the shares sit in the org's OWN custody wallet —
- * this closes the door IN, which is the only direction ADR 0002 ever permits
- * closing.
- *
- * Shared rather than duplicated on purpose: this is the single fact the API
- * refuses on and the dashboard hides the affordance on, and a UI that offered a
- * button the server refuses is the specific failure this replaces.
- *
- * TO OPEN PRODUCTION: land the Active-tab surfacing (PRO-1703), then add
- * "production" here as part of PRO-1635's launch checklist. It is one line
- * precisely so it cannot be forgotten, and it is not a flag flip precisely
- * because the work is real.
+ * Exhaustive per provider so opening Jupiter on mainnet cannot accidentally
+ * open Kamino, Veda, or a future provider there too.
  */
-export const VAULT_DIRECT_DEPOSIT_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox"];
+export const EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS = {
+  veda: ["sandbox"],
+  upshift: ["sandbox"],
+  perena: ["sandbox"],
+  ground: [],
+  kamino: ["sandbox"],
+  jupiter_lend: ["production"],
+} as const satisfies Record<EarnProviderId, readonly SdpEnvironment[]>;
 
 /**
- * Whether a non-custodial vault deposit may be opened in this environment.
- * Fail-closed: an unrecognized environment answers false.
+ * Whether a provider's non-custodial vault deposit may be opened in this
+ * environment. Fail-closed for either an unknown provider or environment.
  */
-export function isVaultDirectDepositEnabled(environment: string): boolean {
-  return (VAULT_DIRECT_DEPOSIT_ENVIRONMENTS as readonly string[]).includes(environment);
+export function isVaultDirectDepositEnabled(environment: string, provider: string): boolean {
+  if (!Object.hasOwn(EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS, provider)) return false;
+  const environments = EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS[
+    provider as EarnProviderId
+  ] as readonly string[];
+  return environments.includes(environment);
 }
 
 /**
