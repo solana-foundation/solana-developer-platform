@@ -224,7 +224,7 @@ async function settleTransfer(
   pending: PrivateChannelTransferRow,
   outcome:
     | { status: "submitted"; signature: Signature }
-    | { status: "failed"; failureReason: string }
+    | { status: "failed"; failureReason: string; expectedSignatureAbsent?: boolean }
 ): Promise<PrivateChannelTransferRow> {
   try {
     const row = await repo.updateTransfer({
@@ -233,6 +233,8 @@ async function settleTransfer(
       signature: outcome.status === "submitted" ? outcome.signature : null,
       failureReason: outcome.status === "failed" ? outcome.failureReason : null,
       expectedStatus: "pending",
+      expectedSignatureAbsent:
+        outcome.status === "failed" ? (outcome.expectedSignatureAbsent ?? false) : false,
     });
     if (row) {
       return row;
@@ -320,7 +322,11 @@ async function resolveAbandonedReservation(
   if (!row.signature) {
     const failureReason =
       "Transfer reservation was abandoned before broadcast; retry with a new idempotency key.";
-    const failed = await settleTransfer(repo, row, { status: "failed", failureReason });
+    const failed = await settleTransfer(repo, row, {
+      status: "failed",
+      failureReason,
+      expectedSignatureAbsent: true,
+    });
     if (failed.status === "failed") {
       await emitTransferEvent(
         env,

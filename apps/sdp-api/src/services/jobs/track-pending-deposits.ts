@@ -140,7 +140,7 @@ async function failIfStale(
   if (deposit.signature) {
     return;
   }
-  await failStale(env, repo, deposit, now, reason);
+  await failStale(env, repo, deposit, now, reason, { expectedSignatureAbsent: true });
 }
 
 /** Signature-agnostic stale fail. */
@@ -149,7 +149,8 @@ async function failStale(
   repo: PrivateChannelDepositRepository,
   deposit: PrivateChannelDepositRow,
   now: number,
-  reason: string
+  reason: string,
+  guard: { expectedSignatureAbsent?: boolean } = {}
 ): Promise<void> {
   if (now - Date.parse(deposit.updated_at) <= STUCK_AFTER_MS) {
     return;
@@ -157,6 +158,7 @@ async function failStale(
   const failed = await repo.updateDeposit({
     id: deposit.id,
     status: "failed",
+    expectedSignatureAbsent: guard.expectedSignatureAbsent ?? false,
     failureReason: reason,
     expectedStatus: deposit.status,
   });

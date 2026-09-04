@@ -170,6 +170,9 @@ beforeEach(async () => {
       if (!inserted || inserted.status !== (input.expectedStatus ?? inserted.status)) {
         return null;
       }
+      if (input.expectedSignatureAbsent && inserted.signature !== null) {
+        return null;
+      }
       inserted = {
         ...inserted,
         status: input.status,
@@ -359,6 +362,7 @@ describe("createChannelTransfer", () => {
       signature: SIGNATURE,
       failureReason: null,
       expectedStatus: "pending",
+      expectedSignatureAbsent: false,
     });
     // The confirm write is CAS'd on `submitted` and leaves the signature in place.
     expect(repo.updateTransfer).toHaveBeenNthCalledWith(3, {
@@ -632,6 +636,34 @@ describe("createChannelTransfer", () => {
       "transfer.transfer.confirmed",
       "confirmed",
       "usr_transfer_test"
+    );
+  });
+
+  it("does not fail a reservation whose live request signed it after the recovery snapshot", async () => {
+    // Recovery decided from a signatureless snapshot, but the live request
+    // persisted its signature in between: the fail CAS must miss.
+    const baseUpdate = vi.mocked(repo.updateTransfer).getMockImplementation();
+    if (!baseUpdate) throw new Error("updateTransfer mock has no base implementation");
+    vi.mocked(repo.updateTransfer)
+      .mockImplementationOnce(baseUpdate)
+      .mockRejectedValueOnce(new Error("database unavailable"));
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC rejected transfer"));
+    const stuck = await createChannelTransfer(TEST_ENV, makeInput());
+    expect(stuck).toMatchObject({ status: "pending" });
+
+    const signedRow = await vi.mocked(repo.createTransfer).mock.results[0].value;
+    vi.mocked(repo.findTransferByIdempotency).mockResolvedValueOnce({
+      ...signedRow,
+      signature: null,
+    });
+    vi.mocked(solanaRpc.sendTransaction).mockClear();
+
+    const replayed = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(replayed).toMatchObject({ status: "pending" });
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+    expect(repo.updateTransfer).not.toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "failed", expectedSignatureAbsent: undefined })
     );
   });
 

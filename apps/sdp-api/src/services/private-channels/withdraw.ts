@@ -256,6 +256,7 @@ async function resolveAbandonedReservation(
       status: "failed",
       failureReason,
       expectedStatus: "pending",
+      expectedSignatureAbsent: true,
     });
     if (failed) {
       await emitWithdrawalEvent(
