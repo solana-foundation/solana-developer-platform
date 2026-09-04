@@ -49,6 +49,11 @@
       "import": "./src/veda-programs.ts",
       "default": "./src/veda-programs.ts"
     },
+    "./wisdomtree-programs": {
+      "types": "./src/wisdomtree-programs.ts",
+      "import": "./src/wisdomtree-programs.ts",
+      "default": "./src/wisdomtree-programs.ts"
+    },
     "./payments": {
       "types": "./src/payments.ts",
       "import": "./src/payments.ts",

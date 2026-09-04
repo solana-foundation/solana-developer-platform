@@ -16,6 +16,10 @@ const SAFE_BIGINT_RESOLUTION = "link:packages/bigint-buffer";
 // tools and tests cannot reach the abandoned package's native binding either.
 assertExactConsumers("@kamino-finance/klend-sdk", [KAMINO_PACKAGE]);
 assertExactConsumers("@sdp/kamino", [API_PACKAGE]);
+// Same rule for the WisdomTree execution package: only the API composes
+// executing providers. (No third-party SDK to pin — the package builds its
+// transfer legs from @solana/kit and @solana-program/token-2022 directly.)
+assertExactConsumers("@sdp/wisdomtree", [API_PACKAGE]);
 
 const safeBigintManifest = JSON.parse(readFileSync(path.join(ROOT, SAFE_BIGINT_PACKAGE), "utf8"));
 if (

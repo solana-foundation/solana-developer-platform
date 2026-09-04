@@ -31,6 +31,7 @@ import {
 } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { assertVaultDepositEligible } from "./deposit-eligibility";
 import {
   earnClusterFor,
   resolveClusterRpcUrl,
@@ -196,6 +197,16 @@ export async function buildExternalWalletDepositTransaction(
     ? { kind: "caller-provided", feePayer: address(feePayer) }
     : { kind: "wallet-pays" };
   const rentPayer = vaultRentPayer(fee);
+
+  // Provider-side KYC/eligibility for the END-USER wallet, before the build.
+  // This is the B2B2C path's whole point of failure for regulated funds: the
+  // partner's user signs, but only an issuer-verified wallet can RECEIVE the
+  // settlement, and the refusal must carry the provider's reason so the
+  // partner UI can send the user to complete verification.
+  await assertVaultDepositEligible(client, runtime, {
+    providerReference: input.providerReference,
+    owner: input.ownerAddress,
+  });
 
   /**
    * One build attempt at a given swap route width. Swap-funded builds may run

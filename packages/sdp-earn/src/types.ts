@@ -28,6 +28,16 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 export interface EarnRuntimeEnvironment {
   GROUND_API_KEY?: string;
   GROUND_SANDBOX_API_KEY?: string;
+  /**
+   * WisdomTree Connect credentials, PACKED as one JSON value per environment:
+   * `{"clientId","clientSecret","username","password"}` — the OAuth2 password
+   * grant needs all four, and the env-key vocabulary is one `<PROVIDER>_API_KEY`
+   * per environment (see the drift test in apps/sdp-api). Parsed and validated
+   * in providers/wisdomtree/connect.ts; a missing or malformed value throws
+   * PROVIDER_NOT_CONFIGURED before any network call.
+   */
+  WISDOMTREE_API_KEY?: string;
+  WISDOMTREE_SANDBOX_API_KEY?: string;
   SOLANA_RPC_URL?: string;
 }
 
@@ -676,6 +686,44 @@ export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan>;
+}
+
+export interface EarnDepositEligibilityInput {
+  /** The strategy's `providerReference` (for WisdomTree, the fund's mint). */
+  providerReference: string;
+  /** The wallet whose deposit would settle — the address the provider must have verified. */
+  owner: string;
+}
+
+export interface EarnDepositEligibility {
+  eligible: boolean;
+  /** The provider's stated reason when ineligible — customer-renderable prose. */
+  reason?: string;
+}
+
+/**
+ * Optional capability: a provider-side eligibility check that must pass before
+ * money moves IN.
+ *
+ * Exists for regulated instruments (WisdomTree's tokenized funds): settlement
+ * pays out fund tokens whose Token-2022 transfer hook refuses any wallet the
+ * issuer has not KYC-verified, so a deposit from an unverified wallet is USDC
+ * sent to the issuer with nothing able to come back. The on-chain hook is the
+ * backstop; this check is what turns that failure mode into a refusal BEFORE
+ * the transfer, with the provider's own reason attached.
+ *
+ * MONEY-IN ONLY, by ADR 0002: exits never consult it — a wallet that already
+ * holds the instrument proved its eligibility on-chain, and money out must
+ * never inherit a money-in gate. Discovered via `supportsDepositEligibility`
+ * (capabilities.ts), never provider-id checks. A provider without the
+ * capability is simply not eligibility-gated, which is today's behavior for
+ * every permissionless vault.
+ */
+export interface EarnDepositEligibilityProvider extends EarnVaultProvider {
+  checkDepositEligibility(
+    ctx: EarnRuntimeContext,
+    input: EarnDepositEligibilityInput
+  ): Promise<EarnDepositEligibility>;
 }
 
 /**

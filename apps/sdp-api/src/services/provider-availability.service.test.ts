@@ -63,6 +63,8 @@ const providerEnvKeys = [
   "PERENA_SANDBOX_API_KEY",
   "GROUND_API_KEY",
   "GROUND_SANDBOX_API_KEY",
+  "WISDOMTREE_API_KEY",
+  "WISDOMTREE_SANDBOX_API_KEY",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -570,6 +572,7 @@ describe("provider-availability.service", () => {
       perena: false,
       ground: false,
       kamino: false,
+      wisdomtree: false,
     });
   });
 

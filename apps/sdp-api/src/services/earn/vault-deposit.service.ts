@@ -15,6 +15,7 @@ import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { assertVaultDepositEligible } from "./deposit-eligibility";
 import {
   earnClusterFor,
   resolveClusterRpcUrl,
@@ -208,6 +209,18 @@ export async function depositIntoVault(
   }
   const cluster = earnClusterFor(input.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  const runtime: EarnRuntimeContext = {
+    env,
+    environment: input.environment,
+  };
+
+  // Provider-side KYC/eligibility, before any sponsorship resolution or build:
+  // an ineligible wallet's deposit would settle nowhere (see the helper), so
+  // it must not cost a paymaster reservation or an RPC build either.
+  await assertVaultDepositEligible(client, runtime, {
+    providerReference: input.providerReference,
+    owner: input.wallet.publicKey,
+  });
 
   // Resolved here, AFTER the replay reads above and BEFORE the provider builds.
   // Both halves of that sentence matter: a replay must still answer during a
@@ -233,10 +246,6 @@ export async function depositIntoVault(
   const expectedAssetIdentity = {
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
-  };
-  const runtime: EarnRuntimeContext = {
-    env,
-    environment: input.environment,
   };
 
   /**

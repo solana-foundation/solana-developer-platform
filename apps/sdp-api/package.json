@@ -65,6 +65,7 @@
     "@sdp/spc-withdraw": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sdp/veda": "workspace:*",
+    "@sdp/wisdomtree": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana-program/token": "catalog:",
     "@solana-program/token-2022": "catalog:",

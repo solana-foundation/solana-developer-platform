@@ -63,6 +63,16 @@
       "types": "./src/providers/kamino/client.ts",
       "import": "./src/providers/kamino/client.ts",
       "default": "./src/providers/kamino/client.ts"
+    },
+    "./providers/wisdomtree/client": {
+      "types": "./src/providers/wisdomtree/client.ts",
+      "import": "./src/providers/wisdomtree/client.ts",
+      "default": "./src/providers/wisdomtree/client.ts"
+    },
+    "./providers/wisdomtree/connect": {
+      "types": "./src/providers/wisdomtree/connect.ts",
+      "import": "./src/providers/wisdomtree/connect.ts",
+      "default": "./src/providers/wisdomtree/connect.ts"
     }
   },
   "scripts": {

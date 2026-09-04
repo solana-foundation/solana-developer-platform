@@ -5,9 +5,11 @@ import { KaminoEarnClient } from "./providers/kamino/client";
 import { PerenaEarnClient } from "./providers/perena/client";
 import { UpshiftEarnClient } from "./providers/upshift/client";
 import { VedaEarnClient } from "./providers/veda/client";
+import { WisdomTreeEarnClient } from "./providers/wisdomtree/client";
 import type { EarnVaultProvider } from "./types";
 
 export {
+  supportsDepositEligibility,
   supportsLiveMetrics,
   supportsPortfolioWallets,
   supportsWithdrawalApprovals,
@@ -27,9 +29,13 @@ export { PerenaEarnClient } from "./providers/perena/client";
 export { StubEarnClient } from "./providers/stub";
 export { UpshiftEarnClient } from "./providers/upshift/client";
 export { VedaEarnClient } from "./providers/veda/client";
+export { WisdomTreeEarnClient } from "./providers/wisdomtree/client";
 export { isClusterFundableInEnvironment, isStrategyWithinDeclaredSupport } from "./support";
 export type {
   EarnDeclaredStrategySupport,
+  EarnDepositEligibility,
+  EarnDepositEligibilityInput,
+  EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
   EarnPendingWithdrawalApproval,
   EarnPortfolioAddressBookEntryInput,
@@ -68,6 +74,7 @@ export const EARN_PROVIDER_CLIENTS = {
   perena: new PerenaEarnClient(),
   ground: new GroundEarnClient(),
   kamino: new KaminoEarnClient(),
+  wisdomtree: new WisdomTreeEarnClient(),
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function isEarnProviderId(value: string): value is EarnProviderId {

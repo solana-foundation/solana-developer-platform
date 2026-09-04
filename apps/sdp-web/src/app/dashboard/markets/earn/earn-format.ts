@@ -118,6 +118,7 @@ const EARN_PROVIDER_LABELS = {
   perena: "Perena",
   upshift: "Upshift",
   veda: "Veda",
+  wisdomtree: "WisdomTree",
 } as const satisfies Record<EarnProviderId, string>;
 
 export function earnProviderLabel(provider: string): string {
