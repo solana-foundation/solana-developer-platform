@@ -1282,11 +1282,11 @@ describe("Payments routes — transfers", () => {
   });
 
   /**
-   * Private transfers are gone, and the body schema is not `.strict()`, so an
-   * unknown key would be STRIPPED and the request would execute as an ordinary
-   * public transfer — publishing on-chain exactly what the caller asked to keep
-   * private. Failing the request is the only safe answer, and nothing may be
-   * signed, submitted, or recorded on the way out.
+   * This route has no private-transfer path any more, and the body schema is not
+   * `.strict()`, so an unknown key would be STRIPPED and the request would
+   * execute as an ordinary public transfer — publishing on-chain exactly what
+   * the caller asked to keep private. Failing the request is the only safe
+   * answer, and nothing may be signed, submitted, or recorded on the way out.
    */
   it("refuses a privateTransfer request instead of downgrading it to a public transfer", async () => {
     const res = await app.request(
@@ -1311,7 +1311,7 @@ describe("Payments routes — transfers", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain("privateTransfer is no longer supported");
+    expect(body.error.message).toContain("privateTransfer is not accepted");
 
     expect(createOrgSignerMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();
