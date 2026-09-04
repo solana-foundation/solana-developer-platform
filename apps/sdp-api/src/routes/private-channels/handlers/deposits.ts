@@ -1,5 +1,5 @@
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, notFound, unauthorized } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -51,11 +51,16 @@ export async function createPrivateChannelDeposit(
       userId: context.auth.userId,
     });
 
+    const userId = context.actor.user_id;
+    if (!userId) {
+      throw unauthorized("Private Channel deposits require a user session.");
+    }
+
     const deposit = await createChannelDeposit(c.env, {
       instance: context.instance,
       organizationId: context.auth.organizationId,
       projectId: context.projectId,
-      userId: context.actor.user_id,
+      userId,
       wallet: context.wallet,
       amount: body.amount,
       mint: body.mint,

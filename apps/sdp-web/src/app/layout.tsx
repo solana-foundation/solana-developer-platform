@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Archivo_Narrow } from "next/font/google";
 import { headers } from "next/headers";
 import { AppToaster } from "@/components/app-toaster";
 import { ClerkClientProvider } from "@/components/clerk-client-provider";
@@ -9,19 +8,6 @@ import { getI18nRequest, getTranslations } from "@/i18n/server";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
 import Script from "next/script";
-
-// The issuance header's exchange-ticker face — the one deliberate exception to
-// the Inter-only rule, used for the token symbol and nothing else. Downloaded by
-// next/font at build time and served from our own origin, so there is no request
-// to Google at runtime. Pared to exactly what the ticker renders: latin subset,
-// weight 600, upright — every extra weight or style is another file.
-const archivoNarrow = Archivo_Narrow({
-  subsets: ["latin"],
-  weight: ["600"],
-  style: ["normal"],
-  variable: "--font-ticker-archivo",
-  display: "swap",
-});
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations();
@@ -68,7 +54,7 @@ export default async function RootLayout({
   );
 
   return (
-    <html lang={locale} className={archivoNarrow.variable} suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <head>
         {process.env.NODE_ENV === "development" && (
           <Script

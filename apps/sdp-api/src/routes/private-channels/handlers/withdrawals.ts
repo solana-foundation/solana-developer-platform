@@ -1,5 +1,5 @@
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, notFound, unauthorized } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -44,6 +44,10 @@ export async function createPrivateChannelWithdrawal(
       destination: body.destination,
     });
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+    const userId = context.actor.user_id;
+    if (!userId) {
+      throw unauthorized("Private Channel withdrawals require a user session.");
+    }
 
     // Auth-enabled instances JWT-gate the burn broadcast (write) + confirm (read).
     const gatewayAuth = await resolveGatewayAuth(c.env, {
@@ -57,14 +61,14 @@ export async function createPrivateChannelWithdrawal(
       instance: context.instance,
       organizationId: context.auth.organizationId,
       projectId: context.projectId,
-      userId: context.actor.user_id,
+      userId,
       wallet: context.wallet,
       amount: body.amount,
       mint: body.mint,
       destination: context.destination,
       idempotencyKey,
       gatewayAuth,
-      cluster: projectRpc.cluster,
+      projectRpc,
     });
     return success(c, withdrawal);
   } catch (error) {

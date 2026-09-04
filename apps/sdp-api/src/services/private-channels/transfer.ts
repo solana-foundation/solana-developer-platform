@@ -40,11 +40,15 @@ import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
 import { resolveChannelToken } from "./mint";
+import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { confirmAndPersistTransfer } from "./transfer-confirm";
 import { emitTransferEvent } from "./transfer-events";
 import { describeTxError, isNodeAtCapacityError } from "./tx-error";
 
-type TransferInstance = Pick<PrivateChannelInstance, "id" | "gatewayUrl">;
+type TransferInstance = Pick<
+  PrivateChannelInstance,
+  "id" | "gatewayUrl" | "escrowProgramId" | "escrowInstanceAddr"
+>;
 
 export interface CreateChannelTransferInput {
   instance: TransferInstance;
@@ -76,7 +80,7 @@ export interface CreateChannelTransferInput {
    */
   idempotencyKey: string;
   gatewayAuth: SpcAuthContext;
-  cluster: import("@sdp/types").SolanaCluster;
+  projectRpc: PrivateChannelProjectRpcClient;
 }
 
 /**
@@ -295,7 +299,7 @@ export async function createChannelTransfer(
   env: Env,
   input: CreateChannelTransferInput
 ): Promise<PrivateChannelTransfer> {
-  const token = resolveChannelToken(input.cluster, input.mint);
+  const token = await resolveChannelToken(input.instance, input.projectRpc, input.mint);
   const mint = address(token.mint);
   const tokenProgram = address(token.tokenProgram);
   const { decimals } = token;
@@ -344,7 +348,7 @@ export async function createChannelTransfer(
     owner: sender,
     mint,
     auth: input.gatewayAuth,
-    cluster: input.cluster,
+    cluster: input.projectRpc.cluster,
   });
   if (amountBaseUnits > BigInt(balance.amount)) {
     throw new AppError("INSUFFICIENT_TOKEN_BALANCE");

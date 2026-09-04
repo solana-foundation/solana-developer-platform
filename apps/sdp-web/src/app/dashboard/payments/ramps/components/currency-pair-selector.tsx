@@ -57,7 +57,7 @@ export function CurrencyPairSelector() {
       wallets.map((w) => {
         const total = w.balances ? resolveTotalBalance(w.balances) : null;
         return {
-          value: w.walletId,
+          value: w.id,
           label: w.label ?? w.walletId,
           description: total !== null ? formatCurrencyAmount(total) : undefined,
         };
@@ -160,7 +160,7 @@ export function CurrencyPairSelector() {
                 ? t("DashboardPayments.ramps.destinationWallet")
                 : t("DashboardPayments.ramps.sourceWallet")
             }
-            value={selectedWallet?.walletId ?? null}
+            value={selectedWallet?.id ?? null}
             onChange={onWalletChange}
             options={walletOptions}
             placeholder={

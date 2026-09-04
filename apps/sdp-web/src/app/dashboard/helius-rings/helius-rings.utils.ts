@@ -5,10 +5,32 @@
  */
 
 import {
+  RINGS_ALLOWLISTED_ASSETS,
   RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsHealthComponent,
+  type RingsOperationState,
 } from "./helius-rings.data";
+
+/**
+ * States something is actively working through, so the row will change on its
+ * own and is worth both a spinner and another poll.
+ *
+ * `approval_required` is deliberately absent: it is waiting on a person, not on
+ * the pipeline, and a spinner there would turn indefinitely. Terminal states
+ * are absent for the obvious reason.
+ */
+const SETTLING: ReadonlySet<RingsOperationState> = new Set<RingsOperationState>([
+  "preparing",
+  "proving",
+  "ready_to_sign",
+  "submitted",
+  "indexing",
+]);
+
+export function isSettling(state: RingsOperationState): boolean {
+  return SETTLING.has(state);
+}
 
 export function formatWhen(iso: string, locale: string): string {
   const d = new Date(iso);
@@ -17,12 +39,6 @@ export function formatWhen(iso: string, locale: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   });
-}
-
-export function formatTimeOfDay(iso: string, locale: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString(locale, { timeStyle: "medium" });
 }
 
 /** Digits only: a shielded amount is an unsigned integer count of base units. */
@@ -49,21 +65,39 @@ export function formatBaseUnits(amountRaw: string, decimals: number): string | n
   return fraction === "" ? whole : `${whole}.${fraction}`;
 }
 
-/**
- * How a shielded amount may be shown. `baseUnits` is distinct from a zero
- * scale: the digits are identical, but only one claims the mint has no
- * fraction, and the caller has to label them differently.
- */
-export type ShieldedAmount =
-  | { scale: "exact"; text: string }
-  | { scale: "baseUnits"; text: string }
-  | { scale: "unrenderable" };
+// Whole part with optional fraction. Reject a bare `.` or a leading `.`.
+const AMOUNT_DECIMAL = /^\d+(?:\.\d+)?$/;
 
-/** Reads a balance at its mint's scale, or as base units when none was reported. */
-export function readShieldedAmount(amountRaw: string, decimals: number | null): ShieldedAmount {
-  const text = formatBaseUnits(amountRaw, decimals ?? 0);
-  if (text === null) return { scale: "unrenderable" };
-  return { scale: decimals === null ? "baseUnits" : "exact", text };
+/**
+ * Parses a user-typed decimal amount ("1.01") into its uint64 base-unit form
+ * ("1010000000" at 9 decimals). Returns `null` for anything that would need
+ * more fractional digits than the mint carries — refusing dust is safer than
+ * silently truncating it.
+ */
+export function parseDecimalToBaseUnits(decimal: string, decimals: number): string | null {
+  if (!AMOUNT_DECIMAL.test(decimal)) return null;
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_DECIMALS) return null;
+
+  const [whole, fraction = ""] = decimal.split(".");
+  if (fraction.length > decimals) return null;
+
+  const combined = `${whole}${fraction.padEnd(decimals, "0")}`.replace(/^0+(?=\d)/, "");
+  return combined === "" ? "0" : combined;
+}
+
+/**
+ * Renders a stored amount as "<value> <symbol>" at the mint's scale, or the raw
+ * base-unit digits if the mint is unknown to us. Never a bare number, so the
+ * operator can tell 1 lamport from 1 SOL at a glance.
+ */
+export function formatAssetAmount(amountRaw: string | null, assetMint: string | null): string {
+  if (!amountRaw) return "—";
+  const asset = assetMint
+    ? RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === assetMint)
+    : undefined;
+  if (!asset) return amountRaw;
+  const formatted = formatBaseUnits(amountRaw, asset.decimals);
+  return formatted === null ? amountRaw : `${formatted} ${asset.symbol}`;
 }
 
 /**
@@ -115,4 +149,12 @@ export function healthAlerts(health: RingsHealth | null): RingsHealthAlert[] {
 export function shortenShieldedAddress(address: string, lead = 6, tail = 4): string {
   if (address.length <= lead + tail + 1) return address;
   return `${address.slice(0, lead)}…${address.slice(-tail)}`;
+}
+
+/**
+ * Enough of an operation id to tell two apart in a lineage label. The prefix is
+ * shared by every row, so only the tail distinguishes them.
+ */
+export function shortenOperationId(operationId: string, tail = 8): string {
+  return operationId.length <= tail ? operationId : `…${operationId.slice(-tail)}`;
 }

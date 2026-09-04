@@ -1,7 +1,10 @@
 "use client";
 
-import type { CustodyWalletSummary, PrivateChannelWithdrawal } from "@sdp/types";
-import { privateChannelTokens } from "@sdp/types";
+import type {
+  CustodyWalletSummary,
+  PrivateChannelTokenEligibility,
+  PrivateChannelWithdrawal,
+} from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useReducer, useTransition } from "react";
@@ -12,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
@@ -53,8 +55,13 @@ function withdrawFormReducer(
   return { ...state, ...patch };
 }
 
-export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
-  const tokens = privateChannelTokens(useSolanaCluster());
+export function WithdrawForm({
+  wallets,
+  tokens,
+}: {
+  wallets: CustodyWalletSummary[];
+  tokens: PrivateChannelTokenEligibility[];
+}) {
   const [state, updateState] = useReducer(withdrawFormReducer, {
     walletId: wallets[0]?.walletId ?? "",
     mint: tokens[0]?.mint ?? "",
@@ -125,6 +132,14 @@ export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
           {t("DashboardPrivateChannels.withdraw.noWalletsLink")}
         </Link>
         {t("DashboardPrivateChannels.withdraw.noWalletsAfter")}
+      </p>
+    );
+  }
+
+  if (tokens.length === 0) {
+    return (
+      <p className="text-secondary text-sm">
+        {t("DashboardPrivateChannels.common.noEnabledTokens")}
       </p>
     );
   }

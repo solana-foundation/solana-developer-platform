@@ -170,10 +170,18 @@ export class RuntimeEnvCredentialSecretStore implements CredentialSecretStore {
 export interface GcpSecretManagerCredentialSecretStoreOptions {
   projectId: string;
   secretPrefix: string;
+  /**
+   * The numeric project id. Secret Manager canonicalizes resource names to it,
+   * so every ref that comes back from the API -- and therefore every ref we
+   * persist -- is written in terms of the number rather than `projectId`.
+   * Resolved from the metadata server when it is not supplied.
+   */
+  projectNumber?: string;
   apiBaseUrl?: string;
   accessToken?: string;
   fetcher?: typeof fetch;
   metadataTokenUrl?: string;
+  metadataProjectNumberUrl?: string;
   now?: () => number;
 }
 
@@ -182,18 +190,28 @@ interface CachedAccessToken {
   expiresAtMs: number;
 }
 
+/**
+ * Keyed by metadata URL so the cache cannot bleed between differently
+ * configured stores, which is also what keeps it inert under test.
+ */
+const projectNumberCache = new Map<string, string>();
+
 export class GcpSecretManagerCredentialSecretStore implements CredentialSecretStore {
   readonly storageBackend = "gcp_secret_manager" as const;
 
   private readonly apiBaseUrl: string;
   private readonly fetcher: typeof fetch;
   private readonly metadataTokenUrl: string;
+  private readonly metadataProjectNumberUrl: string;
   private readonly now: () => number;
   private cachedToken: CachedAccessToken | null = null;
 
   constructor(private readonly options: GcpSecretManagerCredentialSecretStoreOptions) {
     assertGcpProjectId(options.projectId);
     assertGcpSecretPrefix(options.secretPrefix);
+    if (options.projectNumber !== undefined) {
+      assertGcpProjectNumber(options.projectNumber);
+    }
 
     this.apiBaseUrl =
       options.apiBaseUrl?.replace(/\/+$/, "") ?? "https://secretmanager.googleapis.com";
@@ -201,6 +219,9 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     this.metadataTokenUrl =
       options.metadataTokenUrl ??
       "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
+    this.metadataProjectNumberUrl =
+      options.metadataProjectNumberUrl ??
+      "http://metadata.google.internal/computeMetadata/v1/project/numeric-project-id";
     this.now = options.now ?? Date.now;
   }
 
@@ -213,11 +234,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
         providerCredentialId: params.providerCredentialId,
       });
 
-    assertManagedSecretRef(secretRef, {
-      projectId: this.options.projectId,
-      secretPrefix: this.options.secretPrefix,
-      requireVersion: false,
-    });
+    assertManagedSecretRef(secretRef, await this.managedRefOptions(false));
 
     if (!params.existingSecretRef) {
       await this.createSecretIfMissing(secretRef, {
@@ -244,11 +261,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       );
     }
 
-    assertManagedSecretRef(secretVersionRef, {
-      projectId: this.options.projectId,
-      secretPrefix: this.options.secretPrefix,
-      requireVersion: true,
-    });
+    assertManagedSecretRef(secretVersionRef, await this.managedRefOptions(true));
 
     const response = await this.request<{ payload?: { data?: string } }>(
       `${secretVersionRef}:access`,
@@ -277,11 +290,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
   }
 
   async destroyVersion(params: DestroyCredentialSecretVersionParams): Promise<void> {
-    assertManagedSecretRef(params.secretVersionRef, {
-      projectId: this.options.projectId,
-      secretPrefix: this.options.secretPrefix,
-      requireVersion: true,
-    });
+    assertManagedSecretRef(params.secretVersionRef, await this.managedRefOptions(true));
 
     await this.request(`${params.secretVersionRef}:destroy`, {
       method: "POST",
@@ -343,13 +352,19 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       );
     }
 
+    // Resolved outside the try so a metadata-server failure keeps its own
+    // message instead of being reported as a malformed response from GCP.
+    const refOptions = await this.managedRefOptions(true);
+
     try {
-      assertManagedSecretRef(name, {
-        projectId: this.options.projectId,
-        secretPrefix: this.options.secretPrefix,
-        requireVersion: true,
-      });
-      if (!name.startsWith(`${secretRef}/versions/`)) {
+      // Secret Manager answers with the canonical resource name, which spells
+      // the project as its number, so the reply never matches the ref we asked
+      // with character for character. Compare the part that has to agree -- the
+      // secret this version belongs to -- rather than prefix-matching a string
+      // built from the project id.
+      const parsed = assertManagedSecretRef(name, refOptions);
+      const requestedSecretId = secretRef.split("/").at(-1);
+      if (!requestedSecretId || parsed.secretId !== requestedSecretId) {
         throw new Error("Version name does not belong to the requested secret");
       }
     } catch {
@@ -388,6 +403,66 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
         "UPSTREAM_ERROR"
       );
     }
+  }
+
+  private async managedRefOptions(requireVersion: boolean): Promise<ManagedSecretRefOptions> {
+    return {
+      projectId: this.options.projectId,
+      projectNumber: await this.resolveProjectNumber(),
+      secretPrefix: this.options.secretPrefix,
+      requireVersion,
+    };
+  }
+
+  /**
+   * The numeric project id, which is the only spelling Secret Manager uses in
+   * the resource names it returns. Configured value wins; otherwise it comes
+   * off the same metadata server the access token does.
+   *
+   * Cached per process rather than per instance: a store is constructed per
+   * request, and the number cannot change under a running revision, so an
+   * instance-level cache would refetch on every credential operation.
+   */
+  private async resolveProjectNumber(): Promise<string> {
+    if (this.options.projectNumber) {
+      return this.options.projectNumber;
+    }
+
+    const cached = projectNumberCache.get(this.metadataProjectNumberUrl);
+    if (cached) {
+      return cached;
+    }
+
+    let response: Response;
+    try {
+      response = await this.fetcher(this.metadataProjectNumberUrl, {
+        headers: {
+          "Metadata-Flavor": "Google",
+        },
+      });
+    } catch (error) {
+      if (error instanceof CredentialSecretStoreError) {
+        throw error;
+      }
+
+      throw new CredentialSecretStoreError(
+        "GCP metadata project number request failed before receiving a response",
+        "UPSTREAM_ERROR"
+      );
+    }
+
+    if (!response.ok) {
+      throw new CredentialSecretStoreError(
+        "GCP metadata project number request was rejected",
+        "UPSTREAM_ERROR"
+      );
+    }
+
+    const projectNumber = (await response.text()).trim();
+    assertGcpProjectNumber(projectNumber);
+    projectNumberCache.set(this.metadataProjectNumberUrl, projectNumber);
+
+    return projectNumber;
   }
 
   private async getAccessToken(): Promise<string> {
@@ -497,17 +572,34 @@ function buildGcpSecretRef(params: {
   return `projects/${params.projectId}/secrets/${secretId}`;
 }
 
+interface ManagedSecretRefOptions {
+  projectId: string;
+  projectNumber: string;
+  secretPrefix: string;
+  requireVersion: boolean;
+}
+
+interface ParsedManagedSecretRef {
+  project: string;
+  secretId: string;
+  version: string | undefined;
+}
+
 function assertManagedSecretRef(
   ref: string,
-  options: { projectId: string; secretPrefix: string; requireVersion: boolean }
-): void {
+  options: ManagedSecretRefOptions
+): ParsedManagedSecretRef {
   const match = ref.match(/^projects\/([^/]+)\/secrets\/([^/]+)(?:\/versions\/([^/]+))?$/);
   if (!match) {
     throw new CredentialSecretStoreError("Invalid GCP Secret Manager ref", "INVALID_SECRET_REF");
   }
 
-  const [, projectId, secretId, version] = match;
-  if (projectId !== options.projectId) {
+  const [, project, secretId, version] = match;
+  // A ref reaches us spelled either way: we build them with the project id,
+  // and everything Secret Manager hands back -- so everything we persisted
+  // from a response -- uses the number. Both name this project and nothing
+  // else, so both are accepted and anything further is still refused.
+  if (project !== options.projectId && project !== options.projectNumber) {
     throw new CredentialSecretStoreError(
       "GCP Secret Manager ref points at the wrong project",
       "INVALID_SECRET_REF"
@@ -536,6 +628,8 @@ function assertManagedSecretRef(
       "INVALID_SECRET_REF"
     );
   }
+
+  return { project, secretId, version };
 }
 
 async function parseGcpResponse<T = unknown>(response: Response): Promise<T> {
@@ -597,6 +691,18 @@ function assertGcpProjectId(projectId: string): void {
   if (!projectId.match(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/)) {
     throw new CredentialSecretStoreError(
       "GCP Secret Manager project id is invalid",
+      "INVALID_CONFIGURATION"
+    );
+  }
+}
+
+function assertGcpProjectNumber(projectNumber: string): void {
+  // Digits only, and never empty: an unvalidated value here would widen the
+  // project check in `assertManagedSecretRef` to whatever the metadata server
+  // happened to return.
+  if (!projectNumber.match(/^[1-9][0-9]{0,24}$/)) {
+    throw new CredentialSecretStoreError(
+      "GCP Secret Manager project number is invalid",
       "INVALID_CONFIGURATION"
     );
   }

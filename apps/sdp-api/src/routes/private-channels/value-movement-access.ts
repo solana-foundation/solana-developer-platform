@@ -190,7 +190,7 @@ async function resolveCounterpartyAddress(
   }
 
   if (input.requireVerifiedOnInstance) {
-    const verified = await getPrivateChannelVerifiedWalletRepository(c).findByInstanceAndPubkey(
+    const verified = await getPrivateChannelVerifiedWalletRepository(c).findAnyByInstanceAndPubkey(
       context.instance.id,
       resolved
     );

@@ -11,12 +11,7 @@ import {
   type SdpEnvironment,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import {
-  type CryptoAssetSymbol,
-  type CryptoRailId,
-  getCryptoRailAssetLabel,
-  type RampCurrencyLimit,
-} from "@sdp/types/payment-rails";
+import { type CryptoAssetSymbol, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isAddress } from "@solana/addresses";
 import { z } from "zod";
@@ -28,31 +23,29 @@ import {
   SdpPaymentsError,
 } from "../../../errors";
 import { type ProviderRequestInit, providerFetchJson } from "../../fetch";
-import {
-  basicAuthHeader,
-  isActiveIso4217CurrencyCode,
-  isSolanaCryptoAsset,
-  RAMP_RAIL_DUMPS,
-  requireEnv,
-  SOLANA_ASSET_TO_RAIL,
-  UNREPORTED_COUNTRY_SUPPORT,
-  unreportedCurrencyLimit,
-} from "../../shared";
+import { basicAuthHeader, isSolanaCryptoAsset, UNREPORTED_COUNTRY_SUPPORT } from "../../shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
+  RampExternalAccountDetails,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
-import { type LightsparkBusinessInfo, lightsparkCounterpartyRequirements } from "./counterparty";
+import {
+  type LightsparkBusinessInfo,
+  type LightsparkIndividualInfo,
+  lightsparkCounterpartyRequirements,
+} from "./counterparty";
+import { discoverLightsparkCurrencyAndRails } from "./currencies";
+import type { LightsparkPurposeOfPayment } from "./provider-data";
 
-const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
+export const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
 export const LIGHTSPARK_DECLARED_RAIL_SUPPORT = {
   onramp: {
@@ -60,12 +53,11 @@ export const LIGHTSPARK_DECLARED_RAIL_SUPPORT = {
     entityTypes: ["individual", "business"],
   },
   offramp: {
-    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
     entityTypes: ["individual", "business"],
   },
 } as const satisfies ProviderDeclaredRailSupport;
 
-function readLightsparkConfig(
+export function readLightsparkConfig(
   env: Record<string, string | undefined>,
   mode: SdpEnvironment
 ): LightsparkConfig {
@@ -168,16 +160,72 @@ function readRequiredGridString(
   return value.trim();
 }
 
-interface LightsparkExternalAccount {
-  id?: string;
-  status?: string;
-  platformAccountId?: string;
-  accountInfo?: { accountType?: string; address?: string };
-}
+const lightsparkExternalAccountInfoSchema = z.object({
+  accountType: z.string().min(1).optional(),
+  address: z.string().optional(),
+  paymentRails: z.array(z.string().min(1)).optional(),
+});
+
+const lightsparkExternalAccountSchema = z.object({
+  id: z.string().min(1).optional(),
+  status: z.string().min(1).optional(),
+  platformAccountId: z.string().min(1).optional(),
+  accountInfo: lightsparkExternalAccountInfoSchema.optional(),
+});
+
+export type LightsparkExternalAccountInfo = z.infer<typeof lightsparkExternalAccountInfoSchema>;
+type LightsparkExternalAccount = z.infer<typeof lightsparkExternalAccountSchema>;
+
+const lightsparkExternalAccountInfoDetailsSchema = z.preprocess(
+  (value) => {
+    if (!isGridRecord(value) || typeof value.accountType !== "string") {
+      return value;
+    }
+    return {
+      ...value,
+      variant: value.accountType.toUpperCase() === "SOLANA_WALLET" ? "solana" : "bank",
+    };
+  },
+  z.discriminatedUnion("variant", [
+    z.object({
+      variant: z.literal("solana"),
+      accountType: z.string().min(1),
+      paymentRails: z.array(z.string().min(1)),
+      address: z.string().optional(),
+    }),
+    z.object({
+      variant: z.literal("bank"),
+      accountType: z.string().min(1),
+      paymentRails: z.array(z.string().min(1)),
+      bankName: z.string().min(1).optional(),
+      accountNumber: z.string().min(1).optional(),
+    }),
+  ])
+);
+
+const lightsparkExternalAccountDetailsPageSchema = z.object({
+  data: z.array(
+    z.object({
+      platformAccountId: z.string().min(1),
+      status: z.string().min(1),
+      accountInfo: lightsparkExternalAccountInfoDetailsSchema,
+    })
+  ),
+  hasMore: z.boolean(),
+  nextCursor: z.string().min(1).optional(),
+});
+
+type LightsparkExternalAccountInfoDetails = z.infer<
+  typeof lightsparkExternalAccountInfoDetailsSchema
+>;
+type LightsparkExternalAccountDetailsPage = z.infer<
+  typeof lightsparkExternalAccountDetailsPageSchema
+>;
 
 export interface LightsparkExternalAccountResolution {
   id: string;
   status: string;
+  accountInfo?: LightsparkExternalAccountInfo;
 }
 
 function parseLightsparkExternalAccountResolution(
@@ -186,39 +234,19 @@ function parseLightsparkExternalAccountResolution(
   if (!isGridRecord(payload)) {
     throw badRequest("Lightspark external account response must be an object");
   }
-  return {
+  const resolution = {
     id: readRequiredGridString(payload, "id", "Lightspark external account"),
     status: readRequiredGridString(payload, "status", "Lightspark external account"),
   };
+  const account = parseLightsparkExternalAccount(payload);
+  if (account.accountInfo === undefined) {
+    return resolution;
+  }
+  return { ...resolution, accountInfo: account.accountInfo };
 }
 
 function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAccount {
-  if (typeof payload !== "object" || payload === null) {
-    return {};
-  }
-  const raw = payload as {
-    id?: unknown;
-    status?: unknown;
-    platformAccountId?: unknown;
-    accountInfo?: { accountType?: unknown; address?: unknown };
-  };
-  return {
-    id: typeof raw.id === "string" ? raw.id : undefined,
-    status: typeof raw.status === "string" ? raw.status : undefined,
-    platformAccountId:
-      typeof raw.platformAccountId === "string" ? raw.platformAccountId : undefined,
-    accountInfo:
-      raw.accountInfo && typeof raw.accountInfo === "object"
-        ? {
-            accountType:
-              typeof raw.accountInfo.accountType === "string"
-                ? raw.accountInfo.accountType
-                : undefined,
-            address:
-              typeof raw.accountInfo.address === "string" ? raw.accountInfo.address : undefined,
-          }
-        : undefined,
-  };
+  return lightsparkExternalAccountSchema.parse(payload);
 }
 
 /** Connection details for live Grid API calls. */
@@ -232,9 +260,8 @@ export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
 
 export type CreateLightsparkCustomerInput = {
   platformCustomerId: string;
-  email?: string;
 } & (
-  | { customerType: "INDIVIDUAL"; fullName: string }
+  | { customerType: "INDIVIDUAL"; individualInfo: LightsparkIndividualInfo }
   | { customerType: "BUSINESS"; businessInfo: LightsparkBusinessInfo }
 );
 
@@ -250,8 +277,12 @@ interface GridCreateCustomerBody {
   platformCustomerId: string;
   customerType: LightsparkCustomerType;
   fullName?: string;
-  businessInfo?: LightsparkBusinessInfo;
+  region?: LightsparkIndividualInfo["region"];
+  birthDate?: string;
+  nationality?: LightsparkIndividualInfo["nationality"];
+  address?: LightsparkIndividualInfo["address"];
   email?: string;
+  businessInfo?: LightsparkBusinessInfo;
 }
 
 interface GridCustomerResponse {
@@ -283,6 +314,14 @@ interface GridCreateQuoteBody {
   lockedCurrencySide: "SENDING" | "RECEIVING";
   lockedCurrencyAmount: number;
   description: string;
+  /** Some payout corridors mandate a purpose-of-payment code on the quote. */
+  purposeOfPayment: LightsparkPurposeOfPayment;
+  /**
+   * Mirror of `purposeOfPayment`: receiver-mandated sender fields are
+   * checked against this key-value map, and a receiver that requires
+   * PURPOSE_OF_PAYMENT rejects the quote when it is absent here.
+   */
+  senderCustomerInfo: { PURPOSE_OF_PAYMENT: LightsparkPurposeOfPayment };
 }
 
 interface GridPaymentInstruction {
@@ -454,7 +493,9 @@ export interface CreateLightsparkOnrampQuoteInput {
   cryptoCurrency: string;
   /** Locked sending amount in the fiat currency's smallest unit (cents). */
   fiatAmountMinorUnits: number;
-  description?: string;
+  /** Purpose-of-payment code collected during counterparty onboarding. */
+  purposeOfPayment: LightsparkPurposeOfPayment;
+  description: string;
 }
 
 export interface LightsparkQuote {
@@ -471,105 +512,6 @@ export interface LightsparkQuote {
   expiresAt?: string;
 }
 
-const lightsparkConfigDumpSchema = z.object({
-  embeddedWalletConfig: z.object({ appName: z.string().optional() }).optional(),
-  supportedCurrencies: z.array(
-    z.object({
-      currencyCode: z.string(),
-      enabledTransactionTypes: z.array(z.string()),
-      minAmount: z.number().optional(),
-      maxAmount: z.number().optional(),
-    })
-  ),
-});
-
-type LightsparkConfigDump = z.infer<typeof lightsparkConfigDumpSchema>;
-
-function usdMinorUnitsToMajorDecimal(amount: number): string {
-  if (!Number.isInteger(amount)) {
-    throw providerUnavailable("Lightspark USD limits must be integer minor units.");
-  }
-  return formatDecimalAmount(BigInt(amount), 2);
-}
-
-function lightsparkFiatLimit(
-  currencyCode: string,
-  entry: LightsparkConfigDump["supportedCurrencies"][number]
-) {
-  const minAmount = entry.minAmount;
-  const maxAmount = entry.maxAmount;
-  const hasMin = minAmount !== undefined;
-  const hasMax = maxAmount !== undefined;
-  if (currencyCode !== "USD" && (hasMin || hasMax)) {
-    throw providerUnavailable(
-      `Lightspark returned ${currencyCode} limits, but only USD minor-unit scaling is verified.`
-    );
-  }
-  if (!hasMin && !hasMax) {
-    return unreportedCurrencyLimit();
-  }
-  if (!hasMin || !hasMax) {
-    throw providerUnavailable(`Lightspark ${currencyCode} limits must include both min and max.`);
-  }
-  return {
-    min: usdMinorUnitsToMajorDecimal(minAmount),
-    max: usdMinorUnitsToMajorDecimal(maxAmount),
-  };
-}
-
-export function distillLightsparkRailSupport(raw: unknown): ProviderRailSupportDistillation {
-  const config = lightsparkConfigDumpSchema.parse(raw);
-  const onrampCurrencies: Record<string, RampCurrencyLimit> = {};
-  const offrampCurrencies: Record<string, RampCurrencyLimit> = {};
-  const onrampCryptos = new Set<CryptoRailId>();
-  const offrampCryptos = new Set<CryptoRailId>();
-  const droppedCurrencyCodes = new Set<string>();
-
-  for (const entry of config.supportedCurrencies) {
-    const code = entry.currencyCode.trim().toUpperCase();
-    if (isSolanaCryptoAsset(code)) {
-      const rail = SOLANA_ASSET_TO_RAIL[code];
-      if (entry.enabledTransactionTypes.includes("INCOMING")) {
-        onrampCryptos.add(rail);
-      }
-      if (entry.enabledTransactionTypes.includes("OUTGOING")) {
-        offrampCryptos.add(rail);
-      }
-      continue;
-    }
-
-    if (!/^[A-Z]{3}$/.test(code)) {
-      continue;
-    }
-    if (!isActiveIso4217CurrencyCode(code)) {
-      droppedCurrencyCodes.add(code);
-      continue;
-    }
-    const limit = lightsparkFiatLimit(code, entry);
-    if (entry.enabledTransactionTypes.includes("INCOMING")) {
-      onrampCurrencies[code] = limit;
-    }
-    if (entry.enabledTransactionTypes.includes("OUTGOING")) {
-      offrampCurrencies[code] = limit;
-    }
-  }
-
-  return {
-    snapshot: {
-      onramp: {
-        currencies: onrampCurrencies,
-        cryptos: [...onrampCryptos].sort(),
-      },
-      offramp: {
-        currencies: offrampCurrencies,
-        cryptos: [...offrampCryptos].sort(),
-      },
-    },
-    droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
-    droppedCountryCodes: [],
-  };
-}
-
 export class LightsparkRampClient implements RampProvider {
   readonly id = "lightspark";
   readonly declaredRailSupport = LIGHTSPARK_DECLARED_RAIL_SUPPORT;
@@ -581,27 +523,55 @@ export class LightsparkRampClient implements RampProvider {
     return lightsparkCounterpartyRequirements(counterparty, options);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const clientId = requireEnv(env, "LIGHTSPARK_GRID_SANDBOX_CLIENT_ID");
-    const clientSecret = requireEnv(env, "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET");
-    const base =
-      env.LIGHTSPARK_GRID_API_BASE_URL?.trim() || "https://api.lightspark.com/grid/2025-10-13";
-    const headers = {
-      Authorization: basicAuthHeader(clientId, clientSecret),
-    };
-
-    await writeDump(
-      RAMP_RAIL_DUMPS.lightspark.config.name,
-      await fetchJson(this.id, "GET /config", `${base}/config`, { headers })
-    );
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    return discoverLightsparkCurrencyAndRails(context);
   }
 
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
-    return distillLightsparkRailSupport(await readDump(RAMP_RAIL_DUMPS.lightspark.config.file));
+  /**
+   * Lists and sanitizes all Grid external accounts for one customer and fiat currency.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - Grid customer reference and fiat currency.
+   * @returns Sanitized external account details keyed by SDP platform account id.
+   */
+  async listExternalAccountDetails(
+    { env, mode }: RampRuntimeContext,
+    input: { providerCustomerReference: string; fiatCurrency: string }
+  ): Promise<RampExternalAccountDetails[]> {
+    const config = readLightsparkConfig(env, mode);
+    let cursor: string | undefined;
+    const details: RampExternalAccountDetails[] = [];
+
+    for (let page = 0; page < 10; page += 1) {
+      const query = new URLSearchParams();
+      query.set("customerId", input.providerCustomerReference);
+      query.set("currency", input.fiatCurrency);
+      query.set("limit", "100");
+      if (cursor !== undefined) {
+        query.set("cursor", cursor);
+      }
+
+      const response = await this.request<unknown>(
+        config,
+        `customers/external-accounts?${query.toString()}`,
+        { method: "GET" }
+      );
+      const pageResponse: LightsparkExternalAccountDetailsPage =
+        lightsparkExternalAccountDetailsPageSchema.parse(response);
+      details.push(...pageResponse.data.map(mapLightsparkExternalAccountDetails));
+
+      if (!pageResponse.hasMore) {
+        return details;
+      }
+      if (pageResponse.nextCursor === undefined) {
+        throw providerUnavailable("Lightspark external-account pagination is missing nextCursor.");
+      }
+      cursor = pageResponse.nextCursor;
+    }
+
+    throw providerUnavailable("Lightspark external-account pagination exceeded the page limit.");
   }
 
   private async request<TResponse, TBody = never>(
@@ -631,14 +601,23 @@ export class LightsparkRampClient implements RampProvider {
       "customers",
       {
         method: "POST",
-        body: {
-          platformCustomerId: input.platformCustomerId,
-          customerType: input.customerType,
-          ...(input.customerType === "INDIVIDUAL"
-            ? { fullName: input.fullName }
-            : { businessInfo: input.businessInfo }),
-          ...(input.email ? { email: input.email } : {}),
-        },
+        body:
+          input.customerType === "INDIVIDUAL"
+            ? {
+                platformCustomerId: input.platformCustomerId,
+                customerType: input.customerType,
+                fullName: input.individualInfo.fullName,
+                region: input.individualInfo.region,
+                birthDate: input.individualInfo.birthDate,
+                nationality: input.individualInfo.nationality,
+                address: input.individualInfo.address,
+                email: input.individualInfo.email,
+              }
+            : {
+                platformCustomerId: input.platformCustomerId,
+                customerType: input.customerType,
+                businessInfo: input.businessInfo,
+              },
       }
     );
 
@@ -735,7 +714,9 @@ export class LightsparkRampClient implements RampProvider {
         },
         lockedCurrencySide: "SENDING",
         lockedCurrencyAmount: input.fiatAmountMinorUnits,
-        description: input.description ?? "SDP onramp",
+        description: input.description,
+        purposeOfPayment: input.purposeOfPayment,
+        senderCustomerInfo: { PURPOSE_OF_PAYMENT: input.purposeOfPayment },
       },
     });
 
@@ -942,10 +923,13 @@ export class LightsparkRampClient implements RampProvider {
 
   async createOnrampQuote(
     { env, mode }: RampRuntimeContext,
-    input: RampOnrampQuoteInput
+    input: RampOnrampQuoteInput & { description: string }
   ): Promise<PaymentRampQuote> {
     if (!input.customerId) {
       throw badRequest("Lightspark on-ramp requires a resolved customerId");
+    }
+    if (!input.purposeOfPayment) {
+      throw badRequest("Lightspark on-ramp requires a resolved purposeOfPayment");
     }
     const config = readLightsparkConfig(env, mode);
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
@@ -967,6 +951,8 @@ export class LightsparkRampClient implements RampProvider {
       fiatCurrency,
       cryptoCurrency,
       fiatAmountMinorUnits,
+      purposeOfPayment: input.purposeOfPayment,
+      description: input.description,
     });
     assertLightsparkQuoteMatchesRequest(quote, {
       sendingCurrencyCode: fiatCurrency,
@@ -1076,13 +1062,16 @@ export class LightsparkRampClient implements RampProvider {
    */
   async createOfframpQuote(
     { env, mode }: RampRuntimeContext,
-    input: RampOfframpQuoteInput
+    input: RampOfframpQuoteInput & { description: string }
   ): Promise<PaymentRampQuote> {
     if (!input.customerId) {
       throw badRequest("Lightspark off-ramp requires a resolved customerId");
     }
     if (!input.payoutAccountId) {
       throw badRequest("Lightspark off-ramp requires a resolved payoutAccountId");
+    }
+    if (!input.purposeOfPayment) {
+      throw badRequest("Lightspark off-ramp requires a resolved purposeOfPayment");
     }
     if (!input.fiatCurrency) {
       throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
@@ -1115,7 +1104,9 @@ export class LightsparkRampClient implements RampProvider {
         },
         lockedCurrencySide: "SENDING",
         lockedCurrencyAmount: cryptoAmountMinorUnits,
-        description: "SDP offramp",
+        description: input.description,
+        purposeOfPayment: input.purposeOfPayment,
+        senderCustomerInfo: { PURPOSE_OF_PAYMENT: input.purposeOfPayment },
       },
     });
 
@@ -1134,6 +1125,37 @@ export class LightsparkRampClient implements RampProvider {
       body: payload,
     });
   }
+}
+
+/**
+ * Converts one validated Grid account into the sanitized provider contract.
+ *
+ * @param account - Validated Grid external account payload.
+ * @returns Provider account details with only the account-number last four digits.
+ */
+function mapLightsparkExternalAccountDetails(
+  account: LightsparkExternalAccountDetailsPage["data"][number]
+): RampExternalAccountDetails {
+  const result: RampExternalAccountDetails = {
+    platformAccountId: account.platformAccountId,
+    providerStatus: account.status,
+    paymentRails: account.accountInfo.paymentRails,
+  };
+  const accountInfo: LightsparkExternalAccountInfoDetails = account.accountInfo;
+  if (accountInfo.variant === "solana") {
+    return result;
+  }
+
+  if (accountInfo.bankName !== undefined) {
+    result.bankName = accountInfo.bankName;
+  }
+  if (accountInfo.accountNumber !== undefined) {
+    if (accountInfo.accountNumber.length < 4) {
+      throw providerUnavailable("Lightspark external account number is too short.");
+    }
+    result.accountNumberLast4 = accountInfo.accountNumber.slice(-4);
+  }
+  return result;
 }
 
 function parseLightsparkQuote(raw: GridQuoteResponse): LightsparkQuote {

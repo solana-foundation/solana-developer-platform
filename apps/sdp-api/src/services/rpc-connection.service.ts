@@ -470,6 +470,13 @@ export async function submitRpcConnection(
     // see nothing serving and both try to become the default. The partial
     // unique index rejects the loser, and without this it would surface as an
     // unhandled database error rather than something the caller can act on.
+    // Asked before the default check, which accepts a bare 23505 and would
+    // otherwise claim this was a race for the serving slot.
+    if (isProviderConflict(error)) {
+      throw conflict(
+        "This project already has a connection for this provider. Rotate its key to replace it."
+      );
+    }
     if (isDefaultConflict(error)) {
       throw conflict(
         "Another connection started serving this project at the same time. Add this one again, then switch to it."
@@ -942,8 +949,28 @@ async function destroyConnectionSecretBestEffort(
   }
 }
 
+function violationMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A second live key for the same provider, lost to the uniqueness index.
+ *
+ * The pre-check in `submitRpcConnection` is an unlocked read, so two concurrent
+ * saves for one provider both see nothing and both proceed. Only one can hold
+ * the index, and the loser has to be told the same thing the pre-check would
+ * have told it rather than a database error.
+ *
+ * Named-index match only. `isDefaultConflict` also accepts a bare `23505`, so
+ * this has to be asked first or a provider clash reports itself as a race for
+ * the serving slot, which is a different thing to do about it.
+ */
+function isProviderConflict(error: unknown): boolean {
+  return violationMessage(error).includes("rpc_connections_one_live_per_provider");
+}
+
 function isDefaultConflict(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = violationMessage(error);
   return (
     message.includes("rpc_connections_one_default_per_scope_network") || message.includes("23505")
   );

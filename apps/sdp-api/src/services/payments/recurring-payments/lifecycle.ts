@@ -24,11 +24,13 @@ import {
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { createSigningService } from "@/services/domain/signing.service";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
+  assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   sendSubscriptionInstructions,
@@ -91,12 +93,7 @@ function assertLifecyclePreconditions(input: {
   sourceWallet: CustodyWallet;
   nowIso: string;
 }): void {
-  if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
-    throw badRequest("Recurring payment source wallet does not match request");
-  }
-  if (input.recurringPayment.source_address !== input.sourceWallet.publicKey) {
-    throw badRequest("Recurring payment source address does not match wallet");
-  }
+  assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
   const transition = decideRecurringPaymentLifecycleTransition({
     operation: input.operation,
@@ -378,6 +375,12 @@ async function runRecurringPaymentLifecycle(input: {
     return collectionState.recurringPayment;
   }
 
+  await createSigningService(input.env).admitRuntimeExecution(
+    input.organizationId,
+    input.projectId,
+    input.sourceWallet.id
+  );
+
   const claimed = await recurringRepo.claimRecurringPaymentLifecycle({
     recurringPaymentId: collectionState.recurringPayment.id,
     organizationId: input.organizationId,
@@ -450,11 +453,11 @@ async function runRecurringPaymentLifecycle(input: {
       );
     }
 
-    const sourceSigner = await solanaServices.createOrgSigner(
+    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.walletId
+      input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");

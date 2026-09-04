@@ -886,6 +886,10 @@ describe("Unified earn movement ledger (postgres)", () => {
   });
 
   describe("reconciliation queue", () => {
+    beforeEach(async () => {
+      await getDb(env).prepare("DELETE FROM earn_movements").run();
+    });
+
     it("prioritizes blockhash-bound work over older confirmed rows", async () => {
       const db = getDb(env);
       const confirmed = await ledger.createSignedVaultDepositIntent(intent());

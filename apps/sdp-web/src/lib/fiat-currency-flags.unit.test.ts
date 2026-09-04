@@ -1,4 +1,4 @@
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { fiatCurrencyFlagEmoji, regionFlagEmoji } from "@sdp/types/payment-rails";
 import { describe, expect, it } from "vitest";
 

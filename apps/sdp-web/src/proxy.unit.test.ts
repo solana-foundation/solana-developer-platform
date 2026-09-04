@@ -25,20 +25,21 @@ describe("public web routes", () => {
     );
   });
 
-  it("keeps the exact Earn engineering handoff route unauthenticated", () => {
-    expect(
-      isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate/public-token"))
-    ).toBe(true);
-    expect(isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate"))).toBe(
-      false
-    );
+  it("keeps the removed Embedded Yield handoff routes authenticated", () => {
+    // The public engineering-handoff pages left with the UI builder; nothing
+    // under these paths may be reachable without a session again.
     expect(
       isPublicRoute(
-        new NextRequest("https://dashboard.example.com/earn/integrate/public-token/internal")
+        new NextRequest("https://dashboard.example.com/embedded-yield/integrate/public-token")
       )
     ).toBe(false);
     expect(
-      isPublicRoute(new NextRequest("https://dashboard.example.com/dashboard/markets/earn"))
+      isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate/public-token"))
+    ).toBe(false);
+    expect(
+      isPublicRoute(
+        new NextRequest("https://dashboard.example.com/dashboard/markets/embedded-yield")
+      )
     ).toBe(false);
   });
 });

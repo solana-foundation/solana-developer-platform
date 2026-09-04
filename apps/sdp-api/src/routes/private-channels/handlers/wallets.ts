@@ -4,6 +4,7 @@ import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   deletePrivateChannelWallet,
   listPrivateChannelWallets,
@@ -12,6 +13,7 @@ import {
 } from "@/services/private-channels";
 import type { AppContext } from "../context";
 import { emitMember, recordInstanceError, requireActiveInstance } from "../helpers";
+import type { verifyWalletBodySchema } from "../schemas";
 
 function toVerifiedWalletDto(
   row: PrivateChannelVerifiedWalletRow
@@ -55,16 +57,23 @@ export async function listVerifiedWallets(c: AppContext) {
  * POST /wallets/:walletId/verify — run the SPC challenge → sign → verify
  * handshake for a custody wallet, then persist the verification. Idempotent.
  */
-export async function verifyWallet(c: AppContext) {
+export async function verifyWallet(c: ValidatedBodyContext<typeof verifyWalletBodySchema>) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const walletId = c.req.param("walletId");
+  const { principalId } = c.req.valid("json");
   if (!walletId) {
     throw badRequest("walletId is required");
   }
 
   try {
-    const { row, instance } = await verifyPrivateChannelWallet(c.env, auth, projectId, walletId);
+    const { row, instance } = await verifyPrivateChannelWallet(
+      c.env,
+      auth,
+      projectId,
+      walletId,
+      principalId
+    );
     await emitMember(
       c,
       {
@@ -74,7 +83,7 @@ export async function verifyWallet(c: AppContext) {
       },
       PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
       {
-        payload: { walletId: row.wallet_id, pubkey: row.pubkey },
+        payload: { walletId: row.wallet_id, pubkey: row.pubkey, principalId: row.user_id },
       }
     );
     return success(c, { wallet: toVerifiedWalletDto(row) });

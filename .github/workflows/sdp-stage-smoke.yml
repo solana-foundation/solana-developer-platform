@@ -1,0 +1,111 @@
+name: SDP stage smoke
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-smoke-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: GCP stage dashboard smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    env:
+      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,SDP_FLAG_ORGANIZATION_ONBOARDING,SDP_FLAG_PRIVY_BYOK,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,PAYMENTS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
+      SMOKE_TARGET: stage
+      PLAYWRIGHT_API_URL: https://api-preview.solana.com
+      PLAYWRIGHT_USE_EXTERNAL_API: "1"
+      PLAYWRIGHT_USE_NEXT_START: "1"
+      PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
+      NEXT_PUBLIC_DISABLE_SENTRY: "1"
+      NEXT_PUBLIC_SENTRY_DSN: ""
+      PLAYWRIGHT_DISABLE_SENTRY: "1"
+      SENTRY_AUTH_TOKEN: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Pin the smoke flag posture
+        run: jq -r 'to_entries[] | .value.env + "=" + (.value.value|tostring)' apps/sdp-web/smoke-flags.json >> "$GITHUB_ENV"
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
+      - name: Probe API readiness
+        id: health
+        run: |
+          set -euo pipefail
+          READY=$(curl -sS -m 15 "${PLAYWRIGHT_API_URL}/health/ready")
+          echo "$READY"
+          echo "$READY" | jq -e '.status == "ready" and .checks.database == "ok" and .checks.redis == "ok"' >/dev/null
+
+      - name: Install Playwright browser
+        run: pnpm --filter sdp-web exec playwright install --with-deps chromium
+
+      - name: Build web app against the target API
+        if: vars.STAGE_SMOKE_READY == 'true'
+        env:
+          DOPPLER_CONFIG: dev_ci
+          SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
+        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
+
+      - name: Run GCP read-only smoke
+        if: vars.STAGE_SMOKE_READY == 'true'
+        id: smoke
+        env:
+          DOPPLER_CONFIG: dev_ci
+          NODE_ENV: production
+          VERCEL_ENV: production
+        run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run test:e2e:gcp-smoke
+
+      - name: Report run to Loki
+        if: always()
+        continue-on-error: true
+        env:
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome == 'skipped' && steps.health.outcome || steps.smoke.outcome }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: doppler run --scope=. --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: playwright-artifacts-gcp-smoke-${{ github.run_id }}
+          path: |
+            apps/sdp-web/playwright-report
+            apps/sdp-web/test-results
+          if-no-files-found: ignore
+

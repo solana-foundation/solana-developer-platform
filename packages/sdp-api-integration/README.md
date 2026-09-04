@@ -74,7 +74,7 @@ Use Doppler (team members) or export manually:
 **Required for Surfpool/local lanes:**
 
 - `DATABASE_URL` — Defaults to `postgresql://sdp:sdp@127.0.0.1:5432/sdp` in local scripts.
-- `DOPPLER_TOKEN_CI` — Required in upstream CI for managed RPC/browser secrets; fork-safe local shards can run without it where CI says so.
+- Doppler OIDC (`DOPPLER_CI_IDENTITY_ID` repository variable) — required in upstream CI for managed RPC/browser secrets; fork-safe local shards can run without it where CI says so.
 
 **Optional:**
 
@@ -223,7 +223,7 @@ under Doppler, the harness ignores Doppler's hosted `KORA_RPC_URL` and uses
 
 ### Secret-backed browser or custody smoke failed
 
-- Forked pull requests do not receive `DOPPLER_TOKEN_CI`, so secret-backed browser and live-provider smoke jobs intentionally skip there.
+- Forked pull requests cannot authenticate to Doppler via OIDC, so secret-backed browser and live-provider smoke jobs intentionally skip there.
 - For upstream branches, verify Doppler `dev_ci` has `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `PRIVY_APP_ID`, and `PRIVY_APP_SECRET`.
 - If Clerk auth fails before any Solana transaction runs, debug the browser E2E secret setup rather than the Surfpool harness.
 

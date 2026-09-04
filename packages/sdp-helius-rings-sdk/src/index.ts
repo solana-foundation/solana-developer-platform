@@ -1,6 +1,10 @@
-/**
- * The package's Kit-neutral surface, and deliberately the whole of it: its only
- * consumer is `@sdp/api` on Kit 6, where this package's Kit 7 brands can
- * structurally match the wrong major's type without any error.
- */
+// Re-exported so consumers can name shielded-pool custom errors (e.g. 7009 ->
+// InvalidSettlementAccounts) without pulling in @heliuslabs/zolana directly.
+export { decodeShieldedPoolError } from "@heliuslabs/zolana/interface";
 export { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
+export {
+  type OuterTransactionPolicyInput,
+  type OuterTransactionPolicyIntent,
+  validateOuterTransaction,
+} from "./outer-tx-policy.js";
+export { clearWalletCache, invalidateCachedWallet } from "./wallet-cache.js";

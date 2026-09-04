@@ -60,6 +60,7 @@ import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
 import { resolveChannelToken } from "./mint";
+import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { describeTxError } from "./tx-error";
 import { confirmAndPersistWithdrawal } from "./withdraw-confirm";
 import { emitWithdrawalEvent } from "./withdraw-events";
@@ -99,7 +100,7 @@ export interface CreateChannelWithdrawalInput {
    * refreshed.
    */
   gatewayAuth: SpcAuthContext;
-  cluster: import("@sdp/types").SolanaCluster;
+  projectRpc: PrivateChannelProjectRpcClient;
 }
 
 /**
@@ -220,7 +221,11 @@ export async function createChannelWithdrawal(
 ): Promise<PrivateChannelWithdrawal> {
   const { instance, organizationId, projectId, wallet } = input;
 
-  const { mint, decimals, tokenProgram } = resolveChannelToken(input.cluster, input.mint);
+  const { mint, decimals, tokenProgram } = await resolveChannelToken(
+    input.instance,
+    input.projectRpc,
+    input.mint
+  );
   const owner = wallet.publicKey;
   const destination = input.destination;
 
@@ -261,7 +266,7 @@ export async function createChannelWithdrawal(
     owner,
     mint,
     auth: input.gatewayAuth,
-    cluster: input.cluster,
+    cluster: input.projectRpc.cluster,
   });
   if (amountBaseUnits > BigInt(balance.amount)) {
     throw new AppError("INSUFFICIENT_TOKEN_BALANCE");

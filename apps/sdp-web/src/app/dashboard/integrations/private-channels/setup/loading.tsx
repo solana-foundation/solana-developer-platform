@@ -1,5 +1,5 @@
-import { PrivateChannelsFormSkeleton } from "../private-channels-route-skeletons";
+import { PrivateChannelsSetupSkeleton } from "../private-channels-route-skeletons";
 
 export default function PrivateChannelsInstanceLoading() {
-  return <PrivateChannelsFormSkeleton maxWidth="max-w-3xl" />;
+  return <PrivateChannelsSetupSkeleton />;
 }

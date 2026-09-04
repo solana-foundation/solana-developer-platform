@@ -7,9 +7,9 @@ export default defineConfig({
     alias: {
       // Must precede the "@sdp/types" prefix alias: the generated file's
       // suffix does not match the export subpath.
-      "@sdp/types/generated/ramp-support": path.resolve(
+      "@sdp/types/generated/ramp": path.resolve(
         __dirname,
-        "../../packages/sdp-types/src/generated/ramp-support.generated.ts"
+        "../../packages/sdp-types/src/generated/ramp.generated.ts"
       ),
       "@": path.resolve(__dirname, "./src"),
       "@sdp/types": path.resolve(__dirname, "../../packages/sdp-types/src"),
@@ -34,16 +34,17 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/__tests__/**/*.unit.ts"],
     exclude: ["node_modules", "dist"],
     coverage: {
-      provider: "istanbul",
+      provider: "v8",
       reporter: ["text", "json", "html"],
       reportsDirectory: "./coverage/node",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/types/**", "src/db/migrations/**"],
       thresholds: {
-        statements: 70,
-        branches: 70,
-        functions: 70,
-        lines: 70,
+        statements: 75.67,
+        branches: 65.63,
+        functions: 82.87,
+        lines: 76.1,
+        autoUpdate: true,
       },
     },
     testTimeout: 30_000,

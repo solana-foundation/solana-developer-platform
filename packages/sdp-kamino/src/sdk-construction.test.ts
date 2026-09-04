@@ -108,6 +108,16 @@ describe("vault construction", () => {
     expect(sdk.match(/^\s*assetIdentity,$/gm)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
+  it("does not require price oracles to construct vault instructions", () => {
+    const sdk = read("sdk.ts");
+    expect(sdk).toContain("loadStateOnlyReserves(");
+    expect(sdk.match(/loadStateOnlyReserves\(/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(sdk).not.toContain("client.loadVaultReserves(state)");
+    expect(sdk).not.toContain("vault.getExchangeRate(");
+    expect(sdk).toContain("client.getTokensPerShareSingleVault(");
+    expect(sdk).toContain("state-only reserve access attempted to price reserve");
+  });
+
   it("fails closed on invalid observed shares but only withholds an invalid valuation", () => {
     const sdk = read("sdk.ts");
     expect(sdk).toContain(
