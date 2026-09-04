@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  dvpBlockReason,
   type GroupedSetting,
   getConflictingSettingKeys,
   listSettingsForType,
@@ -34,6 +35,7 @@ import {
   Snowflake,
   Sun,
   TrendingUp,
+  TriangleAlert,
   Undo2,
   UserCheck,
   UserCog,
@@ -167,9 +169,22 @@ interface AdvancedSettingsEditorProps {
   containerResponsive?: boolean;
 }
 
-function Pill({ children }: { children: ReactNode }) {
+function Pill({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "warning";
+}) {
   return (
-    <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        tone === "warning"
+          ? "border border-warning-border bg-warning-bg text-warning"
+          : "bg-fill-subtle text-secondary"
+      )}
+    >
       {children}
     </span>
   );
@@ -271,6 +286,7 @@ function SettingShell({
   actions,
   trailing,
   description,
+  note,
   children,
 }: {
   icon: LucideIcon;
@@ -287,6 +303,9 @@ function SettingShell({
   // Right-aligned action, outside the label so clicking it doesn't toggle the checkbox.
   trailing?: ReactNode;
   description: string;
+  // A permanent consequence of the choice, under the description. Separate from
+  // `children`, which renders conflict OR params and never both.
+  note?: ReactNode;
   children?: ReactNode;
 }) {
   const t = useTranslations();
@@ -305,6 +324,9 @@ function SettingShell({
         {badges}
       </span>
       <span className="mt-0.5 block text-xs text-tertiary">{description}</span>
+      {note ? (
+        <span className="mt-1 block text-[11px] leading-relaxed text-warning">{note}</span>
+      ) : null}
       {actions ? <span className="mt-2 flex flex-wrap items-center gap-2.5">{actions}</span> : null}
     </span>
   );
@@ -745,6 +767,142 @@ function CombinedFreezeRow({
   );
 }
 
+/**
+ * The message naming why an extension rules the asset out of DvP settlement.
+ *
+ * A plain lookup rather than a ternary in the row, so the row renders what it
+ * is given and branches on nothing.
+ */
+function settlementBlockedMessageKey(key: Parameters<typeof dvpBlockReason>[0]): MessageKey | null {
+  const reason = dvpBlockReason(key);
+  if (!reason) return null;
+  return reason === "amountMutating"
+    ? "DashboardIssuance.config.settlementBlockedAmount"
+    : "DashboardIssuance.config.settlementBlockedEscrow";
+}
+
+/**
+ * The pills above a permanent setting's label.
+ *
+ * Its own component because two independent badges — availability and the
+ * settlement warning — were enough nested branching in the row's JSX to put
+ * `PermanentRow` over the complexity the linter allows.
+ */
+function PermanentRowBadges({
+  availability,
+  settlementBlocked,
+}: {
+  availability: GroupedSetting["availability"];
+  settlementBlocked: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      {availability === "locked" ? (
+        <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill>
+      ) : availability === "recommended" ? (
+        <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
+      ) : null}
+      {settlementBlocked ? (
+        <Pill tone="warning">
+          <TriangleAlert className="h-3 w-3" aria-hidden />
+          {t("DashboardIssuance.config.settlementBlockedBadge")}
+        </Pill>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The technical-mode action tags for a setting.
+ *
+ * Extracted alongside {@link PermanentRowBadges} and {@link PermanentRowBody}:
+ * between them the row was carrying four independent branch clusters, which is
+ * what put it over the complexity the linter allows.
+ */
+function PermanentRowActions({ actions }: { actions: readonly string[] }) {
+  return (
+    <>
+      {actions.map((action) => {
+        const ActionIcon = ACTION_ICONS[action];
+        return (
+          <Tag key={action}>
+            {ActionIcon ? <ActionIcon className="h-3 w-3 text-tertiary" /> : null}
+            {humanizeAction(action)}
+          </Tag>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * A permanent setting's footer: the conflict note, or its parameter fields.
+ *
+ * Never both — a footer rendering the two together adds phantom padding.
+ */
+function PermanentRowBody({
+  blocked,
+  conflictWith,
+  checked,
+  params,
+  settingKey,
+  selection,
+  showErrors,
+  disabled,
+  containerResponsive,
+  onParam,
+}: {
+  blocked: boolean;
+  conflictWith?: string;
+  checked: boolean;
+  params: readonly ParamFieldSpec[];
+  settingKey: string;
+  selection: SettingSelection | undefined;
+  showErrors?: boolean;
+  disabled?: boolean;
+  containerResponsive?: boolean;
+  onParam: (key: string, paramKey: string, value: string) => void;
+}) {
+  const t = useTranslations();
+
+  if (blocked) {
+    return (
+      <p className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2 text-[11px] text-tertiary">
+        {t("DashboardIssuance.config.settingConflictsWith")}
+        <Tag>{conflictWith}</Tag>
+      </p>
+    );
+  }
+
+  if (!checked || params.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className={cn(
+        "grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5",
+        containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
+      )}
+    >
+      {params.map((param) => (
+        <ParamField
+          key={param.key}
+          param={param}
+          settingKey={settingKey}
+          value={selection?.params?.[param.key] ?? ""}
+          invalid={
+            !!showErrors && !!param.required && (selection?.params?.[param.key] ?? "").trim() === ""
+          }
+          disabled={disabled}
+          onChange={(value) => onParam(settingKey, param.key, value)}
+        />
+      ))}
+    </div>
+  );
+}
+
 function PermanentRow({
   entry,
   selection,
@@ -777,6 +935,9 @@ function PermanentRow({
   // Required always locks; a read-only setting locks only when it's actually on.
   const locked = isLocked || Boolean(readOnly && checked);
   const params = setting.params ?? [];
+  // Whether this extension rules the asset out of DvP settlement, and why. A
+  // property of the single extension, so it is not a `conflictWith` pair.
+  const settlementBlockedKey = settlementBlockedMessageKey(key);
 
   return (
     <SettingShell
@@ -795,57 +956,35 @@ function PermanentRow({
           : t(setting.labelKey as MessageKey)
       }
       description={t(setting.descriptionKey as MessageKey)}
+      // Shown whether or not the setting is on, because the decision it affects
+      // is made before ticking the box and cannot be revisited afterwards.
+      // Deliberately does not repeat that the choice is permanent — the section
+      // this row sits in is headed "Permanent … cannot change after launch".
+      note={settlementBlockedKey ? t(settlementBlockedKey) : null}
       badges={
-        isLocked ? (
-          <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill>
-        ) : availability === "recommended" ? (
-          <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
-        ) : null
+        <PermanentRowBadges
+          availability={availability}
+          settlementBlocked={settlementBlockedKey !== null}
+        />
       }
       actions={
-        showTechnical && setting.actions.length > 0
-          ? setting.actions.map((action) => {
-              const ActionIcon = ACTION_ICONS[action];
-              return (
-                <Tag key={action}>
-                  {ActionIcon ? <ActionIcon className="h-3 w-3 text-tertiary" /> : null}
-                  {humanizeAction(action)}
-                </Tag>
-              );
-            })
-          : null
+        showTechnical && setting.actions.length > 0 ? (
+          <PermanentRowActions actions={setting.actions} />
+        ) : null
       }
     >
-      {/* Render conflict or params, but not both (footer adds phantom padding otherwise). */}
-      {blocked ? (
-        <p className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2 text-[11px] text-tertiary">
-          {t("DashboardIssuance.config.settingConflictsWith")}
-          <Tag>{conflictWith}</Tag>
-        </p>
-      ) : checked && params.length > 0 ? (
-        <div
-          className={cn(
-            "grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5",
-            containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
-          )}
-        >
-          {params.map((param) => (
-            <ParamField
-              key={param.key}
-              param={param}
-              settingKey={key}
-              value={selection?.params?.[param.key] ?? ""}
-              invalid={
-                !!showErrors &&
-                !!param.required &&
-                (selection?.params?.[param.key] ?? "").trim() === ""
-              }
-              disabled={disabled}
-              onChange={(value) => onParam(key, param.key, value)}
-            />
-          ))}
-        </div>
-      ) : null}
+      <PermanentRowBody
+        blocked={blocked}
+        conflictWith={conflictWith}
+        checked={checked}
+        params={params}
+        settingKey={key}
+        selection={selection}
+        showErrors={showErrors}
+        disabled={disabled}
+        containerResponsive={containerResponsive}
+        onParam={onParam}
+      />
     </SettingShell>
   );
 }

@@ -110,6 +110,47 @@ describe("AdvancedSettingsEditor", () => {
     expect(markup).toContain("Closed network");
   });
 
+  // The choice is permanent at mint time, so the warning has to be visible while
+  // the box is still unticked. A warning that only appeared once selected would
+  // arrive after the decision it exists to inform.
+  describe("DvP settlement warning", () => {
+    const securityProps = { ...baseProps, category: "tokenized_security" as const, type: "equity" };
+
+    it("warns on scaledUiAmount before it is selected, and says why", () => {
+      const markup = renderWithI18n(<AdvancedSettingsEditor {...securityProps} />);
+
+      expect(markup).toContain("Scaled display amount");
+      expect(markup).toContain("No atomic settlement");
+      // The amount-mutating reason, not the escrow one.
+      expect(markup).toContain("the amount credited can differ from the amount sent");
+      expect(markup).not.toContain("could never leave escrow");
+    });
+
+    it("gives nonTransferable the escrow reason, not the amount one", () => {
+      // Securities mark nonTransferable unsupported, so use the generic category
+      // where every setting is offered.
+      const markup = renderWithI18n(
+        <AdvancedSettingsEditor {...baseProps} category="generic" type="generic" />
+      );
+
+      expect(markup).toContain("Non-transferable");
+      expect(markup).toContain("tokens could never leave escrow");
+    });
+
+    it("leaves settings the program accepts unmarked", () => {
+      const markup = renderWithI18n(
+        <AdvancedSettingsEditor {...baseProps} category="generic" type="generic" />
+      );
+
+      // permanentDelegate and transferHook are explicitly allowed by the program;
+      // if the warning leaked onto every row it would say nothing.
+      expect(markup).toContain("Custom transfer rules");
+      const warnings = markup.split("No atomic settlement").length - 1;
+      // transferFee, interestBearing, scaledUiAmount, nonTransferable — four.
+      expect(warnings).toBe(4);
+    });
+  });
+
   it("hides unselected on-chain options once deployed, keeping required ones", () => {
     // tokenized_security locks freeze/reclaim and marks scaledUiAmount recommended.
     const securityProps = { ...baseProps, category: "tokenized_security" as const, type: "equity" };
