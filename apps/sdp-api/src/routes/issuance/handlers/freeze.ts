@@ -22,8 +22,8 @@ import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
   resolveAuthorityWallet,
-  resolveCurrentAuthorityForRole,
   resolveDirectIssuanceReplay,
+  resolveFreezeOperationAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import {
@@ -287,12 +287,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const accessControlMode = getTokenAccessControlMode(token);
-  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    c.env,
-    tokenService,
-    token,
-    "freeze"
-  );
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
 
   if (!currentAuthorityRaw) {
     throw badRequest("Current freeze authority is not available for this token");
@@ -546,12 +541,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const accessControlMode = getTokenAccessControlMode(token);
-  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    c.env,
-    tokenService,
-    token,
-    "freeze"
-  );
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
 
   if (!currentAuthorityRaw) {
     throw badRequest("Current freeze authority is not available for this token");

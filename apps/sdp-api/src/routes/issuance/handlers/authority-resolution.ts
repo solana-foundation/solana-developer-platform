@@ -1,8 +1,9 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
-import { createRpc } from "@sdp/rpc/solana";
+import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
+import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -198,6 +199,39 @@ export async function resolveMetadataAuthority(
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve metadata authority"
+    );
+  }
+}
+
+/** Resolve the wallet authority that can execute freeze/thaw, including Token ACL mints. */
+export async function resolveFreezeOperationAuthority(
+  env: Env,
+  token: TokenRecord
+): Promise<string | null> {
+  if (!token) {
+    return null;
+  }
+
+  if (!token.mintAddress) {
+    return token.freezeAuthority;
+  }
+
+  try {
+    const mint = assertValidAddress(token.mintAddress, "mintAddress");
+    const mintConfig = await getTokenAclMintConfig(
+      createRpcForSdk<Parameters<typeof getTokenAclMintConfig>[0]>(env),
+      mint
+    );
+    if (mintConfig.exists) {
+      return mintConfig.data.freezeAuthority;
+    }
+
+    const { freezeAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+    return freezeAuthority;
+  } catch (error) {
+    throw new AppError(
+      "SOLANA_RPC_ERROR",
+      error instanceof Error ? error.message : "Failed to resolve freeze authority"
     );
   }
 }

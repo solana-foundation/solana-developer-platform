@@ -14,16 +14,25 @@ import {
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
   resolveDirectIssuanceReplay,
+  resolveFreezeOperationAuthority,
   resolveIssuanceWallet,
   resolveMetadataAuthority,
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 
-const { fetchMaybeMintMock } = vi.hoisted(() => ({ fetchMaybeMintMock: vi.fn() }));
+const { fetchMaybeMintMock, getTokenAclMintConfigMock } = vi.hoisted(() => ({
+  fetchMaybeMintMock: vi.fn(),
+  getTokenAclMintConfigMock: vi.fn(),
+}));
 
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchMaybeMint: fetchMaybeMintMock,
+}));
+
+vi.mock("@solana/token-acl-sdk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana/token-acl-sdk")>()),
+  getTokenAclMintConfig: getTokenAclMintConfigMock,
 }));
 
 const AUTHORITY = "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9";
@@ -260,6 +269,7 @@ function createDecodedMint(input: {
 describe("authority-resolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getTokenAclMintConfigMock.mockResolvedValue({ exists: false });
   });
 
   afterEach(() => {
@@ -285,6 +295,55 @@ describe("authority-resolution", () => {
       )
     ).resolves.toBe(OTHER_AUTHORITY);
     expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
+  });
+
+  it("uses the Token ACL controller for freeze operations", async () => {
+    getTokenAclMintConfigMock.mockResolvedValue({
+      exists: true,
+      data: { freezeAuthority: AUTHORITY },
+    });
+
+    await expect(
+      resolveFreezeOperationAuthority(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        createToken()
+      )
+    ).resolves.toBe(AUTHORITY);
+    expect(getTokenAclMintConfigMock).toHaveBeenCalledOnce();
+    expect(fetchMaybeMintMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the base freeze authority for non-Token ACL mints", async () => {
+    fetchMaybeMintMock.mockResolvedValue(createDecodedMint({ freezeAuthority: AUTHORITY }));
+
+    await expect(
+      resolveFreezeOperationAuthority(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        createToken()
+      )
+    ).resolves.toBe(AUTHORITY);
+    expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when the Token ACL controller cannot be read", async () => {
+    getTokenAclMintConfigMock.mockRejectedValue(new Error("RPC returned invalid mint config"));
+
+    await expect(
+      resolveFreezeOperationAuthority(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        createToken()
+      )
+    ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
+    expect(fetchMaybeMintMock).not.toHaveBeenCalled();
   });
 
   it("reads the on-chain permanent delegate without mutating the token record", async () => {
