@@ -27,6 +27,7 @@ const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
 const PROJECT_ID = "prj_test";
 
 const mocks = vi.hoisted(() => ({
+  canManageCustody: true,
   createEarnVaultDeposit: vi.fn(),
   useEarnFundingWallets: vi.fn(),
   useEarnVaultDepositOutcome: vi.fn(),
@@ -47,6 +48,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.walletsEmptyTitle": "No active custody wallets",
   "DashboardEarn.deposit.walletsEmptyBody": "Create a wallet before depositing.",
   "DashboardEarn.deposit.goToWallets": "Open Wallets",
+  "DashboardCustody.createWallet": "Create wallet",
   "DashboardEarn.deposit.walletUnnamed": "Unnamed wallet",
   "DashboardEarn.deposit.strategyAssetUnavailable": "Strategy asset unavailable.",
   "DashboardEarn.deposit.vaultWalletTitle": "Funding wallet",
@@ -119,6 +121,13 @@ vi.mock("@/i18n/provider", () => ({
     );
   },
   useLocale: () => "en",
+}));
+
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => ({
+    dashboardAccess: { capabilities: { canManageCustody: mocks.canManageCustody } },
+    flags: { custody: true },
+  }),
 }));
 
 vi.mock("./deposit/earn-funding-wallets", () => ({
@@ -196,6 +205,7 @@ async function enterDepositAmount(amount = "1.000000") {
 }
 
 beforeEach(() => {
+  mocks.canManageCustody = true;
   mocks.createEarnVaultDeposit.mockReset();
   mocks.fetchEarnVaultDepositByRequestId.mockReset();
   mocks.fetchEarnVaultDepositPreview.mockReset();
@@ -737,6 +747,33 @@ describe("EarnVaultDepositModal", () => {
       (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
     expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
+  });
+
+  it("sends an empty wallet state straight to wallet setup", async () => {
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [],
+      error: undefined,
+      isLoading: false,
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    const action = screen.getByRole("link", { name: "Create wallet" });
+    expect(action.getAttribute("href")).toBe("/dashboard/wallets/setup");
+  });
+
+  it("does not offer wallet setup without custody management permission", async () => {
+    mocks.canManageCustody = false;
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [],
+      error: undefined,
+      isLoading: false,
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
   it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
