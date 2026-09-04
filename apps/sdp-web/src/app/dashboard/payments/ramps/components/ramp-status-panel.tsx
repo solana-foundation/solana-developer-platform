@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  isTerminalRampTransferStatus,
-  type PaymentTransferStatus,
-  type PaymentTransferSummary,
-} from "@sdp/types";
+import type { PaymentTransferSummary } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { CheckCircle2Icon, InfoIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -19,11 +15,6 @@ interface TransferStatusCopy {
 }
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-/** Withdraw funding instructions once a transfer can never settle. `completed` is excluded — the completion screen owns it; `undefined` stays fundable — the quote renders before the first status. */
-export function isTerminalTransferStatus(status: PaymentTransferStatus | undefined): boolean {
-  return status !== undefined && status !== "completed" && isTerminalRampTransferStatus(status);
-}
 
 function transferStatusCopy(
   t: Translate,

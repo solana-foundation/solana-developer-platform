@@ -5,9 +5,10 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { isTerminalTransferStatus } from "../ramp-transfer-state";
 import { OfframpStepContent } from "./offramp-step-content";
 import { OnrampStepContent } from "./onramp-step-content";
-import { isTerminalTransferStatus, RampStatusInline } from "./ramp-status-panel";
+import { RampStatusInline } from "./ramp-status-panel";
 
 const TERMINAL: PaymentTransferStatus[] = ["canceled", "failed", "expired"];
 const FUNDABLE: PaymentTransferStatus[] = ["pending", "awaiting_payment", "processing", "settling"];
