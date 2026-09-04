@@ -18,6 +18,9 @@ interface JupiterEarnToken {
   address?: unknown;
   assetAddress?: unknown;
   decimals?: unknown;
+  liquiditySupplyData?: {
+    withdrawable?: unknown;
+  };
   totalAssets?: unknown;
   totalRate?: unknown;
 }
@@ -88,11 +91,37 @@ export class JupiterLendEarnClient extends StubEarnClient implements EarnLiveMet
     return response as JupiterEarnToken[];
   }
 
+  private async usdtToken(): Promise<
+    (JupiterEarnToken & { address: string; decimals: 6 }) | undefined
+  > {
+    const token = (await this.listTokens()).find(isUsdtToken);
+    if (!token) return undefined;
+    assertUsdtIdentity(token);
+    return token;
+  }
+
+  /**
+   * Current protocol-wide USDT liquidity available for an immediate redeem,
+   * in underlying-token atoms. This is deliberately the provider's
+   * `liquiditySupplyData.withdrawable`, not TVL or the looser withdrawal-limit
+   * headroom: a vault-direct surface may only advertise what can leave now.
+   */
+  protected async readUsdtWithdrawableAssets(): Promise<string> {
+    const token = await this.usdtToken();
+    if (!token) {
+      throw providerUnavailable("Jupiter Lend no longer lists the admitted USDT market");
+    }
+    const withdrawable = integerString(token.liquiditySupplyData?.withdrawable);
+    if (withdrawable === undefined) {
+      throw providerUnavailable("Jupiter Lend returned unreadable USDT withdrawal liquidity");
+    }
+    return withdrawable;
+  }
+
   override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
     if (ctx.environment !== "production") return [];
-    const token = (await this.listTokens()).find(isUsdtToken);
+    const token = await this.usdtToken();
     if (!token) return [];
-    assertUsdtIdentity(token);
     const tvlUsd = atomicUsdtToUsd(token.totalAssets);
     return [
       {
@@ -116,9 +145,8 @@ export class JupiterLendEarnClient extends StubEarnClient implements EarnLiveMet
 
   async listStrategyMetrics(ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]> {
     if (ctx.environment !== "production") return [];
-    const token = (await this.listTokens()).find(isUsdtToken);
+    const token = await this.usdtToken();
     if (!token) return [];
-    assertUsdtIdentity(token);
     const tvlUsd = atomicUsdtToUsd(token.totalAssets);
     return [
       {

@@ -1,5 +1,5 @@
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,7 +11,6 @@ const sdk = vi.hoisted(() => ({
   getLendingProgram: vi.fn(),
   depositWithMinAmountOut: vi.fn(),
   redeemWithMinAmountOut: vi.fn(),
-  getUserLendingPositionByAsset: vi.fn(),
 }));
 
 vi.mock("@jup-ag/lend/earn", () => sdk);
@@ -24,6 +23,26 @@ const rentPayer = new PublicKey("11111111111111111111111111111113");
 const shareMint = new PublicKey(JUPITER_LEND_USDT.shareMint);
 const shareAta = new PublicKey("11111111111111111111111111111114");
 const runtime = { environment: "production" as const, env: {} };
+
+function mockJupiterLiquidity(withdrawable = "100000000") {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              address: JUPITER_LEND_USDT.shareMint,
+              assetAddress: JUPITER_LEND_USDT.assetMint,
+              decimals: JUPITER_LEND_USDT.decimals,
+              liquiditySupplyData: { withdrawable },
+            },
+          ]),
+          { status: 200 }
+        )
+    )
+  );
+}
 
 function instruction(programId: PublicKey, payer = owner) {
   return new TransactionInstruction({
@@ -42,6 +61,12 @@ function client() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockJupiterLiquidity();
+  vi.spyOn(Connection.prototype, "getAccountInfo").mockResolvedValue({} as never);
+  vi.spyOn(Connection.prototype, "getTokenAccountBalance").mockResolvedValue({
+    context: { slot: 1 },
+    value: { amount: "4500000", decimals: 6, uiAmount: 4.5, uiAmountString: "4.5" },
+  });
   const depositContext = {
     fTokenMint: shareMint,
     recipientTokenAccount: shareAta,
@@ -86,7 +111,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("JupiterLendVaultDirectClient", () => {
   it("builds a canonical deposit plan and rewrites ATA rent to the supplied payer", async () => {
@@ -135,11 +163,6 @@ describe("JupiterLendVaultDirectClient", () => {
   });
 
   it("reads jlUSDT shares and their current USDT value", async () => {
-    sdk.getUserLendingPositionByAsset.mockResolvedValue({
-      lendingTokenShares: new BN(4_500_000),
-      underlyingAssets: new BN(4_750_000),
-      underlyingBalance: new BN(100),
-    });
     await expect(
       client().readVaultPositions(runtime, {
         owner: owner.toBase58(),
@@ -152,11 +175,78 @@ describe("JupiterLendVaultDirectClient", () => {
         cluster: "mainnet-beta",
         shares: "4.5",
         withdrawableShares: "4.5",
-        tokenValue: "4.75",
+        tokenValue: "4.736839",
         tokenMint: JUPITER_LEND_USDT.assetMint,
         shareMint: JUPITER_LEND_USDT.shareMint,
       },
     ]);
+  });
+
+  it("caps immediately withdrawable shares by Jupiter's current USDT liquidity", async () => {
+    // 2.105262 USDT / 1.052631 USDT per share = 2 shares, rounded down.
+    mockJupiterLiquidity("2105262");
+    await expect(
+      client().readVaultPositions(runtime, {
+        owner: owner.toBase58(),
+        providerReferences: [JUPITER_LEND_USDT.assetMint],
+      })
+    ).resolves.toEqual([expect.objectContaining({ shares: "4.5", withdrawableShares: "2" })]);
+  });
+
+  it("returns zero only when the jlUSDT account is confirmed missing", async () => {
+    vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(null);
+    await expect(
+      client().readVaultPositions(runtime, {
+        owner: owner.toBase58(),
+        providerReferences: [JUPITER_LEND_USDT.assetMint],
+      })
+    ).resolves.toEqual([
+      expect.objectContaining({ shares: "0", withdrawableShares: "0", tokenValue: "0" }),
+    ]);
+    expect(Connection.prototype.getTokenAccountBalance).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves an existing jlUSDT account's RPC balance failure as unavailable", async () => {
+    vi.mocked(Connection.prototype.getTokenAccountBalance).mockRejectedValueOnce(
+      new Error("RPC unavailable")
+    );
+    await expect(
+      client().readVaultPositions(runtime, {
+        owner: owner.toBase58(),
+        providerReferences: [JUPITER_LEND_USDT.assetMint],
+      })
+    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE" });
+  });
+
+  it("reports a withdrawal quote blocked by current protocol liquidity", async () => {
+    mockJupiterLiquidity("1000000");
+    await expect(
+      client().quoteVaultWithdrawal(runtime, {
+        providerReference: JUPITER_LEND_USDT.assetMint,
+        shares: "4.5",
+      })
+    ).resolves.toEqual({
+      assetsOut: "4.736839",
+      assetDecimals: 6,
+      blockingIssues: [
+        {
+          code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY",
+          message:
+            "The requested shares exceed Jupiter Lend's current immediately withdrawable USDT liquidity.",
+        },
+      ],
+    });
+  });
+
+  it("uses the shared unreadable-vault code when live withdrawal liquidity cannot be read", async () => {
+    mockJupiterLiquidity("not-an-amount");
+    await expect(
+      client().quoteVaultWithdrawal(runtime, {
+        providerReference: JUPITER_LEND_USDT.assetMint,
+        shares: "1",
+      })
+    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE" });
   });
 
   it("refuses devnet and missing slippage floors", async () => {
@@ -227,6 +317,6 @@ describe("JupiterLendVaultDirectClient", () => {
         providerReferences: [JUPITER_LEND_USDT.assetMint, owner.toBase58()],
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    expect(sdk.getUserLendingPositionByAsset).not.toHaveBeenCalled();
+    expect(sdk.getWithdrawContext).not.toHaveBeenCalled();
   });
 });

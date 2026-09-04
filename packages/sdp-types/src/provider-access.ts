@@ -276,9 +276,11 @@ export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS
 /**
  * Environments where each `vault_direct` provider may accept a NEW deposit.
  *
- * Jupiter Lend has no devnet deployment, so its mirrored sandbox catalogue row
- * stays browse-only and only a production project may reach its mainnet
- * program. Existing devnet providers keep their sandbox-only launch posture.
+ * Jupiter publishes devnet program ids, but SDP's pinned SDK has no validated
+ * devnet USDT market identity or cluster selector. Its mirrored sandbox row
+ * therefore stays browse-only and only a production project may reach the
+ * integrated mainnet market. Existing devnet providers keep their sandbox-only
+ * launch posture.
  * Withdrawals deliberately do not consult this map: an exit must remain open
  * in every environment where a position can exist.
  *

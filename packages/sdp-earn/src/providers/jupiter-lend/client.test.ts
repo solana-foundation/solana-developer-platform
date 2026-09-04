@@ -7,6 +7,12 @@ import { JUPITER_LEND_USDT_MINT, JupiterLendEarnClient, jupiterRateFromBps } fro
 const ctx: EarnRuntimeContext = { environment: "production", env: {} };
 const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
+class TestJupiterLendEarnClient extends JupiterLendEarnClient {
+  readWithdrawableAssets(): Promise<string> {
+    return this.readUsdtWithdrawableAssets();
+  }
+}
+
 afterEach(() => mock.restoreAll());
 
 describe("JupiterLendEarnClient", () => {
@@ -106,6 +112,41 @@ describe("JupiterLendEarnClient", () => {
         riskMetadata: { tvlUsd: 2 },
       },
     ]);
+  });
+
+  it("reads the provider's immediate USDT withdrawal liquidity in asset atoms", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      response([
+        {
+          address: "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A",
+          assetAddress: JUPITER_LEND_USDT_MINT,
+          decimals: 6,
+          liquiditySupplyData: { withdrawable: "002730863275248" },
+        },
+      ])
+    );
+
+    assert.equal(await new TestJupiterLendEarnClient().readWithdrawableAssets(), "2730863275248");
+  });
+
+  it("fails closed when immediate USDT withdrawal liquidity is missing or malformed", async () => {
+    for (const withdrawable of [undefined, "1.5", -1]) {
+      mock.restoreAll();
+      mock.method(globalThis, "fetch", async () =>
+        response([
+          {
+            address: "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A",
+            assetAddress: JUPITER_LEND_USDT_MINT,
+            decimals: 6,
+            liquiditySupplyData: { withdrawable },
+          },
+        ])
+      );
+      await assert.rejects(
+        new TestJupiterLendEarnClient().readWithdrawableAssets(),
+        (error) => error instanceof SdpEarnError && error.code === "PROVIDER_UNAVAILABLE"
+      );
+    }
   });
 });
 

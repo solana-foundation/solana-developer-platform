@@ -1,6 +1,6 @@
 export type SdpJupiterLendErrorCode =
   | "INVALID_AMOUNT"
-  | "MARKET_UNREADABLE"
+  | "VAULT_UNREADABLE"
   | "CLUSTER_UNSUPPORTED"
   | "PROGRAM_MISMATCH";
 

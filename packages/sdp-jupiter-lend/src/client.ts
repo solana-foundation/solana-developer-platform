@@ -3,7 +3,6 @@ import {
   getLendingProgram,
   getLendingTokenDetails,
   getOrCreateATAInstruction,
-  getUserLendingPositionByAsset,
   getWithdrawContext,
 } from "@jup-ag/lend/earn";
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
@@ -35,6 +34,7 @@ import { assertJupiterLendPlanPrograms, permittedJupiterLendPrograms } from "./g
 
 // biome-ignore lint/security/noSecrets: public Solana program address
 const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+const U64_MAX = new BN(1).ushln(64).subn(1);
 export type JupiterLendVaultOperationRunner = <T>(
   label: string,
   operation: (assertActive: () => void) => Promise<T>
@@ -78,6 +78,31 @@ function toEarnInstruction(instruction: TransactionInstruction): EarnVaultInstru
     })),
     data: instruction.data.toString("base64"),
   };
+}
+
+function readU64Atoms(field: string, value: unknown): BN {
+  if (typeof value !== "string" || value.length === 0 || value.length > 20) {
+    throw new SdpJupiterLendError(
+      "VAULT_UNREADABLE",
+      `Jupiter Lend returned an unreadable ${field}`
+    );
+  }
+  let atoms: BN;
+  try {
+    atoms = new BN(value, 10);
+  } catch {
+    throw new SdpJupiterLendError(
+      "VAULT_UNREADABLE",
+      `Jupiter Lend returned an unreadable ${field}`
+    );
+  }
+  if (atoms.isNeg() || atoms.gt(U64_MAX) || atoms.toString(10) !== value) {
+    throw new SdpJupiterLendError(
+      "VAULT_UNREADABLE",
+      `Jupiter Lend returned an unreadable ${field}`
+    );
+  }
+  return atoms;
 }
 
 export class JupiterLendVaultDirectClient
@@ -157,6 +182,35 @@ export class JupiterLendVaultDirectClient
     return details;
   }
 
+  private async withdrawalAccounting(connection: Connection) {
+    const [details, withdrawableAssetsRaw] = await Promise.all([
+      this.lendingTokenDetails(connection),
+      this.readUsdtWithdrawableAssets(),
+    ]);
+    const withdrawableAssets = readU64Atoms("USDT withdrawal liquidity", withdrawableAssetsRaw);
+    const scale = new BN(10).pow(new BN(details.decimals));
+    // `withdrawable` is denominated in underlying atoms. Divide by the live
+    // assets-per-share rate, rounding DOWN, so this cap never advertises more
+    // shares than the same accounting says Jupiter can pay immediately.
+    const withdrawableShares = withdrawableAssets.mul(scale).div(details.convertToAssets);
+    return { details, scale, withdrawableAssets, withdrawableShares };
+  }
+
+  private async shareBalance(connection: Connection, account: PublicKey): Promise<BN | null> {
+    // The SDK's position helper collapses every `getTokenAccountBalance`
+    // failure to zero. Prove absence separately; once an account is known to
+    // exist, any balance failure remains unavailable and is never a loss.
+    if ((await connection.getAccountInfo(account)) === null) return null;
+    const balance = await connection.getTokenAccountBalance(account);
+    if (balance.value.decimals !== JUPITER_LEND_USDT.decimals) {
+      throw new SdpJupiterLendError(
+        "VAULT_UNREADABLE",
+        "Jupiter Lend returned a jlUSDT balance at an unexpected mint scale"
+      );
+    }
+    return readU64Atoms("jlUSDT balance", balance.value.amount);
+  }
+
   async quoteVaultDeposit(
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositQuoteInput
@@ -188,7 +242,7 @@ export class JupiterLendVaultDirectClient
     } catch (error) {
       if (error instanceof SdpJupiterLendError) throw error;
       throw new SdpJupiterLendError(
-        "MARKET_UNREADABLE",
+        "VAULT_UNREADABLE",
         "Could not quote the Jupiter Lend USDT deposit",
         { cause: error }
       );
@@ -259,7 +313,7 @@ export class JupiterLendVaultDirectClient
     } catch (error) {
       if (error instanceof SdpJupiterLendError) throw error;
       throw new SdpJupiterLendError(
-        "MARKET_UNREADABLE",
+        "VAULT_UNREADABLE",
         "Could not build the Jupiter Lend USDT deposit",
         { cause: error }
       );
@@ -328,7 +382,7 @@ export class JupiterLendVaultDirectClient
     } catch (error) {
       if (error instanceof SdpJupiterLendError) throw error;
       throw new SdpJupiterLendError(
-        "MARKET_UNREADABLE",
+        "VAULT_UNREADABLE",
         "Could not build the Jupiter Lend USDT withdrawal",
         { cause: error }
       );
@@ -347,8 +401,8 @@ export class JupiterLendVaultDirectClient
         ctx,
         "Quoting the Jupiter Lend withdrawal",
         async (connection) => {
-          const details = await this.lendingTokenDetails(connection);
-          const scale = new BN(10).pow(new BN(details.decimals));
+          const { details, scale, withdrawableShares } =
+            await this.withdrawalAccounting(connection);
           const assetsOut = shares.mul(details.convertToAssets).div(scale);
           if (assetsOut.isZero()) {
             throw new SdpJupiterLendError(
@@ -359,14 +413,22 @@ export class JupiterLendVaultDirectClient
           return {
             assetsOut: fromAtoms(assetsOut, details.decimals),
             assetDecimals: details.decimals,
-            blockingIssues: [],
+            blockingIssues: shares.gt(withdrawableShares)
+              ? [
+                  {
+                    code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY",
+                    message:
+                      "The requested shares exceed Jupiter Lend's current immediately withdrawable USDT liquidity.",
+                  },
+                ]
+              : [],
           };
         }
       );
     } catch (error) {
       if (error instanceof SdpJupiterLendError) throw error;
       throw new SdpJupiterLendError(
-        "MARKET_UNREADABLE",
+        "VAULT_UNREADABLE",
         "Could not quote the Jupiter Lend USDT withdrawal",
         { cause: error }
       );
@@ -387,23 +449,50 @@ export class JupiterLendVaultDirectClient
       "Reading the Jupiter Lend position",
       async (connection, assertActive) => {
         try {
-          const [position, context] = await Promise.all([
-            getUserLendingPositionByAsset({ user: owner, asset, connection, market: "main" }),
-            getDepositContext({ asset, signer: owner, connection, market: "main" }),
-          ]);
+          const context = await getWithdrawContext({
+            asset,
+            signer: owner,
+            connection,
+            market: "main",
+          });
           assertActive();
           this.assertShareMint(context.fTokenMint);
-          if (position.lendingTokenShares.isZero() && input.providerReferences.length === 0)
-            return [];
-          const shares = fromAtoms(position.lendingTokenShares, JUPITER_LEND_USDT.decimals);
+          const shareAtoms = await this.shareBalance(connection, context.ownerTokenAccount);
+          assertActive();
+          // A missing ATA is a confirmed zero. For full-shelf discovery that is
+          // not a holding; an exact requested-vault read still returns the
+          // truthful zero snapshot.
+          if (shareAtoms === null || shareAtoms.isZero()) {
+            if (input.providerReferences.length === 0) return [];
+            return [
+              {
+                providerReference: JUPITER_LEND_USDT.assetMint,
+                owner: owner.toBase58(),
+                cluster: "mainnet-beta",
+                shares: "0",
+                withdrawableShares: "0",
+                tokenValue: "0",
+                tokenMint: JUPITER_LEND_USDT.assetMint,
+                shareMint: context.fTokenMint.toBase58(),
+              },
+            ];
+          }
+          const { details, scale, withdrawableShares } =
+            await this.withdrawalAccounting(connection);
+          assertActive();
+          const shares = fromAtoms(shareAtoms, JUPITER_LEND_USDT.decimals);
+          const immediatelyWithdrawable = shareAtoms.lt(withdrawableShares)
+            ? shareAtoms
+            : withdrawableShares;
+          const tokenValue = shareAtoms.mul(details.convertToAssets).div(scale);
           return [
             {
               providerReference: JUPITER_LEND_USDT.assetMint,
               owner: owner.toBase58(),
               cluster: "mainnet-beta",
               shares,
-              withdrawableShares: shares,
-              tokenValue: fromAtoms(position.underlyingAssets, JUPITER_LEND_USDT.decimals),
+              withdrawableShares: fromAtoms(immediatelyWithdrawable, JUPITER_LEND_USDT.decimals),
+              tokenValue: fromAtoms(tokenValue, JUPITER_LEND_USDT.decimals),
               tokenMint: JUPITER_LEND_USDT.assetMint,
               shareMint: context.fTokenMint.toBase58(),
             },
@@ -411,7 +500,7 @@ export class JupiterLendVaultDirectClient
         } catch (error) {
           if (error instanceof SdpJupiterLendError) throw error;
           throw new SdpJupiterLendError(
-            "MARKET_UNREADABLE",
+            "VAULT_UNREADABLE",
             "Could not read the Jupiter Lend USDT position",
             { cause: error }
           );
