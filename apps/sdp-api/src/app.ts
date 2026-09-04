@@ -23,7 +23,7 @@ import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { AppError, badRequest, redactErrorForCapture } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
