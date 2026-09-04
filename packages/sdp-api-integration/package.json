@@ -15,11 +15,13 @@
     "@sdp/private-channels": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/spc-escrow": "workspace:*",
+    "@sdp/spc-withdraw": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana/codecs": "catalog:",
     "@solana/keychain-cdp": "1.4.0",
     "@solana/keychain-para": "1.4.0",
+    "@solana-program/token": "catalog:",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {

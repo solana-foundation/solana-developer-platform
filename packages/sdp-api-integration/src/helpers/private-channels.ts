@@ -31,18 +31,30 @@ export function getGatewayUrl(): string {
   return GATEWAY_URL;
 }
 
-// ── Deposit test config (a live devnet deposit needs a funded keypair) ──────
+// ── Full-flow canary config ────────────────────────────────────────────────
 
 const CHAIN_RPC_URL = readEnv("PRIVATE_CHANNEL_CHAIN_RPC_URL");
 const DEPOSIT_SECRET_KEY = readEnv("PRIVATE_CHANNEL_DEPOSIT_SECRET_KEY");
+const RECIPIENT_SECRET_KEY = readEnv("PRIVATE_CHANNEL_RECIPIENT_SECRET_KEY");
+const ESCROW_INSTANCE_ID = readEnv("PRIVATE_CHANNEL_ESCROW_INSTANCE_ID");
+const AUTH_URL = readEnv("PRIVATE_CHANNEL_AUTH_URL");
+const AUTH_USERNAME = readEnv("PRIVATE_CHANNEL_AUTH_USERNAME");
+const AUTH_PASSWORD = readEnv("PRIVATE_CHANNEL_AUTH_PASSWORD");
 
 /**
- * The live deposit test is gated behind the gateway URL, a devnet chain RPC URL,
- * and a funded devnet keypair (holding devnet USDC + SOL). Absent any of these,
- * the deposit suite skips.
+ * The live full-flow test needs two wallets, auth credentials, an escrow instance,
+ * and both gateway and devnet RPC endpoints. Ordinary integration runs only need
+ * the gateway, so the transaction canary skips unless every secret is present.
  */
-export const PRIVATE_CHANNEL_DEPOSIT_CONFIGURED =
-  PRIVATE_CHANNEL_CONFIGURED && CHAIN_RPC_URL.length > 0 && DEPOSIT_SECRET_KEY.length > 0;
+export const PRIVATE_CHANNEL_FULL_FLOW_CONFIGURED =
+  PRIVATE_CHANNEL_CONFIGURED &&
+  CHAIN_RPC_URL.length > 0 &&
+  DEPOSIT_SECRET_KEY.length > 0 &&
+  RECIPIENT_SECRET_KEY.length > 0 &&
+  ESCROW_INSTANCE_ID.length > 0 &&
+  AUTH_URL.length > 0 &&
+  AUTH_USERNAME.length > 0 &&
+  AUTH_PASSWORD.length > 0;
 
 /** Devnet chain RPC the escrow deposit broadcasts to. */
 export function getChainRpcUrl(): string {
@@ -52,6 +64,28 @@ export function getChainRpcUrl(): string {
 /** The funded devnet keypair secret (`[..64 numbers..]` JSON array or base58). */
 export function getDepositSecretKey(): string {
   return DEPOSIT_SECRET_KEY;
+}
+
+/** A second funded-capable wallet used to prove transfer and withdrawal. */
+export function getRecipientSecretKey(): string {
+  return RECIPIENT_SECRET_KEY;
+}
+
+/** Escrow instance created by the protected devnet bootstrap workflow. */
+export function getEscrowInstanceId(): string {
+  return ESCROW_INSTANCE_ID;
+}
+
+export function getAuthUrl(): string {
+  return AUTH_URL;
+}
+
+export function getAuthUsername(): string {
+  return AUTH_USERNAME;
+}
+
+export function getAuthPassword(): string {
+  return AUTH_PASSWORD;
 }
 
 /** Base-unit deposit amount for the live test (default 0.01 USDC). */
