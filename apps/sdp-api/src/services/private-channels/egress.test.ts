@@ -113,6 +113,18 @@ describe("checkPrivateChannelDestination", () => {
     expect(check("http://10.0.0.8:8899/health").ok).toBe(false);
   });
 
+  it("keeps the DNS guard on a plaintext entry named by hostname", () => {
+    const allowlist = buildPrivateChannelEgressAllowlist(["http://plain.private-channels.test"]);
+    const checked = checkPrivateChannelDestination(
+      "http://plain.private-channels.test/health",
+      allowlist,
+      "gatewayUrl"
+    );
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) throw new Error("narrowing");
+    expect(checked.approved.insecure).toBe(false);
+  });
+
   it("approves nothing from an entry it cannot parse", () => {
     const broken = buildPrivateChannelEgressAllowlist(["gateway.private-channels.test", "   "]);
 

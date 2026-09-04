@@ -110,8 +110,7 @@ export function buildPrivateChannelEgressAllowlist(
     if (!url) continue;
     allowlist.set(url.origin, {
       origin: url.origin,
-      insecure:
-        url.protocol === "http:" || (isIpLiteral(url.hostname) && isBlockedAddress(url.hostname)),
+      insecure: isIpLiteral(url.hostname) && isBlockedAddress(url.hostname),
     });
   }
   return allowlist;
