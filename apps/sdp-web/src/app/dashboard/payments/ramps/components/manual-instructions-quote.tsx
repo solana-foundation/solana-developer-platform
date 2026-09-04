@@ -561,6 +561,12 @@ function HercleInstruction({
           label={t("DashboardPayments.manualInstructions.paymentReference")}
           value={bank.paymentReference}
         />
+        {bank.payerAccountHolder === undefined ? null : (
+          <PaymentInstructionField
+            label={t("DashboardPayments.hercle.payerAccountHolder")}
+            value={bank.payerAccountHolder}
+          />
+        )}
       </div>
       <div className="rounded-xl bg-fill-subtle px-4 py-3">
         <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">

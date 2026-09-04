@@ -140,6 +140,7 @@ const hercleOnrampOrderResponseSchema = z.object({
     bankName: z.string().optional(),
     accountHolder: z.string().optional(),
     paymentReference: z.string().optional(),
+    payerAccountHolder: z.string().optional(),
   }),
   expiresAt: z.string().optional(),
 });
@@ -166,6 +167,7 @@ const hercleVerificationResponseSchema = z.object({
 const herclePayoutAccountResponseSchema = z.object({
   payoutAccountId: z.string().min(1),
   currency: z.string(),
+  rail: z.string().optional(),
   iban: z.string(),
   bic: z.string(),
   accountHolder: z.string(),
@@ -179,6 +181,8 @@ export type HerclePayoutAccountResponse = z.infer<typeof herclePayoutAccountResp
 
 export interface HercleRegisterPayoutAccountRequest {
   currency: string;
+  /** Payment scheme; Hercle defaults it per currency when omitted (spec §6.4). */
+  rail?: string;
   iban: string;
   bic: string;
   accountHolder: string;
@@ -507,7 +511,10 @@ export class HercleRampClient implements RampProvider {
       kind: "fiat_funding",
       fiatCurrency: order.fiatCurrency,
       bankAccount: order.bankAccount,
-      instructionsNotes: `Wire ${order.fiatAmount} ${order.fiatCurrency} from your registered business account; include the payment reference so Hercle can match the transfer.`,
+      instructionsNotes:
+        order.bankAccount.payerAccountHolder === undefined
+          ? `Wire ${order.fiatAmount} ${order.fiatCurrency} from your registered business account; include the payment reference so Hercle can match the transfer.`
+          : `Wire ${order.fiatAmount} ${order.fiatCurrency} from a bank account held in the name of ${order.bankAccount.payerAccountHolder}; a transfer from any other account is returned by the bank. Include the payment reference so Hercle can match the transfer.`,
     };
 
     return {

@@ -822,6 +822,8 @@ export interface HercleBankFundingDetails {
   accountHolder?: string;
   /** Wire reference the sender must include so Hercle can match the payment to the order. */
   paymentReference?: string;
+  /** The name the wire must come from — the business itself; a wire from any other holder is returned by the bank and fails the order. */
+  payerAccountHolder?: string;
 }
 
 /** On-ramp: wire fiat to the Hercle-issued account to receive crypto. */

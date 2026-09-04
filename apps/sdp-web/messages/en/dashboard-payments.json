@@ -334,6 +334,7 @@
       "fundingAccountProvisioningTitle": "Registering your bank account",
       "fundingAccountProvisioningDescription": "Your business is verified. Hercle's bank is now registering the account you'll be paid out to — this page refreshes automatically once it's active.",
       "onrampProvisioningDetail": "Opening your dedicated EUR account at Hercle's bank",
+      "payerAccountHolder": "Pay from an account held in the name of",
       "offrampProvisioningDetail": "Registering your business bank account as the payout destination",
       "readyTitle": "Preparing your instructions",
       "readyDescription": "Your business is verified — fetching your payment details now.",
