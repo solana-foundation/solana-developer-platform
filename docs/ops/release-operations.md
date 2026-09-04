@@ -163,6 +163,16 @@ The production deploy job, in order:
 1. **Gate on stage smoke.** Runs [`sdp-stage-smoke.yml`](../../.github/workflows/sdp-stage-smoke.yml) against the stage API. With `STAGE_SMOKE_READY` unset it is a readiness probe; with it set it builds the dashboard against stage and runs the read-only Playwright suite. A failure stops the release before production is touched.
 2. **Verify release identity.** [`verify-release-identity.sh`](../../.github/scripts/verify-release-identity.sh) checks that the checked-out commit is the release SHA, that the tag resolves to it, that it is contained in `origin/main`, and that the tag version matches `package.json`.
 3. **Verify and promote the release image.** Waits for `ghcr.io/solana-foundation/sdp/sdp-api:vX.Y.Z` to be published by the parallel image build (up to about 65 minutes), then runs `cosign verify` against it with the GitHub OIDC issuer, the certificate identity pinned to `release-images.yml` at `refs/tags/vX.Y.Z`, and the certificate's workflow SHA pinned to the release commit. On success it copies that digest into Artifact Registry as `sdp-api-public:<release-sha>` and tags it `X.Y.Z`. Verification failure fails the job.
+4. **Resolve the immutable deploy image.** Reads the digest back from Artifact Registry and refuses to continue unless it equals the verified origin digest.
+5. **Run database migrations.** Updates and executes `sdp-prod-api-public-migrate` with that digest.
+6. **Capture rollback state.** Records the current traffic split, cron image, and worker image.
+7. **Deploy the candidate without traffic.** Creates a new revision tagged `candidate-<sha12>` at 0% traffic and checks that the revision's image digest is the pinned digest or a platform manifest inside that signed index.
+8. **Verify candidate readiness.** Polls the revision's Ready condition for up to two minutes.
+9. **Promote.** Verifies the cron cadence, moves 100% of traffic to the candidate, polls `https://api.solana.com/health/ready` until it reports the candidate revision with Postgres and Redis ok, then updates the cron job and worker to the same digest.
+10. **Run the production canary.** Executes the `sdp-prod-canary` job and waits for it.
+11. **Roll back an incomplete rollout.** If the rollout started but did not complete, restores the previous traffic split, cron image, and worker image. An incomplete restore fails the job with `Automatic rollback was incomplete; escalate immediately.`
+12. **Remove the candidate traffic tag.**
+
 What the release job checks before an image can reach production, and what each check pins:
 
 | Check | Expected value | Enforced by | On failure |
@@ -174,16 +184,6 @@ What the release job checks before an image can reach production, and what each 
 | Build provenance | SLSA provenance and an SBOM attached at build time; both platforms scanned by Trivy with critical findings failing the build | `release-images.yml` | Image is never published, so the release job times out waiting for it |
 | Artifact Registry digest | Equal to the verified origin digest | `Resolve immutable deploy image` | Job fails; nothing deployed |
 | Candidate revision digest | The pinned digest, or a platform manifest listed inside that signed index | `Deploy candidate without production traffic` | Job fails; the 0% candidate is removed |
-
-4. **Resolve the immutable deploy image.** Reads the digest back from Artifact Registry and refuses to continue unless it equals the verified origin digest.
-5. **Run database migrations.** Updates and executes `sdp-prod-api-public-migrate` with that digest.
-6. **Capture rollback state.** Records the current traffic split, cron image, and worker image.
-7. **Deploy the candidate without traffic.** Creates a new revision tagged `candidate-<sha12>` at 0% traffic and checks that the revision's image digest is the pinned digest or a platform manifest inside that signed index.
-8. **Verify candidate readiness.** Polls the revision's Ready condition for up to two minutes.
-9. **Promote.** Verifies the cron cadence, moves 100% of traffic to the candidate, polls `https://api.solana.com/health/ready` until it reports the candidate revision with Postgres and Redis ok, then updates the cron job and worker to the same digest.
-10. **Run the production canary.** Executes the `sdp-prod-canary` job and waits for it.
-11. **Roll back an incomplete rollout.** If the rollout started but did not complete, restores the previous traffic split, cron image, and worker image. An incomplete restore fails the job with `Automatic rollback was incomplete; escalate immediately.`
-12. **Remove the candidate traffic tag.**
 
 A failure before step 9 leaves production serving the previous revision. A failure during or after step 9 triggers step 11. Migrations (step 5) are not rolled back by the workflow.
 
