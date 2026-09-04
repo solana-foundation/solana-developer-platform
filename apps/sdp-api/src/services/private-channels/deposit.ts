@@ -59,7 +59,7 @@ import { confirmAndPersistDeposit } from "./deposit-confirm";
 import { emitDepositEvent } from "./deposit-events";
 import { resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
-import { describeTxError } from "./tx-error";
+import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
 
 /** The instance fields the deposit needs. */
 type DepositInstance = Pick<
@@ -290,6 +290,7 @@ export async function createChannelDeposit(
   // Broadcast. A failure here means the transaction never reached the chain (no
   // signature), so the deposit is a terminal failure — no funds moved.
   let signature: Signature;
+  let recordedSignature: Signature | null = null;
   try {
     signature = await broadcastDeposit(env, {
       instance,
@@ -315,21 +316,30 @@ export async function createChannelDeposit(
         if (!recorded) {
           throw new AppError("CONFLICT", "Deposit reservation is no longer pending.");
         }
+        recordedSignature = signedAs;
       },
     });
   } catch (error) {
-    const failureReason = describeTxError(error, "Deposit submission failed.");
-    getLogger().error({ depositId: created.id, error }, "createChannelDeposit: broadcast failed");
-    const failed = await repo.updateDeposit({
-      id: created.id,
-      status: "failed",
-      failureReason,
-      expectedStatus: "pending",
-    });
-    if (failed) {
-      await emitDepositEvent(env, failed, "transfer.deposit.failed", "failed", { failureReason });
+    if (recordedSignature !== null && isAmbiguousSubmissionOutcome(error)) {
+      // The connection died after the signed bytes may have gone out, so the
+      // chain may have executed the escrow transfer. Marking it failed would
+      // invite a duplicate under a fresh key; fall through and let the
+      // submitted reconciliation ask the chain instead.
+      signature = recordedSignature;
+    } else {
+      const failureReason = describeTxError(error, "Deposit submission failed.");
+      getLogger().error({ depositId: created.id, error }, "createChannelDeposit: broadcast failed");
+      const failed = await repo.updateDeposit({
+        id: created.id,
+        status: "failed",
+        failureReason,
+        expectedStatus: "pending",
+      });
+      if (failed) {
+        await emitDepositEvent(env, failed, "transfer.deposit.failed", "failed", { failureReason });
+      }
+      return mapPrivateChannelDepositRow(failed ?? created);
     }
-    return mapPrivateChannelDepositRow(failed ?? created);
   }
 
   latest =

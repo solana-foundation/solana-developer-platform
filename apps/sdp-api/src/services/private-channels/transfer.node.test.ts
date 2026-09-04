@@ -584,6 +584,28 @@ describe("createChannelTransfer", () => {
     );
   });
 
+  it("reconciles instead of failing when the send outcome is ambiguous after signing", async () => {
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(
+      Object.assign(new Error("socket hang up"), { code: "ECONNRESET" })
+    );
+
+    const result = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(result).toMatchObject({ status: "confirmed" });
+    expect(result.signature).not.toBeNull();
+    expect(repo.updateTransfer).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" })
+    );
+  });
+
+  it("still fails a definitive RPC rejection even though the signature was recorded", async () => {
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC rejected transfer"));
+
+    const result = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(result).toMatchObject({ status: "failed", failureReason: "SPC rejected transfer" });
+  });
+
   it("confirms instead of failing a replayed reservation whose signature was persisted", async () => {
     // The original request dies after the send but before the settle: the
     // pre-send persist recorded the signature, so recovery must ask SPC what

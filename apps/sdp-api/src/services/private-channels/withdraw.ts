@@ -64,7 +64,7 @@ import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
 import { resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
-import { describeTxError } from "./tx-error";
+import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
 import { confirmAndPersistWithdrawal } from "./withdraw-confirm";
 import { emitWithdrawalEvent } from "./withdraw-events";
 
@@ -417,6 +417,7 @@ export async function createChannelWithdrawal(
   // gone and the oracle escalates unobservable releases via the stuck-warning
   // event instead of auto-failing.
   let signature: Signature;
+  let recordedSignature: Signature | null = null;
   try {
     signature = await broadcastWithdrawal(env, {
       instance,
@@ -442,30 +443,38 @@ export async function createChannelWithdrawal(
         if (!recorded) {
           throw new AppError("CONFLICT", "Withdrawal reservation is no longer pending.");
         }
+        recordedSignature = signedAs;
       },
     });
   } catch (error) {
-    const failureReason = describeTxError(error, "Withdrawal submission failed.");
-    getLogger().error(
-      { withdrawalId: created.id, error },
-      "createChannelWithdrawal: broadcast failed"
-    );
-    const failed = await repo.updateWithdrawal({
-      id: created.id,
-      status: "failed",
-      failureReason,
-      expectedStatus: "pending",
-    });
-    if (failed) {
-      await emitWithdrawalEvent(
-        env,
-        failed,
-        PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
-        "failed",
-        { failureReason }
+    if (recordedSignature !== null && isAmbiguousSubmissionOutcome(error)) {
+      // The connection died after the signed burn may have gone out, so the
+      // gateway may have executed it. Marking it failed would invite a second
+      // burn under a fresh key; fall through and ask the gateway instead.
+      signature = recordedSignature;
+    } else {
+      const failureReason = describeTxError(error, "Withdrawal submission failed.");
+      getLogger().error(
+        { withdrawalId: created.id, error },
+        "createChannelWithdrawal: broadcast failed"
       );
+      const failed = await repo.updateWithdrawal({
+        id: created.id,
+        status: "failed",
+        failureReason,
+        expectedStatus: "pending",
+      });
+      if (failed) {
+        await emitWithdrawalEvent(
+          env,
+          failed,
+          PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
+          "failed",
+          { failureReason }
+        );
+      }
+      return mapPrivateChannelWithdrawalRow(failed ?? created);
     }
-    return mapPrivateChannelWithdrawalRow(failed ?? created);
   }
 
   latest =

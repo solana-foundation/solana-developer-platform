@@ -46,7 +46,7 @@ import { resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { confirmAndPersistTransfer } from "./transfer-confirm";
 import { emitTransferEvent } from "./transfer-events";
-import { describeTxError, isNodeAtCapacityError } from "./tx-error";
+import { describeTxError, isAmbiguousSubmissionOutcome, isNodeAtCapacityError } from "./tx-error";
 
 type TransferInstance = Pick<
   PrivateChannelInstance,
@@ -478,6 +478,7 @@ export async function createChannelTransfer(
   };
 
   let signature: Signature;
+  let recordedSignature: Signature | null = null;
   try {
     signature = await broadcastTransfer(env, {
       instance: input.instance,
@@ -502,6 +503,7 @@ export async function createChannelTransfer(
         if (!recorded) {
           throw new AppError("CONFLICT", "Transfer reservation is no longer pending.");
         }
+        recordedSignature = signedAs;
       },
     });
   } catch (error) {
@@ -511,7 +513,14 @@ export async function createChannelTransfer(
     if (isNodeAtCapacityError(error)) {
       return fail("SPC is at capacity and did not accept the transfer. Try again shortly.");
     }
-    return fail(describeTxError(error, "Transfer submission failed."));
+    if (recordedSignature !== null && isAmbiguousSubmissionOutcome(error)) {
+      // The connection died after the signed bytes may have gone out, so SPC
+      // may have executed the transfer. Marking it failed would invite a
+      // duplicate under a fresh key; fall through and ask SPC instead.
+      signature = recordedSignature;
+    } else {
+      return fail(describeTxError(error, "Transfer submission failed."));
+    }
   }
 
   let latest = await settleTransfer(repo, pending, { status: "submitted", signature });

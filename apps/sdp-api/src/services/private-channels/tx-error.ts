@@ -129,3 +129,40 @@ export function isNodeAtCapacityError(error: unknown): boolean {
   }
   return false;
 }
+
+const AMBIGUOUS_TRANSPORT_CODES = new Set([
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EPIPE",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+/**
+ * Whether a submission error leaves the transaction's fate unknown: the
+ * connection died or timed out AFTER the request may have gone out, so the
+ * node may have executed it. A JSON-RPC error response, a refused connection,
+ * or a DNS failure is NOT ambiguous — the node either answered or was never
+ * reached — and stays a definitive rejection. Callers that persisted the
+ * signature before the send must reconcile an ambiguous outcome against the
+ * chain instead of marking the row failed, which would invite a duplicate
+ * under a fresh idempotency key.
+ */
+export function isAmbiguousSubmissionOutcome(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
+    const record = current as {
+      name?: unknown;
+      code?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    if (record.name === "AbortError" || record.name === "TimeoutError") return true;
+    if (typeof record.code === "string" && AMBIGUOUS_TRANSPORT_CODES.has(record.code)) return true;
+    if (record.message === "socket hang up") return true;
+    if (record.cause === undefined || record.cause === current) break;
+    current = record.cause;
+  }
+  return false;
+}
