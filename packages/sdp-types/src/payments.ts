@@ -101,23 +101,69 @@ export interface PaymentWalletPolicyAuditEntry {
   evaluatedAt: string;
 }
 
-export type PaymentTransferStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "finalized"
-  | "failed"
-  | "awaiting_payment"
-  | "settling"
-  | "completed"
-  | "canceled"
-  | "expired";
+export const PAYMENT_TRANSFER_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "finalized",
+  "failed",
+  "awaiting_payment",
+  "settling",
+  "completed",
+  "canceled",
+  "expired",
+] as const;
+
+export type PaymentTransferStatus = (typeof PAYMENT_TRANSFER_STATUSES)[number];
 
 export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
   "completed",
   "confirmed",
   "finalized",
 ] as const satisfies readonly PaymentTransferStatus[];
+
+/** Whether each status ends a ramp transfer's lifecycle. Scoped to ramps — onchain sends terminate at `finalized`. */
+export const RAMP_TRANSFER_STATUS_TERMINAL = {
+  pending: false,
+  processing: false,
+  confirmed: false,
+  finalized: false,
+  failed: true,
+  awaiting_payment: false,
+  settling: false,
+  completed: true,
+  canceled: true,
+  expired: true,
+} as const satisfies Record<PaymentTransferStatus, boolean>;
+
+/** Reports whether a ramp transfer can never leave the given status. */
+export function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
+  return RAMP_TRANSFER_STATUS_TERMINAL[status];
+}
+
+/** Whether a ramp transfer in each status can still be canceled: only before the customer has funded it. */
+export const RAMP_TRANSFER_STATUS_CANCELABLE = {
+  pending: true,
+  processing: false,
+  confirmed: false,
+  finalized: false,
+  failed: false,
+  awaiting_payment: true,
+  settling: false,
+  completed: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentTransferStatus, boolean>;
+
+/** Reports whether a ramp transfer in the given status can still be canceled. */
+export function isCancelableRampTransferStatus(status: PaymentTransferStatus): boolean {
+  return RAMP_TRANSFER_STATUS_CANCELABLE[status];
+}
+
+/** The statuses a ramp transfer can be canceled from, for status-guarded updates. */
+export const CANCELABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_CANCELABLE[status]
+);
 
 export interface LightsparkGridAmount {
   amount: number;

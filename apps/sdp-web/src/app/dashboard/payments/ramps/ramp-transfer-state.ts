@@ -1,25 +1,20 @@
-import type { PaymentTransferStatus } from "@sdp/types";
-
-type RampTransferState =
-  | { cancelable: true; terminal: false }
-  | { cancelable: false; terminal: boolean };
-
-const RAMP_TRANSFER_STATE = {
-  pending: { cancelable: true, terminal: false },
-  awaiting_payment: { cancelable: true, terminal: false },
-  processing: { cancelable: false, terminal: false },
-  confirmed: { cancelable: false, terminal: false },
-  finalized: { cancelable: false, terminal: false },
-  settling: { cancelable: false, terminal: false },
-  completed: { cancelable: false, terminal: true },
-  failed: { cancelable: false, terminal: true },
-  canceled: { cancelable: false, terminal: true },
-  expired: { cancelable: false, terminal: true },
-} as const satisfies Record<PaymentTransferStatus, RampTransferState>;
+import {
+  isCancelableRampTransferStatus,
+  isTerminalRampTransferStatus,
+  type PaymentTransferStatus,
+} from "@sdp/types";
 
 export function getRampTransferState(status: PaymentTransferStatus | undefined) {
   if (status === undefined) {
     return { cancelable: false, terminal: false };
   }
-  return RAMP_TRANSFER_STATE[status];
+  return {
+    cancelable: isCancelableRampTransferStatus(status),
+    terminal: isTerminalRampTransferStatus(status),
+  };
+}
+
+/** Withdraw funding instructions once a transfer can never settle. `completed` is excluded — the completion screen owns it; `undefined` stays fundable — the quote renders before the first status. */
+export function isTerminalTransferStatus(status: PaymentTransferStatus | undefined): boolean {
+  return status !== undefined && status !== "completed" && isTerminalRampTransferStatus(status);
 }

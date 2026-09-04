@@ -8,6 +8,7 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
+import { isTerminalTransferStatus } from "../ramp-transfer-state";
 import { walletComboboxOptions } from "../wallet-options";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
@@ -19,7 +20,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { isTerminalTransferStatus, RampStatusPanel } from "./ramp-status-panel";
+import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
