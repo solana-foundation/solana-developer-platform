@@ -44,9 +44,8 @@ function capturingCreate() {
 const allMethods: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
   ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "owner" })],
   ["readIdentity", (g) => g.readIdentity({ walletId: "hrw_1", owner: "owner" })],
-  ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "owner", cursor: null })],
-  ["buildOperation", (g) => g.buildOperation({ operation: {} as never, keyRefs: [] })],
-  ["requestProof", (g) => g.requestProof({ operationId: "hro_1", ringsMetadata: {} as never })],
+  ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "owner" })],
+  ["buildOperation", (g) => g.buildOperation({ operation: {} as never, owner: "owner" })],
   ["verifyIndexed", (g) => g.verifyIndexed("sig")],
 ];
 
@@ -204,7 +203,7 @@ describe("resolveRingsGateway", () => {
 
       expect(gateway).toBeInstanceOf(UnconfiguredRingsGateway);
       const health = await gateway.probeHealth();
-      expect(health.detail?.gateway).toContain(key);
+      expect(health.detail?.rpc).toContain(key);
       expect(ringsUpstreamsConfigured(env)).toBe(false);
     });
 
@@ -214,7 +213,7 @@ describe("resolveRingsGateway", () => {
       const gateway = resolveRingsGateway(env, tenant);
 
       expect(gateway).toBeInstanceOf(UnconfiguredRingsGateway);
-      expect((await gateway.probeHealth()).detail?.gateway).toContain("HELIUS_RINGS_PROVER_URL");
+      expect((await gateway.probeHealth()).detail?.rpc).toContain("HELIUS_RINGS_PROVER_URL");
       expect(ringsUpstreamsConfigured(env)).toBe(false);
     });
 
@@ -251,8 +250,8 @@ describe("UnconfiguredRingsGateway", () => {
   it("reports every component red naming the missing variables", async () => {
     const health = await gateway.probeHealth();
 
-    expect(health).toMatchObject({ rpc: "red", photon: "red", prover: "red", gateway: "red" });
-    for (const component of ["rpc", "photon", "prover", "gateway"] as const) {
+    expect(health).toMatchObject({ rpc: "red", photon: "red", prover: "red" });
+    for (const component of ["rpc", "photon", "prover"] as const) {
       expect(health.detail?.[component]).toContain("HELIUS_RINGS_INDEXER_URL");
       expect(health.detail?.[component]).toContain("HELIUS_RINGS_PROVER_URL");
     }
@@ -274,6 +273,6 @@ describe("UnconfiguredRingsGateway", () => {
   it("reads as singular when only one variable is missing", async () => {
     const health = await new UnconfiguredRingsGateway(["HELIUS_RINGS_RPC_URL"]).probeHealth();
 
-    expect(health.detail?.gateway).toContain("HELIUS_RINGS_RPC_URL is not configured");
+    expect(health.detail?.rpc).toContain("HELIUS_RINGS_RPC_URL is not configured");
   });
 });

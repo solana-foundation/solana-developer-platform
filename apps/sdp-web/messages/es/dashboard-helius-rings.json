@@ -36,7 +36,8 @@
       "createFailed": "No se pudo crear la Wallet. Revisa los detalles e inténtalo de nuevo.",
       "noCustodyWallets": "No hay Wallets de custodia disponibles. Primero crea una Wallet en Wallets.",
       "copyShieldedAddress": "Copiar dirección protegida",
-      "shieldedAddressCopied": "Dirección protegida copiada"
+      "shieldedAddressCopied": "Dirección protegida copiada",
+      "allCustodyWalletsBound": "Todas las Wallets de custodia ya respaldan una Wallet privada."
     },
     "identity": {
       "column": "Identidad on-chain",
@@ -102,7 +103,12 @@
       "state_submitted": "Enviada",
       "state_indexing": "Indexando",
       "state_completed": "Completada",
-      "state_failed": "Fallida"
+      "state_failed": "Fallida",
+      "action": "Acción",
+      "working": "Aún en liquidación",
+      "retryOf": "Reintento de {id}",
+      "retriedAs": "Reintentada como {id}",
+      "state_voided": "Anulada"
     },
     "errors": {
       "loadFailed": "No se pudieron cargar los datos de Helius Rings. Inténtalo de nuevo en un momento.",
@@ -138,7 +144,17 @@
       "summaryUnlockAt": "Se desbloquea a las",
       "summaryBeneficiary": "Beneficiario",
       "anonymousWarning": "Entiendo que la contraparte no se revela on-chain. Las transferencias anónimas están sujetas a la misma política de Wallet y a las mismas reglas de aprobación que cualquier otra transferencia: no implican menor riesgo.",
-      "gatewayRedNotice": "La gateway de Rings no está disponible. Aún puedes componer y confirmar: la operación pasará por la política y registrará una falla honesta de la gateway."
+      "gatewayRedNotice": "La gateway de Rings no está disponible. Aún puedes componer y confirmar: la operación pasará por la política y registrará una falla honesta de la gateway.",
+      "description_shield": "Mueve fondos desde la Wallet de custodia a esta Wallet privada.",
+      "description_withdraw": "Devuelve los fondos a la Wallet de custodia que la respalda.",
+      "description_transfer_registered": "Envía fondos de forma privada a otra Wallet privada de este proyecto.",
+      "opTab_shield": "Shield",
+      "opTab_withdraw": "Retirar",
+      "opTab_transfer_registered": "Transferencia privada",
+      "recipientPrivateWallet": "Wallet privada destinataria",
+      "recipientPrivateWalletPlaceholder": "Selecciona una Wallet privada",
+      "privateTransferNoRecipients": "No hay otras Wallets privadas aprovisionadas en este proyecto a las que enviar.",
+      "started": "Operación iniciada. Síguela en Activity abajo."
     },
     "zones": {
       "title": "Zonas",
@@ -157,7 +173,29 @@
       "timeline": "Cronología",
       "timelineEmpty": "No se registraron eventos.",
       "retryable": "Un reintento puede tener éxito.",
-      "notRetryable": "No se puede reintentar."
+      "notRetryable": "No se puede reintentar.",
+      "retryOf": "Reintento de",
+      "timelineState_draft": "Borrador",
+      "timelineState_preparing": "Preparando",
+      "timelineState_approval_required": "En espera de aprobación",
+      "timelineState_proving": "Generando prueba",
+      "timelineState_ready_to_sign": "Listo para firmar",
+      "timelineState_submitted": "Enviada",
+      "timelineState_indexing": "Indexando",
+      "timelineState_completed": "Completada",
+      "timelineState_failed": "Fallida",
+      "timelineState_voided": "Anulada",
+      "event_created": "Creada",
+      "event_retried": "Reintentada",
+      "event_policyEvaluated": "Política evaluada",
+      "event_approvalRequested": "Aprobación solicitada",
+      "event_approvalGranted": "Aprobada",
+      "event_proofReceived": "Prueba generada",
+      "event_transactionSubmitted": "Transmitida",
+      "event_completed": "Completada",
+      "event_failed": "Fallida",
+      "event_voided": "Anulada",
+      "event_escalated": "Escalada"
     },
     "recovery": {
       "title": "Requiere atención",
@@ -166,7 +204,21 @@
       "retry": "Reintentar",
       "retrying": "Reintentando…",
       "execute": "Ejecutar",
-      "executing": "Ejecutando…"
+      "executing": "Ejecutando…",
+      "void": "Anular",
+      "voiding": "Anulando…",
+      "voidConfirm": "Anular declara que esta transacción firmada nunca se registró en la cadena y libera el espacio de gasto de la Wallet. Continúa solo si has conciliado la firma y confirmado su ausencia."
+    },
+    "workspace": {
+      "selectPrompt": "Selecciona una Wallet privada arriba para ver sus detalles, operaciones y actividad."
+    },
+    "overview": {
+      "loading": "Leyendo el saldo protegido…",
+      "failed": "No se pudo leer el saldo. Inténtalo de nuevo desde la fila de la Wallet.",
+      "empty": "0",
+      "notProvisioned": "Aún no se ha aprovisionado.",
+      "unpriced": "—",
+      "privateBalanceLabel": "Saldo privado"
     }
   }
 }

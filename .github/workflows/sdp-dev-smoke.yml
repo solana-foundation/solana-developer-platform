@@ -3,12 +3,10 @@ name: SDP smoke canary
 on:
   workflow_dispatch:
   workflow_call:
-    secrets:
-      DOPPLER_TOKEN_CI:
-        required: true
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: sdp-smoke-${{ github.event_name }}-${{ github.ref }}
@@ -54,12 +52,17 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
       - name: Build web app against the dev API
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
           NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
@@ -69,7 +72,6 @@ jobs:
       - name: Run GCP read-only smoke
         id: smoke
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           NODE_ENV: production
           VERCEL_ENV: production
@@ -82,14 +84,13 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: dev_ci
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           SMOKE_TARGET: dev
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh
+        run: doppler run --scope=. --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh
 
       - name: Upload Playwright artifacts
         if: always()

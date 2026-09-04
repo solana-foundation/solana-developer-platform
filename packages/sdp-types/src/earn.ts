@@ -1,4 +1,5 @@
 import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
+import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
@@ -17,13 +18,105 @@ import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
  * new kind is a code change, never a migration.
  */
 
-/** Day-one deposit stablecoins for Earn V1 (confirmed: USDC, USDG, USDT). */
+/**
+ * Deposit stablecoins for Earn V1. The PRD set is USDC, USDG, PYUSD
+ * (PYUSD admitted for the curated Kamino shelf's two Sentora vaults,
+ * PRO-1727); USDT remains from the day-one set and still has catalogued
+ * vaults behind it.
+ */
 export const EARN_DEPOSIT_TOKEN_SYMBOLS = [
   "USDC",
   "USDG",
   "USDT",
+  "PYUSD",
 ] as const satisfies readonly WellKnownTokenSymbol[];
 export type EarnDepositTokenSymbol = (typeof EARN_DEPOSIT_TOKEN_SYMBOLS)[number];
+
+/**
+ * Stablecoins a deposit may be FUNDED in, whatever the strategy's own deposit
+ * token: when they differ, the deposit transaction gets a Jupiter swap
+ * prepended so the vault still receives its own token (PRO: swap-funded
+ * deposits). A separate registry from `EARN_DEPOSIT_TOKEN_SYMBOLS` on purpose —
+ * that one states what vaults TAKE, this one states what customers may PAY
+ * WITH, and the two move independently. They happen to hold the same four
+ * symbols since PYUSD was admitted as a deposit token for the curated Kamino
+ * shelf (PRO-1727); that is a coincidence of today's shelf, not an invariant,
+ * so never derive one list from the other.
+ */
+export const EARN_SWAP_SOURCE_TOKEN_SYMBOLS = [
+  "USDC",
+  "USDG",
+  "PYUSD",
+  "USDT",
+] as const satisfies readonly WellKnownTokenSymbol[];
+export type EarnSwapSourceTokenSymbol = (typeof EARN_SWAP_SOURCE_TOKEN_SYMBOLS)[number];
+
+/** One cluster's deployment of a swap-source stablecoin, picker-ready. */
+export interface EarnSwapSourceToken {
+  symbol: EarnSwapSourceTokenSymbol;
+  mint: string;
+  decimals: number;
+}
+
+/**
+ * The swap-source stablecoins deployed on one cluster, mint-resolved.
+ *
+ * Derived from `WELL_KNOWN_TOKENS`, never hand-listed, so a token absent from
+ * a cluster (USDT has no devnet mint) simply does not appear rather than
+ * appearing with another cluster's address. Order follows
+ * `EARN_SWAP_SOURCE_TOKEN_SYMBOLS`, which pickers may rely on.
+ */
+export function earnSwapSourceTokens(cluster: SolanaCluster): EarnSwapSourceToken[] {
+  const tokens: EarnSwapSourceToken[] = [];
+  for (const symbol of EARN_SWAP_SOURCE_TOKEN_SYMBOLS) {
+    const mints: { readonly [K in SolanaCluster]?: { address: string; decimals: number } } =
+      WELL_KNOWN_TOKENS[symbol].mints;
+    const mint = mints[cluster];
+    if (mint) tokens.push({ symbol, mint: mint.address, decimals: mint.decimals });
+  }
+  return tokens;
+}
+
+/**
+ * Default and bounds for the swap leg's slippage tolerance, in basis points.
+ * The default is deliberately tight (2 bps): every supported pair is
+ * USD-stable on both sides, so a healthy route clears well inside it and the
+ * remainder left in the owner's wallet stays negligible. The ceiling is a
+ * hard cap the API enforces (1..500): a stable-stable pair that needs more
+ * than 5% tolerance is depegging, and moving money into a depegging token
+ * silently is not a service.
+ */
+export const EARN_SWAP_DEFAULT_SLIPPAGE_BPS = 2;
+export const EARN_SWAP_MAX_SLIPPAGE_BPS = 500;
+
+/**
+ * The swap leg SDP attached (or, for a split flow, built) for a swap-funded
+ * deposit — what was paid, what the vault deposit was sized to, and what the
+ * route looked like when it was quoted. Reported on build responses only;
+ * the durable movement stays denominated in the vault's own token.
+ */
+export interface EarnDepositSwap {
+  /** Mint the customer pays with. */
+  sourceTokenMint: string;
+  /** What the swap consumes, source-token units, decimal string. */
+  sourceAmount: string;
+  /**
+   * The deposit amount the transaction encodes, vault-token units. Sized to
+   * the swap's WORST-CASE output (the quote minus the slippage tolerance), so
+   * the deposit instruction can never find less than it needs: any output
+   * above this floor stays in the owner's token account rather than failing
+   * the transaction.
+   */
+  depositAmount: string;
+  /** The swap's quoted output at the live rate, vault-token units. */
+  quotedAmount: string;
+  /** Slippage tolerance the swap leg encodes, basis points. */
+  slippageBps: number;
+  /** Quoted price impact as a decimal ratio string, e.g. "0.0001". */
+  priceImpactPct: string;
+  /** Venue labels along the quoted route, for display and diagnostics. */
+  routeLabels: string[];
+}
 
 export const EARN_STRATEGY_SOURCE_KINDS = ["defi", "rwa"] as const;
 export type EarnStrategySourceKind = (typeof EARN_STRATEGY_SOURCE_KINDS)[number];
@@ -163,61 +256,6 @@ export interface EarnStrategy {
   updatedAt: string;
 }
 
-/** Persisted customer-facing treatments supported by the Earn button builder. */
-export const EARN_BUTTON_STYLES = ["ink", "light", "accent"] as const;
-export type EarnButtonStyle = (typeof EARN_BUTTON_STYLES)[number];
-export const DEFAULT_EARN_BUTTON_ACCENT_COLOR = "#14F195";
-export const EARN_BUTTON_ACCENT_COLOR_PATTERN = /^#[0-9A-F]{6}$/i;
-
-/**
- * Shape of the public engineering-handoff token. The generator lives in the
- * API repository (`customAlphabet(..., EARN_BUTTON_PUBLIC_TOKEN_LENGTH)`);
- * every validator (API route params, OpenAPI, web client) must consume these
- * rather than restating the shape.
- */
-export const EARN_BUTTON_PUBLIC_TOKEN_LENGTH = 24;
-export const EARN_BUTTON_PUBLIC_TOKEN_PATTERN = /^[A-Za-z0-9_-]{24}$/;
-
-/**
- * One project's saved Earn integration handoff. The public token is safe to
- * share with an engineer: it resolves configuration only and never carries an
- * SDP API key.
- */
-export interface EarnButtonConfiguration {
-  id: string;
-  strategyId: string;
-  style: EarnButtonStyle;
-  accentColor: string;
-  publicToken: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EarnButtonConfigurationResponse {
-  configuration: EarnButtonConfiguration;
-}
-
-/** Public, unauthenticated subset served to an integration handoff page. */
-export interface PublicEarnButtonConfiguration {
-  strategyId: string;
-  strategyName: string | null;
-  provider: string | null;
-  style: EarnButtonStyle;
-  accentColor: string;
-  /**
-   * False when the configured strategy is no longer served by the catalogue
-   * read path (hidden, delisted, or not active). The handoff page must render
-   * a stale state instead of the integration snippet, and the display
-   * metadata above is withheld (`strategyName`/`provider` are null) so the
-   * unauthenticated route never names a strategy the catalogue hides.
-   */
-  strategyAvailable: boolean;
-}
-
-export interface PublicEarnButtonConfigurationResponse {
-  configuration: PublicEarnButtonConfiguration;
-}
-
 /**
  * Non-custodial vault positions — the custody wallet owns the vault shares and
  * SDP reads their current value live from the provider on every list request.
@@ -308,8 +346,22 @@ export interface EarnExternalWalletPositionSummaryResponse {
 export interface EarnVaultDepositRequest {
   strategyId: string;
   custodyWalletId: string;
+  /**
+   * Decimal string. Vault-token units ordinarily; SOURCE-token units when
+   * `sourceTokenMint` requests a swap-funded deposit (the amount is what
+   * leaves the wallet, and the vault deposit is sized from the swap quote).
+   */
   amount: string;
   minSharesOut?: string;
+  /**
+   * Fund the deposit in a different stablecoin (one of
+   * `earnSwapSourceTokens(cluster)`), atomically swapped to the vault's own
+   * token via Jupiter inside the same transaction. Omitted — or equal to the
+   * strategy's deposit mint — means no swap.
+   */
+  sourceTokenMint?: string;
+  /** Swap slippage tolerance, bps (default EARN_SWAP_DEFAULT_SLIPPAGE_BPS). */
+  swapSlippageBps?: number;
 }
 
 export const EARN_VAULT_MOVEMENT_STATUSES = [
@@ -412,6 +464,13 @@ export interface EarnVaultWithdrawalRequest {
   positionId: string;
   /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
   shares: string;
+  /**
+   * Optional exit slippage floor: the minimum deposit-token amount to accept,
+   * decimal string in the token's own units. Required in practice by providers
+   * whose builder refuses an implicit tolerance (Veda); the dashboard derives
+   * it from the live withdrawal quote.
+   */
+  minAmountOut?: string;
 }
 
 /** One signed vault withdrawal movement. */
@@ -484,6 +543,12 @@ export interface EarnExternalWalletDepositTransactionResponse {
     amount: string;
     /** Slippage floor encoded in the transaction, share units, or null. */
     minSharesOut: string | null;
+    /**
+     * Present when the build was swap-funded: a Jupiter swap from
+     * `swap.sourceTokenMint` is prepended inside this same transaction, and
+     * `amount` above equals `swap.depositAmount`.
+     */
+    swap?: EarnDepositSwap;
     strategy: {
       id: string;
       name: string;
@@ -491,6 +556,45 @@ export interface EarnExternalWalletDepositTransactionResponse {
       providerReference: string;
       hostCluster: SolanaCluster;
     };
+  };
+}
+
+/**
+ * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
+ * swap-funded deposit could not fit in ONE Solana transaction (the packet
+ * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
+ * instructions). Nothing is persisted for this answer: SDP hands back an
+ * unsigned SWAP-ONLY transaction for the owner to sign and broadcast itself,
+ * plus the exact follow-up deposit to build once the swap lands. The follow-up
+ * build then takes the ordinary single-transaction path.
+ */
+export interface EarnExternalWalletDepositSwapSplitResponse {
+  /** Discriminates from the atomic response, which carries `transaction`. */
+  requiresSeparateSwap: true;
+  swap: EarnDepositSwap & {
+    /**
+     * Base64 wire bytes of the UNSIGNED swap transaction (fee payer is the
+     * owner). The owner signs and broadcasts it itself — it moves only the
+     * owner's own funds between the owner's own token accounts, so SDP
+     * records nothing for it.
+     */
+    transaction: string;
+    /** Block height after which these exact bytes can no longer land. */
+    lastValidBlockHeight: string;
+  };
+  /** The deposit build to request after the swap is confirmed. */
+  followUp: {
+    strategyId: string;
+    /** `swap.depositAmount`, restated as the follow-up build's `amount`. */
+    amount: string;
+    /**
+     * The share floor from the ORIGINAL request, carried through so the
+     * follow-up build keeps the protection the caller asked for (production
+     * requires one, and without it Kamino's pinned SDK builds the legacy
+     * floor-less deposit instruction). Absent only when the original request
+     * carried none.
+     */
+    minSharesOut?: string;
   };
 }
 
@@ -535,6 +639,72 @@ export interface EarnExternalWalletDepositResponse {
 /** Response body of POST /v1/earn/external-wallet/withdrawals. */
 export interface EarnExternalWalletWithdrawalResponse {
   withdrawal: EarnExternalWalletMovement;
+}
+
+/** Keyset activity page for exactly one external wallet, newest first. */
+export interface EarnExternalWalletMovementsPage {
+  ownerAddress: string;
+  movements: EarnExternalWalletMovement[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** Response body of GET /v1/earn/external-wallet/movements/:movementId. */
+export interface EarnExternalWalletMovementResponse {
+  movement: EarnExternalWalletMovement;
+}
+
+/**
+ * Why an earned figure is absent. Unavailable is never encoded as zero:
+ * - `live_value_unavailable`: the provider could not hydrate current value.
+ * - `movements_pending`: a movement is still settling, so live value and the
+ *   ledger describe different moments.
+ * - `withdrawals_not_valued`: a currently held position has a finalized
+ *   withdrawal, and the ledger records exits in shares, not in the deposit
+ *   token, so no exact token-denominated earned figure exists (ADR 0002).
+ *
+ * Every earnings figure covers the wallet's CURRENTLY HELD positions: a fully
+ * exited position drops out entirely (its deposits leave `totalDeposited`
+ * along with its unvalued withdrawal), so one full exit does not withhold the
+ * open positions' earned forever. The exited history stays on the movements
+ * list.
+ */
+export type EarnExternalWalletEarnedUnavailableReason =
+  | "live_value_unavailable"
+  | "movements_pending"
+  | "withdrawals_not_valued";
+
+/** Earnings for one deposit token across an external wallet's positions. */
+export interface EarnExternalWalletTokenEarnings {
+  tokenMint: string;
+  positionCount: number;
+  /** Positions whose live value could not hydrate. */
+  unavailablePositionCount: number;
+  /** Live value across the token's positions; absent when any position is unavailable. */
+  currentValue?: string;
+  /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
+  totalDeposited: string;
+  /**
+   * `currentValue − totalDeposited`, signed. Absent (with the reason below)
+   * whenever it cannot be stated exactly. Live value reads the owner's WHOLE
+   * vault balance, so shares acquired outside SDP inflate this figure — a
+   * documented property of non-custodial hydration, not a bug (ADR 0002).
+   */
+  earned?: string;
+  earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
+}
+
+/** Balance and earnings for one external wallet, grouped by deposit token. */
+export interface EarnExternalWalletEarnings {
+  ownerAddress: string;
+  positionCount: number;
+  unavailablePositionCount: number;
+  totalsByToken: EarnExternalWalletTokenEarnings[];
+}
+
+/** Response body of GET /v1/earn/external-wallet/earnings/:ownerAddress. */
+export interface EarnExternalWalletEarningsResponse {
+  earnings: EarnExternalWalletEarnings;
 }
 
 /**

@@ -14,8 +14,6 @@ export const basicsSchema = z.object({
 export const CRYPTO_ACCOUNT_NETWORKS = ["solana"] as const;
 export type CryptoAccountNetwork = (typeof CRYPTO_ACCOUNT_NETWORKS)[number];
 
-export type StepId = "basics" | "review";
-
 export type BasicsData = z.input<typeof basicsSchema>;
 
 export type BasicsClean = z.output<typeof basicsSchema>;

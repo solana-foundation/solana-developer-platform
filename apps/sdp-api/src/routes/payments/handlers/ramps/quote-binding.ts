@@ -11,6 +11,7 @@ import { conflict } from "@/lib/errors";
 export interface RampQuoteBinding {
   organizationId: string;
   projectId: string;
+  custodyWalletId: string;
   walletId: string;
   counterpartyId: string;
   direction: "onramp" | "offramp";
@@ -42,6 +43,7 @@ export function assertRampQuoteBindingMatches(
   const matches =
     existing.organization_id === expected.organizationId &&
     existing.project_id === expected.projectId &&
+    existing.custody_wallet_id === expected.custodyWalletId &&
     existing.wallet_id === expected.walletId &&
     existing.counterparty_id === expected.counterpartyId &&
     existing.type === expected.direction &&

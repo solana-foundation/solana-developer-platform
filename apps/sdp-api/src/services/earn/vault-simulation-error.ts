@@ -21,6 +21,13 @@
  * sponsor is broke sends them fixing the wrong thing. Callers that don't know
  * the fee mode (e.g. the reconciler describing a landed failure) omit it and
  * get neutral wording.
+ *
+ * Callers holding simulation LOGS pass them too: an `InstructionError` variant
+ * alone can be unreadable — `Custom: 1` is the System program's "insufficient
+ * lamports", the Token program's "insufficient funds" and every non-Anchor
+ * program's own code, all at once — while the failing program's log line names
+ * the actual failure. Same precedent as the slippage markers in
+ * vault-intent-execution.service.ts.
  */
 
 import { safeStringify } from "@sdp/solana";
@@ -63,6 +70,86 @@ const INSTRUCTION_ERROR_DETAILS = new Map<string, string>([
   ["MissingRequiredSignature", "a required signature was missing"],
 ]);
 
+/**
+ * The System program's log inside a failed account creation or transfer:
+ * `Transfer: insufficient lamports <have>, need <need>`. In a vault plan this
+ * is the rent payer coming up short on the token accounts a first deposit (or
+ * first exit) creates — the failure the bare variant renders as `Custom: 1`.
+ */
+const INSUFFICIENT_LAMPORTS_LOG = /Transfer: insufficient lamports (\d+), need (\d+)/;
+
+/** The SPL Token processors' log for a transfer exceeding the balance. */
+const INSUFFICIENT_TOKENS_LOG = "Error: insufficient funds";
+
+function rentShortfallLamports(logs: readonly string[]): bigint | undefined {
+  for (const line of logs) {
+    const match = INSUFFICIENT_LAMPORTS_LOG.exec(line);
+    if (!match) continue;
+    try {
+      const shortfall = BigInt(match[2] as string) - BigInt(match[1] as string);
+      return shortfall > 0n ? shortfall : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** `1918899n` → `"0.001918899"`, trailing zeros trimmed. */
+function formatSol(lamports: bigint): string {
+  const digits = lamports.toString().padStart(10, "0");
+  const whole = digits.slice(0, -9);
+  const fraction = digits.slice(-9).replace(/0+$/, "");
+  return fraction === "" ? whole : `${whole}.${fraction}`;
+}
+
+/**
+ * A sharper verdict than the `InstructionError` variant alone can give, read
+ * from the failing program's own logs. Only ever REFINES — when no known log
+ * signature matches, the caller falls through to the variant-based wording.
+ */
+function describeInstructionFailureFromLogs(
+  logs: readonly string[],
+  raw: string,
+  fee?: Pick<VaultFeeMode, "kind">
+): VaultSimulationVerdict | undefined {
+  const shortfall = rentShortfallLamports(logs);
+  if (shortfall !== undefined) {
+    if (fee?.kind === "sponsored") {
+      // Post-PRO-1736 the sponsor funds rent alongside the fee, so a rent
+      // shortfall under sponsorship is SDP's operational problem, exactly like
+      // a broke fee payer — callers turn "sponsor" into a retryable 5xx.
+      return {
+        message:
+          `SDP's fee sponsor could not fund the rent for a token account this transaction ` +
+          `creates (${formatSol(shortfall)} SOL short). This is a problem on SDP's side, ` +
+          `not with the wallet. (${raw})`,
+        fault: "sponsor",
+      };
+    }
+    const noun = fee === undefined ? "the rent payer" : "the wallet";
+    const remedy =
+      fee === undefined
+        ? "It needs SOL before this can be retried."
+        : "Send SOL to the wallet and retry.";
+    return {
+      message:
+        `${noun} does not hold enough SOL to create a token account this transaction ` +
+        `needs: rent requires ${formatSol(shortfall)} more SOL. ${remedy} (${raw})`,
+      fault: "caller",
+    };
+  }
+  if (logs.some((line) => line.includes(INSUFFICIENT_TOKENS_LOG))) {
+    return {
+      message:
+        "a token account does not hold enough tokens for this transaction. " +
+        `Check the wallet's token balance and retry. (${raw})`,
+      fault: "caller",
+    };
+  }
+  return undefined;
+}
+
 function describeInstructionErrorDetail(detail: unknown): string {
   if (typeof detail === "string") {
     return INSTRUCTION_ERROR_DETAILS.get(detail) ?? `it failed with ${humanizeVariantName(detail)}`;
@@ -88,7 +175,8 @@ function describeInstructionErrorDetail(detail: unknown): string {
  */
 export function describeVaultSimulationError(
   err: unknown,
-  fee?: Pick<VaultFeeMode, "kind">
+  fee?: Pick<VaultFeeMode, "kind">,
+  logs: readonly string[] = []
 ): VaultSimulationVerdict {
   const raw = stringifyRaw(err);
   const sponsored = fee?.kind === "sponsored";
@@ -141,6 +229,8 @@ export function describeVaultSimulationError(
 
     const instruction = record.InstructionError;
     if (Array.isArray(instruction) && instruction.length === 2) {
+      const refined = describeInstructionFailureFromLogs(logs, raw, fee);
+      if (refined) return refined;
       const [index, detail] = instruction;
       return {
         message: `instruction at index ${String(index)} was rejected: ${describeInstructionErrorDetail(detail)} (${raw})`,

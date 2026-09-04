@@ -10,11 +10,6 @@
  * Do not hand-edit `src/generated` — re-run `pnpm --filter @sdp/spc-escrow generate`.
  */
 
-// Side-effect import: augments `@solana/kit` with the `ExtendedClient` type the
-// generated program-client plugin references but the repo's kit 6.8 lacks. Shared
-// so a consumer importing multiple codama clients sees the augment exactly once.
-import "@sdp/kit-augment";
-
 export * from "./generated";
 // Friendlier alias for the (verbose, codama-suffixed) program address constant.
 export { PRIVATE_CHANNEL_ESCROW_PROGRAM_PROGRAM_ADDRESS as PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "./generated";

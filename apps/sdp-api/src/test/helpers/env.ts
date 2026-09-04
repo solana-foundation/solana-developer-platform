@@ -57,7 +57,7 @@ export const adminDatabaseUrl = workerDatabaseUrl(baseDatabaseUrl, workerId);
  * role (created by node-global-setup.ts), mirroring the production posture
  * from docs/ops/audit-ledger.md. Everything the app-under-test and the
  * repositories touch goes through this role so the tenant-isolation policies
- * from migration 0073 are actually enforced in tests.
+ * from migration 0079 are actually enforced in tests.
  */
 function runtimeDatabaseUrl(adminUrl: string): string {
   const url = new URL(adminUrl);
@@ -75,6 +75,7 @@ const providedEnv: Env = {
   REDIS_URL: workerRedisUrl(baseRedisUrl, workerId),
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
   CREDENTIAL_FINGERPRINT_PEPPER: "test-credential-fingerprint-pepper-for-unit-tests",
+  SPC_CREDENTIAL_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",

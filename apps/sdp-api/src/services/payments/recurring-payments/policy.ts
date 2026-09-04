@@ -1,6 +1,6 @@
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { WalletOperationActor, WalletOperationType } from "@sdp/types";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
@@ -14,6 +14,7 @@ export type RecurringPaymentOperationType = Extract<
 
 interface PendingCollectionApprovalRow {
   wallet_operation_id: string;
+  custody_wallet_id: string | null;
   policy_evaluation_id: string;
   decision: string;
   reason_code: string;
@@ -23,28 +24,27 @@ interface PendingCollectionApprovalRow {
 }
 
 /**
- * The pending approval already filed for a collection cycle, if any. A due
- * collection is retried until it settles, so without this lookup every retry
- * would record a fresh operation and file a duplicate approval request for
- * the same recurring payment + due cycle. Matches both a still-pending
- * decision and one already approved but not yet executed, since a cycle whose
- * approval was granted is still in flight and must not spawn a second
- * request. A rejected or cancelled cycle does not match, so a legitimate
- * later retry can still reach a fresh decision.
+ * Finds an unfinished approval for the exact wallet and collection cycle.
+ * Collection retries use it to avoid duplicate approvals; source changes use
+ * it as a fence. Legacy rows without a custody wallet ID also match so callers
+ * can fail closed instead of assigning the approval to a current exact wallet.
+ * Rejected or cancelled approvals do not match.
  *
  * @param input - The tenant and the collection cycle to look up.
  * @returns The pending decision's rows, or null when none is pending.
  */
 async function findPendingCollectionApproval(input: {
-  env: Env;
+  db: DatabaseExecutor;
   organizationId: string;
   projectId: string;
+  custodyWalletId: string;
   recurringPaymentId: string;
   collectionDueAt: string;
 }): Promise<PendingCollectionApprovalRow | null> {
-  return getDb(input.env)
+  return input.db
     .prepare(
       `SELECT wo.id AS wallet_operation_id,
+              wo.custody_wallet_id,
               pe.id AS policy_evaluation_id,
               pe.decision,
               pe.reason_code,
@@ -57,17 +57,51 @@ async function findPendingCollectionApproval(input: {
           AND ar.status IN ('pending', 'approved')
          JOIN policy_evaluations pe
            ON pe.approval_request_id = ar.id
-        WHERE wo.organization_id = ?
-          AND wo.project_id = ?
-          AND wo.operation_type = 'recurring_payment_collection'
-          AND wo.status IN ('pending_approval', 'executing')
-          AND wo.raw_payload->>'recurringPaymentId' = ?
-          AND wo.raw_payload->>'collectionDueAt' = ?
-        ORDER BY pe.created_at DESC
+         WHERE wo.organization_id = ?
+           AND wo.project_id = ?
+           AND wo.operation_type = 'recurring_payment_collection'
+           AND (wo.custody_wallet_id = ? OR wo.custody_wallet_id IS NULL)
+           AND wo.status IN ('pending_approval', 'executing')
+           AND wo.raw_payload->>'recurringPaymentId' = ?
+           AND wo.raw_payload->>'collectionDueAt' = ?
+        ORDER BY wo.custody_wallet_id NULLS FIRST, pe.created_at DESC
         LIMIT 1`
     )
-    .bind(input.organizationId, input.projectId, input.recurringPaymentId, input.collectionDueAt)
+    .bind(
+      input.organizationId,
+      input.projectId,
+      input.custodyWalletId,
+      input.recurringPaymentId,
+      input.collectionDueAt
+    )
     .first<PendingCollectionApprovalRow>();
+}
+
+export async function assertNoPendingRecurringCollectionApproval(input: {
+  db: DatabaseExecutor;
+  organizationId: string;
+  projectId: string;
+  custodyWalletId: string;
+  recurringPaymentId: string;
+  collectionDueAt: string | null;
+}): Promise<void> {
+  if (!input.collectionDueAt) return;
+
+  const pending = await findPendingCollectionApproval({
+    ...input,
+    collectionDueAt: input.collectionDueAt,
+  });
+  if (pending) {
+    throw new AppError(
+      "CONFLICT",
+      "Recurring payment source cannot change while a collection approval is pending",
+      {
+        walletOperationId: pending.wallet_operation_id,
+        policyEvaluationId: pending.policy_evaluation_id,
+        approvalRequestId: pending.approval_request_id,
+      }
+    );
+  }
 }
 
 /**
@@ -111,14 +145,15 @@ export async function enforceRecurringPaymentPolicy(input: {
     typeof collectionDueAt === "string"
   ) {
     const pending = await findPendingCollectionApproval({
-      env: input.env,
+      db: getDb(input.env),
       organizationId: input.organizationId,
       projectId: input.projectId,
+      custodyWalletId: input.sourceWallet.id,
       recurringPaymentId,
       collectionDueAt,
     });
     if (pending) {
-      throw new AppError("SIGNING_PENDING", "Wallet operation requires policy approval", {
+      const details = {
         walletOperationId: pending.wallet_operation_id,
         policyEvaluationId: pending.policy_evaluation_id,
         decision: pending.decision,
@@ -126,7 +161,15 @@ export async function enforceRecurringPaymentPolicy(input: {
         reason: pending.reason,
         requiresApproval: pending.requires_approval,
         approvalRequestId: pending.approval_request_id,
-      });
+      };
+      if (pending.custody_wallet_id === null) {
+        throw new AppError(
+          "CONFLICT",
+          "Recurring payment collection approval wallet identity is unresolved",
+          details
+        );
+      }
+      throw new AppError("SIGNING_PENDING", "Wallet operation requires policy approval", details);
     }
   }
 

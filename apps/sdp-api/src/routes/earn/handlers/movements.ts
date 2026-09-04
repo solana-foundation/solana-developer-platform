@@ -137,7 +137,7 @@ const movementCursorSchema = z.object({
   id: z.string().min(1).max(128),
 });
 
-function decodeMovementCursor(cursor: string): { createdAt: string; id: string } | null {
+export function decodeMovementCursor(cursor: string): { createdAt: string; id: string } | null {
   const decoded = decodeKeysetCursor(cursor);
   if (!decoded) return null;
   const parsed = movementCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });

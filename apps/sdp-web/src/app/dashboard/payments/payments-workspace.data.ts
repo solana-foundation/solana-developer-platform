@@ -24,7 +24,6 @@ import type {
   RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
-  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -32,6 +31,7 @@ import type {
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
+import type { Address } from "@solana/kit";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
@@ -304,7 +304,7 @@ function resolveWalletBalancesSnapshot(
 export async function fetchTransfers(
   options: {
     pageSize: number;
-    walletId?: string;
+    custodyWalletId?: string;
     category?: "wallet" | "ramp";
     counterpartyId?: string;
     statuses?: readonly string[];
@@ -315,7 +315,7 @@ export async function fetchTransfers(
   const transfersQuery = new URLSearchParams({
     page: "1",
     pageSize: String(options.pageSize),
-    ...(options.walletId ? { wallet: options.walletId } : {}),
+    ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
     ...(options.category ? { category: options.category } : {}),
     ...(options.counterpartyId ? { counterpartyId: options.counterpartyId } : {}),
     ...(options.statuses ? { status: options.statuses.join(",") } : {}),
@@ -377,8 +377,7 @@ export async function fetchTransferById(
 
 export async function cancelRampTransfer(
   input: {
-    provider: RampProviderId;
-    providerReference: string;
+    transferId: string;
   },
   t: Translate
 ): Promise<void> {
@@ -519,14 +518,17 @@ export async function updateWalletPolicy(
   return body.data.policy;
 }
 
+export interface CreateTransferInput {
+  transferId?: string;
+  sourceCustodyWalletId: string;
+  destination: string;
+  token: Address;
+  amount: string;
+  memo?: string;
+}
+
 export async function createTransfer(
-  input: {
-    source: string;
-    destination: string;
-    token: string;
-    amount: string;
-    memo?: string;
-  },
+  input: CreateTransferInput,
   t: Translate
 ): Promise<TransferRecord> {
   const response = await fetch("/api/dashboard/payments/transfers", {
@@ -535,15 +537,16 @@ export async function createTransfer(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: input.source,
+      ...(input.transferId ? { transferId: input.transferId } : {}),
+      sourceCustodyWalletId: input.sourceCustodyWalletId,
       destination: input.destination,
       token: input.token,
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),
     }),
   });
-  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
     throw new Error(
       getApiError(
         body,
@@ -552,6 +555,7 @@ export async function createTransfer(
     );
   }
 
+  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!body.data?.transfer) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
@@ -788,7 +792,7 @@ export async function runComplianceCheck(
   return {
     address,
     checkedAt: result.checkedAt,
-    providers: result.providers,
+    providers: result.providers.filter((provider) => provider.provider !== "chainalysis"),
   };
 }
 

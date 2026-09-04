@@ -273,7 +273,7 @@ describe("MuralWebhookProcessor.process", () => {
   it("refuses a second counterparty claiming the same organization reference", async () => {
     // The two-claimant state this webhook's exactly-one guard used to detect
     // at read time can no longer be created: the effective-key unique index
-    // from 0072_counterparty_provider_lookup_integrity rejects a second
+    // from 0078_counterparty_provider_lookup_integrity rejects a second
     // active claim whether it arrives denormalized or only in provider_data
     // JSON. The read-time guard remains as defense in depth; here the
     // database refuses the write and the webhook keeps resolving the sole

@@ -1,5 +1,5 @@
 /**
- * Database-enforced tenant isolation (migration 0073) under the plain
+ * Database-enforced tenant isolation (migration 0079) under the plain
  * NOSUPERUSER/NOBYPASSRLS runtime role. These tests prove the RLS floor holds
  * even when the application layer is bypassed entirely: raw SQL under a
  * tenant identity cannot read or write another organization, identity-less

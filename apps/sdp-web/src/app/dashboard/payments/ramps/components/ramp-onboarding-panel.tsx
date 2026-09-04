@@ -17,7 +17,13 @@ export function RampOnboardingPanel({
 }) {
   const t = useTranslations();
   const { provider, status } = onboarding;
-  if (status === "collect" || status === "unsupported" || status === "onboarding_not_started") {
+  if (
+    status === "collect" ||
+    status === "collect_counterparty" ||
+    status === "collect_account" ||
+    status === "unsupported" ||
+    status === "onboarding_not_started"
+  ) {
     throw new Error(`RampOnboardingPanel received non-onboarding status: ${status}`);
   }
   const copy = onboardingCopy(provider, status, t);

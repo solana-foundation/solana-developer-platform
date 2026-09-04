@@ -1,3 +1,4 @@
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 
 /**
@@ -52,17 +53,30 @@ async function fetchPriceChunk(
   const prices = new Map<string, number>();
   const requestUrl = `${url}?${new URLSearchParams({ ids: mints.join(",") }).toString()}`;
 
+  const startedAt = Date.now();
   const response = await fetch(requestUrl, {
     headers: apiKey ? { "x-api-key": apiKey } : undefined,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }).catch((error: unknown) => {
+    logVendorCallFailure("jupiter", "price", error, startedAt);
+    throw error;
   });
   if (!response.ok) {
+    logVendorCallFailure(
+      "jupiter",
+      "price",
+      new Error(`price request returned ${response.status}`),
+      startedAt
+    );
     return prices;
   }
 
   // A mint Jupiter cannot price reliably is omitted from the object entirely — no null
   // entry and no error — so absence is the only signal that a price is unavailable.
-  const body = (await response.json()) as Record<string, JupiterPriceEntry | null>;
+  const body = (await response.json().catch((error: unknown) => {
+    logVendorCallFailure("jupiter", "price", error, startedAt);
+    throw error;
+  })) as Record<string, JupiterPriceEntry | null>;
   for (const [mint, entry] of Object.entries(body ?? {})) {
     const usdPrice = entry?.usdPrice;
     if (typeof usdPrice === "number" && Number.isFinite(usdPrice) && usdPrice >= 0) {

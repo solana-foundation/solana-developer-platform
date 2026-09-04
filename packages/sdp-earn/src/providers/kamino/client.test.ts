@@ -559,7 +559,7 @@ describe("KaminoEarnClient contract surface", () => {
     // `rwa` is deliberately absent: nothing this client emits can establish it,
     // because the only signal Kamino offers is the permissionless vault name.
     assert.deepEqual(client.declaredSupport.sourceKinds, ["defi"]);
-    assert.deepEqual(client.declaredSupport.depositTokens, ["USDC", "USDG", "USDT"]);
+    assert.deepEqual(client.declaredSupport.depositTokens, ["USDC", "USDG", "USDT", "PYUSD"]);
   });
 
   it("implements no portfolio-wallet capability — Kamino is catalogue-only", () => {

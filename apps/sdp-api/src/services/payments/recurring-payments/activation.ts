@@ -32,6 +32,7 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -39,6 +40,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   activationErrorMessage,
+  assertRecurringPaymentSourceWallet,
   confirmSubscriptionSignature,
   generateProgramPlanId,
   sendSubscriptionInstructions,
@@ -226,12 +228,7 @@ function assertActivationPreconditions(input: {
   sourceWallet: CustodyWallet;
   nowIso: string;
 }): void {
-  if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
-    throw badRequest("Recurring payment source wallet does not match request");
-  }
-  if (input.recurringPayment.source_address !== input.sourceWallet.publicKey) {
-    throw badRequest("Recurring payment source address does not match wallet");
-  }
+  assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   const transition = decideRecurringPaymentActivationTransition({
     status: input.recurringPayment.status,
     updatedAt: input.recurringPayment.updated_at,
@@ -580,6 +577,12 @@ export async function activateRecurringPayment(input: {
     return input.recurringPayment;
   }
 
+  await createSigningService(input.env).admitRuntimeExecution(
+    input.organizationId,
+    input.projectId,
+    input.sourceWallet.id
+  );
+
   const recoveringStaleActivation = input.recurringPayment.status === "activating";
   const claimed = await recurringRepo.claimRecurringPaymentActivation({
     recurringPaymentId: input.recurringPayment.id,
@@ -619,11 +622,11 @@ export async function activateRecurringPayment(input: {
     const owner = assertValidAddress(claimed.source_address, "sourceAddress") as Address;
     const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
     const mint = assertValidAddress(claimed.token, "token") as Address;
-    const sourceSigner = await solanaServices.createOrgSigner(
+    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.walletId
+      input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");

@@ -12,8 +12,12 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { TokenMark } from "@/components/token-mark";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { getEnabledRampProviders } from "@/flags/ramps";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
+import {
+  fetchProviderAvailability,
+  filterEnabledRampProviderAccess,
+} from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
@@ -442,16 +446,19 @@ async function PaymentNetwork({
 }) {
   const [{ request }, t] = await Promise.all([apiClientPromise, getTranslations()]);
   const trace = createTimedTrace("dashboard.payments.overview.network");
-  const [result, providerAccess] = await trace.step("fetch_network_summary", () =>
-    Promise.all([
-      fetchCounterparties(request, { page: 1, pageSize: 1 }),
-      fetchProviderAvailability(request, organizationId).catch(() => null),
-    ])
-  );
+  const [[result, providerAccess], enabledRampProviders] = await Promise.all([
+    trace.step("fetch_network_summary", () =>
+      Promise.all([
+        fetchCounterparties(request, { page: 1, pageSize: 1 }),
+        fetchProviderAvailability(request, organizationId).catch(() => null),
+      ])
+    ),
+    getEnabledRampProviders(),
+  ]);
   const enabledProviderCount = providerAccess
-    ? Object.values(providerAccess.rampProviderAccess).filter(
-        (provider) => provider.entitled && provider.configured && provider.enabled
-      ).length
+    ? Object.values(
+        filterEnabledRampProviderAccess(providerAccess.rampProviderAccess, enabledRampProviders)
+      ).filter((access) => access.entitled && access.configured && access.enabled).length
     : null;
   trace.log({
     ok: result.ok || providerAccess !== null,

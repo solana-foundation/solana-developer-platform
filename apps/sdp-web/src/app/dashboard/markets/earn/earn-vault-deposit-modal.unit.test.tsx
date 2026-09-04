@@ -14,6 +14,11 @@ import {
   claimVaultDepositIdempotencyKey,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
+import {
+  floorForTolerance,
+  isSlippageExceededRefusal,
+  parseSlippageToleranceBps,
+} from "./earn-vault-slippage";
 
 const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
@@ -22,8 +27,9 @@ const PROJECT_ID = "prj_test";
 const mocks = vi.hoisted(() => ({
   createEarnVaultDeposit: vi.fn(),
   useEarnFundingWallets: vi.fn(),
-  useEarnVaultDepositOutcomeToast: vi.fn(),
+  useEarnVaultDepositOutcome: vi.fn(),
   fetchEarnVaultDepositByRequestId: vi.fn(),
+  fetchEarnVaultDepositPreview: vi.fn(),
 }));
 
 const copy = vi.hoisted<Record<string, string>>(() => ({
@@ -56,20 +62,24 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "This is above the last observed balance; the provider will verify it on submit.",
   "DashboardEarn.deposit.vaultConfirmNote":
     "The selected custody wallet signs the vault deposit transaction.",
+  "DashboardEarn.deposit.vaultConfirmNoteSponsored": "SDP covers the network fee.",
   "DashboardEarn.deposit.vaultSubmit": "Confirm deposit",
   "DashboardEarn.deposit.vaultSubmitting": "Submitting…",
   "DashboardEarn.deposit.vaultSubmitError": "The deposit could not be submitted.",
   "DashboardEarn.deposit.vaultDoneTitle": "Deposit submitted",
-  "DashboardEarn.deposit.vaultDoneBody": "The transaction was submitted to Solana.",
+  "DashboardEarn.deposit.vaultDoneBody": "Signed and sent to Solana.",
+  "DashboardEarn.deposit.vaultDoneStatus": "Awaiting confirmation",
   "DashboardEarn.deposit.vaultSettlingNote":
     "Your vault position will refresh after the chain confirms it.",
   "DashboardEarn.deposit.vaultConfirmedTitle": "Deposit confirmed",
   "DashboardEarn.deposit.vaultConfirmedBody": "The deposit is confirmed on Solana.",
+  "DashboardEarn.deposit.vaultConfirmedStatus": "Confirmed",
   "DashboardEarn.deposit.vaultConfirmedNote":
     "Your live vault position will refresh automatically.",
   "DashboardEarn.deposit.vaultTransaction": "Transaction",
   "DashboardEarn.deposit.vaultPendingTitle": "Deposit pending",
   "DashboardEarn.deposit.vaultPendingBody": "The transaction is waiting to be submitted.",
+  "DashboardEarn.deposit.vaultPendingStatus": "Status unknown",
   "DashboardEarn.deposit.vaultApprovalTitle": "Approval required",
   "DashboardEarn.deposit.vaultApprovalBody":
     "This deposit has not moved funds. It will execute only after wallet-policy approval.",
@@ -77,10 +87,26 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultAbsorbedTitle": "Deposit already completed by your approval",
   "DashboardEarn.deposit.vaultAbsorbedBody":
     "Your earlier approval for this exact deposit executed just before this submission, so the request was absorbed as a retry of it. Funds moved once, through the approval — this submission moved nothing additional.",
+  "DashboardEarn.deposit.vaultAbsorbedStatus": "Handled by approval",
   "DashboardEarn.deposit.vaultAbsorbedNote":
     "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
   "DashboardEarn.deposit.vaultHeldKeyUnavailable":
     "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
+  "DashboardEarn.deposit.vaultMinShares": "Minimum shares received",
+  "DashboardEarn.deposit.vaultExpectedShares": "Expected shares",
+  "DashboardEarn.deposit.vaultQuoteLoading": "Fetching the live share quote…",
+  "DashboardEarn.deposit.vaultQuoteUnavailable":
+    "The live share quote is unavailable right now, so this deposit cannot be sized safely. Try again in a moment.",
+  "DashboardEarn.deposit.vaultQuoteBlocked":
+    "The vault is not accepting this deposit right now: {message}",
+  "DashboardEarn.deposit.vaultSlippageToggle": "Slippage tolerance: {percent}",
+  "DashboardEarn.deposit.vaultSlippageLabel": "Slippage tolerance (basis points)",
+  "DashboardEarn.deposit.vaultSlippageHelp":
+    "The deposit refuses to execute if the vault would mint fewer shares than this tolerance allows.",
+  "DashboardEarn.deposit.vaultSlippageInvalid":
+    "Enter a whole number of basis points from 1 to {max}.",
+  "DashboardEarn.deposit.vaultSlippageExceeded":
+    "The vault would return fewer shares than your slippage tolerance allows for this amount. Increase the tolerance below and try again.",
 }));
 
 vi.mock("@/i18n/provider", () => ({
@@ -101,8 +127,9 @@ vi.mock("./deposit/earn-funding-wallets", () => ({
 
 vi.mock("./earn-program-data", () => ({
   createEarnVaultDeposit: mocks.createEarnVaultDeposit,
-  useEarnVaultDepositOutcomeToast: mocks.useEarnVaultDepositOutcomeToast,
+  useEarnVaultDepositOutcome: mocks.useEarnVaultDepositOutcome,
   fetchEarnVaultDepositByRequestId: mocks.fetchEarnVaultDepositByRequestId,
+  fetchEarnVaultDepositPreview: mocks.fetchEarnVaultDepositPreview,
 }));
 
 const strategy: EarnStrategy = {
@@ -167,6 +194,10 @@ async function enterDepositAmount(amount = "1.000000") {
 beforeEach(() => {
   mocks.createEarnVaultDeposit.mockReset();
   mocks.fetchEarnVaultDepositByRequestId.mockReset();
+  mocks.fetchEarnVaultDepositPreview.mockReset();
+  // Kamino declares no floor policy, so most tests never quote; the veda
+  // suites override this with a real quote.
+  mocks.fetchEarnVaultDepositPreview.mockResolvedValue({ kind: "unavailable" });
   // Default: nothing recorded under the key yet, so a held key stays held.
   mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({ kind: "absent" });
   mocks.useEarnFundingWallets.mockReset();
@@ -422,6 +453,7 @@ describe("EarnVaultDepositModal", () => {
       strategyId: strategy.id,
       custodyWalletId: "wallet_1",
       amount: "1",
+      toleranceBps: null,
     });
     const entries = JSON.parse(
       sessionStorage.getItem("sdp:earn:vault-deposit:idempotency:v1") ?? "[]"
@@ -488,6 +520,7 @@ describe("EarnVaultDepositModal", () => {
       strategyId: strategy.id,
       custodyWalletId: "wallet_1",
       amount: "1",
+      toleranceBps: null,
     });
     expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(
       mocks.createEarnVaultDeposit.mock.calls[1][1]
@@ -621,35 +654,39 @@ describe("EarnVaultDepositModal", () => {
   });
 
   it.each([
-    ["pending", "Deposit pending"],
-    ["submitted", "Deposit submitted"],
-    ["confirmed", "Deposit confirmed"],
-  ] as const)("renders a truthful %s result and refresh callback", async (status, title) => {
-    const deposit = vaultDeposit(status);
-    const onDeposited = vi.fn();
-    mocks.createEarnVaultDeposit.mockResolvedValue({
-      ok: true,
-      status: 201,
-      data: { kind: "submitted", deposit },
-    });
+    ["pending", "Deposit pending", "Status unknown"],
+    ["submitted", "Deposit submitted", "Awaiting confirmation"],
+    ["confirmed", "Deposit confirmed", "Confirmed"],
+  ] as const)(
+    "renders a truthful %s result and refresh callback",
+    async (status, title, statusLabel) => {
+      const deposit = vaultDeposit(status);
+      const onDeposited = vi.fn();
+      mocks.createEarnVaultDeposit.mockResolvedValue({
+        ok: true,
+        status: 201,
+        data: { kind: "submitted", deposit },
+      });
 
-    render(
-      <EarnVaultDepositModal
-        projectId={PROJECT_ID}
-        strategy={strategy}
-        onClose={vi.fn()}
-        onDeposited={onDeposited}
-      />
-    );
-    await enterDepositAmount();
+      render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={strategy}
+          onClose={vi.fn()}
+          onDeposited={onDeposited}
+        />
+      );
+      await enterDepositAmount();
 
-    expect(await screen.findByText(title)).toBeTruthy();
-    const transaction = screen.getByRole("link", { name: /5R3h9G/ });
-    expect(transaction.getAttribute("href")).toBe(
-      `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`
-    );
-    expect(onDeposited).toHaveBeenCalledWith(deposit);
-  });
+      expect(await screen.findByText(title)).toBeTruthy();
+      expect(screen.getByText(statusLabel)).toBeTruthy();
+      const transaction = screen.getByRole("link", { name: /5R3h9G/ });
+      expect(transaction.getAttribute("href")).toBe(
+        `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`
+      );
+      expect(onDeposited).toHaveBeenCalledWith(deposit);
+    }
+  );
 
   it("keeps a failed deposit on the form and reports the provider reason", async () => {
     const onDeposited = vi.fn();
@@ -698,6 +735,83 @@ describe("EarnVaultDepositModal", () => {
     expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
   });
 
+  it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
+    const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [
+        fundingWallet([
+          { token: "USDC", mint: USDC_MINT, amount: "2500000", uiAmount: "2.5", decimals: 6 },
+          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+        ]),
+      ],
+      error: undefined,
+      isLoading: false,
+    });
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    const user = userEvent.setup();
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await screen.findByRole("dialog");
+
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.click(screen.getByRole("radio", { name: "USDG" }));
+
+    // The whole form speaks the FUNDING token now: label and balance.
+    expect(screen.getAllByText("Available: 7 USDG").length).toBeGreaterThan(0);
+    await user.type(screen.getByLabelText("Amount (USDG)"), "5");
+    await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
+
+    expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "5",
+        sourceTokenMint: USDG_MINT,
+        swapSlippageBps: 2,
+      },
+      IDEMPOTENCY_KEY
+    );
+    // Paying in a different token is a DIFFERENT request: the held-key
+    // fingerprint must not collide with an unswapped deposit of the same
+    // amount, or a retry of one would replay the other.
+    expect(
+      vaultDepositRequestFingerprint({
+        projectId: PROJECT_ID,
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "5",
+        toleranceBps: null,
+        sourceTokenMint: USDG_MINT,
+      })
+    ).not.toBe(
+      vaultDepositRequestFingerprint({
+        projectId: PROJECT_ID,
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "5",
+        toleranceBps: null,
+      })
+    );
+  });
+
+  it("sends no swap fields when the customer pays in the vault's own token", async () => {
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount("1.000000");
+
+    expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      { strategyId: strategy.id, custodyWalletId: "wallet_1", amount: "1" },
+      IDEMPOTENCY_KEY
+    );
+  });
+
   it("does not allow a wallet the API marks unavailable for runtime execution", async () => {
     const unavailableWallet = fundingWallet([]);
     unavailableWallet.isRuntimeExecutionAllowed = false;
@@ -715,5 +829,227 @@ describe("EarnVaultDepositModal", () => {
     expect(
       (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
+  });
+});
+
+describe("slippage tolerance helpers", () => {
+  it("accepts whole basis points from 1 to 1000 and nothing else", () => {
+    expect(parseSlippageToleranceBps("10")).toBe(10);
+    expect(parseSlippageToleranceBps(" 1 ")).toBe(1);
+    expect(parseSlippageToleranceBps("1000")).toBe(1000);
+    for (const value of ["0", "1001", "-1", "1.5", "", "ten", "10bps"]) {
+      expect(parseSlippageToleranceBps(value)).toBeNull();
+    }
+  });
+
+  it("derives the floor at mint scale without a number round trip", () => {
+    expect(floorForTolerance("20", 6, 10)).toBe("19.98");
+    expect(floorForTolerance("1", 6, 10)).toBe("0.999");
+    // Rounds DOWN to the atom — never up past what the vault would quote.
+    expect(floorForTolerance("0.000003", 6, 10)).toBe("0.000002");
+    // Dust clamps to one atom rather than a zero floor the builder refuses.
+    expect(floorForTolerance("0.000001", 6, 10)).toBe("0.000001");
+    // Exact above 2^53 atoms.
+    expect(floorForTolerance("10000000000000000", 6, 100)).toBe("9900000000000000");
+    // A ZERO quote has no satisfiable floor: one atom would demand MORE than
+    // the vault expects to return. `null` tells the caller to block, not clamp.
+    expect(floorForTolerance("0", 6, 10)).toBeNull();
+  });
+
+  it("recognizes the API's slippage refusal envelope and nothing else", () => {
+    expect(isSlippageExceededRefusal({ error: { details: { reason: "slippage_exceeded" } } })).toBe(
+      true
+    );
+    for (const body of [
+      null,
+      "error",
+      {},
+      { error: null },
+      { error: { details: null } },
+      { error: { details: { reason: "other" } } },
+    ]) {
+      expect(isSlippageExceededRefusal(body)).toBe(false);
+    }
+  });
+});
+
+describe("slippage-floored providers", () => {
+  const vedaStrategy: EarnStrategy = { ...strategy, provider: "veda" };
+
+  function primeQuote(sharesOut: string, blockingIssues: { code: string; message: string }[] = []) {
+    mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
+      kind: "quoted",
+      preview: { strategyId: vedaStrategy.id, sharesOut, shareDecimals: 6, blockingIssues },
+    });
+  }
+
+  async function enterVedaDepositAmount(amount = "1.000000") {
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), amount);
+    // The floor waits on the debounced live quote; the summary row appearing is
+    // the signal that confirm is armed with a quote-derived floor.
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
+    return user;
+  }
+
+  it("switches the confirm note to sponsored copy when the quote says SDP pays", async () => {
+    mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
+      kind: "quoted",
+      preview: {
+        strategyId: vedaStrategy.id,
+        sharesOut: "0.99999",
+        shareDecimals: 6,
+        blockingIssues: [],
+        feeSponsored: true,
+      },
+    });
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+
+    await screen.findByText("SDP covers the network fee.", undefined, { timeout: 3000 });
+    expect(
+      screen.queryByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeNull();
+  });
+
+  it("keeps the wallet-pays note while no quote claims sponsorship", async () => {
+    // `feeSponsored` absent (an older API, or sponsorship off) reads wallet-pays.
+    primeQuote("0.99999");
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    expect(
+      screen.getByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeTruthy();
+  });
+
+  it("derives the floor from the LIVE quote, not the amount", async () => {
+    // A rate the amount-arithmetic would get wrong: 1 USDC quotes 0.99999
+    // shares, so a 10 bps floor is 0.99899 — not the 0.999 the amount implies.
+    primeQuote("0.99999");
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    await enterVedaDepositAmount("1.000000");
+    await screen.findByText("Deposit submitted");
+    expect(mocks.fetchEarnVaultDepositPreview).toHaveBeenCalledWith(
+      { strategyId: vedaStrategy.id, amount: "1" },
+      expect.anything()
+    );
+    expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+      strategyId: strategy.id,
+      custodyWalletId: "wallet_1",
+      amount: "1",
+      minSharesOut: "0.99899",
+    });
+  });
+
+  it("sends no derived floor and never quotes for a provider with no declared policy", async () => {
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Deposit submitted");
+    expect(mocks.fetchEarnVaultDepositPreview).not.toHaveBeenCalled();
+    expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+      strategyId: strategy.id,
+      custodyWalletId: "wallet_1",
+      amount: "1",
+    });
+    // No policy, no control: the disclosure never renders for this provider.
+    expect(screen.queryByText(/Slippage tolerance:/)).toBeNull();
+  });
+
+  it("disables the deposit while the quote is unavailable, never guessing a floor", async () => {
+    mocks.fetchEarnVaultDepositPreview.mockResolvedValue({ kind: "unavailable" });
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1");
+
+    expect(
+      await screen.findByText(/live share quote is unavailable/, undefined, { timeout: 3000 })
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a vault-reported blocking issue in its own words and refuses to arm", async () => {
+    primeQuote("1", [{ code: "TELLER_PAUSED", message: "The teller is paused." }]);
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1");
+
+    expect(
+      await screen.findByText(/The teller is paused/, undefined, { timeout: 3000 })
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+
+  it("answers a blown floor with its own copy, opens the control, and re-quotes", async () => {
+    primeQuote("1");
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: false,
+      status: 400,
+      error:
+        "Vault deposit simulation failed: the vault would return less than the request's slippage floor allows.",
+      body: {
+        error: {
+          code: "BAD_REQUEST",
+          message: "Vault deposit simulation failed",
+          details: { reason: "slippage_exceeded" },
+        },
+      },
+    });
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+    );
+    await enterVedaDepositAmount("1.000000");
+
+    // This surface's own words, not the relayed simulation log…
+    expect(await screen.findByText(/Increase the tolerance below/)).toBeTruthy();
+    expect(screen.queryByText(/simulation failed/)).toBeNull();
+    // …the control that fixes it is open, prefilled with the default…
+    const toleranceInput = screen.getByLabelText(
+      "Slippage tolerance (basis points)"
+    ) as HTMLInputElement;
+    expect(toleranceInput.value).toBe("10");
+    // …and the retry's floor will come from a FRESH quote, not the refused one.
+    await vi.waitFor(() => {
+      expect(mocks.fetchEarnVaultDepositPreview.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });

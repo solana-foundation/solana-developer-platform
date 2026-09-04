@@ -18,12 +18,12 @@ import {
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -185,35 +185,35 @@ export class CoinbaseRampClient implements RampProvider {
     return readyCounterparty(this.id, options.direction);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {
-    const apiKeyName = requireEnv(env, "COINBASE_CDP_API_KEY_ID");
-    const apiKeySecret = requireEnv(env, "COINBASE_CDP_API_KEY_SECRET");
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    if (!context.offline) {
+      const { env, fetchJson, writeDump } = context;
+      const apiKeyName = requireEnv(env, "COINBASE_CDP_API_KEY_ID");
+      const apiKeySecret = requireEnv(env, "COINBASE_CDP_API_KEY_SECRET");
 
-    const jwt = await generateJwt({
-      apiKeyId: apiKeyName,
-      apiKeySecret,
-      requestMethod: "GET",
-      requestHost: new URL(CDP_V1_API_BASE_URL).host,
-      requestPath: "/onramp/v1/buy/options",
-    });
+      const jwt = await generateJwt({
+        apiKeyId: apiKeyName,
+        apiKeySecret,
+        requestMethod: "GET",
+        requestHost: new URL(CDP_V1_API_BASE_URL).host,
+        requestPath: "/onramp/v1/buy/options",
+      });
 
-    await writeDump(
-      RAMP_RAIL_DUMPS.coinbase.buyOptions.name,
-      await fetchJson(
-        this.id,
-        "GET /onramp/v1/buy/options",
-        `${CDP_V1_API_BASE_URL}/onramp/v1/buy/options?country=US&networks=solana`,
-        { headers: { Authorization: `Bearer ${jwt}` } }
-      )
+      await writeDump(
+        RAMP_RAIL_DUMPS.coinbase.buyOptions.name,
+        await fetchJson(
+          this.id,
+          "GET /onramp/v1/buy/options",
+          `${CDP_V1_API_BASE_URL}/onramp/v1/buy/options?country=US&networks=solana`,
+          { headers: { Authorization: `Bearer ${jwt}` } }
+        )
+      );
+    }
+    return distillCoinbaseRailSupport(
+      await context.readDump(RAMP_RAIL_DUMPS.coinbase.buyOptions.file)
     );
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
-    return distillCoinbaseRailSupport(await readDump(RAMP_RAIL_DUMPS.coinbase.buyOptions.file));
   }
 
   async estimateOnramp(

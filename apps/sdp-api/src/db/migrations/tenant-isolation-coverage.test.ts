@@ -1,5 +1,5 @@
 /**
- * Coverage ratchet for database-enforced tenant isolation (migration 0073).
+ * Coverage ratchet for database-enforced tenant isolation (migration 0079).
  *
  * Every table in the live schema must either carry forced row-level security
  * with at least one policy, or be registered here as a deliberately shared

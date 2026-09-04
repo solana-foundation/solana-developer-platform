@@ -19,7 +19,7 @@ const client = new Client({ connectionString: databaseUrl });
 
 try {
   await client.connect();
-  // Forced row-level security (migration 0073) binds non-superuser owners;
+  // Forced row-level security (migration 0079) binds non-superuser owners;
   // this maintenance reset needs the privileged session identity.
   await client.query("SELECT set_config('app.tenant_isolation_identity', 'system', false)");
   await client.query(sql);

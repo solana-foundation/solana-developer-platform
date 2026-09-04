@@ -1,0 +1,250 @@
+import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
+
+/**
+ * The complete B2B2C loop, exactly as shipped (PRO-1722 + PRO-1772): the
+ * partner's backend BUILDS an unsigned transaction for the customer's own
+ * wallet, the wallet signs it in the browser, the backend SUBMITS the signed
+ * bytes — SDP verifies the signature, records the movement, then broadcasts —
+ * and the reads close the loop: poll the movement to a terminal state, show
+ * balance + earned, list activity, and withdraw the same way money came in.
+ *
+ * Server-only examples by construction: the API key comes from process.env
+ * and the browser/mobile app is expected to call this partner-owned backend.
+ * The customer's key never leaves their wallet, and the partner's key never
+ * reaches the browser. The treasury route (`/vault-deposits` +
+ * `custodyWalletId`) must not appear here — a B2B2C partner cannot name a
+ * custody wallet.
+ *
+ * The guide renders one section per concern so a partner engineer can read it
+ * top to bottom; the sections concatenate into one server module.
+ */
+export interface EarnIntegrationSections {
+  /** Shared client setup: base URL, auth headers, response envelope. */
+  client: string;
+  /** Money in: build → customer signs → submit → poll to terminal. */
+  deposit: string;
+  /** Reads: balance + earned, activity feed, live positions. */
+  portfolio: string;
+  /** Money out: build the exit → customer signs → submit. */
+  withdraw: string;
+}
+
+export function buildEarnIntegrationSections(
+  strategy: Pick<EarnStrategy, "id">,
+  apiBaseUrl?: string
+): EarnIntegrationSections {
+  const client = `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
+
+function sdpHeaders(extra: Record<string, string> = {}) {
+  const apiKey = process.env.SDP_API_KEY;
+  if (!apiKey) throw new Error("SDP_API_KEY is required");
+  return {
+    Authorization: \`Bearer \${apiKey}\`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
+
+async function sdpFetch(path: string, init?: RequestInit) {
+  const response = await fetch(\`\${SDP_API_URL}\${path}\`, init);
+  // An error body is not always JSON (a gateway 502, an empty 503), so parse
+  // defensively and keep the status in the thrown message either way.
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(
+      result?.error?.message ?? \`SDP request failed: \${path} (\${response.status})\`
+    );
+  }
+  return result.data;
+}`;
+
+  const deposit = `/**
+ * Step 1 — build. SDP returns an UNSIGNED transaction for your customer's
+ * wallet: it is the fee payer and the only required signer. Hand the base64
+ * \`transaction\` to the wallet in the browser, e.g. with wallet-adapter:
+ *
+ *   const tx = VersionedTransaction.deserialize(Buffer.from(transaction, "base64"));
+ *   const signed = await wallet.signTransaction(tx);
+ *   const signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+ *
+ * A built transaction expires with its blockhash (about a minute); build a
+ * fresh one if the customer walks away before signing.
+ *
+ * Optional swap funding: pass \`sourceTokenMint\` (USDC, USDG, PYUSD or USDT on
+ * this cluster) to accept a stablecoin the vault does not take — SDP prepends
+ * a Jupiter swap inside the same transaction, \`amount\` becomes the SOURCE
+ * amount, and the response's \`transaction.swap\` reports the derived deposit.
+ * If the composed transaction cannot fit one Solana packet, the response is
+ * \`{ requiresSeparateSwap: true, swap, followUp }\` instead: have the wallet
+ * sign and send \`swap.transaction\` itself, then build again with
+ * \`followUp.amount\` and \`followUp.minSharesOut\` (your original floor,
+ * echoed back) and no \`sourceTokenMint\`.
+ */
+export async function buildEarnDepositTransaction({
+  ownerAddress,
+  amount,
+  minSharesOut,
+  sourceTokenMint,
+}: {
+  /** The customer's Solana wallet address. */
+  ownerAddress: string;
+  /** Deposit amount in the vault token's units — or the source token's, when swapping. */
+  amount: string;
+  /** Minimum acceptable shares, derived from your quote and slippage tolerance. */
+  minSharesOut: string;
+  /** Optional: fund the deposit in a different supported stablecoin. */
+  sourceTokenMint?: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({
+      strategyId: ${JSON.stringify(strategy.id)},
+      ownerAddress,
+      amount,
+      minSharesOut,
+      ...(sourceTokenMint ? { sourceTokenMint } : {}),
+    }),
+  });
+  // { transactionId, transaction, lastValidBlockHeight, swap?, ... }
+  // or { requiresSeparateSwap: true, swap, followUp } — see above.
+  return data;
+}
+
+/**
+ * Step 2 — submit the signed bytes. SDP verifies they are exactly the
+ * transaction it built and that your customer's signature is genuine, records
+ * the deposit, then broadcasts it. Reuse the SAME idempotency key when
+ * retrying this call: a retry returns the original deposit with
+ * \`replayed: true\` instead of moving money twice.
+ */
+export async function submitEarnDeposit({
+  transactionId,
+  signedTransaction,
+  idempotencyKey,
+}: {
+  transactionId: string;
+  /** Base64 of the signed transaction bytes from the customer's wallet. */
+  signedTransaction: string;
+  idempotencyKey: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/deposits", {
+    method: "POST",
+    headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
+    body: JSON.stringify({ transactionId, signedTransaction }),
+  });
+  // { movementId, positionId, status, signature, replayed, ... }
+  return data.deposit;
+}
+
+/**
+ * Step 3 — poll the movement to a terminal state. \`confirmed\` is optimistic;
+ * only \`finalized\` and \`failed\` are terminal, and SDP settles every movement
+ * within about ninety seconds.
+ */
+export async function getEarnMovement(movementId: string) {
+  const data = await sdpFetch(
+    \`/v1/earn/external-wallet/movements/\${encodeURIComponent(movementId)}\`,
+    { headers: sdpHeaders() }
+  );
+  // { movementId, direction, status, amount, denomination, signature, ... }
+  return data.movement;
+}`;
+
+  const portfolio = `/**
+ * Balance + total earned, grouped by deposit token. \`earned\` is stated only
+ * when exact — otherwise it is ABSENT with \`earnedUnavailableReason\`, never
+ * zero. Render an em dash or a spinner for an absent figure, never $0.
+ */
+export async function getEarnEarnings(ownerAddress: string) {
+  const data = await sdpFetch(
+    \`/v1/earn/external-wallet/earnings/\${encodeURIComponent(ownerAddress)}\`,
+    { headers: sdpHeaders() }
+  );
+  // { ownerAddress, totalsByToken: [{ currentValue?, totalDeposited, earned?, ... }] }
+  return data.earnings;
+}
+
+/** Activity feed: the customer's deposits and withdrawals, newest first. */
+export async function listEarnActivity(ownerAddress: string, cursor?: string) {
+  const query = new URLSearchParams({ ownerAddress });
+  if (cursor) query.set("before", cursor);
+  // { movements, hasMore, nextCursor }
+  return sdpFetch(\`/v1/earn/external-wallet/movements?\${query}\`, { headers: sdpHeaders() });
+}
+
+/**
+ * The customer's live positions, paged to completion — a silently short list
+ * hides withdrawable money. A withdrawal names a POSITION and a share amount:
+ * read \`id\` and \`withdrawableShares\` here to drive the withdraw flow.
+ */
+export async function listEarnPositions(ownerAddress: string) {
+  const positions = [];
+  let cursor;
+  do {
+    const query = cursor ? \`?before=\${encodeURIComponent(cursor)}\` : "";
+    const data = await sdpFetch(
+      \`/v1/earn/external-wallet/positions/\${encodeURIComponent(ownerAddress)}\${query}\`,
+      { headers: sdpHeaders() }
+    );
+    // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }], hasMore, nextCursor }
+    positions.push(...data.positions);
+    if (!data.hasMore) return positions;
+    if (!data.nextCursor || data.nextCursor === cursor) {
+      throw new Error("SDP positions cursor did not advance");
+    }
+    cursor = data.nextCursor;
+  } while (true);
+}`;
+
+  const withdraw = `/**
+ * Withdraw, step 1 — build the unsigned exit for the customer's wallet to
+ * sign. Exits keep working even when deposits are paused: money out is never
+ * gated by money-in rules.
+ */
+export async function buildEarnWithdrawalTransaction({
+  positionId,
+  shares,
+}: {
+  /** The position \`id\` from listEarnPositions. */
+  positionId: string;
+  /** Shares to redeem, at most \`withdrawableShares\`, as a decimal string. */
+  shares: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId, shares }),
+  });
+  return data.transaction;
+}
+
+/** Withdraw, step 2 — submit the signed exit; same idempotency contract as the deposit. */
+export async function submitEarnWithdrawal({
+  transactionId,
+  signedTransaction,
+  idempotencyKey,
+}: {
+  transactionId: string;
+  signedTransaction: string;
+  idempotencyKey: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
+    method: "POST",
+    headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
+    body: JSON.stringify({ transactionId, signedTransaction }),
+  });
+  return data.withdrawal;
+}`;
+
+  return { client, deposit, portfolio, withdraw };
+}
+
+/** The sections joined into the one server module they document. */
+export function buildEarnServerIntegration(
+  strategy: Pick<EarnStrategy, "id">,
+  apiBaseUrl?: string
+): string {
+  const sections = buildEarnIntegrationSections(strategy, apiBaseUrl);
+  return [sections.client, sections.deposit, sections.portfolio, sections.withdraw].join("\n\n");
+}

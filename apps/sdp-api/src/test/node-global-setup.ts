@@ -67,7 +67,7 @@ function handleSignal(): void {
 /**
  * The testcontainers bootstrap user (`test`) is a superuser and the table
  * owner, so PostgreSQL would never evaluate the tenant-isolation RLS policies
- * (migration 0073) for it. Tests exercise the app through this plain
+ * (migration 0079) for it. Tests exercise the app through this plain
  * NOSUPERUSER/NOBYPASSRLS role instead — the same posture
  * docs/ops/audit-ledger.md requires of production runtimes. Grants are issued
  * on the base database before the template clone so every worker database

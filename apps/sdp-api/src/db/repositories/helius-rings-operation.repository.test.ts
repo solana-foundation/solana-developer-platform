@@ -3,10 +3,9 @@ import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
-  type HeliusRingsOperationRepository,
-  type ReserveHeliusRingsIntentInput,
+import type {
+  HeliusRingsOperationRepository,
+  ReserveHeliusRingsIntentInput,
 } from "./helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
@@ -275,6 +274,148 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
     });
   });
 
+  describe("ready-to-sign arbitration", () => {
+    async function reserveReadyToSign(intentKey: string) {
+      const { operation } = await repo.reserveIntent(shieldIntent({ intentKey }));
+      const ready = await repo.transitionState({
+        ...scope,
+        id: operation.id,
+        expectedState: "draft",
+        nextState: "ready_to_sign",
+      });
+      if (!ready) throw new Error("ready-to-sign fixture was not created");
+      return ready;
+    }
+
+    const signed = {
+      signature: "signed-fixture-signature",
+      signedTransaction: "signed-fixture-bytes",
+      lastValidBlockHeight: "100",
+    };
+
+    it("does not persist signed bytes after a ready-to-sign failure wins", async () => {
+      const operation = await reserveReadyToSign("sha256:failure-wins");
+
+      const failed = await repo.failOperation({
+        ...scope,
+        id: operation.id,
+        expectedState: "ready_to_sign",
+        code: "signer_failed",
+        message: "recovery found no signed bytes",
+        retryable: true,
+      });
+      const persisted = await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+
+      expect(failed?.state).toBe("failed");
+      expect(persisted).toBeNull();
+      expect(await repo.getOperationById({ ...scope, id: operation.id })).toMatchObject({
+        state: "failed",
+        signed_transaction: null,
+        outer_tx_signature: null,
+      });
+    });
+
+    it("does not fail ready-to-sign after signed bytes win", async () => {
+      const operation = await reserveReadyToSign("sha256:signed-wins");
+
+      const persisted = await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+      const failed = await repo.failOperation({
+        ...scope,
+        id: operation.id,
+        expectedState: "ready_to_sign",
+        code: "signer_failed",
+        message: "stale recovery failure",
+        retryable: true,
+      });
+
+      expect(persisted).toMatchObject({
+        state: "ready_to_sign",
+        signed_transaction: signed.signedTransaction,
+      });
+      expect(failed).toBeNull();
+      expect(await repo.getOperationById({ ...scope, id: operation.id })).toMatchObject({
+        state: "ready_to_sign",
+        signed_transaction: signed.signedTransaction,
+        failure_code: null,
+      });
+    });
+
+    it("does not overwrite a signature-only ready-to-sign row", async () => {
+      const operation = await reserveReadyToSign("sha256:signature-only");
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET outer_tx_signature = ? WHERE id = ?")
+        .bind("preexisting-signature", operation.id)
+        .run();
+
+      const persisted = await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+
+      expect(persisted).toBeNull();
+      expect(await repo.getOperationById({ ...scope, id: operation.id })).toMatchObject({
+        state: "ready_to_sign",
+        outer_tx_signature: "preexisting-signature",
+        signed_transaction: null,
+      });
+    });
+
+    it("commits exactly one coherent winner when persistence and failure race", async () => {
+      const operation = await reserveReadyToSign("sha256:concurrent-winner");
+
+      const [persisted, failed] = await Promise.all([
+        repo.persistSigned({ ...scope, id: operation.id, ...signed }),
+        repo.failOperation({
+          ...scope,
+          id: operation.id,
+          expectedState: "ready_to_sign",
+          code: "signer_failed",
+          message: "concurrent recovery failure",
+          retryable: true,
+        }),
+      ]);
+      const current = await repo.getOperationById({ ...scope, id: operation.id });
+
+      expect([persisted, failed].filter((result) => result !== null)).toHaveLength(1);
+      if (persisted) {
+        expect(current).toMatchObject({
+          state: "ready_to_sign",
+          signed_transaction: signed.signedTransaction,
+          failure_code: null,
+        });
+      } else {
+        expect(current).toMatchObject({
+          state: "failed",
+          signed_transaction: null,
+          failure_code: "signer_failed",
+        });
+      }
+    });
+
+    it("still permits failures from later signed states", async () => {
+      const operation = await reserveReadyToSign("sha256:submitted-failure");
+      await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+      await repo.transitionState({
+        ...scope,
+        id: operation.id,
+        expectedState: "ready_to_sign",
+        nextState: "submitted",
+      });
+
+      const failed = await repo.failOperation({
+        ...scope,
+        id: operation.id,
+        expectedState: "submitted",
+        code: "submit_failed",
+        message: "rpc unavailable",
+        retryable: true,
+      });
+
+      expect(failed).toMatchObject({
+        state: "failed",
+        signed_transaction: signed.signedTransaction,
+        failure_code: "submit_failed",
+      });
+    });
+  });
+
   describe("failOperation", () => {
     it("records the whole failure triple", async () => {
       const { operation } = await repo.reserveIntent(shieldIntent());
@@ -391,14 +532,72 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
 
       expect(await repo.listOperationsByWallet({ ...scope, walletId, limit: 1 })).toHaveLength(1);
     });
+
+    it("applies the rings wallet allowlist before the project list limit", async () => {
+      const allowed = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:allowed" }));
+      const unauthorizedWallet = await walletRepo.createWallet({
+        ...scope,
+        sdpWalletId: "wal_hro_unauthorized",
+        name: "Unauthorized",
+        materialTag: "simulated",
+      });
+      if (!unauthorizedWallet) throw new Error("wallet fixture was not created");
+      const unauthorized = await repo.reserveIntent(
+        shieldIntent({
+          intentKey: "sha256:unauthorized",
+          walletId: unauthorizedWallet.id,
+        })
+      );
+      await setCreatedAt(allowed.operation.id, "2026-01-01T00:00:00.000Z");
+      await setCreatedAt(unauthorized.operation.id, "2026-02-01T00:00:00.000Z");
+
+      const listed = await repo.listOperationsByProject({
+        ...scope,
+        walletIds: [walletId],
+        limit: 1,
+      });
+
+      expect(listed.map((operation) => operation.id)).toEqual([allowed.operation.id]);
+    });
+
+    it("returns no project operations for an explicit empty rings wallet allowlist", async () => {
+      await repo.reserveIntent(shieldIntent());
+
+      expect(await repo.listOperationsByProject({ ...scope, walletIds: [] })).toEqual([]);
+    });
   });
 
   describe("listInFlightOperations", () => {
     it("returns only non-terminal operations older than the staleness cutoff", async () => {
-      const inFlight = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:in-flight" }));
-      const draft = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:draft" }));
-      const done = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:done" }));
-      const fresh = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:fresh" }));
+      // A wallet each, because a wallet may only have one deposit in flight at
+      // a time now. The sweep is per-project rather than per-wallet, so this is
+      // also closer to what it actually reads.
+      const walletFor = async (tag: string): Promise<string> => {
+        const row = await walletRepo.createWallet({
+          ...scope,
+          sdpWalletId: `wal_inflight_${tag}`,
+          name: tag,
+          materialTag: "simulated",
+        });
+        if (!row) throw new Error("wallet fixture was not created");
+        return row.id;
+      };
+
+      const inFlight = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:in-flight", walletId: await walletFor("inflight") })
+      );
+      const draft = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:draft", walletId: await walletFor("draft") })
+      );
+      const done = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:done", walletId: await walletFor("done") })
+      );
+      const fresh = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:fresh", walletId: await walletFor("fresh") })
+      );
+      const waiting = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:waiting", walletId: await walletFor("waiting") })
+      );
 
       for (const id of [inFlight.operation.id, done.operation.id, fresh.operation.id]) {
         await repo.transitionState({
@@ -410,6 +609,12 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       }
       await repo.transitionState({
         ...scope,
+        id: waiting.operation.id,
+        expectedState: "draft",
+        nextState: "approval_required",
+      });
+      await repo.transitionState({
+        ...scope,
         id: done.operation.id,
         expectedState: "submitted",
         nextState: "completed",
@@ -418,42 +623,16 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       await setUpdatedAt(inFlight.operation.id, "2026-01-01T00:00:00.000Z");
       await setUpdatedAt(draft.operation.id, "2026-01-01T00:00:00.000Z");
       await setUpdatedAt(done.operation.id, "2026-01-01T00:00:00.000Z");
+      await setUpdatedAt(waiting.operation.id, "2026-01-01T00:00:00.000Z");
 
       const swept = await repo.listInFlightOperations({ staleBefore: "2026-06-01T00:00:00.000Z" });
 
       // `draft` is excluded because nothing is in flight yet, `completed`
       // because it is terminal, and the fresh row because it was just touched.
+      // `approval_required` is excluded because it waits on a person: the sweep
+      // cannot advance it, and rows like it are the oldest ones in the table,
+      // so returning them would fill the budget ahead of what it can settle.
       expect(swept.map((row) => row.id)).toEqual([inFlight.operation.id]);
-    });
-
-    it("does not let waiting approval rows starve actionable work", async () => {
-      const submitted = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:starved" }));
-      await repo.transitionState({
-        ...scope,
-        id: submitted.operation.id,
-        expectedState: "draft",
-        nextState: "submitted",
-      });
-      await setUpdatedAt(submitted.operation.id, "2026-01-02T00:00:00.000Z");
-
-      const db = getDb(env);
-      for (let i = 0; i < DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT; i += 1) {
-        const waiting = await repo.reserveIntent(
-          shieldIntent({ intentKey: `sha256:approval-${i}` })
-        );
-        await db
-          .prepare("UPDATE helius_rings_operations SET state = 'approval_required' WHERE id = ?")
-          .bind(waiting.operation.id)
-          .run();
-        await setUpdatedAt(waiting.operation.id, "2026-01-01T00:00:00.000Z");
-      }
-
-      const swept = await repo.listInFlightOperations({
-        staleBefore: "2026-06-01T00:00:00.000Z",
-        limit: DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
-      });
-
-      expect(swept.map((row) => row.id)).toEqual([submitted.operation.id]);
     });
   });
 

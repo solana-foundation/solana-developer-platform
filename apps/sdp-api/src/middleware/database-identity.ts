@@ -10,7 +10,7 @@
  *    a named system identity.
  *  - Every other path is explicitly marked identity-less, so any database
  *    access that happens before an auth middleware narrows the request is
- *    denied by row-level security (migration 0073) instead of silently
+ *    denied by row-level security (migration 0079) instead of silently
  *    reading across tenants.
  *
  * Adding a prefix here grants cross-tenant database access to an
@@ -33,15 +33,6 @@ export const PUBLIC_SYSTEM_PATH_PREFIXES: ReadonlyArray<{
   { prefix: "/pay", component: "http:pay" },
   // Login/magic-link/session issuance runs before any session exists.
   { prefix: "/v1/auth", component: "http:auth-routes" },
-  // Earn button handoff: registered before auth on purpose, resolved by an
-  // unguessable public token rather than a tenant. Scoped to that one path
-  // rather than /v1/earn, so an earn route that ever forgets its auth
-  // middleware still fails closed. The handler returns strategy and style
-  // only — never organization, project, or key data.
-  {
-    prefix: "/v1/earn/button-configurations/public",
-    component: "http:earn-button-handoff",
-  },
 ];
 
 function matchPublicComponent(path: string): string | null {

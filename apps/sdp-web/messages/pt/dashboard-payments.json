@@ -244,8 +244,29 @@
         "updated": "Status da transferência atualizado",
         "currentProviderStatus": "Status atual do provedor: {status}.",
         "preparing": "Preparando o status da transferência",
-        "preparingDescription": "Estamos aguardando o registro da transferência vinculado a esta cotação."
-      }
+        "preparingDescription": "Estamos aguardando o registro da transferência vinculado a esta cotação.",
+        "waitingForPayment": "Aguardando pagamento",
+        "waitingForPaymentHostedDescription": "Conclua o pagamento na janela do provedor acima. Este depósito é atualizado automaticamente assim que o provedor o confirmar."
+      },
+      "destinationCountry": "País de destino",
+      "paymentRail": "Rails de pagamento",
+      "requirementGroupDestinationTitle": "Destino",
+      "requirementGroupDestinationDescription": "Escolha onde o pagamento de saída chega e os rails de pagamento locais pelos quais ele trafega.",
+      "requirementGroupBankAccountTitle": "Conta bancária",
+      "requirementGroupBankAccountDescription": "Os dados da conta do destinatário para estes rails. Eles são repassados ao provedor quando o pagamento de saída é executado e nunca são armazenados.",
+      "requirementGroupCustomerTitle": "Dados do destinatário",
+      "requirementGroupCustomerDescription": "A Lightspark usa esses dados para verificar a identidade do destinatário. Eles são enviados quando você envia e nunca são armazenados.",
+      "checkoutPoweredBy": "Desenvolvido por",
+      "addressRequirementDescription": "Busque para preencher os campos de endereço automaticamente ou digite-os manualmente.",
+      "useExistingAccount": "Usar conta existente",
+      "useExistingAccountDescription": "Uma conta de pagamento de saída ativa já está salva para este destino. Vamos usá-la neste pagamento de saída.",
+      "success": "Sucesso",
+      "depositTransaction": "Transação de depósito",
+      "onchainTransaction": "Transação on-chain",
+      "addressSearchPlaceholder": "Buscar um endereço",
+      "addressAutocompleteFailed": "Não foi possível buscar endereços. Tente novamente.",
+      "addressDetailsFailed": "Não foi possível carregar esse endereço. Faça outra busca.",
+      "untrustedProviderUrl": "O provedor retornou uma URL não confiável, então ela não foi carregada. Crie uma nova cotação ou entre em contato com o suporte."
     },
     "onchainSend": {
       "noAssets": "Esta Wallet não tem ativos disponíveis para enviar.",
@@ -618,7 +639,9 @@
       "details": "Detalhes",
       "transactions": "Transações",
       "copyAddress": "Copiar endereço",
-      "addressCopied": "Endereço copiado"
+      "addressCopied": "Endereço copiado",
+      "addAnyway": "Adicionar mesmo assim",
+      "addAnywayTitle": "Adicionar endereço sinalizado?"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -723,7 +746,10 @@
       "solanaSignature": "Assinatura Solana",
       "moneygramError": "Erro do MoneyGram",
       "lastUpdated": "Última atualização",
-      "copy": "Copiar {label}"
+      "copy": "Copiar {label}",
+      "failureReason": "Motivo da falha",
+      "viewReceipt": "Ver recibo",
+      "receipt": "Recibo"
     },
     "requestFailed": "Falha na solicitação.",
     "submitting": "Enviando...",

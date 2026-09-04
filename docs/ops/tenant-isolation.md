@@ -1,6 +1,6 @@
 # Database-enforced tenant isolation
 
-Migration `0073_tenant_isolation_rls.sql` puts forced row-level security on
+Migration `0079_tenant_isolation_rls.sql` puts forced row-level security on
 every tenant-owned table in the SDP API database, so an application query or
 scoping mistake cannot cross an organization boundary. This is
 defense-in-depth beneath the application layer's `TenantScope` repository
@@ -27,9 +27,8 @@ The policies (`sdp_tenant_isolation` on each table) admit:
 - **system** — everything. Granted only at registered entry points: the auth
   middlewares (key/session/Clerk resolution runs before a tenant is known),
   provider webhooks, the public payment page and token metadata, the login
-  routes, the Earn button handoff (resolved by an unguessable public token),
-  cron ticks, the managed reconciliation job, and ops scripts. The registry is
-  enforced by `src/lib/tenant-boundary.test.ts`.
+  routes, cron ticks, the managed reconciliation job, and ops scripts. The
+  registry is enforced by `src/lib/tenant-boundary.test.ts`.
 - **operator** — everything, but only obtainable through
   `runWithOperatorDatabaseAccess` (`src/db/operator-access.ts`), which
   refuses to run until the bypass is recorded in the append-only audit
@@ -52,7 +51,7 @@ or an explicit entry there.
 
 Provider webhooks resolve tenants from provider references
 (`bvnk_customer_reference`, `mural_organization_id`). Migration
-`0072_counterparty_provider_lookup_integrity.sql` makes the *effective*
+`0078_counterparty_provider_lookup_integrity.sql` makes the *effective*
 lookup key — `COALESCE(denormalized column, provider_data JSON path)` —
 unique among active counterparties, so a reference resolves to at most one
 tenant in every PII-migration phase (dual-write included). Tenant-scoped
@@ -61,7 +60,7 @@ repository paths keep writing provider data through
 claim the same reference get a unique-violation failure instead of a silent
 cross-tenant resolution.
 
-### If migration 0072 refuses to apply
+### If migration 0078 refuses to apply
 
 The migration pre-checks for active counterparties that already share an
 effective reference (one row claiming it in the denormalized column, another

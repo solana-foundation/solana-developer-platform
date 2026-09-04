@@ -92,16 +92,26 @@ beforeEach(async () => {
     )
     .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
     .run();
+  await db
+    .prepare(
+      `INSERT INTO private_channel_instances
+         (id, organization_id, project_id, gateway_url,
+          escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active)
+       VALUES (?, ?, ?, ?, 'prog1', 'prog2', 'escrow1', ?, true)`
+    )
+    .bind(INSTANCE_ID, TEST_ORG.id, PROJECT_ID, GATEWAY_URL, AUTH_URL)
+    .run();
 
   // The member row resolveGatewayAuth looks up, with an encrypted SPC credential.
   const ciphertext = await createSpcCredentialCipher(testEnv).encrypt(TEST_ORG.id, "spc-password");
   await db
     .prepare(
       `INSERT INTO private_channel_users
-         (id, organization_id, project_id, user_id, spc_user_id, spc_username, spc_credential_ciphertext)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+         (id, organization_id, project_id, user_id, instance_id, name, is_default,
+          spc_user_id, spc_username, spc_credential_ciphertext)
+         VALUES (?, ?, ?, ?, ?, 'Default', true, ?, ?, ?)`
     )
-    .bind(PCU_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id, "spc-1", "alice", ciphertext)
+    .bind(PCU_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id, INSTANCE_ID, "spc-1", "alice", ciphertext)
     .run();
 
   // Fresh KV per test.

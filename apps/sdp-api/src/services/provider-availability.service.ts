@@ -7,6 +7,7 @@ import {
   EARN_PROVIDERS,
   type EarnProviderId,
   isEarnProviderSurfaced,
+  isRampProviderSurfaced,
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
@@ -19,6 +20,7 @@ import {
   RAMP_PROVIDERS,
   type RampProviderId,
   resolveOrganizationProviderEntitlements,
+  type SdpEnvironment,
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
@@ -82,7 +84,7 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
  * member on `Env`: the template literal below must resolve to a `keyof Env` for
  * every member of this union, so widening it silently demands a credential.
  */
-type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino">;
+type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda">;
 
 /**
  * Credentialed earn providers share one shape: `<PREFIX>_API_KEY` for
@@ -325,7 +327,14 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
   },
   earn: {
-    veda: keyPairCredentialDefinition("Veda", "VEDA"),
+    // Keyless like Kamino, though for a cluster reason rather than Kamino's
+    // account one: Veda's vaults are read and written entirely on-chain through
+    // `@sdp/veda`, so there is no provider API to authenticate against, and no
+    // credential to declare here. Veda's sandbox/production split is devnet vs
+    // mainnet, with the vaults deployed at the same addresses on both clusters,
+    // so this gate always passes and a vault absent from the selected cluster
+    // fails in the SDK call rather than at this gate.
+    veda: publicApiDefinition("Veda"),
     upshift: keyPairCredentialDefinition("Upshift", "UPSHIFT"),
     perena: keyPairCredentialDefinition("Perena", "PERENA"),
     ground: keyPairCredentialDefinition("Ground", "GROUND"),
@@ -759,6 +768,18 @@ export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
     throw new AppError(
       "FORBIDDEN",
       `${PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId].label} is not currently offered.`
+    );
+  }
+}
+
+export function assertRampProviderSurfaced(
+  providerId: RampProviderId,
+  environment: SdpEnvironment
+): void {
+  if (!isRampProviderSurfaced(providerId, environment)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `${PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId].label} is not currently offered.`
     );
   }
 }

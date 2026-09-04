@@ -33,6 +33,17 @@ describe("Postgres migration runner", () => {
     );
   });
 
+  it("backfills rings wallet owners before the identity pair check", () => {
+    const sql = readMigration("0067_helius_rings_money_flows.sql");
+    const ownerBackfill = sql.search(
+      /UPDATE helius_rings_wallets w\s+SET owner_address = cw\.public_key/
+    );
+    const pairCheck = sql.lastIndexOf("helius_rings_wallets_owner_identity_pair_check");
+
+    expect(ownerBackfill).toBeGreaterThan(-1);
+    expect(pairCheck).toBeGreaterThan(ownerBackfill);
+  });
+
   it("installs pg_trgm before building each ledger index concurrently", () => {
     const extensionMigration = "0027_payment_transfer_ledger_indexes.sql";
     const extensionRepairMigration = "0027a_enable_pg_trgm.sql";
