@@ -328,6 +328,27 @@ describe("orphaned workflow secret retirement", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("clears a reserved row whose predicted version was never written", async () => {
+    secretStore.destroyVersion.mockRejectedValueOnce(
+      new CredentialSecretStoreError(
+        "GCP Secret Manager request failed: NOT_FOUND",
+        "UPSTREAM_ERROR"
+      )
+    );
+    await getDb(env)
+      .prepare(
+        `INSERT INTO workflow_action_secret_retirements
+           (id, organization_id, workflow_id, storage_backend, secret_ref, secret_version_ref, last_error, next_attempt_at)
+         VALUES ('wsr_reserved', 'org-1', NULL, 'gcp_secret_manager', NULL, ?, 'reserved for a write that has not happened yet', ?)`
+      )
+      .bind(VERSION_REF, new Date(Date.now() - 1000).toISOString())
+      .run();
+
+    await retireOrphanedActionSecrets(env);
+
+    expect(await queuedRetirements()).toHaveLength(0);
+  });
+
   it("ignores a non-GCP backend", async () => {
     await destroyActionSecret(
       env,

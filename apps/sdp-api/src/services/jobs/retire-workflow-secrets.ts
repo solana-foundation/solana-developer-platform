@@ -35,7 +35,10 @@ function nextAttemptIso(now: Date, attemptCount: number): string {
 }
 
 function isAlreadyDestroyed(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("FAILED_PRECONDITION");
+  return (
+    error instanceof Error &&
+    (error.message.includes("FAILED_PRECONDITION") || error.message.includes("NOT_FOUND"))
+  );
 }
 
 function isKnownBackend(value: string): value is CredentialSecretStorageBackend {

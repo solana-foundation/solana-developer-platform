@@ -36,6 +36,14 @@ export interface CredentialSecretStore {
   write(params: WriteCredentialSecretParams): Promise<StoredCredentialSecret>;
   read(params: ReadCredentialSecretParams): Promise<CredentialSecretPayload>;
   destroyVersion(params: DestroyCredentialSecretVersionParams): Promise<void>;
+  /**
+   * The version ref a fresh write for this credential will create, known
+   * BEFORE anything external exists. Lets a caller record a durable cleanup
+   * obligation ahead of the write, so no externally readable version can ever
+   * outlive both the write's transaction and the record of its existence.
+   * Backends without an external artifact return null.
+   */
+  predictFirstVersionRef(params: { providerCredentialId: string }): string | null;
 }
 
 export class CredentialSecretStoreError extends Error {
@@ -111,6 +119,10 @@ export class EncryptedDbCredentialSecretStore implements CredentialSecretStore {
       "UNSUPPORTED_OPERATION"
     );
   }
+
+  predictFirstVersionRef(): string | null {
+    return null;
+  }
 }
 
 export class RuntimeEnvCredentialSecretStore implements CredentialSecretStore {
@@ -123,6 +135,10 @@ export class RuntimeEnvCredentialSecretStore implements CredentialSecretStore {
       "Runtime env credentials are read-only and must be supplied by deployment configuration",
       "UNSUPPORTED_OPERATION"
     );
+  }
+
+  predictFirstVersionRef(): string | null {
+    return null;
   }
 
   async read(params: ReadCredentialSecretParams): Promise<CredentialSecretPayload> {
@@ -296,6 +312,15 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       method: "POST",
       body: "{}",
     });
+  }
+
+  predictFirstVersionRef(params: { providerCredentialId: string }): string | null {
+    const secretRef = buildGcpSecretRef({
+      projectId: this.options.projectId,
+      secretPrefix: this.options.secretPrefix,
+      providerCredentialId: params.providerCredentialId,
+    });
+    return `${secretRef}/versions/1`;
   }
 
   private async createSecretIfMissing(

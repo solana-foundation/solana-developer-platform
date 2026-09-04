@@ -30,7 +30,11 @@ import {
   type InstallationConflictReason,
   installationFactsFromConnection,
 } from "@/services/provider-credential-installation";
-import { clearQueuedSecretVersion, queuePendingSecretVersion } from "@/services/secret-retirement";
+import {
+  clearQueuedSecretVersion,
+  queuePendingSecretVersion,
+  reserveSecretVersionIntent,
+} from "@/services/secret-retirement";
 import {
   type ProjectConnectionState,
   type ProviderCredentialRow,
@@ -389,22 +393,41 @@ async function persistPreparedSubmission(
     let stored: StoredCredentialSecret;
     if (prepared.credentialSource === "stored") {
       secretStore = await createSubmissionSecretStore(prepared, providerCredentialId, connectionId);
+      const retirementContext = {
+        provider: "privy",
+        orgId: prepared.organizationId,
+        sourceId: providerCredentialId,
+      };
+      // The obligation is recorded BEFORE the write: with the coming version
+      // ref known up front, a durable row exists before anything external
+      // does, so no crash between the write and any later bookkeeping can
+      // leave a readable credential without a record the sweeper drains. If it
+      // cannot be recorded, the request is refused while the backend still
+      // holds nothing.
+      const predictedVersionRef = secretStore.predictFirstVersionRef({ providerCredentialId });
+      if (predictedVersionRef) {
+        await reserveSecretVersionIntent(
+          prepared.c.env,
+          {
+            storageBackend: secretStore.storageBackend,
+            secretRef: null,
+            secretVersionRef: predictedVersionRef,
+          },
+          retirementContext
+        );
+      }
       stored = await writeSubmissionSecret(
         prepared,
         providerCredentialId,
         connectionId,
         secretStore
       );
-      // The version exists and nothing references it yet: queue its
-      // destruction now, durably, and let the committing transaction cancel
-      // it. A process that dies between here and the commit (worker loss)
-      // then leaves a queued row the sweeper collects, instead of a tenant
-      // credential readable in the backend with no record anywhere.
-      await queuePendingSecretVersion(prepared.c.env, stored, {
-        provider: "privy",
-        orgId: prepared.organizationId,
-        sourceId: providerCredentialId,
-      });
+      // The reservation covers the predicted ref; only a write that landed on
+      // a different version (a pre-existing secret, which a freshly minted
+      // credential id should never have) still needs its own record.
+      if (stored.secretVersionRef !== predictedVersionRef) {
+        await queuePendingSecretVersion(prepared.c.env, stored, retirementContext);
+      }
     } else {
       stored = { storageBackend: "runtime_env" };
     }

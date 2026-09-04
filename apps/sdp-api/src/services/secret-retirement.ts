@@ -107,7 +107,10 @@ function pause(ms: number): Promise<void> {
 // the same way (`services/jobs/retire-workflow-secrets.ts`): the version is
 // gone, which is all this ever wanted.
 function isAlreadyDestroyed(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("FAILED_PRECONDITION");
+  return (
+    error instanceof Error &&
+    (error.message.includes("FAILED_PRECONDITION") || error.message.includes("NOT_FOUND"))
+  );
 }
 
 async function queueRetirement(
@@ -169,6 +172,38 @@ function logOrphanRisk(
       reason: params.reason,
     },
     "credential_secret_orphan_risk"
+  );
+}
+
+/**
+ * Record, BEFORE anything external exists, that the version a coming write
+ * will create needs destroying unless a row commits to reference it. The
+ * predicted ref comes from `CredentialSecretStore.predictFirstVersionRef`.
+ * Fails closed with nothing to clean up: at this point the backend holds
+ * nothing, so refusing the request leaves a clean slate — which is exactly why
+ * this runs first. A version covered by this record can never become the
+ * "readable credential with no durable obligation" orphan: the obligation
+ * exists before the version does.
+ *
+ * @throws AppError SERVICE_UNAVAILABLE when the obligation cannot be recorded.
+ */
+export async function reserveSecretVersionIntent(
+  env: Env,
+  predicted: { storageBackend: string; secretRef: string | null; secretVersionRef: string },
+  context: SecretRetirementContext
+): Promise<void> {
+  const queued = await queueRetirement(
+    env,
+    context,
+    predicted as StoredCredentialSecret,
+    "reserved for a write that has not happened yet",
+    new Date(Date.now() + PROVISIONAL_GRACE_MS).toISOString()
+  );
+  if (queued) {
+    return;
+  }
+  throw serviceUnavailable(
+    "Credential cleanup could not be durably reserved; nothing was created — retry the request"
   );
 }
 
