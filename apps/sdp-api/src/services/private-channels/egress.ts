@@ -35,6 +35,7 @@
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import type { ProbeRequest, ProbeResponse, ProbeTransport } from "@sdp/private-channels/transport";
 import { badRequest } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { guardedFetch, isBlockedAddress } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 
@@ -201,6 +202,10 @@ export function assertApprovedPrivateChannelDestinations(
   }
 
   if (Object.keys(fieldErrors).length > 0) {
+    getLogger().warn(
+      { fieldErrors },
+      "private-channel destination refused by the egress allowlist"
+    );
     throw badRequest("Invalid connection details", { fieldErrors });
   }
 }
