@@ -175,8 +175,11 @@ jobs:
     name: Unit Tests
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJson('["self-hosted", "sdp-dev-vm"]') }}
     timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
     env:
-      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
+      CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: api
       TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
       REDIS_URL: redis://127.0.0.1:6379
@@ -225,13 +228,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate Doppler bootstrap secret
+      - name: Validate Doppler OIDC configuration
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          if [ -z "${DOPPLER_TOKEN}" ]; then
-            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
+          if [ -z "${{ vars.DOPPLER_CI_IDENTITY_ID }}" ]; then
+            echo "DOPPLER_CI_IDENTITY_ID must be configured as a repository variable for secret-aware CI jobs." >&2
             exit 1
           fi
 
@@ -239,25 +240,34 @@ jobs:
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
+      - name: Doppler OIDC login
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        run: |
+          oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+
       - name: Unit tests (Doppler)
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
 
       - name: Unit tests (fork-safe)
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
-          echo "::notice title=Fork-safe unit tests::DOPPLER_TOKEN_CI is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
+          echo "::notice title=Fork-safe unit tests::Doppler OIDC authentication is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
           node scripts/run-workspace-tests.mjs unit
 
   test_packages:
     name: Unit Tests (packages)
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJson('["self-hosted", "sdp-dev-vm"]') }}
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     env:
-      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
+      CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: rest
       TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
       REDIS_URL: redis://127.0.0.1:6379
