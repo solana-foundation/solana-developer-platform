@@ -39,6 +39,7 @@ import {
   listAssetProfilesResponseSchema,
   listCounterpartiesResponseSchema,
   listCounterpartyAccountsResponseSchema,
+  listCounterpartyProviderAccountsResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
@@ -146,6 +147,9 @@ export const listCounterpartiesResponse = successResponseSchema(listCounterparti
 export const counterpartyAccountResponse = successResponseSchema(counterpartyAccountResponseSchema);
 export const listCounterpartyAccountsResponse = successResponseSchema(
   listCounterpartyAccountsResponseSchema
+);
+export const listCounterpartyProviderAccountsResponse = successResponseSchema(
+  listCounterpartyProviderAccountsResponseSchema
 );
 
 export const projectResponse = successResponseSchema(projectResponseSchema);

@@ -7,6 +7,7 @@ import {
   type PrivateChannelInstanceRow,
   type ProjectScope,
   type ReactivateInstanceInput,
+  type UpdateActiveInstanceInput,
 } from "./private-channel-instance.repository";
 
 function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
@@ -77,11 +78,11 @@ export function createPostgresPrivateChannelInstanceRepository(
         .prepare(
           `INSERT INTO private_channel_instances (
                id, organization_id, project_id,
-               gateway_url, chain_rpc_url,
+               gateway_url,
                escrow_program_id, withdraw_program_id, escrow_instance_addr,
                auth_url,
                is_active, created_by
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
           RETURNING *`
         )
         .bind(
@@ -89,7 +90,6 @@ export function createPostgresPrivateChannelInstanceRepository(
           input.organizationId,
           input.projectId,
           input.gatewayUrl,
-          input.chainRpcUrl,
           input.escrowProgramId,
           input.withdrawProgramId,
           input.escrowInstanceAddr,
@@ -104,7 +104,7 @@ export function createPostgresPrivateChannelInstanceRepository(
       const row = await db
         .prepare(
           `UPDATE private_channel_instances
-              SET chain_rpc_url = ?,
+              SET chain_rpc_url = '',
                   escrow_program_id = ?,
                   withdraw_program_id = ?,
                   escrow_instance_addr = ?,
@@ -115,12 +115,42 @@ export function createPostgresPrivateChannelInstanceRepository(
           RETURNING *`
         )
         .bind(
-          input.chainRpcUrl,
           input.escrowProgramId,
           input.withdrawProgramId,
           input.escrowInstanceAddr,
           input.authUrl,
           input.id
+        )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async updateActive(input: UpdateActiveInstanceInput) {
+      const row = await db
+        .prepare(
+          `UPDATE private_channel_instances
+              SET gateway_url = ?,
+                  chain_rpc_url = '',
+                  escrow_program_id = ?,
+                  withdraw_program_id = ?,
+                  escrow_instance_addr = ?,
+                  auth_url = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND is_active = TRUE
+          RETURNING *`
+        )
+        .bind(
+          input.gatewayUrl,
+          input.escrowProgramId,
+          input.withdrawProgramId,
+          input.escrowInstanceAddr,
+          input.authUrl,
+          input.id,
+          input.organizationId,
+          input.projectId
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

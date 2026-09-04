@@ -244,8 +244,31 @@
         "updated": "Estado de la transferencia actualizado",
         "currentProviderStatus": "Estado actual del proveedor: {status}.",
         "preparing": "Preparando el estado de la transferencia",
-        "preparingDescription": "Estamos esperando el registro de la transferencia asociado a esta cotización."
-      }
+        "preparingDescription": "Estamos esperando el registro de la transferencia asociado a esta cotización.",
+        "waitingForPayment": "Esperando el pago",
+        "waitingForPaymentHostedDescription": "Completa el pago en la ventana del proveedor que aparece arriba. Este depósito se actualiza automáticamente cuando el proveedor lo confirma."
+      },
+      "untrustedProviderUrl": "El proveedor devolvió una URL no confiable, por lo que no se cargó. Crea una nueva cotización o contacta a soporte.",
+      "destinationCountry": "País de destino",
+      "paymentRail": "Rail de pago",
+      "requirementGroupDestinationTitle": "Destino",
+      "requirementGroupDestinationDescription": "Elige dónde aterriza el pago saliente y el rail de pago local por el que viaja.",
+      "requirementGroupBankAccountTitle": "Cuenta bancaria",
+      "requirementGroupBankAccountDescription": "Los datos de la cuenta del destinatario para este rail. Se pasan al proveedor cuando se ejecuta el pago saliente y nunca se almacenan.",
+      "requirementGroupCustomerTitle": "Datos del destinatario",
+      "requirementGroupCustomerDescription": "Lightspark usa estos datos para verificar la identidad del destinatario. Se envían cuando se envía la solicitud y nunca se almacenan.",
+      "checkoutPoweredBy": "Con tecnología de",
+      "addressRequirementDescription": "Busca para autocompletar los campos de dirección, o ingrésalos manualmente.",
+      "useExistingAccount": "Usar cuenta existente",
+      "useExistingAccountDescription": "Ya hay una cuenta de pago saliente activa guardada para este destino. La usaremos para este pago saliente.",
+      "success": "Éxito",
+      "depositTransaction": "Transacción de depósito",
+      "onchainTransaction": "Transacción on-chain",
+      "addressSearchPlaceholder": "Buscar una dirección",
+      "addressAutocompleteFailed": "No pudimos buscar direcciones. Inténtalo de nuevo.",
+      "addressDetailsFailed": "No pudimos cargar esa dirección. Prueba con otra búsqueda.",
+      "payoutAccountsTitle": "Cuentas de pago saliente guardadas",
+      "payoutAccountsDescription": "Elige dónde llega este pago saliente, o completa los datos de abajo para pagar a una cuenta nueva."
     },
     "onchainSend": {
       "noAssets": "Esta Wallet no tiene activos disponibles para enviar.",
@@ -302,7 +325,9 @@
       "offrampProvisioningDetail": "Aprovisionando una Wallet de pagos salientes dedicada de BVNK para esta moneda.",
       "simulateDeposit": "Simular depósito",
       "simulating": "Simulando...",
-      "depositSimulated": "Depósito simulado"
+      "depositSimulated": "Depósito simulado",
+      "agreementPendingTitle": "Confirmando tu aceptación",
+      "agreementPendingDescription": "Estamos registrando tu aceptación con BVNK — solo toma un momento."
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifica tu identidad",
@@ -618,7 +643,22 @@
       "details": "Detalles",
       "transactions": "Transacciones",
       "copyAddress": "Copiar dirección",
-      "addressCopied": "Dirección copiada"
+      "addressCopied": "Dirección copiada",
+      "addAnyway": "Agregar de todos modos",
+      "addAnywayTitle": "¿Agregar dirección marcada?",
+      "providerAccounts": "Cuentas del proveedor",
+      "loadingProviderAccounts": "Cargando cuentas del proveedor…",
+      "noProviderAccounts": "Aún no hay cuentas del proveedor.",
+      "providerAccountsMissing": "La respuesta de cuentas del proveedor estuvo vacía.",
+      "providerAccountCorridor": "Corredor",
+      "providerAccountRail": "Rail",
+      "providerAccountBank": "Banco",
+      "providerAccountNumber": "Cuenta",
+      "providerAccountCustomer": "Cliente",
+      "providerAccountStatus": "Estado",
+      "copyCustomerId": "Copiar ID del cliente",
+      "customerIdCopied": "ID del cliente copiado",
+      "noPayoutAccounts": "Aún no hay cuentas de pago saliente."
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -723,7 +763,10 @@
       "solanaSignature": "Firma de Solana",
       "moneygramError": "Error de MoneyGram",
       "lastUpdated": "Última actualización",
-      "copy": "Copiar {label}"
+      "copy": "Copiar {label}",
+      "viewReceipt": "Ver recibo",
+      "receipt": "Recibo",
+      "failureReason": "Motivo del error"
     },
     "requestFailed": "La solicitud falló.",
     "submitting": "Enviando...",
@@ -931,7 +974,9 @@
       "openAccount": "Abrir cuenta en el explorador",
       "editPaymentDescription": "Actualiza las Wallets, el monto y el cronograma del pago.",
       "paymentUpdated": "Pago recurrente actualizado.",
-      "noChangesToSave": "No hay cambios para guardar."
+      "noChangesToSave": "No hay cambios para guardar.",
+      "sourceWalletUnresolved": "Wallet de origen no disponible",
+      "sourceWalletUnresolvedDescription": "Este pago recurrente no está vinculado a una Wallet de SDP exacta, por lo que sus acciones no están disponibles."
     },
     "transactions": {
       "searchPlaceholder": "Busca ID, firma, dirección, referencia o contraparte (3 o más caracteres)",

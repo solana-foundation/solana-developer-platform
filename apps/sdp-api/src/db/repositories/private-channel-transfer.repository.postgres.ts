@@ -107,6 +107,7 @@ export function createPostgresPrivateChannelTransferRepository(
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND (?::text IS NULL OR status = ?)
+              AND (?::boolean IS NOT TRUE OR signature IS NULL)
           RETURNING *`
         )
         .bind(
@@ -115,7 +116,8 @@ export function createPostgresPrivateChannelTransferRepository(
           input.failureReason ?? null,
           input.id,
           input.expectedStatus ?? null,
-          input.expectedStatus ?? null
+          input.expectedStatus ?? null,
+          input.expectedSignatureAbsent ?? false
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
@@ -192,6 +194,7 @@ export function createPostgresPrivateChannelTransferRepository(
               AND i.is_active = TRUE
               AND pcu.organization_id = ?
               AND pcu.project_id = ?
+              AND pcu.disabled_at IS NULL
             ORDER BY (pcu.id = ?) DESC, pcu.id ASC, vw.pubkey ASC, vw.id ASC`
         )
         .bind(

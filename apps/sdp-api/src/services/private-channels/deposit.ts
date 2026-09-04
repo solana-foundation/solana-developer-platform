@@ -33,6 +33,7 @@ import {
   address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getSignatureFromTransaction,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -58,7 +59,7 @@ import { confirmAndPersistDeposit } from "./deposit-confirm";
 import { emitDepositEvent } from "./deposit-events";
 import { resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
-import { describeTxError } from "./tx-error";
+import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
 
 /** The instance fields the deposit needs. */
 type DepositInstance = Pick<
@@ -111,6 +112,13 @@ async function broadcastDeposit(
     recipient: Address;
     amountBaseUnits: bigint;
     projectRpc: PrivateChannelProjectRpcClient;
+    /**
+     * Called with the transaction's signature after signing and before the
+     * send, so the outcome of a request that dies mid-send stays resolvable:
+     * a persisted signature is what lets the reconciler ask the chain what
+     * happened instead of failing the row as never-broadcast.
+     */
+    onSigned: (signature: Signature) => Promise<void>;
   }
 ): Promise<Signature> {
   const signer = await solanaServices.createOrgSigner(
@@ -151,6 +159,7 @@ async function broadcastDeposit(
 
   // The custody wallet is the only signer (payer + user); fully sign and broadcast.
   const signed = await signTransactionMessageWithSigners(message);
+  await input.onSigned(getSignatureFromTransaction(signed));
   const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
   return solanaRpc.sendTransaction(input.projectRpc.rpc, signedBytes);
 }
@@ -237,8 +246,9 @@ export async function createChannelDeposit(
     );
   }
 
-  const { mint, decimals, tokenProgram } = resolveChannelToken(
-    input.projectRpc.cluster,
+  const { mint, decimals, tokenProgram } = await resolveChannelToken(
+    input.instance,
+    input.projectRpc,
     input.mint
   );
   const depositor = wallet.publicKey;
@@ -280,6 +290,7 @@ export async function createChannelDeposit(
   // Broadcast. A failure here means the transaction never reached the chain (no
   // signature), so the deposit is a terminal failure — no funds moved.
   let signature: Signature;
+  let recordedSignature: Signature | null = null;
   try {
     signature = await broadcastDeposit(env, {
       instance,
@@ -291,20 +302,44 @@ export async function createChannelDeposit(
       recipient: address(recipient),
       amountBaseUnits,
       projectRpc: input.projectRpc,
+      // The reservation is still exclusively this request's (the CAS holds it),
+      // so record the signature on it before the bytes go out. If the write
+      // fails the send is aborted: better an unbroadcast failed deposit than an
+      // executed escrow transfer whose signature exists nowhere.
+      onSigned: async (signedAs) => {
+        const recorded = await repo.updateDeposit({
+          id: created.id,
+          status: "pending",
+          signature: signedAs,
+          expectedStatus: "pending",
+        });
+        if (!recorded) {
+          throw new AppError("CONFLICT", "Deposit reservation is no longer pending.");
+        }
+        recordedSignature = signedAs;
+      },
     });
   } catch (error) {
-    const failureReason = describeTxError(error, "Deposit submission failed.");
-    getLogger().error({ depositId: created.id, error }, "createChannelDeposit: broadcast failed");
-    const failed = await repo.updateDeposit({
-      id: created.id,
-      status: "failed",
-      failureReason,
-      expectedStatus: "pending",
-    });
-    if (failed) {
-      await emitDepositEvent(env, failed, "transfer.deposit.failed", "failed", { failureReason });
+    if (recordedSignature !== null && isAmbiguousSubmissionOutcome(error)) {
+      // The connection died after the signed bytes may have gone out, so the
+      // chain may have executed the escrow transfer. Marking it failed would
+      // invite a duplicate under a fresh key; fall through and let the
+      // submitted reconciliation ask the chain instead.
+      signature = recordedSignature;
+    } else {
+      const failureReason = describeTxError(error, "Deposit submission failed.");
+      getLogger().error({ depositId: created.id, error }, "createChannelDeposit: broadcast failed");
+      const failed = await repo.updateDeposit({
+        id: created.id,
+        status: "failed",
+        failureReason,
+        expectedStatus: "pending",
+      });
+      if (failed) {
+        await emitDepositEvent(env, failed, "transfer.deposit.failed", "failed", { failureReason });
+      }
+      return mapPrivateChannelDepositRow(failed ?? created);
     }
-    return mapPrivateChannelDepositRow(failed ?? created);
   }
 
   latest =

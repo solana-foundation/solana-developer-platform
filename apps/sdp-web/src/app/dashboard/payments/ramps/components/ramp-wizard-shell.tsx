@@ -26,12 +26,15 @@ interface RampWizardShellProps {
   /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
   header?: ReactNode;
   summary?: ReactNode;
+  /** Replaces the "View summary" button text (e.g. the provider-branded chip). */
+  summaryTrigger?: ReactNode;
   footerActions?: ReactNode;
   hidePrimary?: boolean;
   /** Confirm before running the secondary action — used once a transaction is live. */
   confirmSecondary?: boolean;
   secondaryDisabled?: boolean;
   hideSecondary?: boolean;
+  completionTitle?: string;
 }
 
 export function RampWizardShell({
@@ -49,51 +52,61 @@ export function RampWizardShell({
   children,
   header,
   summary,
+  summaryTrigger,
   footerActions,
   hidePrimary,
   confirmSecondary,
   secondaryDisabled,
   hideSecondary,
+  completionTitle,
 }: RampWizardShellProps) {
   const t = useTranslations();
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const cancelConfirmationAvailable =
+    confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
+  const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
+  const isLastStep = stepIndex === steps.length - 1;
   return (
     <>
       <WizardFrame
         steps={steps}
         currentStep={stepIndex}
+        currentStepTitle={completionTitle}
         progressLabel={t("DashboardPayments.counterparty.stepProgress", {
           current: stepIndex + 1,
           total: steps.length,
         })}
         header={header}
-        summary={summary}
+        summary={isLastStep ? undefined : summary}
+        summaryTrigger={isLastStep ? undefined : summaryTrigger}
         footer={
-          <div className="flex items-center justify-between gap-3">
-            {hideSecondary ? (
-              <div />
-            ) : (
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={secondaryDisabled}
-                onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
-              >
-                {secondaryLabel ??
-                  (stepIndex === 0
-                    ? t("DashboardPayments.counterparty.cancel")
-                    : t("DashboardPayments.previous"))}
-              </Button>
-            )}
-            <div className="ml-auto flex items-center gap-3">
-              {footerActions}
-              {hidePrimary ? null : (
-                <Button type="button" disabled={primaryDisabled} onClick={onPrimary}>
-                  {primaryLabel}
+          showFooter ? (
+            <div className="flex items-center justify-between gap-3">
+              {hideSecondary ? (
+                <div />
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={secondaryDisabled}
+                  onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
+                >
+                  {secondaryLabel ??
+                    (stepIndex === 0
+                      ? t("DashboardPayments.counterparty.cancel")
+                      : t("DashboardPayments.previous"))}
                 </Button>
               )}
+              <div className="ml-auto flex items-center gap-3">
+                {footerActions}
+                {hidePrimary ? null : (
+                  <Button type="button" disabled={primaryDisabled} onClick={onPrimary}>
+                    {primaryLabel}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          ) : undefined
         }
       >
         <div className="space-y-6">
@@ -122,11 +135,13 @@ export function RampWizardShell({
       />
 
       <CancelTransactionDialog
-        open={cancelConfirmOpen}
+        open={cancelConfirmOpen && cancelConfirmationAvailable}
         onKeepGoing={() => setCancelConfirmOpen(false)}
         onCancel={() => {
           setCancelConfirmOpen(false);
-          onSecondary();
+          if (cancelConfirmationAvailable) {
+            onSecondary();
+          }
         }}
       />
     </>

@@ -62,6 +62,47 @@ export async function resolveIdempotencyReplay<
   throw conflict("Idempotency key already used with different request payload");
 }
 
+/**
+ * A replayed row still `pending` this long after its last write was abandoned
+ * mid-flight: the process died between the reserving insert and the broadcast,
+ * and private channels have no reconciliation worker to recover it. Replaying
+ * such a row verbatim would pin the operation to `pending` forever, so callers
+ * fail it instead, freeing the client to retry under a new idempotency key. The
+ * window sits far above the broadcast + confirm budget (seconds) so a live
+ * request can never be failed out from under itself, and the callers' `pending`
+ * status CAS backstops that race regardless of the clock.
+ */
+const ABANDONED_RESERVATION_AFTER_MS = 10 * 60 * 1000;
+
+export function isAbandonedReservation(row: { status: string; updated_at: string }): boolean {
+  return (
+    row.status === "pending" &&
+    Date.now() - Date.parse(row.updated_at) >= ABANDONED_RESERVATION_AFTER_MS
+  );
+}
+
+export async function resolveIdentityBoundIdempotencyReplay<
+  Row extends { idempotency_fingerprint: string | null },
+>(
+  findExisting: () => Promise<Row | null>,
+  fingerprint: string,
+  legacyFingerprint: string,
+  identityMatches: (row: Row) => boolean
+): Promise<Row | null> {
+  const existing = await findExisting();
+  if (!existing || existing.idempotency_fingerprint === null) {
+    return null;
+  }
+  if (
+    identityMatches(existing) &&
+    (existing.idempotency_fingerprint === fingerprint ||
+      existing.idempotency_fingerprint === legacyFingerprint)
+  ) {
+    return existing;
+  }
+  throw conflict("Idempotency key already used with different request payload");
+}
+
 export const normalizeForFingerprint = (value: unknown): unknown => {
   if (value === null || value === undefined) {
     return value;
@@ -89,6 +130,7 @@ export const normalizeForFingerprint = (value: unknown): unknown => {
 };
 
 export interface PaymentTransferFingerprintInput {
+  custodyWalletId: string;
   sourceAddress: string | null;
   destinationAddress: string | null;
   token: string;
@@ -113,16 +155,21 @@ export interface TransferBatchFingerprintRecipientInput {
 }
 
 export interface TransferBatchFingerprintInput {
+  sourceCustodyWalletId: string;
   sourceAddress: string;
   token: string;
   recipients: TransferBatchFingerprintRecipientInput[];
   options: Record<string, unknown> | undefined;
 }
 
-export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
-  JSON.stringify(
+function paymentTransferFingerprint(
+  input: PaymentTransferFingerprintInput,
+  custodyWalletId?: string
+): string {
+  return JSON.stringify(
     normalizeForFingerprint({
       scope: "payment_transfer",
+      custodyWalletId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
@@ -132,17 +179,36 @@ export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprin
       privateTransfer: input.privateTransfer ?? null,
     })
   );
+}
 
-export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
-  JSON.stringify(
+export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
+  paymentTransferFingerprint(input, input.custodyWalletId);
+
+export const buildLegacyPaymentTransferFingerprint = (
+  input: PaymentTransferFingerprintInput
+): string => paymentTransferFingerprint(input);
+
+function transferBatchFingerprint(
+  input: TransferBatchFingerprintInput,
+  sourceCustodyWalletId?: string
+): string {
+  return JSON.stringify(
     normalizeForFingerprint({
       scope: "payment_transfer_batch",
+      sourceCustodyWalletId,
       sourceAddress: input.sourceAddress,
       token: input.token,
       recipients: input.recipients,
       options: input.options ?? null,
     })
   );
+}
+
+export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
+  transferBatchFingerprint(input, input.sourceCustodyWalletId);
+
+export const buildLegacyTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
+  transferBatchFingerprint(input);
 
 export interface EarnVaultDepositFingerprintInput {
   environment: string;
@@ -154,6 +220,15 @@ export interface EarnVaultDepositFingerprintInput {
   amount: string;
   /** The slippage floor, or null when none applies. */
   minSharesOut: string | null;
+  /**
+   * Swap-funded deposits only (both fields together, or neither): the funding
+   * mint changes WHAT MOVES out of the wallet, and the swap tolerance changes
+   * the deposit the transaction encodes. Deliberately optional rather than
+   * null-defaulted so every fingerprint recorded before swaps existed keeps
+   * matching byte-for-byte.
+   */
+  swapSourceTokenMint?: string;
+  swapSlippageBps?: number;
 }
 
 /** Canonicalize decimal spelling without rounding or passing through a float. */
@@ -192,6 +267,12 @@ export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerpr
       direction: "deposit",
       amount: normalizeDecimalString(input.amount),
       minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
+      ...(input.swapSourceTokenMint === undefined
+        ? {}
+        : {
+            swapSourceTokenMint: input.swapSourceTokenMint,
+            swapSlippageBps: input.swapSlippageBps ?? null,
+          }),
     })
   );
 
@@ -202,6 +283,8 @@ export interface EarnVaultWithdrawalFingerprintInput {
   positionId: string;
   /** Shares to redeem, decimal string in share units. */
   shares: string;
+  /** Exit slippage floor, or null when the provider takes none. */
+  minAmountOut: string | null;
 }
 
 /**
@@ -213,7 +296,10 @@ export interface EarnVaultWithdrawalFingerprintInput {
  * naming both; `environment` is included because the same key arriving in
  * sandbox and production is two requests against two chains. Decimal spelling
  * is normalized without rounding, exactly like the deposit — `1` and `1.000000`
- * are one intent to the share mint.
+ * are one intent to the share mint. `minAmountOut` earns its place the same way
+ * the deposit's `minSharesOut` does: the floor is baked into the built
+ * instruction, so omitting it would let a caller reuse a key with a weaker
+ * floor and get a silent `replayed: true` for the original, stricter exit.
  */
 export const buildEarnVaultWithdrawalFingerprint = (
   input: EarnVaultWithdrawalFingerprintInput
@@ -226,6 +312,7 @@ export const buildEarnVaultWithdrawalFingerprint = (
       positionId: input.positionId,
       direction: "withdrawal",
       shares: normalizeDecimalString(input.shares),
+      minAmountOut: input.minAmountOut === null ? null : normalizeDecimalString(input.minAmountOut),
     })
   );
 

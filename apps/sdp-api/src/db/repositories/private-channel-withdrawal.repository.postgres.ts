@@ -103,6 +103,7 @@ export function createPostgresPrivateChannelWithdrawalRepository(
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND (?::text IS NULL OR status = ?)
+              AND (?::boolean IS NOT TRUE OR signature IS NULL)
           RETURNING *`
         )
         .bind(
@@ -112,7 +113,8 @@ export function createPostgresPrivateChannelWithdrawalRepository(
           input.failureReason ?? null,
           input.id,
           input.expectedStatus ?? null,
-          input.expectedStatus ?? null
+          input.expectedStatus ?? null,
+          input.expectedSignatureAbsent ?? false
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

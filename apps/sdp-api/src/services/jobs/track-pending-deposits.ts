@@ -77,8 +77,27 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
 
   for (const deposit of pending) {
     try {
-      if (deposit.status === "pending") {
+      if (deposit.status === "pending" && !deposit.signature) {
         await failIfStale(env, repo, deposit, now, "Deposit was never broadcast.");
+      } else if (deposit.status === "pending") {
+        // The signature is persisted before the send, so a pending row that
+        // carries one belongs to a request that died mid-send: the transaction
+        // may be on chain. Promote it and let the submitted reconciliation ask
+        // the chain, instead of failing a deposit that may have executed.
+        if (now - Date.parse(deposit.updated_at) <= STUCK_AFTER_MS) {
+          continue;
+        }
+        const promoted = await repo.updateDeposit({
+          id: deposit.id,
+          status: "submitted",
+          expectedStatus: "pending",
+        });
+        if (promoted) {
+          const instance = await loadInstance(promoted.instance_id);
+          if (instance) {
+            await reconcileSubmitted(env, repo, promoted, await loadProjectRpc(instance), now);
+          }
+        }
       } else if (deposit.status === "submitted") {
         const instance = await loadInstance(deposit.instance_id);
         if (!instance) {
@@ -121,7 +140,7 @@ async function failIfStale(
   if (deposit.signature) {
     return;
   }
-  await failStale(env, repo, deposit, now, reason);
+  await failStale(env, repo, deposit, now, reason, { expectedSignatureAbsent: true });
 }
 
 /** Signature-agnostic stale fail. */
@@ -130,7 +149,8 @@ async function failStale(
   repo: PrivateChannelDepositRepository,
   deposit: PrivateChannelDepositRow,
   now: number,
-  reason: string
+  reason: string,
+  guard: { expectedSignatureAbsent?: boolean } = {}
 ): Promise<void> {
   if (now - Date.parse(deposit.updated_at) <= STUCK_AFTER_MS) {
     return;
@@ -138,6 +158,7 @@ async function failStale(
   const failed = await repo.updateDeposit({
     id: deposit.id,
     status: "failed",
+    expectedSignatureAbsent: guard.expectedSignatureAbsent ?? false,
     failureReason: reason,
     expectedStatus: deposit.status,
   });

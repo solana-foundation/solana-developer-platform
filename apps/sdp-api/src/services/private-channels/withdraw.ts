@@ -34,7 +34,9 @@ import {
   address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getSignatureFromTransaction,
   getTransactionEncoder,
+  signature as parseSignature,
   pipe,
   type Signature,
   setTransactionMessageFeePayerSigner,
@@ -51,6 +53,7 @@ import {
 import { AppError, badRequest } from "@/lib/errors";
 import {
   buildPrivateChannelWithdrawalFingerprint,
+  isAbandonedReservation,
   resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
@@ -60,7 +63,8 @@ import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
 import { resolveChannelToken } from "./mint";
-import { describeTxError } from "./tx-error";
+import type { PrivateChannelProjectRpcClient } from "./project-rpc";
+import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
 import { confirmAndPersistWithdrawal } from "./withdraw-confirm";
 import { emitWithdrawalEvent } from "./withdraw-events";
 
@@ -99,7 +103,7 @@ export interface CreateChannelWithdrawalInput {
    * refreshed.
    */
   gatewayAuth: SpcAuthContext;
-  cluster: import("@sdp/types").SolanaCluster;
+  projectRpc: PrivateChannelProjectRpcClient;
 }
 
 /**
@@ -119,6 +123,14 @@ async function broadcastWithdrawal(
     destination: Address;
     amountBaseUnits: bigint;
     gatewayAuth: SpcAuthContext;
+    /**
+     * Called with the burn's signature after signing and before the send, so
+     * the outcome of a request that dies mid-send stays resolvable: a persisted
+     * signature is what lets abandoned-reservation recovery ask the gateway
+     * what happened instead of guessing. A 401 retry re-signs and reports its
+     * new signature the same way before its own send.
+     */
+    onSigned: (signature: Signature) => Promise<void>;
   }
 ): Promise<Signature> {
   // Signer derivation + the (blockhash-independent) burn instruction are built ONCE,
@@ -160,6 +172,7 @@ async function broadcastWithdrawal(
     );
 
     const signed = await signTransactionMessageWithSigners(message);
+    await input.onSigned(getSignatureFromTransaction(signed));
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
     return solanaRpc.sendTransaction(gatewayRpc, signedBytes);
   });
@@ -213,6 +226,95 @@ async function reserveWithdrawal(
   }
 }
 
+/**
+ * Resolve a replayed reservation whose original request died mid-flight (see
+ * `isAbandonedReservation`), instead of returning `pending` forever.
+ *
+ * The burn's signature is persisted BEFORE the send, so it splits the crash
+ * window in two: a row without one provably never reached the gateway and is
+ * failed, freeing the client to retry under a new idempotency key; a row with
+ * one may have burned, so it is promoted to `submitted` and confirmed against
+ * the gateway — failing it would invite a second burn for balance the first one
+ * already destroyed. A signed burn that never actually went out cannot confirm
+ * (its blockhash expires), so that row stays `submitted` for the reconciler,
+ * the same verdictless outcome the live confirm path settles for.
+ *
+ * The `pending` CAS means a still-live original wins the race and these writes
+ * are no-ops.
+ */
+async function resolveAbandonedReservation(
+  env: Env,
+  repo: PrivateChannelWithdrawalRepository,
+  row: PrivateChannelWithdrawalRow,
+  input: { gatewayUrl: string; gatewayAuth: SpcAuthContext }
+) {
+  if (!row.signature) {
+    const failureReason =
+      "Withdrawal reservation was abandoned before broadcast; retry with a new idempotency key.";
+    const failed = await repo.updateWithdrawal({
+      id: row.id,
+      status: "failed",
+      failureReason,
+      expectedStatus: "pending",
+      expectedSignatureAbsent: true,
+    });
+    if (failed) {
+      await emitWithdrawalEvent(
+        env,
+        failed,
+        PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
+        "failed",
+        {
+          failureReason,
+        }
+      );
+    }
+    return mapPrivateChannelWithdrawalRow(failed ?? row);
+  }
+
+  const signature = parseSignature(row.signature);
+  const promoted = await repo.updateWithdrawal({
+    id: row.id,
+    status: "submitted",
+    signature,
+    expectedStatus: "pending",
+  });
+  if (!promoted) {
+    getLogger().error(
+      { withdrawalId: row.id },
+      "private-channel-withdrawal recovery found no pending row"
+    );
+  }
+  let latest = promoted ?? row;
+  const settled = await confirmAndPersistWithdrawal(env, repo, {
+    withdrawalId: row.id,
+    gatewayUrl: input.gatewayUrl,
+    signature,
+    gatewayAuth: input.gatewayAuth,
+  });
+  if (settled) {
+    latest = settled;
+    if (latest.status === "confirmed") {
+      await emitWithdrawalEvent(
+        env,
+        latest,
+        PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_CONFIRMED,
+        "confirmed",
+        { signature }
+      );
+    } else if (latest.status === "failed") {
+      await emitWithdrawalEvent(
+        env,
+        latest,
+        PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
+        "failed",
+        { failureReason: latest.failure_reason }
+      );
+    }
+  }
+  return mapPrivateChannelWithdrawalRow(latest);
+}
+
 /** Create a withdrawal intent: reserve, check the balance, burn, confirm. */
 export async function createChannelWithdrawal(
   env: Env,
@@ -220,7 +322,11 @@ export async function createChannelWithdrawal(
 ): Promise<PrivateChannelWithdrawal> {
   const { instance, organizationId, projectId, wallet } = input;
 
-  const { mint, decimals, tokenProgram } = resolveChannelToken(input.cluster, input.mint);
+  const { mint, decimals, tokenProgram } = await resolveChannelToken(
+    input.instance,
+    input.projectRpc,
+    input.mint
+  );
   const owner = wallet.publicKey;
   const destination = input.destination;
 
@@ -249,6 +355,12 @@ export async function createChannelWithdrawal(
   // spent is gone, so re-checking would reject the caller's own success.
   const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
   if (replay) {
+    if (isAbandonedReservation(replay)) {
+      return resolveAbandonedReservation(env, repo, replay, {
+        gatewayUrl: instance.gatewayUrl,
+        gatewayAuth: input.gatewayAuth,
+      });
+    }
     return mapPrivateChannelWithdrawalRow(replay);
   }
 
@@ -261,7 +373,7 @@ export async function createChannelWithdrawal(
     owner,
     mint,
     auth: input.gatewayAuth,
-    cluster: input.cluster,
+    cluster: input.projectRpc.cluster,
   });
   if (amountBaseUnits > BigInt(balance.amount)) {
     throw new AppError("INSUFFICIENT_TOKEN_BALANCE");
@@ -289,6 +401,12 @@ export async function createChannelWithdrawal(
     idempotencyKey: input.idempotencyKey,
   });
   if (replayed) {
+    if (isAbandonedReservation(created)) {
+      return resolveAbandonedReservation(env, repo, created, {
+        gatewayUrl: instance.gatewayUrl,
+        gatewayAuth: input.gatewayAuth,
+      });
+    }
     return mapPrivateChannelWithdrawalRow(created);
   }
 
@@ -300,6 +418,7 @@ export async function createChannelWithdrawal(
   // gone and the oracle escalates unobservable releases via the stuck-warning
   // event instead of auto-failing.
   let signature: Signature;
+  let recordedSignature: Signature | null = null;
   try {
     signature = await broadcastWithdrawal(env, {
       instance,
@@ -311,29 +430,52 @@ export async function createChannelWithdrawal(
       destination: address(destination),
       amountBaseUnits,
       gatewayAuth: input.gatewayAuth,
+      // The reservation is still exclusively this request's (the CAS holds it),
+      // so record the signature on it before the bytes go out. If the write
+      // fails the send is aborted: better an unbroadcast failed withdrawal than
+      // an executed burn whose signature exists nowhere.
+      onSigned: async (signedAs) => {
+        const recorded = await repo.updateWithdrawal({
+          id: created.id,
+          status: "pending",
+          signature: signedAs,
+          expectedStatus: "pending",
+        });
+        if (!recorded) {
+          throw new AppError("CONFLICT", "Withdrawal reservation is no longer pending.");
+        }
+        recordedSignature = signedAs;
+      },
     });
   } catch (error) {
-    const failureReason = describeTxError(error, "Withdrawal submission failed.");
-    getLogger().error(
-      { withdrawalId: created.id, error },
-      "createChannelWithdrawal: broadcast failed"
-    );
-    const failed = await repo.updateWithdrawal({
-      id: created.id,
-      status: "failed",
-      failureReason,
-      expectedStatus: "pending",
-    });
-    if (failed) {
-      await emitWithdrawalEvent(
-        env,
-        failed,
-        PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
-        "failed",
-        { failureReason }
+    if (recordedSignature !== null && isAmbiguousSubmissionOutcome(error)) {
+      // The connection died after the signed burn may have gone out, so the
+      // gateway may have executed it. Marking it failed would invite a second
+      // burn under a fresh key; fall through and ask the gateway instead.
+      signature = recordedSignature;
+    } else {
+      const failureReason = describeTxError(error, "Withdrawal submission failed.");
+      getLogger().error(
+        { withdrawalId: created.id, error },
+        "createChannelWithdrawal: broadcast failed"
       );
+      const failed = await repo.updateWithdrawal({
+        id: created.id,
+        status: "failed",
+        failureReason,
+        expectedStatus: "pending",
+      });
+      if (failed) {
+        await emitWithdrawalEvent(
+          env,
+          failed,
+          PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_WITHDRAWAL_FAILED,
+          "failed",
+          { failureReason }
+        );
+      }
+      return mapPrivateChannelWithdrawalRow(failed ?? created);
     }
-    return mapPrivateChannelWithdrawalRow(failed ?? created);
   }
 
   latest =

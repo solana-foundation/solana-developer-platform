@@ -192,6 +192,32 @@ describe("trackPendingDeposits", () => {
     );
   });
 
+  it("promotes a stale pending deposit that carries a signature and asks the chain", async () => {
+    depositRepo.listNonTerminal.mockResolvedValueOnce([
+      depositRow({ id: "d7", status: "pending", signature: "sig7", updated_at: STALE_ISO }),
+    ]);
+    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "finalized", err: null }]);
+
+    await trackPendingDeposits({} as Env);
+
+    expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "d7", status: "submitted", expectedStatus: "pending" })
+    );
+    expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "d7", status: "confirmed", expectedStatus: "submitted" })
+    );
+  });
+
+  it("keeps a fresh pending deposit with a signature untouched for its live request", async () => {
+    depositRepo.listNonTerminal.mockResolvedValueOnce([
+      depositRow({ id: "d8", status: "pending", signature: "sig8", updated_at: NOW_ISO }),
+    ]);
+
+    await trackPendingDeposits({} as Env);
+
+    expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
+  });
+
   it("leaves confirmed deposits alone — settled is unreachable under the chain oracle", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
       depositRow({ id: "d6", status: "confirmed", signature: "sig6" }),

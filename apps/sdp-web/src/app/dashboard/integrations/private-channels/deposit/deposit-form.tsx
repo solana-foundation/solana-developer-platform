@@ -1,9 +1,9 @@
 "use client";
 
-import {
-  type CustodyWalletSummary,
-  type PrivateChannelDeposit,
-  privateChannelTokens,
+import type {
+  CustodyWalletSummary,
+  PrivateChannelDeposit,
+  PrivateChannelTokenEligibility,
 } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
@@ -53,8 +52,13 @@ function depositFormReducer(state: DepositFormState, update: DepositFormUpdate):
   return { ...state, ...patch };
 }
 
-export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
-  const tokens = privateChannelTokens(useSolanaCluster());
+export function DepositForm({
+  wallets,
+  tokens,
+}: {
+  wallets: CustodyWalletSummary[];
+  tokens: PrivateChannelTokenEligibility[];
+}) {
   const [state, updateState] = useReducer(depositFormReducer, {
     walletId: wallets[0]?.walletId ?? "",
     mint: tokens[0]?.mint ?? "",
@@ -125,6 +129,14 @@ export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
           {t("DashboardPrivateChannels.deposit.noWalletsLink")}
         </Link>
         {t("DashboardPrivateChannels.deposit.noWalletsAfter")}
+      </p>
+    );
+  }
+
+  if (tokens.length === 0) {
+    return (
+      <p className="text-secondary text-sm">
+        {t("DashboardPrivateChannels.common.noEnabledTokens")}
       </p>
     );
   }

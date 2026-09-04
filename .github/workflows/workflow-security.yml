@@ -2,14 +2,8 @@ name: Workflow Security
 
 on:
   pull_request:
-    paths:
-      - ".github/**"
-      - "scripts/ci/**"
   push:
     branches: [main]
-    paths:
-      - ".github/**"
-      - "scripts/ci/**"
 
 permissions:
   contents: read

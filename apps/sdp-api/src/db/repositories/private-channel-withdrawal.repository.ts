@@ -72,6 +72,13 @@ export interface UpdateWithdrawalInput {
    * still in this status. Prevents concurrent pollers from regressing state.
    */
   expectedStatus?: PrivateChannelTransferStatus;
+  /**
+   * Additionally require that no signature has been persisted yet. Guards the
+   * fail path of abandoned-reservation recovery: a decision made from a
+   * signatureless snapshot must not land on a row a live request signed in the
+   * meantime.
+   */
+  expectedSignatureAbsent?: boolean;
 }
 
 export interface PrivateChannelWithdrawalRepositoryContext {

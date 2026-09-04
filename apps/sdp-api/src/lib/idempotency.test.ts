@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   buildEarnVaultDepositFingerprint,
+  buildLegacyPaymentTransferFingerprint,
+  buildLegacyTransferBatchFingerprint,
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
   normalizeForFingerprint,
   resolveIdempotencyReplay,
+  resolveIdentityBoundIdempotencyReplay,
 } from "./idempotency";
 
 describe("buildEarnVaultDepositFingerprint", () => {
@@ -58,6 +61,32 @@ describe("resolveIdempotencyReplay", () => {
   });
 });
 
+describe("resolveIdentityBoundIdempotencyReplay", () => {
+  const row = { id: "row_1", idempotency_fingerprint: "legacy", custody_wallet_id: "cwlt_1" };
+
+  it("accepts a complete legacy fingerprint only for the requested exact wallet", async () => {
+    expect(
+      await resolveIdentityBoundIdempotencyReplay(
+        async () => row,
+        "current",
+        "legacy",
+        (existing) => existing.custody_wallet_id === "cwlt_1"
+      )
+    ).toBe(row);
+  });
+
+  it("rejects a fingerprint match when the persisted exact wallet differs", async () => {
+    await expect(
+      resolveIdentityBoundIdempotencyReplay(
+        async () => row,
+        "current",
+        "legacy",
+        (existing) => existing.custody_wallet_id === "cwlt_2"
+      )
+    ).rejects.toSatisfy((error: unknown) => error instanceof AppError && error.code === "CONFLICT");
+  });
+});
+
 describe("normalizeForFingerprint", () => {
   it("orders object keys deterministically and drops undefined", () => {
     const a = normalizeForFingerprint({ b: 1, a: 2, c: undefined });
@@ -68,6 +97,7 @@ describe("normalizeForFingerprint", () => {
 
 describe("buildPaymentTransferFingerprint", () => {
   const base = {
+    custodyWalletId: "cwlt_source_1",
     sourceAddress: "Src",
     destinationAddress: "Dst",
     token: "SOL",
@@ -85,25 +115,26 @@ describe("buildPaymentTransferFingerprint", () => {
         token: "SOL",
         destinationAddress: "Dst",
         sourceAddress: "Src",
+        custodyWalletId: "cwlt_source_1",
       })
+    );
+  });
+
+  it("differs when the exact SDP Wallet ID changes", () => {
+    expect(buildPaymentTransferFingerprint(base)).not.toBe(
+      buildPaymentTransferFingerprint({ ...base, custodyWalletId: "cwlt_source_2" })
+    );
+  });
+
+  it("keeps the pre-K3 fingerprint available for compatible legacy replay", () => {
+    expect(buildLegacyPaymentTransferFingerprint(base)).toBe(
+      '{"amount":"1","destinationAddress":"Dst","memo":null,"privateTransfer":null,"scope":"payment_transfer","sourceAddress":"Src","token":"SOL","type":"transfer"}'
     );
   });
 
   it("differs when a money-relevant field changes", () => {
     expect(buildPaymentTransferFingerprint(base)).not.toBe(
       buildPaymentTransferFingerprint({ ...base, amount: "2" })
-    );
-  });
-
-  /**
-   * Pins the exact serialization, not just its stability. Removing the vestigial
-   * `privateTransfer` key would silently change every stored fingerprint, so an
-   * Idempotency-Key recorded before the deploy would stop matching its own row —
-   * and the retry it was meant to absorb would execute a second transfer.
-   */
-  it("keeps the byte-exact serialization recorded rows were fingerprinted with", () => {
-    expect(buildPaymentTransferFingerprint(base)).toBe(
-      '{"amount":"1","destinationAddress":"Dst","memo":null,"privateTransfer":null,"scope":"payment_transfer","sourceAddress":"Src","token":"SOL","type":"transfer"}'
     );
   });
 });
@@ -127,6 +158,7 @@ describe("buildTransferBatchFingerprint", () => {
   it("is stable regardless of input key order", () => {
     expect(
       buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
         sourceAddress: "Source111",
         token: "SOL",
         recipients: [firstRecipient, secondRecipient],
@@ -134,6 +166,7 @@ describe("buildTransferBatchFingerprint", () => {
       })
     ).toBe(
       buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
         options: { preflight: false },
         recipients: [firstRecipient, secondRecipient],
         token: "SOL",
@@ -142,9 +175,44 @@ describe("buildTransferBatchFingerprint", () => {
     );
   });
 
+  it("differs when the exact SDP Wallet ID changes", () => {
+    expect(
+      buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
+        sourceAddress: "Source111",
+        token: "SOL",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    ).not.toBe(
+      buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_2",
+        sourceAddress: "Source111",
+        token: "SOL",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    );
+  });
+
+  it("keeps the pre-K3 fingerprint available for compatible legacy replay", () => {
+    expect(
+      buildLegacyTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
+        sourceAddress: "Source111",
+        token: "SOL",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    ).toBe(
+      '{"options":null,"recipients":[{"amount":"1.5","counterpartyAccountId":"account-1","counterpartyId":"counterparty-1","destinationAddress":"Destination111","externalId":"recipient-1"}],"scope":"payment_transfer_batch","sourceAddress":"Source111","token":"SOL"}'
+    );
+  });
+
   it("preserves recipient order", () => {
     expect(
       buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
         sourceAddress: "Source111",
         token: "SOL",
         recipients: [firstRecipient, secondRecipient],
@@ -152,6 +220,7 @@ describe("buildTransferBatchFingerprint", () => {
       })
     ).not.toBe(
       buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
         sourceAddress: "Source111",
         token: "SOL",
         recipients: [secondRecipient, firstRecipient],
@@ -163,6 +232,7 @@ describe("buildTransferBatchFingerprint", () => {
   it("normalizes option keys", () => {
     expect(
       buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
         sourceAddress: "Source111",
         token: "SOL",
         recipients: [firstRecipient],
@@ -170,6 +240,7 @@ describe("buildTransferBatchFingerprint", () => {
       })
     ).toBe(
       buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
         sourceAddress: "Source111",
         token: "SOL",
         recipients: [firstRecipient],

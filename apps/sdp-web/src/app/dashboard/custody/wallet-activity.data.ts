@@ -29,6 +29,11 @@ export interface WalletActivityPayload {
   activityNotice: string | null;
 }
 
+export interface WalletActivityIdentity {
+  custodyWalletId: string;
+  providerWalletId: string;
+}
+
 interface DashboardWalletActivityEnvelope {
   data?: Partial<WalletActivityPayload>;
   error?: {
@@ -162,15 +167,18 @@ export async function fetchWalletIssuanceActivity(
 
 export async function loadWalletActivity(
   request: SdpApiClient["request"],
-  walletId: string,
+  wallet: WalletActivityIdentity,
   t: Translate,
   options: { pageSize?: number } = {}
 ): Promise<FetchResult<WalletActivityPayload>> {
   const pageSize = options.pageSize ?? WALLET_ACTIVITY_LIMIT;
 
   const [paymentsResult, issuanceResult] = await Promise.all([
-    fetchPaymentTransfers(request, pageSize, { walletId }),
-    fetchWalletIssuanceActivity(request, walletId, t, pageSize),
+    fetchPaymentTransfers(request, pageSize, {
+      custodyWalletId: wallet.custodyWalletId,
+      includeObserved: true,
+    }),
+    fetchWalletIssuanceActivity(request, wallet.providerWalletId, t, pageSize),
   ]);
 
   const activityRows = buildWalletActivityRows(

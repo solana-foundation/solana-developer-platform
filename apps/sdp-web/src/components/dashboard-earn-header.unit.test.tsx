@@ -16,31 +16,44 @@ describe("Markets dashboard headers", () => {
     expect(config.headerTabs).toBeUndefined();
   });
 
-  it("centers the Treasury Solutions title without header tabs", () => {
+  it("uses the shared Markets title and route tabs for Treasury", () => {
     const config = getDashboardPageConfig("/dashboard/markets/treasury-solutions", t, false, false);
 
     expect(config).toMatchObject({
-      title: "Shared.dashboardShell.treasurySolutions",
-      titlePosition: "center",
+      title: "Shared.dashboardShell.markets",
+      titlePosition: "left",
+      headerVariant: "markets",
       contentWidthClass: "max-w-none",
     });
     expect(config.headerTabs).toBeUndefined();
+    expect(config.routeTabs?.tabs).toEqual([
+      {
+        href: "/dashboard/markets/treasury-solutions",
+        label: "Shared.dashboardShell.treasurySolutions",
+      },
+      {
+        href: "/dashboard/markets/embedded-yield",
+        label: "Shared.dashboardShell.earnProgram",
+      },
+    ]);
   });
 
-  it("centers the Earn Program title without header tabs", () => {
-    const config = getDashboardPageConfig("/dashboard/markets/earn", t, false, false);
+  it("uses the shared Markets title and route tabs for Embedded Yield", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield", t, false, false);
 
     expect(config).toMatchObject({
-      title: "Shared.dashboardShell.earnProgram",
-      titlePosition: "center",
+      title: "Shared.dashboardShell.markets",
+      titlePosition: "left",
+      headerVariant: "markets",
       contentWidthClass: "max-w-none",
     });
     expect(config.headerTabs).toBeUndefined();
+    expect(config.routeTabs?.tabs).toHaveLength(2);
   });
 
-  it("centers the Earn button builder title without header tabs", () => {
+  it("centers the Embedded Yield integration title without header tabs", () => {
     const config = getDashboardPageConfig(
-      "/dashboard/markets/earn/button-builder",
+      "/dashboard/markets/embedded-yield/integrate",
       t,
       false,
       false
@@ -52,5 +65,20 @@ describe("Markets dashboard headers", () => {
       contentWidthClass: "max-w-none",
     });
     expect(config.headerTabs).toBeUndefined();
+  });
+
+  it("uses the integration title for Embedded Yield configuration", () => {
+    const config = getDashboardPageConfig(
+      "/dashboard/markets/embedded-yield/configure",
+      t,
+      false,
+      false
+    );
+
+    expect(config).toMatchObject({
+      title: "Shared.dashboardShell.configureEarnButton",
+      titlePosition: "center",
+      contentWidthClass: "max-w-none",
+    });
   });
 });

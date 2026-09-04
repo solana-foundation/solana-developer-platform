@@ -1,29 +1,13 @@
-import {
-  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
-  type EarnApyType,
-  type EarnButtonStyle,
-  type EarnLiquidityTerm,
-  type EarnStrategyRiskMetadata,
-  type EarnStrategySourceKind,
-  type EarnStrategyStatus,
-  type SdpEnvironment,
-  type SolanaCluster,
+import type {
+  EarnApyType,
+  EarnLiquidityTerm,
+  EarnStrategyRiskMetadata,
+  EarnStrategySourceKind,
+  EarnStrategyStatus,
+  SdpEnvironment,
+  SolanaCluster,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
-import { customAlphabet } from "nanoid";
-
-// URL-safe and deliberately longer than the existing payment-link token. This
-// is a public locator rather than an API credential, but guessing it must still
-// be impractical because possession is the only requirement to read the handoff.
-// Length and shape are pinned in @sdp/types (EARN_BUTTON_PUBLIC_TOKEN_*) so the
-// route, OpenAPI, and web validators cannot drift from this generator.
-const EARN_BUTTON_PUBLIC_TOKEN_ALPHABET =
-  // biome-ignore lint/security/noSecrets: token alphabet constant, not a secret.
-  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
-const generateEarnButtonPublicToken = customAlphabet(
-  EARN_BUTTON_PUBLIC_TOKEN_ALPHABET,
-  EARN_BUTTON_PUBLIC_TOKEN_LENGTH
-);
 
 export function generateEarnStrategyId(): string {
   return `earn_strategy_${crypto.randomUUID()}`;
@@ -31,14 +15,6 @@ export function generateEarnStrategyId(): string {
 
 export function generateEarnProviderWalletId(): string {
   return `earn_provider_wallet_${crypto.randomUUID()}`;
-}
-
-export function generateEarnButtonConfigurationId(): string {
-  return `earn_button_config_${crypto.randomUUID()}`;
-}
-
-export function generateEarnButtonConfigurationPublicToken(): string {
-  return generateEarnButtonPublicToken();
 }
 
 export interface EarnStrategyRow {
@@ -264,39 +240,7 @@ export interface ListEarnProviderWalletsResult {
   total: number;
 }
 
-export interface EarnButtonConfigurationRow {
-  id: string;
-  public_token: string;
-  organization_id: string;
-  project_id: string;
-  strategy_id: string;
-  style: EarnButtonStyle;
-  accent_color: string;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface UpsertEarnButtonConfigurationInput {
-  organizationId: string;
-  projectId: string;
-  strategyId: string;
-  style: EarnButtonStyle;
-  accentColor: string;
-  actorId: string;
-}
-
 export interface EarnRepository {
-  getButtonConfiguration(params: {
-    organizationId: string;
-    projectId: string;
-  }): Promise<EarnButtonConfigurationRow | null>;
-  getButtonConfigurationByPublicToken(
-    publicToken: string
-  ): Promise<EarnButtonConfigurationRow | null>;
-  upsertButtonConfiguration(
-    input: UpsertEarnButtonConfigurationInput
-  ): Promise<EarnButtonConfigurationRow>;
   upsertStrategy(input: UpsertEarnStrategyInput): Promise<EarnStrategyRow | null>;
   /**
    * Refresh the volatile figures on ONE already-catalogued strategy.

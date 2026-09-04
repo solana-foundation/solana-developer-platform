@@ -1,7 +1,10 @@
+import { SdpVedaError } from "@sdp/veda";
 import type { Blockhash } from "@solana/kit";
 import {
+  AccountRole,
   generateKeyPair,
   getAddressFromPublicKey,
+  getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
@@ -23,6 +26,14 @@ const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
 const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
+const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
+
+// `prependSwapLegToVaultPlan` stays REAL — instruction ordering is part of
+// what the swap-funded cases prove. Only the Jupiter HTTP boundary is stubbed.
+vi.mock("./jupiter-swap.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./jupiter-swap.service")>()),
+  fetchJupiterSwapLeg,
+}));
 
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
@@ -194,6 +205,17 @@ function withdrawalInput(
   };
 }
 
+/** Unwrap the atomic build answer; swap-split cases assert on the union directly. */
+async function buildDepositRow(
+  input: ExternalWalletDepositBuildInput
+): Promise<EarnExternalWalletTransactionRow> {
+  const result = await buildExternalWalletDepositTransaction(env, input);
+  if (result.kind !== "built") {
+    throw new Error(`expected a built transaction, got ${result.kind}`);
+  }
+  return result.built;
+}
+
 async function signBuiltTransaction(
   built: EarnExternalWalletTransactionRow,
   keyPair: CryptoKeyPair = ownerKeyPair
@@ -249,7 +271,7 @@ beforeEach(async () => {
 
 describe("buildExternalWalletDepositTransaction", () => {
   it("persists and returns a decodable unsigned transaction for the owner", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
 
     expect(built.direction).toBe("deposit");
     expect(built.owner_address).toBe(ownerAddress);
@@ -283,6 +305,17 @@ describe("buildExternalWalletDepositTransaction", () => {
     );
   });
 
+  it("maps shared provider refusals to a caller-facing bad request", async () => {
+    buildVaultDeposit.mockRejectedValue(
+      new SdpVedaError("INVALID_AMOUNT", "Veda deposits require minSharesOut")
+    );
+
+    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Veda deposits require minSharesOut",
+    });
+  });
+
   it("refuses a failed simulation before persisting anything", async () => {
     simulateVaultPlan.mockResolvedValue({ ok: false, error: "InstructionError", logs: [] });
     await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
@@ -295,9 +328,165 @@ describe("buildExternalWalletDepositTransaction", () => {
   });
 });
 
+describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
+  // Devnet USDG — any pinned mint works; the route validates membership, the
+  // service only carries it to the (stubbed) Jupiter boundary.
+  const SOURCE_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+
+  function swapLeg(overrides: Record<string, unknown> = {}) {
+    return {
+      instructions: [
+        {
+          programAddress: MEMO_PROGRAM_ADDRESS,
+          accounts: [],
+          data: Buffer.from("swap-leg", "utf8").toString("base64"),
+        },
+      ],
+      lookupTableAddresses: [],
+      sourceAmount: "25",
+      quotedAmount: "24.99",
+      minOutAmount: "24.8",
+      priceImpactPct: "0.0001",
+      routeLabels: ["Whirlpool"],
+      slippageBps: 50,
+      ...overrides,
+    };
+  }
+
+  function swapDepositInput() {
+    return depositInput({
+      amount: "25",
+      swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 50 },
+    });
+  }
+
+  it("prepends the swap, sizes the deposit to the floor, and pins a probed CU limit", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
+    simulateVaultPlan.mockImplementation(async (_env, input) => ({
+      ok: true,
+      prepared: {
+        plan: input.plan,
+        lookupTables: {},
+        blockhash: BLOCKHASH,
+        lastValidBlockHeight: 361n,
+      },
+      unitsConsumed: 400_000n,
+    }));
+
+    const result = await buildExternalWalletDepositTransaction(env, swapDepositInput());
+
+    // The provider built for the FLOOR, not the request's source amount.
+    expect(buildVaultDeposit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ amount: "24.8" })
+    );
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({
+        inputMint: SOURCE_MINT,
+        outputMint: TOKEN_MINT,
+        sourceAmount: "25",
+        owner: ownerAddress,
+        slippageBps: 50,
+      })
+    );
+
+    if (result.kind !== "built") throw new Error(`expected built, got ${result.kind}`);
+    // The persisted amount is the DEPOSIT amount in the deposit token, so the
+    // row's denomination stays truthful.
+    expect(result.built.amount_requested).toBe("24.8");
+    expect(result.built.denomination).toBe(TOKEN_MINT);
+    expect(result.swap?.minOutAmount).toBe("24.8");
+
+    // TWO simulations: a probe under the MAXIMUM compute-unit limit, then the
+    // final plan under the buffered consumption — Jupiter's /build carries no
+    // CU limit, so it is derived locally (see jupiter-swap.service.ts).
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
+    const probe = simulateVaultPlan.mock.calls[0]?.[1]?.plan;
+    const probeCu = Buffer.from(probe.instructions[0].data, "base64");
+    expect(probe.instructions[0].programAddress).toBe(
+      "ComputeBudget111111111111111111111111111111"
+    );
+    expect(probeCu.readUInt32LE(1)).toBe(1_400_000);
+
+    // Final (compiled) plan order: locally built CU limit — buffered 15% over
+    // the probe's consumption — then swap leg, provider deposit, memo last.
+    const simulated = simulateVaultPlan.mock.calls[1]?.[1]?.plan;
+    const finalCu = Buffer.from(simulated.instructions[0].data, "base64");
+    expect(finalCu.readUInt8(0)).toBe(2);
+    expect(finalCu.readUInt32LE(1)).toBe(460_001);
+    const datas = simulated.instructions
+      .slice(1)
+      .map((instruction: { data: string }) =>
+        Buffer.from(instruction.data, "base64").toString("utf8")
+      );
+    expect(datas[0]).toBe("swap-leg");
+    expect(datas[1]).toBe("provider-instruction");
+    expect(datas[2]).toMatch(/^sdp:earn:external-deposit:/);
+  });
+
+  it("splits into a standalone swap when the composed transaction cannot fit, persisting nothing", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    // A provider plan too bulky to share a packet with anything: the composed
+    // compile overflows on both route widths, the swap alone still fits.
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        accepted: { amount: "24.8" },
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [],
+            data: Buffer.alloc(1300).toString("base64"),
+          },
+        ],
+      })
+    );
+
+    const result = await buildExternalWalletDepositTransaction(env, swapDepositInput());
+
+    // One re-route for compactness before giving up on atomicity.
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
+    expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
+
+    if (result.kind !== "swap_required")
+      throw new Error(`expected swap_required, got ${result.kind}`);
+    expect(result.swap.minOutAmount).toBe("24.8");
+    // The standalone swap is genuinely compilable owner-signed bytes.
+    const decoded = getTransactionDecoder().decode(result.swapTransaction.bytes);
+    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+
+    // Nothing durable: the split answer hands out no consumable build.
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS builds FROM earn_external_wallet_transactions")
+      .first<{ builds: number }>();
+    expect(row?.builds).toBe(0);
+  });
+
+  it("keeps an unswapped oversized provider plan a loud failure, not a split", async () => {
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [],
+            data: Buffer.alloc(1300).toString("base64"),
+          },
+        ],
+      })
+    );
+
+    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toThrowError(
+      /Solana allows at most/
+    );
+    expect(fetchJupiterSwapLeg).not.toHaveBeenCalled();
+  });
+});
+
 describe("submitExternalWalletDeposit", () => {
   it("verifies the owner signature, records before broadcast, and claims the position", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
     const requestId = crypto.randomUUID();
 
@@ -337,7 +526,7 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("replays the original movement for the same key without re-broadcasting", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
     const requestId = crypto.randomUUID();
 
@@ -350,8 +539,8 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("rejects the same key used for a different build", async () => {
-    const first = await buildExternalWalletDepositTransaction(env, depositInput());
-    const second = await buildExternalWalletDepositTransaction(env, depositInput());
+    const first = await buildDepositRow(depositInput());
+    const second = await buildDepositRow(depositInput());
     const requestId = crypto.randomUUID();
 
     await submitDeposit(first, await signBuiltTransaction(first), requestId);
@@ -361,7 +550,7 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("rejects a second key against an already-submitted build", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
 
     await submitDeposit(built, signed, crypto.randomUUID());
@@ -376,8 +565,8 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("prevents one movement from consuming more than one built transaction", async () => {
-    const first = await buildExternalWalletDepositTransaction(env, depositInput());
-    const second = await buildExternalWalletDepositTransaction(env, depositInput());
+    const first = await buildDepositRow(depositInput());
+    const second = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       first,
       await signBuiltTransaction(first),
@@ -400,8 +589,8 @@ describe("submitExternalWalletDeposit", () => {
     // Two builds of the SAME intent still differ by message: each carries its
     // own transaction id in the memo. Signing build B and submitting it as
     // build A is exactly the substitution the message comparison exists for.
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
-    const other = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
+    const other = await buildDepositRow(depositInput());
 
     await expect(
       submitDeposit(built, await signBuiltTransaction(other), crypto.randomUUID())
@@ -410,14 +599,14 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("rejects a submit with no owner signature", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     await expect(
       submitDeposit(built, built.unsigned_transaction, crypto.randomUUID())
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("rejects a forged owner signature", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const transaction = getTransactionDecoder().decode(
       Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
     );
@@ -438,7 +627,7 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("scopes the build to its exact project", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
     await expect(
       submitDeposit(built, signed, crypto.randomUUID(), { projectId: SIBLING_PROJECT })
@@ -446,7 +635,7 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("enforces the external position's project claim in the database", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
       await signBuiltTransaction(built),
@@ -462,7 +651,7 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("preserves external position and movement history after project deletion", async () => {
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
       await signBuiltTransaction(built),
@@ -486,7 +675,7 @@ describe("submitExternalWalletDeposit", () => {
 
   it("leaves the movement requested and reconcilable when broadcast fails", async () => {
     broadcastVaultTransaction.mockRejectedValue(new Error("rpc unreachable"));
-    const built = await buildExternalWalletDepositTransaction(env, depositInput());
+    const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
       await signBuiltTransaction(built),
@@ -496,6 +685,182 @@ describe("submitExternalWalletDeposit", () => {
     expect(result.movement.status).toBe("requested");
     expect(result.movement.signature).not.toBeNull();
     expect(result.movement.signed_transaction).not.toBeNull();
+  });
+});
+
+describe("partner fee payer (caller-provided)", () => {
+  let partnerKeyPair: CryptoKeyPair;
+  let partnerAddress: string;
+
+  /**
+   * A provider instruction that names the OWNER as a signer, the way every
+   * real deposit/exit plan does (the owner's tokens move). This matters here
+   * more than anywhere: with the partner in the fee-payer seat, the owner's
+   * authorization comes ONLY from instruction-level signer roles.
+   */
+  function ownerSignerInstruction() {
+    return {
+      programAddress: MEMO_PROGRAM_ADDRESS,
+      accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+      data: Buffer.from("provider-instruction", "utf8").toString("base64"),
+    };
+  }
+
+  beforeEach(async () => {
+    partnerKeyPair = await generateKeyPair();
+    partnerAddress = await getAddressFromPublicKey(partnerKeyPair.publicKey);
+    buildVaultDeposit.mockResolvedValue(depositPlan({ instructions: [ownerSignerInstruction()] }));
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ instructions: [ownerSignerInstruction()] })
+    );
+  });
+
+  it("refuses a fee-payer build whose plan does not require the owner's signature", async () => {
+    // Without the owner in the fee-payer seat, a plan that never names the
+    // owner as a signer would move money on the partner's signature alone —
+    // the compile-time signer assertion is what makes that unrepresentable.
+    buildVaultDeposit.mockResolvedValue(depositPlan());
+    await expect(buildDepositRow(depositInput({ feePayer: partnerAddress }))).rejects.toThrow(
+      "must require exactly the fee-payer and owner signatures"
+    );
+  });
+
+  it("builds a two-signer transaction, funds rent from the partner, and records both facts", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+
+    expect(built.fee_payer).toBe(partnerAddress);
+    // The plan creates the share account and the partner was its rent payer,
+    // so the funder is recorded for the exit's refund.
+    expect(built.share_ata_rent_funder).toBe(partnerAddress);
+
+    // Slot order is the on-chain contract: fee payer at zero, owner beside it,
+    // both unsigned.
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
+    expect(Object.values(decoded.signatures)).toEqual([null, null]);
+
+    // The funds check ran against the partner wallet, and the provider was
+    // asked to charge account rent to the same identity.
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        fee: { kind: "caller-provided", feePayer: partnerAddress },
+      })
+    );
+    expect(buildVaultDeposit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rentPayer: partnerAddress })
+    );
+  });
+
+  it("records no rent funder when the plan creates no account", async () => {
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({ createsShareAccount: false, instructions: [ownerSignerInstruction()] })
+    );
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    expect(built.fee_payer).toBe(partnerAddress);
+    expect(built.share_ata_rent_funder).toBeNull();
+  });
+
+  it("treats a fee payer equal to the owner as the default", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: ownerAddress }));
+    expect(built.fee_payer).toBeNull();
+    expect(built.share_ata_rent_funder).toBeNull();
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ fee: { kind: "wallet-pays" } })
+    );
+  });
+
+  it("accepts a submit signed by both parties and records the fee payer's signature as the txid", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const signed = await partiallySignTransaction([ownerKeyPair, partnerKeyPair], transaction);
+    const signedBase64 = Buffer.from(getTransactionEncoder().encode(signed)).toString("base64");
+
+    const result = await submitDeposit(built, signedBase64, crypto.randomUUID());
+
+    expect(result.movement.status).toBe("submitted");
+    // Slot zero is the partner's signature — the on-chain txid the ledger and
+    // the reconciler poll by.
+    expect(result.movement.signature).toBe(getSignatureFromTransaction(signed));
+    expect(result.movement.creates_share_account).toBe(true);
+    expect(result.movement.share_ata_rent_funder).toBe(partnerAddress);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+
+    // The projection carries the funder onto the position, where the exit
+    // build reads it as `rentRefundTo`.
+    const position = await getDb(env)
+      .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+      .bind(result.position.id)
+      .first<{ share_ata_rent_funder: string | null }>();
+    expect(position?.share_ata_rent_funder).toBe(partnerAddress);
+  });
+
+  it("rejects a submit the fee payer has not co-signed", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    // Owner-only signature: the partner slot stays null.
+    const ownerOnly = await signBuiltTransaction(built);
+
+    await expect(submitDeposit(built, ownerOnly, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("fee-payer signature"),
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a forged fee-payer signature by name", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const ownerSigned = await partiallySignTransaction([ownerKeyPair], transaction);
+    const forged = {
+      ...ownerSigned,
+      signatures: {
+        ...ownerSigned.signatures,
+        [partnerAddress]: new Uint8Array(64).fill(9),
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately corrupting the branded signature map to prove verification rejects it.
+    } as any;
+    const bytes = Buffer.from(getTransactionEncoder().encode(forged)).toString("base64");
+
+    await expect(submitDeposit(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("invalid fee-payer signature"),
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("builds the exit with the partner paying and refunds the recorded funder", async () => {
+    const positionId = await seedExternalWalletPosition();
+    const built = await buildExternalWalletWithdrawalTransaction(
+      env,
+      withdrawalInput(positionId, {
+        feePayer: partnerAddress,
+        // The deposit recorded the partner as the funder; the exit must refund
+        // THAT address, independent of who pays this exit's fee.
+        shareAtaRentFunder: partnerAddress,
+      })
+    );
+
+    expect(built.fee_payer).toBe(partnerAddress);
+    expect(buildVaultWithdrawal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rentPayer: partnerAddress, rentRefundTo: partnerAddress })
+    );
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
   });
 });
 
@@ -530,12 +895,44 @@ describe("external-wallet withdrawals", () => {
     expect(result.movement.custody_wallet_id).toBeNull();
   });
 
+  it("carries the caller's withdrawal floor through the shared provider plan", async () => {
+    const positionId = await seedExternalWalletPosition();
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ accepted: { shares: "10", minAmountOut: "9.5" } })
+    );
+
+    const built = await buildExternalWalletWithdrawalTransaction(
+      env,
+      withdrawalInput(positionId, { minAmountOut: "9.5" })
+    );
+
+    expect(buildVaultWithdrawal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ shares: "10", minAmountOut: "9.5" })
+    );
+    expect(built.min_shares_out).toBe("9.5");
+  });
+
   it("answers 501 when the provider cannot build an exit", async () => {
     resolveVaultWithdrawClient.mockReturnValue(null);
     const positionId = await seedExternalWalletPosition();
     await expect(
       buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId))
     ).rejects.toThrowError(/vault withdrawals/);
+  });
+
+  it("maps shared withdrawal refusals to a caller-facing bad request", async () => {
+    buildVaultWithdrawal.mockRejectedValue(
+      new SdpVedaError("WITHDRAW_REFUSED", "The Veda vault is temporarily paused")
+    );
+    const positionId = await seedExternalWalletPosition();
+
+    await expect(
+      buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId))
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "The Veda vault is temporarily paused",
+    });
   });
 
   it("refuses a deposit submit against a withdrawal build", async () => {

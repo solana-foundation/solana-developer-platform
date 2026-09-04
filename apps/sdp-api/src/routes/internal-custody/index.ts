@@ -1,13 +1,16 @@
+import { CUSTODY_CONNECTION_FAILURE_CODES } from "@sdp/types";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestParams } from "@/lib/errors";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
+import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
 import { getProviderCredentialInstallation } from "@/services/provider-credential-installation.service";
 import { getProviderSetupDefinition } from "@/services/provider-setup-registry";
 import {
@@ -52,22 +55,24 @@ internalCustody.get("/connections", async (c) => {
     connections: connections.map((row) => ({
       id: row.id,
       provider: row.provider,
-      status: row.status,
+      label: row.credential_label,
+      status: row.connection_status,
+      isDefault: isCustodyConnectionRuntimeEnabled(c.env, row.provider) && row.is_selected,
+      isRuntimeExecutionAllowed: isCustodyConnectionRuntimeAvailable(c.env, row.provider, row),
+      defaultCustodyWalletId: row.default_custody_wallet_id,
       createdAt: row.created_at,
       activatedAt: row.activated_at,
       lastCheck: row.last_check_status
         ? {
             status: row.last_check_status,
             at: row.last_check_at,
-            failureCode: row.last_check_failure_code,
+            failureCode:
+              CUSTODY_CONNECTION_FAILURE_CODES.find(
+                (code) => code === row.last_check_failure_code
+              ) ?? null,
           }
         : null,
       pendingWalletLabel: getPendingWalletLabel(row.setup_metadata) ?? null,
-      providerCredential: {
-        id: row.credential_id,
-        label: row.credential_label,
-        status: row.credential_status,
-      },
     })),
     pagination: { limit, offset, total },
   });

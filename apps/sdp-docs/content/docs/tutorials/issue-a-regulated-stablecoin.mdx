@@ -574,7 +574,7 @@ Transfers run on the `/v1/payments/transfers` endpoint family, separate from the
 
 ```javascript title="transfer-tokens.js"
 const { data } = await sdp.get("/v1/wallets");
-const sourceWalletId = data.wallets[0].walletId;
+const sourceCustodyWalletId = data.wallets[0].id;
 
 const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
@@ -588,18 +588,22 @@ for (const provider of screening.data.screening.providers) {
   }
 }
 
-const transfer = await sdp.post("/v1/payments/transfers", {
-  source: sourceWalletId,
-  destination: destinationAddress,
-  token: mintAddress,
-  amount: "100",
-  memo: "Treasury Pilot internal transfer #042",
-});
+const transfer = await sdp.post(
+  "/v1/payments/transfers",
+  {
+    sourceCustodyWalletId,
+    destination: destinationAddress,
+    token: mintAddress,
+    amount: "100",
+    memo: "Treasury Pilot internal transfer #042",
+  },
+  { idempotencyKey: idempotencyKey("transfer") }
+);
 ```
 
 Three field rules to keep clear:
 
-- **`source`** is the wallet's provider-specific `walletId` (for example `privy_jfxdbsq4bg6dxzsd7imgon3j`). It is not the wallet's public key, and not the SDP custody-wallet identifier (`cwlt_*`). The handler does exact-match on `walletId`; passing the public key returns `404 NOT_FOUND`.
+- **`sourceCustodyWalletId`** is the exact SDP Wallet `id` (`cwlt_*`) returned by `GET /v1/wallets`. It is not the wallet's public key or provider-specific `walletId`.
 - **`token`** is the on-chain mint address you got from Section 4's deploy response. It is not the SDP token ID (`tok_*`).
 - **`destination`** is any valid Solana base58 address. It does not have to be a wallet SDP knows about.
 
@@ -613,6 +617,8 @@ A successful response includes the on-chain signature once the transaction confi
       "type": "transfer",
       "direction": "outbound",
       "status": "confirmed",
+      "custodyWalletId": "cwlt_123",
+      "providerWalletId": "privy_jfxdbsq4bg6dxzsd7imgon3j",
       "signature": "ekNe4HK67AXptsx6krYATZd5xYeq8wYQShmN9oHUdAipVJVFELGwiLhdJNCAbyN2TPv9SwzBTNz6igoAfWTdCYP",
       "source": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "destination": "2H2w3hSxAPTybuTL7LkhPbyk6bWYi94x2J4aqBhhyJL2",
@@ -650,13 +656,17 @@ Run the same transfer call. This time it fails:
 
 ```javascript title="transfer-blocked.js"
 try {
-  await sdp.post("/v1/payments/transfers", {
-    source: sourceWalletId,
-    destination: destinationAddress,
-    token: mintAddress,
-    amount: "100",
-    memo: "Compliance test, expecting block",
-  });
+  await sdp.post(
+    "/v1/payments/transfers",
+    {
+      sourceCustodyWalletId,
+      destination: destinationAddress,
+      token: mintAddress,
+      amount: "100",
+      memo: "Compliance test, expecting block",
+    },
+    { idempotencyKey: idempotencyKey("blocked-transfer") }
+  );
 } catch (error) {
   // handle the on-chain block (see step 4)
 }
