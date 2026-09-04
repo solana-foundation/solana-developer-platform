@@ -272,13 +272,19 @@ async function resolveAbandonedReservation(
   }
 
   const signature = parseSignature(row.signature);
-  let latest =
-    (await repo.updateWithdrawal({
-      id: row.id,
-      status: "submitted",
-      signature,
-      expectedStatus: "pending",
-    })) ?? row;
+  const promoted = await repo.updateWithdrawal({
+    id: row.id,
+    status: "submitted",
+    signature,
+    expectedStatus: "pending",
+  });
+  if (!promoted) {
+    getLogger().error(
+      { withdrawalId: row.id },
+      "private-channel-withdrawal recovery found no pending row"
+    );
+  }
+  let latest = promoted ?? row;
   const settled = await confirmAndPersistWithdrawal(env, repo, {
     withdrawalId: row.id,
     gatewayUrl: input.gatewayUrl,
