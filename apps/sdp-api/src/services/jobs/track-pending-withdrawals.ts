@@ -99,8 +99,27 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   // Phase 1 — pending/submitted per withdrawal.
   for (const withdrawal of pending) {
     try {
-      if (withdrawal.status === "pending") {
+      if (withdrawal.status === "pending" && !withdrawal.signature) {
         await failIfStale(env, repo, withdrawal, now, "Withdrawal burn was never broadcast.");
+      } else if (withdrawal.status === "pending") {
+        // The burn signature is persisted before the send, so a pending row
+        // carrying one belongs to a request that died mid-send: the burn may
+        // have reached the gateway. Promote it and let the submitted
+        // reconciliation ask, instead of failing a burn that may have executed.
+        if (now - Date.parse(withdrawal.updated_at) <= STUCK_AFTER_MS) {
+          continue;
+        }
+        const promoted = await repo.updateWithdrawal({
+          id: withdrawal.id,
+          status: "submitted",
+          expectedStatus: "pending",
+        });
+        if (promoted) {
+          const instance = await loadInstance(promoted.instance_id);
+          if (instance) {
+            await reconcileSubmitted(env, repo, promoted, instance, now);
+          }
+        }
       } else if (withdrawal.status === "submitted") {
         const instance = await loadInstance(withdrawal.instance_id);
         if (!instance) {
@@ -199,7 +218,7 @@ async function failIfStale(
   if (withdrawal.signature) {
     return;
   }
-  await failStale(env, repo, withdrawal, now, reason);
+  await failStale(env, repo, withdrawal, now, reason, { expectedSignatureAbsent: true });
 }
 
 /** Signature-agnostic stale fail. Only legitimate pre-burn-confirmation. */
@@ -208,7 +227,8 @@ async function failStale(
   repo: PrivateChannelWithdrawalRepository,
   withdrawal: PrivateChannelWithdrawalRow,
   now: number,
-  reason: string
+  reason: string,
+  guard: { expectedSignatureAbsent?: boolean } = {}
 ): Promise<void> {
   if (now - Date.parse(withdrawal.updated_at) <= STUCK_AFTER_MS) {
     return;
@@ -218,6 +238,7 @@ async function failStale(
     status: "failed",
     failureReason: reason,
     expectedStatus: withdrawal.status,
+    expectedSignatureAbsent: guard.expectedSignatureAbsent ?? false,
   });
   if (failed) {
     await emitWithdrawalEvent(
