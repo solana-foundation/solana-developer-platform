@@ -69,6 +69,20 @@ ON counterparties ((provider_data->'mural'->'organization'->>'id'))
 WHERE status = 'active'
   AND provider_data->'mural'->'organization'->>'id' IS NOT NULL;
 
+-- Links whose parent counterparty is no longer active are not lookup
+-- candidates (the runtime join requires the parent to be active), but the
+-- historical archive flow left them 'active'. Align them first so neither the
+-- pre-flight below nor the unique index can be blocked or occupied by a
+-- reference the runtime would never resolve; archiveCounterparty now keeps
+-- this invariant going forward.
+UPDATE counterparty_provider_accounts cpa
+   SET status = 'archived',
+       updated_at = sdp_iso_now()
+  FROM counterparties c
+ WHERE c.id = cpa.counterparty_id
+   AND c.status <> 'active'
+   AND cpa.status = 'active';
+
 -- BVNK (and any provider using the linked-account model) resolves a webhook's
 -- tenant through counterparty_provider_accounts.provider_customer_reference.
 -- The same dual-claim ambiguity applies: two active customer links claiming one

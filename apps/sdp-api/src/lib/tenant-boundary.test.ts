@@ -75,6 +75,9 @@ describe("tenant data-access boundary", () => {
       "middleware/clerk-auth.ts",
       "middleware/session-auth.ts",
       "middleware/database-identity.ts",
+      // The audit ledger's hash chain spans every organization by design; its
+      // head/anchor reads run privileged while rows keep tenant attribution.
+      "services/audit.service.ts",
       "routes/issuance/index.ts",
       "routes/members/index.ts",
       // BOLA guard: must see every organization's ledger rows to 404 a

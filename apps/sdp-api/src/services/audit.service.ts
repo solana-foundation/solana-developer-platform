@@ -6,6 +6,7 @@
 
 import { redactCredentialSecrets } from "@sdp/custody";
 import type { Context } from "hono";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
 import type { KVStore } from "@/runtime/kv";
@@ -591,6 +592,29 @@ export class AuditService {
     const id = `aud_${crypto.randomUUID()}`;
     const metadata = entry.metadata ? redactCredentialSecrets(entry.metadata) : null;
 
+    // The ledger is platform infrastructure: the hash chain's head and anchor
+    // reads span every organization, so they run under the system identity
+    // regardless of which tenant's request is being audited. The row itself
+    // still records the tenant attribution in its columns.
+    return runWithSystemDatabaseIdentity("audit-ledger", () =>
+      this.persistAsLedger(entry, actor, checkpointStore, id, metadata)
+    );
+  }
+
+  private async persistAsLedger(
+    entry: AuditLogEntry,
+    actor: {
+      organizationId: string | null;
+      userId: string | null;
+      apiKeyId: string | null;
+      ipAddress: string | null;
+      userAgent: string | null;
+      requestId: string | null;
+    },
+    checkpointStore: KVStore,
+    id: string,
+    metadata: Record<string, unknown> | null
+  ): Promise<void> {
     try {
       const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(
         this.db
