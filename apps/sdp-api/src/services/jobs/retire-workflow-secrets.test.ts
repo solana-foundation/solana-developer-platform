@@ -304,10 +304,10 @@ describe("orphaned workflow secret retirement", () => {
         projectId: "prj-wfr",
         tokenId: "tok-wfr",
         triggerType: "kyc_approved",
-        actionType: "webhook",
+        actionType: "send_webhook",
         definition: {
           condition: null,
-          action: { type: "webhook", params: { url: "https://example.test" } },
+          action: { type: "send_webhook", params: { url: "https://example.test" } },
           retryPolicy: { maxAttempts: 5, retryAfterMinutes: 5 },
           actionSecret: storedSecret(),
         },
