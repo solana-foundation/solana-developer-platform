@@ -314,12 +314,31 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- audit_logs already has forced RLS from 0047 as an append-only ledger.
--- SELECT stays USING (true): the hash-chain trigger must read the previous
--- ledger row regardless of which identity performs the insert, and tightening
--- it would fork the chain. Tighten INSERT so a tenant identity can only
--- append rows attributed to its own organization.
+-- audit_logs already has forced RLS from 0047 as an append-only ledger. The
+-- hash-chain trigger must read the previous ledger row regardless of which
+-- identity performs the insert, or every append would fork the chain — but
+-- that read happens INSIDE the trigger, where pg_trigger_depth() is non-zero.
+-- Gating on the depth lets the chain read through while ordinary SELECTs are
+-- scoped like every other tenant table: privileged identities see everything,
+-- a tenant sees its own organization's rows, and rows with no organization
+-- (system audit) stay privileged-only. Tighten INSERT the same way so a
+-- tenant identity can only append rows attributed to its own organization.
 -- ---------------------------------------------------------------------------
+DROP POLICY IF EXISTS audit_logs_select ON audit_logs;
+CREATE POLICY audit_logs_select ON audit_logs FOR SELECT USING (
+  pg_trigger_depth() > 0
+  OR sdp_tenant_isolation_allows(organization_id)
+);
+
+-- Anchors carry no organization: they are the chain's independent head. The
+-- trigger reads them on every append; outside a trigger only privileged
+-- identities have any business reading the ledger head.
+DROP POLICY IF EXISTS audit_ledger_anchors_select ON audit_ledger_anchors;
+CREATE POLICY audit_ledger_anchors_select ON audit_ledger_anchors FOR SELECT USING (
+  pg_trigger_depth() > 0
+  OR sdp_tenant_isolation_is_privileged()
+);
+
 DROP POLICY IF EXISTS audit_logs_insert ON audit_logs;
 CREATE POLICY audit_logs_insert ON audit_logs FOR INSERT WITH CHECK (
   sdp_tenant_isolation_is_privileged()

@@ -46,6 +46,20 @@ describe("tenant data-access boundary", () => {
     expect(violations).toEqual([]);
   });
 
+  it("keeps the raw identity runner private to its approved entry points", () => {
+    // runWithDatabaseIdentity accepts any identity kind, including operator —
+    // which must only ever be reachable through the audited break-glass path.
+    // The kind-specific wrappers and runWithOperatorDatabaseAccess are the
+    // public surface; everything else imports those.
+    const allowed = ["db/identity.ts", "db/operator-access.ts", "db/client.ts", "db/index.ts"];
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("runWithDatabaseIdentity"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => !allowed.includes(path));
+
+    expect(violations).toEqual([]);
+  });
+
   it("keeps system database-identity grants in registered entry points", () => {
     // Each of these files is an explicit cross-tenant surface: HTTP auth
     // resolution, public endpoints, webhook/cron/job entry points, and ops

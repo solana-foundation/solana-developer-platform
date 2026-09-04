@@ -189,16 +189,11 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // revoked. Feature-gating this would leave deployments without the only
   // recovery path for a revocation whose cache write failed post-commit.
   tasks.push(
-    schedule(REVOKED_API_KEY_CACHE_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runRevokedApiKeyCacheReconciliation({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      REVOKED_API_KEY_CACHE_CRON,
+      "cron:revoked-api-key-cache",
+      runRevokedApiKeyCacheReconciliation
+    )
   );
 
   tasks.push(

@@ -68,3 +68,40 @@ CREATE INDEX IF NOT EXISTS idx_counterparties_mural_organization_id_json_active
 ON counterparties ((provider_data->'mural'->'organization'->>'id'))
 WHERE status = 'active'
   AND provider_data->'mural'->'organization'->>'id' IS NOT NULL;
+
+-- BVNK (and any provider using the linked-account model) resolves a webhook's
+-- tenant through counterparty_provider_accounts.provider_customer_reference.
+-- The same dual-claim ambiguity applies: two active customer links claiming one
+-- provider reference would make the system-scoped webhook lookup match rows in
+-- two organizations. Same contract as the mural index above: stop with the
+-- conflicting ids rather than silently reassigning a provider relationship.
+DO $$
+DECLARE
+  reference_conflicts TEXT;
+BEGIN
+  SELECT string_agg(format('%s/%s -> [%s]', provider, provider_customer_reference, ids), '; ')
+  INTO reference_conflicts
+  FROM (
+    SELECT provider, provider_customer_reference, string_agg(id, ', ' ORDER BY id) AS ids
+    FROM counterparty_provider_accounts
+    WHERE status = 'active'
+      AND kind = 'customer_link'
+      AND provider_customer_reference IS NOT NULL
+    GROUP BY provider, provider_customer_reference
+    HAVING count(*) > 1
+  ) duplicates;
+
+  IF reference_conflicts IS NOT NULL THEN
+    RAISE EXCEPTION USING
+      MESSAGE = format(
+        'Duplicate active provider customer links must be resolved before this migration can enforce uniqueness: %s. See docs/ops/tenant-isolation.md.',
+        reference_conflicts
+      );
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_counterparty_provider_accounts_customer_link_reference
+ON counterparty_provider_accounts(provider, provider_customer_reference)
+WHERE status = 'active'
+  AND kind = 'customer_link'
+  AND provider_customer_reference IS NOT NULL;

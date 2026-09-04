@@ -1,6 +1,6 @@
 # Database-enforced tenant isolation
 
-Migration `0079_tenant_isolation_rls.sql` puts forced row-level security on
+Migration `0081_tenant_isolation_rls.sql` puts forced row-level security on
 every tenant-owned table in the SDP API database, so an application query or
 scoping mistake cannot cross an organization boundary. This is
 defense-in-depth beneath the application layer's `TenantScope` repository
@@ -36,9 +36,9 @@ The policies (`sdp_tenant_isolation` on each table) admit:
 - **no identity** — nothing. Reads return zero rows and writes are rejected,
   so a code path that never declared an identity fails closed.
 
-Because the GUCs are set with `set_config(..., is_local = true)` inside the
-transaction that carries each statement, pooled connection reuse can never
-leak one request's identity into another's.
+Because the GUCs are stamped with `SET LOCAL` inside the transaction that
+carries each statement, pooled connection reuse can never leak one request's
+identity into another's.
 
 Shared tables (global identity, operator allowlist, the shared earn strategy
 catalog, singleton state rows) deliberately carry no tenant policy; the
@@ -49,18 +49,20 @@ or an explicit entry there.
 
 ## Counterparty provider lookups
 
-Provider webhooks resolve tenants from provider references
-(`bvnk_customer_reference`, `mural_organization_id`). Migration
-`0078_counterparty_provider_lookup_integrity.sql` makes the *effective*
-lookup key — `COALESCE(denormalized column, provider_data JSON path)` —
-unique among active counterparties, so a reference resolves to at most one
-tenant in every PII-migration phase (dual-write included). Tenant-scoped
-repository paths keep writing provider data through
-`mutateProviderData`/`upsertBvnkCustomerProviderData`; two tenants racing to
-claim the same reference get a unique-violation failure instead of a silent
-cross-tenant resolution.
+Provider webhooks resolve tenants from provider references. Mural still
+lives on the counterparty row (`mural_organization_id`, with a
+`provider_data` JSON fallback); BVNK moved to
+`counterparty_provider_accounts` rows of kind `customer_link`
+(`provider_customer_reference`). Migration
+`0080_counterparty_provider_lookup_integrity.sql` makes both lookup keys
+unique among active rows: the *effective* mural key —
+`COALESCE(mural_organization_id, provider_data JSON path)` — and the
+`(provider, provider_customer_reference)` pair for active customer links.
+A reference therefore resolves to at most one tenant in every migration
+phase; two tenants racing to claim the same reference get a
+unique-violation failure instead of a silent cross-tenant resolution.
 
-### If migration 0078 refuses to apply
+### If migration 0080 refuses to apply
 
 The migration pre-checks for active counterparties that already share an
 effective reference (one row claiming it in the denormalized column, another

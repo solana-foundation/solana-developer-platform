@@ -14,7 +14,6 @@ export {
 export {
   type DatabaseIdentity,
   DatabaseIdentityError,
-  runWithDatabaseIdentity,
   runWithoutDatabaseIdentity,
   runWithSystemDatabaseIdentity,
   runWithTenantDatabaseIdentity,
