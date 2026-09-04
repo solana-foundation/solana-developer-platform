@@ -16,6 +16,7 @@ let client: Client;
 beforeAll(async () => {
   client = new Client({ connectionString: env.DATABASE_URL });
   await client.connect();
+  await client.query("SET app.tenant_isolation_identity = 'system'");
 });
 
 afterAll(async () => {

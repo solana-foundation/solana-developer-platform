@@ -38,6 +38,10 @@ export async function seedOrgProject(
   const projectId = `proj_${tag}`;
   const userId = `user_${tag}`;
 
+  // Session-level, so a per-test ROLLBACK keeps it. Migration tests probe
+  // constraints as the platform, and 0081's forced row-level security would
+  // otherwise reject every seed insert.
+  await client.query("SET app.tenant_isolation_identity = 'system'");
   await client.query("INSERT INTO organizations (id, name, slug) VALUES ($1, $1, $1)", [
     organizationId,
   ]);

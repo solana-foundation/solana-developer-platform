@@ -6,7 +6,7 @@
 
 import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
-import { getDb } from "@/db";
+import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import { AppError } from "@/lib/errors";
 import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import { getLogger } from "@/runtime/logger";
@@ -22,37 +22,43 @@ const SESSION_COOKIE_NAME = "sdp_session";
  */
 export function sessionAuthMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+    // Session resolution reads sessions/organizations before any tenant is
+    // known, so it runs under the system database identity; the rest of the
+    // request narrows to the session's organization.
+    const cachedSession = await runWithSystemDatabaseIdentity("http:auth", async () => {
+      const sessionId = getCookie(c, SESSION_COOKIE_NAME);
 
-    if (!sessionId) {
-      throw new AppError("UNAUTHORIZED", "Session required");
-    }
+      if (!sessionId) {
+        throw new AppError("UNAUTHORIZED", "Session required");
+      }
 
-    const sessionService = new SessionService(getDb(c.env));
-    const cachedSession = await sessionService.getSession(sessionId);
+      const sessionService = new SessionService(getDb(c.env));
+      const session = await sessionService.getSession(sessionId);
 
-    if (!cachedSession) {
-      throw new AppError("UNAUTHORIZED", "Invalid or expired session");
-    }
+      if (!session) {
+        throw new AppError("UNAUTHORIZED", "Invalid or expired session");
+      }
 
-    // Cookie sessions are the other dashboard auth mode with no per-key
-    // limit; meter them per user per org like Clerk traffic.
-    await enforceRateLimit(
-      c,
-      `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
-      DASHBOARD_ACTOR_MAX_REQUESTS
-    );
+      // Cookie sessions are the other dashboard auth mode with no per-key
+      // limit; meter them per user per org like Clerk traffic.
+      await enforceRateLimit(
+        c,
+        `user:${session.userId}:org:${session.organizationId}`,
+        DASHBOARD_ACTOR_MAX_REQUESTS
+      );
 
-    // Behind the limiter: an uncached Postgres read per request.
-    await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
+      // Behind the limiter: an uncached Postgres read per request.
+      await enforceOrganizationIpAllowlist(c, session.organizationId);
 
-    // Set session context
-    c.set("session", cachedSession);
+      // Set session context
+      c.set("session", session);
 
-    // Update last activity (fire and forget)
-    updateLastActivity(getDb(c.env), sessionId);
+      // Update last activity (fire and forget)
+      updateLastActivity(getDb(c.env), sessionId);
+      return session;
+    });
 
-    await next();
+    await runWithTenantDatabaseIdentity({ organizationId: cachedSession.organizationId }, next);
   };
 }
 
@@ -65,20 +71,22 @@ export function optionalSessionAuth() {
 
     if (sessionId) {
       try {
-        const sessionService = new SessionService(getDb(c.env));
-        const cachedSession = await sessionService.getSession(sessionId);
+        await runWithSystemDatabaseIdentity("http:auth", async () => {
+          const sessionService = new SessionService(getDb(c.env));
+          const cachedSession = await sessionService.getSession(sessionId);
 
-        if (cachedSession) {
-          await enforceRateLimit(
-            c,
-            `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
-            DASHBOARD_ACTOR_MAX_REQUESTS
-          );
-          // Before the context is set: a disallowed origin continues as anonymous.
-          await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
-          c.set("session", cachedSession);
-          updateLastActivity(getDb(c.env), sessionId);
-        }
+          if (cachedSession) {
+            await enforceRateLimit(
+              c,
+              `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
+              DASHBOARD_ACTOR_MAX_REQUESTS
+            );
+            // Before the context is set: a disallowed origin continues as anonymous.
+            await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
+            c.set("session", cachedSession);
+            updateLastActivity(getDb(c.env), sessionId);
+          }
+        });
       } catch (error) {
         // Ignore errors for optional auth, but never rate limiting — a
         // limited user must not proceed as anonymous.
@@ -88,6 +96,11 @@ export function optionalSessionAuth() {
       }
     }
 
+    const session = c.get("session");
+    if (session) {
+      await runWithTenantDatabaseIdentity({ organizationId: session.organizationId }, next);
+      return;
+    }
     await next();
   };
 }
