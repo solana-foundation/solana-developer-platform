@@ -381,6 +381,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     // message instead of being reported as a malformed response from GCP.
     const refOptions = await this.managedRefOptions(true);
 
+    let version: string | undefined;
     try {
       // Secret Manager answers with the canonical resource name, which spells
       // the project as its number, so the reply never matches the ref we asked
@@ -392,6 +393,10 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       if (!requestedSecretId || parsed.secretId !== requestedSecretId) {
         throw new Error("Version name does not belong to the requested secret");
       }
+      version = parsed.version;
+      if (!version) {
+        throw new Error("Version name is missing its version number");
+      }
     } catch {
       throw new CredentialSecretStoreError(
         "GCP Secret Manager addVersion response included an invalid version name",
@@ -399,7 +404,12 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       );
     }
 
-    return name;
+    // Returned in the project-ID spelling the write was addressed with, not the
+    // canonical project-number name GCP answered — every ref this deployment
+    // records (retirement obligations, credential rows, the pre-write
+    // reservation) must live in ONE spelling, or the same version becomes two
+    // different bookkeeping keys.
+    return `${secretRef}/versions/${version}`;
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {

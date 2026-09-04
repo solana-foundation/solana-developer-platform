@@ -424,9 +424,15 @@ async function persistPreparedSubmission(
       );
       // The reservation covers the predicted ref; only a write that landed on
       // a different version (a pre-existing secret, which a freshly minted
-      // credential id should never have) still needs its own record.
-      if (stored.secretVersionRef !== predictedVersionRef) {
+      // credential id should never have) still needs its own record. The
+      // now-pointless reservation is released best-effort: left standing it
+      // only costs the sweeper one NOT_FOUND destroy of a version that was
+      // never written.
+      if (predictedVersionRef && stored.secretVersionRef !== predictedVersionRef) {
         await queuePendingSecretVersion(prepared.c.env, stored, retirementContext);
+        await createWorkflowSecretRetirementsRepository(prepared.c.env)
+          .deleteRetirementByVersionRef(predictedVersionRef)
+          .catch(() => undefined);
       }
     } else {
       stored = { storageBackend: "runtime_env" };

@@ -33,7 +33,17 @@ async function clearQueuedSecret(
     return;
   }
   const cleared = await cancelUnclaimedWorkflowSecretRetirement(exec, stored.secretVersionRef);
-  if (!cleared) {
+  if (cleared) {
+    return;
+  }
+  // Distinguish "claimed by the sweeper" (must abort: the version is being
+  // destroyed) from "never recorded" (the best-effort provisional insert
+  // failed; committing is no worse than before the obligation existed).
+  const standing = await exec
+    .prepare("SELECT 1 FROM workflow_action_secret_retirements WHERE secret_version_ref = ?")
+    .bind(stored.secretVersionRef)
+    .first<Record<string, unknown>>();
+  if (standing) {
     throw serviceUnavailable(
       "The action credential was retired while this request was still running; nothing was saved — retry the request"
     );
