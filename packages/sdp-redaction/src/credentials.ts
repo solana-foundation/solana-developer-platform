@@ -1,7 +1,26 @@
-const REDACTED = "[REDACTED]";
+/**
+ * Credential-only redaction.
+ *
+ * This is the narrow pass that is safe to apply to client-facing error bodies:
+ * a caller is entitled to see the PII it just submitted, but never to a
+ * provider secret that leaked into an upstream error message.
+ *
+ * For anything crossing a telemetry or audit boundary use `scrubTelemetry` /
+ * `scrubAuditMetadata` from `./scrub`, which layer the PII rules on top.
+ */
 
+import { isCredentialKey, REDACTED } from "./policy";
+
+// `(?:[A-Za-z0-9]+[-_ ])*` mirrors, for the serialized-string form, the suffix
+// matching that `isCredentialKey` already does on object keys: the quoted key
+// has to *end* with a denied name, not equal one. Without it `x-api-key` — the
+// spelling that actually arrives, and exactly what a stringified
+// `request.headers` blob holds — slips past, because the closing `\1`
+// backreference anchors the alternation to the whole quoted key. The separator
+// is mandatory each repetition, so the group cannot split a run two ways and
+// the pattern stays linear.
 const SENSITIVE_JSON_FIELD_PATTERN =
-  /(["'])(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\1\s*:\s*(["'])(.*?)\3/gi;
+  /(["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(["'])(.*?)\3/gi;
 const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\b(\s*[:=]\s*)[^,\s}]+/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
@@ -77,27 +96,7 @@ function redactValue(value: unknown, seen: WeakSet<object>): unknown {
 
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    result[key] = isSensitiveCredentialKey(key) ? REDACTED : redactValue(item, seen);
+    result[key] = isCredentialKey(key) ? REDACTED : redactValue(item, seen);
   }
   return result;
-}
-
-function isSensitiveCredentialKey(key: string): boolean {
-  const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
-  return (
-    normalized === "secret" ||
-    normalized === "credential" ||
-    normalized === "credentials" ||
-    normalized === "apikey" ||
-    normalized === "authorization" ||
-    normalized === "password" ||
-    normalized === "pem" ||
-    normalized === "token" ||
-    normalized.endsWith("secret") ||
-    normalized.endsWith("password") ||
-    normalized.endsWith("token") ||
-    normalized.endsWith("pem") ||
-    normalized.includes("privatekey") ||
-    normalized.includes("secretpayload")
-  );
 }

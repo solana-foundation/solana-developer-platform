@@ -4,7 +4,7 @@
  * Records all significant actions for compliance and debugging.
  */
 
-import { redactCredentialSecrets } from "@sdp/custody";
+import { scrubAuditMetadata } from "@sdp/redaction";
 import type { Context } from "hono";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
@@ -442,7 +442,7 @@ export class AuditService {
           action: entry.action,
           resourceType: entry.resourceType,
           resourceId: entry.resourceId ?? null,
-          metadata: entry.metadata ? redactCredentialSecrets(entry.metadata) : null,
+          metadata: entry.metadata ? scrubAuditMetadata(entry.metadata) : null,
         },
       },
       status: "success",
@@ -486,7 +486,7 @@ export class AuditService {
           targetAction: intent.entry.action,
           targetResourceType: intent.entry.resourceType,
           targetResourceId: intent.entry.resourceId ?? null,
-          error: redactCredentialSecrets(error),
+          error,
         },
         "Critical operation outcome was not persisted; durable audit intent requires reconciliation"
       );
@@ -589,7 +589,14 @@ export class AuditService {
     checkpointStore: KVStore
   ): Promise<void> {
     const id = `aud_${crypto.randomUUID()}`;
-    const metadata = entry.metadata ? redactCredentialSecrets(entry.metadata) : null;
+    // The scrubbing boundary for the ledger. Applied before the row is hashed,
+    // so what the chain commits to is exactly what a reviewer can read back.
+    // Emails are masked rather than dropped: an invitation event whose subject
+    // is unnamed is not an audit trail. Everything else identifying — names,
+    // phone, date of birth, street, bank instrument, whole identity blobs —
+    // goes. `ip_address` and `user_agent` are unaffected: they are dedicated
+    // columns and part of the security record, not caller-supplied metadata.
+    const metadata = entry.metadata ? scrubAuditMetadata(entry.metadata) : null;
 
     try {
       const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(
@@ -735,7 +742,7 @@ export class AuditService {
         }
       );
     } catch (err) {
-      getLogger().error({ error: redactCredentialSecrets(err) }, "Failed to write audit log");
+      getLogger().error({ error: err }, "Failed to write audit log");
       throw err instanceof AuditPersistenceError ? err : new AuditPersistenceError({ cause: err });
     }
   }

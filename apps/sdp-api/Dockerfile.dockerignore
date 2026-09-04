@@ -23,6 +23,7 @@ packages/*
 !packages/sdp-helius-rings-sdk
 !packages/sdp-rpc
 !packages/sdp-custody
+!packages/sdp-redaction
 !packages/sdp-solana
 !packages/sdp-policy
 !packages/sdp-payments

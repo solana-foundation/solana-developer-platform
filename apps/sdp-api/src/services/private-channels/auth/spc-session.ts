@@ -13,7 +13,6 @@
 // callers go through `openSpcAuthContext` (see ./gateway-auth), which always
 // supplies the cache when KV is configured.
 
-import { redactCredentialSecrets } from "@sdp/custody";
 import { PrivateChannelError } from "@sdp/private-channels";
 import type { SpcAuthClient } from "@sdp/private-channels/auth";
 import type { PrivateChannelUserRow } from "@/db/repositories";
@@ -111,7 +110,7 @@ async function readCachedToken(
     // re-login rather than error out, but say so: silently degrading to a permanent
     // cache miss looks identical to a cold cache.
     getLogger().warn(
-      redactCredentialSecrets({ organizationId, error }),
+      { organizationId, error },
       "spc-session: cached token unusable, falling back to a fresh login"
     );
     return null;
@@ -146,7 +145,7 @@ async function cacheFreshToken(
     // does mean every subsequent call re-logs in, so it is worth a line — on the KMS
     // path an encrypt failure is a misconfigured key, not a transient blip.
     getLogger().warn(
-      redactCredentialSecrets({ organizationId, error }),
+      { organizationId, error },
       "spc-session: could not cache the SPC token; subsequent calls will re-login"
     );
   }

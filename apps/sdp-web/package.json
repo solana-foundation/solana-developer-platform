@@ -26,6 +26,7 @@
     "@sdp/issuance": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
+    "@sdp/redaction": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "10.70.0",

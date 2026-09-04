@@ -7,10 +7,15 @@
  * implementation without initializing the production SDK.
  */
 
-import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
 import { SdpEarnError } from "@sdp/earn/errors";
 import { SdpPaymentsError } from "@sdp/payments/errors";
+import {
+  redactCredentialSecrets,
+  redactCredentialString,
+  scrubError,
+  scrubTelemetry,
+} from "@sdp/redaction";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -18,7 +23,7 @@ import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { AppError, badRequest, redactErrorForCapture } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
@@ -255,7 +260,10 @@ function captureUnexpectedError(
       scope.setUser({ id: clerk.userId });
     }
 
-    observability.captureException(redactErrorForCapture(err));
+    // Scrubbed here as well as in Sentry's `beforeSend`: the hook is the
+    // backstop for payloads the SDK builds itself, this is the payload we hand
+    // it deliberately, and neither should depend on the other being present.
+    observability.captureException(scrubError(err));
   });
 }
 
@@ -510,8 +518,11 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       request_id: requestId,
       ...describeError(err),
     });
+    // Scrubbed here as well as by the logger's own hook: this is the one log
+    // line that carries a wholly unknown error, including `context` and `cause`
+    // straight from a third-party SDK, so it does not rely on the sink alone.
     getLogger().error(
-      redactCredentialSecrets({
+      scrubTelemetry({
         requestId,
         traceId,
         source: requestSource,
