@@ -6,17 +6,24 @@
 
 | Event | Target | Result |
 | --- | --- | --- |
-| Relevant push to `main` | Dev | Builds a SHA-tagged image, runs migrations, updates the dev service, and updates the dev cron job |
-| `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
-| Release publication job on `main` | Production API | Verifies the published tag and SHA, builds version- and SHA-tagged images from that commit, runs migrations, updates the production service, and updates the production cron job |
-| Release publication job on `main` | Production web | Verifies the published tag and SHA, builds sdp-web from that commit, and deploys it to Vercel production |
-| Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
-| Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
-| Manual sdp-web workflow dispatch | Production web | Builds and deploys the provided ref to Vercel production |
+| Pull request labelled `deploy-dev` | Dev | Builds the pull request, runs migrations, updates the dev service, cron job, and worker |
+| Pull request labelled `ephemeral-api` | Dev (per-PR) | Stands up an isolated `sdp-dev-api-pr-<n>` service with its own database and Redis db; torn down when the PR closes or the label is removed |
+| Relevant push to `main` | Stage | Builds a SHA-tagged image from source, runs migrations, updates the stage service, cron job, and worker, then runs the stage smoke |
+| Every push to `main` | GHCR | Builds, scans, attests, and keyless-signs the `sdp-api` image tagged with the commit SHA |
+| `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag and the GitHub release, then starts the production API deployment in the same workflow run |
+| `vX.Y.Z` tag push | GHCR | Builds, scans, attests, and keyless-signs the `sdp-api`, `sdp-web`, and `sdp-docs` images tagged with the version; publishes signed self-hosted checksums to the release |
+| Release publication job on `main` | Production API | Verifies the tag and SHA, gates on the stage smoke, verifies the signed release image at its origin, promotes that exact digest to Artifact Registry, runs migrations, deploys a no-traffic candidate, promotes it, and runs the production canary. Never rebuilds |
+| `chore(main): release X.Y.Z` commit on `main` | Production web | Vercel's git integration builds `sdp-web` for production only when the `main` commit is authored by the release app; every other `main` push is skipped |
+| Any push to `main` | Production docs | Vercel's git integration builds and deploys `sdp-docs` to production on every `main` commit, with no release gate |
+| Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected ref |
+| Manual stage workflow dispatch | Stage | Rebuilds and deploys the selected ref, then runs the stage smoke |
+| Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image in Artifact Registry, verifies its signature, and redeploys its immutable digest through the candidate, promote, and canary steps without running migrations |
 
-Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release flow's production deployment job.
+Vercel builds previews for pull-request branches. `apps/sdp-web/vercel.json` carries an ignore step that lets a `main` build through only when the commit author is the release app, so `sdp-web` reaches production exclusively through a merged release pull request. `apps/sdp-docs` has no such gate. Hotfix redeploys of the web app use the Vercel dashboard's Redeploy action; there is no workflow for it.
 
-The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
+The hosted API runs as a Node.js container on Cloud Run. Dev, stage, and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, cron jobs, and worker services.
+
+A continuous production deployment path exists in [`deploy.yml`](../../.github/workflows/deploy.yml) behind the `CONTINUOUS_PROD_DEPLOY` repository variable. It is not enabled. When it is, a merge to `main` that passes the stage smoke and carries no migrations since the last release tag would promote the signed merge image to production the same way a release does.
 
 ## GitHub and GCP Setup
 
@@ -26,43 +33,53 @@ The `production` environment is attached to the production deployment job. Confi
 
 ### GitHub variables
 
-Configure these deployment values as repository variables so the dev workflow can read them. The production environment may override them when it uses a different identity:
+Configure these deployment values as repository variables:
 
-- `DEPLOY_WIF_PROVIDER` — Google Workload Identity provider
-- `DEPLOY_SA` — Google service account used by the deployment workflows
+- `DEPLOY_WIF_PROVIDER` and `DEPLOY_SA`: Google Workload Identity provider and service account used by the dev, ephemeral, and production deploy workflows. The production job runs in the `production` environment, which may override them
+- `STAGE_DEPLOY_WIF_PROVIDER` and `STAGE_DEPLOY_SA`: the same pair for the stage project. The stage deployment job is skipped while either is empty
+- `STAGE_SMOKE_READY`: when `true`, the stage smoke builds the dashboard against the stage API and runs the read-only Playwright suite; otherwise it only probes `/health/ready`
+- `CONTINUOUS_PROD_DEPLOY`: when `true`, enables the continuous production path described above
 
-The deploy identity needs the least-privilege permissions required to push to the target Artifact Registry repository and update/execute the named Cloud Run services and jobs.
+The deploy identities need the least-privilege permissions required to push to the target Artifact Registry repository and update/execute the named Cloud Run services and jobs.
 
 Release automation also reads these repository variables:
 
-- `TRANSLATION_AGENT_URL` — required when a release has missing UI translations
-- `TRANSLATION_AGENT_MODEL` — optional model name included in the release summary; the translation agent defaults to `deepseek/deepseek-v4-flash`
-- `TRANSLATION_AGENT_BATCH_SIZE` — optional request batch size; defaults to `50`; all missing keys are processed in batches of this size
-- `TRANSLATION_AGENT_MAX_RETRIES` — optional retry count; defaults to `2`
+- `TRANSLATION_AGENT_URL`: required when a release has missing UI translations
+- `TRANSLATION_AGENT_MODEL`: optional model name included in the release summary; the translation agent defaults to `deepseek/deepseek-v4-flash`
+- `TRANSLATION_AGENT_BATCH_SIZE`: optional request batch size; defaults to `50`
+- `TRANSLATION_AGENT_MAX_RETRIES`: optional retry count; defaults to `2`
+- `TRANSLATION_AGENT_MAX_KEYS`: optional cap on keys processed per run
 
 ### Repository secrets
 
-- `DOPPLER_CI_IDENTITY_ID` (repository variable) — Doppler service-account identity for OIDC-based secret-aware CI
-- `RELEASE_APP_ID` — GitHub App ID used by release automation
-- `RELEASE_APP_PRIVATE_KEY` — corresponding GitHub App private key
-- `TRANSLATION_AGENT_USERNAME` and `TRANSLATION_AGENT_PASSWORD` — HTTP Basic credentials required when a release has missing UI translations
+- `DOPPLER_CI_IDENTITY_ID` (repository variable): Doppler service-account identity for OIDC-based secret-aware CI. The Slack notifications, the stage smoke, and the ephemeral environments read their secrets through it
+- `RELEASE_APP_ID`: GitHub App ID used by release automation
+- `RELEASE_APP_PRIVATE_KEY`: corresponding GitHub App private key
+- `TRANSLATION_AGENT_USERNAME` and `TRANSLATION_AGENT_PASSWORD`: HTTP Basic credentials required when a release has missing UI translations
 
-### Production environment secrets
+The release GitHub App needs `contents: write` and `pull_requests: write`, and it must be allowed to maintain the generated release branch and enable auto-merge. The repository must allow auto-merge and squash merging; `release-flow.mjs prepare` fails with the missing setting named when either is off.
 
-- `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` — Vercel CLI credentials used by the sdp-web production deployment
-
-The release GitHub App needs `contents: write` and `pull_requests: write`, and it must be allowed to maintain the generated release branch and enable auto-merge.
+No workflow reads Vercel credentials any more. The web production deployment moved to Vercel's git integration, so `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` are unused if they still exist on the `production` environment.
 
 ### Cloud Run resources
 
-| Environment | Project | Artifact repository | Service | Migration job | Cron job |
-| --- | --- | --- | --- | --- | --- |
-| Dev | `solana-developer-platform-dev` | `sdp-dev` | `sdp-dev-api-public` | `sdp-dev-api-public-migrate` | `sdp-dev-api-public-cron` |
-| Production | `solana-developer-platform` | `sdp-prod` | `sdp-prod-api-public` | `sdp-prod-api-public-migrate` | `sdp-prod-api-public-cron` |
+| Environment | Project | Artifact repository | Service | Migration job | Cron job | Worker |
+| --- | --- | --- | --- | --- | --- | --- |
+| Dev | `solana-developer-platform-dev` | `sdp-dev` | `sdp-dev-api-public` | `sdp-dev-api-public-migrate` | `sdp-dev-api-public-cron` | `sdp-dev-worker` |
+| Stage | `solana-developer-platform-stg` | `sdp-stage` | `sdp-stage-api-public` | `sdp-stage-api-public-migrate` | `sdp-stage-api-public-cron` | `sdp-stage-worker` |
+| Production | `solana-developer-platform` | `sdp-prod` | `sdp-prod-api-public` | `sdp-prod-api-public-migrate` | `sdp-prod-api-public-cron` | `sdp-prod-worker` |
 
-All resources currently use `us-central1`.
+All resources currently use `us-central1`. Production also has the `sdp-prod-canary` job, executed after every promotion. Ephemeral per-PR environments live in the dev project as `sdp-dev-api-pr-<n>` and `sdp-dev-worker-pr-<n>`.
 
-The workflows update images only. Runtime environment variables, Secret Manager references, service accounts, networking, scaling, and scheduler configuration must already exist on the Cloud Run resources.
+Hosted API hostnames:
+
+| Environment | Hostname |
+| --- | --- |
+| Dev | `https://api-dev.solana.com` |
+| Stage | `https://api-stage.solana.com` (also served as `https://api-preview.solana.com`) |
+| Production | `https://api.solana.com` |
+
+The workflows update images only. Runtime environment variables, Secret Manager references, service accounts, networking, scaling, and scheduler configuration must already exist on the Cloud Run resources. A release that removes or adds a runtime variable needs that change applied to the Cloud Run configuration separately; check the release pull request body for such notes before approving.
 
 Configure `PUBLIC_API_ORIGIN` directly on each API service before deployment:
 
@@ -77,27 +94,23 @@ This value is mandatory for hosted services because token deployment embeds meta
 
 ### 1. Merge a feature pull request
 
-Use a conventional pull request title such as `feat:`, `fix:`, `perf:`, `docs:`, or `refactor:`. Release automation uses the merged history to calculate the next version and changelog.
+Use a conventional pull request title such as `feat:`, `fix:`, `perf:`, `docs:`, or `refactor:`. Release automation uses the merged history to calculate the next version and changelog. Merging is a release decision: the commit joins the next release pull request the moment it lands on `main`.
 
-When the pull request merges, the dev workflow runs if a relevant API, package, workspace, lockfile, or workflow path changed:
+When the pull request merges, three things run on the push:
 
-[`.github/workflows/deploy-sdp-api-gcp.yml`](../../.github/workflows/deploy-sdp-api-gcp.yml)
+1. [`deploy.yml`](../../.github/workflows/deploy.yml) deploys to **stage** if an API, package, workspace, lockfile, or deploy-workflow path changed. It builds the image from source through [`deploy-sdp-api-gcp-stage.yml`](../../.github/workflows/deploy-sdp-api-gcp-stage.yml): migrations, service, readiness, cron job, worker, then the stage smoke from [`sdp-stage-smoke.yml`](../../.github/workflows/sdp-stage-smoke.yml).
+2. [`release-images.yml`](../../.github/workflows/release-images.yml) builds the `sdp-api` image, scans both platforms with Trivy (critical findings fail the build), pushes it to GHCR tagged with the commit SHA with SLSA provenance and an SBOM, and signs it with keyless cosign. This is the artifact a release later promotes; nothing is rebuilt at release time.
+3. [`release-please.yml`](../../.github/workflows/release-please.yml) recomputes the release plan and rewrites the release pull request (see step 2).
 
-The workflow:
+Dev is no longer deployed on merge. To put a branch on dev before it merges, add the `deploy-dev` label to the pull request ([`deploy-dev-on-label.yml`](../../.github/workflows/deploy-dev-on-label.yml)); to get an isolated per-PR API with its own database, add `ephemeral-api` ([`sdp-api-ephemeral.yml`](../../.github/workflows/sdp-api-ephemeral.yml)), which comments the URL on the pull request.
 
-1. Authenticates to GCP through Workload Identity Federation.
-2. Builds the API Docker image and pushes a `GITHUB_SHA` tag.
-3. Updates and executes the migration job.
-4. Updates the API service.
-5. Updates the cron job image.
-
-Verify the dev deployment before approving a release:
+Verify the stage deployment before approving a release:
 
 ```bash
-curl --fail-with-body https://api-dev.solana.com/health
+curl --fail-with-body https://api-stage.solana.com/health/ready
 ```
 
-Also exercise the affected authenticated, webhook, or provider flow; `/health` only proves that the HTTP process is reachable.
+The response carries the Cloud Run revision name; match it to the deploy run's summary. Also exercise the affected authenticated, webhook, or provider flow; readiness only proves that the process, Postgres, and Redis are reachable.
 
 ### 2. Review the generated release pull request
 
@@ -108,7 +121,13 @@ The Release Flow workflow maintains `sdp/release-main` and opens a pull request 
 - `CHANGELOG.md`
 - missing UI translations, when applicable
 
-Auto-merge is enabled, but branch protection still requires review approval and required checks. The release pull request is the human release gate.
+The pull request is recreated on every push to `main`, so its contents, title, and version can change while it is open. Three consequences of the branch ruleset (see [branch-controls.md](./branch-controls.md)) follow from that:
+
+- Every push to `main` dismisses the approvals on it. A release pull request approved during working hours can lose that approval to the next merge; approve when nothing else is about to land, or agree a short merge pause first.
+- The ruleset requires an extra approval for unattributed changes, and the release commits are authored by the release app. Plan for two approving reviews, and the approver cannot be the last person who pushed to the branch.
+- Auto-merge is armed by the release app and re-armed whenever the version in the headline drifts. Once the required approvals and checks are green the pull request merges on its own and the production deployment starts within a minute. Approval on the release pull request is the release decision; there is no later confirmation step.
+
+Read the pull request body before approving. It lists every commit in the release, and authors record migration notes and runtime-configuration changes there.
 
 #### Translation sync
 
@@ -129,58 +148,69 @@ Every run posts or updates one comment, so a missing comment means the job never
 
 ### 3. Deploy and publish production
 
-Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then starts two independent production deployments with that immutable tag and SHA:
+Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml) in publish mode. The whole production release is one workflow run, named `Release Flow`, with these jobs in order:
 
-- [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) deploys the production API.
-- The `deploy-web-production` job in [`release-please.yml`](../../.github/workflows/release-please.yml) deploys sdp-web to Vercel production. [`deploy-sdp-web-vercel-prod.yml`](../../.github/workflows/deploy-sdp-web-vercel-prod.yml) remains the manual recovery path.
+1. `publish-release` creates the `vX.Y.Z` tag and the GitHub release, then checks that the tag resolves to the exact `main` commit it is running on. A release commit whose subject names a different version than `package.json` is refused here, before anything deploys.
+2. The tag push starts [`release-images.yml`](../../.github/workflows/release-images.yml) in parallel: it builds, scans, attests, and signs the `sdp-api`, `sdp-web`, and `sdp-docs` images with the version tag, and [`release-checksums.yml`](../../.github/workflows/release-checksums.yml) attaches signed self-hosted checksums to the release.
+3. `deploy-api-production` calls [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) with the release SHA and tag. It does not appear as a separate run in the Actions list; open the `Release Flow` run to watch it.
 
-Both deployments retain the `main` event context required by the `production` environment. Before using production credentials, they verify that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`. The web deployment is a normal job in the release workflow so its Vercel credentials remain scoped to the protected `production` environment; they are not inherited across a reusable-workflow boundary.
+Web and docs deploy through Vercel's git integration on the same push: `sdp-web` because the release app authored the commit, `sdp-docs` as on every `main` push. Their results show as `Vercel – sdp-web` and `Vercel – sdp-docs` commit statuses on the release commit.
 
-The production deploy workflow:
+The production deploy job, in order:
 
-1. Authenticates to the production GCP project.
-2. Builds the API image and pushes both `X.Y.Z` and release-SHA tags.
-3. Resolves the SHA tag to an immutable image digest.
-4. Updates and executes `sdp-prod-api-public-migrate`.
-5. Captures the current service traffic and cron image for rollback.
-6. Deploys a no-traffic candidate revision and verifies its immutable digest.
-7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready.
-8. Sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, and updates `sdp-prod-api-public-cron` to the same digest.
+1. **Gate on stage smoke.** Runs [`sdp-stage-smoke.yml`](../../.github/workflows/sdp-stage-smoke.yml) against the stage API. With `STAGE_SMOKE_READY` unset it is a readiness probe; with it set it builds the dashboard against stage and runs the read-only Playwright suite. A failure stops the release before production is touched.
+2. **Verify release identity.** [`verify-release-identity.sh`](../../.github/scripts/verify-release-identity.sh) checks that the checked-out commit is the release SHA, that the tag resolves to it, that it is contained in `origin/main`, and that the tag version matches `package.json`.
+3. **Verify and promote the release image.** Waits for `ghcr.io/solana-foundation/sdp/sdp-api:vX.Y.Z` to be published by the parallel image build (up to about 65 minutes), then runs `cosign verify` against it with the GitHub OIDC issuer, the certificate identity pinned to `release-images.yml` at `refs/tags/vX.Y.Z`, and the certificate's workflow SHA pinned to the release commit. On success it copies that digest into Artifact Registry as `sdp-api-public:<release-sha>` and tags it `X.Y.Z`. Verification failure fails the job.
+4. **Resolve the immutable deploy image.** Reads the digest back from Artifact Registry and refuses to continue unless it equals the verified origin digest.
+5. **Run database migrations.** Updates and executes `sdp-prod-api-public-migrate` with that digest.
+6. **Capture rollback state.** Records the current traffic split, cron image, and worker image.
+7. **Deploy the candidate without traffic.** Creates a new revision tagged `candidate-<sha12>` at 0% traffic and checks that the revision's image digest is the pinned digest or a platform manifest inside that signed index.
+8. **Verify candidate readiness.** Polls the revision's Ready condition for up to two minutes.
+9. **Promote.** Verifies the cron cadence, moves 100% of traffic to the candidate, polls `https://api.solana.com/health/ready` until it reports the candidate revision with Postgres and Redis ok, then updates the cron job and worker to the same digest.
+10. **Run the production canary.** Executes the `sdp-prod-canary` job and waits for it.
+11. **Roll back an incomplete rollout.** If the rollout started but did not complete, restores the previous traffic split, cron image, and worker image. An incomplete restore fails the job with `Automatic rollback was incomplete; escalate immediately.`
+12. **Remove the candidate traffic tag.**
 
-If production promotion or the cron update fails, the workflow attempts to restore the previous service traffic and cron image. Treat any incomplete automatic rollback as an incident and reconcile both resources immediately.
+A failure before step 9 leaves production serving the previous revision. A failure during or after step 9 triggers step 11. Migrations (step 5) are not rolled back by the workflow.
 
-Do not treat the GitHub release publication as proof that the Cloud Run rollout succeeded; monitor both workflows.
+Slack receives a start and a result message for every production deployment when the deploy webhook is configured.
+
+Do not treat the GitHub release publication as proof that the Cloud Run rollout succeeded; the release exists from step 1 of the run, the deploy finishes at step 12.
 
 ### 4. Verify production
 
 Check:
 
-1. The production GitHub Actions job completed successfully.
+1. The `deploy-api-production / Deploy production image` job in the `Release Flow` run completed successfully, and its summary names the candidate revision and digest.
 2. The migration job execution succeeded.
-3. The candidate and canonical `/health/ready` checks passed for the deployed revision, including Postgres and Redis.
-4. The cron job references the same release image as the service.
-5. `https://api.solana.com/health` succeeds.
-6. Cloud Run error rate, latency, logs, and Sentry remain healthy.
+3. `https://api.solana.com/health/ready` reports `status: ready`, the promoted revision name, and `database` and `redis` ok.
+4. The cron job and worker reference the same release image as the service.
+5. The canary job execution succeeded.
+6. Cloud Run error rate, latency, and logs remain healthy. The API no longer reports to Sentry; its 5xx-ratio and cron-staleness alerts come from Grafana on Loki. Sentry covers the web app only.
 7. At least one representative authenticated API flow succeeds.
+8. The `Vercel – sdp-web` and `Vercel – sdp-docs` statuses on the release commit are green.
+
+`/health` does not identify the release. Use the revision name from `/health/ready` and the run summary, or a behaviour that the release introduced, to confirm what is running.
 
 ## Manual Deployment
 
-Manual dispatch of the production workflow redeploys an image that already exists in Artifact Registry. Run the workflow from `main` and provide:
+Manual dispatch of the production workflow redeploys an image that already exists in Artifact Registry. Run [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) from `main` and provide:
 
 - `image_sha` — the lowercase 40-character Git SHA tag attached to the intended image
 
 Before dispatch, confirm that the SHA came from a successful, trusted production release workflow and that the resolved digest matches the expected release or incident record. The presence of a tag in Artifact Registry is not sufficient provenance on its own.
 
-The workflow validates the SHA, resolves its tag to an immutable digest, verifies a no-traffic candidate, and then promotes the API service and cron job under the same rollback guard used by a normal production release. It does not check out or rebuild source, and it never updates or executes the migration job during a manual deployment.
+The dispatch path skips the stage smoke and the origin promotion, resolves the tag to its immutable digest, and then verifies the image signature: first on the Artifact Registry copy, and if that carries no findable signature, at the signing origin in GHCR at the same digest, accepting either a release-tag or a `main` identity from `release-images.yml` for that exact commit. An image that predates signed promotion fails here by design. It then runs the same candidate, readiness, promote, canary, and rollback-guard steps as a release. It never updates or executes the migration job.
 
 ## Production Rollback
 
 1. Identify the last healthy release's full Git SHA from a successful, trusted production release workflow. Confirm its recorded digest and `sdp-api-public:<sha>` image still match in the production Artifact Registry repository.
-2. Open `Deploy sdp-api to Cloud Run (prod)` in GitHub Actions and choose **Run workflow** from `main`.
-3. Enter the full SHA as `image_sha`.
-4. Approve the `production` environment gate if configured.
-5. Follow the run until both the service and cron job reference the resolved digest.
-6. Repeat the production verification checklist and record the SHA, digest, reason, and operator in the incident timeline.
+2. Check the migrations that landed between that SHA and the current release. If any of them dropped, renamed, or constrained data the older code writes, the older image cannot run against the current schema; stop and fix forward instead.
+3. Open `Deploy sdp-api to Cloud Run (prod)` in GitHub Actions and choose **Run workflow** from `main`.
+4. Enter the full SHA as `image_sha`.
+5. Approve the `production` environment gate if configured.
+6. Follow the run until the service, cron job, and worker reference the resolved digest and the canary passes.
+7. Repeat the production verification checklist and record the SHA, digest, reason, and operator in the incident timeline.
 
 Database schema rollback is not automated. If the selected image is incompatible with the current schema, stop and prepare a forward fix instead of improvising a destructive migration.
 
@@ -192,6 +222,7 @@ Migrations must remain backward-compatible across the rollback window:
 - Avoid deleting or renaming data that the previous release reads.
 - Separate destructive cleanup into a later release after rollback support expires.
 - Test the previous application image against the migrated schema when a change is high risk.
+- When a release ships a migration that breaks this rule, say so in the release pull request body so the rollback note is written before it is needed.
 
 ## One-time Cloudflare teardown
 
@@ -216,27 +247,53 @@ Do not copy old resource IDs into this repository. Resolve deletion targets from
 
 ### GCP authentication fails
 
-Verify `DEPLOY_WIF_PROVIDER` and `DEPLOY_SA`, the GitHub OIDC subject conditions, and the deploy service account's permissions in the target project.
+Verify `DEPLOY_WIF_PROVIDER` and `DEPLOY_SA` (or the `STAGE_` pair), the GitHub OIDC subject conditions, and the deploy service account's permissions in the target project.
 
 ### Image push fails
 
 Verify the Artifact Registry repository exists in `us-central1`, Docker authentication completed, and the deploy identity can upload artifacts.
 
+### Release image never appears in GHCR or fails cosign verification
+
+The production job waits for the parallel `Release Images` run. Open that run first: a Trivy critical finding or a build failure there is the usual cause, and the production job cannot proceed without the signed image. A verification failure on an image that is present means the signing identity or commit does not match the release; do not bypass it.
+
+### Release pull request approval keeps disappearing
+
+Every push to `main` recreates the release pull request and dismisses its approvals. Approve when no other merge is imminent, or agree a short pause on merging to `main` and then approve.
+
+### Release pull request will not merge with one approval
+
+The ruleset requires an extra approval for unattributed changes, and the release commit is authored by the release app. A second approving review from someone other than the last pusher is needed.
+
+### `publish-release` refuses the release commit
+
+`Release commit version X does not match package.json Y` means the squash headline the pull request merged with named an older version than the pull request contained. The release app re-arms auto-merge when the headline drifts, so this should not recur; if it does, no tag was created and nothing deployed. Re-run the release flow by opening a pull request that lands a correctly titled `chore(main): release Y` commit.
+
 ### Migration job fails
 
 Inspect the Cloud Run job execution and application logs. Do not deploy the service past a failed required migration. Fix forward when possible; do not improvise a schema rollback in the workflow.
 
+### Candidate digest does not match the pinned digest
+
+Cloud Run records the platform manifest's digest on the revision, and the pinned image may be an OCI index. The job accepts the index digest or any manifest listed inside that signed index. Anything else means Artifact Registry served a different image than the one verified; stop and inspect the registry.
+
 ### Service update fails after migrations
 
-In production, a candidate that fails readiness receives no production traffic and leaves the cron image unchanged. Inspect startup logs, required environment and secret references, Cloud SQL/Redis connectivity, and health checks. If promotion fails later, verify that the workflow restored both the previous traffic split and cron image; escalate immediately if either rollback was incomplete. In dev, inspect the Cloud Run rollout directly and restore the previous revision when the backward-compatible schema permits it.
+In production, a candidate that fails readiness receives no production traffic and leaves the cron and worker images unchanged. Inspect startup logs, required environment and secret references, Cloud SQL/Redis connectivity, and health checks. If promotion fails later, verify that the workflow restored the previous traffic split, cron image, and worker image; escalate immediately if any restore was incomplete. In dev and stage, inspect the Cloud Run rollout directly and restore the previous revision when the backward-compatible schema permits it.
 
-### Cron job and service use different images
+### Cron job, worker, and service use different images
 
 Resolve each resource's image reference, choose the intended release SHA/digest, and update the stale resource. Do not leave reconciliation running on code that is incompatible with the serving revision.
 
 ## References
 
-- [Dev Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp.yml)
+- [Merge deploy orchestrator](../../.github/workflows/deploy.yml)
+- [Dev Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp.yml) and [label trigger](../../.github/workflows/deploy-dev-on-label.yml)
+- [Ephemeral per-PR API environments](../../.github/workflows/sdp-api-ephemeral.yml)
+- [Stage Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp-stage.yml) and [stage smoke](../../.github/workflows/sdp-stage-smoke.yml)
 - [Production Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp-prod.yml)
-- [Release Flow workflow](../../.github/workflows/release-please.yml)
+- [Release Flow workflow](../../.github/workflows/release-please.yml) and [release-flow.mjs](../../.github/scripts/release-flow.mjs)
+- [Release Images workflow](../../.github/workflows/release-images.yml)
+- [Release Checksums workflow](../../.github/workflows/release-checksums.yml)
+- [Branch controls](./branch-controls.md)
 - [Doppler Secrets Operations](./doppler-secrets.md)

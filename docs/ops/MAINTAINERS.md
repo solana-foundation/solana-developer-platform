@@ -20,17 +20,24 @@ Read this when setting up local development, configuring CI, rotating secrets, o
 
 ## Common Tasks
 
-### Deploy a change to dev
+### Deploy a change to stage
 
 1. Merge the change to `main`.
-2. Follow the `Deploy sdp-api to Cloud Run (dev)` workflow.
-3. Verify `https://api-dev.solana.com/health` and the affected API behavior.
+2. Follow the `sdp-api + worker + cron — stage + smoke` job in the `SDP Deploy` run.
+3. Verify `https://api-stage.solana.com/health/ready` and the affected API behavior.
+
+### Deploy a branch to dev before it merges
+
+1. Add the `deploy-dev` label to the pull request for the shared dev service, or `ephemeral-api` for an isolated per-PR API with its own database.
+2. Follow the `Deploy PR to dev (label-triggered)` or `Ephemeral PR API environment` run.
+3. Verify `https://api-dev.solana.com/health/ready`, or the URL the ephemeral workflow comments on the pull request.
 
 ### Publish a production release
 
 1. Follow [Release Operations](./release-operations.md).
 2. Review and approve the generated release pull request when it is ready.
-3. Monitor both the production Cloud Run deployment and the release publication after it merges.
+3. Approval is the release decision: auto-merge is armed, so the pull request merges and the production deployment starts as soon as the required approvals and checks are green.
+4. Monitor the `Release Flow` run after it merges; the production Cloud Run deployment is a job inside it.
 
 ### Access secrets locally
 
@@ -50,10 +57,11 @@ Read this when setting up local development, configuring CI, rotating secrets, o
 
 | Environment | GCP project | Service | Cron job | Trigger |
 | --- | --- | --- | --- | --- |
-| Dev | `solana-developer-platform-dev` | `sdp-dev-api-public` | `sdp-dev-api-public-cron` | Relevant push to `main`, or manual dispatch |
+| Dev | `solana-developer-platform-dev` | `sdp-dev-api-public` | `sdp-dev-api-public-cron` | Pull request labelled `deploy-dev`, or manual dispatch |
+| Stage | `solana-developer-platform-stg` | `sdp-stage-api-public` | `sdp-stage-api-public-cron` | Relevant push to `main`, or manual dispatch |
 | Production | `solana-developer-platform` | `sdp-prod-api-public` | `sdp-prod-api-public-cron` | Release commit on `main`, or manual dispatch of an existing SHA image from `main` |
 
-The migration jobs are `sdp-dev-api-public-migrate` and `sdp-prod-api-public-migrate`.
+The migration jobs are `sdp-dev-api-public-migrate`, `sdp-stage-api-public-migrate`, and `sdp-prod-api-public-migrate`. Each environment also runs a worker service (`sdp-<env>-worker`) on the same image.
 
 ### Doppler configs
 
@@ -72,6 +80,8 @@ Cloud Run image deployment does not fetch Doppler. The API service and jobs rece
 | --- | --- | --- |
 | `DEPLOY_WIF_PROVIDER` | Variable | Google Workload Identity provider used by Cloud Run deploy workflows |
 | `DEPLOY_SA` | Variable | Google service account used by Cloud Run deploy workflows |
+| `STAGE_DEPLOY_WIF_PROVIDER` | Variable | Workload Identity provider for the stage project; the stage deploy is skipped while empty |
+| `STAGE_DEPLOY_SA` | Variable | Google service account for the stage project |
 | `DOPPLER_CI_IDENTITY_ID` | Variable | Doppler service-account identity for OIDC access to `dev_ci` in secret-aware CI |
 | `RELEASE_APP_ID` | Repository secret | GitHub App used by release automation |
 | `RELEASE_APP_PRIVATE_KEY` | Repository secret | GitHub App private key used by release automation |
