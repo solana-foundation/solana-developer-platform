@@ -52,6 +52,11 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       ASSET_PROFILES_ENABLED: ${ASSET_PROFILES_ENABLED:-true}
       PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
+      # Origins a project's Private Channels gateway/auth URL may point at. The
+      # public sandbox is approved already; add your own instance's origins here
+      # (a local gateway, e.g. http://host.docker.internal:8899, is honoured as
+      # written).
+      PRIVATE_CHANNEL_EGRESS_ALLOWLIST: ${PRIVATE_CHANNEL_EGRESS_ALLOWLIST:-}
       SDP_FLAG_ASSET_PROFILES: ${SDP_FLAG_ASSET_PROFILES:-true}
       PRIVY_BYOK_ENABLED: ${PRIVY_BYOK_ENABLED:-false}
       SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: ${SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED:-false}

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { probeGatewayHealth } from "./health";
+import { MAX_PROBE_DETAIL_CHARS } from "./transport";
+import { fetchProbeTransport } from "./transport.test-support";
 
 type FetchMockImpl = (url: string) => Promise<Response>;
 
@@ -32,14 +34,42 @@ describe("probeGatewayHealth", () => {
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    const result = await probeGatewayHealth("http://gateway.test:8899");
+    const result = await probeGatewayHealth("http://gateway.test:8899", fetchProbeTransport);
 
     expect(result.status).toBe("ready");
     if (result.status !== "ready") throw new Error("narrowing");
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
-    expect(result.health.ok).toBe(true);
-    expect(result.health.body).toEqual({ status: "ok" });
-    expect(result.ready.body).toEqual({ status: "ready" });
+    expect(result.health).toEqual({ status: 200, ok: true });
+    expect(result.ready).toEqual({ status: 200, ok: true });
+  });
+
+  it("does not carry the upstream body out of the probe", async () => {
+    stubFetch(async (url) => {
+      if (url.endsWith("/health"))
+        return jsonResponse({ status: "ok", secret: "tenant-data" }, 200);
+      if (url.endsWith("/ready"))
+        return jsonResponse({ status: "ready", secret: "tenant-data" }, 200);
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const result = await probeGatewayHealth("http://gateway.test:8899", fetchProbeTransport);
+
+    // The gateway was chosen by the caller, so nothing it answered with is
+    // relayed back: only the status and the reachability bit survive.
+    expect(JSON.stringify(result)).not.toContain("tenant-data");
+  });
+
+  it("truncates a degraded reason the gateway pads out", async () => {
+    stubFetch(async (url) => {
+      if (url.endsWith("/health")) return jsonResponse({ status: "ok" }, 200);
+      if (url.endsWith("/ready")) return jsonResponse({ reason: "x".repeat(5000) }, 503);
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const result = await probeGatewayHealth("http://gateway.test:8899", fetchProbeTransport);
+
+    if (result.status !== "degraded") throw new Error("narrowing");
+    expect(result.reason.length).toBeLessThanOrEqual(MAX_PROBE_DETAIL_CHARS + 1);
   });
 
   it("returns degraded when /health is 200 but /ready is 503", async () => {
@@ -50,7 +80,7 @@ describe("probeGatewayHealth", () => {
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    const result = await probeGatewayHealth("http://gateway.test:8899");
+    const result = await probeGatewayHealth("http://gateway.test:8899", fetchProbeTransport);
 
     expect(result.status).toBe("degraded");
     if (result.status !== "degraded") throw new Error("narrowing");
@@ -65,7 +95,7 @@ describe("probeGatewayHealth", () => {
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    const result = await probeGatewayHealth("http://gateway.test:8899");
+    const result = await probeGatewayHealth("http://gateway.test:8899", fetchProbeTransport);
 
     expect(result.status).toBe("degraded");
     if (result.status !== "degraded") throw new Error("narrowing");
@@ -78,7 +108,7 @@ describe("probeGatewayHealth", () => {
       return jsonResponse({ status: "ready" }, 200);
     });
 
-    const result = await probeGatewayHealth("http://gateway.test:8899");
+    const result = await probeGatewayHealth("http://gateway.test:8899", fetchProbeTransport);
 
     expect(result.status).toBe("unreachable");
     if (result.status !== "unreachable") throw new Error("narrowing");
@@ -91,7 +121,7 @@ describe("probeGatewayHealth", () => {
       return jsonResponse({ status: "ready" }, 200);
     });
 
-    const result = await probeGatewayHealth("http://gateway.test:8899");
+    const result = await probeGatewayHealth("http://gateway.test:8899", fetchProbeTransport);
 
     expect(result.status).toBe("unreachable");
     if (result.status !== "unreachable") throw new Error("narrowing");
@@ -103,7 +133,7 @@ describe("probeGatewayHealth", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await probeGatewayHealth("");
+    const result = await probeGatewayHealth("", fetchProbeTransport);
 
     expect(result.status).toBe("unreachable");
     if (result.status !== "unreachable") throw new Error("narrowing");
@@ -115,7 +145,7 @@ describe("probeGatewayHealth", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await probeGatewayHealth("not-a-url");
+    const result = await probeGatewayHealth("not-a-url", fetchProbeTransport);
 
     expect(result.status).toBe("unreachable");
     if (result.status !== "unreachable") throw new Error("narrowing");
@@ -127,7 +157,7 @@ describe("probeGatewayHealth", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await probeGatewayHealth("ftp://gateway.test");
+    const result = await probeGatewayHealth("ftp://gateway.test", fetchProbeTransport);
 
     expect(result.status).toBe("unreachable");
     if (result.status !== "unreachable") throw new Error("narrowing");

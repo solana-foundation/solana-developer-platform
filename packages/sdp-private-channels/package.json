@@ -49,6 +49,11 @@
       "import": "./src/schema.ts",
       "default": "./src/schema.ts"
     },
+    "./transport": {
+      "types": "./src/transport.ts",
+      "import": "./src/transport.ts",
+      "default": "./src/transport.ts"
+    },
     "./types": {
       "types": "./src/types.ts",
       "import": "./src/types.ts",

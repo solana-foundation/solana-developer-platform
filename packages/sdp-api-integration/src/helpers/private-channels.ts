@@ -13,9 +13,32 @@
  *     pnpm --filter @sdp/api-integration test
  */
 
+import type { ProbeTransport } from "@sdp/private-channels/transport";
 import { env } from "#env-impl";
 
 export const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
+
+/**
+ * Transport for the live-gateway probes in this suite.
+ *
+ * The API hands its probes a guarded transport because a project chooses those
+ * URLs; here the harness chose the URL, from its own env, so there is no
+ * untrusted input for an allowlist to constrain — and requiring one would mean
+ * configuring the product's allowlist to run a connectivity check. Redirects
+ * are still refused, because following one would silently move the endpoint
+ * under test. The product path's guard is covered by
+ * `apps/sdp-api/src/services/private-channels/egress.test.ts`.
+ */
+export const privateChannelProbeTransport: ProbeTransport = async (request) => {
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+    redirect: "manual",
+    signal: AbortSignal.timeout(request.timeoutMs),
+  });
+  return { status: response.status, ok: response.ok, text: await response.text() };
+};
 
 function readEnv(key: string): string {
   const value = (env as Record<string, unknown>)[key];

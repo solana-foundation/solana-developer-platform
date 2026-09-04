@@ -58,6 +58,11 @@ services:
       PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
       # Only required when PRIVATE_CHANNELS_ENABLED is true (openssl rand -base64 32).
       SPC_CREDENTIAL_ENCRYPTION_KEY: ${SPC_CREDENTIAL_ENCRYPTION_KEY:-}
+      # Comma-separated origins (https://host[:port]) a project's Private
+      # Channels gateway or auth URL may point at. Projects supply those URLs,
+      # so anything not listed is refused before SDP connects; the public
+      # sandbox is approved without configuring anything.
+      PRIVATE_CHANNEL_EGRESS_ALLOWLIST: ${PRIVATE_CHANNEL_EGRESS_ALLOWLIST:-}
     depends_on:
       postgres:
         condition: service_healthy

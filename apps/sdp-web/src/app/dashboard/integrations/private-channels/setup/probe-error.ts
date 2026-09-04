@@ -1,6 +1,6 @@
-import type { ConnectionProbeResult } from "@sdp/private-channels";
+import type { PrivateChannelProbeResult } from "@sdp/types";
 
-type ConnectionProbeDetails = Omit<ConnectionProbeResult, "ok">;
+type ConnectionProbeDetails = Omit<PrivateChannelProbeResult, "ok">;
 
 export function isProjectRpcProbeFailure(probe: ConnectionProbeDetails): boolean {
   return probe.rpc.ok === false;

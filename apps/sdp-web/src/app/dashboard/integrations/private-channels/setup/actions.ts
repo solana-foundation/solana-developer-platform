@@ -1,10 +1,12 @@
 "use server";
 
-import {
-  type ConnectionProbeResult,
-  privateChannelInstanceInputSchema,
-} from "@sdp/private-channels";
-import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
+import { privateChannelInstanceInputSchema } from "@sdp/private-channels";
+import type {
+  PrivateChannelHealth,
+  PrivateChannelInstance,
+  PrivateChannelInstanceInput,
+  PrivateChannelProbeResult,
+} from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
@@ -20,34 +22,22 @@ const privateChannelInstanceSchema = privateChannelInstanceInputSchema.extend({
   updatedAt: z.string(),
 }) satisfies z.ZodType<PrivateChannelInstance>;
 
-const gatewayProbeResponseSchema = z.object({
-  status: z.number(),
-  ok: z.boolean(),
-  body: z.unknown().optional(),
-});
-
 const gatewayHealthResultSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ready"),
     latencyMs: z.number(),
-    health: gatewayProbeResponseSchema,
-    ready: gatewayProbeResponseSchema,
   }),
   z.object({
     status: z.literal("degraded"),
     latencyMs: z.number(),
-    health: gatewayProbeResponseSchema,
-    ready: gatewayProbeResponseSchema,
     reason: z.string(),
   }),
   z.object({
     status: z.literal("unreachable"),
     latencyMs: z.number(),
     error: z.string(),
-    health: gatewayProbeResponseSchema.optional(),
-    ready: gatewayProbeResponseSchema.optional(),
   }),
-]);
+]) satisfies z.ZodType<PrivateChannelHealth>;
 
 const rpcProbeResultSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), latencyMs: z.number(), version: z.string() }),
@@ -68,7 +58,7 @@ const connectionProbeDetailsSchema = z.object({
 export type FieldErrors = Partial<Record<keyof PrivateChannelInstanceInput, string>>;
 
 export type TestConnectionResult =
-  | { kind: "probe"; probe: ConnectionProbeResult }
+  | { kind: "probe"; probe: PrivateChannelProbeResult }
   | { kind: "validation"; fieldErrors: FieldErrors }
   | { kind: "request-error"; message: string };
 
@@ -89,7 +79,7 @@ export async function testConnectionAction(input: {
 
   try {
     const client = await createSdpApiClient();
-    const probe = await client.fetch<ConnectionProbeResult>("/v1/private-channels/probe", {
+    const probe = await client.fetch<PrivateChannelProbeResult>("/v1/private-channels/probe", {
       method: "POST",
       body: JSON.stringify(parsed.data),
     });
@@ -106,7 +96,7 @@ export async function testConnectionAction(input: {
 export type ConnectPrivateChannelResult =
   | { ok: true; instance: PrivateChannelInstance }
   | { ok: false; kind: "validation"; fieldErrors: FieldErrors }
-  | { ok: false; kind: "probe"; probe: ConnectionProbeResult; message: string }
+  | { ok: false; kind: "probe"; probe: PrivateChannelProbeResult; message: string }
   | { ok: false; kind: "conflict-active"; message: string; activeInstance: PrivateChannelInstance }
   | {
       ok: false;

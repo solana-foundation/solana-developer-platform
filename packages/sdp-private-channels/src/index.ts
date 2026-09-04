@@ -26,12 +26,9 @@ export {
   type GatewayClientOptions,
   getChannelTokenBalance,
 } from "./gateway";
+export { type GatewayHealthResult, probeGatewayHealth } from "./health";
 export {
-  type GatewayHealthResult,
-  type GatewayProbeResponse,
-  probeGatewayHealth,
-} from "./health";
-export {
+  type AuthProbeResult,
   type ConnectionProbeInput,
   type ConnectionProbeResult,
   probeConnection,
@@ -41,6 +38,13 @@ export {
   type PrivateChannelInstanceInputSchema,
   privateChannelInstanceInputSchema,
 } from "./schema";
+export {
+  MAX_PROBE_DETAIL_CHARS,
+  type ProbeRequest,
+  type ProbeResponse,
+  type ProbeTransport,
+  truncateProbeDetail,
+} from "./transport";
 export type {
   GatewayHealth,
   PrivateChannelInstance,
