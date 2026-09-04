@@ -38,6 +38,8 @@ import { isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "@sdp/payments/ramps/s
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
+  CANCELABLE_RAMP_TRANSFER_STATUSES,
+  isCancelableRampTransferStatus,
   isCountryCode,
   type PaymentRampEstimate,
   type PaymentRampInstruction,
@@ -1463,8 +1465,7 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   if (!isRampTransferType(transfer.type)) {
     throw badRequest("Only ramp transfers can be canceled through this endpoint.");
   }
-  const cancelableStatuses: readonly PaymentTransferStatus[] = ["pending", "awaiting_payment"];
-  if (!cancelableStatuses.includes(transfer.status)) {
+  if (!isCancelableRampTransferStatus(transfer.status)) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
 
@@ -1472,7 +1473,7 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
     transferId: transfer.id,
     organizationId: scope.auth.organizationId,
     projectId,
-    fromStatuses: cancelableStatuses,
+    fromStatuses: CANCELABLE_RAMP_TRANSFER_STATUSES,
     toStatus: "canceled",
     updatedAt: new Date().toISOString(),
   });
