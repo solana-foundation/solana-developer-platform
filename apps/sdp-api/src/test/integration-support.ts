@@ -13,6 +13,7 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { closeDatabasePools, getDb } from "@/db";
+import { createPostgresEarnRepository } from "@/db/repositories";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import app from "@/index";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
@@ -53,6 +54,7 @@ export const apiTestSupport = {
   createKVStoreSet,
   createMosaicService,
   createOrgSigner,
+  createPostgresEarnRepository,
   createSigningService,
   createToken2022Service,
   createVaultDeadline,

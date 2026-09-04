@@ -129,8 +129,8 @@ export const EARN_PROVIDER_SURFACING = {
   ground: false,
   kamino: true,
   // Jupiter Earn is a mainnet-only, public on-chain market. Its USDT row is
-  // visible in both product catalogues; the sandbox copy is browse-only and
-  // the shared production money-in gate remains closed until launch.
+  // visible in both product catalogues; the sandbox copy is browse-only while
+  // production projects may execute against the mainnet program.
   jupiter_lend: true,
 } as const satisfies Record<EarnProviderId, boolean>;
 
@@ -275,40 +275,36 @@ export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS
 );
 
 /**
- * Environments where a `vault_direct` deposit may be OPENED.
+ * Environments where each `vault_direct` provider may accept a NEW deposit.
  *
- * ── Why production is (still) closed ────────────────────────────────────────
- * The vault-withdraw path exists now (PRO-1702: `POST /v1/earn/vault-withdrawals`
- * plus the treasury exit action), and it deliberately does NOT consult this
- * constant — an exit works in every environment a position exists in. What
- * remains open is PRO-1703: the Active tab does not surface vault positions,
- * so a mainnet position would be held somewhere the customer's primary
- * portfolio view cannot show. Entitlement will not save us: it is org-scoped,
- * not environment-scoped, so an entitled org would otherwise reach mainnet
- * before the epic's launch checklist (PRO-1635) says it may.
+ * Jupiter Lend has no devnet deployment, so its mirrored sandbox catalogue row
+ * stays browse-only and only a production project may reach its mainnet
+ * program. Existing devnet providers keep their sandbox-only launch posture.
+ * Withdrawals deliberately do not consult this map: an exit must remain open
+ * in every environment where a position can exist.
  *
- * Nothing here traps money that is already deposited — the SDP exit route
- * works in production, and the shares sit in the org's OWN custody wallet —
- * this closes the door IN, which is the only direction ADR 0002 ever permits
- * closing.
- *
- * Shared rather than duplicated on purpose: this is the single fact the API
- * refuses on and the dashboard hides the affordance on, and a UI that offered a
- * button the server refuses is the specific failure this replaces.
- *
- * TO OPEN PRODUCTION: land the Active-tab surfacing (PRO-1703), then add
- * "production" here as part of PRO-1635's launch checklist. It is one line
- * precisely so it cannot be forgotten, and it is not a flag flip precisely
- * because the work is real.
+ * Exhaustive per provider so opening Jupiter on mainnet cannot accidentally
+ * open Kamino, Veda, or a future provider there too.
  */
-export const VAULT_DIRECT_DEPOSIT_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox"];
+export const EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS = {
+  veda: ["sandbox"],
+  upshift: ["sandbox"],
+  perena: ["sandbox"],
+  ground: [],
+  kamino: ["sandbox"],
+  jupiter_lend: ["production"],
+} as const satisfies Record<EarnProviderId, readonly SdpEnvironment[]>;
 
 /**
- * Whether a non-custodial vault deposit may be opened in this environment.
- * Fail-closed: an unrecognized environment answers false.
+ * Whether a provider's non-custodial vault deposit may be opened in this
+ * environment. Fail-closed for either an unknown provider or environment.
  */
-export function isVaultDirectDepositEnabled(environment: string): boolean {
-  return (VAULT_DIRECT_DEPOSIT_ENVIRONMENTS as readonly string[]).includes(environment);
+export function isVaultDirectDepositEnabled(environment: string, provider: string): boolean {
+  if (!Object.hasOwn(EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS, provider)) return false;
+  const environments = EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS[
+    provider as EarnProviderId
+  ] as readonly string[];
+  return environments.includes(environment);
 }
 
 /**

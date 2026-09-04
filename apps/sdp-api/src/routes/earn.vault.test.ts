@@ -91,6 +91,11 @@ const TEST_API_KEY = {
   raw: "sk_test_earn_vault",
   prefix: "sk_test_ear",
 };
+const PROD_API_KEY = {
+  id: "key_earn_vault_prod",
+  raw: "sk_live_earn_vault",
+  prefix: "sk_live_ear",
+};
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -103,6 +108,12 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   signingWalletId: null,
   status: "active",
   expiresAt: null,
+};
+const PROD_CACHED_API_KEY: CachedApiKey = {
+  ...TEST_CACHED_API_KEY,
+  id: PROD_API_KEY.id,
+  projectId: TEST_PRODUCTION_PROJECT.id,
+  environment: "production",
 };
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -188,6 +199,8 @@ async function seedConnectionWallet(): Promise<void> {
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, prodKeyHash, PROD_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -200,7 +213,9 @@ async function seedAuth(): Promise<void> {
         TEST_ORG.slug,
         "enterprise",
         "active",
-        JSON.stringify({ providerOverrides: { earn: { kamino: true, veda: true } } })
+        JSON.stringify({
+          providerOverrides: { earn: { kamino: true, veda: true, jupiter_lend: true } },
+        })
       ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
@@ -251,6 +266,24 @@ async function seedAuth(): Promise<void> {
         JSON.stringify(["*"]),
         "active"
       ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        PROD_API_KEY.id,
+        TEST_ORG.id,
+        TEST_PRODUCTION_PROJECT.id,
+        TEST_USER.id,
+        "Earn Vault Production Key",
+        PROD_API_KEY.prefix,
+        prodKeyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "active"
+      ),
   ]);
 }
 
@@ -279,7 +312,11 @@ async function seedStrategy(
   return strategy;
 }
 
-function postVaultDeposit(body: Record<string, unknown>, idempotencyKey?: string) {
+function postVaultDeposit(
+  body: Record<string, unknown>,
+  idempotencyKey?: string,
+  apiKey = TEST_API_KEY.raw
+) {
   const request = { ...body };
   const key =
     idempotencyKey ?? (typeof request.requestId === "string" ? request.requestId : undefined);
@@ -289,7 +326,7 @@ function postVaultDeposit(body: Record<string, unknown>, idempotencyKey?: string
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         ...(key === undefined ? {} : { "Idempotency-Key": key }),
       },
@@ -328,6 +365,47 @@ afterEach(() => {
 });
 
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
+  it("opens Jupiter Lend only from production without inventing minSharesOut", async () => {
+    await seedAuth();
+    await seedWallet({
+      configId: "cfg_earn_vault_jupiter",
+      custodyWalletId: "cwlt_earn_vault_jupiter",
+      providerWalletId: "privy_earn_vault_jupiter",
+      projectId: TEST_PRODUCTION_PROJECT.id,
+    });
+    const strategy = await seedStrategy({
+      provider: "jupiter_lend",
+      providerReference: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      name: "Jupiter Lend USDT",
+      underlyingSource: "Jupiter Lend",
+      depositMints: ["Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"],
+      shareMint: "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A",
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+
+    const res = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_jupiter",
+        amount: "10",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        environment: "production",
+        provider: "jupiter_lend",
+        minSharesOut: undefined,
+      }),
+      expect.anything()
+    );
+  });
+
   /**
    * The operator stop switch. `paused` rows are deliberately retained by the
    * catalogue sync so a human can halt deposits during an exploit or a depeg;

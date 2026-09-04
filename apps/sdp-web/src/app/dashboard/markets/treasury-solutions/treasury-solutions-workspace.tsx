@@ -81,6 +81,7 @@ import {
   type EarnProviderAccess,
   type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
@@ -1014,7 +1015,9 @@ function TreasuryStrategiesCard({
   unrecordedShareMints: ReadonlySet<string> | undefined;
 }) {
   const t = useTranslations();
-  const depositsEnabled = isVaultDirectDepositEnabled(environment);
+  const depositsEnabled = SURFACED_VAULT_DIRECT_EARN_PROVIDERS.some((provider) =>
+    isVaultDirectDepositEnabled(environment, provider)
+  );
 
   return (
     <section>

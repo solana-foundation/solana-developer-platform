@@ -523,28 +523,6 @@ export async function createEarnExternalWalletDepositTransaction(
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  // ENVIRONMENT CAPABILITY first, same constant as the custody deposit: what
-  // keeps production vault deposits closed (PRO-1703) is not custody-shaped,
-  // so the caller-signed path must not slip past it.
-  if (!isVaultDirectDepositEnabled(environment)) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Vault deposits are not available in production yet: vault positions are not surfaced " +
-        "on the Active tab, so a position opened here would sit outside the portfolio view."
-    );
-  }
-
-  // SLIPPAGE FLOOR, required wherever real money moves — see the custody
-  // deposit for the full rationale. It matters MORE here: the signer is a
-  // stranger's wallet, so nothing else stands between a stale vault state and
-  // the legacy no-floor instruction.
-  if (environment === "production" && body.minSharesOut === undefined) {
-    throw badRequest(
-      "minSharesOut is required for a production vault deposit: without a floor the pinned " +
-        "Kamino SDK builds the legacy deposit instruction, which accepts any number of shares."
-    );
-  }
-
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
   if (!strategy || strategy.environment !== environment) {
     throw notFound("Earn strategy");
@@ -569,6 +547,25 @@ export async function createEarnExternalWalletDepositTransaction(
     );
   }
   const provider = strategy.provider;
+
+  if (!isVaultDirectDepositEnabled(environment, provider)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `Vault deposits for ${provider} are not available from a ${environment} project.`
+    );
+  }
+
+  // Jupiter's official Earn instructions have no minSharesOut parameter. Other
+  // providers retain the production floor guard if their environment is opened.
+  if (
+    environment === "production" &&
+    provider !== "jupiter_lend" &&
+    body.minSharesOut === undefined
+  ) {
+    throw badRequest(
+      "minSharesOut is required for this production vault deposit because the provider supports a share floor."
+    );
+  }
 
   assertEarnProviderSurfaced(provider);
   await assertProviderAvailable(

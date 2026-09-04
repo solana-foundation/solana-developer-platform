@@ -115,6 +115,7 @@ describe("jupiterRateFromBps", () => {
     assert.equal(jupiterRateFromBps(7), "0.0007");
     assert.equal(jupiterRateFromBps(10_000), "1");
     assert.equal(jupiterRateFromBps(0), "0");
+    assert.equal(jupiterRateFromBps(`${"0".repeat(100_000)}418`), "0.0418");
   });
 
   it("refuses invalid values", () => {

@@ -1,3 +1,4 @@
+import BN from "bn.js";
 import { describe, expect, it } from "vitest";
 import { fromAtoms, toAtoms } from "./amounts";
 
@@ -6,6 +7,10 @@ describe("Jupiter Lend amount conversion", () => {
     for (const value of ["1", "1.5", "0.000001", "18446744073709.551615"]) {
       expect(fromAtoms(toAtoms("amount", value))).toBe(value);
     }
+  });
+
+  it("formats a large configured precision without regex backtracking", () => {
+    expect(fromAtoms(new BN(`1${"0".repeat(10_000)}`), 10_000)).toBe("1");
   });
 
   it.each(["0", "-1", "1e3", "1.0000001", "18446744073709.551616"])(

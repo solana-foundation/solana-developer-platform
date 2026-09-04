@@ -423,24 +423,23 @@ organization's own custody wallets.
     is how a whole money-moving surface stayed invisible to the sink inventory.
     The policy envelope is `program` / `earn_vault_deposit`; migration 0060
     re-opens that live family after the earlier vocabulary trim.
-  - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
-    (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
-    vault-withdraw route. The dashboard surfaces the durable position but
-    visibly disables its exit action. Entitlement cannot express this — it is
-    org-scoped, not environment-scoped. The dashboard disables the deposit
-    affordance from the same constant so the opportunity remains discoverable
-    without advertising an action the API will refuse.
-  - `minSharesOut` is **required in production** and optional in sandbox: the
-    pinned Kamino SDK picks the LEGACY deposit instruction when it is absent, so
-    there is no implicit floor at all.
+  - **Provider/environment capability after strategy resolution.**
+    `isVaultDirectDepositEnabled(environment, provider)`
+    (`@sdp/types/provider-access`) opens only the provider's real deployment:
+    Jupiter Lend on production/mainnet; Kamino and Veda on sandbox/devnet. The
+    dashboard reads the same map, so it never advertises an action the API will
+    refuse.
+  - `minSharesOut` remains required for a production provider whose builder
+    supports a share floor. Jupiter Lend is the explicit exception because its
+    official Earn instruction has no such parameter; passing one is rejected.
   - `Idempotency-Key` is **REQUIRED** and body `requestId` is rejected. There is
     no provider-side dedupe to fall back on: the chain will happily accept the
     same transfer twice. The header value is stored with a canonical
     `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
     position is claimed — reusing a key with a different intent is a **409**, not
     a silent replay, and writes nothing.
-  - Gate order: schema → environment capability → production floor → strategy
-    resolution → deposit-style check → surfacing → entitlement →
+  - Gate order: schema → strategy resolution → provider/environment capability
+    → provider-specific production floor → deposit-style check → surfacing → entitlement →
     **catalogue admission** → wallet. `assertStrategyDepositable`
     (`handlers/admission.ts`) is shared with the custodial path and asserts
     `status = 'active'` plus `isClusterFundableInEnvironment`; without it a
@@ -897,9 +896,8 @@ produces a movement, so nothing on this surface reports it. That outcome is
 observable via `GET /v1/wallets/approval-requests/:approvalRequestId`, whose
 `status` plus nested `operation.status` distinguish rejected/canceled from
 approved-and-executed. Wiring the dashboard to it is deliberately not done
-here. `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` still fail-closes production
-DEPOSITS — the remaining blocker is PRO-1703 (vault positions on the Active
-tab), not the exit path.
+here. `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` scopes new deposits to
+each provider's supported deployment; withdrawals remain open independently.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
 `SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
@@ -934,8 +932,9 @@ kvault program id also resolves on devnet with no accounts under it.
   (Kamino is keyless; a credentialed vault provider's own client throws
   `PROVIDER_NOT_CONFIGURED` from inside its build). Capability (501) is the
   only provider-shaped refusal, and wallet policy is the org's own custody
-  control, not a provider gate. It also ignores `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`:
-  the environment fail-close guards the way IN only.
+  control, not a provider gate. It also ignores
+  `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`: the environment fail-close
+  guards the way IN only.
 - **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
   deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
   because a deposit quote exists only to open a new position. It takes the

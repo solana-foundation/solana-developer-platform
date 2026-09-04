@@ -28,18 +28,26 @@ function integerString(value: unknown): string | undefined {
     return Number.isSafeInteger(value) && value >= 0 ? String(value) : undefined;
   }
   if (typeof value !== "string" || !/^\d+$/.test(value)) return undefined;
-  return value.replace(/^0+(?=\d)/, "");
+  let firstNonZero = 0;
+  while (firstNonZero < value.length - 1 && value.charCodeAt(firstNonZero) === 48) {
+    firstNonZero += 1;
+  }
+  return value.slice(firstNonZero);
 }
 
 /** Convert provider basis points to a decimal fraction without floating point. */
 export function jupiterRateFromBps(value: unknown): string | undefined {
   const digits = integerString(value);
   if (digits === undefined) return undefined;
-  return (
-    `${digits.padStart(5, "0").slice(0, -4)}.${digits.padStart(5, "0").slice(-4)}`
-      .replace(/^0+(?=\d)/, "")
-      .replace(/\.?0+$/, "") || "0"
-  );
+  const basisPoints = BigInt(digits);
+  const whole = (basisPoints / 10_000n).toString();
+  const rawFraction = (basisPoints % 10_000n).toString().padStart(4, "0");
+  let fractionEnd = rawFraction.length;
+  while (fractionEnd > 0 && rawFraction.charCodeAt(fractionEnd - 1) === 48) {
+    fractionEnd -= 1;
+  }
+  const fraction = rawFraction.slice(0, fractionEnd);
+  return fraction ? `${whole}.${fraction}` : whole;
 }
 
 function atomicUsdtToUsd(value: unknown): number | undefined {

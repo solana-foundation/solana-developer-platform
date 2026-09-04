@@ -1,4 +1,12 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import type {
+  EarnExternalWalletDepositResponse,
+  EarnExternalWalletDepositTransactionResponse,
+  EarnExternalWalletWithdrawalResponse,
+  EarnExternalWalletWithdrawalTransactionResponse,
+  EarnVaultDeposit,
+  EarnVaultWithdrawalResponse,
+} from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   generateKeyPair,
@@ -13,26 +21,47 @@ import {
   createFundedIntegrationWallet,
   env,
   initIntegrationSuite,
+  requestWithApiKey,
   TEST_ORG,
   TEST_PROJECT,
-  TEST_USER,
+  TEST_PROJECT_CACHED_KEY,
 } from "../helpers/integration";
 
 const {
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
+  createKVStoreSet,
+  createPostgresEarnRepository,
   createVaultDeadline,
-  depositIntoVault,
   getDb,
   resolveEarnExecutionClient,
-  submitExternalWalletDeposit,
-  submitExternalWalletWithdrawal,
   supportsVaultDirect,
-  withdrawFromVault,
 } = apiTestSupport;
 
 const ENABLED = process.env.JUPITER_LEND_SURFPOOL_E2E === "true";
 const DEPOSIT_AMOUNT = "5";
+const api = requestWithApiKey();
+
+async function post<T>(
+  path: string,
+  body: Record<string, unknown>,
+  idempotent = false
+): Promise<T> {
+  const response = await api(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotent ? { "Idempotency-Key": crypto.randomUUID() } : {}),
+    },
+    body: JSON.stringify(body),
+    timeoutMs: 120_000,
+  });
+  const payload = (await response.json()) as { data?: T; error?: { message?: string } };
+  if (!response.ok || payload.data === undefined) {
+    throw new Error(
+      `${path} failed (${response.status}): ${payload.error?.message ?? JSON.stringify(payload)}`
+    );
+  }
+  return payload.data;
+}
 
 async function cheat(method: string, params: unknown[]): Promise<unknown> {
   const response = await fetch(env.SOLANA_RPC_URL ?? "", {
@@ -110,118 +139,130 @@ async function signBuilt(unsignedBase64: string, keyPair: CryptoKeyPair): Promis
 }
 
 describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", () => {
+  let originalMarketsEnabled: string | undefined;
+  let originalEarnEnabled: string | undefined;
+  let strategyId: string;
+
   beforeAll(async () => {
+    originalMarketsEnabled = env.MARKETS_ENABLED;
+    originalEarnEnabled = env.EARN_ENABLED;
+    env.MARKETS_ENABLED = "true";
+    env.EARN_ENABLED = "true";
     await putForkClockAheadOfLazyClones();
-    await initIntegrationSuite();
+    const { apiKeyHash } = await initIntegrationSuite();
     await getDb(env)
       .prepare("UPDATE projects SET environment = 'production' WHERE id = ?")
       .bind(TEST_PROJECT.id)
       .run();
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(
+        JSON.stringify({
+          providerOverrides: { custody: { local: true }, earn: { jupiter_lend: true } },
+        }),
+        TEST_ORG.id
+      )
+      .run();
+    await createKVStoreSet(env).apiKeys.put(
+      `key:${apiKeyHash}`,
+      JSON.stringify({ ...TEST_PROJECT_CACHED_KEY, environment: "production" })
+    );
+    const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
+      provider: "jupiter_lend",
+      providerReference: JUPITER_LEND_USDT.assetMint,
+      name: "Jupiter Lend USDT",
+      sourceKind: "defi",
+      underlyingSource: "Jupiter Lend",
+      depositMints: [JUPITER_LEND_USDT.assetMint],
+      shareMint: JUPITER_LEND_USDT.shareMint,
+      apyType: "variable",
+      currentApy: null,
+      liquidityTerm: "instant",
+      redemptionDelayDays: null,
+      riskMetadata: { curator: "jupiter" },
+      status: "active",
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+    if (!strategy) throw new Error("Failed to seed the Jupiter Lend USDT strategy");
+    strategyId = strategy.id;
   });
 
-  afterAll(async () => cleanupIntegrationSuite());
+  afterAll(async () => {
+    env.MARKETS_ENABLED = originalMarketsEnabled;
+    env.EARN_ENABLED = originalEarnEnabled;
+    await cleanupIntegrationSuite();
+  });
 
   it("Treasury Solutions custody deposits and withdraws on the mainnet fork", async () => {
     const wallet = await createFundedIntegrationWallet({ label: "Jupiter treasury" });
     await fundUsdt(wallet.publicKey);
 
-    const deposited = await depositIntoVault(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      environment: "production",
-      provider: "jupiter_lend",
-      providerReference: JUPITER_LEND_USDT.assetMint,
-      wallet: { id: wallet.id, walletId: wallet.walletId, publicKey: wallet.publicKey },
-      tokenMint: JUPITER_LEND_USDT.assetMint,
-      shareMint: JUPITER_LEND_USDT.shareMint,
-      label: "Jupiter Lend USDT",
-      amount: DEPOSIT_AMOUNT,
-      requestId: crypto.randomUUID(),
-      userId: TEST_USER.id,
-    });
-    expect(deposited.movement.signature).toBeTruthy();
+    const deposited = await post<EarnVaultDeposit>(
+      "/v1/earn/vault-deposits",
+      {
+        strategyId,
+        custodyWalletId: wallet.id,
+        amount: DEPOSIT_AMOUNT,
+      },
+      true
+    );
+    expect(deposited.signature).toBeTruthy();
 
     const holding = await waitForShares(wallet.publicKey, false);
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
-    const withdrawn = await withdrawFromVault(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      environment: "production",
-      provider: "jupiter_lend",
-      positionId: deposited.position.id,
-      vaultAddress: JUPITER_LEND_USDT.assetMint,
-      tokenMint: JUPITER_LEND_USDT.assetMint,
-      shareMint: JUPITER_LEND_USDT.shareMint,
-      wallet: { id: wallet.id, walletId: wallet.walletId, publicKey: wallet.publicKey },
-      shares: holding?.shares ?? "0",
-      requestId: crypto.randomUUID(),
-      userId: TEST_USER.id,
-    });
-    expect(withdrawn.movement.signature).toBeTruthy();
+    const withdrawn = await post<EarnVaultWithdrawalResponse>(
+      "/v1/earn/vault-withdrawals",
+      {
+        positionId: deposited.positionId,
+        shares: holding?.shares ?? "0",
+      },
+      true
+    );
+    expect(withdrawn.withdrawal.signature).toBeTruthy();
     expect((await waitForShares(wallet.publicKey, true))?.shares ?? "0").toBe("0");
   }, 180_000);
 
-  it("Embedded Yield external-wallet build/submit deposits and withdraws", async () => {
+  it("Embedded Yield external-wallet API deposits and withdraws on the mainnet fork", async () => {
     const ownerKeyPair = await generateKeyPair();
     const ownerAddress = await getAddressFromPublicKey(ownerKeyPair.publicKey);
     await fundSol(ownerAddress);
     await fundUsdt(ownerAddress);
 
-    const depositBuild = await buildExternalWalletDepositTransaction(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      environment: "production",
-      provider: "jupiter_lend",
-      providerReference: JUPITER_LEND_USDT.assetMint,
-      ownerAddress,
-      tokenMint: JUPITER_LEND_USDT.assetMint,
-      shareMint: JUPITER_LEND_USDT.shareMint,
-      label: "Jupiter Lend USDT",
-      amount: DEPOSIT_AMOUNT,
-      userId: TEST_USER.id,
-    });
-    expect(depositBuild.kind).toBe("built");
-    if (depositBuild.kind !== "built") throw new Error("Unexpected split swap build");
-    const depositResult = await submitExternalWalletDeposit(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      environment: "production",
-      transactionId: depositBuild.built.id,
-      signedTransaction: await signBuilt(depositBuild.built.unsigned_transaction, ownerKeyPair),
-      requestId: crypto.randomUUID(),
-      userId: TEST_USER.id,
-    });
-    expect(depositResult.movement.signature).toBeTruthy();
+    const depositBuild = await post<EarnExternalWalletDepositTransactionResponse>(
+      "/v1/earn/external-wallet/deposit-transactions",
+      { strategyId, ownerAddress, amount: DEPOSIT_AMOUNT }
+    );
+    const depositResult = await post<EarnExternalWalletDepositResponse>(
+      "/v1/earn/external-wallet/deposits",
+      {
+        transactionId: depositBuild.transaction.transactionId,
+        signedTransaction: await signBuilt(depositBuild.transaction.transaction, ownerKeyPair),
+      },
+      true
+    );
+    expect(depositResult.deposit.signature).toBeTruthy();
 
     const holding = await waitForShares(ownerAddress, false);
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
-    const withdrawalBuild = await buildExternalWalletWithdrawalTransaction(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      environment: "production",
-      provider: "jupiter_lend",
-      positionId: depositResult.position.id,
-      vaultAddress: JUPITER_LEND_USDT.assetMint,
-      tokenMint: JUPITER_LEND_USDT.assetMint,
-      shareMint: JUPITER_LEND_USDT.shareMint,
-      ownerAddress,
-      label: "Jupiter Lend USDT",
-      shareAtaRentFunder: depositResult.position.share_ata_rent_funder,
-      shares: holding?.shares ?? "0",
-      userId: TEST_USER.id,
-    });
-    const withdrawalResult = await submitExternalWalletWithdrawal(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      environment: "production",
-      transactionId: withdrawalBuild.id,
-      signedTransaction: await signBuilt(withdrawalBuild.unsigned_transaction, ownerKeyPair),
-      requestId: crypto.randomUUID(),
-      userId: TEST_USER.id,
-    });
-    expect(withdrawalResult.movement.signature).toBeTruthy();
+    const withdrawalBuild = await post<EarnExternalWalletWithdrawalTransactionResponse>(
+      "/v1/earn/external-wallet/withdrawal-transactions",
+      {
+        positionId: depositResult.deposit.positionId,
+        shares: holding?.shares ?? "0",
+      }
+    );
+    const withdrawalResult = await post<EarnExternalWalletWithdrawalResponse>(
+      "/v1/earn/external-wallet/withdrawals",
+      {
+        transactionId: withdrawalBuild.transaction.transactionId,
+        signedTransaction: await signBuilt(withdrawalBuild.transaction.transaction, ownerKeyPair),
+      },
+      true
+    );
+    expect(withdrawalResult.withdrawal.signature).toBeTruthy();
     expect((await waitForShares(ownerAddress, true))?.shares ?? "0").toBe("0");
   }, 180_000);
 });

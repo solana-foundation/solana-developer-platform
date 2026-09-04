@@ -33,6 +33,11 @@ export function toAtoms(field: string, value: string, decimals = 6): BN {
 export function fromAtoms(value: BN, decimals = 6): string {
   const digits = value.toString(10).padStart(decimals + 1, "0");
   const whole = digits.slice(0, -decimals);
-  const fraction = digits.slice(-decimals).replace(/0+$/, "");
+  const rawFraction = digits.slice(-decimals);
+  let fractionEnd = rawFraction.length;
+  while (fractionEnd > 0 && rawFraction.charCodeAt(fractionEnd - 1) === 48) {
+    fractionEnd -= 1;
+  }
+  const fraction = rawFraction.slice(0, fractionEnd);
   return fraction ? `${whole}.${fraction}` : whole;
 }
