@@ -441,7 +441,11 @@
     "rpcByokRotated": "Chave rotacionada.",
     "rpcByokTest": "Testar chave",
     "rpcByokTestPassed": "Alcançou o provedor agora mesmo.",
-    "rpcByokTestFailed": "Não foi possível alcançar o provedor."
+    "rpcByokTestFailed": "Não foi possível alcançar o provedor.",
+    "statusNotConnected": "Não conectado",
+    "statusOnRequest": "Disponível mediante solicitação",
+    "rpcByokDeleteConfirm": "Excluir esta conexão? A chave foi destruída quando ela foi desativada, então isso apenas limpa o registro.",
+    "rpcByokDeleteNamed": "Excluir {name}"
   },
   "notifications": {
     "ariaLabel": "Notificações",
