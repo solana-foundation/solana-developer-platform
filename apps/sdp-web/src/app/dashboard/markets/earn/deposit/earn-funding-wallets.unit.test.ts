@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type EarnFundingWallet, fetchFundingWallets } from "./earn-funding-wallets";
+import {
+  type EarnFundingWallet,
+  fetchFundingWallets,
+  fetchLiveFundingWalletBalance,
+  refreshFundingWalletBalances,
+} from "./earn-funding-wallets";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -44,5 +49,71 @@ describe("fetchFundingWallets", () => {
     });
 
     await expect(fetchFundingWallets()).resolves.toEqual([active]);
+  });
+});
+
+describe("live funding wallet balances", () => {
+  it("bypasses the cached collection and reads the wallet balance endpoint", async () => {
+    const balances = [
+      {
+        token: "USDC",
+        mint: "USDC111111111111111111111111111111111111111",
+        amount: "425000000",
+        uiAmount: "425",
+        decimals: 6,
+      },
+    ];
+    const fetchMock = vi.fn(async () => Response.json({ data: { walletBalances: { balances } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchLiveFundingWalletBalance("wallet/live")).resolves.toEqual(balances);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/dashboard/payments/wallets/wallet%2Flive/balances",
+      { cache: "no-store" }
+    );
+  });
+
+  it("updates healthy wallets while preserving an unavailable wallet observation", async () => {
+    const first = wallet({
+      id: "first",
+      balances: [
+        {
+          token: "USDC",
+          mint: "USDC111111111111111111111111111111111111111",
+          amount: "1000000",
+          uiAmount: "1",
+          decimals: 6,
+        },
+      ],
+    });
+    const unavailable = wallet({ id: "unavailable", balances: undefined });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("provider-unavailable")) {
+          return Response.json({ error: { message: "RPC unavailable" } }, { status: 503 });
+        }
+        return Response.json({
+          data: {
+            walletBalances: {
+              balances: [
+                {
+                  token: "USDC",
+                  mint: "USDC111111111111111111111111111111111111111",
+                  amount: "500000",
+                  uiAmount: "0.5",
+                  decimals: 6,
+                },
+              ],
+            },
+          },
+        });
+      })
+    );
+
+    const refreshed = await refreshFundingWalletBalances([first, unavailable]);
+    expect(refreshed[0]?.balances?.[0]?.uiAmount).toBe("0.5");
+    expect(refreshed[1]).toBe(unavailable);
+    expect(refreshed[1]?.balances).toBeUndefined();
   });
 });

@@ -10,6 +10,7 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import Link from "next/link";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -381,7 +382,7 @@ function DepositWalletPicker({
         </p>
         {custodyEnabled ? (
           <Button asChild className="mt-3" size="sm" variant="outline">
-            <a href="/dashboard/wallets">{t("DashboardEarn.deposit.goToWallets")}</a>
+            <Link href="/dashboard/wallets/setup">{t("DashboardCustody.createWallet")}</Link>
           </Button>
         ) : null}
       </div>

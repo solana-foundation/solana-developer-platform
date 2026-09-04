@@ -45,6 +45,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.walletsEmptyTitle": "No active custody wallets",
   "DashboardEarn.deposit.walletsEmptyBody": "Create a wallet before depositing.",
   "DashboardEarn.deposit.goToWallets": "Open Wallets",
+  "DashboardCustody.createWallet": "Create wallet",
   "DashboardEarn.deposit.walletUnnamed": "Unnamed wallet",
   "DashboardEarn.deposit.strategyAssetUnavailable": "Strategy asset unavailable.",
   "DashboardEarn.deposit.vaultWalletTitle": "Funding wallet",
@@ -735,6 +736,19 @@ describe("EarnVaultDepositModal", () => {
       (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
     expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
+  });
+
+  it("sends an empty wallet state straight to wallet setup", async () => {
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [],
+      error: undefined,
+      isLoading: false,
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    const action = screen.getByRole("link", { name: "Create wallet" });
+    expect(action.getAttribute("href")).toBe("/dashboard/wallets/setup");
   });
 
   it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {

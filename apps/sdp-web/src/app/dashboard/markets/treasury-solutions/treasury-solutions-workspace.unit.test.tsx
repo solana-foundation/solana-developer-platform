@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   refreshStrategies: vi.fn(),
   refreshPositions: vi.fn(),
   refreshPrograms: vi.fn(),
+  refreshWalletBalances: vi.fn(),
   refreshWallets: vi.fn(),
   withdrawalsByProgram: {} as Record<string, Array<{ status: string; withdrawalRef?: string }>>,
   vaultDeposits: [] as Array<{
@@ -49,6 +50,13 @@ const mocks = vi.hoisted(() => ({
   vaultDepositTrackers: {} as Record<
     string,
     {
+      onSettled?: (deposit: {
+        createdAt?: string;
+        failureReason: string | null;
+        movementId: string;
+        positionId: string;
+        status: string;
+      }) => void;
       onUpdated?: (deposit: {
         createdAt?: string;
         failureReason: string | null;
@@ -61,6 +69,13 @@ const mocks = vi.hoisted(() => ({
   vaultWithdrawalTrackers: {} as Record<
     string,
     {
+      onSettled?: (withdrawal: {
+        createdAt: string;
+        failureReason: string | null;
+        movementId: string;
+        positionId: string;
+        status: string;
+      }) => void;
       onUpdated?: (withdrawal: {
         createdAt: string;
         failureReason: string | null;
@@ -97,6 +112,7 @@ const mocks = vi.hoisted(() => ({
   strategiesStaleError: false,
   strategyMissingShareMint: false,
   walletsError: false,
+  walletsEmpty: false,
   corruptStableShareMint: false,
   secondWalletBalances: undefined as
     | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
@@ -117,39 +133,42 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
   useEarnFundingWallets: () => ({
     error: mocks.walletsError ? new Error("wallets unavailable") : undefined,
     isLoading: false,
+    refreshBalances: mocks.refreshWalletBalances,
     refresh: mocks.refreshWallets,
-    wallets: [
-      {
-        id: "cwlt_live",
-        custodyConfigId: "custody_live",
-        isRuntimeExecutionAllowed: true,
-        walletId: "privy_live",
-        publicKey: "LiveWallet111111111111111111111111111111111",
-        label: "Operating treasury",
-        purpose: null,
-        status: "active",
-        createdAt: "2026-08-18T00:00:00.000Z",
-        provider: "privy",
-        balances: mocks.walletBalances,
-      },
-      ...(mocks.secondWalletBalances
-        ? [
-            {
-              id: "cwlt_second",
-              custodyConfigId: "custody_live",
-              isRuntimeExecutionAllowed: true,
-              walletId: "privy_second",
-              publicKey: "SecondWallet1111111111111111111111111111111",
-              label: "Reserve treasury",
-              purpose: null,
-              status: "active",
-              createdAt: "2026-08-18T00:00:00.000Z",
-              provider: "privy",
-              balances: mocks.secondWalletBalances,
-            },
-          ]
-        : []),
-    ],
+    wallets: mocks.walletsEmpty
+      ? []
+      : [
+          {
+            id: "cwlt_live",
+            custodyConfigId: "custody_live",
+            isRuntimeExecutionAllowed: true,
+            walletId: "privy_live",
+            publicKey: "LiveWallet111111111111111111111111111111111",
+            label: "Operating treasury",
+            purpose: null,
+            status: "active",
+            createdAt: "2026-08-18T00:00:00.000Z",
+            provider: "privy",
+            balances: mocks.walletBalances,
+          },
+          ...(mocks.secondWalletBalances
+            ? [
+                {
+                  id: "cwlt_second",
+                  custodyConfigId: "custody_live",
+                  isRuntimeExecutionAllowed: true,
+                  walletId: "privy_second",
+                  publicKey: "SecondWallet1111111111111111111111111111111",
+                  label: "Reserve treasury",
+                  purpose: null,
+                  status: "active",
+                  createdAt: "2026-08-18T00:00:00.000Z",
+                  provider: "privy",
+                  balances: mocks.secondWalletBalances,
+                },
+              ]
+            : []),
+        ],
   }),
 }));
 
@@ -384,6 +403,13 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
   ),
   EarnVaultWithdrawalOutcomeTracker: (props: {
     movementId: string;
+    onSettled?: (withdrawal: {
+      createdAt: string;
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
     onUpdated?: (withdrawal: {
       createdAt: string;
       failureReason: string | null;
@@ -412,6 +438,13 @@ vi.mock("../earn/earn-vault-deposit-modal", () => ({
   },
   EarnVaultDepositOutcomeTracker: (props: {
     movementId: string;
+    onSettled?: (deposit: {
+      createdAt?: string;
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
     onUpdated?: (deposit: {
       createdAt?: string;
       failureReason: string | null;
@@ -475,6 +508,7 @@ beforeEach(() => {
   mocks.secondWalletBalances = undefined;
   mocks.strategyMissingShareMint = false;
   mocks.walletsError = false;
+  mocks.walletsEmpty = false;
   mocks.corruptStableShareMint = false;
   vi.clearAllMocks();
 });
@@ -482,6 +516,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TreasurySolutionsWorkspace", () => {
+  it("guides a treasury with no wallet straight into wallet setup", () => {
+    mocks.walletsEmpty = true;
+    mocks.positionsEmpty = true;
+    renderWorkspace();
+
+    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    const action = screen.getByRole("link", { name: "Create wallet" });
+    expect(action.getAttribute("href")).toBe("/dashboard/wallets/setup");
+    expect(screen.queryByRole("link", { name: "View all" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Available strategies" })).toBeTruthy();
+  });
+
   it("renders live wallets, vault positions, and existing provider programs", async () => {
     const user = userEvent.setup();
     renderWorkspace();
@@ -685,6 +731,34 @@ describe("TreasurySolutionsWorkspace", () => {
         name: "Deposited: The latest deposit is confirmed on-chain.",
       })
     ).toBeTruthy();
+  });
+
+  it("refreshes uncached wallet balances when a vault movement settles", async () => {
+    const movementId = "earn_vault_movement_live_balance";
+    mocks.vaultDeposits = [
+      {
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "submitted",
+      },
+    ];
+    renderWorkspace();
+
+    await waitFor(() => expect(mocks.vaultDepositTrackers[movementId]).toBeTruthy());
+    act(() => {
+      mocks.vaultDepositTrackers[movementId]?.onSettled?.({
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWallets).not.toHaveBeenCalled();
   });
 
   it("updates a confirmed withdrawal to final settlement in place", async () => {
