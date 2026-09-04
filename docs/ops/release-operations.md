@@ -23,7 +23,7 @@ Vercel builds previews for pull-request branches. `apps/sdp-web/vercel.json` car
 
 The hosted API runs as a Node.js container on Cloud Run. Dev, stage, and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, cron jobs, and worker services.
 
-A continuous production deployment path exists in [`deploy.yml`](../../.github/workflows/deploy.yml) behind the `CONTINUOUS_PROD_DEPLOY` repository variable. It is not enabled. When it is, a merge to `main` that passes the stage smoke and carries no migrations since the last release tag would promote the signed merge image to production the same way a release does.
+A continuous production deployment path exists in [`deploy.yml`](../../.github/workflows/deploy.yml) behind the `CONTINUOUS_PROD_DEPLOY` repository variable. When it is enabled, a merge to `main` that passes the stage smoke and carries no migrations since the last release tag would promote the signed merge image to production the same way a release does.
 
 ## GitHub and GCP Setup
 
