@@ -107,7 +107,10 @@ deploy() {
          ((.spec.template.spec.template.spec.containers[0].env // []) + $redis + $extra)
     ' >"${tmp}/${db_job}.json"
   run jobs replace "${tmp}/${db_job}.json" >/dev/null
-  verify_redis_claim "${redis_db}"
+  if ! verify_redis_claim "${redis_db}"; then
+    run jobs delete "${db_job}" --quiet
+    exit 1
+  fi
   run jobs execute "${db_job}" --wait
 
   jq --arg name "${api_service}" --arg pr "${pr}" --arg image "${image}" \
@@ -145,7 +148,14 @@ deploy() {
 
 teardown() {
   if run jobs describe "${db_job}" >/dev/null 2>&1; then
-    run jobs execute "${db_job}" --args drop --wait || echo "database drop failed; dropping resources anyway" >&2
+    local drop_args="drop" own_db
+    own_db="$(run jobs describe "${db_job}" \
+      --format 'value(metadata.labels.sdp-ephemeral-redis-db)' 2>/dev/null || true)"
+    if [[ -n "${own_db}" ]] && redis_db_taken "$(list_redis_claims)" "${own_db}"; then
+      echo "redis db ${own_db} belongs to an older PR; dropping database only" >&2
+      drop_args="drop,skip-redis"
+    fi
+    run jobs execute "${db_job}" --args "${drop_args}" --wait || echo "database drop failed; dropping resources anyway" >&2
     run jobs delete "${db_job}" --quiet
   fi
   for service in "${api_service}" "${worker_service}"; do

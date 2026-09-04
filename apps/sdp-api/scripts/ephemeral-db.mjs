@@ -75,7 +75,11 @@ if (mode === "ensure") {
 } else {
   const redisUrl = process.env.REDIS_URL?.trim();
   const redisDb = process.env.EPHEMERAL_REDIS_DB?.trim();
-  if (redisUrl && redisDb) {
+  const skipRedis = process.argv.includes("skip-redis");
+  if (skipRedis) {
+    console.log("skip-redis: this environment lost its redis claim; not flushing");
+  }
+  if (!skipRedis && redisUrl && redisDb) {
     const url = new URL(redisUrl);
     url.pathname = `/${redisDb}`;
     const redis = new Redis(url.toString(), { maxRetriesPerRequest: 3, lazyConnect: true });
