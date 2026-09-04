@@ -489,18 +489,20 @@ export const createTransferSchema = z.strictObject({
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
-  // This route has no private-transfer path any more. The key is REJECTED rather
-  // than dropped: this object is not `.strict()`, so simply deleting the field
-  // would let an old caller's private-transfer request fall through and execute
-  // as an ordinary PUBLIC transfer — moving funds visibly that the caller asked
-  // to move privately. Failing the request is the only safe answer.
-  //
-  // The message says only that the field is not accepted. Whether SDP offers
-  // private transfers again is a product question, and a request validator is
-  // not the place to announce an answer to it.
-  privateTransfer: z
-    .undefined({ message: "privateTransfer is not accepted on this endpoint." })
-    .optional(),
+  /**
+   * Retired on this route: it has no private-transfer path any more. Declared
+   * as `never` rather than omitted — matching the retired `requestId` on the
+   * earn routes — so the stray key is rejected with this message instead of
+   * being silently stripped. This object is not `.strict()`, so stripping it
+   * would let an old caller's private-transfer request fall through and execute
+   * as an ordinary PUBLIC transfer, moving funds visibly that the caller asked
+   * to move privately. Failing the request is the only safe answer.
+   *
+   * The message says only that the field is not accepted. Whether SDP offers
+   * private transfers again is a product question, and a request validator is
+   * not the place to announce an answer to it.
+   */
+  privateTransfer: z.never("privateTransfer is not accepted on this endpoint").optional(),
 });
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);

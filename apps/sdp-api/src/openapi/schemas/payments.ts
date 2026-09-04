@@ -468,8 +468,11 @@ export const walletBalancesSchema = z
       "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
-// `privateTransfer` is omitted rather than documented: the runtime schema keeps
-// the key only to REJECT it, so the request body has no such property.
+// `privateTransfer` is omitted from the PROPERTIES — it is not an input any
+// more — but the retirement is stated in the description below rather than left
+// silent. A v1 caller that used to send the field needs the spec to explain the
+// 400 it now gets; dropping the property without a word makes the break look
+// like a bug.
 export const createTransferRequestSchema = createTransferSchemaBase
   .omit({ privateTransfer: true })
   .extend({
@@ -504,7 +507,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
   })
   .openapi({
     description:
-      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
+      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets. Transfers are public on-chain transfers: the retired `privateTransfer` field is no longer accepted, and a request that still includes it is rejected with 400 rather than executed as a public transfer.",
     example: {
       projectId: "prj_example",
       sourceCustodyWalletId: "cwlt_example",
