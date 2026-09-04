@@ -7,7 +7,9 @@ import {
   address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getSignatureFromTransaction,
   getTransactionEncoder,
+  signature as parseSignature,
   pipe,
   type Signature,
   setTransactionMessageFeePayerSigner,
@@ -164,6 +166,14 @@ async function broadcastTransfer(
     recipient: Address;
     amountBaseUnits: bigint;
     gatewayAuth: SpcAuthContext;
+    /**
+     * Called with the transaction's signature after signing and before the
+     * send, so the outcome of a request that dies mid-send stays resolvable:
+     * a persisted signature is what lets abandoned-reservation recovery ask
+     * SPC what happened instead of guessing. A 401 retry re-signs and reports
+     * its new signature the same way before its own send.
+     */
+    onSigned: (signature: Signature) => Promise<void>;
   }
 ): Promise<Signature> {
   const signer = input.signer;
@@ -199,6 +209,7 @@ async function broadcastTransfer(
       (m) => appendTransactionMessageInstructions(instructions, m)
     );
     const signed = await signTransactionMessageWithSigners(message);
+    await input.onSigned(getSignatureFromTransaction(signed));
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
     return solanaRpc.sendTransaction(gatewayRpc, signedBytes);
   });
@@ -285,31 +296,64 @@ async function reserveTransfer(
 }
 
 /**
- * A replayed reservation whose original request died before broadcast (see
- * `isAbandonedReservation`) is failed here so the client can retry under a new
- * idempotency key instead of reading `pending` forever. The `pending` CAS in
- * `settleTransfer` means a still-live original wins the race and this write is
- * a no-op.
+ * Resolve a replayed reservation whose original request died mid-flight (see
+ * `isAbandonedReservation`), instead of returning `pending` forever.
+ *
+ * The signature is persisted BEFORE the send, so it splits the crash window in
+ * two: a row without one provably never reached SPC and is failed, freeing the
+ * client to retry under a new idempotency key; a row with one may have executed,
+ * so it is promoted to `submitted` and confirmed against SPC — failing it would
+ * invite a duplicate of a transfer that already moved the balance. A signed
+ * transaction that never actually went out cannot confirm (its blockhash
+ * expires), so that row stays `submitted` for the operator, which is the same
+ * verdictless outcome the live confirm path settles for.
+ *
+ * The `pending` CAS in `settleTransfer` means a still-live original wins the
+ * race and these writes are no-ops.
  */
-async function failAbandonedReservation(
+async function resolveAbandonedReservation(
   env: Env,
   repo: PrivateChannelTransferRepository,
   row: PrivateChannelTransferRow,
-  sdpUserId: string
+  input: { gatewayUrl: string; gatewayAuth: SpcAuthContext; sdpUserId: string }
 ) {
-  const failureReason =
-    "Transfer reservation was abandoned before broadcast; retry with a new idempotency key.";
-  const failed = await settleTransfer(repo, row, { status: "failed", failureReason });
-  if (failed.status === "failed") {
-    await emitTransferEvent(
-      env,
-      failed,
-      PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
-      PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
-      sdpUserId
-    );
+  if (!row.signature) {
+    const failureReason =
+      "Transfer reservation was abandoned before broadcast; retry with a new idempotency key.";
+    const failed = await settleTransfer(repo, row, { status: "failed", failureReason });
+    if (failed.status === "failed") {
+      await emitTransferEvent(
+        env,
+        failed,
+        PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
+        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+        input.sdpUserId
+      );
+    }
+    return mapPrivateChannelTransferRow(failed);
   }
-  return mapPrivateChannelTransferRow(failed);
+
+  const signature = parseSignature(row.signature);
+  let latest = await settleTransfer(repo, row, { status: "submitted", signature });
+  const settled = await confirmAndPersistTransfer(env, repo, {
+    transferId: row.id,
+    gatewayUrl: input.gatewayUrl,
+    signature,
+    gatewayAuth: input.gatewayAuth,
+  });
+  if (settled) {
+    latest = settled;
+    const eventType =
+      latest.status === "confirmed"
+        ? PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_CONFIRMED
+        : PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED;
+    const eventStatus =
+      latest.status === "confirmed"
+        ? PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED
+        : PRIVATE_CHANNEL_EVENT_STATUSES.FAILED;
+    await emitTransferEvent(env, latest, eventType, eventStatus, input.sdpUserId);
+  }
+  return mapPrivateChannelTransferRow(latest);
 }
 
 /**
@@ -370,7 +414,11 @@ export async function createChannelTransfer(
   const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
   if (replay) {
     if (isAbandonedReservation(replay)) {
-      return failAbandonedReservation(env, repo, replay, input.sdpUserId);
+      return resolveAbandonedReservation(env, repo, replay, {
+        gatewayUrl: input.instance.gatewayUrl,
+        gatewayAuth: input.gatewayAuth,
+        sdpUserId: input.sdpUserId,
+      });
     }
     return mapPrivateChannelTransferRow(replay);
   }
@@ -407,7 +455,11 @@ export async function createChannelTransfer(
   });
   if (reserved.replayed) {
     if (isAbandonedReservation(reserved.row)) {
-      return failAbandonedReservation(env, repo, reserved.row, input.sdpUserId);
+      return resolveAbandonedReservation(env, repo, reserved.row, {
+        gatewayUrl: input.instance.gatewayUrl,
+        gatewayAuth: input.gatewayAuth,
+        sdpUserId: input.sdpUserId,
+      });
     }
     return mapPrivateChannelTransferRow(reserved.row);
   }
@@ -436,6 +488,21 @@ export async function createChannelTransfer(
       recipient: recipientAddress,
       amountBaseUnits,
       gatewayAuth: input.gatewayAuth,
+      // The reservation is still exclusively this request's (the CAS holds it),
+      // so record the signature on it before the bytes go out. If the write
+      // fails the send is aborted: better an unbroadcast failed transfer than
+      // an executed one whose signature exists nowhere.
+      onSigned: async (signedAs) => {
+        const recorded = await repo.updateTransfer({
+          id: pending.id,
+          status: "pending",
+          signature: signedAs,
+          expectedStatus: "pending",
+        });
+        if (!recorded) {
+          throw new AppError("CONFLICT", "Transfer reservation is no longer pending.");
+        }
+      },
     });
   } catch (error) {
     // A capacity shed happens at ingress before the dedup insert, so nothing was

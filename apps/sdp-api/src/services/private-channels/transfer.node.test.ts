@@ -345,7 +345,15 @@ describe("createChannelTransfer", () => {
     expect(vi.mocked(repo.createTransfer).mock.invocationCallOrder[0] ?? 0).toBeLessThan(
       vi.mocked(solanaRpc.sendTransaction).mock.invocationCallOrder[0] ?? 0
     );
+    // The signed transaction's signature is recorded before the send, so a
+    // crash mid-send leaves a row whose outcome recovery can resolve.
     expect(repo.updateTransfer).toHaveBeenNthCalledWith(1, {
+      id: "pct_transfer_test",
+      status: "pending",
+      signature: expect.any(String),
+      expectedStatus: "pending",
+    });
+    expect(repo.updateTransfer).toHaveBeenNthCalledWith(2, {
       id: "pct_transfer_test",
       status: "submitted",
       signature: SIGNATURE,
@@ -353,7 +361,7 @@ describe("createChannelTransfer", () => {
       expectedStatus: "pending",
     });
     // The confirm write is CAS'd on `submitted` and leaves the signature in place.
-    expect(repo.updateTransfer).toHaveBeenNthCalledWith(2, {
+    expect(repo.updateTransfer).toHaveBeenNthCalledWith(3, {
       id: "pct_transfer_test",
       status: "confirmed",
       expectedStatus: "submitted",
@@ -434,6 +442,7 @@ describe("createChannelTransfer", () => {
 
     expect(result).toMatchObject({ status: "submitted", signature: SIGNATURE });
     expect(vi.mocked(repo.updateTransfer).mock.calls.map(([call]) => call.status)).toEqual([
+      "pending",
       "submitted",
     ]);
     expect(
@@ -476,18 +485,18 @@ describe("createChannelTransfer", () => {
     });
     expect(retried).toMatchObject({ status: "confirmed", signature: SIGNATURE });
     expect(repo.updateTransfer).toHaveBeenNthCalledWith(
-      1,
+      2,
       expect.objectContaining({
         status: "failed",
         failureReason: "SPC rejected transfer",
       })
     );
     expect(repo.updateTransfer).toHaveBeenNthCalledWith(
-      2,
+      4,
       expect.objectContaining({ status: "submitted", signature: SIGNATURE })
     );
     expect(repo.updateTransfer).toHaveBeenNthCalledWith(
-      3,
+      5,
       expect.objectContaining({ status: "confirmed", expectedStatus: "submitted" })
     );
     expect(transferEvents.emitTransferEvent).toHaveBeenNthCalledWith(
@@ -548,14 +557,14 @@ describe("createChannelTransfer", () => {
   });
 
   it("fails a replayed reservation the original request abandoned before broadcast", async () => {
-    // The original request dies between the reserving insert and the broadcast:
-    // the broadcast rejects and the settle write also fails, leaving the row
-    // `pending`. Its `updated_at` (2026-07-28 from the mock) is far older than
-    // the abandonment window by the time the retry arrives.
-    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC unreachable"));
+    // The original request dies before anything is signed: the blockhash read
+    // rejects and the settle write also fails, leaving the row `pending` with
+    // no signature. Its `updated_at` (2026-07-28 from the mock) is far older
+    // than the abandonment window by the time the retry arrives.
+    vi.mocked(solanaRpc.getRecentBlockhash).mockRejectedValueOnce(new Error("SPC unreachable"));
     vi.mocked(repo.updateTransfer).mockRejectedValueOnce(new Error("database unavailable"));
     const stuck = await createChannelTransfer(TEST_ENV, makeInput());
-    expect(stuck).toMatchObject({ status: "pending" });
+    expect(stuck).toMatchObject({ status: "pending", signature: null });
 
     vi.mocked(solanaRpc.sendTransaction).mockClear();
     const replayed = await createChannelTransfer(TEST_ENV, makeInput());
@@ -575,8 +584,37 @@ describe("createChannelTransfer", () => {
     );
   });
 
+  it("confirms instead of failing a replayed reservation whose signature was persisted", async () => {
+    // The original request dies after the send but before the settle: the
+    // pre-send persist recorded the signature, so recovery must ask SPC what
+    // happened rather than invite a duplicate via "retry with a new key".
+    const baseUpdate = vi.mocked(repo.updateTransfer).getMockImplementation();
+    if (!baseUpdate) throw new Error("updateTransfer mock has no base implementation");
+    vi.mocked(repo.updateTransfer)
+      .mockImplementationOnce(baseUpdate)
+      .mockRejectedValueOnce(new Error("database unavailable"));
+    const stuck = await createChannelTransfer(TEST_ENV, makeInput());
+    // The returned snapshot predates the lost settle, but the DB row carries
+    // the pre-send signature — which is what recovery reads.
+    expect(stuck).toMatchObject({ status: "pending" });
+
+    vi.mocked(solanaRpc.sendTransaction).mockClear();
+    const replayed = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(replayed).toMatchObject({ status: "confirmed" });
+    expect(replayed.signature).not.toBeNull();
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+    expect(transferEvents.emitTransferEvent).toHaveBeenLastCalledWith(
+      TEST_ENV,
+      expect.objectContaining({ status: "confirmed" }),
+      "transfer.transfer.confirmed",
+      "confirmed",
+      "usr_transfer_test"
+    );
+  });
+
   it("returns a replayed pending row untouched while the original request is still live", async () => {
-    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC unreachable"));
+    vi.mocked(solanaRpc.getRecentBlockhash).mockRejectedValueOnce(new Error("SPC unreachable"));
     vi.mocked(repo.updateTransfer).mockRejectedValueOnce(new Error("database unavailable"));
     const stuck = await createChannelTransfer(TEST_ENV, makeInput());
 
@@ -606,7 +644,12 @@ describe("createChannelTransfer", () => {
   });
 
   it("leaves the row pending and still returns it when the status write fails after accept", async () => {
-    vi.mocked(repo.updateTransfer).mockRejectedValueOnce(new Error("database unavailable"));
+    // The pre-send signature persist goes through; only the post-accept settle is lost.
+    const baseUpdate = vi.mocked(repo.updateTransfer).getMockImplementation();
+    if (!baseUpdate) throw new Error("updateTransfer mock has no base implementation");
+    vi.mocked(repo.updateTransfer)
+      .mockImplementationOnce(baseUpdate)
+      .mockRejectedValueOnce(new Error("database unavailable"));
 
     const result = await createChannelTransfer(TEST_ENV, makeInput());
 
