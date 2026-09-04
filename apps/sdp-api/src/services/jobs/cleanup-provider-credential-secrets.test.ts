@@ -22,7 +22,7 @@ const USER_ID = "usr_credential_cleanup";
 
 async function insertCredential(params: {
   id: string;
-  status?: "active" | "retired" | "deactivated";
+  status?: "pending" | "active" | "failed_validation" | "retired" | "deactivated";
   backend?: "encrypted_db" | "gcp_secret_manager";
   retentionExpiresAt?: string | null;
   rotatedFromId?: string | null;
@@ -381,6 +381,56 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
     expect(JSON.stringify(logError.mock.calls)).not.toContain(rawFailure);
     expect(JSON.stringify(logError.mock.calls)).not.toContain("projects/p/secrets");
   });
+
+  it.each(["failed_validation", "deactivated"] as const)(
+    "retries cleanup for a GCP rotation candidate that ends %s without changing its status",
+    async (status) => {
+      const predecessorId = `pcred_${status}_predecessor`;
+      const candidateId = `pcred_${status}_candidate`;
+      await insertCredential({ id: predecessorId, status: "active" });
+      await insertCredential({
+        id: candidateId,
+        status: "pending",
+        backend: "gcp_secret_manager",
+        rotatedFromId: predecessorId,
+      });
+      const credentialStore = new ProviderCredentialStore(getDb(env));
+      const transitioned =
+        status === "failed_validation"
+          ? await credentialStore.recordRotationFailure(candidateId, "invalid_credentials")
+          : await credentialStore.deactivateRotationCandidate({
+              organizationId: ORGANIZATION_ID,
+              candidateId,
+              predecessorId,
+            });
+      expect(transitioned).toBe(true);
+      const retentionExpiresAt = (await credentialState(candidateId)).secret_retention_expires_at;
+      expect(retentionExpiresAt).toEqual(expect.any(String));
+      destroyVersion.mockRejectedValueOnce(new Error("transient GCP failure"));
+
+      await expect(cleanupRetiredProviderCredentialSecrets(env)).rejects.toThrow(
+        "Provider Credential secret cleanup failed for 1 row(s)"
+      );
+      await expect(credentialState(candidateId)).resolves.toMatchObject({
+        status,
+        secret_retention_expires_at: retentionExpiresAt,
+      });
+
+      await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toEqual({
+        cleaned: 1,
+        skipped: 0,
+        failed: 0,
+      });
+      expect(destroyVersion).toHaveBeenCalledTimes(2);
+      expect(destroyVersion).toHaveBeenLastCalledWith({
+        secretVersionRef: `projects/p/secrets/sdp-provider-credentials-${candidateId}/versions/7`,
+      });
+      await expect(credentialState(candidateId)).resolves.toMatchObject({
+        status,
+        secret_retention_expires_at: null,
+      });
+    }
+  );
 
   it("does not clear a GCP marker that changed while the destroy was in flight", async () => {
     await insertCredential({

@@ -17,8 +17,15 @@ export class ProviderCredentialSecretCleanupStore {
               pc.secret_retention_expires_at
        FROM provider_credentials pc
        WHERE pc.source = 'stored'
-         AND pc.status = 'retired'
-         AND pc.storage_backend IN ('encrypted_db', 'gcp_secret_manager')
+         AND (
+           (pc.status = 'retired'
+             AND pc.storage_backend IN ('encrypted_db', 'gcp_secret_manager'))
+           OR (
+             pc.status IN ('failed_validation', 'deactivated')
+             AND pc.storage_backend = 'gcp_secret_manager'
+             AND pc.rotated_from_provider_credential_id IS NOT NULL
+           )
+         )
          AND pc.secret_retention_expires_at IS NOT NULL
          AND (
            pc.secret_retention_expires_at::timestamptz <= clock_timestamp()
@@ -81,8 +88,14 @@ export class ProviderCredentialSecretCleanupStore {
        SET updated_at = sdp_iso_now()
        WHERE pc.id = ?
          AND pc.source = 'stored'
-         AND pc.status = 'retired'
          AND pc.storage_backend = 'gcp_secret_manager'
+         AND (
+           pc.status = 'retired'
+           OR (
+             pc.status IN ('failed_validation', 'deactivated')
+             AND pc.rotated_from_provider_credential_id IS NOT NULL
+           )
+         )
          AND pc.secret_retention_expires_at = ?
          AND (
            pc.secret_retention_expires_at::timestamptz <= clock_timestamp()
@@ -115,8 +128,14 @@ export class ProviderCredentialSecretCleanupStore {
              updated_at = sdp_iso_now()
          WHERE pc.id = ?
            AND pc.source = 'stored'
-           AND pc.status = 'retired'
            AND pc.storage_backend = 'gcp_secret_manager'
+           AND (
+             pc.status = 'retired'
+             OR (
+               pc.status IN ('failed_validation', 'deactivated')
+               AND pc.rotated_from_provider_credential_id IS NOT NULL
+             )
+           )
            AND pc.secret_retention_expires_at = ?
            AND pc.secret_version_ref = ?
            AND (

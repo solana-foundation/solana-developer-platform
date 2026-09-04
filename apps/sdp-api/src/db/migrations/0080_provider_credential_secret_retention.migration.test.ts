@@ -9,29 +9,34 @@ const USER_ID = "usr_credential_secret_retention";
 async function insertCredential(params: {
   id: string;
   status: "pending" | "active" | "failed_validation" | "retired" | "deactivated";
-  backend?: "encrypted_db" | "runtime_env";
+  backend?: "encrypted_db" | "gcp_secret_manager" | "runtime_env";
   ciphertext?: string | null;
   retentionExpiresAt?: string | null;
+  rotatedFromId?: string | null;
 }): Promise<void> {
   const backend = params.backend ?? "encrypted_db";
   const runtime = backend === "runtime_env";
+  const gcp = backend === "gcp_secret_manager";
   await getDb(env)
     .prepare(
       `INSERT INTO provider_credentials (
          id, organization_id, provider, label, scope, source, storage_backend,
-         encrypted_secret_payload, status, deactivated_at,
-         secret_retention_expires_at, created_by
-       ) VALUES (?, ?, 'privy', 'Privy', 'organization', ?, ?, ?, ?, ?, ?, ?)`
+         secret_ref, secret_version_ref, encrypted_secret_payload, status, deactivated_at,
+         secret_retention_expires_at, rotated_from_provider_credential_id, created_by
+       ) VALUES (?, ?, 'privy', 'Privy', 'organization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
       ORGANIZATION_ID,
       runtime ? "runtime" : "stored",
       backend,
-      runtime ? null : (params.ciphertext ?? null),
+      gcp ? `projects/p/secrets/${params.id}` : null,
+      gcp ? `projects/p/secrets/${params.id}/versions/7` : null,
+      backend === "encrypted_db" ? (params.ciphertext ?? null) : null,
       params.status,
       params.status === "deactivated" ? "2026-09-04T10:00:00.000Z" : null,
       params.retentionExpiresAt ?? null,
+      params.rotatedFromId ?? null,
       USER_ID
     )
     .run();
@@ -121,4 +126,44 @@ describe("0080 provider Credential secret retention", () => {
       })
     ).rejects.toThrow(/provider_credentials_secret_retention_check/);
   });
+
+  it.each(["failed_validation", "deactivated"] as const)(
+    "permits an immediate cleanup marker only for a GCP rotation candidate that ends %s",
+    async (status) => {
+      const predecessorId = `pcred_${status}_predecessor`;
+      await insertCredential({
+        id: predecessorId,
+        status: "active",
+        ciphertext: "v2.predecessor",
+      });
+
+      await expect(
+        insertCredential({
+          id: `pcred_gcp_${status}`,
+          status,
+          backend: "gcp_secret_manager",
+          retentionExpiresAt: "2026-09-04T10:00:00.000Z",
+          rotatedFromId: predecessorId,
+        })
+      ).resolves.toBeUndefined();
+
+      await expect(
+        insertCredential({
+          id: `pcred_encrypted_${status}`,
+          status,
+          retentionExpiresAt: "2026-09-04T10:00:00.000Z",
+          rotatedFromId: predecessorId,
+        })
+      ).rejects.toThrow(/provider_credentials_secret_retention_check/);
+
+      await expect(
+        insertCredential({
+          id: `pcred_unrotated_gcp_${status}`,
+          status,
+          backend: "gcp_secret_manager",
+          retentionExpiresAt: "2026-09-04T10:00:00.000Z",
+        })
+      ).rejects.toThrow(/provider_credentials_secret_retention_check/);
+    }
+  );
 });

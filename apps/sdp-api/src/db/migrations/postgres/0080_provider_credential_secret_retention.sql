@@ -1,6 +1,5 @@
--- Retain exactly one retired stored Credential for the fixed rollback window.
--- The nullable deadline is both the rollback upper bound and the durable
--- marker consumed by the shared secret-cleanup batch.
+-- Retain one retired stored Credential for rollback and durably mark terminal
+-- GCP rotation-candidate versions for the shared secret-cleanup batch.
 
 ALTER TABLE provider_credentials
     ADD COLUMN secret_retention_expires_at TEXT;
@@ -9,7 +8,17 @@ ALTER TABLE provider_credentials
     ADD CONSTRAINT provider_credentials_secret_retention_check
         CHECK (
             secret_retention_expires_at IS NULL
-            OR (source = 'stored' AND status = 'retired')
+            OR (
+                source = 'stored'
+                AND (
+                    status = 'retired'
+                    OR (
+                        storage_backend = 'gcp_secret_manager'
+                        AND status IN ('failed_validation', 'deactivated')
+                        AND rotated_from_provider_credential_id IS NOT NULL
+                    )
+                )
+            )
         );
 
 ALTER TABLE provider_credentials
@@ -45,4 +54,4 @@ ALTER TABLE provider_credentials
 
 CREATE INDEX idx_provider_credentials_secret_retention_due
     ON provider_credentials(secret_retention_expires_at, id)
-    WHERE status = 'retired' AND secret_retention_expires_at IS NOT NULL;
+    WHERE secret_retention_expires_at IS NOT NULL;

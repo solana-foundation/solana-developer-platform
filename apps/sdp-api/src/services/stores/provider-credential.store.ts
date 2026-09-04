@@ -368,6 +368,9 @@ export class ProviderCredentialStore {
              encrypted_secret_payload =
                CASE WHEN storage_backend = 'encrypted_db' THEN NULL
                     ELSE encrypted_secret_payload END,
+             secret_retention_expires_at =
+               CASE WHEN storage_backend = 'gcp_secret_manager' THEN sdp_iso_now()
+                    ELSE secret_retention_expires_at END,
              last_failed_at = sdp_iso_now(),
              last_failure_code = ?,
              updated_at = sdp_iso_now()
@@ -486,6 +489,9 @@ export class ProviderCredentialStore {
              encrypted_secret_payload =
                CASE WHEN storage_backend = 'encrypted_db' THEN NULL
                     ELSE encrypted_secret_payload END,
+             secret_retention_expires_at =
+               CASE WHEN storage_backend = 'gcp_secret_manager' THEN sdp_iso_now()
+                    ELSE secret_retention_expires_at END,
              deactivated_at = sdp_iso_now(), updated_at = sdp_iso_now()
          WHERE candidate.id = ?
            AND candidate.organization_id = ?

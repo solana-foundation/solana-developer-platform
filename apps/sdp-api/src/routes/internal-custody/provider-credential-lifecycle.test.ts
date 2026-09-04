@@ -380,6 +380,64 @@ describe("provider credential lifecycle", () => {
     ]);
   });
 
+  it("rolls back the whole cutover when retiring the predecessor fails", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    vi.stubGlobal("fetch", providerFetch);
+    const db = getDb(env);
+    await db.execute(
+      `ALTER TABLE provider_credentials
+       ADD CONSTRAINT sdp_test_fail_provider_credential_retirement
+       CHECK (status <> 'retired') NOT VALID`
+    );
+
+    try {
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+        method: "POST",
+        key: "rotate-retirement-write-failure",
+        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      });
+
+      expect(response.status).toBe(409);
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      expect(
+        await db.queryMany<{
+          id: string;
+          status: string;
+          rotated_from_provider_credential_id: string | null;
+        }>(
+          `SELECT id, status, rotated_from_provider_credential_id
+           FROM provider_credentials
+           ORDER BY credential_version, id`
+        )
+      ).toEqual([
+        {
+          id: CREDENTIAL_ID,
+          status: "active",
+          rotated_from_provider_credential_id: null,
+        },
+        expect.objectContaining({
+          status: "pending",
+          rotated_from_provider_credential_id: CREDENTIAL_ID,
+        }),
+      ]);
+      expect(
+        await db.queryMany<{ id: string; provider_credential_id: string }>(
+          `SELECT id, provider_credential_id
+           FROM custody_connections
+           ORDER BY id`
+        )
+      ).toEqual([
+        { id: CONNECTION_A_ID, provider_credential_id: CREDENTIAL_ID },
+        { id: CONNECTION_B_ID, provider_credential_id: CREDENTIAL_ID },
+      ]);
+    } finally {
+      await db.execute(
+        `ALTER TABLE provider_credentials
+         DROP CONSTRAINT sdp_test_fail_provider_credential_retirement`
+      );
+    }
+  });
+
   it("fails closed when credential references change during provider validation", async () => {
     const projectCId = "prj_provider_credential_lifecycle_c";
     const connectionCId = "cconn_provider_credential_lifecycle_c";
@@ -842,6 +900,12 @@ describe("provider credential lifecycle", () => {
     expect(await canceled.json()).toMatchObject({
       data: { providerCredential: { status: "deactivated" } },
     });
+    expect(
+      await getDb(env).queryOne<{ secret_retention_expires_at: string | null }>(
+        "SELECT secret_retention_expires_at FROM provider_credentials WHERE id = ?",
+        [rotatedBody.data.providerCredential.id]
+      )
+    ).toEqual({ secret_retention_expires_at: expect.any(String) });
   });
 
   it("reauthorizes a canceled candidate replay against current lineage references", async () => {
