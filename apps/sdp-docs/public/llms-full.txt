@@ -935,6 +935,8 @@ Two fields gate what you may offer:
 
 Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-null means that direction's builder refuses to run without an explicit protection floor (`minSharesOut` on deposits, `minAmountOut` on withdrawals): quote first, then derive the floor from the live figure minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). Null means the floor is optional there.
 
+Jupiter Lend currently contributes one strategy: its mainnet USDT Earn market. Because Jupiter Lend is mainnet-only, the strategy can appear in a sandbox catalogue as a browse-only row with `fundable: false`; do not offer a deposit action for that row. Deposits mint jlUSDT receipt tokens to the signing wallet, and withdrawals redeem those receipt tokens back to USDT when protocol liquidity is available.
+
 ## 2. Deposit: build, sign, submit, poll
 
 ```ts
@@ -5961,7 +5963,6 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
 | `GET` | `/v1/earn/strategies` | List yield strategies |
 | `GET` | `/v1/earn/strategies/{strategyId}` | Get one yield strategy |
-| `POST` | `/v1/earn/vault-deposit-previews` | Preview a direct vault deposit |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.
