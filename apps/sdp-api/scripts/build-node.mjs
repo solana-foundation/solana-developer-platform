@@ -77,6 +77,8 @@ const entryPoints = {
   "custody-backfill": "scripts/migrate-custody-encryption.ts",
   // configure.js generates a self-hosted .env in the terminal from the prebuilt image.
   configure: "scripts/configure.ts",
+  // ephemeral-db.js creates/drops per-PR databases from the prebuilt image (PRO-1767).
+  "ephemeral-db": "scripts/ephemeral-db.mjs",
 };
 
 const zkSdkNodeEntries = new Set();
