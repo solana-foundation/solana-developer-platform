@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.74.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.73.0...v0.74.0) (2026-09-04)
+
+### Features
+
+* **earn:** reconcile custody vault shares against recorded positions ([#1662](https://github.com/solana-foundation/solana-developer-platform/pull/1662)) ([77b2c48](https://github.com/solana-foundation/solana-developer-platform/commit/77b2c488a065f48245b7ea16e2c2630766c896c8))
+* **earn:** Jupiter Lend USDT ([#1657](https://github.com/solana-foundation/solana-developer-platform/pull/1657)) ([d23445a](https://github.com/solana-foundation/solana-developer-platform/commit/d23445a8c60d8e85a4c350ec6dd670e6d14b561e))
+* **api:** HOO-1000 enforce tenant isolation at the database with RLS identities ([#1447](https://github.com/solana-foundation/solana-developer-platform/pull/1447)) ([aecc1b0](https://github.com/solana-foundation/solana-developer-platform/commit/aecc1b053eb38b7fa8640a33c83903a6d7fde1b2))
+
+### Bug Fixes
+
+* **api:** stamp database identity on the Clerk onboarding middleware ([#1661](https://github.com/solana-foundation/solana-developer-platform/pull/1661)) ([52e5c9a](https://github.com/solana-foundation/solana-developer-platform/commit/52e5c9ac7ba709f489534d74a46b05f439c139c7))
+* **earn:** improve wallet empty states and balance refresh ([#1655](https://github.com/solana-foundation/solana-developer-platform/pull/1655)) ([bfc9e16](https://github.com/solana-foundation/solana-developer-platform/commit/bfc9e160534871c66293da5f7b26ac9f02d27791))
+
+### Maintenance
+
+* **deps:** bump the minor-patch group across 1 directory with 43 updates ([#1641](https://github.com/solana-foundation/solana-developer-platform/pull/1641)) ([f7e0c64](https://github.com/solana-foundation/solana-developer-platform/commit/f7e0c64960e6c63478417c7cea9696ae099df88f))
+
 ## [0.73.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.72.0...v0.73.0) (2026-09-04)
 
 ### Features
