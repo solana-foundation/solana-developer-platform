@@ -30,6 +30,30 @@ export interface ProviderCredentialRow {
   created_at: string;
 }
 
+export interface LifecycleCredentialRow extends ProviderCredentialRow {
+  source: "stored" | "runtime";
+  storage_backend: StoredCredentialSecret["storageBackend"];
+  deactivated_at: string | null;
+  last_validated_at: string | null;
+  last_failed_at: string | null;
+  last_failure_code: string | null;
+  secret_retention_expires_at: string | null;
+}
+
+export interface LifecycleCredentialWithSecretRow extends LifecycleCredentialRow {
+  secret_ref: string | null;
+  secret_version_ref: string | null;
+  encrypted_secret_payload: string | null;
+}
+
+export interface CredentialReferenceRow {
+  id: string;
+  project_id: string;
+  project_name: string;
+  status: CustodyConnectionStatus;
+  provider_account_fingerprint: string | null;
+}
+
 export interface CustodyConnectionRow {
   id: string;
   organization_id: string;
@@ -174,6 +198,312 @@ export class ProviderCredentialStore {
        WHERE id = ?
        ${options.lock ? "FOR UPDATE" : ""}`,
       [id]
+    );
+  }
+
+  async findLifecycleCredential(
+    organizationId: string,
+    id: string,
+    options: { lock?: boolean } = {}
+  ): Promise<LifecycleCredentialRow | null> {
+    return this.db.queryOne<LifecycleCredentialRow>(
+      `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
+              source, storage_backend, display_metadata, status, credential_version,
+              rotated_from_provider_credential_id, idempotency_key,
+              idempotency_fingerprint, deactivated_at, last_validated_at,
+              last_failed_at, last_failure_code, secret_retention_expires_at, created_at
+       FROM provider_credentials
+       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+       ${options.lock ? "FOR UPDATE" : ""}`,
+      [id, organizationId]
+    );
+  }
+
+  async findLifecycleCredentialWithSecret(
+    organizationId: string,
+    id: string
+  ): Promise<LifecycleCredentialWithSecretRow | null> {
+    return this.db.queryOne<LifecycleCredentialWithSecretRow>(
+      `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
+              source, storage_backend, secret_ref, secret_version_ref,
+              encrypted_secret_payload, display_metadata, status, credential_version,
+              rotated_from_provider_credential_id, idempotency_key,
+              idempotency_fingerprint, deactivated_at, last_validated_at,
+              last_failed_at, last_failure_code, secret_retention_expires_at, created_at
+       FROM provider_credentials
+       WHERE id = ? AND organization_id = ? AND provider = 'privy'`,
+      [id, organizationId]
+    );
+  }
+
+  async findLifecycleConnectionCredentialId(
+    organizationId: string,
+    projectId: string,
+    connectionId: string
+  ): Promise<string | null> {
+    const row = await this.db.queryOne<{ provider_credential_id: string }>(
+      `SELECT provider_credential_id
+       FROM custody_connections
+       WHERE id = ? AND organization_id = ? AND project_id = ? AND provider = 'privy'`,
+      [connectionId, organizationId, projectId]
+    );
+    return row?.provider_credential_id ?? null;
+  }
+
+  async listCredentialReferences(
+    organizationId: string,
+    providerCredentialId: string,
+    options: { lock?: boolean } = {}
+  ): Promise<CredentialReferenceRow[]> {
+    return this.db.queryMany<CredentialReferenceRow>(
+      `SELECT c.id, c.project_id, p.name AS project_name, c.status,
+              c.provider_account_fingerprint
+       FROM custody_connections c
+       JOIN projects p ON p.id = c.project_id
+       WHERE c.organization_id = ?
+         AND c.provider = 'privy'
+         AND c.provider_credential_id = ?
+         AND c.status <> 'deactivated'
+       ORDER BY c.project_id, c.id
+       ${options.lock ? "FOR UPDATE OF c" : ""}`,
+      [organizationId, providerCredentialId]
+    );
+  }
+
+  async listCredentialLineageReferences(
+    organizationId: string,
+    providerCredentialId: string
+  ): Promise<CredentialReferenceRow[]> {
+    return this.db.queryMany<CredentialReferenceRow>(
+      `WITH RECURSIVE credential_lineage(id, rotated_from_provider_credential_id) AS (
+         SELECT id, rotated_from_provider_credential_id
+         FROM provider_credentials
+         WHERE id = ? AND organization_id = ? AND provider = 'privy'
+         UNION
+         SELECT related.id, related.rotated_from_provider_credential_id
+         FROM provider_credentials related
+         JOIN credential_lineage member
+           ON related.rotated_from_provider_credential_id = member.id
+           OR related.id = member.rotated_from_provider_credential_id
+         WHERE related.organization_id = ? AND related.provider = 'privy'
+       )
+       SELECT c.id, c.project_id, p.name AS project_name, c.status,
+              c.provider_account_fingerprint
+       FROM custody_connections c
+       JOIN credential_lineage lineage ON lineage.id = c.provider_credential_id
+       JOIN projects p ON p.id = c.project_id
+       WHERE c.organization_id = ?
+         AND c.provider = 'privy'
+         AND c.status <> 'deactivated'
+       ORDER BY c.project_id, c.id`,
+      [providerCredentialId, organizationId, organizationId, organizationId]
+    );
+  }
+
+  async lockAuthorizedProjects(
+    organizationId: string,
+    userId: string,
+    projectIds: readonly string[]
+  ): Promise<boolean> {
+    const uniqueIds = [...new Set(projectIds)].sort();
+    if (uniqueIds.length === 0) return true;
+    const rows = await this.db.queryMany<{ id: string }>(
+      `SELECT p.id
+       FROM projects p
+       JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
+       WHERE p.organization_id = ?
+         AND p.status = 'active'
+         AND p.id IN (SELECT jsonb_array_elements_text(?::jsonb))
+       ORDER BY p.id
+       FOR UPDATE OF p, pm`,
+      [userId, organizationId, JSON.stringify(uniqueIds)]
+    );
+    return rows.length === uniqueIds.length;
+  }
+
+  async findPendingDirectChild(
+    organizationId: string,
+    providerCredentialId: string,
+    options: { lock?: boolean } = {}
+  ): Promise<LifecycleCredentialRow | null> {
+    return this.db.queryOne<LifecycleCredentialRow>(
+      `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
+              source, storage_backend, display_metadata, status, credential_version,
+              rotated_from_provider_credential_id, idempotency_key,
+              idempotency_fingerprint, deactivated_at, last_validated_at,
+              last_failed_at, last_failure_code, secret_retention_expires_at, created_at
+       FROM provider_credentials
+       WHERE organization_id = ?
+         AND provider = 'privy'
+         AND rotated_from_provider_credential_id = ?
+         AND status = 'pending'
+       ORDER BY created_at, id
+       LIMIT 1
+       ${options.lock ? "FOR UPDATE" : ""}`,
+      [organizationId, providerCredentialId]
+    );
+  }
+
+  async recordRotationRetryUnknown(candidateId: string): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE provider_credentials
+         SET last_failed_at = sdp_iso_now(),
+             last_failure_code = 'provider_response_unknown',
+             updated_at = sdp_iso_now()
+         WHERE id = ? AND status = 'pending' AND rotated_from_provider_credential_id IS NOT NULL`,
+        [candidateId]
+      )) === 1
+    );
+  }
+
+  async recordRotationFailure(
+    candidateId: string,
+    failureCode: "invalid_credentials" | "provider_account_mismatch"
+  ): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE provider_credentials
+         SET status = 'failed_validation',
+             encrypted_secret_payload =
+               CASE WHEN storage_backend = 'encrypted_db' THEN NULL
+                    ELSE encrypted_secret_payload END,
+             last_failed_at = sdp_iso_now(),
+             last_failure_code = ?,
+             updated_at = sdp_iso_now()
+         WHERE id = ? AND status = 'pending' AND rotated_from_provider_credential_id IS NOT NULL`,
+        [failureCode, candidateId]
+      )) === 1
+    );
+  }
+
+  async cutOverRotation(params: {
+    organizationId: string;
+    predecessorId: string;
+    candidateId: string;
+    candidateScopeKey: string;
+    expectedConnectionIds: readonly string[];
+  }): Promise<boolean> {
+    const moved = await this.db.execute(
+      `UPDATE custody_connections
+       SET provider_credential_id = ?, provider_credential_scope_key = ?, updated_at = sdp_iso_now()
+       WHERE organization_id = ?
+         AND provider = 'privy'
+         AND provider_credential_id = ?
+         AND status <> 'deactivated'`,
+      [params.candidateId, params.candidateScopeKey, params.organizationId, params.predecessorId]
+    );
+    if (moved !== params.expectedConnectionIds.length) return false;
+
+    const activated = await this.db.execute(
+      `UPDATE provider_credentials
+       SET status = 'active', last_validated_at = sdp_iso_now(), last_failed_at = NULL,
+           last_failure_code = NULL, updated_at = sdp_iso_now()
+       WHERE id = ? AND organization_id = ? AND status = 'pending'
+         AND rotated_from_provider_credential_id = ?`,
+      [params.candidateId, params.organizationId, params.predecessorId]
+    );
+    const retired = await this.db.execute(
+      `UPDATE provider_credentials
+       SET status = 'retired',
+           secret_retention_expires_at = to_char(
+             timezone('UTC', clock_timestamp() + interval '24 hours'),
+             'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+           ),
+           updated_at = sdp_iso_now()
+       WHERE id = ? AND organization_id = ? AND status = 'active'`,
+      [params.predecessorId, params.organizationId]
+    );
+    if (activated !== 1 || retired !== 1) return false;
+
+    await this.db.execute(
+      `WITH RECURSIVE ancestors(id) AS (
+         SELECT rotated_from_provider_credential_id
+         FROM provider_credentials
+         WHERE id = ?
+         UNION ALL
+         SELECT pc.rotated_from_provider_credential_id
+         FROM provider_credentials pc
+         JOIN ancestors a ON pc.id = a.id
+         WHERE a.id IS NOT NULL
+       )
+       UPDATE provider_credentials
+       SET secret_retention_expires_at = sdp_iso_now(), updated_at = sdp_iso_now()
+       WHERE id IN (SELECT id FROM ancestors WHERE id IS NOT NULL)
+         AND status = 'retired'
+         AND secret_retention_expires_at IS NOT NULL`,
+      [params.predecessorId]
+    );
+    return true;
+  }
+
+  async rollBackCredential(params: {
+    organizationId: string;
+    currentId: string;
+    predecessorId: string;
+    predecessorScopeKey: string;
+    expectedConnectionIds: readonly string[];
+  }): Promise<boolean> {
+    const moved = await this.db.execute(
+      `UPDATE custody_connections
+       SET provider_credential_id = ?, provider_credential_scope_key = ?, updated_at = sdp_iso_now()
+       WHERE organization_id = ?
+         AND provider = 'privy'
+         AND provider_credential_id = ?
+         AND status <> 'deactivated'`,
+      [params.predecessorId, params.predecessorScopeKey, params.organizationId, params.currentId]
+    );
+    if (moved !== params.expectedConnectionIds.length) return false;
+    const restored = await this.db.execute(
+      `UPDATE provider_credentials
+       SET status = 'active', secret_retention_expires_at = NULL,
+           last_validated_at = sdp_iso_now(), last_failed_at = NULL,
+           last_failure_code = NULL, updated_at = sdp_iso_now()
+       WHERE id = ? AND organization_id = ? AND status = 'retired'
+         AND secret_retention_expires_at::timestamptz > clock_timestamp()`,
+      [params.predecessorId, params.organizationId]
+    );
+    const retired = await this.db.execute(
+      `UPDATE provider_credentials
+       SET status = 'retired', secret_retention_expires_at = sdp_iso_now(),
+           updated_at = sdp_iso_now()
+       WHERE id = ? AND organization_id = ? AND status = 'active'
+         AND rotated_from_provider_credential_id = ?`,
+      [params.currentId, params.organizationId, params.predecessorId]
+    );
+    return restored === 1 && retired === 1;
+  }
+
+  async deactivateRotationCandidate(params: {
+    organizationId: string;
+    candidateId: string;
+    predecessorId: string;
+  }): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE provider_credentials candidate
+         SET status = 'deactivated',
+             encrypted_secret_payload =
+               CASE WHEN storage_backend = 'encrypted_db' THEN NULL
+                    ELSE encrypted_secret_payload END,
+             deactivated_at = sdp_iso_now(), updated_at = sdp_iso_now()
+         WHERE candidate.id = ?
+           AND candidate.organization_id = ?
+           AND candidate.status = 'pending'
+           AND candidate.rotated_from_provider_credential_id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM custody_connections c
+             WHERE c.provider_credential_id = candidate.id AND c.status <> 'deactivated'
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM custody_connections c
+             JOIN custody_wallets w
+               ON w.custody_connection_id = c.id AND w.status = 'active'
+             WHERE c.provider_credential_id = candidate.id
+           )`,
+        [params.candidateId, params.organizationId, params.predecessorId]
+      )) === 1
     );
   }
 

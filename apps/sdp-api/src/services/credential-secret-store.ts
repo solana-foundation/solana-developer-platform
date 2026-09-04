@@ -292,10 +292,26 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
   async destroyVersion(params: DestroyCredentialSecretVersionParams): Promise<void> {
     assertManagedSecretRef(params.secretVersionRef, await this.managedRefOptions(true));
 
-    await this.request(`${params.secretVersionRef}:destroy`, {
-      method: "POST",
-      body: "{}",
-    });
+    try {
+      await this.request(`${params.secretVersionRef}:destroy`, {
+        method: "POST",
+        body: "{}",
+      });
+    } catch (error) {
+      if (await this.isVersionDestroyed(params.secretVersionRef)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async isVersionDestroyed(secretVersionRef: string): Promise<boolean> {
+    try {
+      const version = await this.request<{ state?: unknown }>(secretVersionRef, { method: "GET" });
+      return version.state === "DESTROYED";
+    } catch {
+      return false;
+    }
   }
 
   private async createSecretIfMissing(

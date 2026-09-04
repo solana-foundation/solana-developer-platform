@@ -23,12 +23,13 @@ import {
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import {
+  checkPrivyCredential,
   getPrivyProviderAccountFingerprint,
   PRIVY_RUNTIME_ENV_FIELDS,
+  type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
 import {
   findPrivyWalletByExternalId,
-  type PrivyCredentialAuthentication,
   type ProvisionPrivyResult,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
@@ -48,7 +49,6 @@ import {
 import type { Env } from "@/types/env";
 
 const INSTALLATION_UNAVAILABLE_MESSAGE = "Provider credential installation is unavailable";
-const PRIVY_CHECK_TIMEOUT_MS = 10_000;
 
 type CompletionStatus = "running" | "success" | "failed" | "retry_unknown";
 type CompletionFailureCode =
@@ -528,7 +528,7 @@ async function executeCompletionMode(
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
 
-  const validation = await validatePrivyCredential(context.c.env, credential);
+  const validation = await checkPrivyCredential(context.c.env, credential);
   if (validation !== "success") {
     return validation === "failed"
       ? { kind: "failed", code: "invalid_credentials" }
@@ -638,38 +638,6 @@ async function acquireCompletionLease(
     expectedLastCheckStatus: target.last_check_status,
     expectedLastCheckAt: target.last_check_at,
   });
-}
-
-async function validatePrivyCredential(
-  env: Env,
-  credential: PrivyCredentialAuthentication
-): Promise<"success" | "failed" | "retry_unknown"> {
-  const baseUrl = (env.PRIVY_API_BASE_URL ?? "https://api.privy.io/v1").replace(/\/+$/, "");
-  try {
-    const response = await fetch(`${baseUrl}/wallets?limit=1&chain_type=solana`, {
-      method: "GET",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,
-        "privy-app-id": credential.appId,
-      },
-      signal: AbortSignal.timeout(PRIVY_CHECK_TIMEOUT_MS),
-    });
-    if (response.status === 401) return "failed";
-    if (response.status !== 200) return "retry_unknown";
-    const body = await response.json().catch(() => null);
-    return isWalletListResponse(body) ? "success" : "retry_unknown";
-  } catch {
-    return "retry_unknown";
-  }
-}
-
-function isWalletListResponse(value: unknown): value is { data: unknown[] } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "data" in value &&
-    Array.isArray((value as { data?: unknown }).data)
-  );
 }
 
 async function persistSuccess(

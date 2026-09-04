@@ -48,6 +48,10 @@ import {
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
 import {
+  PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
+  runProviderCredentialSecretCleanup,
+} from "./provider-credential-secret-cleanup";
+import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
@@ -291,6 +295,19 @@ export function startCron(deps: CronDeps): CronHandle | null {
         return;
       }
       runWorkflowSecretRetirements({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  tasks.push(
+    schedule(PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runProviderCredentialSecretCleanup({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,

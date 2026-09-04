@@ -118,6 +118,76 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     expect(requests[1]?.body).toContain(encodeBase64(JSON.stringify(payload)));
   });
 
+  it("accepts a failed destroy only after the same exact version is confirmed DESTROYED", async () => {
+    const versionRef = `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/7`;
+    const requests: { url: string; method: string }[] = [];
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: PROJECT_ID,
+      projectNumber: PROJECT_NUMBER,
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        requests.push({ url, method });
+        if (method === "POST") {
+          throw new TypeError("connection reset after request");
+        }
+        return new Response(JSON.stringify({ name: versionRef, state: "DESTROYED" }));
+      },
+    });
+
+    await expect(store.destroyVersion({ secretVersionRef: versionRef })).resolves.toBeUndefined();
+    expect(requests).toEqual([
+      {
+        url: `https://secretmanager.googleapis.com/v1/${versionRef}:destroy`,
+        method: "POST",
+      },
+      { url: `https://secretmanager.googleapis.com/v1/${versionRef}`, method: "GET" },
+    ]);
+  });
+
+  it.each(["ENABLED", "DISABLED", undefined])(
+    "keeps a failed destroy retryable when exact-version state is %s",
+    async (state) => {
+      const versionRef = `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/8`;
+      const store = new GcpSecretManagerCredentialSecretStore({
+        projectId: PROJECT_ID,
+        projectNumber: PROJECT_NUMBER,
+        secretPrefix: "sdp-dev-provider-credentials",
+        accessToken: "test-token",
+        fetcher: async (_input, init) =>
+          init?.method === "POST"
+            ? new Response(JSON.stringify({ error: { status: "FAILED_PRECONDITION" } }), {
+                status: 400,
+              })
+            : new Response(JSON.stringify(state ? { name: versionRef, state } : {})),
+      });
+
+      await expect(store.destroyVersion({ secretVersionRef: versionRef })).rejects.toMatchObject({
+        code: "UPSTREAM_ERROR",
+      });
+    }
+  );
+
+  it("keeps a failed destroy retryable when exact-version verification fails", async () => {
+    const versionRef = `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/9`;
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: PROJECT_ID,
+      projectNumber: PROJECT_NUMBER,
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async (_input, init) =>
+        init?.method === "POST"
+          ? new Response(JSON.stringify({ error: { status: "UNAVAILABLE" } }), { status: 503 })
+          : new Response(JSON.stringify({ error: { status: "UNAVAILABLE" } }), { status: 503 }),
+    });
+
+    await expect(store.destroyVersion({ secretVersionRef: versionRef })).rejects.toMatchObject({
+      code: "UPSTREAM_ERROR",
+    });
+  });
+
   it("rejects refs outside the managed project, prefix, or exact numeric version", async () => {
     const store = new GcpSecretManagerCredentialSecretStore({
       projectId: "sdp-dev-123",

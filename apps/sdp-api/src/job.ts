@@ -11,6 +11,7 @@ import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
+import { PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR } from "@/cron/provider-credential-secret-cleanup";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
 import { runWithCronRunEvent } from "@/cron/run-event";
@@ -27,6 +28,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
+import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
@@ -59,14 +61,16 @@ const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
  * non-fatal ticks' failures are swallowed after their log. The next execution
  * retries everything. Workflow secret retirements and Earn metrics refresh are
  * intentionally the only ticks whose failures do not enter the final failure
- * collection.
+ * collection. Provider Credential cleanup is fatal after its bounded batch has
+ * tried every row, so orphan risk remains visible to the scheduler.
  *
  * The sequence:
  *
  * 1. **Pending transfers** + approved-wallet-operation replay + sponsorship
- *    budget reconciliation — one monitored tick (the replay rides the
- *    transfers monitor, matching the in-process runner); the legs run settled
- *    so one failing never hides the other. Fatal.
+ *    budget reconciliation, alongside **Provider Credential secret cleanup** —
+ *    independent monitored siblings, so either starts even while the other is
+ *    slow. The transfers legs and the cleanup rows each run settled before
+ *    their tick reports failure. Fatal.
  * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
  *    deployment-provided Managed Reconciliation Cadence is its effective
@@ -157,7 +161,7 @@ export async function runCronJob(): Promise<void> {
       }
     };
 
-    await collect(
+    const initialOutcomes = await Promise.allSettled([
       monitored(PENDING_TRANSFERS_MONITOR, async () => {
         const outcomes = await Promise.allSettled([
           (async () => {
@@ -167,8 +171,12 @@ export async function runCronJob(): Promise<void> {
           reconcileSponsorshipBudgets(env),
         ]);
         throwCollected(rejectionReasons(outcomes), "pending-transfers tick had multiple failures");
-      })
-    );
+      }),
+      monitored(PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR, () =>
+        cleanupRetiredProviderCredentialSecrets(env)
+      ),
+    ]);
+    failures.push(...rejectionReasons(initialOutcomes));
     await collect(
       monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () => collectDueRecurringPayments(env))
     );

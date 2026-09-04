@@ -179,6 +179,16 @@ describe("orphaned workflow secret retirement", () => {
     expect(new Date(queued[0]?.next_attempt_at ?? 0).getTime()).toBeGreaterThan(sweptAt.getTime());
   });
 
+  it("does not infer destruction from a FAILED_PRECONDITION error", async () => {
+    secretStore.destroyVersion.mockRejectedValue(new Error("FAILED_PRECONDITION"));
+    await destroyActionSecret(env, storedSecret(), { orgId: "org_1", workflowId: "wf_1" });
+
+    const result = await retireOrphanedActionSecrets(env, new Date(Date.now() + 1_000));
+
+    expect(result).toEqual({ retired: 0, failed: 1 });
+    expect(await queuedRetirements()).toHaveLength(1);
+  });
+
   // Backoff has to actually hold the row back, or the sweep is a busy loop.
   it("leaves a not-yet-due row alone", async () => {
     secretStore.destroyVersion.mockRejectedValue(new Error("permission denied"));

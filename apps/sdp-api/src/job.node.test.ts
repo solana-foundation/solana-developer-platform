@@ -5,6 +5,7 @@ import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { logEvent } from "@/runtime/money-path-events";
+import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
@@ -48,6 +49,10 @@ vi.mock("@/cron/earn-vault-movements", () => ({
 // of this test's module graph (same reason runner.node.test.ts mocks it).
 vi.mock("@/cron/pending-transfers", () => ({
   PENDING_TRANSFERS_MONITOR: "sdp-api-track-pending-transfers",
+}));
+
+vi.mock("@/cron/provider-credential-secret-cleanup", () => ({
+  PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR: "sdp-api-cleanup-provider-credential-secrets",
 }));
 
 vi.mock("@/cron/pending-deposits", () => ({
@@ -98,6 +103,14 @@ vi.mock("@/services/jobs/retire-workflow-secrets", () => ({
   retireOrphanedActionSecrets: vi.fn(async () => ({ retired: 0, failed: 0 })),
 }));
 
+vi.mock("@/services/jobs/cleanup-provider-credential-secrets", () => ({
+  cleanupRetiredProviderCredentialSecrets: vi.fn(async () => ({
+    cleaned: 0,
+    skipped: 0,
+    failed: 0,
+  })),
+}));
+
 vi.mock("@/services/jobs/run-workflow-executions", () => ({
   runDueWorkflowExecutions: vi.fn(async () => {}),
 }));
@@ -146,6 +159,16 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
   } as Env;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("runCronJob", () => {
   beforeEach(() => {
     vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv());
@@ -171,6 +194,11 @@ describe("runCronJob", () => {
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(retireOrphanedActionSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
+    vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReset().mockResolvedValue({
+      cleaned: 0,
+      skipped: 0,
+      failed: 0,
+    });
     vi.mocked(closeDatabasePools).mockClear();
     vi.mocked(closeAllRedisClients).mockClear();
     vi.mocked(logEvent).mockClear();
@@ -271,6 +299,7 @@ describe("runCronJob", () => {
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+    expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledExactlyOnceWith(env);
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
     expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env);
@@ -287,6 +316,60 @@ describe("runCronJob", () => {
     expect(trackPendingWithdrawals).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs cleanup beside pending transfers and waits for both before reporting failure", async () => {
+    const transfers = deferred<void>();
+    vi.mocked(trackPendingTransfers).mockReturnValue(transfers.promise as never);
+    vi.mocked(cleanupRetiredProviderCredentialSecrets).mockRejectedValue(
+      new Error("credential cleanup down")
+    );
+
+    const running = runCronJob();
+    let settled = false;
+    void running.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await vi.waitFor(() => {
+      expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledTimes(1);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    });
+    expect(settled).toBe(false);
+
+    transfers.resolve(undefined);
+    await expect(running).rejects.toThrow("credential cleanup down");
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for in-flight cleanup when pending transfers fail", async () => {
+    const cleanup = deferred<{ cleaned: number; skipped: number; failed: number }>();
+    vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReturnValue(cleanup.promise);
+    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+
+    const running = runCronJob();
+    let settled = false;
+    void running.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await vi.waitFor(() => {
+      expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledTimes(1);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    });
+    expect(settled).toBe(false);
+
+    cleanup.resolve({ cleaned: 0, skipped: 0, failed: 0 });
+    await expect(running).rejects.toThrow("transfers down");
   });
 
   it("fails the job on a recurring-collection error but still releases pools", async () => {
@@ -372,6 +455,7 @@ describe("runCronJob", () => {
       .mocked(logEvent)
       .mock.calls.filter(([, payload]) => payload.event === "sdp_cron_run");
     expect(runs.map(([, payload]) => payload.monitor).sort()).toEqual([
+      "sdp-api-managed-cleanup-provider-credential-secrets",
       "sdp-api-managed-collect-recurring-payments",
       "sdp-api-managed-poll-rings-indexing",
       "sdp-api-managed-reconcile-earn-vault-movements",
