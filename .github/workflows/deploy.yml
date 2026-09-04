@@ -51,7 +51,7 @@ jobs:
             none) ;;
             api) api=true ;;
             auto|*)
-              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-dev-smoke\.yml)"; then
+              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
                 api=true
               fi
               ;;

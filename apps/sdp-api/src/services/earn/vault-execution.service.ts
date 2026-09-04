@@ -1,4 +1,5 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 import {
@@ -178,9 +179,11 @@ async function resolveLookupTables(
   if (input.plan.lookupTables.length === 0) return {};
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
   return input.deadline.run("Fetching the vault lookup tables", () =>
-    fetchAddressesForLookupTables(
-      input.plan.lookupTables.map((table) => address(table)),
-      rpc
+    rpcCore.withTransientRpcRetry(() =>
+      fetchAddressesForLookupTables(
+        input.plan.lookupTables.map((table) => address(table)),
+        rpc
+      )
     )
   );
 }

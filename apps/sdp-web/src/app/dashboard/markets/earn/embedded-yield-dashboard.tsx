@@ -8,10 +8,7 @@ import type {
 } from "@sdp/types";
 import {
   AlertTriangleIcon,
-  ArrowRightIcon,
   ChevronRightIcon,
-  CircleDollarSignIcon,
-  Code2Icon,
   CopyIcon,
   ExternalLinkIcon,
   InfoIcon,
@@ -21,7 +18,7 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { type CSSProperties, Fragment, useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +35,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -48,11 +44,6 @@ import {
   fetchEarnExternalWalletPositions,
   useEarnExternalWalletPositionSummary,
 } from "./earn-program-data";
-
-const ONBOARDING_STEPS = [
-  { icon: CircleDollarSignIcon, key: "DashboardMarkets.earnProgram.flowSelect" },
-  { icon: Code2Icon, key: "DashboardMarkets.earnProgram.flowIntegrate" },
-] as const satisfies ReadonlyArray<{ icon: typeof Layers3Icon; key: MessageKey }>;
 
 const STRATEGY_WALLET_REFRESH_INTERVAL_MS = process.env.NODE_ENV === "development" ? 3_000 : 15_000;
 
@@ -92,8 +83,8 @@ function PortfolioOnboarding({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
 
   return (
-    <Card className="gap-0 rounded-2xl px-7 py-7 shadow-[0_18px_24px_rgba(0,0,0,0.05)]">
-      <div className="flex flex-col items-center py-4 text-center">
+    <Card className="gap-0 rounded-2xl px-7 py-10 shadow-[0_18px_24px_rgba(0,0,0,0.05)]">
+      <div className="flex flex-col items-center text-center">
         <span className="flex size-12 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
           <Layers3Icon aria-hidden="true" className="size-6" />
         </span>
@@ -104,32 +95,8 @@ function PortfolioOnboarding({ configureHref }: { configureHref: string }) {
           {t("DashboardMarkets.earnProgram.introDescription")}
         </p>
 
-        <ol
-          aria-label={t("DashboardMarkets.earnProgram.setupProgress")}
-          className="mt-8 grid w-full items-center gap-3 text-left md:grid-cols-[minmax(0,1fr)_1.5rem_minmax(0,1fr)] md:gap-0"
-        >
-          {ONBOARDING_STEPS.map(({ icon: Icon, key }, index) => (
-            <Fragment key={key}>
-              <li className="flex h-20 min-w-0 items-center gap-4 rounded-xl border-2 border-border-default px-4">
-                <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-                  <Icon aria-hidden="true" className="size-6" />
-                </span>
-                <span className="min-w-0 text-base leading-6 font-medium text-secondary">
-                  {t(key)}
-                </span>
-              </li>
-              {index < ONBOARDING_STEPS.length - 1 ? (
-                <ArrowRightIcon
-                  aria-hidden="true"
-                  className="mx-auto hidden size-4 text-tertiary md:block"
-                />
-              ) : null}
-            </Fragment>
-          ))}
-        </ol>
-
-        <Button asChild className="mt-10" variant="secondary">
-          <Link href={configureHref}>{t("DashboardMarkets.earnProgram.getStarted")}</Link>
+        <Button asChild className="mt-8" variant="secondary">
+          <Link href={configureHref}>{t("DashboardMarkets.earnProgram.configureShort")}</Link>
         </Button>
       </div>
     </Card>

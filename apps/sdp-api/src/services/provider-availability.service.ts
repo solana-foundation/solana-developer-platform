@@ -80,8 +80,8 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
 /**
  * Earn providers SDP reaches with a credential, which is most but not all of
  * them — see `publicApiDefinition` below. Excluding the keyless ones here is
- * what stops `keyPairCredentialDefinition` from requiring a `KAMINO_API_KEY`
- * member on `Env`: the template literal below must resolve to a `keyof Env` for
+ * what stops `keyPairCredentialDefinition` from requiring Kamino or Veda API
+ * keys on `Env`: the template literal below must resolve to a `keyof Env` for
  * every member of this union, so widening it silently demands a credential.
  */
 type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda">;
@@ -115,20 +115,18 @@ function keyPairCredentialDefinition(
 /**
  * A provider reached over a PUBLIC API, with nothing to configure.
  *
- * Kamino's vault data API takes no credential, so "is it configured" has no
- * meaningful negative answer — there is no key to be missing, no sandbox
- * account to mistake for production, and no way to point it at a wrong tenant.
- * It reports configured everywhere, which is honest: a catalogue read either
- * succeeds or fails at the network, and both are the client's business.
+ * Kamino's public API and Veda's on-chain reads take no credential, so "is it
+ * configured" has no meaningful negative answer. They report configured
+ * everywhere; cluster-specific deployment registries separately decide whether
+ * a real instrument can be catalogued or executed.
  *
- * Deliberately NOT given placeholder `KAMINO_API_KEY` / `KAMINO_SANDBOX_API_KEY`
- * entries. scripts/secret-keys.mjs is "every env key the SDP API reads" and
+ * Deliberately NOT given placeholder provider keys. scripts/secret-keys.mjs is
+ * "every env key the SDP API reads" and
  * projects into the local and Docker env files; a declared secret nothing reads
  * is a standing question for whoever next provisions this service.
  *
  * Note what this does NOT relax: entitlement. An org still needs the
- * `providerOverrides.earn.<provider>` override for any money-in path, and a
- * catalogue-only provider has none to gate.
+ * `providerOverrides.earn.<provider>` override for any money-in path.
  */
 function publicApiDefinition(label: string): ProviderAvailabilityDefinition {
   return { label, isConfigured: () => true };

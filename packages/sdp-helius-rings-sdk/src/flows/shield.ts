@@ -1,5 +1,7 @@
+import { buildRingDepositTransaction } from "@heliuslabs/zolana/ring";
 import { buildDepositTransaction } from "@heliuslabs/zolana/wallet";
 import { address, type Transaction } from "@solana/kit";
+import { withConfiguredAddressErrorBridge } from "../error-bridge.js";
 import type { ShieldedMaterial } from "../material.js";
 import { protocolMint } from "./mint.js";
 
@@ -21,6 +23,14 @@ export interface ShieldFlowInput {
   readonly mint: string;
   readonly amountRaw: string;
   readonly tree?: string;
+  /**
+   * Ring the operation was pinned to at prepare time. Set, the deposit is
+   * ring-bound, so only that ring's transact can ever spend the note; unset,
+   * it lands in the default public pool. Persisted state rather than
+   * caller-echoable input, so a bad value is a config_error and its text
+   * never echoes back.
+   */
+  readonly ringProgramId?: string;
 }
 
 export async function buildShieldTransaction(
@@ -29,8 +39,13 @@ export async function buildShieldTransaction(
 ): Promise<Transaction> {
   const owner = address(input.owner);
   const asset = protocolMint(input.mint);
+  const pinnedRing = input.ringProgramId;
+  const ringProgramId =
+    pinnedRing === undefined
+      ? undefined
+      : withConfiguredAddressErrorBridge(() => address(pinnedRing));
 
-  return buildDepositTransaction({
+  const deposit = {
     client,
     feePayer: owner,
     depositor: owner,
@@ -38,5 +53,9 @@ export async function buildShieldTransaction(
     amount: BigInt(input.amountRaw),
     ...(asset ? { asset: address(asset) } : {}),
     ...(input.tree ? { tree: address(input.tree) } : {}),
-  });
+  };
+
+  return ringProgramId === undefined
+    ? buildDepositTransaction(deposit)
+    : buildRingDepositTransaction({ ...deposit, ringProgramId });
 }

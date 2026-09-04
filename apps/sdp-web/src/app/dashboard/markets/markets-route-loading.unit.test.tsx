@@ -14,13 +14,13 @@ describe("Markets route loading states", () => {
     expect(markup).toContain("h-[121px]");
   });
 
-  it("matches the strategy catalogue while configuration loads", () => {
+  it("matches the unified strategy and code guide while configuration loads", () => {
     const markup = renderToStaticMarkup(<EmbeddedYieldConfigureLoading />);
 
     expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain('data-embedded-yield-loading="configure"');
-    expect(markup).toContain("max-w-7xl");
-    expect(markup).toContain("h-20");
+    expect(markup).toContain('data-embedded-yield-loading="integrate"');
+    expect(markup).toContain("max-w-5xl");
+    expect(markup).toContain("h-56");
   });
 
   it("matches the code guide while integration loads", () => {

@@ -1,13 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const syncWallet = vi.fn();
-const getPrivateTokenBalances = vi.fn();
 const getPrivateTransactions = vi.fn();
 const utxos = vi.fn();
 
 vi.mock("@heliuslabs/zolana/wallet", () => ({
   syncWallet: (...args: unknown[]) => syncWallet(...args),
-  getPrivateTokenBalances: (...args: unknown[]) => getPrivateTokenBalances(...args),
   getPrivateTransactions: (...args: unknown[]) => getPrivateTransactions(...args),
 }));
 
@@ -29,6 +27,11 @@ const OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 const PROTOCOL_SOL = "11111111111111111111111111111111";
 const SDP_SOL = "So11111111111111111111111111111111111111112";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+// Distinct from every other address here so a swapped parameter cannot pass.
+const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
+const OTHER_RING = "SysvarRent111111111111111111111111111111111";
+
+const SOL_LABEL = { mint: SDP_SOL, symbol: "SOL", decimals: 9 };
 
 const DEPS = {
   client: {} as never,
@@ -51,41 +54,78 @@ describe("syncRingsWallet", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     syncWallet.mockResolvedValue(CLEAN);
-    getPrivateTokenBalances.mockReturnValue([]);
     getPrivateTransactions.mockReturnValue([]);
     utxos.mockReturnValue([]);
   });
 
+  it("tags every unspent note's balance by its ring, default bucket first", async () => {
+    utxos.mockReturnValue([
+      { spent: false, utxo: { ringProgramId: RING_PROGRAM, asset: PROTOCOL_SOL, amount: 2n } },
+      { spent: false, utxo: { ringProgramId: RING_PROGRAM, asset: PROTOCOL_SOL, amount: 3n } },
+      // Unbound: only the default pool's flows can spend it, so its own row.
+      { spent: false, utxo: { asset: PROTOCOL_SOL, amount: 100n } },
+      // A foreign ring's note is unspendable through this project's flows, but
+      // hiding it would misreport what the identity holds.
+      { spent: false, utxo: { ringProgramId: OTHER_RING, asset: PROTOCOL_SOL, amount: 200n } },
+      { spent: true, utxo: { ringProgramId: RING_PROGRAM, asset: PROTOCOL_SOL, amount: 400n } },
+      { spent: false, utxo: { ringProgramId: RING_PROGRAM, asset: USDC, amount: 7n } },
+    ]);
+
+    const { balances } = await syncRingsWallet(DEPS, {
+      walletId: "hrw_1",
+      owner: OWNER,
+      knownAssets: [SOL_LABEL],
+    });
+
+    // Value cannot cross a ring boundary inside a spend, so nothing merges.
+    expect(balances).toEqual([
+      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "100", ringProgramId: null },
+      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "5", ringProgramId: RING_PROGRAM },
+      { mint: USDC, symbol: "UNKNOWN", decimals: 0, amountRaw: "7", ringProgramId: RING_PROGRAM },
+      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "200", ringProgramId: OTHER_RING },
+    ]);
+  });
+
   it("reports SOL under the mint SDP uses, not the protocol's", async () => {
-    getPrivateTokenBalances.mockReturnValue([
-      { assetId: 1n, mint: PROTOCOL_SOL, amount: 2_500_000_000n, utxos: [] },
+    utxos.mockReturnValue([
+      { spent: false, utxo: { asset: PROTOCOL_SOL, amount: 2_500_000_000n } },
     ]);
 
     const result = await syncRingsWallet(DEPS, {
       walletId: "hrw_1",
       owner: OWNER,
-      knownAssets: [{ mint: SDP_SOL, symbol: "SOL", decimals: 9 }],
+      knownAssets: [SOL_LABEL],
     });
 
     // The protocol spells native SOL as the system program and SDP spells it as
     // wrapped SOL. Returning the protocol's would miss every allowlist lookup.
     expect(result.balances).toEqual([
-      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "2500000000" },
+      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "2500000000", ringProgramId: null },
     ]);
   });
 
   it("still returns a holding whose mint is not on the allowlist", async () => {
-    getPrivateTokenBalances.mockReturnValue([{ assetId: 9n, mint: USDC, amount: 42n, utxos: [] }]);
+    utxos.mockReturnValue([{ spent: false, utxo: { asset: USDC, amount: 42n } }]);
 
     const [balance] = (await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER })).balances;
 
     // Dropping it would tell an operator the wallet is empty when it is not,
     // and guessing decimals would render the amount at the wrong magnitude.
-    expect(balance).toEqual({ mint: USDC, symbol: "UNKNOWN", decimals: 0, amountRaw: "42" });
+    expect(balance).toEqual({
+      mint: USDC,
+      symbol: "UNKNOWN",
+      decimals: 0,
+      amountRaw: "42",
+      ringProgramId: null,
+    });
   });
 
   it("counts unspent notes", async () => {
-    utxos.mockReturnValue([{ spent: false }, { spent: true }, { spent: false }]);
+    utxos.mockReturnValue([
+      { spent: false, utxo: { asset: PROTOCOL_SOL, amount: 1n } },
+      { spent: true, utxo: { asset: PROTOCOL_SOL, amount: 1n } },
+      { spent: false, utxo: { asset: PROTOCOL_SOL, amount: 1n } },
+    ]);
 
     const { report } = await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER });
 

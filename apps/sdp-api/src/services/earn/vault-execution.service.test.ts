@@ -1,4 +1,5 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
+import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
@@ -442,6 +443,7 @@ describe("vault execution validation", () => {
   });
 
   it("rejects lookup-table transport failures instead of returning a simulation verdict", async () => {
+    const retry = vi.spyOn(rpcCore, "withTransientRpcRetry");
     const planWithLookupTable = {
       ...plan,
       lookupTables: ["11111111111111111111111111111112"],
@@ -458,6 +460,7 @@ describe("vault execution validation", () => {
         fee: { kind: "wallet-pays" },
       })
     ).rejects.toBeTruthy();
+    expect(retry).toHaveBeenCalledOnce();
   });
 });
 

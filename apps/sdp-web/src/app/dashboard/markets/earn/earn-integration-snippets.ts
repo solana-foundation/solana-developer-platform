@@ -4,8 +4,8 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * The complete B2B2C loop, exactly as shipped (PRO-1722 + PRO-1772): the
  * partner's backend BUILDS an unsigned transaction for the customer's own
  * wallet, the wallet signs it in the browser, the backend SUBMITS the signed
- * bytes — SDP verifies the signature, records the movement, then broadcasts —
- * and the reads close the loop: poll the movement to a terminal state, show
+ * bytes, and SDP verifies the signature, records the movement, then broadcasts.
+ * The reads close the loop: poll the movement to a terminal state, show
  * balance + earned, list activity, and withdraw the same way money came in.
  *
  * Server-only examples by construction: the API key comes from process.env
@@ -16,11 +16,12 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * custody wallet.
  *
  * The guide renders one section per concern so a partner engineer can read it
- * top to bottom; the sections concatenate into one server module.
+ * top to bottom. The sections concatenate into one module. Wallet products
+ * supply a base64-in, base64-out signer for their customer wallet and, when
+ * sponsoring fees, their server-side sponsor wallet.
  *
  * The public docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
- * documents this same flow, including the optional partner `feePayer` these
- * snippets keep out of the default path — update both together.
+ * documents this same flow. Update both together.
  */
 export interface EarnIntegrationSections {
   /** Shared client setup: base URL, auth headers, response envelope. */
@@ -109,9 +110,9 @@ async function sdpFetch(path: string, init?: RequestInit) {
   // defensively and keep the status in the thrown message either way.
   const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(
-      result?.error?.message ?? \`SDP request failed: \${path} (\${response.status})\`
-    );
+    const code = result?.error?.code ? \` \${result.error.code}\` : "";
+    const message = result?.error?.message ?? "Request failed";
+    throw new Error(\`SDP \${response.status}\${code}: \${message}\`);
   }
   return result.data;
 }
@@ -142,44 +143,34 @@ function floorForTolerance(quote: string, decimals: number, toleranceBps: number
   return fractionResult ? \`\${wholeResult}.\${fractionResult}\` : wholeResult;
 }
 
-/**
- * Browser helper. Keep this in client code with @solana/web3.js and your
- * wallet adapter. It does not import or receive the SDP API key.
- */
-export async function signSdpTransaction(
-  transactionBase64: string,
-  signTransaction: (transaction: import("@solana/web3.js").VersionedTransaction) =>
-    Promise<import("@solana/web3.js").VersionedTransaction>
+export type EarnTransactionSigner = (transactionBase64: string) => Promise<string>;
+
+/** Collect every signature required by the exact transaction SDP built. */
+export async function signEarnTransaction(
+  built: { transaction: string; feePayer?: string },
+  customerSigner: EarnTransactionSigner,
+  sponsorSigner?: EarnTransactionSigner
 ) {
-  const { VersionedTransaction } = await import("@solana/web3.js");
-  const bytes = Uint8Array.from(atob(transactionBase64), (character) => character.charCodeAt(0));
-  const signed = await signTransaction(VersionedTransaction.deserialize(bytes));
-  const serialized = signed.serialize();
-  let binary = "";
-  for (const byte of serialized) binary += String.fromCharCode(byte);
-  return btoa(binary);
+  const customerSigned = await customerSigner(built.transaction);
+  if (!built.feePayer) return customerSigned;
+  if (!sponsorSigner) throw new Error("Sponsor signature is required for this transaction");
+  return sponsorSigner(customerSigned);
 }`;
 
   const deposit = `/**
- * Step 1 — build. SDP returns an UNSIGNED transaction for your customer's
- * wallet: it is the fee payer and the only required signer. Hand the base64
- * \`transaction\` to signSdpTransaction in the browser.
- *
- * A built transaction expires with its blockhash (about a minute); build a
- * fresh one if the customer walks away before signing.
- *
- * Start with EMBEDDED_YIELD_STRATEGY.directDepositMint. It avoids a swap and
- * is the shortest production integration. The OpenAPI reference documents the
- * optional swap-funded branch separately.
+ * Build an unsigned direct deposit. Omit feePayer for customer-paid fees.
+ * Pass your sponsor address to pay fees and first-deposit account rent.
+ * signEarnTransaction collects both signatures when the built transaction
+ * echoes a feePayer.
  */
 export async function buildEarnDepositTransaction({
   ownerAddress,
   amount,
+  feePayer,
 ${depositSlippageInput}}: {
-  /** The customer's Solana wallet address. */
   ownerAddress: string;
-  /** Deposit amount in EMBEDDED_YIELD_STRATEGY.directDepositMint units. */
   amount: string;
+  feePayer?: string;
 ${depositSlippageType}}) {
 ${depositFloor}
   const data = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
@@ -189,19 +180,17 @@ ${depositFloor}
       strategyId: EMBEDDED_YIELD_STRATEGY.id,
       ownerAddress,
       amount,
+      sourceTokenMint: EMBEDDED_YIELD_STRATEGY.directDepositMint,
+      ...(feePayer ? { feePayer } : {}),
       ...(minSharesOut ? { minSharesOut } : {}),
     }),
   });
-  // { transactionId, transaction, lastValidBlockHeight, swap?, ... }
-  return data;
+  return data.transaction;
 }
 
 /**
- * Step 2 — submit the signed bytes. SDP verifies they are exactly the
- * transaction it built and that your customer's signature is genuine, records
- * the deposit, then broadcasts it. Reuse the SAME idempotency key when
- * retrying this call: a retry returns the original deposit with
- * \`replayed: true\` instead of moving money twice.
+ * Submit only after every required wallet has signed. Reuse the same
+ * idempotency key when retrying this exact submission.
  */
 export async function submitEarnDeposit({
   transactionId,
@@ -209,7 +198,6 @@ export async function submitEarnDeposit({
   idempotencyKey,
 }: {
   transactionId: string;
-  /** Base64 of the signed transaction bytes from the customer's wallet. */
   signedTransaction: string;
   idempotencyKey: string;
 }) {
@@ -223,7 +211,7 @@ export async function submitEarnDeposit({
 }
 
 /**
- * Step 3 — poll the movement to a terminal state. \`confirmed\` is optimistic;
+ * Poll the movement to a terminal state. \`confirmed\` is optimistic;
  * only \`finalized\` and \`failed\` are terminal. Each detail read performs a
  * bounded live chain check; scheduled reconciliation remains the recovery path.
  */
@@ -302,24 +290,29 @@ export async function listEarnPositions(ownerAddress: string) {
 }`;
 
   const withdraw = `/**
- * Withdraw, step 1 — build the unsigned exit for the customer's wallet to
- * sign. Exits keep working even when deposits are paused: money out is never
- * gated by money-in rules.
+ * Build an unsigned exit. Omit feePayer for customer-paid fees, or pass the
+ * same sponsor address pattern used for deposits. Exits remain available when
+ * deposits are paused.
  */
 export async function buildEarnWithdrawalTransaction({
   positionId,
   shares,
+  feePayer,
 ${withdrawalSlippageInput}}: {
-  /** The position \`id\` from listEarnPositions. */
   positionId: string;
-  /** Shares to redeem, at most \`withdrawableShares\`, as a decimal string. */
   shares: string;
+  feePayer?: string;
 ${withdrawalSlippageType}}) {
 ${withdrawalFloor}
   const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
     method: "POST",
     headers: sdpHeaders(),
-    body: JSON.stringify({ positionId, shares, ...(minAmountOut ? { minAmountOut } : {}) }),
+    body: JSON.stringify({
+      positionId,
+      shares,
+      ...(feePayer ? { feePayer } : {}),
+      ...(minAmountOut ? { minAmountOut } : {}),
+    }),
   });
   return data.transaction;
 }

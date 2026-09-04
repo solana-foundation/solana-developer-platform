@@ -121,6 +121,7 @@ describe("buildRingsWalletOperationInput", () => {
     actor: null,
     operationId: "hro_1",
     intentKey: "sha256:abc",
+    ringProgramId: null,
   };
 
   it("maps a transfer onto the transfer family with a rings operation type", () => {
@@ -159,5 +160,16 @@ describe("buildRingsWalletOperationInput", () => {
     expect(input.source).toBe("system");
     expect(input.asset).toBeNull();
     expect(input.destination).toBeNull();
+  });
+
+  it("carries the pinned ring into the context bag for reviewers", () => {
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+    const input = buildRingsWalletOperationInput({
+      ...base,
+      ringProgramId: RING_PROGRAM,
+      operation: { walletId: "hrw_1", opType: "shield", clientNonce: "n1" },
+    });
+
+    expect(input.context).toMatchObject({ ringProgramId: RING_PROGRAM });
   });
 });

@@ -6,11 +6,15 @@ import type {
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
-import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
+import type {
+  CollectedFieldData,
+  PayoutRequirementAccount,
+  RampDirection,
+} from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import type { z } from "zod";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
@@ -51,6 +55,8 @@ export interface RampQuotePayloadArgs {
   cryptoToken: string;
   collectedData: CollectedFieldData;
   selectedProviderAccountId: string | null;
+  /** Explicitly picked saved payout account; its corridor overrides the collected destination country. */
+  selectedPayoutAccount: PayoutRequirementAccount | null;
   rampsMemo: Record<string, string>;
 }
 
@@ -160,6 +166,14 @@ export function useRampWizard<TId extends string>(
     counterpartyId: initialCounterpartyId,
   });
 
+  const { mutate: mutateSwrCache } = useSWRConfig();
+  const selectProvider = (provider: RampProviderId) => {
+    void mutateSwrCache(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
+      revalidate: true,
+    });
+    setField("provider", provider);
+  };
+
   const selectedProviderField = fields.provider;
   useEffect(() => {
     if (selectedProviderField === null) return;
@@ -198,7 +212,7 @@ export function useRampWizard<TId extends string>(
   );
 
   // Once inserted, the requirements step is pinned for the provider's lifetime in
-  // this wizard: a corridor GET answering `ready` flips needsCollection off, but the
+  // this wizard: an advance answering `ready` flips needsCollection off, but the
   // step the user is standing on must not vanish under them.
   const [requirementsPin, setRequirementsPin] = useState<{
     provider: RampProviderId | null;
@@ -235,11 +249,7 @@ export function useRampWizard<TId extends string>(
   const stepSchema = config.stepSchemas[currentStepId];
   const canProceed = useMemo(() => {
     if (isRequirementsStep) {
-      return (
-        requirements.isComplete &&
-        !requirements.isCorridorLoading &&
-        requirements.blockReason === null
-      );
+      return requirements.isComplete && requirements.blockReason === null;
     }
     // Block leaving the step that precedes the requirements insertion until the
     // requirements answer has resolved AND isn't a blocker (fetch error, or an
@@ -263,7 +273,6 @@ export function useRampWizard<TId extends string>(
     config.memoStepId,
     memoRows,
     requirements.isComplete,
-    requirements.isCorridorLoading,
     requirements.isResolved,
     requirements.blockReason,
     requirementsConfig,
@@ -293,6 +302,7 @@ export function useRampWizard<TId extends string>(
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
         collectedData: requirements.collectedData,
         selectedProviderAccountId: providerAccountId,
+        selectedPayoutAccount: requirements.selectedPayoutAccount,
         rampsMemo: memoRowsToRecord(memoRows),
       }),
       t
@@ -506,7 +516,8 @@ export function useRampWizard<TId extends string>(
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
     selectedProviderAccountId: requirements.selectedProviderAccountId,
-    resolvedAccount: requirements.resolvedAccount,
+    payoutAccounts: requirements.payoutAccounts,
+    selectPayoutAccount: requirements.selectPayoutAccount,
     requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,
@@ -515,6 +526,7 @@ export function useRampWizard<TId extends string>(
     selectedRampPair,
     fields,
     setField,
+    selectProvider,
     quote,
     quoteTransferId,
     memoRows,

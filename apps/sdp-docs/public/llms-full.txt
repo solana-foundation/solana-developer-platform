@@ -903,13 +903,14 @@ Two properties define the surface:
 - **Non-custodial.** SDP holds no key for your customers' wallets. The customer's signature is the authorization, every time.
 - **Server-side.** Your SDP API key stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones.
 
-All endpoints live under `/v1/earn`. Authenticate with `Authorization: Bearer <SDP_API_KEY>`; the key needs the `earn:read` and `earn:write` permissions. Start in sandbox: new vault deposits are enabled there first.
+All endpoints live under `/v1/earn`. Authenticate with `Authorization: Bearer <SDP_API_KEY>`; the key needs the `earn:read` and `earn:write` permissions. Start in sandbox, which uses Solana devnet. A sandbox strategy is depositable only when its `hostCluster` is `devnet`, `fundable` is `true`, and `status` is `active`.
 
 ## The endpoints at a glance
 
 | Step | Endpoint |
 | --- | --- |
 | Discover strategies | `GET /v1/earn/strategies` |
+| Preview a direct deposit | `POST /v1/earn/vault-deposit-previews` |
 | Build a deposit | `POST /v1/earn/external-wallet/deposit-transactions` |
 | Submit the signed deposit | `POST /v1/earn/external-wallet/deposits` |
 | Poll a movement | `GET /v1/earn/external-wallet/movements/{movementId}` |
@@ -937,7 +938,8 @@ Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-nu
 ## 2. Deposit: build, sign, submit, poll
 
 ```ts
-const SDP_API_URL = "https://api.sdp.solana.com";
+const SDP_API_URL = "https://api.solana.com";
+// For a local SDP API, use the configured base URL, usually http://127.0.0.1:8787.
 
 function sdpHeaders(extra: Record<string, string> = {}) {
   const apiKey = process.env.SDP_API_KEY;
@@ -953,23 +955,62 @@ async function sdpFetch(path: string, init?: RequestInit) {
   const response = await fetch(`${SDP_API_URL}${path}`, init);
   const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(result?.error?.message ?? `SDP request failed: ${path} (${response.status})`);
+    const code = result?.error?.code ? ` ${result.error.code}` : "";
+    const message = result?.error?.message ?? "Request failed";
+    throw new Error(`SDP ${response.status}${code}: ${message}`);
   }
   return result.data;
+}
+
+/** Exact decimal floor without a JavaScript number round-trip. */
+function floorForTolerance(quote: string, decimals: number, toleranceBps: number) {
+  if (!Number.isInteger(toleranceBps) || toleranceBps < 1 || toleranceBps > 1_000) {
+    throw new Error("slippage tolerance must be 1-1000 basis points");
+  }
+  const [whole, fraction = ""] = quote.split(".");
+  if (!/^\d+$/.test(whole ?? "") || !/^\d*$/.test(fraction) || fraction.length > decimals) {
+    throw new Error("provider quote is not a valid decimal at the reported mint scale");
+  }
+  const atoms = BigInt((whole ?? "0") + fraction.padEnd(decimals, "0"));
+  if (atoms === 0n) throw new Error("provider quote returned zero output");
+  const floored = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;
+  const digits = floored.toString().padStart(decimals + 1, "0");
+  if (decimals === 0) return digits;
+  const wholeResult = digits.slice(0, -decimals);
+  const fractionResult = digits.slice(-decimals).replace(/0+$/, "");
+  return fractionResult ? `${wholeResult}.${fractionResult}` : wholeResult;
 }
 ```
 
 **Build.** SDP simulates the deposit before handing anything out, so a wallet that cannot fund it fails here with a readable 400 instead of a landed, failed transaction.
 
 ```ts
+let minSharesOut: string | undefined;
+if (strategy.depositSlippage?.quoteRequired) {
+  const quote = await sdpFetch("/v1/earn/vault-deposit-previews", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ strategyId: strategy.id, amount: "25" }),
+  });
+  if (quote.blockingIssues.length > 0) {
+    throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
+  }
+  minSharesOut = floorForTolerance(
+    quote.sharesOut,
+    quote.shareDecimals,
+    strategy.depositSlippage.defaultToleranceBps,
+  );
+}
+
 const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify({
-    strategyId,
+    strategyId: strategy.id,
     ownerAddress, // the customer's wallet
     amount: "25", // decimal string in the vault token's units
-    minSharesOut, // slippage floor; required in production
+    sourceTokenMint: strategy.depositMints[0], // shortest path: no swap
+    ...(minSharesOut ? { minSharesOut } : {}),
   }),
 });
 // { transactionId, transaction, lastValidBlockHeight, ... }
@@ -1040,13 +1081,13 @@ What to know when sponsoring:
 - Passing the customer's own address as `feePayer` simply means the default. Program-derived addresses cannot sign, so an off-curve fee payer can never be submitted.
 - Applies to `withdrawal-transactions` identically, and to the standalone swap transaction of a split swap-funded deposit, so every transaction the flow hands out can be sponsored.
 
-On the Treasury surface (your organization's own custody wallets) the wallet itself pays its fees, so keep some SOL on custody wallets that deposit into vaults.
+The Treasury surface uses SDP's configured paymaster when Earn sponsorship is enabled for the cluster. Otherwise the organization custody wallet pays its own fee and rent. This is separate from the partner-controlled `feePayer` on Embedded Yield builds.
 
 ## 4. Show balances and activity
 
 - `GET /v1/earn/external-wallet/earnings?ownerAddress=…` returns balance and total earned per deposit token. `earned` is stated only when exact; otherwise it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
 - `GET /v1/earn/external-wallet/movements?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`.
-- `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals.
+- `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals. If live RPC hydration fails, `shares`, `withdrawableShares`, and `tokenValue` are absent, never zero. Show an unavailable state and disable withdrawal until a fresh read returns the ceiling.
 - `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token.
 
 ## 5. Withdraw
@@ -1090,6 +1131,8 @@ If the composed transaction cannot fit one Solana packet, the response is `{ req
 | --- | --- |
 | Builds | No key. A build moves no money and expires with its blockhash. |
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`); a different key against an already-consumed build is a 409. |
+
+A `400` means the request or current vault state must change before retrying. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
 
 Full request and response shapes: [Earn API reference](/docs/reference/api/earn).
 
@@ -5918,6 +5961,7 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
 | `GET` | `/v1/earn/strategies` | List yield strategies |
 | `GET` | `/v1/earn/strategies/{strategyId}` | Get one yield strategy |
+| `POST` | `/v1/earn/vault-deposit-previews` | Preview a direct vault deposit |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

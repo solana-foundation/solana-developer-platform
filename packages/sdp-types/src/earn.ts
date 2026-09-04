@@ -255,12 +255,11 @@ export interface EarnStrategy {
    * which is a larger set.
    *
    * `true` is necessary but NOT sufficient. It answers only the cluster
-   * question; a deposit additionally needs the provider to expose SDP a
-   * money-movement surface (a catalogue-only provider like Kamino answers 501
-   * on `POST /v1/earn/programs`) and your organization to be entitled to that
-   * provider. Those are deliberately not folded in here: this field describes
-   * the INSTRUMENT, and entitlement in particular is a property of the caller,
-   * not of a platform-global catalogue row.
+   * question; a deposit additionally needs the matching execution capability,
+   * an open environment, an active strategy, and organization entitlement.
+   * Those are deliberately not folded in here: this field describes the
+   * INSTRUMENT, and entitlement in particular is a property of the caller, not
+   * of a platform-global catalogue row.
    */
   fundable: boolean;
   createdAt: string;

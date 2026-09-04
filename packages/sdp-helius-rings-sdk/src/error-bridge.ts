@@ -4,6 +4,7 @@ import {
   type ClientErrorDetailsMap,
 } from "@heliuslabs/zolana/client";
 import { InterfaceError, type InterfaceErrorCode } from "@heliuslabs/zolana/interface";
+import { RingError, type RingErrorCode } from "@heliuslabs/zolana/ring";
 import { TransactionError, type TransactionErrorCode } from "@heliuslabs/zolana/transaction";
 import { WalletError, type WalletErrorCode } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings";
@@ -86,7 +87,7 @@ const WALLET_ERROR_CODES_TO_DOMAIN = {
   WALLET_RECIPIENT_NOT_REGISTERED: "invalid_input",
   WALLET_SELECTED_BALANCE_OVERFLOW: "invalid_input",
   WALLET_SPLIT_INPUT_HAS_DATA: "invalid_input",
-  WALLET_SPLIT_INPUT_ZONE_MISMATCH: "invalid_input",
+  WALLET_SPLIT_INPUT_RING_MISMATCH: "invalid_input",
   WALLET_SPLIT_INVALID_PART_COUNT: "invalid_input",
   WALLET_SPLIT_NOT_DIVISIBLE: "invalid_input",
   WALLET_SYNC: "gateway_unavailable",
@@ -131,11 +132,11 @@ const TRANSACTION_ERROR_CODES_TO_DOMAIN = {
   TRANSACTION_MERGE_INPUT_NULLIFIER_KEY_MISMATCH: "conflict",
   TRANSACTION_MERGE_INPUT_OWNER_MISMATCH: "conflict",
   TRANSACTION_MERGE_INPUT_RAIL_MISMATCH: "conflict",
-  TRANSACTION_MERGE_INPUT_ZONE_MISMATCH: "conflict",
+  TRANSACTION_MERGE_INPUT_RING_MISMATCH: "conflict",
   TRANSACTION_MISSING_CURRENT_VIEWING_KEY: "conflict",
   TRANSACTION_MISSING_OUTPUT: "invalid_input",
   TRANSACTION_MISSING_PUBLIC_SPL_ASSET: "invalid_input",
-  TRANSACTION_MISSING_ZONE_PROGRAM_ID: "invalid_input",
+  TRANSACTION_MISSING_RING_PROGRAM_ID: "invalid_input",
   TRANSACTION_MULTIPLE_PUBLIC_SPL_ASSETS: "invalid_input",
   TRANSACTION_NON_CANONICAL_DATA_ORDER: "invalid_input",
   TRANSACTION_NONCANONICAL_DUMMY_INPUT: "invalid_input",
@@ -148,7 +149,7 @@ const TRANSACTION_ERROR_CODES_TO_DOMAIN = {
   TRANSACTION_OUTPUT_DATA_MISMATCH: "conflict",
   TRANSACTION_OUTPUT_OWNER_MISMATCH: "conflict",
   TRANSACTION_OUTPUT_SLOT_OVERFLOW: "invalid_input",
-  TRANSACTION_OUTPUT_ZONE_MISMATCH: "conflict",
+  TRANSACTION_OUTPUT_RING_MISMATCH: "conflict",
   TRANSACTION_P256_TRANSACT_UNSUPPORTED: "invalid_input",
   TRANSACTION_POSEIDON: "gateway_unavailable",
   TRANSACTION_PUBLIC_SOL_ALREADY_SET: "invalid_input",
@@ -164,7 +165,7 @@ const TRANSACTION_ERROR_CODES_TO_DOMAIN = {
   TRANSACTION_SPLIT_INPUT_IS_DUMMY: "conflict",
   TRANSACTION_SPLIT_INPUT_NULLIFIER_KEY_MISMATCH: "conflict",
   TRANSACTION_SPLIT_INPUT_OWNER_MISMATCH: "conflict",
-  TRANSACTION_SPLIT_INPUT_ZONE_MISMATCH: "conflict",
+  TRANSACTION_SPLIT_INPUT_RING_MISMATCH: "conflict",
   TRANSACTION_SPLIT_INVALID_PART_COUNT: "invalid_input",
   TRANSACTION_TOO_MANY_INPUTS: "invalid_input",
   TRANSACTION_TOO_MANY_INTERFACE_TRANSFERS: "invalid_input",
@@ -249,6 +250,47 @@ const CLIENT_ERROR_CODES_TO_DOMAIN = {
   CLIENT_INVALID_RPC_RESPONSE: "gateway_unavailable",
 } satisfies Record<ClientErrorCode, BridgedErrorCode>;
 
+/**
+ * Total by construction, like the wallet map: a new public RingError code in
+ * Zolana must be classified before this package typechecks. Build and origin
+ * failures wrap upstream I/O; definitive chain-state absences and invariant
+ * failures are conflicts the tenant cannot fix by retrying.
+ */
+const RING_ERROR_CODES_TO_DOMAIN = {
+  RING_AUDIT_KEY_MISMATCH: "conflict",
+  RING_AUDIT_MESSAGE: "gateway_unavailable",
+  RING_AUDIT_UNSEALED: "gateway_unavailable",
+  RING_BUILD_DEPOSIT: "gateway_unavailable",
+  RING_BUILD_LOOKUP_TABLE: "gateway_unavailable",
+  RING_BUILD_TRANSFER: "gateway_unavailable",
+  RING_BUILD_WITHDRAWAL: "gateway_unavailable",
+  // A ring config that decodes but fails its invariants is chain state this
+  // tenant cannot fix by retrying, like the user-record mismatches above.
+  RING_CONFIG_INVALID: "conflict",
+  RING_CONFIG_NOT_FOUND: "conflict",
+  RING_DATA_OUTSIDE_RING: "invalid_input",
+  RING_FOREIGN_RING: "invalid_input",
+  RING_INSUFFICIENT_BALANCE: "insufficient_balance",
+  RING_INVALID_LENGTH: "invalid_input",
+  RING_LOOKUP_TABLE_INCOMPLETE: "gateway_unavailable",
+  RING_LOOKUP_TABLE_NOT_FOUND: "conflict",
+  RING_MULTIPLE_INPUT_TREES: "conflict",
+  RING_ORIGIN_DECODE: "gateway_unavailable",
+  RING_ORIGIN_STACK: "gateway_unavailable",
+  RING_ORIGIN_UNAVAILABLE: "gateway_unavailable",
+  RING_PADDED_CHANGE: "gateway_unavailable",
+  RING_PASSKEY: "invalid_input",
+  RING_PROOF_LENGTH: "invalid_input",
+  RING_READ_ACCESS_RECORD_INVALID: "conflict",
+  RING_READ_CURSOR: "invalid_input",
+  RING_READ_LIMIT: "invalid_input",
+  RING_READER_KEY: "invalid_input",
+  RING_RESERVED_AUDITOR_KEY: "conflict",
+  RING_RPC: "gateway_unavailable",
+  RING_RPC_TRANSPORT: "gateway_unavailable",
+  RING_TOO_MANY_INPUTS: "invalid_input",
+} satisfies Record<RingErrorCode, BridgedErrorCode>;
+
 function clientErrorCode(error: ClientError): BridgedErrorCode {
   if (error.code === "CLIENT_TRANSACTION") {
     const details = error.details as ClientErrorDetailsMap["CLIENT_TRANSACTION"] | undefined;
@@ -278,6 +320,20 @@ function bridgedCode(error: unknown): BridgedErrorCode | undefined {
       return TRANSACTION_ERROR_CODES_TO_DOMAIN[error.cause.code];
     }
     return WALLET_ERROR_CODES_TO_DOMAIN[error.code];
+  }
+
+  if (error instanceof RingError) {
+    // Ring wrappers retain the more specific Zolana error the same way.
+    if (error.cause instanceof InterfaceError) {
+      return INTERFACE_ERROR_CODES_TO_DOMAIN[error.cause.code];
+    }
+    if (error.cause instanceof ClientError) {
+      return clientErrorCode(error.cause);
+    }
+    if (error.cause instanceof TransactionError) {
+      return TRANSACTION_ERROR_CODES_TO_DOMAIN[error.cause.code];
+    }
+    return RING_ERROR_CODES_TO_DOMAIN[error.code];
   }
 
   if (error instanceof ClientError) {
@@ -325,7 +381,7 @@ export function withZolanaErrorBridgeSync<T>(work: () => T): T {
   }
 }
 
-function isConfiguredTreeAddressError(error: unknown): boolean {
+function isConfiguredAddressError(error: unknown): boolean {
   return (
     isSolanaError(error, SOLANA_ERROR__ADDRESSES__STRING_LENGTH_OUT_OF_RANGE) ||
     isSolanaError(error, SOLANA_ERROR__ADDRESSES__INVALID_BYTE_LENGTH) ||
@@ -335,14 +391,15 @@ function isConfiguredTreeAddressError(error: unknown): boolean {
 }
 
 /**
- * Narrows Kit address failures to the configured-tree parsing site. The same
- * SolanaError codes thrown elsewhere remain untouched.
+ * Narrows Kit address failures to a configured-address parsing site (the tree
+ * or a pinned ring program id). The same SolanaError codes thrown elsewhere
+ * remain untouched.
  */
-export function withConfiguredTreeErrorBridge<T>(work: () => T): T {
+export function withConfiguredAddressErrorBridge<T>(work: () => T): T {
   try {
     return work();
   } catch (error) {
-    if (!isConfiguredTreeAddressError(error)) throw error;
+    if (!isConfiguredAddressError(error)) throw error;
     throw bridgedError("config_error");
   }
 }

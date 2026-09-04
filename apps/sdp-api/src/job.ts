@@ -31,6 +31,7 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
@@ -161,6 +162,10 @@ export async function runCronJob(): Promise<void> {
       monitored(PENDING_TRANSFERS_MONITOR, async () => {
         const outcomes = await Promise.allSettled([
           (async () => {
+            // Security sweep first so payment reconciliation failures cannot
+            // starve it: repairs revoked API keys whose cache write failed
+            // post-commit.
+            await reconcileRevokedApiKeyCache(env);
             await trackPendingTransfers(env);
             await recoverApprovedWalletOperations(env);
           })(),

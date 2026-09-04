@@ -210,7 +210,9 @@ export const earnExternalWalletDepositTransactionRequest = z
     }),
     minSharesOut: earnDecimalAmountSchema.optional().openapi({
       description:
-        "Slippage floor in share units. Optional in sandbox; required for production deposits.",
+        "Slippage floor in share units. Required whenever the selected strategy's " +
+        "`depositSlippage.quoteRequired` is true, and for every production deposit. Derive it " +
+        "from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
       example: "24.9",
     }),
     sourceTokenMint: earnSolanaMintSchema.optional().openapi({
@@ -305,6 +307,50 @@ export const earnExternalWalletWithdrawalPreviewRequest = z
       "nothing is persisted.",
   });
 
+const earnVaultQuoteIssueSchema = z.object({
+  code: z.string().openapi({ example: "SHARE_LOCKED" }),
+  message: z.string(),
+});
+
+export const earnVaultDepositPreviewRequest = z
+  .object({
+    strategyId: z.string().min(1).openapi({ example: "earn_strategy_example" }),
+    amount: earnDecimalAmountSchema.openapi({
+      description: "Deposit amount in the vault token's units.",
+      example: "25",
+    }),
+  })
+  .openapi({
+    description:
+      "Quote one direct vault deposit against the provider's live accounting. Read-only: " +
+      "nothing is built and nothing is persisted.",
+  });
+
+export const earnVaultDepositPreviewResponse = successResponseSchema(
+  z.object({
+    strategyId: z.string().openapi({ example: "earn_strategy_example" }),
+    sharesOut: earnDecimalAmountSchema.openapi({
+      description:
+        "Shares the deposit would mint at the live rate. Derive `minSharesOut` from this " +
+        "value minus the chosen tolerance, quantized to `shareDecimals`.",
+      example: "24.98",
+    }),
+    shareDecimals: z.number().int().openapi({
+      description: "The share mint's decimals, which the floor must be quantized to.",
+      example: 6,
+    }),
+    blockingIssues: z.array(earnVaultQuoteIssueSchema).openapi({
+      description: "Conditions the provider reports would block this deposit; empty when none.",
+    }),
+    feeSponsored: z.boolean().openapi({
+      description:
+        "Whether SDP's treasury vault flow would use its configured paymaster on this cluster. " +
+        "Embedded Yield partners sponsor their external-wallet flow separately by passing " +
+        "`feePayer` to the transaction build.",
+    }),
+  })
+);
+
 export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema(
   z.object({
     positionId: z.string().openapi({ example: "earn_position_example" }),
@@ -318,16 +364,9 @@ export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema
       description: "The deposit token's decimals — the scale a floor must be quantized to.",
       example: 6,
     }),
-    blockingIssues: z
-      .array(
-        z.object({
-          code: z.string().openapi({ example: "SHARE_LOCKED" }),
-          message: z.string(),
-        })
-      )
-      .openapi({
-        description: "Conditions the provider reports would block this exit; empty when none.",
-      }),
+    blockingIssues: z.array(earnVaultQuoteIssueSchema).openapi({
+      description: "Conditions the provider reports would block this exit; empty when none.",
+    }),
   })
 );
 

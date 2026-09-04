@@ -144,9 +144,13 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
 
-/** Signs through custody, broadcasts, and waits for the chain to accept it. */
-async function landTransaction(
-  deps: ProvisionDeps,
+/**
+ * Signs through custody, broadcasts, and waits for the chain to accept it.
+ * The one place bring-up bytes reach `deps.signTransaction`, shared with ring
+ * bring-up in `provision-ring.ts`.
+ */
+export async function landTransaction(
+  deps: Pick<ProvisionDeps, "client" | "signTransaction" | "submitTransaction">,
   transaction: Transaction,
   owner: string
 ): Promise<string> {

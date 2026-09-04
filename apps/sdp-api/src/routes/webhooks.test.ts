@@ -1,4 +1,5 @@
 import { createHmac, createSign, generateKeyPairSync } from "node:crypto";
+import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   buildBvnkCustomerExternalReference,
@@ -13,7 +14,7 @@ import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString(
   "base64"
@@ -205,6 +206,84 @@ describe("Clerk webhooks", () => {
       tier: "individual",
     });
     expect(updatedOrg?.settings ? JSON.parse(updatedOrg.settings) : null).toBeNull();
+  });
+
+  it("invalidates cached API keys when Clerk deletes an organization", async () => {
+    const clerkOrgId = "org_clerk_webhook_cache_invalidation";
+    const orgId = "org_webhook_cache_invalidation";
+    const projectId = "prj_webhook_cache_invalidation";
+    const userId = "usr_webhook_cache_invalidation";
+    // Assembled at runtime: the auth middleware only accepts sk_test_/sk_live_
+    // prefixed credentials, and a plain literal in that shape trips secret
+    // scanners on what is a made-up fixture value.
+    const rawKey = ["sk", "test", "webhook", "cache", "invalidation"].join("_");
+    const keyId = "key_webhook_cache_invalidation";
+    const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
+    const db = getDb(env);
+
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Cache Invalidation Org', ?, 'individual', 'active')"
+        )
+        .bind(orgId, orgId),
+      db
+        .prepare(
+          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+           VALUES (?, 'clerk', ?, ?, ?)`
+        )
+        .bind(`aoi_${orgId}`, clerkOrgId, orgId, orgId),
+      db
+        .prepare(
+          "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'webhook-cache@example.com', 1, 'active')"
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+        )
+        .bind(projectId, orgId, projectId, userId),
+      db
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, 'api_admin', ?, 'active')`
+        )
+        .bind(keyId, orgId, projectId, userId, keyHash, JSON.stringify(["*"])),
+    ]);
+
+    await seedCachedApiKey(env, keyHash, {
+      id: keyId,
+      organizationId: orgId,
+      projectId,
+      role: "api_admin",
+      permissions: ["*"],
+      environment: "sandbox",
+      rateLimitTier: "standard",
+      allowedIps: null,
+      signingWalletId: null,
+      signingWalletIds: [],
+      walletBindings: [],
+      status: "active",
+      expiresAt: null,
+      rotationDeadline: null,
+    });
+
+    const authedRequest = () =>
+      app.request("/v1/api-keys", { headers: { Authorization: `Bearer ${rawKey}` } }, env);
+
+    expect((await authedRequest()).status).toBe(200);
+
+    const res = await simulateClerkWebhook({
+      type: "organization.deleted",
+      data: { id: clerkOrgId, object: "organization", deleted: true },
+    });
+    expect(res.status).toBe(200);
+
+    // The cached key must be rejected on the very next request — no waiting
+    // out the cache TTL.
+    expect((await authedRequest()).status).toBe(401);
   });
 
   it("defaults new Clerk organizations to enterprise when SDP tier metadata is missing", async () => {

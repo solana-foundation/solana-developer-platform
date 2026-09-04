@@ -424,13 +424,15 @@ describe("depositIntoVault — validation and custody identity", () => {
     }
   });
 
-  it("does not dress an unreadable vault up as a caller error", async () => {
+  it("maps unreadable provider state to a retryable 503", async () => {
     buildVaultDeposit.mockRejectedValue(
       new SdpVedaError("VAULT_UNREADABLE", "the configured RPC could not be reached")
     );
 
     await expect(depositIntoVault(env, depositInput({ provider: "veda" }))).rejects.toMatchObject({
-      code: "VAULT_UNREADABLE",
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+      message: "Earn provider is temporarily unavailable. Try again.",
     });
   });
 

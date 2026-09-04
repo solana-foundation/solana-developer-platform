@@ -51,6 +51,10 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import {
+  REVOKED_API_KEY_CACHE_CRON,
+  runRevokedApiKeyCacheReconciliation,
+} from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { runWithCronRunEvent } from "./run-event";
 import {
@@ -160,6 +164,22 @@ export function startCron(deps: CronDeps): CronHandle | null {
         return;
       }
       runPendingTransfersReconciliation({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  // Unconditional: repairs cached credentials for keys Postgres already
+  // revoked. Feature-gating this would leave deployments without the only
+  // recovery path for a revocation whose cache write failed post-commit.
+  tasks.push(
+    schedule(REVOKED_API_KEY_CACHE_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRevokedApiKeyCacheReconciliation({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,

@@ -1,3 +1,7 @@
+import { ViewingKey } from "@heliuslabs/zolana";
+import type { Bytes32 } from "@heliuslabs/zolana/interface";
+import { decryptTransactionViewingSecret, parseAuditorMessage } from "@heliuslabs/zolana/ring";
+import { AssetRegistry } from "@heliuslabs/zolana/transaction";
 import { address } from "@solana/kit";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -99,5 +103,55 @@ describe("CustodyWalletAuthority", () => {
     await expect(
       authorityFor().encryptSplit({} as Parameters<CustodyWalletAuthority["encryptSplit"]>[0])
     ).rejects.toBeInstanceOf(RingsUnsupportedFlowError);
+  });
+
+  describe("encryptCustomRingTransfer", () => {
+    // The auditor's key pair, both halves: the authority only ever sees the
+    // public point, and the test plays the auditor with the secret half.
+    const auditor = ViewingKey.fromBytes(new Uint8Array(32).fill(9) as Bytes32);
+    const FIRST_NULLIFIER = new Uint8Array(32).fill(1) as Bytes32;
+
+    async function encrypted() {
+      return authorityFor().encryptCustomRingTransfer({
+        firstNullifier: FIRST_NULLIFIER,
+        outputs: [],
+        assets: new AssetRegistry(),
+        auditorPublicKey: auditor.publicKey(),
+      });
+    }
+
+    it("returns the confidential envelope plus the audit witness", async () => {
+      const result = await encrypted();
+
+      expect(result.salt).toHaveLength(16);
+      expect(result.audit.txViewingSecret).toHaveLength(32);
+      expect(result.audit.ephemeralSecret).toHaveLength(32);
+      // The witness secret IS the transaction viewing key the envelope names.
+      expect([
+        ...ViewingKey.fromBytes(result.audit.txViewingSecret as Bytes32)
+          .publicKey()
+          .toBytes(),
+      ]).toEqual([...result.txViewingPublicKey.toBytes()]);
+    });
+
+    it("seals the transaction viewing secret to the auditor key", async () => {
+      const result = await encrypted();
+
+      // The auditor-side round trip: only the auditor secret opens the message,
+      // and what it opens is exactly the witness secret.
+      const recovered = decryptTransactionViewingSecret(
+        auditor,
+        parseAuditorMessage(result.auditorMessage.data)
+      );
+      expect([...recovered]).toEqual([...result.audit.txViewingSecret]);
+    });
+
+    it("derives deterministically from the first nullifier", async () => {
+      const [first, second] = await Promise.all([encrypted(), encrypted()]);
+      // Same nullifier, same viewing key: the transaction viewing key is a
+      // derivation, not a random draw (the salt and ephemeral secret are).
+      expect([...first.audit.txViewingSecret]).toEqual([...second.audit.txViewingSecret]);
+      expect([...first.audit.ephemeralSecret]).not.toEqual([...second.audit.ephemeralSecret]);
+    });
   });
 });

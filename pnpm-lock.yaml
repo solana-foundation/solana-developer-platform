@@ -626,11 +626,14 @@ importers:
   packages/sdp-helius-rings-sdk:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: 0.1.1-alpha
-        version: 0.1.1-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
+        specifier: 0.1.2-alpha
+        version: 0.1.2-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@sdp/helius-rings':
         specifier: workspace:*
         version: link:../sdp-helius-rings
+      '@solana-program/address-lookup-table':
+        specifier: 0.13.0
+        version: 0.13.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana-program/compute-budget':
         specifier: 0.17.0
         version: 0.17.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
@@ -1555,8 +1558,8 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  '@heliuslabs/zolana@0.1.1-alpha':
-    resolution: {integrity: sha512-H8vOu/j5x/qqANvnfEchwH39TU5F8MssHuKWrPrA+2EneoZncNsxKUTxZ61fpBwrFr2F9g3gBCuJ+kQqXsgm2g==}
+  '@heliuslabs/zolana@0.1.2-alpha':
+    resolution: {integrity: sha512-+TPLUxv9/Oik16zHcWQu63l/nzwGyGir5t7ZQnJz8DAjbs06vrNEoBqW8DWwwoiV1vpZdv+/q4R5Vf2jOFtSBA==}
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^7.0.0
@@ -3287,6 +3290,12 @@ packages:
 
   '@shikijs/vscode-textmate@10.0.2':
     resolution: {integrity: sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg==}
+
+  '@solana-program/address-lookup-table@0.13.0':
+    resolution: {integrity: sha512-UCxrapY8AA3wFzGpfYcXvs41alPTVFWdM7MGoz8IL6F+EL3BJ+4XVcUIj3UT3K9Sp14hPVPAIMFqnE4iOX7VMw==}
+    engines: {node: '>=24.0.0'}
+    peerDependencies:
+      '@solana/kit': ^7.0.0
 
   '@solana-program/address-lookup-table@0.7.0':
     resolution: {integrity: sha512-dzCeIO5LtiK3bIg0AwO+TPeGURjSG2BKt0c4FRx7105AgLy7uzTktpUzUj6NXAK9SzbirI8HyvHUvw1uvL8O9A==}
@@ -10481,12 +10490,13 @@ snapshots:
       protobufjs: 7.6.5
       yargs: 17.7.2
 
-  '@heliuslabs/zolana@0.1.1-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))':
+  '@heliuslabs/zolana@0.1.2-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.3.0
       '@noble/curves': 2.2.0
       '@noble/hashes': 2.2.0
+      '@solana-program/address-lookup-table': 0.13.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana-program/compute-budget': 0.17.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana-program/token': 0.15.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana/kit': 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -12333,6 +12343,10 @@ snapshots:
       '@types/hast': 3.0.5
 
   '@shikijs/vscode-textmate@10.0.2': {}
+
+  '@solana-program/address-lookup-table@0.13.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))':
+    dependencies:
+      '@solana/kit': 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
 
   '@solana-program/address-lookup-table@0.7.0(@solana/kit@2.3.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)))':
     dependencies:

@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.72.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.71.0...v0.72.0) (2026-09-04)
+
+### Features
+
+* **custody:** expose connection inventory runtime state ([#1582](https://github.com/solana-foundation/solana-developer-platform/pull/1582)) ([6efd7a5](https://github.com/solana-foundation/solana-developer-platform/commit/6efd7a504fc6e683b2fa1ea0fa0355fb8e294067))
+* **payments:** explicit saved payout-account picker on the offramp wizard ([#1639](https://github.com/solana-foundation/solana-developer-platform/pull/1639)) ([749ba00](https://github.com/solana-foundation/solana-developer-platform/commit/749ba00c3ce249d58edd1c0b24de11007dea2c8e))
+* **earn:** simplify Embedded Yield integration ([#1643](https://github.com/solana-foundation/solana-developer-platform/pull/1643)) ([d407ca0](https://github.com/solana-foundation/solana-developer-platform/commit/d407ca0ac66e1c4db3f9366ab2c74a3263155e8c))
+* **payments:** surface provider customers on counterparty detail ([#1636](https://github.com/solana-foundation/solana-developer-platform/pull/1636)) ([6bc830e](https://github.com/solana-foundation/solana-developer-platform/commit/6bc830e46d9bd32292f2a06b79e621ae55c5fb55))
+* **payments:** corridor-aware lightspark offramp requirements with payout-account auto-reuse ([#1633](https://github.com/solana-foundation/solana-developer-platform/pull/1633)) ([beee453](https://github.com/solana-foundation/solana-developer-platform/commit/beee4536de1317b6a18e7ed69dd36ae4bfbb7c50))
+* **earn:** partner fee payer, unified owner addressing, poll read-through, public catalogue ([#1613](https://github.com/solana-foundation/solana-developer-platform/pull/1613)) ([c4e07c8](https://github.com/solana-foundation/solana-developer-platform/commit/c4e07c831bd742b6e04c032f855af1d3adbbb589))
+* **earn:** harden embedded yield integration ([#1615](https://github.com/solana-foundation/solana-developer-platform/pull/1615)) ([aad08a5](https://github.com/solana-foundation/solana-developer-platform/commit/aad08a5bb1faaa2f12fd252ca736480cc64db19d))
+* **ramps:** BVNK collect_counterparty JIT PII collection + explicit agreement consent ([#1621](https://github.com/solana-foundation/solana-developer-platform/pull/1621)) ([f701840](https://github.com/solana-foundation/solana-developer-platform/commit/f7018402f456545fdf5dc88382b12dd54dc893b4))
+
+### Bug Fixes
+
+* **earn:** harden Embedded Yield devnet flows ([#1638](https://github.com/solana-foundation/solana-developer-platform/pull/1638)) ([e651829](https://github.com/solana-foundation/solana-developer-platform/commit/e6518291044a00c53720179188d914440e70f80b))
+* **web:** surface the real Private Channels setup failure instead of a fixed string ([#1634](https://github.com/solana-foundation/solana-developer-platform/pull/1634)) ([a61803b](https://github.com/solana-foundation/solana-developer-platform/commit/a61803bdc14227fe7cb04bfbf1bd505fe01843c7))
+* **earn:** pre-fund Veda AllowedUser rent so sponsored first deposits pass ([#1614](https://github.com/solana-foundation/solana-developer-platform/pull/1614)) ([dd685e8](https://github.com/solana-foundation/solana-developer-platform/commit/dd685e8cbc784f99c5ae09b08606d72d013a029d))
+
+### Maintenance
+
+* **smoke:** stage-only smoke workflow on api-preview.solana.com ([#1648](https://github.com/solana-foundation/solana-developer-platform/pull/1648)) ([e822269](https://github.com/solana-foundation/solana-developer-platform/commit/e822269a9b7d0aefdb03ee48a79eea103c9c1e13))
+* route all code ownership through the foundation product team ([#1630](https://github.com/solana-foundation/solana-developer-platform/pull/1630)) ([1c1e05b](https://github.com/solana-foundation/solana-developer-platform/commit/1c1e05be7923fe67dba55ae546150f19a94dc38d))
+* **deps:** bump the fast-uri pnpm override to 3.1.7 ([#1640](https://github.com/solana-foundation/solana-developer-platform/pull/1640)) ([8c56fa1](https://github.com/solana-foundation/solana-developer-platform/commit/8c56fa1f83b3e926c130045cb72f71c9c2db9851))
+
 ## [0.71.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.70.0...v0.71.0) (2026-09-03)
 
 ### Features

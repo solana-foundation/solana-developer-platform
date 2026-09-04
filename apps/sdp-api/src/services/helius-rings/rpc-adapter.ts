@@ -1,8 +1,9 @@
 import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk";
-import { createRpc, type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
+import { createRpc, getSignatureStatuses, type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
 import { getBase64Codec } from "@solana/codecs";
 import {
   isSolanaError,
+  type Signature,
   SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
 } from "@solana/kit";
@@ -148,6 +149,36 @@ export async function readRingsBlockHeight(input: {
   } catch {
     // Not knowing the height means this tick cannot judge expiry — a reason to
     // leave operations alone, not to abandon the rest of the sweep.
+    return null;
+  }
+}
+
+/** What the chain knows about a signature, where `null` is "could not ask". */
+export type RingsSignatureOutcome = "landed" | "failed" | "absent";
+
+/**
+ * Asks the chain whether signed bytes ever executed.
+ *
+ * The history is searched because the recent-status cache holds only a few
+ * hundred slots, far less than the indexing budget an operation is judged
+ * against. Absence is reported only when the RPC answered and had nothing; a
+ * call that fails returns `null`, since an unreachable RPC is not evidence a
+ * transaction never landed.
+ */
+export async function readRingsSignatureStatus(input: {
+  env: Env;
+  signature: string;
+  rpc?: SolanaRpc;
+}): Promise<RingsSignatureOutcome | null> {
+  try {
+    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
+    const [status] = await getSignatureStatuses(rpc, [input.signature as Signature], {
+      searchTransactionHistory: true,
+    });
+
+    if (!status) return "absent";
+    return status.err === null ? "landed" : "failed";
+  } catch {
     return null;
   }
 }

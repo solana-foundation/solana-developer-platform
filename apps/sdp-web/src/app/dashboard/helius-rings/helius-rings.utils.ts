@@ -5,12 +5,18 @@
  */
 
 import {
+  type ProjectRing,
   RINGS_ALLOWLISTED_ASSETS,
   RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsHealthComponent,
   type RingsOperationState,
 } from "./helius-rings.data";
+
+/** Ring display names keyed by program id, for labelling operations and balances. */
+export function ringNameByProgramId(rings: readonly ProjectRing[]): Map<string, string> {
+  return new Map(rings.map((ring) => [ring.ringProgramId, ring.name]));
+}
 
 /**
  * States something is actively working through, so the row will change on its

@@ -185,6 +185,64 @@ describe("Helius Rings routes", () => {
     expect(body.data.health.photon).toBe("red");
   });
 
+  describe("project rings", () => {
+    // A real 32-byte address: the route schema runs `isAddress`, not just a shape regex.
+    const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
+    const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
+
+    it("lists an empty collection before any ring is recorded", async () => {
+      const res = await app.request("/v1/helius-rings/rings", { headers: authHeaders() }, env);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { rings: unknown[] } };
+      expect(body.data.rings).toEqual([]);
+    });
+
+    it("records a named ring, activates it, and serves it back", async () => {
+      gatewayOverride.current = {
+        provisionRing: async () => ({
+          auditorPublicKeyHex: "04ff",
+          lookupTableAddress: LOOKUP_TABLE,
+        }),
+      } as unknown as RingsGatewayPort;
+
+      const created = await post("/v1/helius-rings/rings", {
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+      });
+      expect(created.status).toBe(201);
+      const createdBody = (await created.json()) as { data: { ring: Record<string, unknown> } };
+      expect(createdBody.data.ring).toMatchObject({
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+        status: "active",
+        auditorPublicKeyHex: "04ff",
+        lookupTableAddress: LOOKUP_TABLE,
+      });
+
+      const read = await app.request("/v1/helius-rings/rings", { headers: authHeaders() }, env);
+      expect(read.status).toBe(200);
+      const readBody = (await read.json()) as { data: { rings: Record<string, unknown>[] } };
+      expect(readBody.data.rings).toMatchObject([
+        { name: "treasury", ringProgramId: RING_PROGRAM, status: "active" },
+      ]);
+    });
+
+    it("400s a ring program id that is not base58", async () => {
+      const res = await post("/v1/helius-rings/rings", {
+        name: "treasury",
+        ringProgramId: "not base58 0OIl",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a name outside the slug shape and the reserved word", async () => {
+      for (const name of ["Treasury", "default"]) {
+        const res = await post("/v1/helius-rings/rings", { name, ringProgramId: RING_PROGRAM });
+        expect(res.status).toBe(400);
+      }
+    });
+  });
+
   it("GET /wallets lists the project's rings wallets", async () => {
     const res = await app.request("/v1/helius-rings/wallets", { headers: authHeaders() }, env);
     expect(res.status).toBe(200);
@@ -330,11 +388,77 @@ describe("Helius Rings routes", () => {
       expect(body.data.operation.state).toBe("failed");
     });
 
+    /**
+     * The counterpart of void. Void asserts a transaction never landed and
+     * cannot be undone; recheck only asks the indexer, so a failure it still
+     * has nothing for comes back exactly as it was.
+     */
+    it("recheck leaves a failure the indexer has nothing for untouched", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
+      gatewayOverride.current = gateway;
+
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-recheck",
+        })
+      ).json()) as { data: { operation: { id: string } } };
+
+      const rechecked = await post(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/recheck`,
+        {}
+      );
+      expect(rechecked.status).toBe(200);
+      const body = (await rechecked.json()) as { data: { operation: { state: string } } };
+      expect(body.data.operation.state).toBe("failed");
+    });
+
     it("rejects an invalid operation body", async () => {
       const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "not-a-real-op",
         clientNonce: "route-nonce-5",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a named ring the project never recorded", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-ring-none",
+        ring: "treasury",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    // Every enabled op type takes `ring` now, but the value is still a slug:
+    // anything else is refused at the schema, never silently stripped.
+    it("400s a ring selector outside the slug shape", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "withdraw",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        to: "HrRouteTestPublicKey111111111111111111111111",
+        clientNonce: "route-nonce-ring-withdraw",
+        ring: "Not A Ring",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a withdraw naming a ring the project never recorded", async () => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "withdraw",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        to: "HrRouteTestPublicKey111111111111111111111111",
+        clientNonce: "route-nonce-ring-withdraw-2",
+        ring: "treasury",
       });
       expect(res.status).toBe(400);
     });
@@ -377,6 +501,7 @@ describe("Helius Rings routes", () => {
             amountRaw: "18446744073709551615",
             decimals: 9,
             symbol: "SOL",
+            ringProgramId: null,
           },
         ],
         history: [],

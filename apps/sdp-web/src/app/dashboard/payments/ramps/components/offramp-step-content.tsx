@@ -82,10 +82,12 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     quote,
     transferStatus,
     setField,
+    selectProvider,
     handlePairChange,
     requirementFields,
     selectedProviderAccountId,
-    resolvedAccount,
+    payoutAccounts,
+    selectPayoutAccount,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -157,7 +159,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           onAmountBlur={() => {}}
           onWalletChange={(walletId) => setField("walletId", walletId)}
           onPairChange={handlePairChange}
-          onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+          onProviderSelect={selectProvider}
         />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
@@ -192,7 +194,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
             fields={requirementFields}
             values={collectedData}
             onChange={setCollectedField}
-            resolvedAccount={resolvedAccount}
+            payoutAccountPicker={{
+              accounts: payoutAccounts,
+              selectedProviderAccountId,
+              onSelect: selectPayoutAccount,
+            }}
           />
         </fieldset>
       </div>

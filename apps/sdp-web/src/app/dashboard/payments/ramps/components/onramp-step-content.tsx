@@ -38,6 +38,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     selectedCounterparty,
     fields,
     setField,
+    selectProvider,
     liveWallets,
     walletsLoading,
     selectedWallet,
@@ -94,7 +95,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           onAmountBlur={() => {}}
           onWalletChange={(walletId) => setField("walletId", walletId)}
           onPairChange={handlePairChange}
-          onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+          onProviderSelect={selectProvider}
         />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">

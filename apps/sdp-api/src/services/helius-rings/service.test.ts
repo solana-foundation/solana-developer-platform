@@ -1,3 +1,4 @@
+import type { BuildOperationInput } from "@sdp/helius-rings";
 import { HeliusRingsError, type PrivateOperationInput } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyDecision } from "@sdp/types";
@@ -26,15 +27,20 @@ import {
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createHeliusRingsWalletRepository } from "@/db/repositories";
+import {
+  createHeliusRingsProjectRingRepository,
+  createHeliusRingsWalletRepository,
+} from "@/db/repositories";
 import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import { AppError } from "@/lib/errors";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { RingsAdapterError } from "./adapter-error";
+import type { RingsOuterTransactionPolicyInput } from "./gateway";
 import {
   computeIntentKey,
   createHeliusRingsService,
@@ -474,7 +480,7 @@ describe("HeliusRingsService", () => {
       const replay = await svc.prepareOperation(operationInput(), actorContext);
 
       expect(replay.id).toBe(first.id);
-      expect(replay.intentKey).toBe(computeIntentKey(operationInput()));
+      expect(replay.intentKey).toBe(computeIntentKey(operationInput(), null));
     });
 
     it("fails a private transfer when the recipient shielded address is not a wallet in this project", async () => {
@@ -1418,18 +1424,378 @@ describe("HeliusRingsService", () => {
       expect(kinds).toContain("transaction.submitted");
     });
   });
+
+  describe("project rings", () => {
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+    const OTHER_RING = "RingProgram2111111111111111111111111111111";
+    const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
+
+    const provisioned = async () => ({
+      auditorPublicKeyHex: "04ff",
+      lookupTableAddress: LOOKUP_TABLE,
+    });
+
+    async function seedActiveRing(name = "treasury", ringProgramId = RING_PROGRAM) {
+      const rings = createHeliusRingsProjectRingRepository(env);
+      await rings.reserveRing({ ...tenant, name, ringProgramId });
+      await rings.markActive({
+        ...tenant,
+        name,
+        ringProgramId,
+        auditorPublicKey: "04ff",
+        lookupTableAddress: LOOKUP_TABLE,
+      });
+    }
+
+    it("records a named ring and activates it with the auditor key and lookup table", async () => {
+      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned }) });
+
+      const ring = await svc.createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM });
+
+      expect(ring).toMatchObject({
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+        status: "active",
+        auditorPublicKeyHex: "04ff",
+        lookupTableAddress: LOOKUP_TABLE,
+        failure: null,
+      });
+      expect(await svc.listProjectRings()).toMatchObject([
+        { name: "treasury", status: "active", auditorPublicKeyHex: "04ff" },
+      ]);
+    });
+
+    it("keeps rings with distinct names side by side, oldest first", async () => {
+      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned }) });
+
+      await svc.createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM });
+      await svc.createProjectRing({ name: "payroll", ringProgramId: OTHER_RING });
+
+      expect((await svc.listProjectRings()).map((ring) => ring.name)).toEqual([
+        "treasury",
+        "payroll",
+      ]);
+    });
+
+    it("refuses a name outside the slug shape and the reserved word", async () => {
+      const svc = service({ gateway: gatewayStub({}) });
+
+      for (const name of ["Treasury", "default", "-x-"]) {
+        await expect(
+          svc.createProjectRing({ name, ringProgramId: RING_PROGRAM })
+        ).rejects.toMatchObject({ code: "invalid_input" });
+      }
+    });
+
+    it("refuses one program under two names", async () => {
+      await service({ gateway: gatewayStub({ provisionRing: provisioned }) }).createProjectRing({
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+      });
+
+      // One on-chain pool under two rows would split its audit trail.
+      await expect(
+        service({ gateway: gatewayStub({}) }).createProjectRing({
+          name: "payroll",
+          ringProgramId: RING_PROGRAM,
+        })
+      ).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("registers rings without a cap and lets an existing name resume", async () => {
+      const svc = service({ gateway: gatewayStub({ provisionRing: provisioned }) });
+      const programId = (index: number) => `RingProgram${index}11111111111111111111111111111`;
+      // No MAX_PROJECT_RINGS ceiling: a project registers as many as ops deploys.
+      for (let index = 1; index <= 12; index += 1) {
+        expect(
+          await svc.createProjectRing({ name: `ring-${index}`, ringProgramId: programId(index) })
+        ).toMatchObject({ status: "active" });
+      }
+
+      // Re-submitting an existing name is a resume, not a new ring.
+      expect(
+        await svc.createProjectRing({ name: "ring-1", ringProgramId: programId(1) })
+      ).toMatchObject({ status: "active" });
+    });
+
+    it("returns an active ring as it stands without re-running bring-up", async () => {
+      await service({ gateway: gatewayStub({ provisionRing: provisioned }) }).createProjectRing({
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+      });
+
+      // The stub's default provisionRing throws, so reaching the gateway again
+      // would fail this test with its "not expected" error instead of the replay.
+      const replay = await service({ gateway: gatewayStub({}) }).createProjectRing({
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+      });
+
+      expect(replay).toMatchObject({ status: "active", auditorPublicKeyHex: "04ff" });
+    });
+
+    it("re-points a never-active ring at a corrected program id", async () => {
+      // A mistyped id records a failure and can never activate...
+      await expect(
+        service({
+          gateway: gatewayStub({
+            provisionRing: async () => {
+              throw new HeliusRingsError("invalid_input", "not a deployed program");
+            },
+          }),
+        }).createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM })
+      ).rejects.toMatchObject({ code: "invalid_input" });
+
+      // ...so submitting the corrected id under the same name replaces it and
+      // runs bring-up against it.
+      const bringUps: string[] = [];
+      const ring = await service({
+        gateway: gatewayStub({
+          provisionRing: async ({ ringProgramId }) => {
+            bringUps.push(ringProgramId);
+            return { auditorPublicKeyHex: "04ff", lookupTableAddress: LOOKUP_TABLE };
+          },
+        }),
+      }).createProjectRing({ name: "treasury", ringProgramId: OTHER_RING });
+
+      expect(bringUps).toEqual([OTHER_RING]);
+      expect(ring).toMatchObject({
+        ringProgramId: OTHER_RING,
+        status: "active",
+        failure: null,
+      });
+    });
+
+    it("refuses to re-point a name away from an active ring", async () => {
+      await service({ gateway: gatewayStub({ provisionRing: provisioned }) }).createProjectRing({
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+      });
+
+      // Re-pointing an active ring would strand every note bound to it.
+      await expect(
+        service({ gateway: gatewayStub({}) }).createProjectRing({
+          name: "treasury",
+          ringProgramId: OTHER_RING,
+        })
+      ).rejects.toMatchObject({ code: "conflict" });
+      expect(await service({ gateway: gatewayStub({}) }).listProjectRings()).toMatchObject([
+        { ringProgramId: RING_PROGRAM, status: "active" },
+      ]);
+    });
+
+    it("records a domain failure on the row and resumes on re-submission", async () => {
+      const failing = service({
+        gateway: gatewayStub({
+          provisionRing: async () => {
+            throw new HeliusRingsError("gateway_unavailable", "a Rings upstream is unavailable");
+          },
+        }),
+      });
+
+      await expect(
+        failing.createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM })
+      ).rejects.toMatchObject({ code: "gateway_unavailable" });
+      expect(await failing.listProjectRings()).toMatchObject([
+        {
+          status: "failed",
+          failure: { code: "gateway_unavailable", message: "a Rings upstream is unavailable" },
+        },
+      ]);
+
+      // Same name and id, healthy gateway: the failed row is the resume point.
+      const resumed = await service({
+        gateway: gatewayStub({ provisionRing: provisioned }),
+      }).createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM });
+      expect(resumed).toMatchObject({ status: "active", failure: null });
+    });
+
+    it("records only a fixed message for a non-domain failure", async () => {
+      const svc = service({
+        gateway: gatewayStub({
+          provisionRing: async () => {
+            // e.g. a transport error quoting the endpoint, which carries an API key.
+            throw new Error("fetch failed: https://rpc.example/?api-key=super-secret");
+          },
+        }),
+      });
+
+      await expect(
+        svc.createProjectRing({ name: "treasury", ringProgramId: RING_PROGRAM })
+      ).rejects.toThrow("fetch failed");
+
+      const [ring] = await svc.listProjectRings();
+      expect(ring?.failure).toEqual({
+        code: "gateway_unavailable",
+        message: "ring bring-up failed",
+      });
+    });
+
+    it("pins the named ring on a shield and keys the intent by it", async () => {
+      await seedActiveRing();
+
+      const input = operationInput({ ring: "treasury", clientNonce: "nonce-ring-pin" });
+      const operation = await liveishService().prepareOperation(input, actorContext);
+
+      expect(operation.state).toBe("indexing");
+      expect(operation.ringProgramId).toBe(RING_PROGRAM);
+      // The resolved id joins the idempotency key: the same shield without the
+      // ring reserves a second operation instead of replaying this one.
+      expect(operation.intentKey).toBe(computeIntentKey(input, RING_PROGRAM));
+      expect(computeIntentKey(input, RING_PROGRAM)).not.toBe(computeIntentKey(input, null));
+    });
+
+    it("pins the named ring on a withdraw and threads its lookup table to the build and the wire policy", async () => {
+      await seedActiveRing();
+
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+      const builds: BuildOperationInput[] = [];
+      const buildOperation = gateway.buildOperation.bind(gateway);
+      gateway.buildOperation = async (input) => {
+        builds.push(input);
+        return buildOperation(input);
+      };
+      const policyInputs: RingsOuterTransactionPolicyInput[] = [];
+
+      const operation = await liveishService({
+        gateway,
+        validateOuterTransaction: async (input) => {
+          policyInputs.push(input);
+        },
+      }).prepareOperation(
+        operationInput({ opType: "withdraw", ring: "treasury", clientNonce: "nonce-ring-spend" }),
+        actorContext
+      );
+
+      expect(operation.state).toBe("indexing");
+      expect(operation.ringProgramId).toBe(RING_PROGRAM);
+      expect(builds[0]?.ring).toEqual({ programId: RING_PROGRAM, lookupTable: LOOKUP_TABLE });
+      expect(policyInputs[0]?.intent).toMatchObject({
+        opType: "withdraw",
+        ring: { programId: RING_PROGRAM, lookupTable: LOOKUP_TABLE },
+      });
+    });
+
+    it("resolves the same named ring on every enabled operation type", async () => {
+      await seedActiveRing();
+      // No shield-only guard remains: the selector resolves before reserve for
+      // all three op types, so intent keys are ring-sensitive on spends too.
+      const input = operationInput({
+        opType: "withdraw",
+        ring: "treasury",
+        clientNonce: "nonce-ring-withdraw-key",
+      });
+      const operation = await liveishService().prepareOperation(input, actorContext);
+      expect(operation.intentKey).toBe(computeIntentKey(input, RING_PROGRAM));
+    });
+
+    it("refuses a name the project never recorded before reserving", async () => {
+      // The request names a ring the project does not have: the caller's to fix.
+      await expect(
+        liveishService().prepareOperation(
+          operationInput({ ring: "treasury", clientNonce: "nonce-ring-none" }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(
+        await createPostgresHeliusRingsOperationRepository(getDb(env)).listOperationsByWallet({
+          ...tenant,
+          walletId,
+        })
+      ).toHaveLength(0);
+    });
+
+    it("refuses a named ring while bring-up is unfinished", async () => {
+      await createHeliusRingsProjectRingRepository(env).reserveRing({
+        ...tenant,
+        name: "treasury",
+        ringProgramId: RING_PROGRAM,
+      });
+
+      // An operator action (completing bring-up) makes the same request succeed.
+      await expect(
+        liveishService().prepareOperation(
+          operationInput({ ring: "treasury", clientNonce: "nonce-ring-pending" }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "config_error" });
+    });
+
+    it("retries a shield with the pinned ring rather than re-resolving the selector", async () => {
+      await seedActiveRing();
+
+      const failed = await retryableFailureService().prepareOperation(
+        operationInput({ ring: "treasury", clientNonce: "nonce-ring-retry" }),
+        actorContext
+      );
+      expect(failed.state).toBe("failed");
+      expect(failed.ringProgramId).toBe(RING_PROGRAM);
+
+      // The ring row is gone before the retry runs, so the pinned id on the
+      // failed row is the only ring source left — re-resolving the selector
+      // here would fail as invalid_input instead of reaching indexing.
+      await getDb(env)
+        .prepare("DELETE FROM helius_rings_project_rings WHERE project_id = ?")
+        .bind(TEST_PROJECT_ID)
+        .run();
+
+      const retried = await liveishService().retryOperation(
+        failed.id,
+        "nonce-ring-retry-2",
+        actorContext
+      );
+      expect(retried.state).toBe("indexing");
+      expect(retried.ringProgramId).toBe(RING_PROGRAM);
+    });
+
+    it("fails a ring spend as config_error when the ring row lost its bring-up", async () => {
+      await seedActiveRing();
+
+      const failed = await retryableFailureService().prepareOperation(
+        operationInput({
+          opType: "withdraw",
+          ring: "treasury",
+          clientNonce: "nonce-ring-spend-cfg",
+        }),
+        actorContext
+      );
+      expect(failed.state).toBe("failed");
+
+      // Unlike a shield, a spend needs the ring row again at build time — its
+      // lookup table is the transport the v0 transaction rides.
+      await getDb(env)
+        .prepare("DELETE FROM helius_rings_project_rings WHERE project_id = ?")
+        .bind(TEST_PROJECT_ID)
+        .run();
+
+      const retried = await liveishService().retryOperation(
+        failed.id,
+        "nonce-ring-spend-cfg-2",
+        actorContext
+      );
+      expect(retried.state).toBe("failed");
+      expect(retried.failure?.code).toBe("config_error");
+    });
+  });
 });
 
 describe("computeIntentKey", () => {
-  it("is deterministic and nonce-sensitive", () => {
+  it("is deterministic, nonce-sensitive and ring-sensitive", () => {
     const base: PrivateOperationInput = {
       walletId: "hrw_1",
       opType: "shield",
       clientNonce: "n1",
     };
+    const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
 
-    expect(computeIntentKey(base)).toBe(computeIntentKey({ ...base }));
-    expect(computeIntentKey(base)).not.toBe(computeIntentKey({ ...base, clientNonce: "n2" }));
-    expect(computeIntentKey(base)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(computeIntentKey(base, null)).toBe(computeIntentKey({ ...base }, null));
+    expect(computeIntentKey(base, null)).not.toBe(
+      computeIntentKey({ ...base, clientNonce: "n2" }, null)
+    );
+    // Same input, different ring: a second operation, never a replay.
+    expect(computeIntentKey(base, null)).not.toBe(computeIntentKey(base, RING_PROGRAM));
+    expect(computeIntentKey(base, null)).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });

@@ -88,9 +88,9 @@ describe("EmbeddedYieldDashboard", () => {
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
 
-    expect(screen.getByRole("link", { name: "Set up Embedded Yield" }).getAttribute("href")).toBe(
-      "/dashboard/markets/embedded-yield/configure"
-    );
+    expect(
+      screen.getByRole("link", { name: "Integrate Embedded Yield" }).getAttribute("href")
+    ).toBe("/dashboard/markets/embedded-yield/configure");
     expect(screen.getByText("USDC Core Yield")).toBeTruthy();
     expect(screen.getByText("1,250.42 USDC")).toBeTruthy();
   });
@@ -167,7 +167,7 @@ describe("EmbeddedYieldDashboard", () => {
     expect(screen.getByRole("status").textContent).toBe("");
   });
 
-  it("shows the current two-step setup flow without the removed UI builder", () => {
+  it("offers one direct integration action without a setup flow", () => {
     mocks.summary = {
       walletCount: 0,
       positionCount: 0,
@@ -180,10 +180,8 @@ describe("EmbeddedYieldDashboard", () => {
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
 
-    const progress = screen.getByRole("list", { name: "Embedded Yield setup progress" });
-    expect(within(progress).getAllByRole("listitem")).toHaveLength(2);
-    expect(within(progress).getByText("Select a strategy")).toBeTruthy();
-    expect(within(progress).getByText("Integrate the API")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Embedded Yield integration path" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Integrate" })).toBeTruthy();
     expect(screen.queryByText("Preview UI")).toBeNull();
   });
 

@@ -242,6 +242,10 @@ export interface Env {
   HELIUS_RINGS_INDEXER_URL?: string;
   HELIUS_RINGS_PROVER_URL?: string;
 
+  // Helius ring RPC, which mints custom-ring auditor keys. Only ring bring-up
+  // needs it; absent, submitting a ring program id fails with config_error.
+  HELIUS_RINGS_RING_RPC_URL?: string;
+
   // Permits plain-http Rings upstreams; opt-in per environment because over
   // plaintext an indexer response reveals which notes an identity owns.
   HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;

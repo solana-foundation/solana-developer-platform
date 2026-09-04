@@ -27,6 +27,16 @@ export interface PayoutRequirementFieldLabels {
 }
 
 /**
+ * Filters the payout tree's accounts to the ones currently payable.
+ *
+ * @param payout - Provider payout decision tree.
+ * @returns Every active account across all destination countries.
+ */
+export function activePayoutAccounts(payout: PayoutRequirementTree): PayoutRequirementAccount[] {
+  return payout.accounts.filter((candidate) => candidate.status.toUpperCase() === "ACTIVE");
+}
+
+/**
  * Converts payout country keys into country-name options.
  *
  * @param countryRails - Payout rails grouped by destination country.
@@ -76,14 +86,12 @@ function payoutRailsForCountry(
  * @param payout - Provider payout decision tree.
  * @param values - Locally collected payout selections.
  * @param labels - Translated labels for synthesized fields.
- * @param corridorResolved - The selected corridor already has a resolved payout account.
  * @returns The fields visible for the current local selection.
  */
 export function derivePayoutRequirementFields(
   payout: PayoutRequirementTree,
   values: CollectedFieldData,
-  labels: PayoutRequirementFieldLabels,
-  corridorResolved: boolean
+  labels: PayoutRequirementFieldLabels
 ): RequirementField[] {
   const destinationCountryField = {
     kind: "select",
@@ -98,10 +106,6 @@ export function derivePayoutRequirementFields(
   }
 
   const rails = payoutRailsForCountry(payout.countryRails, destinationCountry);
-  if (corridorResolved) {
-    return [destinationCountryField];
-  }
-
   const paymentRailField = {
     kind: "select",
     key: "paymentRails",
@@ -128,7 +132,7 @@ async function fetchCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  corridor: AdvanceRequirementsPayload & { destinationCountry?: string },
+  corridor: AdvanceRequirementsPayload,
   t: Translate
 ): Promise<CounterpartyRequirements> {
   const params = new URLSearchParams({
@@ -139,9 +143,6 @@ async function fetchCounterpartyRequirements(
   });
   if (direction === "onramp") {
     params.set("destinationWallet", corridor.destinationWallet);
-  }
-  if (corridor.destinationCountry !== undefined) {
-    params.set("destinationCountry", corridor.destinationCountry);
   }
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements?${params.toString()}`
@@ -261,31 +262,7 @@ function lightsparkOfframpReadyAnswer(
  * @returns The payout tree, or null when the answer carries none.
  */
 function payoutTreeOf(answer: CounterpartyRequirements | undefined): PayoutRequirementTree | null {
-  if (answer !== undefined && answer.status === "collect_account") {
-    return answer.payout;
-  }
-  const ready = lightsparkOfframpReadyAnswer(answer);
-  return ready !== null && ready.payout !== undefined ? ready.payout : null;
-}
-
-/**
- * Picks the requirements answer the step renders: the current corridor's ready
- * answer, then the subject's progressive-collection record, then the GET data.
- *
- * @param corridorAnswer - GET answer for the current corridor key.
- * @param collectAnswer - Subject-scoped collect-stage record.
- * @param data - GET data, possibly held from a previous corridor while loading.
- * @returns The answer to render.
- */
-function pickRequirementsAnswer(
-  corridorAnswer: CounterpartyRequirements | undefined,
-  collectAnswer: CounterpartyRequirements | undefined,
-  data: CounterpartyRequirements | undefined
-): CounterpartyRequirements | undefined {
-  if (corridorAnswer !== undefined && corridorAnswer.status === "ready") {
-    return corridorAnswer;
-  }
-  return collectAnswer !== undefined ? collectAnswer : data;
+  return answer !== undefined && answer.status === "collect_account" ? answer.payout : null;
 }
 
 function isOnboardingPending(status: CounterpartyRequirements["status"]): boolean {
@@ -312,10 +289,14 @@ export interface CounterpartyRequirementsParams extends AdvanceRequirementsPaylo
 export interface CounterpartyRequirementsState {
   /** Fields the client must collect; empty unless the provider returned `collect`. */
   fields: RequirementField[];
-  /** Payout account the current corridor resolved to, sent on advances and the quote. */
+  /** Id of the explicitly picked account, sent on advances and the quote; never seeded. */
   selectedProviderAccountId: string | null;
-  /** Tree entry for the resolved account, for the read-only summary card; null when the tree predates it. */
-  resolvedAccount: PayoutRequirementAccount | null;
+  /** Tree entry of the explicitly picked account — carries the corridor the quote pays into. */
+  selectedPayoutAccount: PayoutRequirementAccount | null;
+  /** Every active saved payout account, across all destination countries. */
+  payoutAccounts: PayoutRequirementAccount[];
+  /** Picks a saved account, or clears the choice with null; independent of the collection form. */
+  selectPayoutAccount: (account: PayoutRequirementAccount | null) => void;
   collectedData: CollectedFieldData;
   setField: (key: string, value: string) => void;
   /** The chosen provider needs fields collected for this counterparty. */
@@ -338,10 +319,8 @@ export interface CounterpartyRequirementsState {
   resolvedProviderAccountId: string | null;
   /** Advances provider provisioning; resolves to the new lifecycle state. */
   submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
-  /** An advance request is in flight (initial submit or a poll tick). */
+  /** An advance POST is in flight. */
   isAdvancing: boolean;
-  /** The corridor-keyed requirements GET is in flight — corridor-derived state is not yet trustworthy. */
-  isCorridorLoading: boolean;
   /** Re-runs the advance (POST) to retry — used by the customer funding provisioning failure action. */
   retryOnboarding: () => void;
 }
@@ -357,6 +336,7 @@ export function useCounterpartyRequirements(
 ): CounterpartyRequirementsState {
   const t = useTranslations();
   const [collectedData, setCollectedData] = useState<CollectedFieldData>({});
+  const [selectedPayoutAccountId, setSelectedPayoutAccountId] = useState<string | null>(null);
   const setField = (key: string, value: string) => {
     setCollectedData((previous) => {
       if (key === "destinationCountry" && previous.destinationCountry !== value) {
@@ -372,6 +352,9 @@ export function useCounterpartyRequirements(
       }
       return { ...previous, [key]: value };
     });
+  };
+  const selectPayoutAccount = (account: PayoutRequirementAccount | null) => {
+    setSelectedPayoutAccountId(account === null ? null : account.id);
   };
 
   // Reset collected answers when any request-corridor field changes by comparing
@@ -393,27 +376,22 @@ export function useCounterpartyRequirements(
     result: CounterpartyRequirements;
   } | null>(null);
   const [isAdvancing, setIsAdvancing] = useState(false);
-  // The request subject plus the collected destination country (which lives
-  // outside the subject key): together the full corridor an advance or poll
-  // response answers for.
+  // The request subject plus the routing choice living outside the subject key —
+  // the collected destination country and the explicitly picked account: together
+  // the full submission an advance or poll response answers for.
   const corridorIdentity = `${subjectKey}:${
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry
-  }`;
+  }:${selectedPayoutAccountId === null ? "" : selectedPayoutAccountId}`;
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
+    setSelectedPayoutAccountId(null);
     setAdvanceRecord(null);
     setCollectRecord(null);
   }
   const advance =
     advanceRecord !== null && advanceRecord.corridor === corridorIdentity ? advanceRecord : null;
 
-  const corridorCountry =
-    params?.provider === "lightspark" &&
-    params.direction === "offramp" &&
-    collectedData.destinationCountry !== undefined
-      ? collectedData.destinationCountry
-      : "";
   const key =
     params?.provider &&
     params.counterpartyId &&
@@ -425,41 +403,28 @@ export function useCounterpartyRequirements(
           cryptoToken: params.cryptoToken,
           fiatCurrency: params.fiatCurrency,
           destinationWallet: params.direction === "onramp" ? params.destinationWallet : "",
-          destinationCountry: corridorCountry,
         })
       : null;
-  // Requirements are deterministic for a (counterparty, provider, corridor) for the
-  // wizard's lifetime — never revalidate, so `needsCollection` (and thus the wizard's
-  // step list) can't flip out from under the user mid-flow.
-  const { data, error, isLoading } = useSWR(
+  // Requirements never revalidate on their own — `needsCollection` (and thus the
+  // wizard's step list) can't flip out from under the user mid-flow.
+  const {
+    data,
+    error,
+    mutate: revalidateRequirements,
+  } = useSWR(
     key,
-    ([
-      ,
-      counterpartyId,
-      provider,
-      direction,
-      cryptoToken,
-      fiatCurrency,
-      destinationWallet,
-      destinationCountry,
-    ]) =>
+    ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
       fetchCounterpartyRequirements(
         counterpartyId,
         provider,
         direction,
-        {
-          cryptoToken,
-          fiatCurrency,
-          destinationWallet,
-          ...(destinationCountry === "" ? {} : { destinationCountry }),
-        },
+        { cryptoToken, fiatCurrency, destinationWallet },
         t
       ),
     {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       revalidateIfStale: false,
-      keepPreviousData: true,
     }
   );
 
@@ -476,13 +441,13 @@ export function useCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
         params.direction,
-        {
-          ...payload,
-          collectedData,
-          ...(resolvedProviderAccountId === null
-            ? {}
-            : { providerAccountId: resolvedProviderAccountId }),
-        },
+        selectedPayoutAccount === null
+          ? { ...payload, collectedData }
+          : {
+              ...payload,
+              collectedData: { destinationCountry: selectedPayoutAccount.destinationCountry },
+              providerAccountId: selectedPayoutAccount.id,
+            },
         t
       );
       setAdvanceRecord({ corridor, advanceId: crypto.randomUUID(), payload, result });
@@ -492,6 +457,11 @@ export function useCounterpartyRequirements(
       return result;
     } finally {
       setIsAdvancing(false);
+      // Even a failed advance can have created a payout account (created but
+      // not active yet throws) — refetch so the tree carries the fresh list.
+      if (params.provider === "lightspark" && params.direction === "offramp") {
+        void revalidateRequirements();
+      }
     }
   };
 
@@ -543,11 +513,8 @@ export function useCounterpartyRequirements(
   // so an abandoned corridor's result can never surface here.
   const onboarding =
     advance === null ? null : polledOnboarding !== undefined ? polledOnboarding : advance.result;
-  const corridorAnswer = isLoading ? undefined : data;
   const advanceReady = lightsparkOfframpReadyAnswer(onboarding);
-  const readyAnswer =
-    advanceReady !== null ? advanceReady : lightsparkOfframpReadyAnswer(corridorAnswer);
-  const resolvedProviderAccountId = readyAnswer === null ? null : readyAnswer.providerAccountId;
+  const resolvedProviderAccountId = advanceReady === null ? null : advanceReady.providerAccountId;
 
   const payoutLabels = useMemo<PayoutRequirementFieldLabels>(
     () => ({
@@ -556,20 +523,18 @@ export function useCounterpartyRequirements(
     }),
     [t]
   );
+  // Furthest collect stage wins for stage/field selection; the payout tree
+  // prefers the GET answer, which a post-advance refetch keeps fresh.
   const collectAnswer =
     collectRecord !== null && collectRecord.subject === subjectKey
       ? collectRecord.result
       : undefined;
-  const requirementsData = pickRequirementsAnswer(corridorAnswer, collectAnswer, data);
-  const payout = payoutTreeOf(requirementsData);
+  const requirementsData = collectAnswer !== undefined ? collectAnswer : data;
+  const freshTree = payoutTreeOf(data);
+  const payout = freshTree !== null ? freshTree : payoutTreeOf(requirementsData);
   const fields = useMemo<RequirementField[]>(() => {
     if (payout !== null) {
-      return derivePayoutRequirementFields(
-        payout,
-        collectedData,
-        payoutLabels,
-        resolvedProviderAccountId !== null
-      );
+      return derivePayoutRequirementFields(payout, collectedData, payoutLabels);
     }
     if (
       requirementsData !== undefined &&
@@ -578,25 +543,32 @@ export function useCounterpartyRequirements(
       return requirementsData.fields;
     }
     return [];
-  }, [collectedData, requirementsData, resolvedProviderAccountId, payout, payoutLabels]);
+  }, [collectedData, requirementsData, payout, payoutLabels]);
 
-  const resolvedAccountEntry =
-    payout !== null && resolvedProviderAccountId !== null
-      ? payout.accounts.find((account) => account.id === resolvedProviderAccountId)
-      : undefined;
+  const payoutAccounts = useMemo<PayoutRequirementAccount[]>(
+    () => (payout === null ? [] : activePayoutAccounts(payout)),
+    [payout]
+  );
+  // An account a refetch no longer lists drops out of the selection with it.
+  const selectedEntry = payoutAccounts.find((account) => account.id === selectedPayoutAccountId);
+  const selectedPayoutAccount = selectedEntry === undefined ? null : selectedEntry;
 
-  const isComplete = useMemo(
+  const fieldsComplete = useMemo(
     () =>
       fields
         .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
         .every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
+  const isComplete =
+    requirementsData !== undefined && (selectedPayoutAccount !== null || fieldsComplete);
 
   // Every status the provider can return is handled: "collect" → needsCollection,
   // "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
+  // A fetch error only blocks while no usable answer exists — a failed
+  // post-advance refresh must not strand a wizard whose advance succeeded.
   let blockReason: string | null = null;
-  if (error instanceof Error) {
+  if (error instanceof Error && requirementsData === undefined) {
     blockReason = error.message;
   } else if (data?.status === "unsupported") {
     blockReason = data.reason;
@@ -604,8 +576,10 @@ export function useCounterpartyRequirements(
 
   return {
     fields,
-    selectedProviderAccountId: resolvedProviderAccountId,
-    resolvedAccount: resolvedAccountEntry === undefined ? null : resolvedAccountEntry,
+    selectedProviderAccountId: selectedPayoutAccount === null ? null : selectedPayoutAccount.id,
+    selectedPayoutAccount,
+    payoutAccounts,
+    selectPayoutAccount,
     collectedData,
     setField,
     needsCollection: requirementsData !== undefined && isCollectStage(requirementsData.status),
@@ -616,7 +590,6 @@ export function useCounterpartyRequirements(
     resolvedProviderAccountId,
     submitRequirements,
     isAdvancing,
-    isCorridorLoading: isLoading,
     retryOnboarding,
   };
 }

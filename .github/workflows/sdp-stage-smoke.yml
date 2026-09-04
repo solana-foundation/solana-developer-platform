@@ -1,18 +1,8 @@
-name: SDP smoke canary
+name: SDP stage smoke
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Environment to smoke"
-        type: choice
-        default: dev
-        options: [dev, stage]
   workflow_call:
-    inputs:
-      target:
-        type: string
-        default: dev
 
 permissions:
   contents: read
@@ -24,14 +14,14 @@ concurrency:
 
 jobs:
   smoke:
-    name: GCP ${{ inputs.target || 'dev' }} dashboard smoke
+    name: GCP stage dashboard smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.repository == 'solana-foundation/solana-developer-platform'
     env:
       DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,SDP_FLAG_ORGANIZATION_ONBOARDING,SDP_FLAG_PRIVY_BYOK,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,PAYMENTS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
-      SMOKE_TARGET: ${{ inputs.target || 'dev' }}
-      PLAYWRIGHT_API_URL: ${{ (inputs.target || 'dev') == 'stage' && 'https://api-stage.solana.com' || 'https://api-dev.solana.com' }}
+      SMOKE_TARGET: stage
+      PLAYWRIGHT_API_URL: https://api-preview.solana.com
       PLAYWRIGHT_USE_EXTERNAL_API: "1"
       PLAYWRIGHT_USE_NEXT_START: "1"
       PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
@@ -81,7 +71,7 @@ jobs:
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
       - name: Build web app against the target API
-        if: env.SMOKE_TARGET != 'stage' || vars.STAGE_SMOKE_READY == 'true'
+        if: vars.STAGE_SMOKE_READY == 'true'
         env:
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
@@ -90,17 +80,13 @@ jobs:
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run GCP read-only smoke
-        if: env.SMOKE_TARGET != 'stage' || vars.STAGE_SMOKE_READY == 'true'
+        if: vars.STAGE_SMOKE_READY == 'true'
         id: smoke
         env:
           DOPPLER_CONFIG: dev_ci
           NODE_ENV: production
           VERCEL_ENV: production
         run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run test:e2e:gcp-smoke
-
-      - name: Private-channels vendor sandbox smoke
-        if: env.SMOKE_TARGET == 'dev'
-        run: pnpm test:private-channels
 
       - name: Report run to Loki
         if: always()
