@@ -12,6 +12,7 @@
 import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createSignableMessage } from "@solana/signers";
+import { redactCredentialString } from "../redaction";
 import type {
   FullSigningPort,
   GeneratedKeypair,
@@ -92,10 +93,12 @@ export abstract class BaseKeychainAdapter implements FullSigningPort {
         signatures,
       };
     } catch (error) {
+      // Provider SDK errors embed the upstream response, which can carry
+      // credentials; redact before it reaches the caller.
       const message = error instanceof Error ? error.message : "Unknown signing error";
       return {
         status: "failed",
-        error: `${this.providerId}: ${message}`,
+        error: `${this.providerId}: ${redactCredentialString(message)}`,
       };
     }
   }

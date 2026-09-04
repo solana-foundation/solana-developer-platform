@@ -16,6 +16,7 @@ import {
   type TransactionWithLifetime,
 } from "@solana/transactions";
 import { denormalizeUtilaWalletId } from "../provider-wallet-ids";
+import { redactCredentialString } from "../redaction";
 import type { SignRequest, SignResult } from "../signing";
 import { SigningError } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
@@ -87,10 +88,12 @@ export class KeychainUtilaAdapter extends BaseKeychainAdapter {
         signatures: toSignatureMap(signatureDict),
       };
     } catch (error) {
+      // Utila SDK errors embed the upstream response, which can carry the
+      // service-account bearer token; redact before it reaches the caller.
       const message = error instanceof Error ? error.message : "Unknown signing error";
       return {
         status: "failed",
-        error: `utila: ${message}`,
+        error: `utila: ${redactCredentialString(message)}`,
       };
     }
   }
