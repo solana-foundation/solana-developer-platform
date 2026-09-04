@@ -2205,7 +2205,8 @@ describe("Payments routes — transfers", () => {
         const body = (await res.json()) as { error: { code: string; message: string } };
         expect(body.error).toMatchObject({
           code: "PROVIDER_UNAVAILABLE",
-          message: "MagicBlock returned a transaction that does not match the requested transfer: its signers differ from the declared required signers",
+          message:
+            "MagicBlock returned a transaction that does not match the requested transfer: its signers differ from the declared required signers",
         });
         expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
         expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -2255,7 +2256,8 @@ describe("Payments routes — transfers", () => {
         const body = (await res.json()) as { error: { code: string; message: string } };
         expect(body.error).toMatchObject({
           code: "PROVIDER_UNAVAILABLE",
-          message: "MagicBlock returned a transaction that does not match the requested transfer: the requested source wallet is not one of its signers",
+          message:
+            "MagicBlock returned a transaction that does not match the requested transfer: the requested source wallet is not one of its signers",
         });
         expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
         expect(sendTransactionMock).not.toHaveBeenCalled();
