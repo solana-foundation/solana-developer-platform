@@ -23,6 +23,7 @@ if (!window.matchMedia) {
 }
 
 const mocks = vi.hoisted(() => ({
+  canManageCustody: true,
   environment: "sandbox" as "sandbox" | "production",
   programProvider: "ground",
   // Every cluster value useEarnStrategies was asked for, across renders.
@@ -126,7 +127,10 @@ const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
-  useOptionalDashboardWorkspace: () => undefined,
+  useOptionalDashboardWorkspace: () => ({
+    dashboardAccess: { capabilities: { canManageCustody: mocks.canManageCustody } },
+    flags: { custody: true },
+  }),
 }));
 
 vi.mock("../earn/deposit/earn-funding-wallets", () => ({
@@ -484,6 +488,7 @@ function renderWorkspace() {
 }
 
 beforeEach(() => {
+  mocks.canManageCustody = true;
   mocks.environment = "sandbox";
   mocks.programProvider = "ground";
   mocks.strategiesClusterRequests = [];
@@ -526,6 +531,16 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(action.getAttribute("href")).toBe("/dashboard/wallets/setup");
     expect(screen.queryByRole("link", { name: "View all" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Available strategies" })).toBeTruthy();
+  });
+
+  it("does not offer wallet setup without custody management permission", () => {
+    mocks.canManageCustody = false;
+    mocks.walletsEmpty = true;
+    mocks.positionsEmpty = true;
+    renderWorkspace();
+
+    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
   it("renders live wallets, vault positions, and existing provider programs", async () => {

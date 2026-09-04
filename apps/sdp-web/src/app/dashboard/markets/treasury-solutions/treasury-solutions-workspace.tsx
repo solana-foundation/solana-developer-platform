@@ -403,6 +403,7 @@ function TreasuryWalletsCard({
   const locale = useLocale();
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
+  const canManageCustody = workspace?.dashboardAccess.capabilities.canManageCustody ?? true;
   if (!custodyEnabled) return null;
   return (
     <section>
@@ -430,11 +431,13 @@ function TreasuryWalletsCard({
         <Card className="overflow-hidden rounded-2xl py-0">
           <ListEmptyState
             action={
-              <Button asChild size="sm">
-                <Link href={`${DASHBOARD_SIDE_NAV_HREFS.wallets}/setup`}>
-                  {t("DashboardCustody.createWallet")}
-                </Link>
-              </Button>
+              canManageCustody ? (
+                <Button asChild size="sm">
+                  <Link href={`${DASHBOARD_SIDE_NAV_HREFS.wallets}/setup`}>
+                    {t("DashboardCustody.createWallet")}
+                  </Link>
+                </Button>
+              ) : undefined
             }
             description={t("DashboardMarkets.treasury.walletsEmptyDescription")}
             icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}

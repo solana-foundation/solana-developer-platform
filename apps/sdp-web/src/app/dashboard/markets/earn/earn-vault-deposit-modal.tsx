@@ -353,6 +353,7 @@ function DepositWalletPicker({
   const locale = useLocale();
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
+  const canManageCustody = workspace?.dashboardAccess.capabilities.canManageCustody ?? true;
 
   let walletContent: ReactNode;
   if (walletsLoading && wallets === undefined) {
@@ -380,7 +381,7 @@ function DepositWalletPicker({
         <p className="mt-1 text-sm leading-5 text-secondary">
           {t("DashboardEarn.deposit.walletsEmptyBody")}
         </p>
-        {custodyEnabled ? (
+        {custodyEnabled && canManageCustody ? (
           <Button asChild className="mt-3" size="sm" variant="outline">
             <Link href="/dashboard/wallets/setup">{t("DashboardCustody.createWallet")}</Link>
           </Button>
