@@ -428,11 +428,13 @@ async function persistPreparedSubmission(
       // now-pointless reservation is released best-effort: left standing it
       // only costs the sweeper one NOT_FOUND destroy of a version that was
       // never written.
-      if (predictedVersionRef && stored.secretVersionRef !== predictedVersionRef) {
+      if (stored.secretVersionRef !== predictedVersionRef) {
         await queuePendingSecretVersion(prepared.c.env, stored, retirementContext);
-        await createWorkflowSecretRetirementsRepository(prepared.c.env)
-          .deleteRetirementByVersionRef(predictedVersionRef)
-          .catch(() => undefined);
+        if (predictedVersionRef) {
+          await createWorkflowSecretRetirementsRepository(prepared.c.env)
+            .deleteRetirementByVersionRef(predictedVersionRef)
+            .catch(() => undefined);
+        }
       }
     } else {
       stored = { storageBackend: "runtime_env" };
