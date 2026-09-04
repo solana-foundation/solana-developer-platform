@@ -255,19 +255,19 @@ describe("database-enforced tenant isolation", () => {
           projectId: PROJECT_A,
           mutate: (current) => ({
             ...current,
-            bvnk: { customer: { customerReference: "tenant-written-ref" } },
+            mural: { organization: { id: "tenant-written-ref" } },
           }),
         })
       );
       expect(updated).not.toBeNull();
 
       const persisted = await runWithSystemDatabaseIdentity("test", () =>
-        getDb(env).queryOne<{ bvnk_customer_reference: string | null }>(
-          "SELECT bvnk_customer_reference FROM counterparties WHERE id = ?",
+        getDb(env).queryOne<{ mural_organization_id: string | null }>(
+          "SELECT mural_organization_id FROM counterparties WHERE id = ?",
           [COUNTERPARTY_A]
         )
       );
-      expect(persisted?.bvnk_customer_reference).toBe("tenant-written-ref");
+      expect(persisted?.mural_organization_id).toBe("tenant-written-ref");
 
       // The same scoped path aimed at another tenant's row resolves nothing.
       const crossTenant = await runWithTenantDatabaseIdentity(scope, () =>
@@ -277,7 +277,7 @@ describe("database-enforced tenant isolation", () => {
           projectId: PROJECT_A,
           mutate: (current) => ({
             ...current,
-            bvnk: { customer: { customerReference: "smuggled-ref" } },
+            mural: { organization: { id: "smuggled-ref" } },
           }),
         })
       );
@@ -288,11 +288,14 @@ describe("database-enforced tenant isolation", () => {
       const repository = createSystemCounterpartiesRepository(env);
       const claim = (counterpartyId: string, organizationId: string, projectId: string) =>
         runWithSystemDatabaseIdentity("test", () =>
-          repository.upsertBvnkCustomerProviderData({
+          repository.mutateProviderData({
             counterpartyId,
             organizationId,
             projectId,
-            customer: { customerReference: "shared-provider-ref" },
+            mutate: (current) => ({
+              ...current,
+              mural: { organization: { id: "shared-provider-ref" } },
+            }),
           })
         );
 
@@ -311,7 +314,7 @@ describe("database-enforced tenant isolation", () => {
       // Exactly one row holds the reference afterwards.
       const holders = await runWithSystemDatabaseIdentity("test", () =>
         getDb(env).queryMany<{ id: string }>(
-          "SELECT id FROM counterparties WHERE bvnk_customer_reference = ?",
+          "SELECT id FROM counterparties WHERE mural_organization_id = ?",
           ["shared-provider-ref"]
         )
       );
@@ -320,20 +323,20 @@ describe("database-enforced tenant isolation", () => {
 
     it("rejects a JSON-only claim that collides with another tenant's column value", async () => {
       await runWithSystemDatabaseIdentity("test", () =>
-        getDb(env).execute("UPDATE counterparties SET bvnk_customer_reference = ? WHERE id = ?", [
+        getDb(env).execute("UPDATE counterparties SET mural_organization_id = ? WHERE id = ?", [
           "dual-write-ref",
           COUNTERPARTY_A,
         ])
       );
 
       // A row whose reference lives only in provider_data JSON (the dual-write
-      // fallback the lookups still honour) must not be able to shadow another
+      // fallback the lookup still honours) must not be able to shadow another
       // tenant's denormalized claim.
       await expect(
         runWithSystemDatabaseIdentity("test", () =>
           getDb(env).execute(
             `UPDATE counterparties
-             SET provider_data = '{"bvnk":{"customer":{"customerReference":"dual-write-ref"}}}'::jsonb
+             SET provider_data = '{"mural":{"organization":{"id":"dual-write-ref"}}}'::jsonb
              WHERE id = ?`,
             [COUNTERPARTY_B]
           )
