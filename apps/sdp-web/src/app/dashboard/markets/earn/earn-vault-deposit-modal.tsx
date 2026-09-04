@@ -52,6 +52,7 @@ import {
 } from "./earn-vault-deposit-tracking";
 import {
   floorForTolerance,
+  isExpiredQuote,
   isSlippageExceededRefusal,
   isZeroQuote,
   parseSlippageToleranceBps,
@@ -914,6 +915,44 @@ export function EarnVaultDepositModal({
     amountValidation.kind !== "valid" ||
     (slippagePolicy !== null && minSharesOut === undefined);
 
+  /**
+   * EXPIRY BACKSTOP (PRO-1691). The quote hook re-quotes on its own, but
+   * timers throttle in background tabs, so the floor on screen can be older
+   * than the TTL at submit. A floor that fresh — or a HELD floor, which a
+   * replay must carry verbatim — passes straight through. An expired one is
+   * re-quoted first: the floor the user REVIEWED is submitted only once a
+   * fresh rate proves it still satisfiable — never a weaker floor re-derived
+   * from the fresh rate, which could accept up to double the chosen tolerance.
+   * A rate that moved beyond that floor stops the submission on THIS side of
+   * the API, through the same copy and control as a blown floor, and either
+   * way the displayed quote re-syncs. Returns whether to proceed.
+   */
+  async function floorSafeToSubmit(
+    controller: AbortController,
+    amount: string,
+    heldFloor: string | null | undefined,
+    floor: string | null
+  ): Promise<boolean> {
+    if (heldFloor !== undefined || floor === null || !isExpiredQuote(quote)) return true;
+    const fresh = await fetchEarnVaultDepositPreview(
+      { strategyId: strategy.id, amount },
+      controller.signal
+    );
+    if (controller.signal.aborted) return false;
+    const usable = fresh.kind === "quoted" && fresh.preview.blockingIssues.length === 0;
+    if (usable && compareUnsignedDecimals(fresh.preview.sharesOut, floor) !== -1) {
+      return true;
+    }
+    if (usable) setSlippageOpen(true);
+    setQuoteRefreshKey((refresh) => refresh + 1);
+    setSubmitError(
+      usable
+        ? t("DashboardEarn.deposit.vaultSlippageExceeded")
+        : t("DashboardEarn.deposit.vaultQuoteUnavailable")
+    );
+    return false;
+  }
+
   async function submitResolvedIntent(
     controller: AbortController,
     wallet: EarnFundingWallet,
@@ -951,6 +990,8 @@ export function EarnVaultDepositModal({
     // freshly derived floor, and records it for exactly that future replay.
     const heldFloor = resolvedKey.wasHeld ? recallVaultDepositFloor(fingerprint) : undefined;
     const floorForRequest = heldFloor !== undefined ? heldFloor : (minSharesOut ?? null);
+
+    if (!(await floorSafeToSubmit(controller, amount, heldFloor, floorForRequest))) return;
     rememberVaultDepositFloor(fingerprint, floorForRequest);
 
     // The value-moving POST deliberately takes NO abort signal. The server

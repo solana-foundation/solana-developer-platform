@@ -342,10 +342,11 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // Kamino's pinned SDK selects the LEGACY deposit instruction when no
   // `minSharesOut` is given — there is no implicit floor, so a vault-state
   // change between signing and inclusion can mint materially fewer shares than
-  // the caller reviewed. The dashboard now derives one from a live quote with
-  // a displayed tolerance (`POST /vault-deposit-previews`) — an expiry is the
-  // piece still missing — but API callers predate the floor, so requiring it
-  // unconditionally today would still break working flows.
+  // the caller reviewed. The dashboard derives one from a live quote with a
+  // displayed tolerance (`POST /vault-deposit-previews`) and refuses to submit
+  // a floor whose quote has aged past its TTL (PRO-1691) — but API callers
+  // predate the floor, so requiring it unconditionally today would still break
+  // working flows.
   //
   // This is scoped to production deliberately, and it is NOT dead code: the
   // environment gate above closes production for a different reason (no exit

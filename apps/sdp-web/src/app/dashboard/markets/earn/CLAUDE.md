@@ -292,14 +292,23 @@ program create still sends the body `requestId` form.
   (fingerprint: project, position, shares, minAmountOut — the derived exit
   floor is in there for the same reason the deposit's is) under its own
   versioned `sessionStorage` key.
-- `earn-vault-slippage.tsx` — the slippage-floor machinery BOTH vault modals
+- `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum), `isSlippageExceededRefusal` (the
-  API's `details.reason` seam), the debounced quote hook and the disclosure
-  section. One copy on purpose — two copies of a funds-protection rule is how
-  one drifts, the same reasoning as `earn-idempotency-key-store`. The floor is
-  derived from a LIVE provider quote, never from the caller's own input; an
-  unavailable quote DISABLES the action rather than guessing.
+  API's `details.reason` seam), the debounced quote hook and (in
+  `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
+  purpose — two copies of a funds-protection rule is how one drifts, the same
+  reasoning as `earn-idempotency-key-store`. The floor is derived from a LIVE
+  provider quote, never from the caller's own input; an unavailable quote
+  DISABLES the action rather than guessing. Quotes EXPIRE (PRO-1691): past
+  `VAULT_QUOTE_TTL_MS` the hook re-quotes on its own, silently in place (the
+  standing quote stays on screen and swaps when the fresh one lands — never a
+  loading flicker or a disarmed confirm), and the deposit modal's
+  `floorSafeToSubmit` additionally refuses to SUBMIT a floor whose quote aged
+  past the TTL without re-quoting first: still satisfiable proceeds with the
+  floor the user reviewed, a rate beyond it stops client-side through the
+  blown-floor copy and control. Held floors bypass the check — a replay must
+  carry the floor its key was minted with, verbatim.
 - `earn-idempotency-key-store.ts` — the shared machinery behind BOTH tracking
   modules (storage tiers, quota divergence, approval holds, entry bounds), plus
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
