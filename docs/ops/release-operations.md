@@ -8,7 +8,7 @@ Last verified against the workflows on `main` at `15f49df1` (2026-09-04). When a
 
 1. **Approval is the release decision.** Auto-merge is armed. When the required approvals and checks are green, the pull request merges on its own and production deploys within about a minute. There is no later confirmation step.
 2. **It needs two approvals**: the release manager's and the designated second approver's. The release commits are authored by the release app, which the branch ruleset treats as unattributed changes, and the approver cannot be the last person who pushed to the branch.
-3. **Every merge to `main` dismisses the approvals.** The pull request is recreated on each push, so approve when no other merge is about to land.
+3. **Every merge to `main` dismisses the approvals.** The pull request is recreated on each push. Call a short merge pause in the engineering channel before approving, and lift it once the release has merged.
 4. **Read the body before approving.** It lists every commit in the release. Look for migrations, runtime configuration changes, and anything that must happen outside the repository on release day.
 5. **Then watch the `Release Flow` run** until the production job finishes, and verify with the checklist in [Verify production](#5-verify-production). The release exists from the first job; production is only live after the last.
 
@@ -124,7 +124,7 @@ Every run posts or updates one comment, so a missing comment means the job never
 
 Three consequences of the branch ruleset (see [Branch controls](./branch-controls.md)) shape how to approve:
 
-- Every push to `main` dismisses the approvals on the release pull request. Approve when nothing else is about to land, or agree a short pause on merging to `main` first.
+- Every push to `main` dismisses the approvals on the release pull request. The release manager calls a short merge pause in the engineering channel before approving and lifts it once the release has merged. Anything that lands in between regenerates the pull request and the approvals start over.
 - The ruleset requires an extra approval for unattributed changes, and the release commits are authored by the release app. The two approvals are the release manager's and the designated second approver's, in that order, and neither can be the last person who pushed to the branch.
 - Auto-merge is armed by the release app and re-armed whenever the version in the headline drifts. Once the required approvals and checks are green the pull request merges on its own and the production deployment starts within a minute. Approval on the release pull request is the release decision.
 
@@ -277,7 +277,7 @@ The release job gates on it and cannot skip it. Fix the cause, or if the failure
 
 ### The release pull request will not merge
 
-- **Approvals keep disappearing.** Every push to `main` recreates the pull request and dismisses its approvals. Approve when no other merge is imminent, or agree a short pause on merging to `main`.
+- **Approvals keep disappearing.** Every push to `main` recreates the pull request and dismisses its approvals. Call the merge pause, then approve again.
 - **One approval is not enough.** The ruleset requires an extra approval for unattributed changes, and the release commit is authored by the release app. The designated second approver's review is needed, and neither approver can be the last pusher.
 - **`publish-release` refused the commit** with `Release commit version X does not match package.json Y`. The squash headline the pull request merged with named an older version than it contained. The release app now re-arms auto-merge when the headline drifts, so this should not recur; if it does, no tag was created and nothing deployed. Land a correctly titled `chore(main): release Y` commit through a new pull request.
 
