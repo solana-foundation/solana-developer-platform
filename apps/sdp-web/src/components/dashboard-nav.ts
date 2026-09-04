@@ -9,7 +9,9 @@ import {
   CoinsIcon,
   FileTextIcon,
   KeyRoundIcon,
+  LandmarkIcon,
   LayoutDashboardIcon,
+  PercentIcon,
   ReceiptTextIcon,
   RepeatIcon,
   ShieldCheckIcon,
@@ -147,12 +149,14 @@ export function getMarketsActions(
     {
       label: t("Shared.dashboardShell.treasurySolutions"),
       href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
+      icon: LandmarkIcon,
     },
     ...(earnEnabled
       ? [
           {
             label: t("Shared.dashboardShell.earnProgram"),
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+            icon: PercentIcon,
           },
         ]
       : []),
