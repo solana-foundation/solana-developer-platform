@@ -102,24 +102,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
       if (withdrawal.status === "pending" && !withdrawal.signature) {
         await failIfStale(env, repo, withdrawal, now, "Withdrawal burn was never broadcast.");
       } else if (withdrawal.status === "pending") {
-        // The burn signature is persisted before the send, so a pending row
-        // carrying one belongs to a request that died mid-send: the burn may
-        // have reached the gateway. Promote it and let the submitted
-        // reconciliation ask, instead of failing a burn that may have executed.
-        if (now - Date.parse(withdrawal.updated_at) <= STUCK_AFTER_MS) {
-          continue;
-        }
-        const promoted = await repo.updateWithdrawal({
-          id: withdrawal.id,
-          status: "submitted",
-          expectedStatus: "pending",
-        });
-        if (promoted) {
-          const instance = await loadInstance(promoted.instance_id);
-          if (instance) {
-            await reconcileSubmitted(env, repo, promoted, instance, now);
-          }
-        }
+        await promoteSignedPending(env, repo, withdrawal, loadInstance, now);
       } else if (withdrawal.status === "submitted") {
         const instance = await loadInstance(withdrawal.instance_id);
         if (!instance) {
@@ -208,6 +191,36 @@ function logReconcileError(withdrawalId: string, status: string, err: unknown): 
 }
 
 /** Fail a burn-signature-less withdrawal that has been stuck past the threshold. */
+/**
+ * The burn signature is persisted before the send, so a pending row carrying
+ * one belongs to a request that died mid-send: the burn may have reached the
+ * gateway. Promote it and let the submitted reconciliation ask, instead of
+ * failing a burn that may have executed.
+ */
+async function promoteSignedPending(
+  env: Env,
+  repo: PrivateChannelWithdrawalRepository,
+  withdrawal: PrivateChannelWithdrawalRow,
+  loadInstance: (id: string) => Promise<PrivateChannelInstanceRow | null>,
+  now: number
+): Promise<void> {
+  if (now - Date.parse(withdrawal.updated_at) <= STUCK_AFTER_MS) {
+    return;
+  }
+  const promoted = await repo.updateWithdrawal({
+    id: withdrawal.id,
+    status: "submitted",
+    expectedStatus: "pending",
+  });
+  if (!promoted) {
+    return;
+  }
+  const instance = await loadInstance(promoted.instance_id);
+  if (instance) {
+    await reconcileSubmitted(env, repo, promoted, instance, now);
+  }
+}
+
 async function failIfStale(
   env: Env,
   repo: PrivateChannelWithdrawalRepository,
