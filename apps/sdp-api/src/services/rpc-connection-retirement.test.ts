@@ -65,6 +65,8 @@ vi.mock("@/services/credential-secret-store", async (importOriginal) => {
       }),
       read: async () => ({}),
       destroyVersion: gcpMock.destroyVersion,
+      predictFirstVersionRef: (input: { providerCredentialId: string }) =>
+        `projects/sdp-test/secrets/${input.providerCredentialId}/versions/1`,
     }),
   };
 });
@@ -352,17 +354,17 @@ describe("BYOK RPC secret retirement", () => {
     ).toBe(false);
   });
 
-  it("refuses the create and takes the version back when the obligation cannot be recorded", async () => {
+  it("refuses the create BEFORE anything external exists when the obligation cannot be reserved", async () => {
     retirementQueueControl.failRecordRetirement = true;
 
     await expect(
       submitRpcConnection(serviceContext(PROJECT_UNRECORDABLE), submitInput("Unrecordable"))
-    ).rejects.toThrow(/durably recorded/i);
+    ).rejects.toThrow(/durably reserved/i);
 
-    // Fail closed: the version this request wrote was destroyed immediately —
-    // no credential may exist with no durable record that it exists...
-    expect(gcpMock.destroyVersion).toHaveBeenCalledTimes(1);
-    // ...and no rows were created for a connection that never came to be.
+    // Fail closed with a clean slate: the obligation is reserved before the
+    // write, so a refused reservation means no external version was ever
+    // created — nothing to destroy, nothing that can leak.
+    expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
     const credentials = await getDb(appEnv).queryMany<{ id: string }>(
       `SELECT id FROM provider_credentials WHERE organization_id = ? AND label = 'Unrecordable'`,
       [ORG_ID]
@@ -370,27 +372,24 @@ describe("BYOK RPC secret retirement", () => {
     expect(credentials).toEqual([]);
   });
 
-  it("retries the destroy and admits the leak when neither recording nor destroying works", async () => {
-    // The terminal case: the queue is unwritable AND the backend refuses the
-    // destroy, so the version this request wrote survives with nothing on
-    // record. Nothing may report that as a clean slate.
+  it("cannot reach the leak case through the create path: an unwritable queue stops the write", async () => {
+    // Before the pre-write reservation this was the terminal orphan: queue
+    // unwritable AND destroy failing left a readable version with only a log.
+    // The ordering closes it — with the queue down the external write never
+    // happens, so there is no version to destroy and no orphan to admit.
     retirementQueueControl.failRecordRetirement = true;
     gcpMock.destroyVersion.mockRejectedValue(new Error("secret manager unavailable"));
     const logError = vi.spyOn(getLogger(), "error");
 
     await expect(
       submitRpcConnection(serviceContext(PROJECT_LEAKED), submitInput("Leaked"))
-    ).rejects.toThrow(/could not be completed and could not be recorded/i);
+    ).rejects.toThrow(/durably reserved/i);
 
-    // The destroy is the only thing that can still end the leak once the queue
-    // is unwritable, so a single blip must not be taken for an answer.
-    expect(gcpMock.destroyVersion.mock.calls.length).toBeGreaterThan(1);
-    // Nothing will collect this one — the flag is what summons a human.
-    expect(logError).toHaveBeenCalledWith(
-      expect.objectContaining({ queuedForRetry: false, reason: "secret_cleanup_failed" }),
+    expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
+    expect(logError).not.toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "secret_cleanup_failed" }),
       "credential_secret_orphan_risk"
     );
-    // The credential still never became a row.
     const credentials = await getDb(appEnv).queryMany<{ id: string }>(
       `SELECT id FROM provider_credentials WHERE organization_id = ? AND label = 'Leaked'`,
       [ORG_ID]

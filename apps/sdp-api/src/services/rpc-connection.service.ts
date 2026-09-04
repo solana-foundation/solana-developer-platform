@@ -16,6 +16,7 @@ import type {
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
 import { getAuth } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import {
@@ -29,6 +30,7 @@ import {
   destroySecretVersion,
   queueOrphanedSecretVersion,
   queuePendingSecretVersion,
+  reserveSecretVersionIntent,
 } from "@/services/secret-retirement";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import {
@@ -381,24 +383,42 @@ export async function submitRpcConnection(
   const connectionId = `rconn_${crypto.randomUUID()}`;
 
   const secretStore = createCredentialSecretStore(c.env);
+  const retirementContext = {
+    provider: "rpc_connection",
+    orgId: auth.organizationId,
+    sourceId: providerCredentialId,
+  };
+  // The obligation is recorded BEFORE the write: the coming version ref is
+  // known up front, so a durable row exists before anything external does and
+  // no crash can leave a readable key without a record the sweeper drains. If
+  // it cannot be recorded, the request is refused while the backend still
+  // holds nothing.
+  const predictedVersionRef = secretStore.predictFirstVersionRef({ providerCredentialId });
+  if (predictedVersionRef) {
+    await reserveSecretVersionIntent(
+      c.env,
+      {
+        storageBackend: secretStore.storageBackend,
+        secretRef: null,
+        secretVersionRef: predictedVersionRef,
+      },
+      retirementContext
+    );
+  }
   const stored = await secretStore.write({
     orgId: auth.organizationId,
     provider: input.provider,
     providerCredentialId,
     payload: { endpointUrl: credential.endpointUrl, apiKey: input.apiKey },
   });
-
-  const retirementContext = {
-    provider: "rpc_connection",
-    orgId: auth.organizationId,
-    sourceId: providerCredentialId,
-  };
-  // The version exists and nothing references it yet, so its destruction is
-  // queued NOW and cancelled by the committing transaction below. Recorded
-  // before the write — not in a catch block — because a process that dies
-  // mid-request leaves no catch block to run, and the queue is then the only
-  // record the tenant's key is still readable in the backend.
-  await queuePendingSecretVersion(c.env, stored, retirementContext);
+  if (stored.secretVersionRef !== predictedVersionRef) {
+    await queuePendingSecretVersion(c.env, stored, retirementContext);
+    if (predictedVersionRef) {
+      await createWorkflowSecretRetirementsRepository(c.env)
+        .deleteRetirementByVersionRef(predictedVersionRef)
+        .catch(() => undefined);
+    }
+  }
 
   const db = getDb(c.env);
   try {
