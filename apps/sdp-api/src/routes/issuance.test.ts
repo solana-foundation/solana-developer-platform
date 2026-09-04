@@ -6515,6 +6515,100 @@ describe("Issuance Routes", () => {
         expect(signerSpy).not.toHaveBeenCalled();
       });
 
+      it("requires an exact wallet when neither the draft nor request selects one", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_without_exact_wallet",
+          mintAddress: null,
+          status: "pending",
+          signingCustodyWalletId: null,
+          signingWalletId: null,
+          requiresAllowlist: false,
+        });
+        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signerSpy.mockClear();
+        const createTokenSpy = vi.spyOn(MosaicService.prototype, "createToken");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          await expect(res.json()).resolves.toMatchObject({
+            error: { message: "signingCustodyWalletId is required to deploy this token" },
+          });
+          expect(signerSpy).not.toHaveBeenCalled();
+          expect(createTokenSpy).not.toHaveBeenCalled();
+        } finally {
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("uses the exact wallet from the request instead of the draft selection", async () => {
+        const draftWallet = await seedIssuanceActivityWallet(
+          "wal_direct_deploy_draft",
+          TEST_SOLANA_ADDRESSES.wallet1
+        );
+        const requestedWallet = await seedIssuanceActivityWallet(
+          "wal_direct_deploy_request",
+          TEST_SOLANA_ADDRESSES.wallet2
+        );
+        const token = await seedIssuedToken({
+          id: "tok_deploy_request_wallet_override",
+          mintAddress: null,
+          status: "pending",
+          signingCustodyWalletId: draftWallet.custodyWalletId,
+          signingWalletId: draftWallet.walletId,
+          requiresAllowlist: false,
+        });
+        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signerSpy.mockClear();
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signingCustodyWalletId: requestedWallet.custodyWalletId,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          await expect(res.json()).resolves.toMatchObject({
+            data: {
+              token: { signingCustodyWalletId: requestedWallet.custodyWalletId },
+            },
+          });
+          expect(signerSpy).toHaveBeenCalledWith(
+            env,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            requestedWallet.custodyWalletId
+          );
+        } finally {
+          createTokenSpy.mockRestore();
+        }
+      });
+
       it("replays a completed direct deploy by its exact wallet without deploying again", async () => {
         const wallet = await seedIssuanceActivityWallet(
           "wal_direct_deploy_replay",

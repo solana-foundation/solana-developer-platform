@@ -66,6 +66,10 @@ export function useAssetProfileForm({
   const supplyLocked = isSupplyLockedOnChain(token);
 
   const errors = getAssetDetailsErrors(draft, t);
+  if (token.mintAddress) {
+    // A deployed token's historical deployment wallet is read-only here.
+    delete errors.signingWalletId;
+  }
   if (!draft.name.trim()) {
     errors.name = t("DashboardIssuance.errors.assetNameRequired");
   }
