@@ -2,6 +2,7 @@
 
 import { privateChannelInstanceInputSchema } from "@sdp/private-channels";
 import type {
+  PrivateChannelHealth,
   PrivateChannelInstance,
   PrivateChannelInstanceInput,
   PrivateChannelProbeResult,
@@ -21,34 +22,22 @@ const privateChannelInstanceSchema = privateChannelInstanceInputSchema.extend({
   updatedAt: z.string(),
 }) satisfies z.ZodType<PrivateChannelInstance>;
 
-const gatewayProbeResponseSchema = z.object({
-  status: z.number(),
-  ok: z.boolean(),
-  body: z.unknown().optional(),
-});
-
 const gatewayHealthResultSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ready"),
     latencyMs: z.number(),
-    health: gatewayProbeResponseSchema,
-    ready: gatewayProbeResponseSchema,
   }),
   z.object({
     status: z.literal("degraded"),
     latencyMs: z.number(),
-    health: gatewayProbeResponseSchema,
-    ready: gatewayProbeResponseSchema,
     reason: z.string(),
   }),
   z.object({
     status: z.literal("unreachable"),
     latencyMs: z.number(),
     error: z.string(),
-    health: gatewayProbeResponseSchema.optional(),
-    ready: gatewayProbeResponseSchema.optional(),
   }),
-]);
+]) satisfies z.ZodType<PrivateChannelHealth>;
 
 const rpcProbeResultSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), latencyMs: z.number(), version: z.string() }),
