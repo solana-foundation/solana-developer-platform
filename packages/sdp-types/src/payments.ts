@@ -119,6 +119,25 @@ export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
   "finalized",
 ] as const satisfies readonly PaymentTransferStatus[];
 
+/** Whether each status ends a ramp transfer's lifecycle. Scoped to ramps — onchain sends terminate at `finalized`. */
+export const RAMP_TRANSFER_STATUS_TERMINAL = {
+  pending: false,
+  processing: false,
+  confirmed: false,
+  finalized: false,
+  failed: true,
+  awaiting_payment: false,
+  settling: false,
+  completed: true,
+  canceled: true,
+  expired: true,
+} as const satisfies Record<PaymentTransferStatus, boolean>;
+
+/** Reports whether a ramp transfer can never leave the given status. */
+export function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
+  return RAMP_TRANSFER_STATUS_TERMINAL[status];
+}
+
 export interface LightsparkGridAmount {
   amount: number;
   currencyCode: string;
