@@ -1,8 +1,10 @@
 import {
   getKvaultGlobalConfigPda,
+  KaminoReserve,
   KaminoVault,
   KaminoVaultClient,
   KVaultGlobalConfig,
+  Reserve,
 } from "@kamino-finance/klend-sdk";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction } from "@solana/kit";
@@ -136,6 +138,78 @@ async function bindVault(
   return { client, vault, state, config, rpc, assetIdentity };
 }
 
+/**
+ * Load reserve account state without requiring a price oracle.
+ *
+ * klend-sdk's `loadVaultReserves` always resolves a live oracle for every
+ * reserve. Deposit instruction construction only reads the reserve's lending
+ * market, while withdrawal planning reads its on-chain liquidity and
+ * collateral exchange state. Neither operation prices the asset. Some valid
+ * devnet reserves intentionally have no usable oracle, so the priced loader
+ * prevents otherwise valid deposits and exits from being built.
+ *
+ * The placeholder is explicitly invalid and its price throws if a future SDK
+ * version tries to use it. That keeps this seam fail-closed for valuation while
+ * allowing the state-only instruction paths we audit below.
+ */
+async function loadStateOnlyReserves(
+  runtime: KaminoRuntime,
+  vaultAddress: Address,
+  client: Kit2,
+  state: Kit2,
+  rpc: Kit2,
+  klendProgramId: Address,
+  slotDurationMs: number
+): Promise<Kit2> {
+  const reserveAddresses = client.getVaultReserves(state) as Address[];
+  let reserveStates: Array<Kit2 | null>;
+  try {
+    reserveStates = await Reserve.fetchMultiple(
+      rpc,
+      reserveAddresses as Kit2,
+      klendProgramId as Kit2
+    );
+  } catch (cause) {
+    throw vaultUnreadable(vaultAddress, runtime.cluster, cause);
+  }
+
+  return new Map(
+    reserveAddresses.map((reserveAddress, index) => {
+      const reserveState = reserveStates[index];
+      if (!reserveState) {
+        throw vaultUnreadable(
+          vaultAddress,
+          runtime.cluster,
+          `allocated reserve ${reserveAddress} was not found`
+        );
+      }
+      const unavailableOracle = {
+        mintAddress: reserveState.liquidity.mintPubkey,
+        decimals: new Decimal(reserveState.liquidity.mintDecimals.toString()),
+        get price(): never {
+          throw vaultUnreadable(
+            vaultAddress,
+            runtime.cluster,
+            `state-only reserve access attempted to price reserve ${reserveAddress}`
+          );
+        },
+        timestamp: 0n,
+        valid: false,
+      };
+      return [
+        reserveAddress,
+        new KaminoReserve(
+          reserveState,
+          reserveAddress as Kit2,
+          unavailableOracle as Kit2,
+          rpc,
+          slotDurationMs
+        ),
+      ];
+    })
+  );
+}
+
 /** Decimal strings are the boundary currency; `Decimal` never escapes this file. */
 function toDecimal(value: string, label: string): Decimal {
   if (!isDecimalString(value)) throw invalidAmount(label, value);
@@ -209,7 +283,15 @@ export async function buildKaminoDepositPlan(
   // already there. Only a chain read distinguishes them, so it happens here,
   // concurrently with the reserve load rather than as an extra serial trip.
   const [reserves, shareAccountsResponse, [shareAta]] = await Promise.all([
-    client.loadVaultReserves(state),
+    loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    ),
     rpc
       .getTokenAccountsByOwner(
         input.owner.address,
@@ -321,7 +403,15 @@ export async function buildKaminoWithdrawPlan(
         { encoding: "jsonParsed" }
       )
       .send(),
-    client.loadVaultReserves(state),
+    loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    ),
     (async () => {
       const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
       return KVaultGlobalConfig.fetch(rpc, globalConfigAddress, config.kvaultProgramId as Kit2);
@@ -634,7 +724,7 @@ export async function readKaminoPosition(
   input: { vault: Address; owner: Address; slot: bigint },
   assertActive: AssertActive = alwaysActive
 ): Promise<KaminoPosition> {
-  const { vault, state, config, rpc, assetIdentity } = await bindVault(
+  const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
     runtime,
     input.vault,
     assertActive
@@ -667,7 +757,21 @@ export async function readKaminoPosition(
   let tokenValue: string | undefined;
   let rawRate: unknown;
   try {
-    rawRate = await vault.getExchangeRate(input.slot as Kit2);
+    const reserves = await loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    );
+    rawRate = await client.getTokensPerShareSingleVault(
+      state,
+      input.slot as Kit2,
+      reserves,
+      input.slot as Kit2
+    );
   } catch {
     rawRate = undefined;
   }

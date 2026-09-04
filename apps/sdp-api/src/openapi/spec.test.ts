@@ -81,6 +81,7 @@ describe("OpenAPI spec", () => {
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
     for (const path of [
+      "/v1/earn/vault-deposit-previews",
       "/v1/earn/external-wallet/deposit-transactions",
       "/v1/earn/external-wallet/deposits",
       "/v1/earn/external-wallet/withdrawal-transactions",
@@ -97,6 +98,18 @@ describe("OpenAPI spec", () => {
         { sessionCookie: [] },
       ]);
     }
+
+    const depositPreviewRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.requestBody
+    );
+    expect(depositPreviewRequest.required).toEqual(
+      expect.arrayContaining(["strategyId", "amount"])
+    );
+    expect(
+      JSON.stringify(
+        publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
+      )
+    ).toContain("sharesOut");
 
     const submitRequest = getJsonSchema(
       publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
@@ -285,10 +298,29 @@ describe("OpenAPI spec", () => {
   it("documents counterparty ramp requirements", () => {
     const doc = createOpenApiDocument();
 
-    const requirementsPath = doc.paths?.["/v1/counterparties/{counterpartyId}/requirements"]?.get;
-    expect(requirementsPath).toBeDefined();
-    expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
-    expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
+    const paths = doc.paths;
+    if (paths === undefined) {
+      expect.fail("Expected OpenAPI paths");
+    }
+    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/requirements"];
+    if (requirementsPathItem === undefined) {
+      expect.fail("Expected counterparty requirements path");
+    }
+    const requirementsPath = requirementsPathItem.get;
+    if (requirementsPath === undefined) {
+      expect.fail("Expected counterparty requirements GET operation");
+    }
+    expect(requirementsPath.operationId).toBe("getCounterpartyRequirements");
+    const parameters = requirementsPath.parameters;
+    if (parameters === undefined) {
+      expect.fail("Expected counterparty requirements parameters");
+    }
+    expect(
+      parameters
+        .filter((parameter) => "in" in parameter && parameter.in === "query")
+        .map((parameter) => ("name" in parameter ? parameter.name : undefined))
+    ).toContain("destinationCountry");
+    expect(requirementsPath.responses["200"]).toMatchSnapshot();
   });
 
   it("documents every supported public wallet policy rule kind", () => {

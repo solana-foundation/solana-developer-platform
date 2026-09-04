@@ -266,7 +266,9 @@
       "onchainTransaction": "Transacción on-chain",
       "addressSearchPlaceholder": "Buscar una dirección",
       "addressAutocompleteFailed": "No pudimos buscar direcciones. Inténtalo de nuevo.",
-      "addressDetailsFailed": "No pudimos cargar esa dirección. Prueba con otra búsqueda."
+      "addressDetailsFailed": "No pudimos cargar esa dirección. Prueba con otra búsqueda.",
+      "payoutAccountsTitle": "Cuentas de pago saliente guardadas",
+      "payoutAccountsDescription": "Elige dónde llega este pago saliente, o completa los datos de abajo para pagar a una cuenta nueva."
     },
     "onchainSend": {
       "noAssets": "Esta Wallet no tiene activos disponibles para enviar.",
@@ -323,7 +325,9 @@
       "offrampProvisioningDetail": "Aprovisionando una Wallet de pagos salientes dedicada de BVNK para esta moneda.",
       "simulateDeposit": "Simular depósito",
       "simulating": "Simulando...",
-      "depositSimulated": "Depósito simulado"
+      "depositSimulated": "Depósito simulado",
+      "agreementPendingTitle": "Confirmando tu aceptación",
+      "agreementPendingDescription": "Estamos registrando tu aceptación con BVNK — solo toma un momento."
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifica tu identidad",
@@ -641,7 +645,20 @@
       "copyAddress": "Copiar dirección",
       "addressCopied": "Dirección copiada",
       "addAnyway": "Agregar de todos modos",
-      "addAnywayTitle": "¿Agregar dirección marcada?"
+      "addAnywayTitle": "¿Agregar dirección marcada?",
+      "providerAccounts": "Cuentas del proveedor",
+      "loadingProviderAccounts": "Cargando cuentas del proveedor…",
+      "noProviderAccounts": "Aún no hay cuentas del proveedor.",
+      "providerAccountsMissing": "La respuesta de cuentas del proveedor estuvo vacía.",
+      "providerAccountCorridor": "Corredor",
+      "providerAccountRail": "Rail",
+      "providerAccountBank": "Banco",
+      "providerAccountNumber": "Cuenta",
+      "providerAccountCustomer": "Cliente",
+      "providerAccountStatus": "Estado",
+      "copyCustomerId": "Copiar ID del cliente",
+      "customerIdCopied": "ID del cliente copiado",
+      "noPayoutAccounts": "Aún no hay cuentas de pago saliente."
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -957,7 +974,9 @@
       "openAccount": "Abrir cuenta en el explorador",
       "editPaymentDescription": "Actualiza las Wallets, el monto y el cronograma del pago.",
       "paymentUpdated": "Pago recurrente actualizado.",
-      "noChangesToSave": "No hay cambios para guardar."
+      "noChangesToSave": "No hay cambios para guardar.",
+      "sourceWalletUnresolved": "Wallet de origen no disponible",
+      "sourceWalletUnresolvedDescription": "Este pago recurrente no está vinculado a una Wallet de SDP exacta, por lo que sus acciones no están disponibles."
     },
     "transactions": {
       "searchPlaceholder": "Busca ID, firma, dirección, referencia o contraparte (3 o más caracteres)",

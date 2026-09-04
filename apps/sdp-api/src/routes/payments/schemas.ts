@@ -20,12 +20,13 @@ import { getI64Encoder, getU64Encoder } from "@solana/kit";
 import { z } from "zod";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
-// Per-field schema for any payments input that expects a base58 Solana address
-// (destination, referenceAddress, allowlist entries). Trim whitespace in a
-// preprocess and require both the 32–44 length window and `isAddress` to pass.
-// Validating here returns 400 BAD_REQUEST with an actionable per-field message
-// instead of letting `assertValidAddress` throw a plain Error downstream (500).
-function solanaAddressSchema(fieldName: string) {
+// Per-field schema for any input that expects a base58 Solana address
+// (destination, referenceAddress, allowlist entries, ring program ids). Trim
+// whitespace in a preprocess and require both the 32–44 length window and
+// `isAddress` to pass. Validating here returns 400 BAD_REQUEST with an
+// actionable per-field message instead of letting `assertValidAddress` throw a
+// plain Error downstream (500).
+export function solanaAddressSchema(fieldName: string) {
   return z.preprocess(
     (value) => (typeof value === "string" ? value.trim() : value),
     z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
@@ -675,6 +676,8 @@ export const createOnrampQuoteSchema = z.object({
 
 const collectedDataSchema = z.record(z.string(), z.string()).optional();
 
+export const rampDestinationCountrySchema = z.enum(COUNTRY_CODES);
+
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
   z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
@@ -686,6 +689,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
     z.object({
       provider: z.literal("bvnk"),
@@ -693,6 +697,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
   ]),
   z.discriminatedUnion("direction", [
@@ -742,7 +747,7 @@ export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
     provider: z.literal("lightspark"),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema,
-    destinationCountry: z.enum(COUNTRY_CODES),
+    destinationCountry: rampDestinationCountrySchema,
     providerAccountId: z.string().min(1).optional(),
   }),
   z.object({

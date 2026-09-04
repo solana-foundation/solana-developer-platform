@@ -1,13 +1,12 @@
 -- Counterparty provider lookup keys: enforce uniqueness of the *effective*
 -- lookup value at the database.
 --
--- The webhook lookups (findActiveCounterpartyByBvnkCustomerReference,
--- findCounterpartyByMuralOrganizationId) resolve a tenant from a
+-- The webhook lookup (findCounterpartyByMuralOrganizationId) resolves a tenant from a
 -- provider-supplied reference via
 --   COALESCE(<denormalized column>, <provider_data JSON path>)
 -- (column first, JSON only when the column is NULL). The historical unique
 -- indexes each cover one representation in isolation:
---   * 0020/0024 — the provider_data JSON expression (stops covering rows once
+--   * 0024 — the provider_data JSON expression (stops covering rows once
 --     the PII purge nulls provider_data),
 --   * 0047      — the denormalized columns.
 -- In the dual-write window one tenant can hold a reference in the column
@@ -27,24 +26,8 @@
 -- runbook in docs/ops/tenant-isolation.md and re-run.
 DO $$
 DECLARE
-  bvnk_conflicts TEXT;
   mural_conflicts TEXT;
 BEGIN
-  SELECT string_agg(format('%s -> [%s]', effective_reference, ids), '; ')
-  INTO bvnk_conflicts
-  FROM (
-    SELECT
-      COALESCE(bvnk_customer_reference, provider_data->'bvnk'->'customer'->>'customerReference')
-        AS effective_reference,
-      string_agg(id, ', ' ORDER BY id) AS ids
-    FROM counterparties
-    WHERE status = 'active'
-      AND COALESCE(bvnk_customer_reference, provider_data->'bvnk'->'customer'->>'customerReference')
-        IS NOT NULL
-    GROUP BY 1
-    HAVING count(*) > 1
-  ) duplicates;
-
   SELECT string_agg(format('%s -> [%s]', effective_reference, ids), '; ')
   INTO mural_conflicts
   FROM (
@@ -60,20 +43,14 @@ BEGIN
     HAVING count(*) > 1
   ) duplicates;
 
-  IF bvnk_conflicts IS NOT NULL OR mural_conflicts IS NOT NULL THEN
+  IF mural_conflicts IS NOT NULL THEN
     RAISE EXCEPTION USING
       MESSAGE = format(
-        'Duplicate active counterparty provider references must be resolved before this migration can enforce uniqueness. bvnk: %s | mural: %s. See docs/ops/tenant-isolation.md.',
-        COALESCE(bvnk_conflicts, 'none'),
-        COALESCE(mural_conflicts, 'none')
+        'Duplicate active counterparty provider references must be resolved before this migration can enforce uniqueness. mural: %s. See docs/ops/tenant-isolation.md.',
+        mural_conflicts
       );
   END IF;
 END $$;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_counterparties_bvnk_customer_reference_effective_active
-ON counterparties ((COALESCE(bvnk_customer_reference, provider_data->'bvnk'->'customer'->>'customerReference')))
-WHERE status = 'active'
-  AND COALESCE(bvnk_customer_reference, provider_data->'bvnk'->'customer'->>'customerReference') IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_counterparties_mural_organization_id_effective_active
 ON counterparties ((COALESCE(mural_organization_id, provider_data->'mural'->'organization'->>'id')))
@@ -85,13 +62,7 @@ WHERE status = 'active'
 -- JSON value would still block an unrelated tenant's row. Keep the JSON
 -- expression indexed for the lookup fallback branch, but not uniquely.
 
-DROP INDEX IF EXISTS idx_counterparties_bvnk_customer_reference_active;
 DROP INDEX IF EXISTS idx_counterparties_mural_organization_id_active;
-
-CREATE INDEX IF NOT EXISTS idx_counterparties_bvnk_customer_reference_json_active
-ON counterparties ((provider_data->'bvnk'->'customer'->>'customerReference'))
-WHERE status = 'active'
-  AND provider_data->'bvnk'->'customer'->>'customerReference' IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_counterparties_mural_organization_id_json_active
 ON counterparties ((provider_data->'mural'->'organization'->>'id'))

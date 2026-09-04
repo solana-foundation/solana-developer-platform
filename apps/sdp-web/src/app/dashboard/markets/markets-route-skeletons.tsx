@@ -82,34 +82,6 @@ export function EmbeddedYieldPortfolioSkeleton() {
   );
 }
 
-export function EarnProgramConfigureSkeleton() {
-  return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div className="mx-auto w-full max-w-7xl space-y-5" data-embedded-yield-loading="configure">
-        <SkeletonBlock className="h-3 w-28" />
-        <section className="rounded-xl border border-border-default bg-surface-raised p-6">
-          <SkeletonBlock className="h-5 w-80 max-w-full" />
-          <SkeletonBlock className="mt-3 h-4 w-[38rem] max-w-full" />
-          <div className="mt-6 grid overflow-hidden rounded-xl border border-border-default md:grid-cols-2">
-            {STRATEGY_SKELETON_IDS.slice(0, 2).map((id) => (
-              <SkeletonBlock className="h-16 w-full rounded-none" key={`flow-${id}`} />
-            ))}
-          </div>
-        </section>
-        <section className="rounded-xl border border-border-default bg-surface-raised p-6">
-          <SkeletonBlock className="h-5 w-40" />
-          <SkeletonBlock className="mt-2 h-4 w-96 max-w-full" />
-          <div className="mt-6 overflow-hidden rounded-xl border border-border-default">
-            {STRATEGY_SKELETON_IDS.map((id) => (
-              <SkeletonBlock className="h-20 w-full rounded-none" key={`strategy-${id}`} />
-            ))}
-          </div>
-        </section>
-      </div>
-    </DashboardWorkspaceOverviewPanel>
-  );
-}
-
 export function EarnIntegrationGuideSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true">
@@ -124,23 +96,23 @@ export function EarnIntegrationGuideSkeleton() {
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <SkeletonBlock className="h-5 w-36" />
-              <SkeletonBlock className="mt-2 h-4 w-24" />
+              <SkeletonBlock className="mt-2 h-4 w-80 max-w-full" />
             </div>
-            <SkeletonBlock className="h-7 w-20 rounded-md" />
+            <SkeletonBlock className="h-8 w-40 rounded-md" />
           </div>
-          <SkeletonBlock className="mt-6 h-16 w-full rounded-xl" />
+          <SkeletonBlock className="mt-6 h-12 w-full rounded-xl" />
+          <SkeletonBlock className="mt-4 h-28 w-full rounded-xl" />
         </section>
-        <SkeletonBlock className="h-20 w-full rounded-xl" />
-        {INTEGRATION_SECTION_SKELETON_IDS.map((id) => (
-          <section
-            className="rounded-xl border border-border-default bg-surface-raised p-6"
-            key={id}
-          >
-            <SkeletonBlock className="h-5 w-40" />
-            <SkeletonBlock className="mt-2 h-4 w-[34rem] max-w-full" />
-            <SkeletonBlock className="mt-6 h-56 w-full rounded-xl" />
-          </section>
-        ))}
+        <div className="grid grid-cols-4 gap-2">
+          {INTEGRATION_SECTION_SKELETON_IDS.map((id) => (
+            <SkeletonBlock className="h-9 w-full rounded-lg" key={id} />
+          ))}
+        </div>
+        <section>
+          <SkeletonBlock className="h-5 w-40" />
+          <SkeletonBlock className="mt-2 h-4 w-[34rem] max-w-full" />
+          <SkeletonBlock className="mt-6 h-56 w-full rounded-xl" />
+        </section>
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

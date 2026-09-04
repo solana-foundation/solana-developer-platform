@@ -36,6 +36,7 @@ export const TEST_PROJECT_CACHED_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
   rotationDeadline: null,
+  organizationStatus: "active",
 };
 
 export const TEST_TOKEN: Token = {

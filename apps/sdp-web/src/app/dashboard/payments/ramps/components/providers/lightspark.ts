@@ -1,44 +1,18 @@
 import type { RampDirection } from "@sdp/types/ramp-requirements";
-import { Loader2Icon, ShieldCheckIcon, XCircleIcon } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import type { OnboardingCopy, SimulateActionLabels, StandardOnboardingPanelStatus } from "./index";
+import type {
+  LightsparkOnboardingPanelStatus,
+  OnboardingCopy,
+  SimulateActionLabels,
+} from "./index";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export function getLightsparkOnboardingCopy(
   t: Translate
-): Record<StandardOnboardingPanelStatus, OnboardingCopy> {
+): Record<LightsparkOnboardingPanelStatus, OnboardingCopy> {
   return {
-    customer_verification_required: {
-      title: t("DashboardPayments.lightspark.verificationRequiredTitle"),
-      description: t("DashboardPayments.lightspark.verificationRequiredDescription"),
-      icon: ShieldCheckIcon,
-      iconClassName: "text-primary",
-    },
-    customer_verifying: {
-      title: t("DashboardPayments.lightspark.verificationInReviewTitle"),
-      description: t("DashboardPayments.lightspark.verificationInReviewDescription"),
-      icon: Loader2Icon,
-      iconClassName: "animate-spin text-secondary",
-    },
-    customer_verification_failed: {
-      title: t("DashboardPayments.lightspark.verificationFailedTitle"),
-      description: t("DashboardPayments.lightspark.verificationFailedDescription"),
-      icon: XCircleIcon,
-      iconClassName: "text-error",
-    },
-    funding_account_provisioning: {
-      title: t("DashboardPayments.lightspark.fundingAccountProvisioningTitle"),
-      description: t("DashboardPayments.lightspark.fundingAccountProvisioningDescription"),
-      icon: Loader2Icon,
-      iconClassName: "animate-spin text-secondary",
-    },
-    provisioning_failed: {
-      title: t("DashboardPayments.lightspark.provisioningFailedTitle"),
-      description: t("DashboardPayments.lightspark.provisioningFailedDescription"),
-      icon: XCircleIcon,
-      iconClassName: "text-error",
-    },
     ready: {
       title: t("DashboardPayments.lightspark.readyTitle"),
       description: t("DashboardPayments.lightspark.readyDescription"),

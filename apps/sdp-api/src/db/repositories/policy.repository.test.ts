@@ -8,7 +8,7 @@ import type {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { ApiKeyService } from "@/services/api-key.service";
+import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import { ApiKeyPolicyStore } from "@/services/policy/api-key-policy.store";
 import { PostgresPolicyEnforcementStore } from "@/services/policy/enforcement.store";
 import { WalletPolicyStore } from "@/services/policy/wallet-policy.store";
@@ -1326,6 +1326,11 @@ describe("PolicyRepository (postgres)", () => {
       "pepper"
     );
     expect(rotation).not.toBeNull();
+    // A first rotation of this key, so it must mint a replacement rather
+    // than report one already exists.
+    if (!rotation || isApiKeyAlreadyRotated(rotation)) {
+      throw new Error("expected the rotation to create a replacement key");
+    }
 
     expect(
       await getDb(env)
@@ -1334,13 +1339,13 @@ describe("PolicyRepository (postgres)", () => {
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`
         )
-        .bind(rotation?.apiKey.id)
+        .bind(rotation.apiKey.id)
         .first()
     ).toEqual({
       wallet_id: TEST_CUSTODY_WALLET.walletId,
     });
 
-    const clonedBindings = await repo.listApiKeyWalletPolicyBindings(rotation?.apiKey.id ?? "");
+    const clonedBindings = await repo.listApiKeyWalletPolicyBindings(rotation.apiKey.id ?? "");
     expect(clonedBindings).toHaveLength(2);
     const clonedAllBinding = clonedBindings.find((binding) => binding.binding_scope === "all");
     const clonedSelectedBinding = clonedBindings.find(
@@ -1356,7 +1361,7 @@ describe("PolicyRepository (postgres)", () => {
     expect(clonedSelectedBinding?.api_key_control_profile_id).not.toBe(apiKeyProfile?.id);
 
     const clonedProfile = await repo.getActiveApiKeyControlProfileByApiKeyId(
-      rotation?.apiKey.id ?? ""
+      rotation.apiKey.id ?? ""
     );
     expect(clonedProfile?.profile.name).toBe("Rotation controls");
     expect(clonedProfile?.revision?.rules).toEqual([
@@ -1367,7 +1372,7 @@ describe("PolicyRepository (postgres)", () => {
 
     const clonedEndpointPermissions = await getDb(env)
       .prepare("SELECT permissions FROM api_key_wallet_permissions WHERE api_key_id = ?")
-      .bind(rotation?.apiKey.id)
+      .bind(rotation.apiKey.id)
       .all<{ permissions: string }>();
     expect(clonedEndpointPermissions.results).toHaveLength(1);
     expect(JSON.parse(clonedEndpointPermissions.results[0].permissions)).toEqual([

@@ -447,7 +447,11 @@
     "rpcByokRotated": "Clé remplacée.",
     "rpcByokTest": "Tester la clé",
     "rpcByokTestPassed": "Fournisseur joint à l'instant.",
-    "rpcByokTestFailed": "Impossible de joindre le fournisseur."
+    "rpcByokTestFailed": "Impossible de joindre le fournisseur.",
+    "statusNotConnected": "Non connecté",
+    "statusOnRequest": "Disponible sur demande",
+    "rpcByokDeleteConfirm": "Supprimer cette connexion ? Sa clé a été détruite lors de sa désactivation, cela ne fait donc qu'effacer l'enregistrement.",
+    "rpcByokDeleteNamed": "Supprimer {name}"
   },
   "notifications": {
     "ariaLabel": "Notifications",

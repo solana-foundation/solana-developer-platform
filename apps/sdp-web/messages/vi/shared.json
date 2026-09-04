@@ -442,7 +442,11 @@
     "rpcByokRotated": "Đã xoay khóa.",
     "rpcByokTest": "Kiểm tra khóa",
     "rpcByokTestPassed": "Đã kết nối tới nhà cung cấp.",
-    "rpcByokTestFailed": "Không thể kết nối tới nhà cung cấp."
+    "rpcByokTestFailed": "Không thể kết nối tới nhà cung cấp.",
+    "statusNotConnected": "Chưa kết nối",
+    "statusOnRequest": "Khả dụng theo yêu cầu",
+    "rpcByokDeleteConfirm": "Xóa kết nối này? Khóa của nó đã bị hủy khi bị vô hiệu hóa, nên thao tác này chỉ xóa bản ghi.",
+    "rpcByokDeleteNamed": "Xóa {name}"
   },
   "notifications": {
     "ariaLabel": "Thông báo",

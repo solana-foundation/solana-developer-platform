@@ -67,6 +67,7 @@ DECLARE
 BEGIN
   FOREACH tenant_table IN ARRAY ARRAY[
     'projects',
+    'helius_rings_project_rings',
     'organization_members',
     'invitations',
     'sessions',

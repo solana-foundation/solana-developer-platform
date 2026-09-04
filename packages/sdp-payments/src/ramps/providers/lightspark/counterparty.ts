@@ -17,12 +17,12 @@ import {
   countryField,
   dateField,
   parseCollectedFields,
-  readyCounterparty,
   selectField,
   textField,
 } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
+  isLightsparkExternalAccountActive,
   LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
   readLightsparkPurposeOfPayment,
 } from "./provider-data";
@@ -89,6 +89,38 @@ const LIGHTSPARK_VALUE_LABELS: Readonly<Record<string, Readonly<Record<string, s
 };
 
 let regionDisplayNames: Intl.DisplayNames | undefined;
+
+/**
+ * Builds the ready state for a linked Lightspark on-ramp counterparty.
+ *
+ * @returns Lightspark on-ramp readiness.
+ */
+export function lightsparkOnrampReady(): CounterpartyRequirements {
+  return { provider: "lightspark", direction: "onramp", status: "ready" };
+}
+
+/**
+ * Builds the ready state for a Lightspark off-ramp payout account.
+ *
+ * @param providerAccountId - SDP payout external-account identifier.
+ * @param payout - Corridor payout requirements exposed by requirements GET.
+ * @returns Lightspark off-ramp readiness for the selected payout account.
+ */
+export function lightsparkOfframpReady(
+  providerAccountId: string,
+  payout?: PayoutRequirementTree
+): CounterpartyRequirements {
+  if (payout === undefined) {
+    return { provider: "lightspark", direction: "offramp", status: "ready", providerAccountId };
+  }
+  return {
+    provider: "lightspark",
+    direction: "offramp",
+    status: "ready",
+    providerAccountId,
+    payout,
+  };
+}
 
 /**
  * Resolves the display label for one enumerated field value: the curated map
@@ -488,7 +520,7 @@ export function lightsparkCounterpartyRequirements(
     return lightsparkPurposeOfPaymentRequirement(options.direction);
   }
   if (options.direction === "onramp") {
-    return readyCounterparty("lightspark", "onramp");
+    return lightsparkOnrampReady();
   }
   if (options.fiatCurrency === undefined) {
     throw badRequest("fiatCurrency is required for Lightspark off-ramp requirements.");
@@ -500,7 +532,40 @@ export function lightsparkCounterpartyRequirements(
   if (options.payoutAccounts !== undefined) {
     accounts.push(...options.payoutAccounts);
   }
-  return lightsparkCollectAccountRequirements(options.cryptoRail, options.fiatCurrency, accounts);
+  const payout = lightsparkPayoutRequirementTree(
+    options.cryptoRail,
+    options.fiatCurrency,
+    accounts
+  );
+  if (Object.keys(payout.countryRails).length === 0) {
+    return unsupportedCounterparty(
+      "lightspark",
+      "offramp",
+      `Lightspark off-ramp does not support payouts in ${options.fiatCurrency}.`
+    );
+  }
+  if (options.destinationCountry !== undefined) {
+    const matchingAccounts = accounts.filter(
+      (account) =>
+        account.destinationCountry === options.destinationCountry &&
+        isLightsparkExternalAccountActive(account.status)
+    );
+    if (matchingAccounts.length > 1) {
+      throw badRequest(
+        `Counterparty has multiple active lightspark external accounts for ${options.fiatCurrency} to ${options.destinationCountry}; explicit external-account selection is required.`
+      );
+    }
+    const selected = matchingAccounts[0];
+    if (selected !== undefined) {
+      return lightsparkOfframpReady(selected.id, payout);
+    }
+  }
+  return {
+    provider: "lightspark",
+    direction: "offramp",
+    status: "collect_account",
+    payout,
+  };
 }
 
 /**

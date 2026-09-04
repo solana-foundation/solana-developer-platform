@@ -121,6 +121,22 @@ describe("probeRingsHealth", () => {
     expect(errored.detail?.photon).toBe("reported unhealthy");
   });
 
+  it("passes the indexer's own lag message through when present", async () => {
+    const health = await probeRingsHealth(
+      input({
+        fetch: fetchStub({
+          indexer: () =>
+            Promise.resolve(
+              jsonResponse({ error: { code: -32600, message: "Node is behind 57132 slots" } })
+            ),
+        }),
+      })
+    );
+
+    expect(health.photon).toBe("amber");
+    expect(health.detail?.photon).toBe("Node is behind 57132 slots");
+  });
+
   it("calls an unreachable or erroring upstream red", async () => {
     const photonDown = await probeRingsHealth(
       input({

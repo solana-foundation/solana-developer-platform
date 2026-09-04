@@ -17,6 +17,16 @@ const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
 const buildExternalWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
 const submitExternalWalletDeposit = vi.hoisted(() => vi.fn());
 const submitExternalWalletWithdrawal = vi.hoisted(() => vi.fn());
+const quoteVaultWithdrawal = vi.hoisted(() => vi.fn());
+const resolveVaultWithdrawClient = vi.hoisted(() =>
+  vi.fn(() => ({
+    buildVaultDeposit: vi.fn(),
+    buildVaultWithdrawal: vi.fn(),
+    quoteVaultWithdrawal,
+    readVaultPositions: vi.fn(),
+    sponsoredPrograms: vi.fn(() => []),
+  }))
+);
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
 
 vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) => ({
@@ -25,6 +35,11 @@ vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) 
   buildExternalWalletWithdrawalTransaction,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
+}));
+
+vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
+  resolveVaultWithdrawClient,
 }));
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
@@ -246,6 +261,8 @@ function builtRow(overrides: Record<string, unknown> = {}) {
     amount_requested: "25",
     min_shares_out: null,
     creates_share_account: true,
+    fee_payer: null,
+    share_ata_rent_funder: null,
     unsigned_transaction: "AQ==",
     last_valid_block_height: "361",
     movement_id: null,
@@ -325,6 +342,11 @@ beforeEach(async () => {
   submitExternalWalletWithdrawal.mockResolvedValue(
     submitResult({ direction: "withdrawal", denomination: SHARE_MINT, amount_requested: "10" })
   );
+  quoteVaultWithdrawal.mockResolvedValue({
+    assetsOut: "9.95",
+    assetDecimals: 6,
+    blockingIssues: [],
+  });
 });
 
 afterEach(() => {
@@ -374,6 +396,66 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       amount: "25",
     });
     expect(res.status).toBe(404);
+  });
+
+  describe("partner fee payer", () => {
+    const FEE_PAYER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+
+    it("passes the fee payer through and echoes it on the built transaction", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      buildExternalWalletDepositTransaction.mockResolvedValue({
+        kind: "built",
+        built: builtRow({ fee_payer: FEE_PAYER, share_ata_rent_funder: FEE_PAYER }),
+      });
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer: FEE_PAYER,
+        amount: "25",
+      });
+
+      expect(res.status).toBe(200);
+      expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ feePayer: FEE_PAYER })
+      );
+      const body = (await res.json()) as { data: { transaction: { feePayer?: string } } };
+      expect(body.data.transaction.feePayer).toBe(FEE_PAYER);
+    });
+
+    it("normalizes a fee payer equal to the owner away", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer: OWNER,
+        amount: "25",
+      });
+
+      expect(res.status).toBe(200);
+      expect(buildExternalWalletDepositTransaction.mock.calls[0]?.[1]).not.toHaveProperty(
+        "feePayer"
+      );
+      const body = (await res.json()) as { data: { transaction: { feePayer?: string } } };
+      expect(body.data.transaction).not.toHaveProperty("feePayer");
+    });
+
+    it("400s a malformed fee payer before any build", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer: "not-a-real-address",
+        amount: "25",
+      });
+      expect(res.status).toBe(400);
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    });
   });
 
   describe("swap-funded builds", () => {
@@ -534,6 +616,36 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         amount: "24.8",
         minSharesOut: "24.5",
       });
+    });
+
+    it("carries the fee payer through the split's follow-up contract", async () => {
+      await seedAuth();
+      const strategy = await seedStrategy();
+      const feePayer = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+      buildExternalWalletDepositTransaction.mockResolvedValue({
+        kind: "swap_required",
+        swap: swapLeg,
+        swapTransaction: {
+          bytes: Uint8Array.from([1, 2, 3]),
+          lastValidBlockHeight: "361",
+        },
+      });
+
+      const res = await post("deposit-transactions", {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        feePayer,
+        amount: "25",
+        sourceTokenMint: SOURCE_MINT,
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { followUp: { feePayer?: string } };
+      };
+      // A follow-up build that silently dropped the fee payer would bill the
+      // customer's wallet — the same reasoning as the floor echo above.
+      expect(body.data.followUp.feePayer).toBe(feePayer);
     });
 
     it("omits the follow-up floor only when the original request carried none", async () => {
@@ -718,6 +830,44 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 });
 
 describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", () => {
+  it("quotes an external-wallet exit so callers can derive minAmountOut", async () => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition();
+
+    const res = await post("withdrawal-previews", { positionId, shares: "10" });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: {
+        positionId,
+        assetsOut: "9.95",
+        assetDecimals: 6,
+        blockingIssues: [],
+      },
+    });
+    expect(quoteVaultWithdrawal).toHaveBeenCalledWith(expect.anything(), {
+      providerReference: VAULT,
+      shares: "10",
+    });
+  });
+
+  it("keeps the external-wallet exit quote inside the exact project", async () => {
+    await seedAuth();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES ('prj_earn_ext_quote_sibling', ?, 'Sibling', 'earn-ext-quote-sibling', 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_ORG.id, TEST_USER.id)
+      .run();
+    const positionId = await seedExternalWalletPosition({
+      projectId: "prj_earn_ext_quote_sibling",
+    });
+
+    expect((await post("withdrawal-previews", { positionId, shares: "10" })).status).toBe(404);
+    expect(quoteVaultWithdrawal).not.toHaveBeenCalled();
+  });
+
   it("404s an unknown position", async () => {
     await seedAuth();
     const res = await post("withdrawal-transactions", {
@@ -730,7 +880,11 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
   it("404s a custody position: the treasury exit is a different surface", async () => {
     await seedAuth();
     const positionId = await seedCustodyPosition();
-    const res = await post("withdrawal-transactions", { positionId, shares: "10" });
+    const res = await post("withdrawal-transactions", {
+      positionId,
+      shares: "10",
+      minAmountOut: "9.5",
+    });
     expect(res.status).toBe(404);
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
   });
@@ -752,7 +906,11 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
   it("builds the exit from the recorded position facts", async () => {
     await seedAuth();
     const positionId = await seedExternalWalletPosition();
-    const res = await post("withdrawal-transactions", { positionId, shares: "10" });
+    const res = await post("withdrawal-transactions", {
+      positionId,
+      shares: "10",
+      minAmountOut: "9.5",
+    });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { transaction: Record<string, unknown> } };
@@ -770,6 +928,7 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
         shareMint: SHARE_MINT,
         shareAtaRentFunder: null,
         shares: "10",
+        minAmountOut: "9.5",
       })
     );
   });

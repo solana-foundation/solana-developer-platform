@@ -8,11 +8,10 @@ import {
   type WalletAuthority,
   WithdrawalTarget,
 } from "@heliuslabs/zolana/transaction";
-import { HeliusRingsError } from "@sdp/helius-rings";
 import { type Address, address, type Instruction } from "@solana/kit";
 import { type PreparedSpendIntent, validatePreparedTransferIntent } from "../intent-validation.js";
 import type { ShieldedMaterial } from "../material.js";
-import { PROTOCOL_NATIVE_MINT, protocolMint } from "./mint.js";
+import { protocolMint, requireProtocolSol } from "./mint.js";
 import { type NoteSelection, selectNotes } from "./notes.js";
 
 export interface SpendDeps {
@@ -44,12 +43,9 @@ export interface TransferInput {
 }
 
 export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Promise<SpendResult> {
-  const protocolAsset = protocolMint(input.mint);
-  if (protocolAsset !== PROTOCOL_NATIVE_MINT) {
-    throw new HeliusRingsError("invalid_input", "only SOL withdrawals are supported in this build");
-  }
+  requireProtocolSol(input.mint, "withdrawal");
 
-  const asset = address(protocolAsset);
+  const asset = address(protocolMint(input.mint));
   const amount = BigInt(input.amountRaw);
   const recipient = address(input.recipient);
   const selection = selectNotes({
@@ -92,12 +88,9 @@ export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Pr
  * instead of a public settlement target. No interface transfer on the outer tx.
  */
 export async function buildTransfer(deps: SpendDeps, input: TransferInput): Promise<SpendResult> {
-  const protocolAsset = protocolMint(input.mint);
-  if (protocolAsset !== PROTOCOL_NATIVE_MINT) {
-    throw new HeliusRingsError("invalid_input", "only SOL transfers are supported in this build");
-  }
+  requireProtocolSol(input.mint, "transfer");
 
-  const asset = address(protocolAsset);
+  const asset = address(protocolMint(input.mint));
   const amount = BigInt(input.amountRaw);
   const selection = selectNotes({
     wallet: deps.wallet,
@@ -139,7 +132,7 @@ function proofInputs(deps: SpendDeps, selection: NoteSelection): ProofInputUtxo[
         utxo: note.utxo,
         nullifierKey: deps.material.nullifierKey,
         ...(note.dataHash ? { dataHash: note.dataHash } : {}),
-        ...(note.zoneDataHash ? { zoneDataHash: note.zoneDataHash } : {}),
+        ...(note.ringDataHash ? { ringDataHash: note.ringDataHash } : {}),
       })
   );
 }

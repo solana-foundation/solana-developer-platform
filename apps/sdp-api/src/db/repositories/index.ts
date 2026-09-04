@@ -44,14 +44,19 @@ export { createPostgresCounterpartyAccountsRepository } from "./counterparty-acc
 export type {
   ArchiveExternalAccountInput,
   CompleteExternalAccountInput,
+  CounterpartyProviderAccountKind,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
+  GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
+  InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
+  PatchAccountMetadataInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
@@ -128,6 +133,20 @@ export {
   mapHeliusRingsOperationSummaryRow,
 } from "./helius-rings-operation.repository";
 export { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
+export type {
+  HeliusRingsProjectRingRepository,
+  HeliusRingsProjectRingRow,
+  HeliusRingsRingKey,
+  MarkHeliusRingsProjectRingActiveInput,
+  MarkHeliusRingsProjectRingFailedInput,
+  RecordHeliusRingsLookupTableInput,
+  ReserveHeliusRingsProjectRingInput,
+} from "./helius-rings-project-ring.repository";
+export {
+  generateHeliusRingsProjectRingId,
+  mapHeliusRingsProjectRingRow,
+} from "./helius-rings-project-ring.repository";
+export { createPostgresHeliusRingsProjectRingRepository } from "./helius-rings-project-ring.repository.postgres";
 export type {
   CreateHeliusRingsWalletInput,
   HeliusRingsProjectScope,
@@ -440,6 +459,7 @@ export {
   createHeliusRingsHealthRepository,
   createHeliusRingsKeyRefRepository,
   createHeliusRingsOperationRepository,
+  createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createHeliusRingsZoneRepository,
   createKycWalletsRepository,

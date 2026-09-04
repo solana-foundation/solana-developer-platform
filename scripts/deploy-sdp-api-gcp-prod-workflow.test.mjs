@@ -182,7 +182,7 @@ test("merge deploys promote signed per-merge images and never migrate", () => {
 test("merge mode skips the internal smoke gate but requires the caller's", () => {
   assert.match(
     workflow,
-    /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-dev-smoke\.yml/
+    /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-stage-smoke\.yml/
   );
   assert.match(
     workflow,

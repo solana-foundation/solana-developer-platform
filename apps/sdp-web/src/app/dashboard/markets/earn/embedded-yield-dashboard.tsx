@@ -1,21 +1,30 @@
 "use client";
 
-import type { EarnExternalWalletPositionSummary } from "@sdp/types";
+import type {
+  EarnExternalWalletPosition,
+  EarnExternalWalletPositionSummary,
+  EarnExternalWalletStrategyTotal,
+  SolanaCluster,
+} from "@sdp/types";
 import {
   AlertTriangleIcon,
-  ArrowRightIcon,
-  CircleDollarSignIcon,
-  Code2Icon,
+  ChevronRightIcon,
+  CopyIcon,
+  ExternalLinkIcon,
   InfoIcon,
   Layers3Icon,
+  LoaderCircleIcon,
+  WalletIcon,
+  XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Drawer, DrawerClose, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
   Table,
@@ -26,16 +35,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerAddressUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
-import { useEarnExternalWalletPositionSummary } from "./earn-program-data";
+import {
+  fetchEarnExternalWalletPositions,
+  useEarnExternalWalletPositionSummary,
+} from "./earn-program-data";
 
-const ONBOARDING_STEPS = [
-  { icon: CircleDollarSignIcon, key: "DashboardMarkets.earnProgram.flowSelect" },
-  { icon: Code2Icon, key: "DashboardMarkets.earnProgram.flowIntegrate" },
-] as const satisfies ReadonlyArray<{ icon: typeof Layers3Icon; key: MessageKey }>;
+const STRATEGY_WALLET_REFRESH_INTERVAL_MS = process.env.NODE_ENV === "development" ? 3_000 : 15_000;
 
 function PortfolioInfoTip({ label }: { label: string }) {
   return (
@@ -73,8 +83,8 @@ function PortfolioOnboarding({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
 
   return (
-    <Card className="gap-0 rounded-2xl px-7 py-7 shadow-[0_18px_24px_rgba(0,0,0,0.05)]">
-      <div className="flex flex-col items-center py-4 text-center">
+    <Card className="gap-0 rounded-2xl px-7 py-10 shadow-[0_18px_24px_rgba(0,0,0,0.05)]">
+      <div className="flex flex-col items-center text-center">
         <span className="flex size-12 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
           <Layers3Icon aria-hidden="true" className="size-6" />
         </span>
@@ -85,39 +95,228 @@ function PortfolioOnboarding({ configureHref }: { configureHref: string }) {
           {t("DashboardMarkets.earnProgram.introDescription")}
         </p>
 
-        <ol
-          aria-label={t("DashboardMarkets.earnProgram.setupProgress")}
-          className="mt-8 grid w-full items-center gap-3 text-left md:grid-cols-[minmax(0,1fr)_1.5rem_minmax(0,1fr)] md:gap-0"
-        >
-          {ONBOARDING_STEPS.map(({ icon: Icon, key }, index) => (
-            <Fragment key={key}>
-              <li className="flex h-20 min-w-0 items-center gap-4 rounded-xl border-2 border-border-default px-4">
-                <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-                  <Icon aria-hidden="true" className="size-6" />
-                </span>
-                <span className="min-w-0 text-base leading-6 font-medium text-secondary">
-                  {t(key)}
-                </span>
-              </li>
-              {index < ONBOARDING_STEPS.length - 1 ? (
-                <ArrowRightIcon
-                  aria-hidden="true"
-                  className="mx-auto hidden size-4 text-tertiary md:block"
-                />
-              ) : null}
-            </Fragment>
-          ))}
-        </ol>
-
-        <Button asChild className="mt-10" variant="secondary">
-          <Link href={configureHref}>{t("DashboardMarkets.earnProgram.getStarted")}</Link>
+        <Button asChild className="mt-8" variant="secondary">
+          <Link href={configureHref}>{t("DashboardMarkets.earnProgram.configureShort")}</Link>
         </Button>
       </div>
     </Card>
   );
 }
 
-function PortfolioByStrategy({ summary }: { summary: EarnExternalWalletPositionSummary }) {
+function compactAddress(value: string) {
+  return `${value.slice(0, 5)}…${value.slice(-5)}`;
+}
+
+function StrategyWalletDrawer({
+  strategy,
+  cluster,
+  open,
+  onOpenChange,
+}: {
+  strategy: EarnExternalWalletStrategyTotal | null;
+  cluster: SolanaCluster;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const locale = useLocale();
+  const t = useTranslations();
+  const [positions, setPositions] = useState<EarnExternalWalletPosition[] | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!open || !strategy) return;
+    const currentStrategy = strategy;
+    let active = true;
+    let refreshing = false;
+    setPositions(null);
+    setError(false);
+
+    async function refresh() {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const pages = await Promise.all(
+          currentStrategy.ownerAddresses.map(fetchEarnExternalWalletPositions)
+        );
+        if (!active) return;
+        setPositions(
+          pages
+            .flat()
+            .filter(
+              (position) =>
+                position.provider === currentStrategy.provider &&
+                position.providerReference === currentStrategy.providerReference
+            )
+            .sort((left, right) => left.ownerAddress.localeCompare(right.ownerAddress))
+        );
+        setError(false);
+      } catch {
+        if (active) setError(true);
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), STRATEGY_WALLET_REFRESH_INTERVAL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [open, strategy]);
+
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="right">
+      <DrawerContent
+        style={
+          {
+            "--drawer-content-width": "min(34rem, calc(100vw - 1rem))",
+          } as CSSProperties
+        }
+      >
+        <div className="flex items-start justify-between border-b border-border-default px-6 py-5">
+          <div>
+            <DrawerTitle className="text-lg font-medium text-primary">
+              {strategy?.label ?? t("DashboardMarkets.earnProgram.customerWallets")}
+            </DrawerTitle>
+            <p className="mt-1 text-sm text-secondary">
+              {strategy
+                ? t(
+                    strategy.walletCount === 1
+                      ? "DashboardMarkets.earnProgram.customerWalletCount"
+                      : "DashboardMarkets.earnProgram.customerWalletCountPlural",
+                    { count: strategy.walletCount }
+                  )
+                : ""}
+            </p>
+          </div>
+          <DrawerClose
+            type="button"
+            aria-label={t("Shared.SharedComponents.close")}
+            className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <XIcon aria-hidden="true" className="size-4" />
+          </DrawerClose>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          {!positions && !error ? (
+            <div className="flex min-h-48 items-center justify-center text-secondary">
+              <LoaderCircleIcon aria-hidden="true" className="size-5 animate-spin" />
+              <span className="ml-2 text-sm">
+                {t("DashboardMarkets.earnProgram.walletValuesLoading")}
+              </span>
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning">
+              {t("DashboardMarkets.earnProgram.walletRefreshError")}
+            </div>
+          ) : null}
+
+          {positions ? (
+            <div className="space-y-3">
+              {positions.map((position, index) => {
+                const asset = earnMintAsset(position.tokenMint);
+                return (
+                  <article
+                    key={position.id}
+                    className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_12px_28px_rgba(0,0,0,0.04)]"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
+                          <WalletIcon aria-hidden="true" className="size-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-primary">
+                            {t("DashboardMarkets.earnProgram.customerWallet", {
+                              index: index + 1,
+                            })}
+                          </p>
+                          <p className="mt-0.5 font-mono text-xs text-tertiary">
+                            {compactAddress(position.ownerAddress)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={t("DashboardMarkets.earnProgram.copyWalletAddress")}
+                          className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
+                          onClick={() => void navigator.clipboard.writeText(position.ownerAddress)}
+                        >
+                          <CopyIcon aria-hidden="true" className="size-3.5" />
+                        </button>
+                        <a
+                          aria-label={t("DashboardMarkets.earnProgram.openWalletInExplorer")}
+                          className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
+                          href={explorerAddressUrl(position.ownerAddress, cluster)}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+                        </a>
+                      </div>
+                    </div>
+
+                    <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border-subtle pt-4">
+                      <div>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.liveValue")}
+                        </dt>
+                        <dd className="mt-1 text-sm font-medium text-primary tabular-nums">
+                          {position.tokenValue === undefined
+                            ? t("DashboardMarkets.earnProgram.valueUnavailable")
+                            : formatProviderAmount(position.tokenValue, locale, asset.symbol)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.asset")}
+                        </dt>
+                        <dd className="mt-1 flex items-center gap-2 text-sm font-medium text-primary">
+                          <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
+                          {asset.symbol}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.vaultShares")}
+                        </dt>
+                        <dd className="mt-1 text-sm text-primary tabular-nums">
+                          {position.shares ?? t("DashboardMarkets.earnProgram.valueUnavailable")}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-tertiary">
+                          {t("DashboardMarkets.earnProgram.availableShares")}
+                        </dt>
+                        <dd className="mt-1 text-sm text-primary tabular-nums">
+                          {position.withdrawableShares ??
+                            t("DashboardMarkets.earnProgram.valueUnavailable")}
+                        </dd>
+                      </div>
+                    </dl>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+function PortfolioByStrategy({
+  summary,
+  onStrategySelect,
+}: {
+  summary: EarnExternalWalletPositionSummary;
+  onStrategySelect: (strategy: EarnExternalWalletStrategyTotal) => void;
+}) {
   const t = useTranslations();
   const locale = useLocale();
 
@@ -146,12 +345,29 @@ function PortfolioByStrategy({ summary }: { summary: EarnExternalWalletPositionS
                   return (
                     <TableRow
                       key={`${strategy.provider}:${strategy.providerReference}:${total.tokenMint}`}
+                      aria-label={t("DashboardMarkets.earnProgram.viewCustomerWallets", {
+                        strategy: strategy.label,
+                      })}
+                      className="cursor-pointer transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
+                      tabIndex={0}
+                      onClick={() => onStrategySelect(strategy)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onStrategySelect(strategy);
+                        }
+                      }}
                     >
                       <TableCell>
-                        <p className="text-sm text-primary">{strategy.label}</p>
-                        <p className="mt-0.5 text-xs capitalize text-tertiary">
-                          {strategy.provider}
-                        </p>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm text-primary">{strategy.label}</p>
+                            <p className="mt-0.5 text-xs capitalize text-tertiary">
+                              {strategy.provider}
+                            </p>
+                          </div>
+                          <ChevronRightIcon aria-hidden="true" className="size-4 text-tertiary" />
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -186,7 +402,11 @@ function PortfolioByStrategy({ summary }: { summary: EarnExternalWalletPositionS
 
 export function EmbeddedYieldDashboard({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary();
+  const [selectedStrategy, setSelectedStrategy] = useState<EarnExternalWalletStrategyTotal | null>(
+    null
+  );
 
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 
@@ -270,11 +490,19 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
             {summary.positionCount === 0 ? (
               <PortfolioOnboarding configureHref={configureHref} />
             ) : (
-              <PortfolioByStrategy summary={summary} />
+              <PortfolioByStrategy summary={summary} onStrategySelect={setSelectedStrategy} />
             )}
           </>
         )}
       </div>
+      <StrategyWalletDrawer
+        cluster={cluster}
+        open={selectedStrategy !== null}
+        strategy={selectedStrategy}
+        onOpenChange={(open) => {
+          if (!open) setSelectedStrategy(null);
+        }}
+      />
     </DashboardWorkspaceOverviewPanel>
   );
 }

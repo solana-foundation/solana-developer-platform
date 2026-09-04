@@ -26,7 +26,6 @@ import {
 import DashboardLoading from "@/app/dashboard/loading";
 import {
   EarnIntegrationGuideSkeleton,
-  EarnProgramConfigureSkeleton,
   EmbeddedYieldPortfolioSkeleton,
   MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
@@ -165,7 +164,7 @@ function resolvePageLoadingComponent(
     case "embedded-yield-portfolio":
       return EmbeddedYieldPortfolioSkeleton;
     case "embedded-yield-configure":
-      return EarnProgramConfigureSkeleton;
+      return EarnIntegrationGuideSkeleton;
     case "embedded-yield-integrate":
       return EarnIntegrationGuideSkeleton;
     case "payments-transactions":

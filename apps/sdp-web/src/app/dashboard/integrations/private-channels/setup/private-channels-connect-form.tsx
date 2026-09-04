@@ -154,7 +154,10 @@ export function PrivateChannelsConnectForm({
       toast.error(result.message);
       return;
     }
-    updateState({ formError: t("DashboardPrivateChannels.instance.connectionRequestFailed") });
+    // `server` carries the API's own message (RPC resolution, principal
+    // provisioning, feature gate). Surface it like runUpdate does — the generic
+    // fallback named a connection test that never ran and hid the real failure.
+    updateState({ formError: result.message });
   };
 
   const runTest = () => {
@@ -173,7 +176,9 @@ export function PrivateChannelsConnectForm({
         return;
       }
       if (result.kind === "request-error") {
-        toast.error(t("DashboardPrivateChannels.instance.connectionRequestFailed"));
+        // The request never produced a probe verdict, so there are no per-check
+        // badges to show — but the reason still belongs on screen.
+        toast.error(result.message);
         return;
       }
       if (result.probe.ok) {

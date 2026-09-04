@@ -1,0 +1,25 @@
+name: Deploy PR to dev (label-triggered)
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-api-gcp-deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy this PR branch to dev
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'deploy-dev')
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp.yml

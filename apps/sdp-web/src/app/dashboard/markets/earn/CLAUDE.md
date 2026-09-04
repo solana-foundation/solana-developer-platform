@@ -66,21 +66,28 @@ program create still sends the body `requestId` form.
 
 ## Routes
 
-- `/dashboard/markets/embedded-yield` → `EarnProgramWorkspace`: pick a strategy
-  from the live catalogue, then continue to the integration guide. The
-  canonical page and loading files live in `../embedded-yield/`; this directory
-  keeps shared internal Earn modules and legacy route shims only.
-- `/dashboard/markets/embedded-yield/integrate` → `EarnIntegrationGuide`: the
-  sectioned **server-side** integration guide for the EXTERNAL-WALLET flow —
+- `/dashboard/markets/embedded-yield` → `EmbeddedYieldDashboard`: the live
+  customer portfolio and entry point for configuration.
+- `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
+  configuration surface with a strategy dropdown, the selected strategy ID,
+  live APY and liquidity, and code that updates in place. The legacy
+  `/integrate` deep link renders the same surface for bookmarked strategy URLs.
+  The guide covers the sectioned **server-side** EXTERNAL-WALLET flow —
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
-  `GET …/movements/:movementId`, read `GET …/earnings/:ownerAddress`
+  `GET …/movements/:movementId`, read `GET …/earnings?ownerAddress=`
   (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
-  render a dash, never $0), list `GET …/movements?ownerAddress=`, and exit via
+  render a dash, never $0), list `GET …/movements?ownerAddress=` and
+  `GET …/positions?ownerAddress=` (the owner rides the query on every
+  per-owner read), and exit via
   `…/withdrawal-transactions` + `…/withdrawals`. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
-  snippets — a B2B2C partner cannot name a custody wallet. The guide is
+  snippets — a B2B2C partner cannot name a custody wallet. The optional
+  partner `feePayer` (the implementor sponsoring its customers' fees) is
+  documented in the public docs guide
+  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`), which mirrors
+  these snippets — update both together. The guide is
   entirely derived from the strategy catalogue: nothing is persisted, there is
   no styling to save, and no public handoff token exists. (The UI builder that
   used to hold those — styled previews, saved per-project configuration, the
@@ -116,18 +123,12 @@ program create still sends the body `requestId` form.
   Every failure path returns `null`, and `null` disables deposit actions. A
   catalogue row says a strategy EXISTS; it never says this organization may
   fund it.
-- `earn-program-workspace.tsx` — the strategy table. Each row asks
-  `earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess)` and
-  renders the answer as a badge; an unavailable row stays **visible with its
-  Select button disabled**, never hidden and never silently enabled. Continue
-  routes to the integration guide with `?strategy=<id>`.
-- `earn-integration-guide.tsx` — re-checks availability itself rather than
-  trusting the referrer, and refuses with a named empty state for each way in
-  that can fail (catalogue error / unknown strategy / missing strategy /
-  environment, access, provider, or strategy unavailable). Renders the guide as
-  four ordered sections (client setup, deposits, reads, withdraw), each a card
-  over its slice of the one server module. The snippets remain server-only and
-  say so, because the module they document carries a secret API key.
+- `earn-integration-guide.tsx` — owns strategy selection and re-checks
+  availability rather than trusting a deep link. Unavailable strategies stay
+  visible but disabled. The selected strategy's ID, APY, liquidity, provider,
+  and availability remain beside four freely navigable reference tabs (client
+  setup, deposits, reads, withdraw). The snippets remain server-only and say so,
+  because the module they document carries a secret API key.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is

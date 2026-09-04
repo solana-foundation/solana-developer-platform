@@ -115,15 +115,19 @@ export interface VedaDepositInput {
    */
   owner: Address;
   /**
-   * Who funds rent for the token accounts this plan creates. Omitted means the
+   * Who funds rent for the accounts this plan creates. Omitted means the
    * owner pays, which is what an unsponsored deposit wants.
    *
    * Veda's SDK offers no payer knob — it names the owner as the funding payer
    * of every ATA create it emits — so honoring this means REWRITING those
-   * creates' funding account after the build (`./rent.ts`). NOT the
-   * transaction fee payer: this address lands inside the instruction accounts
-   * as writable+signer, and the API's paymaster supplies its signature after
-   * compilation, exactly as on the Kamino client.
+   * creates' funding account after the build (`./rent.ts`). The vault program
+   * ALSO charges the owner, inside the deposit instruction itself, for the
+   * AllowedUser record a first deposit creates; that payer cannot be swapped,
+   * so a sponsored build prepends a transfer pre-funding the owner with
+   * exactly that rent (`./allowed-user.ts`). NOT the transaction fee payer:
+   * this address lands inside the instruction accounts as writable+signer,
+   * and the API's paymaster supplies its signature after compilation, exactly
+   * as on the Kamino client.
    */
   rentPayer?: Address;
   /** Deposit amount in the vault asset's own units, as a decimal string. */

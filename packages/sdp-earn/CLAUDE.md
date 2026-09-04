@@ -356,8 +356,9 @@ three gates enforce its answer, none of which may re-derive the comparison:
    thing that can drift toward permissive.
 
 Note `fundable` answers the cluster question ALONE. `true` does not promise a
-deposit will succeed — a catalogue-only provider still answers 501, and the org
-still needs entitlement. See the field's doc comment in `@sdp/types`.
+deposit will succeed: the matching execution capability, money-in environment,
+active strategy, and organization entitlement must still pass. See the field's
+doc comment in `@sdp/types`.
 
 `status` cannot express this: it is the operator's stop switch, and reusing it
 would misstate the reason AND collide with the repository's refusal to overwrite

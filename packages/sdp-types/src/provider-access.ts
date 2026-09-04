@@ -30,14 +30,14 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
  * - **Custodial portfolio providers** (Ground) front an omnibus wallet SDP
  *   provisions and moves money through. They implement the optional
  *   `EarnPortfolioWalletProvider` capability.
- * - **Catalogue-only providers** (Kamino) front on-chain vaults the customer's
- *   own wallet deposits into. They implement the base `EarnVaultProvider`
- *   contract and nothing else, so every money-moving route answers 501 for
- *   them by capability detection — never by a provider-id check.
+ * - **Vault-direct providers** (Kamino, Veda) front on-chain vaults that an
+ *   organization custody wallet or an end user's external wallet deposits
+ *   into. Their catalogue client implements the base `EarnVaultProvider`
+ *   contract; a separate execution package implements `EarnVaultDirectProvider`.
  *
- * Kamino is also the first provider with NO credential: its data API is public,
- * which is why `keyPairCredentialDefinition` in the API's availability service
- * excludes it rather than demanding a `KAMINO_API_KEY` that nothing reads.
+ * Kamino and Veda are keyless today: their catalogue and execution paths read
+ * public on-chain state, so the API availability service excludes them rather
+ * than demanding keys that nothing reads.
  */
 export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground", "kamino"] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
@@ -129,10 +129,11 @@ export const EARN_PROVIDER_SURFACING = {
  * - `custodial` — SDP provisions a provider-managed portfolio wallet and the
  *   customer funds THAT address. SDP never signs; it watches the address and the
  *   provider deploys on its own rebalance. Ground.
- * - `vault_direct` — the vault is non-custodial and takes an on-chain program
- *   instruction signed by the organization's selected custody wallet. There is
- *   no provider deposit address to fund; SDP builds and submits the custody-
- *   signed transaction. Kamino.
+ * - `vault_direct`: the vault is non-custodial and takes an on-chain program
+ *   instruction signed by the organization's selected custody wallet or an end
+ *   user's external wallet. There is no provider deposit address to fund; SDP
+ *   builds the transaction and either submits the custody-signed form or
+ *   verifies and submits the caller-signed form. Kamino and Veda.
  *
  * **The difference is load-bearing in the UI and is not cosmetic.** A custodial
  * program has a real deposit ADDRESS a customer can send USDC to. A K-Vault does

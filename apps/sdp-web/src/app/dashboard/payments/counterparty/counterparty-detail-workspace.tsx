@@ -3,9 +3,12 @@
 import type {
   Counterparty,
   CounterpartyAccount,
+  CounterpartyProviderAccount,
+  CounterpartyProviderCustomerLink,
   PaymentTransferSummary,
   RampProviderId,
 } from "@sdp/types";
+import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import {
   ArrowRightIcon,
   BanknoteArrowDownIcon,
@@ -45,7 +48,11 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { downloadResponseBlob } from "@/lib/download";
 import { explorerTxUrl } from "@/lib/explorer";
-import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import {
+  getRampProviderLabel,
+  RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS,
+  RAMP_PROVIDER_LOGOS,
+} from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
@@ -60,6 +67,7 @@ import {
 import { providerTransferDetailRows } from "../provider-transfer-details";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
+import { useCounterpartyProviderAccounts } from "./use-counterparty-provider-accounts";
 
 interface CounterpartyDetailWorkspaceProps {
   counterparty: Counterparty;
@@ -116,6 +124,234 @@ function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
         className="size-5 rounded"
       />
       <span className="text-sm text-primary">{getRampProviderLabel(provider)}</span>
+    </div>
+  );
+}
+
+const PROVIDER_ACCOUNT_STATUS_TONE = {
+  active: "success",
+  completed: "success",
+  ready: "success",
+  archived: "error",
+  failed: "error",
+  rejected: "error",
+  pending: "pending",
+  processing: "pending",
+} as const;
+
+function ProviderAccountStatusBadge({ status }: { status: string }) {
+  const tone =
+    PROVIDER_ACCOUNT_STATUS_TONE[status.toLowerCase() as keyof typeof PROVIDER_ACCOUNT_STATUS_TONE];
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+        tone === "success" && "bg-success-bg text-success",
+        tone === "error" && "bg-error-bg text-error",
+        (tone === "pending" || tone === undefined) && "bg-fill-strong text-secondary"
+      )}
+    >
+      {toTitleCase(status)}
+    </span>
+  );
+}
+
+function providerAccountStatus(
+  account: Pick<
+    CounterpartyProviderAccount,
+    "status" | "providerStatus" | "bankName" | "accountNumberLast4" | "paymentRails"
+  >
+): string {
+  const hasEnrichment =
+    account.bankName !== undefined ||
+    account.accountNumberLast4 !== undefined ||
+    account.paymentRails !== undefined;
+  if (hasEnrichment || account.providerStatus === null) {
+    return account.status;
+  }
+  return account.providerStatus;
+}
+
+interface ProviderCustomerGroup {
+  provider: RampProviderId;
+  customerLink: CounterpartyProviderCustomerLink | undefined;
+  payoutAccounts: CounterpartyProviderAccount[];
+}
+
+/**
+ * Groups provider-account rows by provider with the customer link lifted onto the group.
+ *
+ * @param accounts - Flat provider-account rows from the API.
+ * @returns One group per provider in first-seen order.
+ */
+function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): ProviderCustomerGroup[] {
+  const groups = new Map<RampProviderId, ProviderCustomerGroup>();
+  for (const account of accounts) {
+    let group = groups.get(account.provider);
+    if (group === undefined) {
+      group = { provider: account.provider, customerLink: undefined, payoutAccounts: [] };
+      groups.set(account.provider, group);
+    }
+    if (account.kind === "payout_account") {
+      group.payoutAccounts.push(account);
+    }
+    if (account.customerLink !== undefined) {
+      group.customerLink = account.customerLink;
+    }
+  }
+  return [...groups.values()];
+}
+
+function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(true);
+  const { copied, copy } = useCopy();
+  const { provider, customerLink, payoutAccounts } = group;
+  const expandable = payoutAccounts.length > 0 || RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
+  const headers = [
+    t("DashboardPayments.counterparty.providerAccountCorridor"),
+    t("DashboardPayments.counterparty.providerAccountRail"),
+    t("DashboardPayments.counterparty.providerAccountBank"),
+    t("DashboardPayments.counterparty.providerAccountNumber"),
+    t("DashboardPayments.counterparty.providerAccountStatus"),
+  ];
+
+  const headerContent = (
+    <>
+      <Image
+        src={RAMP_PROVIDER_LOGOS[provider]}
+        alt=""
+        width={20}
+        height={20}
+        className="size-5 rounded"
+      />
+      <span className="text-sm font-medium text-primary">{getRampProviderLabel(provider)}</span>
+      {customerLink !== undefined ? (
+        <>
+          <span className="text-xs uppercase tracking-wide text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountCustomer")}
+          </span>
+          <ProviderAccountStatusBadge status={providerAccountStatus(customerLink)} />
+        </>
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className="rounded-lg border border-border-default bg-surface-raised">
+      <div className="flex items-center gap-2 px-4 py-3">
+        {expandable ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          >
+            <ChevronDownIcon
+              className={cn(
+                "size-4 shrink-0 text-secondary transition-transform",
+                !open && "-rotate-90"
+              )}
+            />
+            {headerContent}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-2">{headerContent}</div>
+        )}
+        {customerLink !== undefined ? (
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="max-w-40 truncate text-xs text-tertiary">
+              {customerLink.providerCustomerReference}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="size-5"
+              aria-label={t("DashboardPayments.counterparty.copyCustomerId")}
+              onClick={() => {
+                void copy(customerLink.providerCustomerReference);
+                toast.success(t("DashboardPayments.counterparty.customerIdCopied"), {
+                  position: "bottom-right",
+                });
+              }}
+            >
+              {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
+            </Button>
+            <span
+              className="whitespace-nowrap text-xs text-tertiary"
+              title={formatTimestamp(customerLink.createdAt, t)}
+            >
+              {formatRelativeTime(customerLink.createdAt)}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      {expandable && open ? (
+        payoutAccounts.length === 0 ? (
+          <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">
+            {t("DashboardPayments.counterparty.noPayoutAccounts")}
+          </p>
+        ) : (
+          <div className="overflow-x-auto border-t border-border-default">
+            <table className="w-full min-w-max border-collapse text-left">
+              <thead>
+                <tr className="border-b border-border-default">
+                  {headers.map((header) => (
+                    <th
+                      key={header}
+                      className="whitespace-nowrap px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary"
+                    >
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {payoutAccounts.map((account) => {
+                  const flag =
+                    account.destinationCountry === null
+                      ? null
+                      : regionFlagEmoji(account.destinationCountry);
+                  return (
+                    <tr key={account.id} className="border-b border-border-default last:border-b-0">
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <div className="flex items-center gap-2 text-sm text-primary">
+                          <span>{account.fiatCurrency}</span>
+                          {flag !== null ? (
+                            <>
+                              <span aria-hidden="true">{flag}</span>
+                              <span className="sr-only">{account.destinationCountry}</span>
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        {account.paymentRail !== null ? (
+                          <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs font-medium text-secondary">
+                            {account.paymentRail}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
+                        {account.bankName}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
+                        {account.accountNumberLast4 !== undefined
+                          ? `•••• ${account.accountNumberLast4}`
+                          : null}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <ProviderAccountStatusBadge status={providerAccountStatus(account)} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : null}
     </div>
   );
 }
@@ -799,6 +1035,9 @@ export function CounterpartyDetailWorkspace({
   const locale = useLocale();
   const router = useRouter();
   const { copy, copied } = useCopy(1200);
+  const { data: providerAccounts, error: providerAccountsError } = useCounterpartyProviderAccounts(
+    counterparty.id
+  );
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState(initialAccounts);
   const [addOpen, setAddOpen] = useState(false);
@@ -921,6 +1160,35 @@ export function CounterpartyDetailWorkspace({
                 </div>
               </section>
             </div>
+
+            <section className="space-y-3">
+              <h3 className="text-2xl font-medium text-primary">
+                {t("DashboardPayments.counterparty.providerAccounts")}
+              </h3>
+              {providerAccountsError ? (
+                <div className="rounded-lg border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+                  {providerAccountsError instanceof Error ? providerAccountsError.message : null}
+                </div>
+              ) : providerAccounts === undefined ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border-default bg-surface-raised px-4 py-5 text-sm text-tertiary">
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  {t("DashboardPayments.counterparty.loadingProviderAccounts")}
+                </div>
+              ) : providerAccounts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong py-10 text-center">
+                  <WalletIcon className="size-7 text-muted" />
+                  <p className="text-sm text-tertiary">
+                    {t("DashboardPayments.counterparty.noProviderAccounts")}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {groupProviderAccounts(providerAccounts).map((group) => (
+                    <ProviderCustomerCard key={group.provider} group={group} />
+                  ))}
+                </div>
+              )}
+            </section>
 
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">

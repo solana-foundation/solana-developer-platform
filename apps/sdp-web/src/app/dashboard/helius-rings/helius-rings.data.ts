@@ -20,6 +20,50 @@ export type RingsHealth = Record<RingsHealthComponent, RingsHealthStatus> & {
 
 export type RingsWalletStatus = "pending" | "ready" | "paused";
 
+export type ProjectRingStatus = "pending" | "active" | "failed";
+
+export interface ProjectRing {
+  id: string;
+  /** Operator-chosen slug operations select the ring by; "default" is reserved. */
+  name: string;
+  /** Base58 program id of the ring's custom program. */
+  ringProgramId: string;
+  status: ProjectRingStatus;
+  /** Uncompressed SEC1 P-256 hex, as the chain publishes it; null until active. */
+  auditorPublicKeyHex: string | null;
+  /** The ring's address lookup table; every ring spend rides through it. Null until bring-up lands it. */
+  lookupTableAddress: string | null;
+  failure: { code: string; message: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Mirrors RING_NAME_PATTERN in @sdp/helius-rings (no server imports here). */
+export const RING_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
+
+/** The reserved name of the default public pool; can never name a custom ring. */
+export const DEFAULT_RING_NAME = "default";
+
+/** The project's custom rings, oldest first; empty while it only uses the default pool. */
+export function fetchProjectRings(fallbackError: string): Promise<{ rings: ProjectRing[] }> {
+  return getJson("/api/dashboard/helius-rings/rings", fallbackError);
+}
+
+/**
+ * Records a named ring's pre-deployed program id and runs bring-up server-side.
+ * Re-submitting the same name and id resumes a failed bring-up.
+ */
+export async function createProjectRing(input: {
+  name: string;
+  ringProgramId: string;
+}): Promise<{ ring?: ProjectRing; error?: string }> {
+  const result = await postJson<{ ring: ProjectRing }>("/api/dashboard/helius-rings/rings", input);
+  if (!result.ok) {
+    return { error: result.error };
+  }
+  return { ring: result.data.ring };
+}
+
 export interface RingsWallet {
   id: string;
   sdpWalletId: string;
@@ -59,6 +103,8 @@ export interface RingsOperationSummary {
   state: RingsOperationState;
   assetMint: string | null;
   amountRaw: string | null;
+  /** Ring pinned at prepare; null = the default public ring. */
+  ringProgramId: string | null;
   createdAt: string;
   failureCode: string | null;
   outerTxSignature: string | null;
@@ -107,6 +153,22 @@ async function getJson<T>(path: string, fallbackError: string): Promise<T> {
   return result.data;
 }
 
+/** POST through the BFF, JSON body optional, returning the envelope result. */
+async function postJson<T>(
+  path: string,
+  body?: Record<string, unknown>
+): Promise<EnvelopeResult<T>> {
+  const response = await fetch(path, {
+    method: "POST",
+    ...(body !== undefined && {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    cache: "no-store",
+  });
+  return readEnvelope<T>(response);
+}
+
 export function fetchRingsHealth(fallbackError: string): Promise<{ health: RingsHealth }> {
   return getJson("/api/dashboard/helius-rings/health", fallbackError);
 }
@@ -144,13 +206,10 @@ export async function createRingsWallet(input: {
   walletId: string;
   name: string;
 }): Promise<CreateRingsWalletResult> {
-  const response = await fetch("/api/dashboard/helius-rings/wallets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-    cache: "no-store",
-  });
-  const result = await readEnvelope<{ wallet: RingsWallet }>(response);
+  const result = await postJson<{ wallet: RingsWallet }>(
+    "/api/dashboard/helius-rings/wallets",
+    input
+  );
   if (!result.ok) {
     return { error: result.error };
   }
@@ -167,6 +226,8 @@ export interface RingsShieldedBalance {
   amountRaw: string;
   /** The mint's scale, or null when the API knew of none. Null is not zero. */
   decimals: number | null;
+  /** Ring the notes are bound to; null = the default public pool. Never merged across rings. */
+  ringProgramId: string | null;
   /** USD per whole unit, when pricing was reachable. */
   usdPrice?: number;
   /** amountRaw × usdPrice, rounded to 2dp; absent when the mint went unpriced. */
@@ -193,11 +254,9 @@ export interface RingsWalletSync {
 export async function syncRingsWallet(
   walletId: string
 ): Promise<{ sync?: RingsWalletSync; error?: string }> {
-  const response = await fetch(
-    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/sync`,
-    { method: "POST", cache: "no-store" }
+  const result = await postJson<RingsWalletSync>(
+    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/sync`
   );
-  const result = await readEnvelope<RingsWalletSync>(response);
   if (!result.ok) {
     return { error: result.error };
   }
@@ -255,23 +314,21 @@ export interface PrepareRingsOperationInput {
   asset: { mint: string; amountRaw: string };
   /** Withdrawals only: the public address the funds leave the pool for. */
   to?: string;
+  /**
+   * Ring NAME the operation targets; the server resolves and pins the program
+   * id at prepare. Omitted = the default pool. For spends the named ring is
+   * the source of funds.
+   */
+  ring?: string;
 }
 
-type OperationResult = { operation?: RingsOperationDetail; error?: string };
+export type OperationResult = { operation?: RingsOperationDetail; error?: string };
 
 async function postOperation(
   path: string,
   body?: Record<string, unknown>
 ): Promise<OperationResult> {
-  const response = await fetch(path, {
-    method: "POST",
-    ...(body !== undefined && {
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-    cache: "no-store",
-  });
-  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
+  const result = await postJson<{ operation: RingsOperationDetail }>(path, body);
   if (!result.ok) return { error: result.error };
   return { operation: result.data.operation };
 }
@@ -294,6 +351,16 @@ export function retryRingsOperation(operationId: string): Promise<OperationResul
   return postOperation(
     `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/retry`,
     { clientNonce: crypto.randomUUID() }
+  );
+}
+
+/**
+ * Asks the indexer about a signed failure again, completing it on a hit and
+ * leaving it untouched on a miss. Carries no body and never asserts absence.
+ */
+export function recheckRingsOperation(operationId: string): Promise<OperationResult> {
+  return postOperation(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/recheck`
   );
 }
 

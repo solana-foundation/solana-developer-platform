@@ -31,6 +31,8 @@ export interface HeliusRingsOperationRow {
   to_addr: string | null;
   zone_id: string | null;
   transfer_mode: TransferMode | null;
+  /** Ring the operation was pinned to at prepare; NULL = the default public ring. */
+  ring_program_id: string | null;
   intent_key: string;
   approval_request_id: string | null;
   policy_evaluation_id: string | null;
@@ -85,6 +87,8 @@ export interface ReserveHeliusRingsIntentInput extends HeliusRingsProjectScope {
   toAddr?: string | null;
   zoneId?: string | null;
   transferMode?: TransferMode | null;
+  /** Resolved by the service before reserving; immutable for the operation's life. */
+  ringProgramId?: string | null;
   retryOfOperationId?: string | null;
   /** Required for `timelock_create`; writes the escrow row and the denormalized column. */
   timelock?: HeliusRingsTimelockInput | null;
@@ -314,6 +318,7 @@ export function mapHeliusRingsOperationSummaryRow(
     state: row.state,
     assetMint: row.asset_mint ?? null,
     amountRaw: row.amount_raw ?? null,
+    ringProgramId: row.ring_program_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     failureCode: row.failure_code ?? null,

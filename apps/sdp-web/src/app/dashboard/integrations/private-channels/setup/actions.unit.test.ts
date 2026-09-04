@@ -5,11 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: async () => ({ fetch: fetchMock }),
-  extractSdpApiErrorMessage: (error: unknown) =>
-    error instanceof Error ? error.message : "Request failed.",
-}));
+// Only the client is stubbed. `extractSdpApiErrorMessage` is the real one: it
+// decides how much of a failure reaches the operator, so a hand-written stand-in
+// would assert against a message shape the product never produces.
+vi.mock("@/lib/sdp-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/sdp-api")>("@/lib/sdp-api");
+  return {
+    createSdpApiClient: async () => ({ fetch: fetchMock }),
+    extractSdpApiErrorMessage: actual.extractSdpApiErrorMessage,
+  };
+});
 
 import {
   connectPrivateChannelAction,
@@ -88,7 +93,7 @@ describe("connectPrivateChannelAction", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns both successful and failed probe requests without exposing diagnostics", async () => {
+  it("returns both successful and failed probe requests, naming the failure", async () => {
     const probe = {
       ok: true,
       gateway: {
@@ -108,6 +113,7 @@ describe("connectPrivateChannelAction", () => {
     });
     await expect(testConnectionAction(SANDBOX_DEFAULTS)).resolves.toEqual({
       kind: "request-error",
+      message: "The SDP API could not be reached. Check the server logs.",
     });
   });
 
@@ -195,18 +201,45 @@ describe("connectPrivateChannelAction", () => {
     });
   });
 
+  // These used to collapse to one of two fixed strings, so a failure that never
+  // reached the API rendered identically to one the API rejected. Each class is
+  // now distinguishable without echoing upstream text: raw exception bodies and
+  // infrastructure pages stay in the log, and only the class and HTTP status
+  // reach the form.
   it.each([
-    { thrown: null, message: "Request failed." },
-    { thrown: new Error("network down"), message: "Unable to reach the SDP API." },
+    { label: "non-Error throw", thrown: null },
+    { label: "framework digest object", thrown: { digest: "NEXT_REDIRECT;replace;/x;307;" } },
+  ])("reports a $label without echoing it", async ({ thrown }) => {
+    fetchMock.mockRejectedValue(thrown);
+
+    await expect(connectPrivateChannelAction(SANDBOX_DEFAULTS)).resolves.toEqual({
+      ok: false,
+      kind: "server",
+      message:
+        "The dashboard hit an unexpected error before the request was sent. Check the server logs.",
+    });
+  });
+
+  it.each([
     {
-      thrown: new Error("SDP API request failed (500): not-json"),
-      message: "Request failed.",
+      thrown: new Error("network down"),
+      message: "The SDP API could not be reached. Check the server logs.",
+    },
+    {
+      thrown: new Error("SDP API request failed (502): <html>gateway</html>"),
+      message: "The SDP API returned an unexpected response (HTTP 502). Check the server logs.",
     },
     {
       thrown: new Error("SDP API request failed (500): {}"),
-      message: "Request failed.",
+      message: "The SDP API rejected the request (HTTP 500). Check the server logs.",
     },
-  ])("normalizes an unsafe API failure to '$message'", async ({ thrown, message }) => {
+    {
+      thrown: new Error(
+        `SDP API request failed (400): ${JSON.stringify({ error: { message: "Escrow program ID is required." } })}`
+      ),
+      message: "Escrow program ID is required.",
+    },
+  ])("reports an API failure as '$message'", async ({ thrown, message }) => {
     fetchMock.mockRejectedValue(thrown);
 
     await expect(connectPrivateChannelAction(SANDBOX_DEFAULTS)).resolves.toEqual({

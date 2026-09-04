@@ -12,7 +12,9 @@
       "empty": "0",
       "notProvisioned": "Not provisioned yet.",
       "unpriced": "—",
-      "privateBalanceLabel": "Private balance"
+      "privateBalanceLabel": "Private balance",
+      "defaultRing": "Default ring",
+      "customRing": "Custom ring {id}"
     },
     "health": {
       "title": "Health",
@@ -23,6 +25,30 @@
       "status_amber": "Degraded",
       "status_red": "Unavailable",
       "reason": "{components}: {reason}"
+    },
+    "ring": {
+      "title": "Custom rings",
+      "description": "Named custom rings for this project. Ops deploys each ring program and hands over its id; recording a name and id here completes bring-up (auditor key, ring config, read access, lookup table) through custody. Once active, any operation can target the ring by name — default-ring operations are never blocked by it.",
+      "none": "No custom rings recorded. All operations use the default ring.",
+      "openList": "View custom rings",
+      "dialogDescription": "Select a ring to see its program, auditor key, and lookup table.",
+      "nameLabel": "Ring name",
+      "namePlaceholder": "treasury",
+      "programIdLabel": "Ring program id",
+      "programIdPlaceholder": "Base58 program id from the ops deployment",
+      "programId": "Ring program",
+      "auditorKey": "Auditor public key",
+      "lookupTable": "Lookup table",
+      "submit": "Record and bring up",
+      "submitting": "Bringing up…",
+      "retry": "Retry bring-up",
+      "repointHint": "Re-submitting a recorded name resumes its bring-up. Entering a different id under that name replaces its program, which is possible only while the ring has never been active.",
+      "submitFailed": "Ring bring-up failed.",
+      "status_pending": "Pending",
+      "status_active": "Active",
+      "status_failed": "Failed",
+      "explain_pending": "Bring-up has not completed. Operations cannot target this ring yet; default-ring operations are unaffected.",
+      "explain_failed": "Bring-up failed; operations cannot target this ring until a retry succeeds. Default-ring operations are unaffected."
     },
     "wallets": {
       "title": "Private wallets",
@@ -86,6 +112,8 @@
       "operation": "Operation",
       "state": "State",
       "amount": "Amount",
+      "ring": "Ring",
+      "ringDefault": "Default ring",
       "created": "Created",
       "action": "Action",
       "working": "Still settling",
@@ -137,7 +165,13 @@
       "summaryOperation": "Operation",
       "summaryAmount": "Amount",
       "summaryRecipient": "Recipient",
-      "gatewayRedNotice": "One or more Rings upstreams are unavailable. You can still compose and confirm — the operation will run through policy and record an honest upstream failure."
+      "gatewayRedNotice": "One or more Rings upstreams are unavailable. You can still compose and confirm — the operation will run through policy and record an honest upstream failure.",
+      "ring": "Ring",
+      "ringDefault": "Default ring",
+      "ringShieldHint": "The ring the shielded notes land in.",
+      "ringSpendHint": "The source of funds: only notes bound to the chosen ring can be spent by it.",
+      "ringNoneActive": "No ring is active yet; complete bring-up in the Custom rings card before targeting one.",
+      "summaryRing": "Ring"
     },
     "detail": {
       "title": "Operation detail",
@@ -174,6 +208,10 @@
       "retrying": "Retrying…",
       "execute": "Execute",
       "executing": "Executing…",
+      "recheck": "Check indexer",
+      "rechecking": "Checking…",
+      "recheckFound": "The indexer has caught up — this operation is now complete.",
+      "recheckStillMissing": "The indexer still has no record of this transaction. It may be behind the chain; check again before voiding.",
       "void": "Void",
       "voiding": "Voiding…",
       "voidConfirm": "Voiding asserts this signed transaction never landed on chain and releases the wallet's spend slot. Continue only if you have reconciled the signature and confirmed absence."

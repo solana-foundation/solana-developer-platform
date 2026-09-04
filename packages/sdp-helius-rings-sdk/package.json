@@ -16,8 +16,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "0.1.1-alpha",
+    "@heliuslabs/zolana": "0.1.2-alpha",
     "@sdp/helius-rings": "workspace:*",
+    "@solana-program/address-lookup-table": "0.13.0",
     "@solana-program/compute-budget": "0.17.0",
     "@solana/kit": "7.1.1"
   },

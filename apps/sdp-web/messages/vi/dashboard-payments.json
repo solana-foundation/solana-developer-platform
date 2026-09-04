@@ -265,7 +265,9 @@
       "onchainTransaction": "Giao dịch Onchain",
       "addressSearchPlaceholder": "Tìm địa chỉ",
       "addressAutocompleteFailed": "Chúng tôi không thể tìm kiếm địa chỉ. Thử lại.",
-      "addressDetailsFailed": "Chúng tôi không tải được địa chỉ đó. Hãy thử tìm kiếm khác."
+      "addressDetailsFailed": "Chúng tôi không tải được địa chỉ đó. Hãy thử tìm kiếm khác.",
+      "payoutAccountsTitle": "Tài khoản thanh toán đã lưu",
+      "payoutAccountsDescription": "Chọn nơi nhận khoản thanh toán này, hoặc điền thông tin bên dưới để thanh toán vào tài khoản mới."
     },
     "onchainSend": {
       "noAssets": "Wallet này không có Asset để gửi.",
@@ -322,7 +324,9 @@
       "offrampProvisioningDetail": "Đang tạo Wallet chi trả BVNK riêng cho tiền tệ này.",
       "simulateDeposit": "Mô phỏng nạp",
       "simulating": "Đang mô phỏng...",
-      "depositSimulated": "Đã mô phỏng nạp"
+      "depositSimulated": "Đã mô phỏng nạp",
+      "agreementPendingTitle": "Đang xác nhận thỏa thuận của bạn",
+      "agreementPendingDescription": "Chúng tôi đang ghi nhận sự chấp thuận của bạn với BVNK — chỉ mất một chút thời gian."
     },
     "lightspark": {
       "verificationRequiredTitle": "Xác minh danh tính",
@@ -639,7 +643,20 @@
       "copyAddress": "Sao chép địa chỉ",
       "addressCopied": "Đã sao chép địa chỉ",
       "addAnyway": "Vẫn thêm",
-      "addAnywayTitle": "Thêm địa chỉ bị gắn cờ?"
+      "addAnywayTitle": "Thêm địa chỉ bị gắn cờ?",
+      "providerAccounts": "Tài khoản Provider",
+      "loadingProviderAccounts": "Đang tải tài khoản Provider…",
+      "noProviderAccounts": "Chưa có tài khoản Provider.",
+      "providerAccountsMissing": "Danh sách tài khoản Provider trả về trống.",
+      "providerAccountCorridor": "Corridor",
+      "providerAccountRail": "Rail",
+      "providerAccountBank": "Ngân hàng",
+      "providerAccountNumber": "Tài khoản",
+      "providerAccountCustomer": "Khách hàng",
+      "providerAccountStatus": "Trạng thái",
+      "copyCustomerId": "Sao chép mã khách hàng",
+      "customerIdCopied": "Đã sao chép mã khách hàng",
+      "noPayoutAccounts": "Chưa có tài khoản thanh toán."
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -951,7 +968,9 @@
       "openAccount": "Mở tài khoản trên explorer",
       "editPaymentDescription": "Cập nhật Wallets, số tiền và lịch của khoản thanh toán.",
       "paymentUpdated": "Đã cập nhật thanh toán định kỳ.",
-      "noChangesToSave": "Không có thay đổi để lưu."
+      "noChangesToSave": "Không có thay đổi để lưu.",
+      "sourceWalletUnresolved": "Wallet nguồn không khả dụng",
+      "sourceWalletUnresolvedDescription": "Thanh toán định kỳ này không liên kết với Wallet SDP cụ thể nên không thể thực hiện các thao tác."
     },
     "transactions": {
       "searchPlaceholder": "Tìm ID, chữ ký, địa chỉ, tham chiếu hoặc Counterparty (từ 3 ký tự)",
