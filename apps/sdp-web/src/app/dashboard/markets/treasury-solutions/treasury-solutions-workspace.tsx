@@ -43,7 +43,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import {
+  useDashboardWorkspace,
+  useOptionalDashboardWorkspace,
+} from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -398,6 +401,9 @@ function TreasuryWalletsCard({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
+  if (!custodyEnabled) return null;
   return (
     <section>
       <div className="mb-4 flex items-center justify-between gap-4">

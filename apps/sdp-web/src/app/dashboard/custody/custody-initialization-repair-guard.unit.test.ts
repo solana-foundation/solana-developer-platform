@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { initializeOnboardingCustodyAction } from "./actions";
+import { initializeCustodySetupAction } from "./actions";
 
 const fetchMock = vi.fn();
 
@@ -24,7 +24,7 @@ function form(provider: string): FormData {
   return data;
 }
 
-describe("onboarding repair guard", () => {
+describe("custody initialization repair guard", () => {
   beforeEach(() => {
     fetchMock.mockReset();
   });
@@ -52,10 +52,9 @@ describe("onboarding repair guard", () => {
       throw new Error(`unexpected call: ${path}`);
     });
 
-    const result = await initializeOnboardingCustodyAction(form("local"));
+    const result = await initializeCustodySetupAction(form("local"));
 
     expect(result.status).toBe("error");
-    // The hijack path: no wallet may be created for the submitted provider.
     const walletPosts = fetchMock.mock.calls.filter(([path]) => path === "/v1/wallets");
     expect(walletPosts).toHaveLength(0);
   });
@@ -86,15 +85,16 @@ describe("onboarding repair guard", () => {
       throw new Error(`unexpected call: ${path}`);
     });
 
-    const result = await initializeOnboardingCustodyAction(form("privy"));
+    const result = await initializeCustodySetupAction(form("privy"));
 
     expect(result.status).toBe("success");
-    if (result.status === "success") {
-      expect(result.wallet).toEqual({ walletId: "wal_repaired", publicKey: "RepairedKey" });
-    }
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/wallets",
+      expect.objectContaining({ method: "POST" })
+    );
   });
 
-  it("returns the finished wallet when the same provider's default is already complete", async () => {
+  it("accepts an already-complete default for the same provider", async () => {
     fetchMock.mockImplementation(async (path: string) => {
       if (path === "/v1/wallets/initialize") {
         throw ALREADY_INITIALIZED;
@@ -117,11 +117,10 @@ describe("onboarding repair guard", () => {
       throw new Error(`unexpected call: ${path}`);
     });
 
-    const result = await initializeOnboardingCustodyAction(form("privy"));
+    const result = await initializeCustodySetupAction(form("privy"));
 
     expect(result.status).toBe("success");
-    if (result.status === "success") {
-      expect(result.wallet?.walletId).toBe("wal_done");
-    }
+    const walletPosts = fetchMock.mock.calls.filter(([path]) => path === "/v1/wallets");
+    expect(walletPosts).toHaveLength(0);
   });
 });

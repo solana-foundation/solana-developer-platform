@@ -38,6 +38,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   formatTimestamp,
@@ -367,6 +368,8 @@ export function RecurringPaymentDetailWorkspace({
 }: RecurringPaymentDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -688,7 +691,7 @@ export function RecurringPaymentDetailWorkspace({
                         <PencilIcon className="size-4" />
                       </Button>
                     ) : null}
-                    {wallet ? (
+                    {wallet && custodyEnabled ? (
                       <EntityLink
                         href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
                       >

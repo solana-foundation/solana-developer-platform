@@ -110,6 +110,7 @@ const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
+  useOptionalDashboardWorkspace: () => undefined,
 }));
 
 vi.mock("../earn/deposit/earn-funding-wallets", () => ({

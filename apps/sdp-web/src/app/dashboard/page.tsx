@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { custody, issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -13,13 +14,30 @@ import {
 } from "./payments/payments-page.data";
 
 export default async function DashboardPage() {
-  const t = await getTranslations();
-  const { userId, orgId } = await auth();
+  const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
+    getTranslations(),
+    auth(),
+    custody(),
+    issuance(),
+  ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     return null;
+  }
+
+  if (!custodyEnabled) {
+    return (
+      <HomeWorkspace
+        totalBalance={null}
+        totalBalanceError={null}
+        wallets={[]}
+        balances={[]}
+        walletCount={0}
+        issuedTokens={[]}
+      />
+    );
   }
 
   const trace = createTimedTrace("dashboard.home.page");
@@ -32,9 +50,11 @@ export default async function DashboardPage() {
       trace.step("fetch_wallet_summaries", () =>
         fetchPaymentsWallets(apiClient.request, { view: "summary" })
       ),
-      trace.step("fetch_issued_token_symbols", () =>
-        fetchPaymentsIssuedTokenSymbols(apiClient.request)
-      ),
+      issuanceEnabled
+        ? trace.step("fetch_issued_token_symbols", () =>
+            fetchPaymentsIssuedTokenSymbols(apiClient.request)
+          )
+        : Promise.resolve({ ok: true as const, data: [] }),
     ]);
 
     const wallets = walletsResult.data ?? [];

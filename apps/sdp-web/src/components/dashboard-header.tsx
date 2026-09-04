@@ -597,19 +597,6 @@ function getIntegrationsPageConfig(
     // second max-width inside the centered default and stranding gutters.
     return {
       title: t("Shared.dashboardShell.integrations"),
-      // The family axis rides the header tabs like policies; the catalog keeps
-      // status and search as its own secondary filters.
-      headerTabs: {
-        tabs: [
-          { id: "all", label: t("Shared.integrations.filterAllFamilies") },
-          { id: "custody", label: t("Shared.integrations.custodyTitle") },
-          { id: "rpc", label: t("Shared.integrations.rpcTitle") },
-          { id: "ramps", label: t("Shared.integrations.rampsTitle") },
-          { id: "compliance", label: t("Shared.integrations.complianceTitle") },
-          { id: "privacy", label: t("Shared.integrations.privacyTitle") },
-        ],
-        hideOnMobile: false,
-      },
       contentWidthClass: "max-w-7xl",
     };
   }
@@ -671,7 +658,10 @@ export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  custodyEnabled = true,
+  _paymentsEnabled = true,
+  _policiesEnabled = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -705,11 +695,13 @@ export function getDashboardPageConfig(
     return {
       title: t("Shared.dashboardShell.policies"),
       headerTabs: {
-        tabs: [
-          { id: "all", label: t("DashboardPolicies.all") },
-          { id: "wallets", label: t("DashboardPolicies.wallets") },
-          { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
-        ],
+        tabs: custodyEnabled
+          ? [
+              { id: "all", label: t("DashboardPolicies.all") },
+              { id: "wallets", label: t("DashboardPolicies.wallets") },
+              { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
+            ]
+          : [{ id: "api_keys", label: t("DashboardPolicies.apiKeys") }],
         hideOnMobile: false,
       },
       contentWidthClass: "max-w-none",

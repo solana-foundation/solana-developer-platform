@@ -48,6 +48,7 @@ function getMoreGroups(
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
+    policiesEnabled: boolean;
   }
 ): MoreGroup[] {
   return [
@@ -77,17 +78,21 @@ function getMoreGroups(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        {
-          label: t("Shared.dashboardShell.policies"),
-          href: DASHBOARD_SIDE_NAV_HREFS.policies,
-          icon: ShieldCheckIcon,
-        },
+        ...(options.policiesEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.policies"),
+                href: DASHBOARD_SIDE_NAV_HREFS.policies,
+                icon: ShieldCheckIcon,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.integrations"),
           href: DASHBOARD_SIDE_NAV_HREFS.integrations,
           icon: BlocksIcon,
         },
-        ...(options.canReadApprovals
+        ...(options.policiesEnabled && options.canReadApprovals
           ? [
               {
                 label: t("Shared.dashboardShell.approvals"),
@@ -166,6 +171,7 @@ export function DashboardMoreSheet({
   earnEnabled,
   heliusRingsEnabled,
   marketsEnabled,
+  policiesEnabled,
   onClose,
 }: {
   pathname: string;
@@ -174,6 +180,7 @@ export function DashboardMoreSheet({
   earnEnabled: boolean;
   heliusRingsEnabled: boolean;
   marketsEnabled: boolean;
+  policiesEnabled: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations();
@@ -183,6 +190,7 @@ export function DashboardMoreSheet({
     earnEnabled,
     heliusRingsEnabled,
     marketsEnabled,
+    policiesEnabled,
   });
 
   useEffect(() => {

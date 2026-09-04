@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { Button } from "@/components/ui/button";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
@@ -142,7 +143,7 @@ export function toWalletIdentity(
  * where leaving costs nothing; `new-tab` when the surrounding surface holds
  * unsaved state (a modal or form) that in-place navigation would tear down.
  */
-export type WalletLinkTarget = "same-tab" | "new-tab";
+export type WalletLinkTarget = "same-tab" | "new-tab" | "disabled";
 
 function walletHref(walletId: string): string {
   return `/dashboard/wallets/${encodeURIComponent(walletId)}`;
@@ -165,13 +166,15 @@ export function WalletIdentityBadge({
    *  so a fixed width has to come from the list, not the badge. */
   className?: string;
 }) {
+  const workspace = useOptionalDashboardWorkspace();
+  const resolvedWalletLink = workspace?.flags.custody === false ? "disabled" : walletLink;
   return variant === "card" ? (
-    <IdentityCard identity={identity} walletLink={walletLink} className={className} />
+    <IdentityCard identity={identity} walletLink={resolvedWalletLink} className={className} />
   ) : (
     <CompactIdentity
       identity={identity}
       onCopy={onCopy}
-      walletLink={walletLink}
+      walletLink={resolvedWalletLink}
       className={className}
     />
   );
@@ -200,6 +203,14 @@ function WalletNameLink({
   className?: string;
   children: ReactNode;
 }) {
+  if (target === "disabled") {
+    return (
+      <span title={title} className={cn("inline-flex w-fit max-w-full items-center", className)}>
+        <span className="truncate">{children}</span>
+      </span>
+    );
+  }
+
   return (
     <WalletLinkAnchor
       href={walletHref(walletId)}

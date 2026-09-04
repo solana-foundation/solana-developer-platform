@@ -14,19 +14,23 @@ interface QuickAction {
 }
 
 /**
- * What a freshly provisioned organization sees in place of a balance.
- *
- * Onboarding provisions a wallet and pushes straight to /dashboard, so a brand new
- * organization arrived at the populated hero holding nothing — a $0.00 headline and
- * no next step, which reads as a broken dashboard rather than a new one. Entry
- * points are gated on capability so a member is never offered an action that would
- * only 403.
+ * What an organization with one provisioned but empty wallet sees in place of a
+ * balance. Entry points are gated on capability so a member is never offered an
+ * action that would only 403.
  */
-export function HomeQuickActions({ capabilities }: { capabilities: QuickActionCapabilities }) {
+export function HomeQuickActions({
+  capabilities,
+  custodyEnabled,
+  policiesEnabled,
+}: {
+  capabilities: QuickActionCapabilities;
+  custodyEnabled: boolean;
+  policiesEnabled: boolean;
+}) {
   const t = useTranslations();
 
   const actions: QuickAction[] = [
-    capabilities.canManageCustody
+    custodyEnabled && capabilities.canManageCustody
       ? {
           href: "/dashboard/wallets",
           title: t("Shared.homeWorkspace.quickActionWallets"),
@@ -45,11 +49,13 @@ export function HomeQuickActions({ capabilities }: { capabilities: QuickActionCa
       title: t("Shared.homeWorkspace.quickActionPayments"),
       body: t("Shared.homeWorkspace.quickActionPaymentsBody"),
     },
-    {
-      href: "/dashboard/policies",
-      title: t("Shared.homeWorkspace.quickActionPolicies"),
-      body: t("Shared.homeWorkspace.quickActionPoliciesBody"),
-    },
+    policiesEnabled
+      ? {
+          href: "/dashboard/policies",
+          title: t("Shared.homeWorkspace.quickActionPolicies"),
+          body: t("Shared.homeWorkspace.quickActionPoliciesBody"),
+        }
+      : null,
   ].filter((action): action is QuickAction => action !== null);
 
   return (

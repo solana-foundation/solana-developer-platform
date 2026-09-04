@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
-import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
+import { RpcProviderMark } from "@/app/dashboard/integrations/rpc-provider-mark";
 import { docsHref } from "@/components/dashboard-nav";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";

@@ -4,6 +4,7 @@ import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
+import { custody, payments, policies } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -13,6 +14,7 @@ import {
   type SdpApiClient,
 } from "@/lib/sdp-api";
 import { isKnownIntegrationProvider, resolveIntegrationDetail } from "../integration-detail";
+import { isIntegrationProviderEnabled } from "../integration-feature-gates";
 import {
   resolveComplianceIntegrations,
   resolveCustodyIntegrations,
@@ -153,6 +155,20 @@ export default async function IntegrationDetailPage({
   if (!isKnownIntegrationProvider(provider)) {
     notFound();
   }
+  const [custodyEnabled, paymentsEnabled, policiesEnabled] = await Promise.all([
+    custody(),
+    payments(),
+    policies(),
+  ]);
+  if (
+    !isIntegrationProviderEnabled(provider, {
+      custody: custodyEnabled,
+      payments: paymentsEnabled,
+      policies: policiesEnabled,
+    })
+  ) {
+    notFound();
+  }
 
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
@@ -176,7 +192,9 @@ export default async function IntegrationDetailPage({
 
   const [availability, connectedProviders, credentialModeState, byokState] = await Promise.all([
     fetchProviderAvailability(projectClient.request, organizationId),
-    getConnectedCustodyProviders(projectClient.request).catch(() => null),
+    custodyEnabled
+      ? getConnectedCustodyProviders(projectClient.request).catch(() => null)
+      : Promise.resolve([]),
     getRpcCredentialMode(dashboardAccess.capabilities.canManageOrgSettings),
     getByokConnections(provider, dashboardAccess.capabilities.canManageOrgSettings),
   ]);
