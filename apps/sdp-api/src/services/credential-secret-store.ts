@@ -195,6 +195,7 @@ interface CachedAccessToken {
  * configured stores, which is also what keeps it inert under test.
  */
 const projectNumberCache = new Map<string, string>();
+const GCP_REQUEST_TIMEOUT_MS = 10_000;
 
 export class GcpSecretManagerCredentialSecretStore implements CredentialSecretStore {
   readonly storageBackend = "gcp_secret_manager" as const;
@@ -403,6 +404,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     try {
       return await this.fetcher(`${this.apiBaseUrl}/v1/${path}`, {
         ...init,
+        signal: AbortSignal.timeout(GCP_REQUEST_TIMEOUT_MS),
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
@@ -452,6 +454,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     let response: Response;
     try {
       response = await this.fetcher(this.metadataProjectNumberUrl, {
+        signal: AbortSignal.timeout(GCP_REQUEST_TIMEOUT_MS),
         headers: {
           "Metadata-Flavor": "Google",
         },
@@ -474,7 +477,15 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       );
     }
 
-    const projectNumber = (await response.text()).trim();
+    let projectNumber: string;
+    try {
+      projectNumber = (await response.text()).trim();
+    } catch {
+      throw new CredentialSecretStoreError(
+        "GCP metadata project number response could not be read",
+        "UPSTREAM_ERROR"
+      );
+    }
     assertGcpProjectNumber(projectNumber);
     projectNumberCache.set(this.metadataProjectNumberUrl, projectNumber);
 
@@ -493,6 +504,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     let response: Response;
     try {
       response = await this.fetcher(this.metadataTokenUrl, {
+        signal: AbortSignal.timeout(GCP_REQUEST_TIMEOUT_MS),
         headers: {
           "Metadata-Flavor": "Google",
         },

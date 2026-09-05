@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { RedisKVStore } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
@@ -26,6 +28,11 @@ const APP_SECRET = "privy-lifecycle-secret";
 const ORIGINAL_SECRET_BACKEND = env.CREDENTIAL_SECRET_STORE_BACKEND;
 const ORIGINAL_ENCRYPTION_KEY = env.CUSTODY_ENCRYPTION_KEY;
 const ORIGINAL_GCP_PROJECT_ID = env.GCP_SECRET_MANAGER_PROJECT_ID;
+const ORIGINAL_GCP_PREFIX = env.GCP_SECRET_MANAGER_SECRET_PREFIX;
+const ORIGINAL_GCP_API_BASE_URL = env.GCP_SECRET_MANAGER_API_BASE_URL;
+const credentialResponseSchema = z.object({
+  data: z.object({ providerCredential: z.object({ id: z.string().min(1) }) }),
+});
 
 function encodeJwtPart(value: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -218,6 +225,20 @@ async function lifecycleRequest(
   );
 }
 
+async function rotationFailureEvents() {
+  return getDb(env).queryMany<{
+    resource_id: string;
+    status: string;
+    failure_code: string;
+  }>(
+    `SELECT resource_id, status, metadata::jsonb ->> 'failureCode' AS failure_code
+     FROM audit_logs
+     WHERE organization_id = ? AND action = 'rotate'
+       AND metadata::jsonb ->> 'event' = 'provider_credential_rotation_rejected'`,
+    [ORGANIZATION_ID]
+  );
+}
+
 describe("provider credential lifecycle", () => {
   beforeEach(async () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
@@ -231,6 +252,8 @@ describe("provider credential lifecycle", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = ORIGINAL_SECRET_BACKEND;
     env.CUSTODY_ENCRYPTION_KEY = ORIGINAL_ENCRYPTION_KEY;
     env.GCP_SECRET_MANAGER_PROJECT_ID = ORIGINAL_GCP_PROJECT_ID;
+    env.GCP_SECRET_MANAGER_SECRET_PREFIX = ORIGINAL_GCP_PREFIX;
+    env.GCP_SECRET_MANAGER_API_BASE_URL = ORIGINAL_GCP_API_BASE_URL;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     await clearKVStores(env);
@@ -475,6 +498,8 @@ describe("provider credential lifecycle", () => {
   });
 
   it("rolls back the whole cutover when retiring the predecessor fails", async () => {
+    const logger = getLogger();
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
     const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
     const db = getDb(env);
@@ -492,6 +517,20 @@ describe("provider credential lifecycle", () => {
       });
 
       expect(response.status).toBe(409);
+      expect(errorLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_credential_lifecycle_failure",
+          stage: "rotation_commit",
+          organization_id: ORGANIZATION_ID,
+          request_id: "req_provider_credential_lifecycle",
+          error_code: "23514",
+        }),
+        "sdp_api_credential_lifecycle_failure"
+      );
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain("new-secret");
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
+        "sdp_test_fail_provider_credential_retirement"
+      );
       expect(providerFetch).toHaveBeenCalledTimes(1);
       expect(
         await db.queryMany<{
@@ -531,6 +570,114 @@ describe("provider credential lifecycle", () => {
       );
     }
   });
+
+  it.each([false, true])(
+    "compensates a real GCP write after candidate insertion rolls back (cleanup fails: %s)",
+    async (cleanupFails) => {
+      env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+      env.GCP_SECRET_MANAGER_PROJECT_ID = "sdp-lifecycle-test";
+      env.GCP_SECRET_MANAGER_SECRET_PREFIX = "sdp-provider-credentials";
+      env.GCP_SECRET_MANAGER_API_BASE_URL = "https://gcp-lifecycle.test";
+      const requests: Array<{ url: string; method: string }> = [];
+      let secretRef: string | undefined;
+      let versionRef: string | undefined;
+      const fetcher: typeof fetch = async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        requests.push({ url: url.href, method });
+        if (url.hostname === "metadata.google.internal") {
+          return url.pathname.endsWith("/numeric-project-id")
+            ? new Response("1234567890")
+            : Response.json({ access_token: "gcp-sensitive-token", expires_in: 300 });
+        }
+        if (url.hostname !== "gcp-lifecycle.test") throw new Error("Unexpected provider request");
+        const secretId = url.searchParams.get("secretId");
+        if (secretId) {
+          secretRef = `projects/1234567890/secrets/${secretId}`;
+          return Response.json({ name: secretRef });
+        }
+        if (url.pathname.endsWith(":addVersion")) {
+          if (!secretRef) throw new Error("Version requested before secret creation");
+          versionRef = `${secretRef}/versions/7`;
+          return Response.json({ name: versionRef });
+        }
+        if (url.pathname === `/v1/${versionRef}:destroy`) {
+          return cleanupFails
+            ? Response.json(
+                { error: { message: "sensitive-upstream-cleanup-detail" } },
+                { status: 503 }
+              )
+            : Response.json({ name: versionRef, state: "DESTROYED" });
+        }
+        if (url.pathname === `/v1/${versionRef}` && method === "GET") {
+          return Response.json({ name: versionRef, state: "ENABLED" });
+        }
+        throw new Error("Unexpected GCP request");
+      };
+      vi.stubGlobal("fetch", fetcher);
+      const logger = getLogger();
+      const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
+      const db = getDb(env);
+      const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+        CREDENTIAL_ID,
+      ]);
+      await db.execute(
+        `ALTER TABLE provider_credentials ADD CONSTRAINT sdp_test_fail_gcp_rotation_insert
+         CHECK (credential_version = 1) NOT VALID`
+      );
+      try {
+        await expect(
+          lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+            method: "POST",
+            key: "rotate-gcp-insert-rollback",
+            body: { fields: { appId: APP_ID, appSecret: "new-gcp-secret" } },
+          })
+        ).rejects.toMatchObject({ code: "23514" });
+        expect(versionRef).toMatch(/\/versions\/7$/);
+        expect(requests.filter((request) => request.url.endsWith(":destroy"))).toEqual([
+          { url: `https://gcp-lifecycle.test/v1/${versionRef}:destroy`, method: "POST" },
+        ]);
+        expect(
+          requests.filter(
+            (request) => request.url === `https://gcp-lifecycle.test/v1/${versionRef}`
+          )
+        ).toHaveLength(cleanupFails ? 1 : 0);
+        expect(await db.queryMany("SELECT * FROM provider_credentials")).toEqual([original]);
+        expect(
+          await db.queryMany<{ provider_credential_id: string }>(
+            "SELECT provider_credential_id FROM custody_connections ORDER BY id"
+          )
+        ).toEqual([
+          { provider_credential_id: CREDENTIAL_ID },
+          { provider_credential_id: CREDENTIAL_ID },
+        ]);
+        const orphanLogs = errorLog.mock.calls.filter(
+          (call) => call[1] === "provider_credential_orphan_risk"
+        );
+        expect(orphanLogs).toHaveLength(cleanupFails ? 1 : 0);
+        if (cleanupFails) {
+          expect(orphanLogs[0]?.[0]).toMatchObject({
+            provider: "privy",
+            storageBackend: "gcp_secret_manager",
+            reason: "secret_cleanup_failed",
+          });
+        }
+        const logs = JSON.stringify(errorLog.mock.calls);
+        for (const sensitive of [
+          "new-gcp-secret",
+          "gcp-sensitive-token",
+          "sensitive-upstream-cleanup-detail",
+          "projects/1234567890/secrets/",
+        ]) {
+          expect(logs).not.toContain(sensitive);
+        }
+      } finally {
+        await db.execute(
+          "ALTER TABLE provider_credentials DROP CONSTRAINT sdp_test_fail_gcp_rotation_insert"
+        );
+      }
+    }
+  );
 
   it("fails closed when credential references change during provider validation", async () => {
     const projectCId = "prj_provider_credential_lifecycle_c";
@@ -601,7 +748,8 @@ describe("provider credential lifecycle", () => {
   });
 
   it("rejects only the candidate when Privy rejects the new credentials", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", providerFetch);
 
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -632,6 +780,30 @@ describe("provider credential lifecycle", () => {
       { provider_credential_id: CREDENTIAL_ID },
       { provider_credential_id: CREDENTIAL_ID },
     ]);
+  });
+
+  it("audits a rejected rotation once across replays", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const request = {
+      method: "POST" as const,
+      key: "rotate-rejected-audit",
+      body: { fields: { appId: APP_ID, appSecret: "invalid-secret" } },
+    };
+    const response = await lifecycleRequest(
+      `/provider-credentials/${CREDENTIAL_ID}/rotate`,
+      request
+    );
+    expect(response.status).toBe(200);
+    const events = await rotationFailureEvents();
+    expect(events).toEqual([
+      { resource_id: expect.any(String), status: "failure", failure_code: "invalid_credentials" },
+    ]);
+
+    const replay = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
+    expect(replay.status).toBe(200);
+    expect(await rotationFailureEvents()).toEqual(events);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a valid credential for a different Privy account without changing the current credential", async () => {
@@ -689,6 +861,169 @@ describe("provider credential lifecycle", () => {
       rotated_from_provider_credential_id: CREDENTIAL_ID,
       encrypted_secret_payload: null,
     });
+    expect(await rotationFailureEvents()).toEqual([
+      {
+        resource_id: body.data.providerCredential.id,
+        status: "failure",
+        failure_code: "provider_account_mismatch",
+      },
+    ]);
+  });
+
+  it("emits one rejection outcome when two completions reject the same candidate", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-concurrent-rejection",
+      body: { fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+    });
+    const { data } = credentialResponseSchema.parse(await pending.json());
+    const candidateId = data.providerCredential.id;
+    let checksStarted = 0;
+    let releaseChecks = () => {};
+    const bothChecking = new Promise<void>((resolve) => {
+      releaseChecks = resolve;
+    });
+    providerFetch.mockImplementation(async () => {
+      if (++checksStarted === 2) releaseChecks();
+      await bothChecking;
+      return new Response(null, { status: 401 });
+    });
+
+    const results = await Promise.all([
+      lifecycleRequest(`/provider-credentials/${candidateId}/complete-rotation`, {
+        method: "POST",
+      }),
+      lifecycleRequest(`/provider-credentials/${candidateId}/complete-rotation`, {
+        method: "POST",
+      }),
+    ]);
+    for (const response of results) {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { rotation: { status: "failed", code: "invalid_credentials" } },
+      });
+    }
+    expect(await rotationFailureEvents()).toEqual([
+      { resource_id: candidateId, status: "failure", failure_code: "invalid_credentials" },
+    ]);
+    expect(
+      await getDb(env).queryOne<{ count: number }>(
+        `SELECT count(*) AS count FROM audit_logs
+         WHERE action = 'maintenance'
+           AND metadata::jsonb ->> 'event' = 'provider_credential_rotation_rejection_not_committed'`
+      )
+    ).toEqual({ count: 1 });
+  });
+
+  it("keeps a rejection intent unresolved when the COMMIT response is lost", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-rejection-commit-unknown",
+      body: { fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+    });
+    const { data } = credentialResponseSchema.parse(await pending.json());
+    const candidateId = data.providerCredential.id;
+    providerFetch.mockResolvedValue(new Response(null, { status: 401 }));
+    const db = getDb(env);
+    const runTransaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+      await runTransaction(callback);
+      throw new Error("Lost COMMIT response");
+    });
+
+    const response = await lifecycleRequest(
+      `/provider-credentials/${candidateId}/complete-rotation`,
+      {
+        method: "POST",
+      }
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { rotation: { status: "failed", code: "invalid_credentials" } },
+    });
+    expect(await rotationFailureEvents()).toEqual([]);
+    expect(
+      await db.queryOne<{ count: number }>(
+        `SELECT count(*) AS count FROM audit_logs intent
+       WHERE intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+         AND intent.metadata::jsonb -> 'target' ->> 'resourceId' = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM audit_logs outcome
+           WHERE outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+         )`,
+        [candidateId]
+      )
+    ).toEqual({ count: 1 });
+  });
+
+  it("keeps rejected credentials pending when their audit intent cannot be persisted", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    const db = getDb(env);
+    await db.execute(
+      `ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_rotation_audit
+       CHECK (action <> 'maintenance') NOT VALID`
+    );
+    try {
+      await expect(
+        lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+          method: "POST",
+          key: "rotate-audit-unavailable",
+          body: { fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+        })
+      ).rejects.toThrow("Required audit record could not be persisted");
+      expect(
+        await db.queryOne<{ status: string; has_secret: boolean }>(
+          `SELECT status, encrypted_secret_payload IS NOT NULL AS has_secret
+           FROM provider_credentials WHERE idempotency_key = 'rotate-audit-unavailable'`
+        )
+      ).toEqual({ status: "pending", has_secret: true });
+      expect(await rotationFailureEvents()).toEqual([]);
+    } finally {
+      await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_rotation_audit");
+    }
+  });
+
+  it("logs an unreadable candidate secret without exposing its stored contents", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-unreadable-secret",
+      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+    });
+    const { data } = credentialResponseSchema.parse(await pending.json());
+    const candidateId = data.providerCredential.id;
+    await getDb(env).execute(
+      "UPDATE provider_credentials SET encrypted_secret_payload = ? WHERE id = ?",
+      ["invalid-secret-ciphertext", candidateId]
+    );
+    const logger = getLogger();
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
+
+    const response = await lifecycleRequest(
+      `/provider-credentials/${candidateId}/complete-rotation`,
+      {
+        method: "POST",
+      }
+    );
+    expect(response.status).toBe(500);
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_credential_lifecycle_failure",
+        stage: "secret_read",
+        provider_credential_id: candidateId,
+        error_name: "CredentialSecretStoreError",
+        error_code: "MISSING_SECRET",
+      }),
+      "sdp_api_credential_lifecycle_failure"
+    );
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain("invalid-secret-ciphertext");
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain("new-secret");
+    expect(providerFetch).toHaveBeenCalledTimes(1);
   });
 
   it("persists an uncertain candidate and resumes it without another secret submission", async () => {

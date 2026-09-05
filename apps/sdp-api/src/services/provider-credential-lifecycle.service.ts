@@ -13,6 +13,7 @@ import {
 } from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import {
   type CredentialSecretPayload,
@@ -140,7 +141,7 @@ export async function rotateProviderCredential(
   }
 
   const candidateId = `pcred_${crypto.randomUUID()}`;
-  const secretStore = createStoredSecretStore(c.env);
+  const secretStore = createStoredSecretStore(c, candidateId);
   const stored = await writeRotationSecret(
     context,
     secretStore,
@@ -213,7 +214,8 @@ export async function rotateProviderCredential(
     let recovered: ProviderCredentialRow | null;
     try {
       recovered = await context.store.findReplayByKey(context.organizationId, idempotencyKey);
-    } catch {
+    } catch (reconciliationError) {
+      logLifecycleFailure(c, "candidate_insert_reconcile", candidateId, reconciliationError);
       logSecretWriteOutcomeUnknown(c, candidateId, stored.storageBackend);
       throw error;
     }
@@ -254,12 +256,8 @@ export async function completeRotationCandidate(
   let authentication: PrivyCredentialAuthentication;
   try {
     candidateSecret = await requireLifecycleCredentialSecret(context, loaded.candidate.id);
-    const secretStore = createPersistedSecretStore(c.env, candidateSecret.storage_backend);
-    authentication = await readPrivyCredential(
-      secretStore,
-      context.organizationId,
-      candidateSecret
-    );
+    const secretStore = createPersistedSecretStore(c, candidateSecret.storage_backend, candidateId);
+    authentication = await readPrivyCredential(secretStore, context, candidateSecret);
   } catch (error) {
     return reconcileCandidateSecretReadFailure(c, context, loaded.candidate.id, error);
   }
@@ -332,6 +330,7 @@ export async function completeRotationCandidate(
       applied = true;
     });
   } catch (error) {
+    logLifecycleFailure(c, "rotation_commit", loaded.candidate.id, error);
     const visible = await rotationCommitIsVisible(context, loaded);
     if (visible === true) {
       if (applied) {
@@ -372,12 +371,12 @@ export async function rollbackProviderCredential(
   let authentication: PrivyCredentialAuthentication;
   try {
     const predecessorSecret = await requireLifecycleCredentialSecret(context, predecessor.id);
-    const secretStore = createPersistedSecretStore(c.env, predecessorSecret.storage_backend);
-    authentication = await readPrivyCredential(
-      secretStore,
-      context.organizationId,
-      predecessorSecret
+    const secretStore = createPersistedSecretStore(
+      c,
+      predecessorSecret.storage_backend,
+      predecessor.id
     );
+    authentication = await readPrivyCredential(secretStore, context, predecessorSecret);
   } catch (error) {
     const refreshedCurrent = await loadAuthorizedCurrent(
       context,
@@ -454,6 +453,7 @@ export async function rollbackProviderCredential(
       applied = true;
     });
   } catch (error) {
+    logLifecycleFailure(c, "rollback_commit", currentCredentialId, error);
     const visible = await rollbackCommitIsVisible(context, current, predecessor);
     if (visible === true) {
       if (applied) {
@@ -552,6 +552,7 @@ export async function deactivateRotationCandidate(
       applied = true;
     });
   } catch (error) {
+    logLifecycleFailure(c, "cancellation_commit", candidateId, error);
     const visible = await cancellationCommitIsVisible(context, loaded);
     if (visible === true) {
       if (applied) {
@@ -784,6 +785,18 @@ async function settleCandidateOutcome(
   expected: Awaited<ReturnType<typeof loadAuthorizedCandidate>>,
   outcome: "retry_unknown" | RotationFailureCode
 ): Promise<ProviderCredentialRotationResult | null> {
+  const auditIntent =
+    outcome === "retry_unknown"
+      ? null
+      : await context.audit.beginCritical(context.c, {
+          organizationId: context.organizationId,
+          userId: context.userId,
+          action: "rotate",
+          resourceType: "provider_credential",
+          resourceId: expected.candidate.id,
+          metadata: { event: "provider_credential_rotation_rejection_started", provider: "privy" },
+        });
+  let applied = false;
   try {
     await getDb(context.c.env).transaction(async (tx) => {
       const store = new ProviderCredentialStore(tx);
@@ -815,16 +828,37 @@ async function settleCandidateOutcome(
           ? await store.recordRotationRetryUnknown(expected.candidate.id)
           : await store.recordRotationFailure(expected.candidate.id, outcome);
       if (!persisted) throw conflict(ROTATION_UNAVAILABLE);
+      applied = true;
     });
-    return null;
   } catch (error) {
+    logLifecycleFailure(context.c, "candidate_outcome_write", expected.candidate.id, error);
     let current: Awaited<ReturnType<typeof loadAuthorizedCandidate>>;
     try {
       current = await loadAuthorizedCandidate(context, expected.candidate.id);
     } catch (reconciliationError) {
+      logLifecycleFailure(
+        context.c,
+        "candidate_outcome_read",
+        expected.candidate.id,
+        reconciliationError
+      );
       if (reconciliationError instanceof AppError) throw reconciliationError;
       throw providerUnavailable("Credential rotation outcome is temporarily unknown");
     }
+    if (
+      auditIntent &&
+      (!applied ||
+        current.candidate.status !== "failed_validation" ||
+        current.candidate.last_failure_code !== outcome)
+    ) {
+      await closeRejectedIntent(
+        context,
+        auditIntent,
+        "provider_credential_rotation_rejection_not_committed"
+      );
+    }
+    // A failed COMMIT followed by the expected state does not prove which
+    // concurrent request wrote it. Keep that intent unresolved, not a duplicate outcome.
     if (
       outcome === "retry_unknown" &&
       current.candidate.status === "pending" &&
@@ -842,6 +876,17 @@ async function settleCandidateOutcome(
     if (error instanceof AppError) throw error;
     throw providerUnavailable("Credential rotation outcome is temporarily unknown");
   }
+  if (auditIntent) {
+    await context.audit.completeCritical(context.c, auditIntent, {
+      status: "failure",
+      metadata: {
+        event: "provider_credential_rotation_rejected",
+        provider: "privy",
+        failureCode: outcome,
+      },
+    });
+  }
+  return null;
 }
 
 function projectImpact(
@@ -954,7 +999,8 @@ async function rotationCommitIsVisible(
       JSON.stringify(referenceIds(candidateReferences)) ===
         JSON.stringify(referenceIds(expected.references))
     );
-  } catch {
+  } catch (error) {
+    logLifecycleFailure(context.c, "rotation_outcome_read", expected.candidate.id, error);
     return null;
   }
 }
@@ -978,7 +1024,8 @@ async function rollbackCommitIsVisible(
       JSON.stringify(referenceIds(restoredReferences)) ===
         JSON.stringify(referenceIds(expected.references))
     );
-  } catch {
+  } catch (error) {
+    logLifecycleFailure(context.c, "rollback_outcome_read", expected.credential.id, error);
     return null;
   }
 }
@@ -1000,7 +1047,8 @@ async function cancellationCommitIsVisible(
       candidateReferences.length === 0 &&
       sameReferences(predecessorReferences, expected.references)
     );
-  } catch {
+  } catch (error) {
+    logLifecycleFailure(context.c, "cancellation_outcome_read", expected.candidate.id, error);
     return null;
   }
 }
@@ -1068,25 +1116,31 @@ async function rotationFingerprint(
   );
 }
 
-function createStoredSecretStore(env: Env): CredentialSecretStore {
+function createStoredSecretStore(
+  c: Context<{ Bindings: Env }>,
+  credentialId: string
+): CredentialSecretStore {
   try {
-    const store = createCredentialSecretStore(env);
+    const store = createCredentialSecretStore(c.env);
     if (store.storageBackend === "runtime_env") throw internalError();
     return store;
   } catch (error) {
+    logLifecycleFailure(c, "secret_store_create", credentialId, error);
     if (error instanceof AppError) throw error;
     throw internalError();
   }
 }
 
 function createPersistedSecretStore(
-  env: Env,
-  backend: LifecycleCredentialRow["storage_backend"]
+  c: Context<{ Bindings: Env }>,
+  backend: LifecycleCredentialRow["storage_backend"],
+  credentialId: string
 ): CredentialSecretStore {
   if (backend === "runtime_env") throw conflict(ROTATION_UNAVAILABLE);
   try {
-    return createCredentialSecretStore(env, backend);
-  } catch {
+    return createCredentialSecretStore(c.env, backend);
+  } catch (error) {
+    logLifecycleFailure(c, "secret_store_create", credentialId, error);
     throw internalError();
   }
 }
@@ -1106,6 +1160,7 @@ async function writeRotationSecret(
       payload: { appId, appSecret },
     });
   } catch (error) {
+    logLifecycleFailure(context.c, "secret_write", candidateId, error);
     if (error instanceof CredentialSecretStoreError && error.code === "UPSTREAM_ERROR") {
       if (store.storageBackend === "gcp_secret_manager") {
         logSecretWriteOutcomeUnknown(context.c, candidateId, store.storageBackend);
@@ -1118,13 +1173,14 @@ async function writeRotationSecret(
 
 async function readPrivyCredential(
   store: CredentialSecretStore,
-  organizationId: string,
+  context: LifecycleContext,
   row: LifecycleCredentialWithSecretRow
 ): Promise<PrivyCredentialAuthentication> {
   let payload: CredentialSecretPayload;
   try {
-    payload = await store.read({ orgId: organizationId, stored: storedSecret(row) });
+    payload = await store.read({ orgId: context.organizationId, stored: storedSecret(row) });
   } catch (error) {
+    logLifecycleFailure(context.c, "secret_read", row.id, error);
     if (error instanceof CredentialSecretStoreError && error.code === "UPSTREAM_ERROR") {
       throw providerUnavailable("Credential storage is temporarily unavailable");
     }
@@ -1165,7 +1221,7 @@ async function cleanupRejectedCandidate(
 ): Promise<void> {
   if (candidate.storage_backend !== "gcp_secret_manager" || !candidate.secret_version_ref) return;
   try {
-    const store = createPersistedSecretStore(c.env, candidate.storage_backend);
+    const store = createPersistedSecretStore(c, candidate.storage_backend, candidate.id);
     await store.destroyVersion({ secretVersionRef: candidate.secret_version_ref });
   } catch {
     logCleanupFailure(c, candidate.id, candidate.storage_backend);
@@ -1174,6 +1230,26 @@ async function cleanupRejectedCandidate(
 
 function mapLifecycleCredential(row: LifecycleCredentialRow): LifecycleProviderCredential {
   return { ...mapProviderCredential(row), source: row.source };
+}
+
+function logLifecycleFailure(
+  c: Context<{ Bindings: Env }>,
+  stage: string,
+  credentialId: string,
+  cause: unknown
+): void {
+  if (cause instanceof AppError) return;
+  const auth = getAuth(c);
+  logEvent("error", {
+    event: "sdp_api_credential_lifecycle_failure",
+    stage,
+    organization_id: auth.organizationId,
+    project_id: auth.projectId,
+    provider: "privy",
+    provider_credential_id: credentialId,
+    request_id: c.get("requestId"),
+    ...describeError(cause),
+  });
 }
 
 function logCleanupFailure(

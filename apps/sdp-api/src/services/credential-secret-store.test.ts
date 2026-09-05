@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import {
   CredentialSecretStoreError,
@@ -36,6 +36,125 @@ const PROJECT_NUMBER = "1049637352508";
 const SECRET_ID = "sdp-dev-provider-credentials-pcred_123";
 
 describe("GcpSecretManagerCredentialSecretStore", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["project-number", "token", "secret"] as const)(
+    "bounds a stalled %s response body and reports an upstream failure",
+    async (stalled) => {
+      const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(10));
+      let observedSignal: AbortSignal | null | undefined;
+      const projectUrl = `https://metadata.test/${stalled}/project-number`;
+      const tokenUrl = `https://metadata.test/${stalled}/token`;
+      const store = new GcpSecretManagerCredentialSecretStore({
+        projectId: PROJECT_ID,
+        secretPrefix: "sdp-dev-provider-credentials",
+        metadataProjectNumberUrl: projectUrl,
+        metadataTokenUrl: tokenUrl,
+        fetcher: async (input, init) => {
+          const url = String(input);
+          const phase =
+            url === projectUrl ? "project-number" : url === tokenUrl ? "token" : "secret";
+          if (phase === stalled) {
+            observedSignal = init?.signal;
+            if (!observedSignal) throw new Error("Missing request deadline");
+            const signal = observedSignal;
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  signal.addEventListener("abort", () => controller.error(signal.reason), {
+                    once: true,
+                  });
+                },
+              })
+            );
+          }
+          if (phase === "project-number") return new Response(PROJECT_NUMBER);
+          return Response.json({ access_token: "test-token", expires_in: 300 });
+        },
+      });
+
+      await expect(
+        store.read({
+          orgId: "org_123",
+          stored: {
+            storageBackend: "gcp_secret_manager",
+            secretVersionRef: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
+          },
+        })
+      ).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+      expect(timeout).toHaveBeenCalledWith(10_000);
+      expect(observedSignal?.aborted).toBe(true);
+    }
+  );
+
+  it("does not retry an add-version request after its deadline expires", async () => {
+    const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(10));
+    const requests: string[] = [];
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: PROJECT_ID,
+      projectNumber: PROJECT_NUMBER,
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async (input, init) => {
+        requests.push(String(input));
+        const signal = init?.signal;
+        if (!signal) throw new Error("Missing request deadline");
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    });
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        existingSecretRef: `projects/${PROJECT_ID}/secrets/${SECRET_ID}`,
+        payload: { appId: "app", appSecret: "secret" },
+      })
+    ).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+    expect(requests).toEqual([
+      `https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${SECRET_ID}:addVersion`,
+    ]);
+  });
+
+  it("verifies a timed-out destroy with a fresh deadline for the same version", async () => {
+    const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(10));
+    const versionRef = `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/7`;
+    const signals: AbortSignal[] = [];
+    const urls: string[] = [];
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: PROJECT_ID,
+      projectNumber: PROJECT_NUMBER,
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async (input, init) => {
+        urls.push(String(input));
+        const signal = init?.signal;
+        if (!signal) throw new Error("Missing request deadline");
+        signals.push(signal);
+        signal.throwIfAborted();
+        if (init?.method === "POST") {
+          return new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        }
+        return Response.json({ name: versionRef, state: "DESTROYED" });
+      },
+    });
+    await expect(store.destroyVersion({ secretVersionRef: versionRef })).resolves.toBeUndefined();
+    expect(urls).toEqual([
+      `https://secretmanager.googleapis.com/v1/${versionRef}:destroy`,
+      `https://secretmanager.googleapis.com/v1/${versionRef}`,
+    ]);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]).not.toBe(signals[0]);
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
   it("creates, versions, reads, and destroys credential payloads by exact refs", async () => {
     const payload = {
       appId: "privy-app-id",

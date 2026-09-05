@@ -27,6 +27,7 @@ import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
@@ -632,6 +633,12 @@ export async function assertCustodyProviderEntitled(
   const availability = await getProviderAvailability(env, db, organizationId);
   const entry = availability.providers.custody[provider];
   if (!isCustodyProviderEntitled(availability, provider)) {
+    logEvent("warn", {
+      event: "sdp_api_custody_entitlement_denied",
+      organization_id: organizationId,
+      provider,
+      reason: "provider_not_entitled",
+    });
     throw new AppError(
       "FORBIDDEN",
       getAvailabilityMessage(
