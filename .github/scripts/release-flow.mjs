@@ -451,22 +451,20 @@ async function enableAutoMerge(pullRequestId, version) {
   const arm = () =>
     githubGraphqlRequest({ query, variables: { pullRequestId, commitHeadline }, token });
 
-  try {
+  // Read the armed state first. A repeat enablePullRequestAutoMerge on an
+  // already-armed pull request no longer errors with "Auto merge is already
+  // enabled": GitHub returns success and keeps the headline frozen at the
+  // original arming time. Branching on that error therefore never reaches
+  // the re-arm below, which is how #1650 merged as 0.72.1 while titled 0.73.0
+  // and #1658 sat armed as 0.73.1 while titled 0.74.0. The pull request is
+  // recreated on every push to main, so a stale headline lands on main naming
+  // the wrong version and `publish` refuses it, taking the production deploy
+  // with it. See release-automerge.mjs for the full reasoning.
+  const armedHeadline = await armedAutoMergeHeadline(pullRequestId);
+  if (armedHeadline === null) {
     await arm();
     return;
-  } catch (error) {
-    if (!error.message.includes("Auto merge is already enabled")) {
-      throw error;
-    }
   }
-
-  // Already armed, which on this repository usually means armed at an earlier
-  // version: this pull request is recreated on every push to main, and the
-  // headline GitHub squash-merges with is frozen at arming time even though the
-  // title is updated. Left alone, the release commit lands on main naming the
-  // wrong version and `publish` refuses it, taking the production deploy with
-  // it. See release-automerge.mjs for the full reasoning.
-  const armedHeadline = await armedAutoMergeHeadline(pullRequestId);
   if (!autoMergeNeedsRearm(armedHeadline, commitHeadline)) {
     return;
   }
