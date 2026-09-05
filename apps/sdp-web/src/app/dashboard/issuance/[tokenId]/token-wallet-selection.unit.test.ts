@@ -154,4 +154,53 @@ describe("issuance exact wallet selection", () => {
       "cwlt_connection"
     );
   });
+
+  it("blocks metadata when a live refresh fails even with cached matching wallets", () => {
+    const selection = getSignerSelectionForAction({
+      action: "metadata",
+      token,
+      authorityWallets: wallets,
+      metadataAuthority: "address_b",
+      metadataAuthorityError: "Metadata RPC unavailable",
+      t,
+    });
+    expect(selection.wallets).toEqual([]);
+    expect(selection.defaultWalletId).toBe("");
+    expect(selection.unavailableReason).toBe("Metadata RPC unavailable");
+  });
+
+  it.each(["only live wallet", "both old and live wallets"])(
+    "selects the live metadata authority after external rotation: %s",
+    (scenario) => {
+      const selection = getSignerSelectionForAction({
+        action: "metadata",
+        token: {
+          ...token,
+          status: "active",
+          mintAddress: "mint",
+          metadataAuthority: "address_a",
+          signingCustodyWalletId: "cwlt_a",
+        },
+        authorityWallets: scenario === "only live wallet" ? [wallets[1]] : wallets,
+        metadataAuthority: "address_b",
+        t,
+      });
+      expect(selection.wallets).toEqual([wallets[1]]);
+      expect(selection.defaultWalletId).toBe("cwlt_b");
+      expect(selection.unavailableReason).toBeNull();
+    }
+  );
+
+  it("does not fall back to stored metadata or mint authority after live revocation", () => {
+    const selection = getSignerSelectionForAction({
+      action: "metadata",
+      token: { ...token, metadataAuthority: "address_a", mintAuthority: "address_a" },
+      authorityWallets: wallets,
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.wallets).toEqual([]);
+    expect(selection.defaultWalletId).toBe("");
+    expect(selection.unavailableReason).not.toBeNull();
+  });
 });

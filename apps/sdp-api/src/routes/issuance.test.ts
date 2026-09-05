@@ -11,6 +11,7 @@ import type { Address } from "@sdp/solana/address";
 import type { CachedApiKey } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
+import * as Token2022 from "@solana-program/token-2022";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -41,6 +42,11 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { seedCachedApiKey } from "@/test/mocks/kv";
+
+// Copy the immutable ESM namespace so tests can spy on SDK reads while preserving real exports.
+vi.mock("@solana-program/token-2022", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
+}));
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
@@ -2833,6 +2839,8 @@ describe("Issuance Routes", () => {
   describe("GET /v1/issuance/tokens/:tokenId", () => {
     let tokenId: string;
 
+    afterEach(() => vi.restoreAllMocks());
+
     beforeEach(async () => {
       const createRes = await app.request(
         "/v1/issuance/tokens",
@@ -2865,6 +2873,194 @@ describe("Issuance Routes", () => {
       expect(body.data.token.name).toBe("Detail Token");
     });
 
+    it("reads live metadata authority and updates through its wallet without changing deployment attribution", async () => {
+      const deploymentWallet = await seedIssuanceActivityWallet(
+        "wal_metadata_deployment",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      const metadataWallet = await seedIssuanceActivityWallet(
+        "wal_metadata_current",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+        .bind(deploymentWallet.custodyWalletId)
+        .run();
+      const token = await seedIssuedToken({
+        id: "tok_metadata_authority_read",
+        metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+        signingCustodyWalletId: deploymentWallet.custodyWalletId,
+      });
+      // SAFETY: this partial external SDK fixture supplies every mint field read by the route.
+      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint").mockResolvedValue({
+        exists: true,
+        data: {
+          mintAuthority: { __option: "None" },
+          freezeAuthority: { __option: "None" },
+          extensions: {
+            __option: "Some",
+            value: [
+              {
+                __kind: "TokenMetadata",
+                updateAuthority: { __option: "Some", value: TEST_SOLANA_ADDRESSES.wallet2 },
+              },
+            ],
+          },
+        },
+      } as never);
+      const headers = { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` };
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}?includeMetadataAuthority=true`,
+        { headers },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          metadataAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+          token: { metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1 },
+        },
+      });
+      expect(mintRead).toHaveBeenCalledOnce();
+      expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+      const ordinary = await app.request(`/v1/issuance/tokens/${token.id}`, { headers }, env);
+      expect(await ordinary.json()).toMatchObject({
+        data: { token: { metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1 } },
+      });
+
+      vi.mocked(AuthorityResolution.resolveCurrentAuthorityForRole).mockRestore();
+      const updateMetadata = vi.spyOn(MosaicService.prototype, "updateMetadata").mockResolvedValue({
+        signature: "sig_metadata_rotated_authority",
+        slot: 123n,
+      });
+      const update = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Updated with live metadata authority",
+            signingCustodyWalletId: metadataWallet.custodyWalletId,
+          }),
+        },
+        env
+      );
+
+      expect(update.status).toBe(200);
+      expect(await update.json()).toMatchObject({
+        data: {
+          token: {
+            name: "Updated with live metadata authority",
+            metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+            signingCustodyWalletId: deploymentWallet.custodyWalletId,
+          },
+        },
+      });
+      expect(updateMetadata).toHaveBeenCalledWith(
+        expect.objectContaining({
+          updateAuthority: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet2 }),
+        })
+      );
+      expect(mintRead).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(["", "?includeMetadataAuthority=false"])(
+      "does not read metadata authority without opt-in (%s)",
+      async (query) => {
+        const token = await seedIssuedToken();
+        const mintRead = vi.spyOn(Token2022, "fetchMaybeMint");
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}${query}`,
+          { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data).not.toHaveProperty("metadataAuthority");
+        expect(mintRead).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      {
+        metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+        expectedAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+      },
+      { metadataAuthority: null, expectedAuthority: TEST_SOLANA_ADDRESSES.wallet3 },
+    ])(
+      "reads draft metadata authority without RPC (stored authority $metadataAuthority)",
+      async ({ metadataAuthority, expectedAuthority }) => {
+        const token = await seedIssuedToken({
+          mintAddress: null,
+          status: "pending",
+          metadataAuthority,
+        });
+        const mintRead = vi.spyOn(Token2022, "fetchMaybeMint");
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}?includeMetadataAuthority=true`,
+          { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data.metadataAuthority).toBe(expectedAuthority);
+        expect(mintRead).not.toHaveBeenCalled();
+        expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+      }
+    );
+
+    it("returns both requested authorities, including absent on-chain metadata authority", async () => {
+      const token = await seedIssuedToken({
+        metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      vi.spyOn(Token2022, "fetchMaybeMint").mockResolvedValue({
+        exists: false,
+        address: address(TEST_SOLANA_ADDRESSES.wallet2),
+      });
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}?includeAllowlistAuthority=true&includeMetadataAuthority=true`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: { allowlistAuthority: TEST_ACTIVE_TOKEN.mintAuthority, metadataAuthority: null },
+      });
+      expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    });
+
+    it("fails the metadata authority read when RPC fails without returning stored authority", async () => {
+      const token = await seedIssuedToken({ metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1 });
+      vi.spyOn(Token2022, "fetchMaybeMint").mockRejectedValue(new Error("RPC unavailable"));
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}?includeMetadataAuthority=true`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(502);
+      const body = await res.json();
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+      expect(body).not.toHaveProperty("data");
+      expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    });
+
+    it("rejects an invalid metadata authority query before RPC", async () => {
+      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint");
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}?includeMetadataAuthority=yes`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mintRead).not.toHaveBeenCalled();
+    });
+
     it("returns 404 for non-existent token", async () => {
       const res = await app.request(
         "/v1/issuance/tokens/tok_nonexistent12",
@@ -2888,12 +3084,11 @@ describe("Issuance Routes", () => {
       const otherProjectToken = await seedIssuedToken({
         id: "tok_other_project_iso",
         projectId: otherProjectId,
-        mintAddress: null,
-        status: "pending",
       });
+      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint");
 
       const res = await app.request(
-        `/v1/issuance/tokens/${otherProjectToken.id}`,
+        `/v1/issuance/tokens/${otherProjectToken.id}?includeMetadataAuthority=true`,
         {
           headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
         },
@@ -2901,6 +3096,7 @@ describe("Issuance Routes", () => {
       );
 
       expect(res.status).toBe(404);
+      expect(mintRead).not.toHaveBeenCalled();
     });
   });
 

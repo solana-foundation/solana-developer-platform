@@ -577,6 +577,10 @@ export const tokenResponseSchema = z
       description:
         "Live on-chain list authority. Returned only by GET token with includeAllowlistAuthority=true; null when no on-chain list is configured. This is not the token freeze authority or a signer authorization.",
     }),
+    metadataAuthority: solanaAddressSchema.nullable().optional().openapi({
+      description:
+        "Metadata authority, returned only by GET token with includeMetadataAuthority=true. Read live on-chain when the token has a mint; otherwise the stored metadata authority or stored mint authority. Null when unavailable. RPC failure returns 502 without falling back to stored authority. This read does not authorize signing or change the token.",
+    }),
   })
   .openapi({ description: "Token response payload." });
 
@@ -870,6 +874,11 @@ export const getTokenQueryOpenApiSchema = getTokenQuerySchemaBase.extend({
   includeAllowlistAuthority: withOpenApi(getTokenQuerySchemaBase.shape.includeAllowlistAuthority, {
     description:
       "Opt in to a read-only RPC lookup of the current on-chain list authority for wallet selection. Ordinary token reads do not perform this lookup.",
+    example: "true",
+  }),
+  includeMetadataAuthority: withOpenApi(getTokenQuerySchemaBase.shape.includeMetadataAuthority, {
+    description:
+      "Opt in to a read-only lookup of the current metadata authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored metadata authority, falling back to stored mint authority, without RPC. Ordinary token reads do not perform this lookup.",
     example: "true",
   }),
 });

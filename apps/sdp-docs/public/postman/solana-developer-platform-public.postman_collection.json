@@ -764,7 +764,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}",
-            "description": "Gets token details."
+            "description": "Gets token details with optional read-only authority lookups for wallet selection."
           }
         },
         {

@@ -51,11 +51,15 @@ export interface TokenAuthorityWalletsData {
   // Optional only for pre-existing persisted dashboard cache entries.
   allowlistAuthority?: string | null;
   allowlistAuthorityError?: string | null;
+  metadataAuthority?: string | null;
+  metadataAuthorityError?: string | null;
 }
 
-const allowlistAuthoritySchema = z.object({
+const liveAuthoritiesSchema = z.object({
   allowlistAuthority: z.string().min(1).nullable(),
   allowlistAuthorityError: z.string().nullable(),
+  metadataAuthority: z.string().min(1).nullable(),
+  metadataAuthorityError: z.string().nullable(),
 });
 
 function getApiError(body: SupportingDataEnvelope, fallback: string): string {
@@ -141,7 +145,7 @@ export async function fetchTokenAuthorityWallets(
   }
 
   return {
-    ...allowlistAuthoritySchema.parse(body.data),
+    ...liveAuthoritiesSchema.parse(body.data),
     authorityWallets: Array.isArray(body.data?.authorityWallets) ? body.data.authorityWallets : [],
     authorityWalletsError:
       typeof body.data?.authorityWalletsError === "string" ? body.data.authorityWalletsError : null,

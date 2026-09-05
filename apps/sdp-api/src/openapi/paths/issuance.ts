@@ -248,7 +248,8 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Get token",
     operationId: "getToken",
-    description: "Gets token details.",
+    description:
+      "Gets token details with optional read-only authority lookups for wallet selection.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -262,7 +263,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 

@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { getSignerSelectionForAction } from "../token-management-workspace.utils";
 import { useAssetProfileForm } from "./use-asset-profile-form";
 
 const mocks = vi.hoisted(() => ({
@@ -112,6 +113,70 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useAssetProfileForm", () => {
+  it("saves with live wallet B while retaining the historical deployment wallet A", async () => {
+    const historicalToken = { ...token, signingCustodyWalletId: "cwlt_deployment_a" };
+    const liveWallet = {
+      id: "cwlt_live_b",
+      walletId: "provider_b",
+      publicKey: "live_authority_b",
+      label: "B",
+    };
+    const selection = getSignerSelectionForAction({
+      action: "metadata",
+      token: historicalToken,
+      authorityWallets: [liveWallet],
+      metadataAuthority: liveWallet.publicKey,
+      t: (key) => key,
+    });
+    const rendered = renderHook(
+      () =>
+        useAssetProfileForm({
+          token: historicalToken,
+          assetProfile,
+          metadataSignerSelection: selection,
+        }),
+      { wrapper }
+    );
+    act(() => rendered.result.current.updateDraft({ description: "Updated with B" }));
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({
+          signingCustodyWalletId: "cwlt_live_b",
+          description: "Updated with B",
+        }),
+      })
+    );
+    expect(rendered.result.current.draft.signingWalletId).toBe("cwlt_deployment_a");
+  });
+
+  it("keeps legacy pending-with-mint metadata edits signer-free when RPC is unavailable", async () => {
+    const pendingToken = { ...token, status: "pending" as const };
+    const rendered = renderHook(
+      () =>
+        useAssetProfileForm({
+          token: pendingToken,
+          assetProfile,
+          metadataSignerSelection: {
+            wallets: [],
+            defaultWalletId: "",
+            unavailableReason: "RPC unavailable",
+          },
+        }),
+      { wrapper }
+    );
+    act(() => rendered.result.current.updateDraft({ description: "Draft metadata edit" }));
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({
+          signingCustodyWalletId: undefined,
+          description: "Draft metadata edit",
+        }),
+      })
+    );
+  });
+
   it("saves an unrelated edit to a deployed legacy permanent-delegate token", async () => {
     const rendered = renderHook(
       () => useAssetProfileForm({ token, assetProfile, metadataSignerSelection }),

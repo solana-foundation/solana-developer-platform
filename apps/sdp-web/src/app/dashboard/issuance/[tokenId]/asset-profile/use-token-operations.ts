@@ -347,7 +347,21 @@ export function useTokenOperations({
   const forceBurnSignerSelection = signerSelectionFor("force-burn");
   const freezeSignerSelection = signerSelectionFor("freeze");
   const pauseSignerSelection = signerSelectionFor("pause");
-  const metadataSignerSelection = signerSelectionFor("metadata");
+  const metadataSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "metadata",
+      token,
+      authorityWallets,
+      metadataAuthority: authorityWalletsData?.metadataAuthority ?? null,
+      metadataAuthorityError:
+        authorityWalletsFetchError ??
+        authorityWalletsData?.metadataAuthorityError ??
+        (authorityWalletsData?.metadataAuthority === undefined
+          ? t("DashboardIssuance.management.loadingSignerWallets")
+          : null),
+      t,
+    })
+  );
   const allowlistSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "allowlist",

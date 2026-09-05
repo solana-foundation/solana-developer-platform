@@ -7827,7 +7827,8 @@
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
-            "allowlistAuthority": "So11111111111111111111111111111111111111112"
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8190,7 +8191,7 @@
         "operationId": "getToken",
         "title": "Get token",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}",
+        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeMetadataAuthority={includeMetadataAuthority}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8203,6 +8204,24 @@
             "key": "includeAllowlistAuthority",
             "label": "includeAllowlistAuthority",
             "description": "Opt in to a read-only RPC lookup of the current on-chain list authority for wallet selection. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "includeMetadataAuthority",
+            "label": "includeMetadataAuthority",
+            "description": "Opt in to a read-only lookup of the current metadata authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored metadata authority, falling back to stored mint authority, without RPC. Ordinary token reads do not perform this lookup.",
             "defaultValue": "true",
             "required": false,
             "kind": "select",
@@ -8277,7 +8296,8 @@
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
-            "allowlistAuthority": "So11111111111111111111111111111111111111112"
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8369,7 +8389,8 @@
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
-            "allowlistAuthority": "So11111111111111111111111111111111111111112"
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8472,7 +8493,8 @@
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
-            "allowlistAuthority": "So11111111111111111111111111111111111111112"
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8768,7 +8790,8 @@
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
-            "allowlistAuthority": "So11111111111111111111111111111111111111112"
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8902,7 +8925,8 @@
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
-            "allowlistAuthority": "So11111111111111111111111111111111111111112"
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",

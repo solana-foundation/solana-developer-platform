@@ -118,6 +118,7 @@ export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAss
 
 export const getTokenQuerySchema = z.object({
   includeAllowlistAuthority: z.enum(["true", "false"]).optional(),
+  includeMetadataAuthority: z.enum(["true", "false"]).optional(),
 });
 
 export const updateTokenSchema = z.object({

@@ -59,7 +59,8 @@ export function useAssetProfileForm({
   const [selectedMetadataSignerWalletId, setMetadataSignerWalletId] = useState("");
   const metadataSignerWalletId =
     selectedMetadataSignerWalletId || metadataSignerSelection.defaultWalletId;
-  const metadataSignerUnavailableReason = token.mintAddress
+  const requiresMetadataSigner = Boolean(token.mintAddress && token.status !== "pending");
+  const metadataSignerUnavailableReason = requiresMetadataSigner
     ? (metadataSignerSelection.unavailableReason ??
       (metadataSignerSelection.wallets.some((wallet) => wallet.id === metadataSignerWalletId)
         ? null
@@ -123,7 +124,7 @@ export function useAssetProfileForm({
         profileId: assetProfile.id,
         rebuiltMetadata: buildIssuanceMetadata(draft),
         tokenPatch: {
-          signingCustodyWalletId: isDeployed ? metadataSignerWalletId : undefined,
+          signingCustodyWalletId: requiresMetadataSigner ? metadataSignerWalletId : undefined,
           name: draft.name.trim(),
           description: draft.description.trim() || null,
           uri: draft.metadataUri.trim() || null,
@@ -193,6 +194,7 @@ export function useAssetProfileForm({
     supplyLocked,
     metadataSignerWalletId,
     setMetadataSignerWalletId,
+    requiresMetadataSigner,
   };
 }
 

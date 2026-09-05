@@ -2248,6 +2248,8 @@ After a token is deployed, you can rotate its authorities and adjust operational
 
 For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optional `signingCustodyWalletId`. It selects the exact custody record controlling the current metadata authority for this request, not a new deployment wallet or authority. Omission requires exactly one matching in-scope record; multiple matches return `409`. Database-only edits need no signer. In the dashboard, one matching wallet is automatic; when there are several, choose one in the metadata confirmation or beside the Asset Profile Save button. Historical `data.token.signingCustodyWalletId` does not change.
 
+To select that signer after an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority`. For tokens with a mint this is read live from the chain, unlike the stored snapshot in `data.token.metadataAuthority`; tokens without a mint return their stored metadata authority or mint authority without RPC. RPC failure returns `502`, never the stored value as a fallback. The dashboard keeps metadata and allowlist lookup errors separate, and the update rechecks authority before signing. This read changes neither the stored token nor its deployment wallet.
+
 ## Prerequisites
 
 - A deployed token with status `active`

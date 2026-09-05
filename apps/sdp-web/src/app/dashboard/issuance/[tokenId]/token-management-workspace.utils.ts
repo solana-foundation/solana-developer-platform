@@ -839,6 +839,7 @@ export function getSignerSelectionForAction({
   token,
   authorityWallets,
   metadataAuthority,
+  metadataAuthorityError,
   allowlistAuthority,
   permissionRow,
   t,
@@ -847,10 +848,14 @@ export function getSignerSelectionForAction({
   token: Token;
   authorityWallets: PaymentsDashboardWallet[];
   metadataAuthority: string | null;
+  metadataAuthorityError?: string | null;
   allowlistAuthority?: string | null;
   permissionRow?: PermissionRow | null;
   t: Translate;
 }): SignerSelectionState {
+  if (action === "metadata" && metadataAuthorityError) {
+    return { wallets: [], defaultWalletId: "", unavailableReason: metadataAuthorityError };
+  }
   const availableWallets = getAvailableSignerWallets(authorityWallets);
 
   if (availableWallets.length === 0) {

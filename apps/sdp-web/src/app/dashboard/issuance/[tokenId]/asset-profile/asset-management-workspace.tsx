@@ -289,7 +289,7 @@ export function AssetManagementWorkspace({
         onSave={() => void form.save()}
         onDiscard={form.discard}
       >
-        {token.mintAddress &&
+        {form.requiresMetadataSigner &&
         (ops.metadataSignerSelection.wallets.length !== 1 ||
           ops.metadataSignerSelection.wallets[0]?.id !== form.metadataSignerWalletId ||
           ops.metadataSignerSelection.unavailableReason) ? (

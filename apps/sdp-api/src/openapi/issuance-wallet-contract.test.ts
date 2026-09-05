@@ -85,6 +85,17 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     );
   });
 
+  it("documents the optional metadata authority read and RPC failure", () => {
+    const get = createOpenApiDocument().paths?.["/v1/issuance/tokens/{tokenId}"]?.get;
+    expect(get?.parameters).toContainEqual(
+      expect.objectContaining({ name: "includeMetadataAuthority", in: "query", required: false })
+    );
+    const data = requestSchema(get?.responses?.["200"]).properties?.data;
+    expect(data?.properties).toHaveProperty("metadataAuthority");
+    expect(data?.required ?? []).not.toContain("metadataAuthority");
+    expect(get?.responses).toHaveProperty("502");
+  });
+
   it("documents conflict responses for wallet-bound mutations", () => {
     const doc = createOpenApiDocument();
     const operations = [

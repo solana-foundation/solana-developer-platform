@@ -28,6 +28,7 @@ import {
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
   resolveIssuanceWallet,
+  resolveMetadataAuthority,
 } from "./authority-resolution";
 import { toPublicToken } from "./public-response";
 
@@ -250,13 +251,16 @@ export const getToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
+  const authorities: { allowlistAuthority?: string | null; metadataAuthority?: string | null } = {};
   if (parsed.data.includeAllowlistAuthority === "true") {
-    const allowlistAuthority = token.ablListAddress
+    authorities.allowlistAuthority = token.ablListAddress
       ? await resolveAllowlistAuthority(c.env, token.ablListAddress)
       : null;
-    return success(c, { token: toPublicToken(token), allowlistAuthority });
   }
-  return success(c, { token: toPublicToken(token) });
+  if (parsed.data.includeMetadataAuthority === "true") {
+    authorities.metadataAuthority = await resolveMetadataAuthority(c.env, tokenService, token);
+  }
+  return success(c, { token: toPublicToken(token), ...authorities });
 };
 
 export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSchema>) => {

@@ -510,7 +510,13 @@ export function TokenManagementWorkspace({
       action: "metadata",
       token,
       authorityWallets,
-      metadataAuthority,
+      metadataAuthority: authorityWalletsData?.metadataAuthority ?? null,
+      metadataAuthorityError:
+        authorityWalletsFetchError ??
+        authorityWalletsData?.metadataAuthorityError ??
+        (authorityWalletsData?.metadataAuthority === undefined
+          ? t("DashboardIssuance.management.loadingSignerWallets")
+          : null),
       t,
     })
   );
@@ -740,7 +746,8 @@ export function TokenManagementWorkspace({
   };
 
   const handleUpdateMetadata = () => {
-    if (token.mintAddress && metadataSignerSelection.unavailableReason) {
+    const requiresMetadataSigner = Boolean(token.mintAddress && token.status !== "pending");
+    if (requiresMetadataSigner && metadataSignerSelection.unavailableReason) {
       toast.error(metadataSignerSelection.unavailableReason);
       return;
     }
@@ -762,7 +769,7 @@ export function TokenManagementWorkspace({
           imageUrl: metadataForm.imageUrl.trim() ? metadataForm.imageUrl.trim() : null,
         },
       },
-      { signerWallets: token.mintAddress ? metadataSignerSelection.wallets : undefined }
+      { signerWallets: requiresMetadataSigner ? metadataSignerSelection.wallets : undefined }
     );
   };
 
