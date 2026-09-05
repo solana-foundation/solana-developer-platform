@@ -3,8 +3,9 @@
 import type { CounterpartyRequirements, PayoutRequirementTree } from "@sdp/types/ramp-requirements";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { SWRConfig } from "swr";
+import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
@@ -477,5 +478,71 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     await secondSubmit;
 
     expect(rendered.result.current.onboarding).toEqual(provisioning);
+  });
+
+  /**
+   * Mirrors the wizard's `selectProvider` purge (use-ramp-wizard.ts): every
+   * provider-card click clears all cached requirements answers before setting
+   * the provider field.
+   */
+  function usePurgeHarness(params: CounterpartyRequirementsParams) {
+    const requirements = useCounterpartyRequirements(params);
+    const { mutate } = useSWRConfig();
+    const purgeRequirements = () => {
+      void mutate(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
+        revalidate: true,
+      });
+    };
+    return { requirements, purgeRequirements };
+  }
+
+  it("re-selecting the same provider refetches a subject the cache already answered", async () => {
+    const rendered = renderHook((props: CounterpartyRequirementsParams) => usePurgeHarness(props), {
+      wrapper,
+      initialProps: OFFRAMP_PARAMS,
+    });
+    await release("GET", COLLECT_COUNTERPARTY);
+    await waitFor(() => expect(rendered.result.current.requirements.needsCollection).toBe(true));
+
+    // The frozen SWR options serve the cached answer on re-render — this is the
+    // stale state a provider click must not trust.
+    rendered.rerender(OFFRAMP_PARAMS);
+    expect(held).toHaveLength(0);
+
+    act(() => {
+      rendered.result.current.purgeRequirements();
+    });
+    await waitFor(() => expect(held).toHaveLength(1));
+    await release("GET", READY_US_ADVANCE);
+
+    await waitFor(() => expect(rendered.result.current.requirements.needsCollection).toBe(false));
+    expect(rendered.result.current.requirements.isResolved).toBe(true);
+  });
+
+  it("returning to a previously answered provider refetches after the purge", async () => {
+    const bvnkParams: CounterpartyRequirementsParams = { ...OFFRAMP_PARAMS, provider: "bvnk" };
+    const rendered = renderHook((props: CounterpartyRequirementsParams) => usePurgeHarness(props), {
+      wrapper,
+      initialProps: OFFRAMP_PARAMS,
+    });
+    await release("GET", COLLECT_COUNTERPARTY);
+
+    rendered.rerender(bvnkParams);
+    const bvnkRequest = await release("GET", COLLECT_COUNTERPARTY);
+    expect(bvnkRequest.url).toContain("provider=bvnk");
+
+    act(() => {
+      rendered.result.current.purgeRequirements();
+    });
+    rendered.rerender(OFFRAMP_PARAMS);
+    // The purge revalidates the still-mounted bvnk key, then the switch back to
+    // lightspark finds an empty cache and must fetch — two requests, in order.
+    await waitFor(() => expect(held).toHaveLength(2));
+    const revalidatedBvnk = await release("GET", COLLECT_COUNTERPARTY);
+    expect(revalidatedBvnk.url).toContain("provider=bvnk");
+    const lightsparkRequest = await release("GET", READY_US_ADVANCE);
+    expect(lightsparkRequest.url).toContain("provider=lightspark");
+
+    await waitFor(() => expect(rendered.result.current.requirements.needsCollection).toBe(false));
   });
 });

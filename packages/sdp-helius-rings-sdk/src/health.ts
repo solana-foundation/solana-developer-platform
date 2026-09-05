@@ -86,10 +86,13 @@ async function probePhoton(input: RingsHealthInput, timeoutMs: number): Promise<
           return { status: "red", reason: `http ${response.status}` } as const;
         }
 
-        const body = (await response.json()) as { result?: unknown; error?: unknown };
+        const body = (await response.json()) as {
+          result?: unknown;
+          error?: { message?: unknown };
+        };
         if (body.error !== undefined) {
-          // Answering at all means the indexer is up; its state is what is off.
-          return { status: "amber", reason: "reported unhealthy" } as const;
+          const upstream = typeof body.error.message === "string" ? body.error.message : undefined;
+          return { status: "amber", reason: upstream ?? "reported unhealthy" } as const;
         }
 
         return body.result === "ok"

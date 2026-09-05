@@ -1,5 +1,6 @@
 "use server";
 
+import { auth } from "@clerk/nextjs/server";
 import type {
   ApiKeyControlProfile,
   ApiKeyControlProfileRevision,
@@ -24,7 +25,14 @@ import {
   type PolicyBindingIntent,
   requiredBindingConfirmation,
 } from "./api-key-authoring";
-import { API_KEY_FLASH_COOKIE, API_KEYS_PAGE_PATH, type ApiKeyFlash } from "./api-key-flash";
+import {
+  API_KEY_FLASH_COOKIE,
+  API_KEYS_PAGE_PATH,
+  type ApiKeyFlash,
+  apiKeyFlashCookieOptions,
+  apiKeyFlashMaxAgeSeconds,
+} from "./api-key-flash";
+import { sealApiKeyFlash } from "./api-key-flash-seal";
 
 function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): number {
   if (typeof value !== "string" || value.trim() === "") return fallback;
@@ -33,13 +41,23 @@ function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): n
 }
 
 async function setFlash(flash: ApiKeyFlash) {
+  // The flash can carry a freshly generated API key secret, so it is sealed
+  // (encrypted) and bound to the Clerk session that created it. Without an
+  // authenticated session there is nobody to deliver it to — fail closed
+  // rather than write anything readable to the browser.
+  const { sessionId, userId } = await auth();
+  if (!sessionId || !userId) {
+    return;
+  }
+
+  const maxAge = apiKeyFlashMaxAgeSeconds(flash);
+  const sealed = await sealApiKeyFlash(flash, { sessionId, userId }, maxAge);
+  if (!sealed) {
+    return;
+  }
+
   const jar = await cookies();
-  jar.set(API_KEY_FLASH_COOKIE, JSON.stringify(flash), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: API_KEYS_PAGE_PATH,
-    maxAge: 60 * 5,
-  });
+  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(maxAge));
 }
 
 function extractErrorMessage(error: unknown): string {

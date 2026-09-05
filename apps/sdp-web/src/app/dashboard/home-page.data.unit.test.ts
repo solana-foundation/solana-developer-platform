@@ -2,7 +2,11 @@ import type { PaymentTransferSummary, TokenTransactionListItem } from "@sdp/type
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { buildHomeActivityRows, fetchOrgIssuanceActivity } from "./home-page.data";
+import {
+  buildHomeActivityRows,
+  fetchOrgIssuanceActivity,
+  filterHomeActivityRowsByFlags,
+} from "./home-page.data";
 
 const t = (key: MessageKey, _values?: TranslationValues) => key;
 
@@ -103,6 +107,23 @@ describe("home issuance activity", () => {
     const [row] = buildHomeActivityRows([transfer], [], t);
 
     expect(row?.status).toBe("pending");
+  });
+
+  it("removes issuance rows when the Issuance module is disabled", () => {
+    const transfer = {
+      id: "xfr_visible",
+      direction: "outbound",
+      status: "confirmed",
+      token: "mint",
+      amount: "1",
+      destination: "wallet_9",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+    const rows = buildHomeActivityRows([transfer], [issuanceItem], t);
+
+    expect(filterHomeActivityRowsByFlags(rows, { issuance: false })).toEqual([
+      expect.objectContaining({ id: "payment-xfr_visible", sourceKind: "payments" }),
+    ]);
   });
 
   it("renders a well-known mint as its symbol rather than the raw address", () => {

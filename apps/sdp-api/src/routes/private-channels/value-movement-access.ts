@@ -2,21 +2,22 @@
  * The single access-policy seam for Private Channels value movement.
  *
  * Deposits, withdrawals and member transfers all answer the same question before
- * anything is signed: may THIS caller move value out of THIS wallet, to THIS
- * destination, on THIS instance? Membership in the SPC workspace is not enough —
- * it only proves the caller can mint a gateway token. The control that actually
- * binds a caller to a wallet is `private_channel_verified_wallets`: the record
- * that this member completed the challenge → sign → verify handshake for that
- * pubkey under this instance. Wallet verification is documented as "the gate for
- * money-movement" on the router, and this module is where that gate is applied.
+ * anything is signed: may value move out of THIS wallet, to THIS destination, on
+ * THIS instance? Holding `payments:write` on the project is not enough — it only
+ * proves the caller may move project funds at all. The control that actually
+ * binds a wallet to the channel is `private_channel_verified_wallets`: the record
+ * that the wallet completed the challenge → sign → verify handshake under the
+ * project's SPC principal on this instance. Wallet verification is documented as
+ * "the gate for money-movement" on the router, and this module is where that gate
+ * is applied.
  *
  * Why it has to be here rather than in the service: the request context is the
- * only place that knows who is calling. A service handed a `CustodyWallet` can
- * check that the resolved signer matches it (both deposit and withdraw do), but
- * that only proves SDP can sign for the wallet — never that the CALLER is
- * entitled to. Without this seam, any project member holding `payments:write`
- * could name any project custody wallet and deposit from, or burn the channel
- * balance of, a wallet belonging to someone else.
+ * only place that knows the tenant, the project and its active instance. A
+ * service handed a `CustodyWallet` can check that the resolved signer matches it
+ * (both deposit and withdraw do), but that only proves SDP can sign for the
+ * wallet — never that the wallet is enrolled in Private Channels at all. Without
+ * this seam, any project custody wallet could be named as a deposit source, or
+ * have its channel balance burned, without ever having been enrolled.
  */
 
 import { isAddress } from "@sdp/solana/address";
@@ -74,29 +75,30 @@ export interface PrivateChannelActorContext {
 }
 
 /**
- * Resolve the acting SPC member for a value movement on the project's active
+ * Resolve the acting SPC principal for a value movement on the project's active
  * instance. Instance-scoped, with no channel: deposits and withdrawals move
  * value between a custody wallet and the instance escrow, and are not made
  * inside a logical channel.
+ *
+ * Resolved as the project's DEFAULT PRINCIPAL, the same way `transfer-access`
+ * resolves it, and deliberately not by the caller's user id. A
+ * `private_channel_users` row is a project-level principal that wallets enrol
+ * under; since #1558 it carries no user id at all, so looking one up by
+ * `auth.userId` finds nothing and every deposit and withdrawal on a project
+ * created after that change would answer 403.
  */
 export async function resolvePrivateChannelActor(
   c: AppContext
 ): Promise<PrivateChannelActorContext> {
   const auth = getAuth(c);
-  if (!auth.userId) {
-    throw forbidden(
-      "Private Channels value movement requires a user identity and is not available for API-key auth."
-    );
-  }
-
   const projectId = requireProjectId(c);
   const instanceRow = await requireActiveInstance(c);
-  const actor = await getPrivateChannelUserRepository(c).findByProjectAndUser(
+  const actor = await getPrivateChannelUserRepository(c).findDefaultPrincipal(
     { organizationId: auth.organizationId, projectId },
-    auth.userId
+    instanceRow.id
   );
   if (!actor) {
-    throw forbidden("You must be a Private Channels member to move funds.");
+    throw forbidden("This project has no active Private Channels principal.");
   }
 
   return { auth, projectId, instance: mapPrivateChannelInstanceRow(instanceRow), actor };
@@ -115,14 +117,14 @@ function loadProjectWallets(
 }
 
 /**
- * The custody wallet a value movement spends from, held against the acting
- * member's own verification.
+ * The custody wallet a value movement spends from, held against its enrolment.
  *
  * Three facts have to agree, and each rules out a different mistake: the wallet
  * must exist in the project's custody scope (else it belongs to another tenant),
- * the acting member must have verified it on THIS instance (else it belongs to
- * another member), and the verification's pubkey must still equal the wallet's
- * (else a re-keyed custody wallet would ride an old proof of control).
+ * it must be verified under the project's principal on THIS instance (else it is
+ * a project wallet that was never enrolled in Private Channels), and the
+ * verification's pubkey must still equal the wallet's (else a re-keyed custody
+ * wallet would ride an old proof of control).
  */
 export async function resolveVerifiedSourceWallet(
   c: AppContext,

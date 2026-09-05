@@ -95,12 +95,8 @@ export async function initializeCustody(formData: FormData) {
   redirect("/dashboard/wallets");
 }
 
-/**
- * Returns the wallet the call provisioned so callers can show it. Onboarding
- * previously discarded this and left the user with no evidence of what setup
- * created for them.
- */
-async function initializeCustodyWallet(formData: FormData): Promise<OnboardingProvisionedWallet> {
+/** Returns the wallet provisioned by a custody initialization request. */
+async function initializeCustodyWallet(formData: FormData): Promise<ProvisionedWallet> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -176,7 +172,7 @@ async function initializeCustodyWallet(formData: FormData): Promise<OnboardingPr
       }
 
       // Repair a provider connection whose first wallet did not finish
-      // persisting instead of leaving the organization trapped in onboarding.
+      // persisting instead of leaving the organization without a usable wallet.
       // This endpoint nests its wallet, unlike initialize.
       const repaired = await client.fetch<{ wallet: { walletId: string; publicKey: string } }>(
         "/v1/wallets",
@@ -230,21 +226,10 @@ async function createCustodyWalletForProvider(formData: FormData) {
   });
 }
 
-/** A provisioned wallet is `null` when an earlier attempt had already created it. */
-export interface OnboardingProvisionedWallet {
+interface ProvisionedWallet {
   publicKey: string;
   walletId: string;
 }
-
-export type OnboardingCustodyActionResult =
-  | {
-      status: "success";
-      wallet: OnboardingProvisionedWallet;
-    }
-  | {
-      status: "error";
-      message: string;
-    };
 
 export type WalletSetupActionResult =
   | {
@@ -263,29 +248,6 @@ export async function initializeCustodySetupAction(
     await initializeCustodyWallet(formData);
     revalidateWalletPaths();
     return { status: "success" };
-  } catch (error) {
-    return {
-      status: "error",
-      message: toApiActionErrorMessage(error, t),
-    };
-  }
-}
-
-export async function initializeOnboardingCustodyAction(
-  formData: FormData
-): Promise<OnboardingCustodyActionResult> {
-  const t = await getTranslations();
-  try {
-    const wallet = await initializeCustodyWallet(formData);
-    // No revalidation here: any revalidatePath from this action invalidates the
-    // client router cache and re-runs the onboarding route, whose server page
-    // redirects once setup is complete, sweeping the completion panel away
-    // after a beat. The panel exits through full document navigations, which
-    // fetch fresh state without any help.
-    return {
-      status: "success",
-      wallet: { publicKey: wallet.publicKey, walletId: wallet.walletId },
-    };
   } catch (error) {
     return {
       status: "error",

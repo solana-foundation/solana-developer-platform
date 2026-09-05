@@ -182,9 +182,17 @@ async function reconcileSubmitted(
     return;
   }
 
-  const [status] = await solanaRpc.getSignatureStatuses(projectRpc.rpc, [
-    deposit.signature as Signature,
-  ]);
+  // searchTransactionHistory because every caller of this is already past the
+  // node's short recent-status cache: a submitted row is only polled on the
+  // reconciler's cadence, and the signed-pending promotion below reaches here
+  // strictly AFTER STUCK_AFTER_MS. Without it an executed deposit reads null,
+  // gets failed as "not found on chain", and the dashboard hands the caller a
+  // fresh idempotency key for a deposit that already moved funds.
+  const [status] = await solanaRpc.getSignatureStatuses(
+    projectRpc.rpc,
+    [deposit.signature as Signature],
+    { searchTransactionHistory: true }
+  );
 
   if (!status) {
     // Not found on chain; if it's been a while, treat the tx as dropped.

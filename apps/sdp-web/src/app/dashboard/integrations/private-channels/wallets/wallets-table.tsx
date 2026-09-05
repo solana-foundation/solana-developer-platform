@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { WalletChannelBalance } from "../private-channels-page.data";
 import { deleteVerifiedWalletAction, verifyWalletAction } from "./actions";
@@ -82,6 +83,8 @@ export function WalletsTable({
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
   const t = useTranslations();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
 
   const custodyByPubkey = new Map(custodyWallets.map((w) => [w.publicKey, w]));
   const verifiedPubkeys = new Set(verifiedWallets.map((w) => w.pubkey));
@@ -149,11 +152,13 @@ export function WalletsTable({
             <p className="text-sm text-secondary">
               {t("DashboardPrivateChannels.verifiedWallets.noWallets")}
             </p>
-            <Button asChild>
-              <Link href="/dashboard/wallets">
-                {t("DashboardPrivateChannels.verifiedWallets.createWallet")}
-              </Link>
-            </Button>
+            {custodyEnabled ? (
+              <Button asChild>
+                <Link href="/dashboard/wallets">
+                  {t("DashboardPrivateChannels.verifiedWallets.createWallet")}
+                </Link>
+              </Button>
+            ) : null}
           </div>
         ) : verifiedWallets.length === 0 ? (
           <p className="text-sm text-secondary">

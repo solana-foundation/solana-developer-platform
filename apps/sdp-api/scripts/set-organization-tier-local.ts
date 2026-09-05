@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDatabaseClient } from "../src/db";
+import { createDatabaseClient, runWithSystemDatabaseIdentity } from "../src/db";
 import { ClerkOrganizationsService } from "../src/services/clerk-organizations.service";
 import {
   parseProviderOverridesFromClerkMetadata,
@@ -229,7 +229,7 @@ async function main() {
   );
 }
 
-void main().catch((error) => {
+void runWithSystemDatabaseIdentity("script:set-organization-tier-local", main).catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

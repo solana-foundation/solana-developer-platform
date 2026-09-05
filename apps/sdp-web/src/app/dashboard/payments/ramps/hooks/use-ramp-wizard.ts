@@ -14,7 +14,7 @@ import type {
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import type { z } from "zod";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
@@ -165,6 +165,14 @@ export function useRampWizard<TId extends string>(
     provider: null,
     counterpartyId: initialCounterpartyId,
   });
+
+  const { mutate: mutateSwrCache } = useSWRConfig();
+  const selectProvider = (provider: RampProviderId) => {
+    void mutateSwrCache(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
+      revalidate: true,
+    });
+    setField("provider", provider);
+  };
 
   const selectedProviderField = fields.provider;
   useEffect(() => {
@@ -518,6 +526,7 @@ export function useRampWizard<TId extends string>(
     selectedRampPair,
     fields,
     setField,
+    selectProvider,
     quote,
     quoteTransferId,
     memoRows,

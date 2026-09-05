@@ -231,6 +231,20 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return row ? mapStrategyRow(row) : null;
     },
 
+    async listShareMintedStrategies(params) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_strategies
+             WHERE environment = ?
+               AND host_cluster = ?
+               AND share_mint IS NOT NULL
+             ORDER BY created_at ASC, id ASC`
+        )
+        .bind(params.environment, params.hostCluster)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapStrategyRow);
+    },
+
     async deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput) {
       // Only `active` rows are deleted. An operator `paused`/`deprecated` is a
       // deliberate human record, and it is load-bearing: upsertStrategy refuses

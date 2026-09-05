@@ -326,6 +326,19 @@ describe("buildExternalWalletDepositTransaction", () => {
       .first<{ builds: number }>();
     expect(row?.builds).toBe(0);
   });
+
+  it("names Jupiter Lend's floor refusal as slippage exceeded", async () => {
+    simulateVaultPlan.mockResolvedValue({
+      ok: false,
+      error: "custom program error: 0x1771",
+      logs: ["Program log: AnchorError. Error Code: FTokenMinAmountOut."],
+    });
+    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      details: { reason: "slippage_exceeded" },
+      message: expect.stringContaining("slippage"),
+    });
+  });
 });
 
 describe("buildExternalWalletDepositTransaction (swap-funded)", () => {

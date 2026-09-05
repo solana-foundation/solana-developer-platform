@@ -619,6 +619,45 @@ describe("createChannelTransfer", () => {
     );
   });
 
+  /**
+   * A gateway that answers 502 or 504 has already forwarded the send upstream
+   * and lost the reply, so the burn may be on chain. Failing the signed row here
+   * would invite the caller to spend the same balance again under a fresh key.
+   */
+  it.each([
+    ["502 from the gateway", 502],
+    ["504 from the gateway", 504],
+  ])("reconciles a %s instead of failing the signed reservation", async (_label, statusCode) => {
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(
+      Object.assign(new Error(`HTTP error (${statusCode}): Bad Gateway`), {
+        context: { __code: 8100002, statusCode },
+      })
+    );
+
+    const result = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(result).toMatchObject({ status: "confirmed" });
+    expect(repo.updateTransfer).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" })
+    );
+  });
+
+  /**
+   * 503 stays definitive: the proxy refused before forwarding anything, which is
+   * the same "never reached" case as a refused connection.
+   */
+  it("still fails a 503 the gateway refused before forwarding", async () => {
+    vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(
+      Object.assign(new Error("HTTP error (503): Service Unavailable"), {
+        context: { __code: 8100002, statusCode: 503 },
+      })
+    );
+
+    const result = await createChannelTransfer(TEST_ENV, makeInput());
+
+    expect(result).toMatchObject({ status: "failed" });
+  });
+
   it("still fails a definitive RPC rejection even though the signature was recorded", async () => {
     vi.mocked(solanaRpc.sendTransaction).mockRejectedValueOnce(new Error("SPC rejected transfer"));
 

@@ -30,6 +30,7 @@ const OBSERVED: RingsWalletSync = {
       symbol: "SOL",
       amountRaw: "1000000000",
       decimals: 9,
+      ringProgramId: null,
       usdPrice: 150,
       usdValue: 150,
     },

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { EarnStrategy, EarnVaultDeposit, EarnVaultMovementStatus } from "@sdp/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnFundingWallet } from "./deposit/earn-funding-wallets";
@@ -18,6 +18,8 @@ import {
   floorForTolerance,
   isSlippageExceededRefusal,
   parseSlippageToleranceBps,
+  VAULT_QUOTE_DEBOUNCE_MS,
+  VAULT_QUOTE_TTL_MS,
 } from "./earn-vault-slippage";
 
 const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -25,6 +27,7 @@ const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
 const PROJECT_ID = "prj_test";
 
 const mocks = vi.hoisted(() => ({
+  canManageCustody: true,
   createEarnVaultDeposit: vi.fn(),
   useEarnFundingWallets: vi.fn(),
   useEarnVaultDepositOutcome: vi.fn(),
@@ -45,6 +48,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.walletsEmptyTitle": "No active custody wallets",
   "DashboardEarn.deposit.walletsEmptyBody": "Create a wallet before depositing.",
   "DashboardEarn.deposit.goToWallets": "Open Wallets",
+  "DashboardCustody.createWallet": "Create wallet",
   "DashboardEarn.deposit.walletUnnamed": "Unnamed wallet",
   "DashboardEarn.deposit.strategyAssetUnavailable": "Strategy asset unavailable.",
   "DashboardEarn.deposit.vaultWalletTitle": "Funding wallet",
@@ -117,6 +121,13 @@ vi.mock("@/i18n/provider", () => ({
     );
   },
   useLocale: () => "en",
+}));
+
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => ({
+    dashboardAccess: { capabilities: { canManageCustody: mocks.canManageCustody } },
+    flags: { custody: true },
+  }),
 }));
 
 vi.mock("./deposit/earn-funding-wallets", () => ({
@@ -194,6 +205,7 @@ async function enterDepositAmount(amount = "1.000000") {
 }
 
 beforeEach(() => {
+  mocks.canManageCustody = true;
   mocks.createEarnVaultDeposit.mockReset();
   mocks.fetchEarnVaultDepositByRequestId.mockReset();
   mocks.fetchEarnVaultDepositPreview.mockReset();
@@ -737,6 +749,33 @@ describe("EarnVaultDepositModal", () => {
     expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
   });
 
+  it("sends an empty wallet state straight to wallet setup", async () => {
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [],
+      error: undefined,
+      isLoading: false,
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    const action = screen.getByRole("link", { name: "Create wallet" });
+    expect(action.getAttribute("href")).toBe("/dashboard/wallets/setup");
+  });
+
+  it("does not offer wallet setup without custody management permission", async () => {
+    mocks.canManageCustody = false;
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [],
+      error: undefined,
+      isLoading: false,
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
+  });
+
   it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
     mocks.useEarnFundingWallets.mockReturnValue({
@@ -1019,6 +1058,190 @@ describe("slippage-floored providers", () => {
     expect(
       (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
+  });
+
+  describe("quote expiry (PRO-1691)", () => {
+    function quoted(sharesOut: string) {
+      return {
+        kind: "quoted" as const,
+        preview: {
+          strategyId: vedaStrategy.id,
+          sharesOut,
+          shareDecimals: 6,
+          blockingIssues: [] as { code: string; message: string }[],
+        },
+      };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function advanceTimers(ms: number) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    }
+
+    /** Flush the submit's promise chain without moving any timer. */
+    async function flushSubmission() {
+      await act(async () => {
+        for (let step = 0; step < 25; step += 1) await Promise.resolve();
+      });
+    }
+
+    /** Select the wallet, enter 1 USDC, and wait out the quote debounce. */
+    async function armVedaDeposit() {
+      screen.getByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+      fireEvent.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+      fireEvent.change(screen.getByLabelText("Amount (USDC)"), {
+        target: { value: "1.000000" },
+      });
+      await advanceTimers(VAULT_QUOTE_DEBOUNCE_MS);
+      screen.getByText("Minimum shares received");
+    }
+
+    it("re-quotes an aged quote on its own and re-floors in place, without disarming", async () => {
+      let resolveRefresh: (value: ReturnType<typeof quoted>) => void = () => {};
+      mocks.fetchEarnVaultDepositPreview.mockResolvedValueOnce(quoted("1")).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          })
+      );
+      render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      expect(screen.getByText("0.999")).toBeTruthy();
+
+      // The TTL elapses: the refresh fires on its own and is IN FLIGHT here…
+      // (the second advance fires the re-run's own zero-delay fetch timer)
+      await advanceTimers(VAULT_QUOTE_TTL_MS + 1000);
+      await advanceTimers(1);
+      expect(mocks.fetchEarnVaultDepositPreview).toHaveBeenCalledTimes(2);
+      // …while the standing quote stays on screen — no loading flicker, no
+      // disarmed confirm, no layout shift.
+      expect(screen.getByText("0.999")).toBeTruthy();
+      expect(screen.queryByText(/Fetching the live share quote/)).toBeNull();
+      expect(
+        (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
+      ).toBe(false);
+
+      await act(async () => {
+        resolveRefresh(quoted("0.9"));
+        await Promise.resolve();
+      });
+      // The fresh rate swaps in place: expected shares and floor both re-derive.
+      expect(screen.getByText("0.9")).toBeTruthy();
+      expect(screen.getByText("0.8991")).toBeTruthy();
+    });
+
+    it("re-quotes a floor older than the TTL at submit, then sends the reviewed floor", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValueOnce(quoted("0.9995"));
+      mocks.createEarnVaultDeposit.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+      });
+      render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      // The clock passes the TTL without the auto-refresh timer firing — the
+      // throttled-background-tab case the submit-time check exists for.
+      vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      // The fresh check ran, BEFORE the money moved…
+      expect(mocks.fetchEarnVaultDepositPreview).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(1);
+      expect(mocks.fetchEarnVaultDepositPreview.mock.invocationCallOrder[1]).toBeLessThan(
+        mocks.createEarnVaultDeposit.mock.invocationCallOrder[0]
+      );
+      // …and the floor sent is the one the user REVIEWED, freshly revalidated:
+      // the still-satisfiable 0.999, never a weaker floor off the 0.9995 rate.
+      expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "1",
+        minSharesOut: "0.999",
+      });
+      expect(screen.getByText("Deposit submitted")).toBeTruthy();
+    });
+
+    it("stops a stale submit whose fresh rate broke the floor: slippage copy, no POST", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValue(quoted("0.99"));
+      render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      // The rate moved beyond the chosen tolerance while the quote sat stale:
+      // friction lands HERE, before submit, never as a server refusal after.
+      expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
+      expect(screen.getByText(/Increase the tolerance below/)).toBeTruthy();
+      expect(
+        (screen.getByLabelText("Slippage tolerance (basis points)") as HTMLInputElement).value
+      ).toBe("10");
+      // The displayed quote re-syncs so the retry reviews the fresh floor.
+      await advanceTimers(1);
+      expect(mocks.fetchEarnVaultDepositPreview.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(screen.getByText("0.98901")).toBeTruthy();
+    });
+
+    it("replays a held key's floor verbatim, bypassing the expiry check", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValue(quoted("0.5"));
+      mocks.createEarnVaultDeposit.mockResolvedValue({
+        ok: true,
+        status: 202,
+        data: { kind: "approval_pending", message: "Approval required" },
+      });
+
+      const held = render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+      screen.getByText("Approval required");
+      held.unmount();
+
+      render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      // Had the expiry gate run here, the 0.5 re-quote would have refused the
+      // held 0.999 floor. It must not: an approval's replay carries the floor
+      // its key was MINTED with, verbatim, or the hold is stranded.
+      expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][0]).toMatchObject({
+        minSharesOut: "0.999",
+      });
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+        mocks.createEarnVaultDeposit.mock.calls[0][1]
+      );
+    });
   });
 
   it("answers a blown floor with its own copy, opens the control, and re-quotes", async () => {

@@ -17,11 +17,16 @@ import type {
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
   CachedApiKey,
+  Permission,
 } from "@sdp/types";
-import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
 import type { Context, Next } from "hono";
-import { getDb } from "@/db";
-import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
+import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
+import {
+  apiKeyCacheKey,
+  fillApiKeyCache,
+  isTrustedCachedApiKey,
+  loadCachedApiKeyFromDb,
+} from "@/lib/api-key-cache";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
@@ -30,12 +35,10 @@ import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
-import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
-const KV_TTL_SECONDS = 3600; // 1 hour cache
 const INVALID_KEY_CACHE_TTL_SECONDS = 30;
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
 
@@ -83,18 +86,12 @@ function looksLikeJwt(token: string): boolean {
 
 /** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
-  const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
-  // Payloads written before rotation-deadline enforcement do not contain this
-  // property. Treat them as misses so a deploy cannot extend an old key's
-  // validity until the legacy one-hour cache entry expires.
-  return cached &&
-    Object.hasOwn(cached, "rotationDeadline") &&
-    (cached.walletScope === "all" || cached.walletScope === "selected") &&
-    (cached.walletBindings ?? []).every(
-      (binding) => typeof binding.custodyWalletId === "string" && binding.custodyWalletId.length > 0
-    )
-    ? cached
-    : null;
+  const cached = await kv.get<CachedApiKey>(apiKeyCacheKey(keyHash), "json");
+  // The shared predicate treats legacy payloads (pre rotation-deadline,
+  // organization-status, or wallet-scope enforcement) and pending installs
+  // as misses, so a deploy cannot extend an old key's validity and a fill's
+  // not-yet-verified snapshot never authenticates a cache-hit reader.
+  return cached && isTrustedCachedApiKey(cached) ? cached : null;
 }
 
 async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
@@ -118,73 +115,17 @@ async function getFromDatabaseAndCache(
   kv: KVStore,
   keyHash: string
 ): Promise<CachedApiKey | null> {
-  const result = await db
-    .prepare(
-      `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
-              p.environment,
-              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at,
-              ak.rotation_deadline
-       FROM api_keys ak
-       JOIN projects p ON p.id = ak.project_id
-       WHERE ak.key_hash = ?`
-    )
-    .bind(keyHash)
-    .first<{
-      id: string;
-      organization_id: string;
-      project_id: string;
-      role: ApiKeyRole;
-      permissions: string | null;
-      environment: string;
-      rate_limit_tier: string;
-      allowed_ips: string | null;
-      signing_wallet_id: string | null;
-      status: string;
-      expires_at: string | null;
-      rotation_deadline: string | null;
-    }>();
+  const cached = await loadCachedApiKeyFromDb(db, keyHash);
 
-  if (!result) {
+  if (!cached) {
     return null;
   }
 
-  const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
-    await loadApiKeyWalletAuthorization(
-      db,
-      result.id,
-      result.organization_id,
-      result.project_id,
-      result.signing_wallet_id
-    );
-
-  const cached: CachedApiKey = {
-    id: result.id,
-    organizationId: result.organization_id,
-    projectId: result.project_id,
-    role: result.role,
-    permissions: result.permissions
-      ? parsePostgresJson<Permission[]>(result.permissions)
-      : getPermissionsForApiKeyRole(result.role),
-    environment: result.environment as "sandbox" | "production",
-    rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
-    allowedIps: parseOptionalPostgresJson<string[]>(result.allowed_ips),
-    walletScope,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    status: result.status as "active" | "revoked" | "expired" | "deactivated",
-    expiresAt: result.expires_at,
-    rotationDeadline: result.rotation_deadline,
-  };
-
-  // Older readers interpret an empty binding list as unrestricted.
-  if (walletScope !== "selected" || walletBindings.length > 0) {
-    await kv.put(`key:${keyHash}`, JSON.stringify(cached), {
-      expirationTtl: KV_TTL_SECONDS,
-    });
-  }
-
-  return cached;
+  // Write-if-absent: a fill must never overwrite authoritative state a
+  // concurrent revocation wrote after this function's DB read — and if that
+  // happened, this request must authenticate against the newer state, not
+  // the snapshot it read.
+  return await fillApiKeyCache(db, kv, keyHash, cached);
 }
 
 function writeLastUsed(db: DatabaseClient, keyId: string): Promise<void> {
@@ -299,10 +240,8 @@ function normalizeWalletBindings(cachedKey: CachedApiKey): {
     .map((binding) => ({
       walletId: binding.walletId,
       custodyWalletId: binding.custodyWalletId,
-      permissions:
-        binding.permissions && binding.permissions.length > 0
-          ? binding.permissions
-          : (["*"] as Permission[]),
+      // An explicitly empty list grants nothing; it must never widen to "*".
+      permissions: binding.permissions ?? ([] as Permission[]),
     }));
 
   const signingWalletIds = walletBindings.map((binding) => binding.walletId);
@@ -321,92 +260,113 @@ function normalizeWalletBindings(cachedKey: CachedApiKey): {
  * Validates API key and sets auth context
  */
 export function authMiddleware() {
+  // Key resolution reads api_keys and organization allowlists before any
+  // tenant is known, so it runs under the system database identity; the rest
+  // of the request narrows to the key's organization (row-level security then
+  // holds every downstream query inside that tenant).
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const apiKey = extractApiKey(c);
+    const authContext = await runWithSystemDatabaseIdentity("http:auth", () =>
+      authenticateApiKeyRequest(c)
+    );
+    await runWithTenantDatabaseIdentity({ organizationId: authContext.organizationId }, next);
+  };
+}
 
-    if (!apiKey) {
-      throw new AppError("UNAUTHORIZED", "API key required");
-    }
+async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise<ApiKeyContext> {
+  const apiKey = extractApiKey(c);
 
-    // Validate key format
-    if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
-      throw new AppError("INVALID_API_KEY", "Invalid API key format");
-    }
+  if (!apiKey) {
+    throw new AppError("UNAUTHORIZED", "API key required");
+  }
 
-    // Hash the key
-    const pepper = c.env.API_KEY_PEPPER;
-    const keyHash = await hashString(apiKey, pepper);
+  // Validate key format
+  if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
+    throw new AppError("INVALID_API_KEY", "Invalid API key format");
+  }
 
-    // Try KV first, then Postgres
-    const apiKeysKV = c.var.kv.apiKeys;
-    let cachedKey = await getFromKV(apiKeysKV, keyHash);
-    if (!cachedKey) {
-      if (await isKnownInvalidKey(apiKeysKV, keyHash)) {
-        throw new AppError("INVALID_API_KEY", "Invalid API key");
-      }
-      cachedKey = await getFromDatabaseAndCache(getDb(c.env), apiKeysKV, keyHash);
-      if (!cachedKey) {
-        await cacheInvalidKey(apiKeysKV, keyHash);
-      }
-    }
+  // Hash the key
+  const pepper = c.env.API_KEY_PEPPER;
+  const keyHash = await hashString(apiKey, pepper);
 
-    if (!cachedKey) {
+  // Try KV first, then Postgres
+  const apiKeysKV = c.var.kv.apiKeys;
+  let cachedKey = await getFromKV(apiKeysKV, keyHash);
+  if (!cachedKey) {
+    if (await isKnownInvalidKey(apiKeysKV, keyHash)) {
       throw new AppError("INVALID_API_KEY", "Invalid API key");
     }
-
-    // Check status
-    if (cachedKey.status === "revoked" || cachedKey.status === "deactivated") {
-      throw new AppError("REVOKED_API_KEY");
+    cachedKey = await getFromDatabaseAndCache(getDb(c.env), apiKeysKV, keyHash);
+    if (!cachedKey) {
+      await cacheInvalidKey(apiKeysKV, keyHash);
     }
+  }
 
-    if (cachedKey.status === "expired") {
-      throw new AppError("EXPIRED_API_KEY");
-    }
+  if (!cachedKey) {
+    throw new AppError("INVALID_API_KEY", "Invalid API key");
+  }
 
-    // Check expiration
-    if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
-      throw new AppError("EXPIRED_API_KEY");
-    }
+  // Reject on organization status before key status: even when the key
+  // row still says active, a key created or rotated after an organization
+  // deletion enumerated that org's keys is covered by neither the
+  // deletion's revocation nor its cache refresh.
+  if (cachedKey.organizationStatus !== "active") {
+    throw new AppError("REVOKED_API_KEY");
+  }
 
-    if (isRotationDeadlineReached(cachedKey.rotationDeadline)) {
-      throw new AppError("EXPIRED_API_KEY");
-    }
+  // Check status
+  if (cachedKey.status === "revoked" || cachedKey.status === "deactivated") {
+    throw new AppError("REVOKED_API_KEY");
+  }
 
-    if (!isClientIpAllowed(getClientIp(c), cachedKey.allowedIps)) {
-      throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
-    }
+  if (cachedKey.status === "expired") {
+    throw new AppError("EXPIRED_API_KEY");
+  }
 
-    await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
+  // Check expiration
+  if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
+    throw new AppError("EXPIRED_API_KEY");
+  }
 
-    // Uncached Postgres read (so enabling it takes effect immediately) — which
-    // is why it must sit behind the KV-backed limiter: ahead of it, a flooding
-    // key costs one DB read per rejected request. Behind it, reads are capped
-    // at the tier; the quota this spends belongs to whoever holds the key.
-    await enforceOrganizationIpAllowlist(c, cachedKey.organizationId);
+  if (isRotationDeadlineReached(cachedKey.rotationDeadline)) {
+    throw new AppError("EXPIRED_API_KEY");
+  }
 
-    // Set auth context
-    const normalizedWalletBindings = normalizeWalletBindings(cachedKey);
+  if (!isClientIpAllowed(getClientIp(c), cachedKey.allowedIps)) {
+    throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
+  }
 
-    const authContext: ApiKeyContext = {
-      id: cachedKey.id,
-      organizationId: cachedKey.organizationId,
-      projectId: cachedKey.projectId,
-      role: cachedKey.role,
-      permissions: cachedKey.permissions,
-      environment: cachedKey.environment,
-      walletScope: normalizedWalletBindings.walletScope,
-      signingWalletId: normalizedWalletBindings.signingWalletId,
-      signingWalletIds: normalizedWalletBindings.signingWalletIds,
-      walletBindings: normalizedWalletBindings.walletBindings,
-    };
+  await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
 
-    c.set("apiKey", authContext);
+  // Uncached Postgres read (so enabling it takes effect immediately) — which
+  // is why it must sit behind the KV-backed limiter: ahead of it, a flooding
+  // key costs one DB read per rejected request. Behind it, reads are capped
+  // at the tier; the quota this spends belongs to whoever holds the key.
+  await enforceOrganizationIpAllowlist(c, cachedKey.organizationId);
 
-    // Update last used (fire and forget). Node coalesces this write per key.
-    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id);
+  // Set auth context
+  const normalizedWalletBindings = normalizeWalletBindings(cachedKey);
 
-    await next();
+  const authContext: ApiKeyContext = {
+    id: cachedKey.id,
+    organizationId: cachedKey.organizationId,
+    projectId: cachedKey.projectId,
+    role: cachedKey.role,
+    permissions: cachedKey.permissions,
+    environment: cachedKey.environment,
+    walletScope: normalizedWalletBindings.walletScope,
+    signingWalletId: normalizedWalletBindings.signingWalletId,
+    signingWalletIds: normalizedWalletBindings.signingWalletIds,
+    walletBindings: normalizedWalletBindings.walletBindings,
   };
+
+  c.set("apiKey", authContext);
+
+  // Update last used (fire and forget). Node coalesces this write per key.
+  // Started inside the system identity frame so the deferred write keeps
+  // its cross-tenant grant after the request narrows to the tenant.
+  void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id);
+
+  return authContext;
 }
 
 /**
@@ -463,6 +423,13 @@ export function optionalAuth() {
       }
     }
 
+    // Re-narrow explicitly: authMiddleware bound the tenant identity around
+    // its own (no-op) next, so the real downstream runs here instead.
+    const authenticated = c.get("apiKey");
+    if (authenticated) {
+      await runWithTenantDatabaseIdentity({ organizationId: authenticated.organizationId }, next);
+      return;
+    }
     await next();
   };
 }
@@ -475,8 +442,19 @@ export function unifiedAuthMiddleware(
   options: { allowSession?: boolean; allowClerk?: boolean } = {}
 ) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (await tryApprovedOperationReplayAuth(c)) {
-      return next();
+    // Replay capabilities resolve the wallet operation (and its tenant)
+    // before authentication, so the lookup runs privileged and the request
+    // then narrows to the operation's organization.
+    const replayAuthenticated = await runWithSystemDatabaseIdentity("http:auth", () =>
+      tryApprovedOperationReplayAuth(c)
+    );
+    if (replayAuthenticated) {
+      const organizationId =
+        c.get("apiKey")?.organizationId ?? c.get("session")?.organizationId ?? null;
+      if (!organizationId) {
+        throw new AppError("FORBIDDEN", "Approved wallet operation has no tenant context");
+      }
+      return runWithTenantDatabaseIdentity({ organizationId }, next);
     }
     // Try API key first
     const apiKey = extractApiKey(c);

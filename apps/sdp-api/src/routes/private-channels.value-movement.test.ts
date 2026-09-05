@@ -3,12 +3,18 @@
  * Channels money routes: `POST /deposits` and `POST /withdrawals`.
  *
  * Both routes used to accept ANY custody wallet in the project as their source,
- * gated only on `payments:write`. That let one project member deposit out of a
- * colleague's wallet, and — the sharper edge — burn a colleague's channel
- * balance while naming an arbitrary payout address of their own. The gate is now
- * `private_channel_verified_wallets`: the caller must have proved control of the
- * source wallet on this instance. These tests hold that gate, plus the
- * `Idempotency-Key` reservation that keeps a retry from moving funds twice.
+ * gated only on `payments:write`. That let a caller deposit out of a wallet that
+ * was never enrolled in Private Channels, and — the sharper edge — burn the
+ * channel balance behind one while naming an arbitrary payout address. The gate
+ * is now `private_channel_verified_wallets`: the wallet must have completed the
+ * challenge → sign → verify handshake under the project's default principal on
+ * this instance. These tests hold that gate, plus the `Idempotency-Key`
+ * reservation that keeps a retry from moving funds twice.
+ *
+ * The principal is project-scoped, not per-user (migration 0073), so the seeds
+ * here write the CURRENT row shape — `instance_id` + `is_default`, no `user_id`.
+ * Seeding the legacy user-keyed shape is what let the first version of the seam
+ * pass these tests while answering 403 against every real post-0073 project.
  *
  * The services are mocked: what is under test is the ACCESS DECISION and what
  * the route hands the service, not the chain work behind it.
@@ -270,22 +276,30 @@ async function seedRouteState(): Promise<void> {
       ),
     db
       .prepare(
+        // Principals are project-scoped and instance-scoped since 0073: `user_id`
+        // is nullable and carries no meaning here, so these rows are seeded the
+        // way the application now writes them — the acting one is the instance's
+        // DEFAULT principal, which is what the access seam resolves. Seeding the
+        // legacy user-keyed shape would let a seam that looks members up by user
+        // id pass here while answering 403 against a real project.
         `INSERT INTO private_channel_users
-           (id, organization_id, project_id, user_id, spc_user_id, spc_username,
-            spc_credential_ciphertext)
+           (id, organization_id, project_id, instance_id, is_default, provisioned_at,
+            spc_user_id, spc_username, spc_credential_ciphertext)
          VALUES
-           (?, ?, ?, ?, 'spc-value-actor', 'value-actor', 'cipher-actor'),
-           (?, ?, ?, ?, 'spc-value-colleague', 'value-colleague', 'cipher-colleague')`
+           (?, ?, ?, ?, TRUE, '2026-01-01T00:00:00.000Z',
+            'spc-value-actor', 'value-actor', 'cipher-actor'),
+           (?, ?, ?, ?, FALSE, '2026-01-01T00:00:00.000Z',
+            'spc-value-colleague', 'value-colleague', 'cipher-colleague')`
       )
       .bind(
         ACTOR_PC_USER_ID,
         ORGANIZATION_ID,
         PROJECT_ID,
-        ACTOR_USER_ID,
+        INSTANCE_ID,
         COLLEAGUE_PC_USER_ID,
         ORGANIZATION_ID,
         PROJECT_ID,
-        COLLEAGUE_USER_ID
+        INSTANCE_ID
       ),
     db
       .prepare(
@@ -388,36 +402,49 @@ describe("Private Channels — deposit and withdrawal access", () => {
     await clearKVStores(env);
   });
 
-  it("refuses API-key auth, which cannot name an acting member", async () => {
-    const deposit = await postDeposit(
-      { walletId: ACTOR_WALLET_ID, amount: "1.5" },
-      apiKeyHeaders()
-    );
-    const withdrawal = await postWithdrawal(
-      { walletId: ACTOR_WALLET_ID, amount: "1.5" },
-      apiKeyHeaders()
-    );
+  /**
+   * The SPC identity is a PROJECT-scoped principal since 0073, not a per-user
+   * membership, so value movement cannot be gated on who is calling — the seam
+   * resolves the instance's default principal, exactly as member transfers do.
+   * What still has to hold is that the project HAS one to act as.
+   */
+  it("refuses a value movement when the project has no active principal", async () => {
+    await getDb(env)
+      .prepare("UPDATE private_channel_users SET is_default = FALSE WHERE id = ?")
+      .bind(ACTOR_PC_USER_ID)
+      .run();
 
-    expect(deposit.status).toBe(403);
-    expect(withdrawal.status).toBe(403);
+    expect((await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(403);
+    expect((await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
-  it("refuses a project member who is not an SPC member", async () => {
-    const headers = sessionHeaders({ Cookie: `sdp_session=${NON_MEMBER_SESSION_ID}` });
+  /**
+   * Enrolment is the gate, and it does not depend on the caller's own identity:
+   * a session belonging to nobody in particular, and an API key, both get the
+   * same refusal for a wallet that was never verified under the principal.
+   */
+  it.each([
+    [
+      "a non-member session",
+      () => sessionHeaders({ Cookie: `sdp_session=${NON_MEMBER_SESSION_ID}` }),
+    ],
+    ["an API key", apiKeyHeaders],
+  ])("refuses an unenrolled wallet for %s", async (_label, buildHeaders) => {
+    const headers = buildHeaders();
 
-    expect((await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers)).status).toBe(
-      403
-    );
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers)).status
+      (await postDeposit({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, headers)).status
+    ).toBe(403);
+    expect(
+      (await postWithdrawal({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, headers)).status
     ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
-  it("refuses a custody wallet the acting member has not verified", async () => {
+  it("refuses a custody wallet that is not enrolled under the principal", async () => {
     expect((await postDeposit({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" })).status).toBe(403);
     expect((await postWithdrawal({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" })).status).toBe(
       403
@@ -426,9 +453,11 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
-  // The finding in one line: `payments:write` used to be enough to spend out of a
-  // colleague's wallet, or to burn the channel balance behind it.
-  it("does not let a member move funds out of another member's verified wallet", async () => {
+  // The finding in one line: `payments:write` used to be enough to spend out of
+  // any project custody wallet, or to burn the channel balance behind it. This
+  // one is verified under a DIFFERENT, non-default principal — enrolled in SPC,
+  // but not under the principal this project acts as.
+  it("does not let a caller move funds out of another principal's verified wallet", async () => {
     expect((await postDeposit({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" })).status).toBe(403);
     expect((await postWithdrawal({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" })).status).toBe(
       403

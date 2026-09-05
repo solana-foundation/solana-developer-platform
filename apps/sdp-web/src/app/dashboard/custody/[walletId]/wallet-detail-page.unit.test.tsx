@@ -5,11 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { getTranslations } from "@/i18n/server";
 
-const { mockAuth, mockLoadWalletActivity, mockRequest } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockLoadWalletActivity: vi.fn(),
-  mockRequest: vi.fn(),
-}));
+const { mockAuth, mockIssuanceFlag, mockLoadWalletActivity, mockPoliciesFlag, mockRequest } =
+  vi.hoisted(() => ({
+    mockAuth: vi.fn(),
+    mockIssuanceFlag: vi.fn(),
+    mockLoadWalletActivity: vi.fn(),
+    mockPoliciesFlag: vi.fn(),
+    mockRequest: vi.fn(),
+  }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
@@ -26,6 +29,11 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
+}));
+
+vi.mock("@/flags", () => ({
+  issuance: mockIssuanceFlag,
+  policies: mockPoliciesFlag,
 }));
 
 vi.mock("@/lib/sdp-api", () => ({
@@ -102,10 +110,14 @@ function findWalletLabelEditor(
 
 beforeEach(() => {
   mockAuth.mockReset();
+  mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
+  mockPoliciesFlag.mockReset();
   mockRequest.mockReset();
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+  mockIssuanceFlag.mockResolvedValue(true);
+  mockPoliciesFlag.mockResolvedValue(true);
   mockLoadWalletActivity.mockResolvedValue({
     ok: true,
     data: {
@@ -150,11 +162,13 @@ describe("WalletDetailPage critical path", () => {
       WalletBalancesSection({
         balancesPromise: Promise.resolve(balanceResult),
         ownedTokensByMintPromise: Promise.resolve(new Map()),
+        issuanceEnabled: true,
         t,
       }),
       WalletBalancesSection({
         balancesPromise: Promise.resolve({ balances: [], error: null }),
         ownedTokensByMintPromise: Promise.resolve(new Map()),
+        issuanceEnabled: true,
         t,
       }),
     ]);
@@ -189,6 +203,17 @@ describe("WalletDetailPage critical path", () => {
 
     expect(mockLoadWalletActivity).not.toHaveBeenCalled();
     expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
+  });
+
+  it("does not load or render policy controls when Policies is disabled", async () => {
+    mockPoliciesFlag.mockResolvedValue(false);
+
+    const page = await WalletDetailPage({
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+    expect(page).toBeTruthy();
+
+    expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/policies"))).toBe(false);
   });
 
   it("resolves the identity shell while lower wallet sections are still pending", async () => {

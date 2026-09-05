@@ -16,7 +16,11 @@ function renderWithProviders(children: ReactNode) {
 describe("HomeQuickActions", () => {
   it("offers the custody and api key entry points when the member may act on them", () => {
     const markup = renderWithProviders(
-      <HomeQuickActions capabilities={{ canManageCustody: true, canManageApiKeys: true }} />
+      <HomeQuickActions
+        capabilities={{ canManageCustody: true, canManageApiKeys: true }}
+        custodyEnabled
+        policiesEnabled
+      />
     );
 
     expect(markup).toContain("Create a wallet");
@@ -27,7 +31,11 @@ describe("HomeQuickActions", () => {
 
   it("hides entry points the member would only be 403'd on", () => {
     const markup = renderWithProviders(
-      <HomeQuickActions capabilities={{ canManageCustody: false, canManageApiKeys: false }} />
+      <HomeQuickActions
+        capabilities={{ canManageCustody: false, canManageApiKeys: false }}
+        custodyEnabled
+        policiesEnabled
+      />
     );
 
     expect(markup).not.toContain("Create a wallet");
@@ -36,7 +44,11 @@ describe("HomeQuickActions", () => {
 
   it("always offers the entry points that need no elevated permission", () => {
     const markup = renderWithProviders(
-      <HomeQuickActions capabilities={{ canManageCustody: false, canManageApiKeys: false }} />
+      <HomeQuickActions
+        capabilities={{ canManageCustody: false, canManageApiKeys: false }}
+        custodyEnabled
+        policiesEnabled
+      />
     );
 
     expect(markup).toContain("Send a payment");
@@ -47,10 +59,28 @@ describe("HomeQuickActions", () => {
     // The point of this surface: a freshly provisioned organization was landing on
     // a $0.00 hero, which reads as broken rather than new.
     const markup = renderWithProviders(
-      <HomeQuickActions capabilities={{ canManageCustody: true, canManageApiKeys: true }} />
+      <HomeQuickActions
+        capabilities={{ canManageCustody: true, canManageApiKeys: true }}
+        custodyEnabled
+        policiesEnabled
+      />
     );
 
     expect(markup).toContain("Start here");
     expect(markup).not.toContain("$0.00");
+  });
+
+  it("hides disabled module actions while retaining API key authoring", () => {
+    const markup = renderWithProviders(
+      <HomeQuickActions
+        capabilities={{ canManageCustody: true, canManageApiKeys: true }}
+        custodyEnabled={false}
+        policiesEnabled={false}
+      />
+    );
+
+    expect(markup).not.toContain("/dashboard/wallets");
+    expect(markup).not.toContain("/dashboard/policies");
+    expect(markup).toContain("/dashboard/api-keys");
   });
 });

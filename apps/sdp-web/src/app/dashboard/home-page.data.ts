@@ -40,6 +40,18 @@ export interface HomeActivityRow {
   sourceKind: "payments" | "issuance";
 }
 
+/**
+ * Filters cached Home activity through the current module flags. The API route
+ * applies the same gate, but this client-side seam prevents a persisted SWR
+ * snapshot from briefly resurfacing Issuance rows after the flag is disabled.
+ */
+export function filterHomeActivityRowsByFlags(
+  rows: readonly HomeActivityRow[],
+  flags: { issuance: boolean }
+): HomeActivityRow[] {
+  return flags.issuance ? [...rows] : rows.filter((row) => row.sourceKind !== "issuance");
+}
+
 function resolveIssuanceAmount(transaction: TokenTransaction): string {
   const amount = readTransactionParam(transaction.params, "amount");
   if (amount === null) {

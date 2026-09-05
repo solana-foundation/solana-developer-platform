@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
@@ -48,6 +49,29 @@ export function clerkOnboardingMiddleware() {
       orgRole: payload.org_role ?? null,
       email,
     });
+
+    // The Clerk-org -> organization mapping lives in an RLS-forced table
+    // (migration 0081) and must be read before a tenant identity exists, so
+    // the lookup runs under the system identity (the same boundary
+    // clerk-auth.ts draws) and the rest of the request narrows to the mapped
+    // organization. An unlinked Clerk org proceeds with the ambient
+    // no-identity context: tenant-table reads stay empty and the handlers
+    // answer linked:false / Organization not found instead of leaking anything.
+    const mapping = await runWithSystemDatabaseIdentity("http:auth", () =>
+      getDb(c.env)
+        .prepare(
+          `SELECT organization_id
+           FROM auth_organization_identities
+           WHERE provider = 'clerk' AND provider_org_id = ?`
+        )
+        .bind(payload.org_id)
+        .first<{ organization_id: string }>()
+    );
+
+    if (mapping) {
+      await runWithTenantDatabaseIdentity({ organizationId: mapping.organization_id }, next);
+      return;
+    }
 
     await next();
   };

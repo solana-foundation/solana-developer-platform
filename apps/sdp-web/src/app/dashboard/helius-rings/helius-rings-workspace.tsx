@@ -8,9 +8,11 @@ import { ActivityCard } from "./activity-card";
 import { HealthStrip } from "./health-strip";
 import {
   executeRingsOperation,
+  fetchProjectRings,
   fetchRingsHealth,
   fetchRingsOperations,
   fetchRingsWallets,
+  type ProjectRing,
   RINGS_HEALTH_COMPONENTS,
   type RingsHealth,
   type RingsOperationSummary,
@@ -20,6 +22,7 @@ import { healthAlerts, isSettling } from "./helius-rings.utils";
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { type CustodyWalletOption, PrivateWalletsCard } from "./private-wallets-card";
+import { RingCard } from "./ring-card";
 import { WalletOverview } from "./wallet-overview";
 
 /** How often to re-read while an operation is still moving. */
@@ -35,6 +38,7 @@ export function HeliusRingsWorkspace({
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
   const [operations, setOperations] = useState<RingsOperationSummary[]>([]);
+  const [projectRings, setProjectRings] = useState<ProjectRing[]>([]);
   const [detailOperationId, setDetailOperationId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -58,9 +62,25 @@ export function HeliusRingsWorkspace({
     }
   }, [loadFailedCopy]);
 
+  // Rings live outside `refresh` on purpose: the settling poll below re-runs
+  // `refresh` every 4s, and the near-static ring rows only change through the
+  // ring card, which refreshes them itself.
+  const refreshRings = useCallback(async () => {
+    try {
+      const { rings } = await fetchProjectRings(loadFailedCopy);
+      setProjectRings(rings);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : loadFailedCopy);
+    }
+  }, [loadFailedCopy]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refresh(), refreshRings()]);
+  }, [refresh, refreshRings]);
+
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refreshAll();
+  }, [refreshAll]);
 
   // Bumped whenever a new operation transitions to completed on our watch, so
   // the balance surfaces re-sync and the just-landed value is on screen without
@@ -165,6 +185,8 @@ export function HeliusRingsWorkspace({
 
       <HealthStrip health={health} alerts={alerts} />
 
+      <RingCard rings={projectRings} onChanged={refreshAll} />
+
       <PrivateWalletsCard
         wallets={wallets}
         custodyWallets={custodyWallets}
@@ -184,7 +206,11 @@ export function HeliusRingsWorkspace({
       ) : (
         <>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <WalletOverview wallet={selectedWallet} refreshTick={balancesTick} />
+            <WalletOverview
+              wallet={selectedWallet}
+              refreshTick={balancesTick}
+              projectRings={projectRings}
+            />
             <OperationComposer
               key={selectedWallet.id}
               wallet={selectedWallet}
@@ -194,6 +220,7 @@ export function HeliusRingsWorkspace({
               custodyPublicKey={
                 custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
               }
+              projectRings={projectRings}
               gatewayRed={upstreamsRed}
               onPrepared={refresh}
             />
@@ -201,6 +228,7 @@ export function HeliusRingsWorkspace({
 
           <ActivityCard
             operations={filteredOperations}
+            projectRings={projectRings}
             onChanged={refresh}
             onSelect={setDetailOperationId}
           />

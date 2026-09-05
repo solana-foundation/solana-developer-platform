@@ -78,8 +78,13 @@ export interface CreateChannelWithdrawalInput {
   instance: WithdrawalInstance;
   organizationId: string;
   projectId: string;
-  /** SDP user creating the intent; recorded on the audit context. */
-  userId: string;
+  /**
+   * SDP user creating the intent; recorded on the audit context and surfaced as
+   * the event's `sdpUserId`. Null for API-key callers, which have no human
+   * behind them — the SPC identity that acts is the project's principal, not a
+   * user, so this stays a best-effort attribution rather than a gate.
+   */
+  userId: string | null;
   /** Custody wallet the burn is signed from (the burn `user` / balance owner). */
   wallet: CustodyWallet;
   /** UI decimal amount (e.g. "1.5"). */
@@ -396,7 +401,9 @@ export async function createChannelWithdrawal(
       gatewayUrl: instance.gatewayUrl,
       escrowProgramId: instance.escrowProgramId,
       escrowInstanceAddr: instance.escrowInstanceAddr,
-      actingUserId: input.userId,
+      // Omitted rather than stored as null when there is no human caller: the
+      // context is an optional-field JSONB and the events read it as `?? null`.
+      actingUserId: input.userId ?? undefined,
     },
     idempotencyKey: input.idempotencyKey,
   });
