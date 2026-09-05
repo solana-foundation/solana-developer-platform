@@ -1528,6 +1528,71 @@ export class TokenService {
   }
 
   /**
+   * Mirror pause state OBSERVED on-chain at a known slot into
+   * `issued_tokens.status`, for repair paths that hold no settled transaction
+   * of their own to order against: a lifecycle receipt that arrived without a
+   * slot, or a converge branch that found the mint already in the target state
+   * (possibly because an earlier tick's ledger write died after the chain
+   * effect landed).
+   *
+   * Ordering: the observation at slot S reflects every transition ≤ S, so the
+   * write is vetoed by any confirmed pause/unpause transaction recorded with a
+   * slot > S — a newer settled transition owns the status and its own
+   * bookkeeping writes it. Rows without a slot cannot veto (they are exactly
+   * what this method repairs around). Only the active↔paused flip is ever
+   * written; any other current status is left alone.
+   *
+   * Returns true when a repair write happened, false when the row was already
+   * consistent, vetoed, or not in a pause-mirrorable state.
+   */
+  async reconcileObservedTokenPauseState(
+    tokenId: string,
+    observedStatus: "active" | "paused",
+    observedAtSlot: number
+  ): Promise<boolean> {
+    const tokenScope = this.tenantTokenScope();
+    return this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(`SELECT status FROM issued_tokens WHERE id = ?${tokenScope.clause} FOR UPDATE`)
+        .bind(tokenId, ...tokenScope.values)
+        .first<{ status: string }>();
+      if (!row) throw new Error("TOKEN_NOT_FOUND");
+
+      const counterpart = observedStatus === "paused" ? "active" : "paused";
+      if (row.status !== counterpart) {
+        return false;
+      }
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions
+           WHERE token_id = ?
+             AND type IN ('pause', 'unpause')
+             AND status = 'confirmed'
+             AND slot > ?
+           LIMIT 1`
+        )
+        .bind(tokenId, observedAtSlot)
+        .first<{ exists: number }>();
+      if (newer) {
+        return false;
+      }
+
+      const tokenMutation = this.tenantMutationScope();
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens SET status = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(observedStatus, new Date().toISOString(), tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+      return true;
+    });
+  }
+
+  /**
    * Mirror a settled freeze/unfreeze without allowing an older replay to
    * overwrite a later on-chain transition for the same token account.
    */

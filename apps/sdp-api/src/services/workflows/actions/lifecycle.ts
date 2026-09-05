@@ -1,7 +1,11 @@
 import { createRpcForSdk } from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
 import type { TokenTransactionType } from "@sdp/types";
-import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
+import {
+  getTokenPauseState,
+  MINT_ALREADY_PAUSED_ERROR,
+  MINT_NOT_PAUSED_ERROR,
+} from "@solana/mosaic-sdk";
 import { AccountState, fetchToken } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
@@ -48,15 +52,49 @@ async function lifecycleSucceeded(
   });
 }
 
+function tenantTokenService(env: Env, execution: WorkflowExecutionRow): TokenService {
+  return new TokenService(
+    getDb(env),
+    createTenantScope({
+      organizationId: execution.organization_id,
+      projectId: execution.project_id,
+    })
+  );
+}
+
+// Mirror the OBSERVED on-chain pause state into `issued_tokens.status`,
+// anchored to a slot so a newer settled transition always wins the write (the
+// veto lives in reconcileObservedTokenPauseState). The slot is read BEFORE the
+// state: understating the anchor means a transition landing between the two
+// reads gets recorded with a higher slot and vetoes this write, instead of
+// being silently overwritten. Returns whether a repair write happened.
+async function mirrorObservedPauseState(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  mint: Address
+): Promise<boolean> {
+  const rpc = createRpcForSdk<Parameters<typeof getTokenPauseState>[0]>(env);
+  const observedAtSlot = Number(await rpc.getSlot({ commitment: "confirmed" }).send());
+  const paused = await getTokenPauseState(rpc, mint);
+  return tenantTokenService(env, execution).reconcileObservedTokenPauseState(
+    execution.token_id,
+    paused ? "paused" : "active",
+    observedAtSlot
+  );
+}
+
 // The DB pause mirror goes through applySettledTokenStatus — the same ordered,
 // once-only writer the manual admin pause path uses — anchored on the recorded
 // transaction's slot. Writing `issued_tokens.status` directly from here let a
 // slow rule tick land after a newer manual pause/unpause and silently reverse
-// it (HOO-1013). A mirror failure never fails the action: the chain effect has
-// already landed, so it is reported as `mirrorFailed` like the freeze mirror.
+// it (HOO-1013). A receipt without a slot cannot pass that bookkeeping, so it
+// falls back to a slot-anchored observation of the chain instead. A mirror
+// failure never fails the action: the chain effect has already landed, so it
+// is reported as `mirrorFailed` like the freeze mirror.
 async function lifecycleStatusSucceeded(
   env: Env,
   execution: WorkflowExecutionRow,
+  mint: Address,
   result: { signature: string; slot?: number | bigint },
   type: "pause" | "unpause",
   status: "paused" | "active"
@@ -70,13 +108,15 @@ async function lifecycleStatusSucceeded(
   let mirrored = false;
   if (transactionId) {
     try {
-      await new TokenService(
-        getDb(env),
-        createTenantScope({
-          organizationId: execution.organization_id,
-          projectId: execution.project_id,
-        })
-      ).applySettledTokenStatus(transactionId, execution.token_id, status);
+      if (result.slot == null) {
+        await mirrorObservedPauseState(env, execution, mint);
+      } else {
+        await tenantTokenService(env, execution).applySettledTokenStatus(
+          transactionId,
+          execution.token_id,
+          status
+        );
+      }
       mirrored = true;
     } catch (error) {
       getLogger().error(
@@ -93,11 +133,29 @@ async function lifecycleStatusSucceeded(
   });
 }
 
+// A converged mint holds no settled transaction of our own to order a status
+// write against — the transition that converged it may even predate this rule,
+// with its ledger write lost (crash between chain effect and bookkeeping). So
+// repair from a slot-anchored observation rather than skipping: the DB must
+// not stay `active` forever over a mint that is paused on chain. An unreadable
+// observation becomes a retry, never a success over a possibly-stale row.
+async function convergedLifecycleSucceeded(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  mint: Address,
+  flag: Record<string, unknown>
+): Promise<ActionExecutionResult> {
+  try {
+    const repaired = await mirrorObservedPauseState(env, execution, mint);
+    return succeeded({ ...flag, ...(repaired ? { statusRepaired: true } : {}) });
+  } catch (error) {
+    return transientFail(errorMessage(error));
+  }
+}
+
 // pause → MosaicService.pauseToken. Idempotent: an already-paused mint is a
-// converged success. No DB status write in that branch — with no settled
-// transaction of our own there is nothing to order the write against, and the
-// operation that actually paused the mint mirrors the status through its own
-// applySettledTokenStatus call.
+// converged success, with the DB status reconciled from a slot-anchored
+// observation (see convergedLifecycleSucceeded).
 export async function runPause(
   env: Env,
   execution: WorkflowExecutionRow,
@@ -115,17 +173,17 @@ export async function runPause(
       pauseAuthority: signer,
       feePayer: signer,
     });
-    return lifecycleStatusSucceeded(env, execution, result, "pause", "paused");
+    return lifecycleStatusSucceeded(env, execution, mintAddress, result, "pause", "paused");
   } catch (error) {
     if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
-      return succeeded({ alreadyPaused: true });
+      return convergedLifecycleSucceeded(env, execution, mintAddress, { alreadyPaused: true });
     }
     return transientFail(errorMessage(error));
   }
 }
 
 // unpause → MosaicService.unpauseToken. Idempotent: an already-active mint
-// succeeds (see runPause for why that branch writes no DB status).
+// succeeds (see runPause).
 export async function runUnpause(
   env: Env,
   execution: WorkflowExecutionRow,
@@ -143,10 +201,10 @@ export async function runUnpause(
       pauseAuthority: signer,
       feePayer: signer,
     });
-    return lifecycleStatusSucceeded(env, execution, result, "unpause", "active");
+    return lifecycleStatusSucceeded(env, execution, mintAddress, result, "unpause", "active");
   } catch (error) {
     if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
-      return succeeded({ alreadyActive: true });
+      return convergedLifecycleSucceeded(env, execution, mintAddress, { alreadyActive: true });
     }
     return transientFail(errorMessage(error));
   }
