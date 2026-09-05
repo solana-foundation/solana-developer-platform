@@ -468,77 +468,12 @@ export const walletBalancesSchema = z
       "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
-export const magicBlockPrivateTransferOptionsSchema = z
-  .object({
-    validator: solanaAddressSchema.optional().openapi({
-      description:
-        "Optional MagicBlock validator pubkey. MagicBlock can resolve this when omitted.",
-    }),
-    initIfMissing: z
-      .boolean()
-      .optional()
-      .openapi({ description: "Initialize the MagicBlock transfer queue when missing." }),
-    initAtasIfMissing: z
-      .boolean()
-      .optional()
-      .openapi({ description: "Initialize required associated token accounts when missing." }),
-    initVaultIfMissing: z
-      .boolean()
-      .optional()
-      .openapi({ description: "Initialize the MagicBlock vault when missing." }),
-    minDelayMs: z.string().regex(/^\d+$/).optional().openapi({
-      description:
-        "Earliest settlement delay in milliseconds, preserved as MagicBlock's integer-string field.",
-      example: "0",
-    }),
-    maxDelayMs: z.string().regex(/^\d+$/).optional().openapi({
-      description:
-        "Latest settlement delay in milliseconds, preserved as MagicBlock's integer-string field.",
-      example: "1000",
-    }),
-    clientRefId: z.string().regex(/^\d+$/).optional().openapi({
-      description:
-        "Client reference encrypted by MagicBlock for payment correlation, preserved as an integer string.",
-      example: "1042",
-    }),
-    split: z.number().int().min(1).max(15).optional().openapi({
-      description: "Number of queue entries to split the transfer across.",
-      example: 2,
-    }),
-    gasless: z
-      .boolean()
-      .optional()
-      .openapi({ description: "Request MagicBlock fee sponsorship when supported." }),
-    legacy: z
-      .boolean()
-      .optional()
-      .openapi({ description: "Request MagicBlock legacy transaction mode instead of v0." }),
-  })
-  .strict()
-  .openapi({
-    description:
-      "MagicBlock-specific options for private SPL transfer preparation. SDP currently supports base-balance private transfers only: funds are spent from the sender's normal Solana token balance and settle to the recipient's normal Solana token balance through MagicBlock's private routing.",
-    example: {
-      initIfMissing: true,
-      initAtasIfMissing: true,
-      maxDelayMs: "1000",
-    },
-  });
-
-export const privateTransferRequestSchema = z
-  .object({
-    provider: z.literal("magicblock").openapi({
-      description: "Private-transfer provider identifier.",
-      example: "magicblock",
-    }),
-    magicBlock: magicBlockPrivateTransferOptionsSchema,
-  })
-  .openapi({
-    description:
-      "Optional private-transfer routing. MagicBlock can prepare an unsigned transaction for client review or execute through server-side custody when all required signers are SDP-controlled.",
-  });
-
+// `privateTransfer` stays DOCUMENTED and deprecated rather than deleted. v1
+// published it, so removing the property would retract part of a live contract;
+// the capability behind it is gone, which the field's own description and the
+// documented 503 say plainly.
 export const createTransferRequestSchema = createTransferSchemaBase
+  .omit({ privateTransfer: true })
   .extend({
     projectId: withOpenApi(createTransferSchemaBase.shape.projectId, {
       description: "Project identifier for the transfer context.",
@@ -568,14 +503,15 @@ export const createTransferRequestSchema = createTransferSchemaBase
     memo: withOpenApi(createTransferSchemaBase.shape.memo, {
       description: "Optional memo for the transfer.",
     }),
-    privateTransfer: privateTransferRequestSchema.optional().openapi({
+    privateTransfer: z.unknown().optional().openapi({
+      deprecated: true,
       description:
-        "Private-transfer routing. SDP asks the provider to build a base-balance private transfer, signs it with the custody wallet when required, and submits it on the configured Solana cluster. Any additional required signer must be synchronously allowed by policy; approval-required additional signers return 409 until durable signer-set replay is supported.",
+        "Retired. SDP no longer integrates a private-transfer provider. The field is still accepted by validation so existing v1 requests remain well-formed, but a request that includes it is refused with 503 PROVIDER_UNAVAILABLE and no transfer is created — it is never downgraded to a public transfer. Remove the field to send an ordinary public transfer.",
     }),
   })
   .openapi({
     description:
-      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
+      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets. Transfers are public on-chain transfers; the deprecated `privateTransfer` field is no longer honoured.",
     example: {
       projectId: "prj_example",
       sourceCustodyWalletId: "cwlt_example",
@@ -777,35 +713,6 @@ export const transferSchema = z
     }),
   })
   .openapi({ description: "Transfer transaction record." });
-
-export const preparedPrivateTransferSchema = z
-  .object({
-    provider: z.literal("magicblock").openapi({
-      description: "Private-transfer provider that built the transaction.",
-      example: "magicblock",
-    }),
-    magicBlock: z
-      .object({
-        kind: z
-          .string()
-          .openapi({ description: "MagicBlock transaction kind.", example: "transfer" }),
-        version: z
-          .string()
-          .openapi({ description: "MagicBlock transaction version.", example: "v0" }),
-        instructionCount: z.number().int().openapi({
-          description: "Instruction count in the prepared transaction.",
-          example: 4,
-        }),
-        requiredSigners: z.array(solanaAddressSchema).openapi({
-          description: "Signers required by the MagicBlock-prepared transaction.",
-        }),
-        validator: solanaAddressSchema.optional().openapi({
-          description: "MagicBlock validator pubkey returned by the provider, when present.",
-        }),
-      })
-      .openapi({ description: "MagicBlock prepared-transfer metadata." }),
-  })
-  .openapi({ description: "Provider metadata returned for private-transfer preparation." });
 
 export const paymentTransferBatchStatusSchema = withOpenApi(transferBatchStatusSchemaBase, {
   description: "Transfer batch status.",
@@ -2187,9 +2094,6 @@ export const walletBalancesResponseSchema = z
 export const transferResponseSchema = z
   .object({
     transfer: transferSchema.openapi({ description: "Transfer details." }),
-    privateTransfer: preparedPrivateTransferSchema
-      .optional()
-      .openapi({ description: "Provider metadata returned for private-transfer execution." }),
   })
   .openapi({ description: "Transfer response payload." });
 

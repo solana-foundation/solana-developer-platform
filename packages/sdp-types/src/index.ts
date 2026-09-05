@@ -22,7 +22,6 @@ export * from "./permissions";
 export * from "./places";
 export * from "./policy";
 export * from "./private-channels";
-export * from "./private-transfers";
 export * from "./projects";
 export * from "./provider-access";
 export * from "./rpc-connections";

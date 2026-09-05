@@ -9,7 +9,6 @@ import {
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   type PolicyRule,
-  type PrivateTransferRequest,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
   WALLET_OPERATION_FAMILIES,
@@ -454,35 +453,6 @@ export const listSubscriptionCollectionAttemptsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-const magicBlockPrivateTransferOptionsSchema = z
-  .object({
-    validator: z.string().min(32).max(44).optional(),
-    initIfMissing: z.boolean().optional(),
-    initAtasIfMissing: z.boolean().optional(),
-    initVaultIfMissing: z.boolean().optional(),
-    minDelayMs: z
-      .string()
-      .regex(/^\d+$/, { message: "minDelayMs must be an integer string" })
-      .optional(),
-    maxDelayMs: z
-      .string()
-      .regex(/^\d+$/, { message: "maxDelayMs must be an integer string" })
-      .optional(),
-    clientRefId: z
-      .string()
-      .regex(/^\d+$/, { message: "clientRefId must be an integer string" })
-      .optional(),
-    split: z.number().int().min(1).max(15).optional(),
-    gasless: z.boolean().optional(),
-    legacy: z.boolean().optional(),
-  })
-  .strict();
-
-export const privateTransferSchema: z.ZodType<PrivateTransferRequest> = z.object({
-  provider: z.literal("magicblock"),
-  magicBlock: magicBlockPrivateTransferOptionsSchema,
-});
-
 const rampProviderSchema = z.enum(RAMP_PROVIDERS);
 export const rampDirectionSchema = z.enum(["onramp", "offramp"]);
 const onrampCryptoRailSchema = z.enum(ONRAMP_CRYPTO_RAILS);
@@ -520,7 +490,22 @@ export const createTransferSchema = z.strictObject({
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
-  privateTransfer: privateTransferSchema.optional(),
+  /**
+   * Retired, but still ACCEPTED by validation. SDP no longer has a
+   * private-transfer provider, and the request cannot be honoured — but v1
+   * published this field, so rejecting the shape here would break the contract
+   * in place. Validation therefore keeps accepting it and the route answers
+   * PROVIDER_UNAVAILABLE (503), which is what this field's callers already had
+   * to handle: every failure of the old provider path — timeout, malformed
+   * response, upstream 5xx — surfaced as exactly that.
+   *
+   * It must not be dropped either. This object is not `.strict()`, so a
+   * stripped key would let an old caller's private-transfer request fall
+   * through and execute as an ordinary PUBLIC transfer, moving funds visibly
+   * that the caller asked to move privately. Accepted here, refused at the
+   * route: see the guard in `extractTransferPolicyCandidate`.
+   */
+  privateTransfer: z.unknown().optional(),
 });
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
