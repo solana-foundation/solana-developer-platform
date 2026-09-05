@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createSystemAssetProfilesRepository } from "@/db/repositories";
+import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -10,54 +11,44 @@ type AppContext = Context<{ Bindings: Env }>;
 /**
  * Canonical URL of the SDP-hosted metadata JSON for a token.
  *
- * Derived from the request origin (not a hardcoded constant) so each
- * environment links to itself with zero config. The deploy handlers fall back
- * to this when the issuer didn't supply their own `uri`.
+ * The id is encoded so a value with path characters can't splice extra
+ * segments into the minted URI — ids are server-generated UUIDs today, but
+ * this function must stay safe for any caller.
  */
 export const canonicalMetadataUrl = (origin: string, tokenId: string): string =>
-  `${origin}/v1/issuance/tokens/${tokenId}/metadata.json`;
+  `${origin}/v1/issuance/tokens/${encodeURIComponent(tokenId)}/metadata.json`;
 
 /**
- * Origin to embed in the on-chain metadata URL.
+ * Origin to embed in the on-chain metadata URL — `env.PUBLIC_API_ORIGIN`, and
+ * nothing else.
  *
- * Prefers `env.PUBLIC_API_ORIGIN` so a deployment fronted by a proxy that
- * rewrites Host/scheme can pin the public origin — the URL is burned into the
- * on-chain MetadataPointer at deploy time, so an internal/unreachable origin
- * would be a permanent mistake. The configured value is normalized through
+ * The URL is burned into the on-chain MetadataPointer at deploy time, so it
+ * must come from trusted configuration only. This used to fall back to the
+ * request's own origin, which let a hostile or spoofed Host header (or a
+ * malformed env value silently degrading to that fallback) pin an
+ * attacker-controlled metadata URL into a mint forever (HOO-1013). Now a
+ * missing, malformed, or non-http(s) value fails the deploy closed with a
+ * config error instead. The configured value is normalized through
  * `URL.origin` so a stray trailing slash or path can't leak into the minted
- * URI. Falls back to the request origin when the env var is unset or malformed.
- * In Cloud Run, the Node adapter sees the cleartext hop from Google's proxy;
- * only there do we trust the proxy's forwarded scheme when reconstructing the
- * public origin.
+ * URI.
  */
-export const resolveMetadataOrigin = (
-  env: Env,
-  requestUrl: string,
-  forwardedProto?: string
-): string => {
+export const resolveMetadataOrigin = (env: Env): string => {
   const configured = env.PUBLIC_API_ORIGIN?.trim();
   if (configured) {
     try {
-      return new URL(configured).origin;
+      const url = new URL(configured);
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        return url.origin;
+      }
     } catch {
-      // Misconfigured env value — fall back to the request origin rather than
-      // burning a malformed URL into the on-chain MetadataPointer.
+      // Malformed — fall through to the config error below.
     }
   }
 
-  const requestOrigin = new URL(requestUrl);
-  if (env.K_SERVICE) {
-    const protocol = forwardedProto
-      ?.split(",")
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean)
-      .at(-1);
-    if (protocol === "http" || protocol === "https") {
-      requestOrigin.protocol = `${protocol}:`;
-    }
-  }
-
-  return requestOrigin.origin;
+  throw new AppError(
+    "INTERNAL_ERROR",
+    "PUBLIC_API_ORIGIN must be set to a valid http(s) origin to mint SDP-hosted metadata URLs"
+  );
 };
 
 /**

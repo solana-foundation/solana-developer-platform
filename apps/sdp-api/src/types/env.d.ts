@@ -33,12 +33,12 @@ export interface Env {
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
 
-  // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
-  // it overrides the request-derived origin used to build the SDP-hosted token
-  // metadata URL that gets burned into the on-chain MetadataPointer. Set this in
-  // any environment fronted by a proxy that rewrites Host/scheme, so the URI
-  // can't capture an internal, unreachable address. Falls back to the request
-  // origin when unset.
+  // Public-facing origin of this API (e.g. "https://api.example.com"). The
+  // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
+  // built from this value and nothing else — it is never derived from the
+  // incoming request, so a spoofed Host header can't pin a hostile origin into
+  // a mint. Deploys that need the SDP-hosted metadata fallback fail closed when
+  // it is unset or not a valid http(s) origin.
   PUBLIC_API_ORIGIN?: string;
 
   // Deployment mode. "managed" (default) uses tier-based provider entitlements

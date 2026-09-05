@@ -5,6 +5,7 @@ import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic
 import { AccountState, fetchToken } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import type { WorkflowExecutionRow } from "@/db/repositories";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -47,8 +48,56 @@ async function lifecycleSucceeded(
   });
 }
 
-// pause → MosaicService.pauseToken. Idempotent: an already-paused mint is a converged
-// success (the DB status is reconciled either way).
+// The DB pause mirror goes through applySettledTokenStatus — the same ordered,
+// once-only writer the manual admin pause path uses — anchored on the recorded
+// transaction's slot. Writing `issued_tokens.status` directly from here let a
+// slow rule tick land after a newer manual pause/unpause and silently reverse
+// it (HOO-1013). A mirror failure never fails the action: the chain effect has
+// already landed, so it is reported as `mirrorFailed` like the freeze mirror.
+async function lifecycleStatusSucceeded(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  result: { signature: string; slot?: number | bigint },
+  type: "pause" | "unpause",
+  status: "paused" | "active"
+): Promise<ActionExecutionResult> {
+  const transactionId = await recordWorkflowTransaction(env, execution, {
+    type,
+    params: {},
+    signature: result.signature,
+    slot: result.slot ?? null,
+  });
+  let mirrored = false;
+  if (transactionId) {
+    try {
+      await new TokenService(
+        getDb(env),
+        createTenantScope({
+          organizationId: execution.organization_id,
+          projectId: execution.project_id,
+        })
+      ).applySettledTokenStatus(transactionId, execution.token_id, status);
+      mirrored = true;
+    } catch (error) {
+      getLogger().error(
+        { executionId: execution.id, type, error: errorMessage(error) },
+        "workflow lifecycle: settled status mirror failed"
+      );
+    }
+  }
+  return succeeded({
+    signature: result.signature,
+    ...(result.slot == null ? {} : { slot: String(result.slot) }),
+    ...(mirrored ? {} : { mirrorFailed: true }),
+    ...(transactionId ? {} : { ledgerFailed: true }),
+  });
+}
+
+// pause → MosaicService.pauseToken. Idempotent: an already-paused mint is a
+// converged success. No DB status write in that branch — with no settled
+// transaction of our own there is nothing to order the write against, and the
+// operation that actually paused the mint mirrors the status through its own
+// applySettledTokenStatus call.
 export async function runPause(
   env: Env,
   execution: WorkflowExecutionRow,
@@ -58,8 +107,7 @@ export async function runPause(
   if (!prep.ok) {
     return prep.result;
   }
-  const { token, mintAddress, signer, mosaic } = prep.ctx;
-  const tokenService = new TokenService(getDb(env));
+  const { mintAddress, signer, mosaic } = prep.ctx;
 
   try {
     const result = await mosaic.pauseToken({
@@ -67,18 +115,17 @@ export async function runPause(
       pauseAuthority: signer,
       feePayer: signer,
     });
-    await tokenService.updateToken(token.id, { status: "paused" });
-    return lifecycleSucceeded(env, execution, result, "pause", {});
+    return lifecycleStatusSucceeded(env, execution, result, "pause", "paused");
   } catch (error) {
     if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
-      await tokenService.updateToken(token.id, { status: "paused" });
       return succeeded({ alreadyPaused: true });
     }
     return transientFail(errorMessage(error));
   }
 }
 
-// unpause → MosaicService.unpauseToken. Idempotent: an already-active mint succeeds.
+// unpause → MosaicService.unpauseToken. Idempotent: an already-active mint
+// succeeds (see runPause for why that branch writes no DB status).
 export async function runUnpause(
   env: Env,
   execution: WorkflowExecutionRow,
@@ -88,8 +135,7 @@ export async function runUnpause(
   if (!prep.ok) {
     return prep.result;
   }
-  const { token, mintAddress, signer, mosaic } = prep.ctx;
-  const tokenService = new TokenService(getDb(env));
+  const { mintAddress, signer, mosaic } = prep.ctx;
 
   try {
     const result = await mosaic.unpauseToken({
@@ -97,11 +143,9 @@ export async function runUnpause(
       pauseAuthority: signer,
       feePayer: signer,
     });
-    await tokenService.updateToken(token.id, { status: "active" });
-    return lifecycleSucceeded(env, execution, result, "unpause", {});
+    return lifecycleStatusSucceeded(env, execution, result, "unpause", "active");
   } catch (error) {
     if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
-      await tokenService.updateToken(token.id, { status: "active" });
       return succeeded({ alreadyActive: true });
     }
     return transientFail(errorMessage(error));
