@@ -17,6 +17,7 @@ catalog:
   '@solana/rpc': 7.1.1
   '@solana/signers': 7.1.1
   '@solana/sysvars': 7.1.1
+  '@solana/token-acl-sdk': 0.4.0
   '@solana/transactions': 7.1.1
 
 # A strict resolve fails on peer ranges this repo does not control (typescript ^5 vs 6, kora's kit-plugin-* peers, klend's kit ^3); flipping it needs its own PR.

@@ -1315,7 +1315,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 
 <Step number={3} title="Set operational settings">
 
-Choose the wallet that will sign token operations, and configure Token Access Control and supply controls.
+Choose the exact SDP Wallet that will deploy the token, and configure Token Access Control and supply controls.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -1323,7 +1323,7 @@ Choose the wallet that will sign token operations, and configure Token Access Co
 
 In step 3 of 3, configure:
 
-- **Main signer** — the SDP-controlled wallet for deploy and token actions
+- **Main signer** — the exact SDP-controlled wallet selected for deployment
 - **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
 
 Click **Create token** to save the draft.
@@ -1333,7 +1333,7 @@ Click **Create token** to save the draft.
 </Tab>
 <Tab value="API">
 
-Add operational fields to the same body:
+Add operational fields to the same body. `signingCustodyWalletId` is the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`), not the provider-specific `walletId` or the wallet's public key. You can omit it while drafting and provide it when you deploy.
 
 ```typescript title="create-token.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
@@ -1348,6 +1348,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
     decimals: 6,
     description: "USD-backed stablecoin",
     template: "stablecoin",
+    signingCustodyWalletId: "cwlt_abc123",
     requiresAllowlist: false,
     isMintable: true,
     isFreezable: true,
@@ -1363,6 +1364,7 @@ body: JSON.stringify({
   symbol: "GAME",
   decimals: 0,
   template: "custom",
+  signingCustodyWalletId: "cwlt_abc123",
   overrides: {
     extensions: {
       pausable: {},
@@ -1405,6 +1407,7 @@ A successful response returns the new token object:
 const { data } = await res.json();
 // data.token.id     — save this; used in all subsequent calls
 // data.token.status — "pending"
+// data.token.signingCustodyWalletId — exact wallet selected for deployment
 ```
 
 The token is not yet onchain. Pass `data.token.id` to [Deploy a Token](/docs/tokens/deploy-a-token).
@@ -1424,12 +1427,12 @@ Source: https://platform.solana.com/docs/tokens/deploy-a-token
 
 > Deploy a created token to the Solana blockchain.
 
-After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
+After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and signs the deployment with the exact SDP Wallet selected for execution.
 
 ## Prerequisites
 
 - A token in `pending` status
-- A [wallet configured](/docs/guides/setup-wallets) as the token's main signer
+- The exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
 
@@ -1437,7 +1440,7 @@ After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deploy
 
 <Step number={1} title="Open the deploy action">
 
-Locate the token you want to deploy. Deployment is irreversible — the mint account is created onchain and authorities are locked to your configured wallets.
+Locate the token you want to deploy. Deployment is irreversible — the mint account and its configured authorities are created onchain.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -1459,7 +1462,12 @@ curl https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-deploy calls.
+Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
+
+```bash title="Terminal"
+curl https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..."
+```
 
 </Tab>
 </Tabs>
@@ -1469,7 +1477,7 @@ Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-de
 
 <Step number={2} title="Deploy the token">
 
-SDP signs and submits the deploy transaction using the token's configured signer wallet.
+SDP signs and submits the deploy transaction using `signingCustodyWalletId`. If you supply it here, it overrides the pending draft's execution wallet; if you omit it, SDP uses the value stored on the draft. One of those values is required. An override changes the deployment signer and historical attribution, but it does not rewrite immutable authority values already captured in the token's configuration.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -1491,7 +1499,9 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
   -H "Authorization: Bearer sk_test_..." \
-  -H "Idempotency-Key: deploy-acme-001"
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: deploy-acme-001" \
+  -d '{"signingCustodyWalletId":"cwlt_abc123"}'
 ```
 
 ```typescript title="deploy-token.ts"
@@ -1501,8 +1511,10 @@ const res = await fetch(
     method: "POST",
     headers: {
       Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
       "Idempotency-Key": "deploy-acme-001",
     },
+    body: JSON.stringify({ signingCustodyWalletId: "cwlt_abc123" }),
   }
 );
 const { data } = await res.json();
@@ -1537,7 +1549,10 @@ The deploy response includes the confirmed state:
 ```typescript title="deploy-token.ts"
 // data.token.status      — "active"
 // data.token.mintAddress — e.g., "AcMeXYZ..."
+// data.token.signingCustodyWalletId — exact wallet used for deployment
 ```
+
+After deployment, `signingCustodyWalletId` is historical deployment attribution. Mint and admin actions resolve their current on-chain authority, while a standard burn uses its exact source wallet; none use the deployment wallet as a fallback.
 
 Fetch the token at any time to verify:
 
@@ -1567,6 +1582,7 @@ After [deploying a token](/docs/tokens/deploy-a-token), you can mint new tokens 
 
 - A deployed token with status `active`
 - `tokens:write` permission — or `tokens:admin` for force-burn
+- For standard burn, the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
 
@@ -1598,6 +1614,8 @@ POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
 The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
+
+`signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 
 </Tab>
 </Tabs>
@@ -1642,6 +1660,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
   -d '{
+    "signingCustodyWalletId": "cwlt_abc123",
     "mint": {
       "destination": "7xKXz...9fGh",
       "amount": "1000",
@@ -1661,6 +1680,7 @@ const res = await fetch(
       "Idempotency-Key": "mint-001",
     },
     body: JSON.stringify({
+      signingCustodyWalletId: "cwlt_abc123",
       mint: {
         destination: "7xKXz...9fGh",
         amount: "1000",
@@ -1723,6 +1743,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
     "Idempotency-Key": "burn-001",
   },
   body: JSON.stringify({
+    signingCustodyWalletId: "cwlt_abc123",
     burn: { source: "3xYZa...2aBc", amount: "250", memo: "Redemption" },
   }),
 });
@@ -1739,6 +1760,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
     "Idempotency-Key": "force-burn-001",
   },
   body: JSON.stringify({
+    signingCustodyWalletId: "cwlt_abc123",
     forceBurn: { source: "3xYZa...2aBc", amount: "250", memo: "Compliance action" },
   }),
 });
@@ -1855,6 +1877,8 @@ Open the token detail page and go to the **Compliance** tab, then select **Allow
 
 Enter the wallet address and an optional label, then click **Add allowlist entry**. The address is enforced on the next allowlist-checked operation.
 
+For an on-chain list, SDP uses its authority wallet automatically when there is one matching wallet. If several custody records match, select the signer in the confirmation dialog. Database-only lists need no signer.
+
 ![Compliance Allowlist tab with empty address and label fields, ready to add a new entry](/images/tokens/allowlist-empty.png)
 
 After adding, the entry appears below the form with a **Remove entry** button.
@@ -1888,6 +1912,8 @@ const res = await fetch(
 );
 // res.data.entry.id — save this to remove the entry later
 ```
+
+For on-chain additions, the JSON body accepts optional `signingCustodyWalletId` (an exact `cwlt_…` record ID). It must control the list's current authority, which may differ from the token's freeze authority. Without the selector, multiple matching custody records return `409`. Selecting a wallet does not bypass permissions or runtime availability checks.
 
 </Tab>
 </Tabs>
@@ -1955,7 +1981,7 @@ Remove an address when a holder's compliance status changes. Existing token hold
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Compliance → Allowlist** tab, click **Remove entry** next to the address. The entry is removed immediately and the Control Lists sidebar updates to 0 entries.
+In the **Compliance → Allowlist** tab, click **Remove entry** next to the address. For an on-chain list with multiple matching wallets, choose the signer in the confirmation dialog. After successful removal, the list and its count refresh.
 
 </Tab>
 <Tab value="API">
@@ -1967,6 +1993,8 @@ curl -X DELETE \
 ```
 
 Use the `entry.id` returned when the address was added.
+
+For an on-chain removal, pass the optional exact signer as a query parameter: `?signingCustodyWalletId=cwlt_example`. To discover the current list authority, request `GET /v1/issuance/tokens/{tokenId}?includeAllowlistAuthority=true` and read `data.allowlistAuthority` (`null` for a database-only list). Match that address against your wallets; do not infer it from the token's freeze authority.
 
 </Tab>
 </Tabs>
@@ -2131,6 +2159,8 @@ Confirm the on-chain submission in the confirmation prompt.
 
 ![Pause token confirmation dialog](/images/tokens/pause-confirm.png)
 
+The prompt uses the only matching authority wallet automatically. If several custody records control the same authority, select the signer before confirming. The Unpause button uses the same selection rules.
+
 The "Pause transaction finalized." toast appears and an orange **Token is paused** banner displays across the page. All supply and transfer operations are now blocked.
 
 ![Compliance tab showing Token is paused banner and Pause transaction finalized toast](/images/tokens/pause-confirmed.png)
@@ -2145,12 +2175,18 @@ To resume, click **Unpause token** and confirm.
 ```bash title="Terminal"
 # Pause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{"signingCustodyWalletId":"cwlt_example"}'
 
 # Unpause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{"signingCustodyWalletId":"cwlt_example"}'
 ```
+
+`signingCustodyWalletId` is optional when exactly one in-scope custody record matches the current pause authority; send `{}` to use that resolution. Multiple matches without a selector return `409`. An explicit choice must control the live authority and pass authorization and runtime checks. Reusing an idempotency key with a different wallet returns `409`.
 
 While paused, all transfer-related and supply-management operations are rejected until unpause.
 
@@ -2211,6 +2247,10 @@ Source: https://platform.solana.com/docs/tokens/manage-token-settings
 > Update token authorities and operational settings after deployment.
 
 After a token is deployed, you can rotate its authorities and adjust operational settings. Authority management is separate from compliance actions — for freeze, pause, and seize flows see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
+
+For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optional `signingCustodyWalletId`. It selects the exact custody record controlling the current metadata authority for this request, not a new deployment wallet or authority. Omission requires exactly one matching in-scope record; multiple matches return `409`. Database-only edits need no signer. In the dashboard, one matching wallet is automatic; when there are several, choose one in the metadata confirmation or beside the Asset Profile Save button. Historical `data.token.signingCustodyWalletId` does not change.
+
+To select that signer after an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority`. For tokens with a mint this is read live from the chain, unlike the stored snapshot in `data.token.metadataAuthority`; tokens without a mint return their stored metadata authority or mint authority without RPC. RPC failure returns `502`, never the stored value as a fallback. The dashboard keeps metadata and allowlist lookup errors separate, and the update rechecks authority before signing. This read changes neither the stored token nor its deployment wallet.
 
 ## Prerequisites
 
@@ -4160,16 +4200,27 @@ Now confirm the setup by listing the wallets bound to your project:
 
 ```javascript title="list-wallets.js"
 const { data } = await sdp.get("/v1/wallets");
+const custodyWallet = data.wallets.find(
+  (wallet) => wallet.status === "active" && wallet.isRuntimeExecutionAllowed
+);
+if (!custodyWallet) throw new Error("No active custody wallet can execute");
+
+const signingCustodyWalletId = custodyWallet.id;
+const custodyAddress = custodyWallet.publicKey;
 console.log(`Custody wallets configured: ${data.wallets.length}`);
+console.log(`Deployment wallet: ${signingCustodyWalletId}`);
 ```
 
 A working setup prints:
 
 ```text title="Output"
 Custody wallets configured: 2
+Deployment wallet: cwlt_123
 ```
 
-If the response shows at least one wallet, your custody is bound and you are ready to deploy a token. If it returns an empty array, your custody provider has not finished provisioning. For the Anchorage pipeline, contact your onboarding lead. For the self-serve sandbox, wait a minute and re-run; Privy's initial wallet provision can lag the SDP organization creation by a few seconds.
+If the response includes an active wallet with `isRuntimeExecutionAllowed: true`, your custody is bound and you are ready to deploy a token. If it returns no wallets, your custody provider has not finished provisioning. For the Anchorage pipeline, contact your onboarding lead. For the self-serve sandbox, wait a minute and re-run; Privy's initial wallet provision can lag the SDP organization creation by a few seconds.
+
+Keep both values. `signingCustodyWalletId` is the exact SDP Wallet record `id` (`cwlt_*`) used by issuance requests. It is not the provider-specific `walletId` or the Solana `publicKey`; `custodyAddress` is that public key and is used only where an on-chain address is required.
 
 ## 3. Design the token
 
@@ -4217,6 +4268,7 @@ const tokenConfig = {
   name: "Treasury Pilot USD",
   symbol: "TPUSD",
   decimals: 6,
+  signingCustodyWalletId,
   description: "GENIUS-compliant treasury pilot stablecoin.",
   maxSupply: "100000000",
   isFreezable: true,
@@ -4289,6 +4341,7 @@ A successful response:
       "symbol": "TPUSD",
       "decimals": 6,
       "status": "pending",
+      "signingCustodyWalletId": "cwlt_123",
       "mintAddress": null,
       "isFreezable": true,
       "isMintable": true,
@@ -4309,7 +4362,7 @@ The deploy call submits a Token-2022 mint creation transaction to Solana via the
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
-  {},
+  { signingCustodyWalletId },
   { idempotencyKey: deployKey }
 );
 const mintAddress = deployed.data.token.mintAddress;
@@ -4323,6 +4376,7 @@ A successful response carries the deployed token record with `status: "active"` 
     "token": {
       "id": "tok_e152fd38-...",
       "status": "active",
+      "signingCustodyWalletId": "cwlt_123",
       "mintAddress": "6V5bTuMsmXyhdY2Hj6VWQZsuacugACBmPqNtQgGtar8L",
       "mintAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "freezeAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
@@ -4337,7 +4391,7 @@ A successful response carries the deployed token record with `status: "active"` 
 }
 ```
 
-The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the custody wallet address that SDP picked from your configured custody (the project signing wallet, falling back to the org signing wallet). The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority.
+The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the public key of the exact `signingCustodyWalletId` supplied above. The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority. After deployment, the token's `signingCustodyWalletId` is historical attribution, not a preferred signer or fallback; authority-gated operations are checked against their live on-chain authority, and a standard burn uses its exact source wallet.
 
 <Callout type="warn">
 Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. Fund the custody wallet via the faucet and re-run `/deploy` with the same `Idempotency-Key` to replay, or a fresh key for a new attempt. SDP treats different keys as different requests; the same key with the same params replays the prior result.
@@ -4372,6 +4426,8 @@ Every other section of this tutorial is engineering. This one is the regulatory 
 
 Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer as a financial institution for purposes of the Bank Secrecy Act. That single sentence is what makes everything below load-bearing. The Act also requires you to have "[the technological capability to comply with all lawful orders to seize, freeze, burn or prevent the transfer of outstanding stablecoins](https://www.skadden.com/insights/publications/2025/07/us-establishes-first-federal-regulatory-framework)." The endpoints in this section map directly onto that statutory phrase, in the order you'll encounter them: screening first, freeze for per-account blocks, seize for compliance recovery, force-burn as the final remedy.
 
+The issuance selectors below reuse the exact `signingCustodyWalletId` from Section 2. SDP verifies that it controls the live freeze or permanent-delegate authority before signing.
+
 ### Screen before you move
 
 Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response.
@@ -4403,6 +4459,7 @@ const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
+    signingCustodyWalletId,
     accountAddress: holderAddress,
     reason: "Court order #2026-IL-0142",
   },
@@ -4425,6 +4482,7 @@ const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/seize`,
   {
+    signingCustodyWalletId,
     seize: {
       source: holderAddress,
       destination: custodyAddress,
@@ -4447,6 +4505,7 @@ const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/force-burn`,
   {
+    signingCustodyWalletId,
     forceBurn: {
       source: holderAddress,
       amount: "12000.00",
@@ -4479,6 +4538,7 @@ const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
   {
+    signingCustodyWalletId,
     mint: {
       destination: custodyAddress,
       amount: "1000000",
@@ -4489,8 +4549,9 @@ const minted = await sdp.post(
 );
 ```
 
-Three field rules to keep clear:
+Four field rules to keep clear:
 
+- **`signingCustodyWalletId`** is the exact SDP Wallet `id` from Section 2. SDP verifies that this wallet controls the current mint authority; the historical deployment wallet is not used as a fallback.
 - **`destination`** is a Solana base58 address. For the initial issuer-holds-supply pattern, this is your custody wallet's public key. For subsequent mints to client wallets, it's the recipient's wallet.
 - **`amount`** is a decimal string in UI units (post-decimals). Not a BigInt, not a number. `"1000000"` mints one million TPUSD because the token has 6 decimals.
 - **`memo`** is up to 100 characters. SDP stores it on the transaction record. This is the institutional audit attribution: the reference your compliance officer will use months later when reconciling the mint against the reserve custodian's monthly report.
@@ -4558,8 +4619,7 @@ Section 5's compliance controls only matter if they enforce. This section moves 
 Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The required permissions are `payments:write` and `wallets:read`, both of which the Developer key (`sdp`) carries:
 
 ```javascript title="transfer-tokens.js"
-const { data } = await sdp.get("/v1/wallets");
-const sourceCustodyWalletId = data.wallets[0].id;
+const sourceCustodyWalletId = signingCustodyWalletId;
 
 const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
@@ -4624,6 +4684,7 @@ const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
+    signingCustodyWalletId,
     accountAddress: destinationAddress,
     reason: "Compliance hold pending OFAC review 2026-04-019",
   },
@@ -4701,6 +4762,7 @@ For a production environment, unfreezing happens only after the underlying compl
 
 ```javascript title="unfreeze-account.js"
 await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+  signingCustodyWalletId,
   accountAddress: destinationAddress,
 });
 ```

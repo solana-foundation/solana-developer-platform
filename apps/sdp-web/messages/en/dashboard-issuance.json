@@ -717,6 +717,7 @@
       "noControlledWalletsAvailable": "No controlled wallets are available to sign this action.",
       "noSignerConfigured": "No signer is configured for this action.",
       "requiredSignerNotControlled": "The required signer is not one of your controlled wallets.",
+      "requiredSignerAmbiguous": "More than one controlled wallet matches the required signer. Resolve the wallet conflict before retrying.",
       "mintAuthorityNotControlled": "Mint authority is not one of your controlled wallets.",
       "permanentDelegateNotControlled": "Permanent delegate authority is not one of your controlled wallets.",
       "authority": "authority",

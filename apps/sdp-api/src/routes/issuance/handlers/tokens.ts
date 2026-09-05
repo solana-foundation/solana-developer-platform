@@ -1,25 +1,39 @@
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createOrgSigner } from "@/services/solana";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { type createTokenSchema, listTokensQuerySchema, type updateTokenSchema } from "../schemas";
-import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
+import {
+  type createTokenSchema,
+  getTokenQuerySchema,
+  listTokensQuerySchema,
+  type updateTokenSchema,
+} from "../schemas";
+import {
+  admitIssuanceRuntimeExecution,
+  createResolvedAuthoritySigner,
+  resolveAllowlistAuthority,
+  resolveAuthorityWallet,
+  resolveCurrentAuthorityForRole,
+  resolveIssuanceWallet,
+  resolveMetadataAuthority,
+} from "./authority-resolution";
+import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
+type TokenRecord = NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
 
 function getOnChainMetadataPatch(input: {
   name?: string;
@@ -50,6 +64,56 @@ function getOnChainMetadataPatch(input: {
   return patch;
 }
 
+async function resolveMetadataUpdate(params: {
+  c: AppContext;
+  auth: ApiKeyContext;
+  tokenService: TokenService;
+  token: TokenRecord;
+  patch: ReturnType<typeof getOnChainMetadataPatch>;
+  signingCustodyWalletId?: string;
+}) {
+  if (
+    !params.token.mintAddress ||
+    params.token.status === "pending" ||
+    Object.keys(params.patch).length === 0
+  ) {
+    return null;
+  }
+
+  const currentAuthority = await resolveCurrentAuthorityForRole(
+    params.c.env,
+    params.tokenService,
+    params.token,
+    "metadata"
+  );
+  if (!currentAuthority) {
+    throw badRequest("Metadata authority is not available for this token");
+  }
+
+  const authorityWallet = await resolveAuthorityWallet({
+    env: params.c.env,
+    auth: params.auth,
+    currentAuthority,
+    requestedCustodyWalletId: params.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+  await admitIssuanceRuntimeExecution({
+    env: params.c.env,
+    auth: params.auth,
+    custodyWalletId: authorityWallet.custodyWalletId,
+    tokenService: params.tokenService,
+  });
+  const signer = await createResolvedAuthoritySigner({
+    env: params.c.env,
+    auth: params.auth,
+    custodyWalletId: authorityWallet.custodyWalletId,
+    currentAuthority,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+  const authority = { ...authorityWallet, signer };
+  return { authority, patch: params.patch };
+}
+
 export const createToken = async (c: ValidatedBodyContext<typeof createTokenSchema>) => {
   const { auth, projectId, orgId } = requireProjectScope(c);
 
@@ -70,19 +134,21 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
   }
 
   const tokenService = getTenantTokenService(c);
-  const signingWalletId = resolveApiKeySigningWalletId(auth, body.signingWalletId, [
-    "tokens:write",
-  ]);
-
-  if (signingWalletId) {
-    await createOrgSigner(c.env, orgId, projectId, signingWalletId);
-  }
+  const signingWallet = body.signingCustodyWalletId
+    ? await resolveIssuanceWallet({
+        env: c.env,
+        auth,
+        custodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:write"],
+      })
+    : null;
 
   const token = await tokenService.createToken({
     projectId,
     organizationId: orgId,
     createdBy: auth.id,
-    signingWalletId,
+    signingCustodyWalletId: signingWallet?.custodyWalletId,
+    signingWalletId: signingWallet?.providerWalletId,
     name: body.name,
     symbol: body.symbol,
     decimals: resolved.decimals,
@@ -109,8 +175,7 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
     },
   });
 
-  const response: TokenResponse = { token };
-  return created(c, response);
+  return created(c, { token: toPublicToken(token) });
 };
 
 export const listTokens = async (c: AppContext) => {
@@ -155,7 +220,7 @@ export const listTokens = async (c: AppContext) => {
     offset: (page - 1) * pageSize,
   });
 
-  return paginated(c, tokens, { total, page, pageSize });
+  return paginated(c, tokens.map(toPublicToken), { total, page, pageSize });
 };
 
 export const listTokenFacets = async (c: AppContext) => {
@@ -170,6 +235,10 @@ export const listTokenFacets = async (c: AppContext) => {
 export const getToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
+  const parsed = getTokenQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -182,15 +251,23 @@ export const getToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const response: TokenResponse = { token };
-  return success(c, response);
+  const authorities: { allowlistAuthority?: string | null; metadataAuthority?: string | null } = {};
+  if (parsed.data.includeAllowlistAuthority === "true") {
+    authorities.allowlistAuthority = token.ablListAddress
+      ? await resolveAllowlistAuthority(c.env, token.ablListAddress)
+      : null;
+  }
+  if (parsed.data.includeMetadataAuthority === "true") {
+    authorities.metadataAuthority = await resolveMetadataAuthority(c.env, tokenService, token);
+  }
+  return success(c, { token: toPublicToken(token), ...authorities });
 };
 
 export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = c.req.valid("json");
+  const { signingCustodyWalletId, ...body } = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
 
@@ -245,10 +322,14 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
 
   try {
     const metadataPatch = getOnChainMetadataPatch(body);
-    const shouldUpdateMetadataOnChain =
-      Boolean(existing.mintAddress) &&
-      existing.status !== "pending" &&
-      Object.keys(metadataPatch).length > 0;
+    const metadataUpdate = await resolveMetadataUpdate({
+      c,
+      auth,
+      tokenService,
+      token: existing,
+      patch: metadataPatch,
+      signingCustodyWalletId,
+    });
 
     auditIntent = await auditService.beginCritical(c, {
       action: "update",
@@ -256,36 +337,21 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
       resourceId: tokenId,
       metadata: {
         ...body,
-        onChainMetadataUpdatePlanned: shouldUpdateMetadataOnChain,
+        onChainMetadataUpdatePlanned: metadataUpdate !== null,
+        custodyWalletId: metadataUpdate?.authority.custodyWalletId ?? null,
       },
     });
 
     let metadataUpdateSignature: string | null = null;
     let metadataUpdateSlot: string | null = null;
 
-    if (shouldUpdateMetadataOnChain) {
-      const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-        c.env,
-        tokenService,
-        existing,
-        "metadata"
-      );
-
-      if (!currentAuthorityRaw) {
-        throw badRequest("Metadata authority is not available for this token");
-      }
-
-      const { signer } = await resolveAuthoritySigner({
-        env: c.env,
-        auth,
-        token: existing,
-        currentAuthority: currentAuthorityRaw,
-      });
+    if (metadataUpdate) {
+      const { signer } = metadataUpdate.authority;
 
       const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
-        ...metadataPatch,
+        ...metadataUpdate.patch,
         updateAuthority: signer,
         feePayer: signer,
       });
@@ -303,14 +369,13 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
 
     await auditService.completeCritical(c, auditIntent, {
       metadata: {
-        onChainMetadataUpdated: shouldUpdateMetadataOnChain,
+        onChainMetadataUpdated: metadataUpdate !== null,
         metadataUpdateSignature,
         metadataUpdateSlot,
       },
     });
 
-    const response: TokenResponse = { token };
-    return success(c, response);
+    return success(c, { token: toPublicToken(token) });
   } catch (error) {
     if (auditIntent && !authoritativeEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {

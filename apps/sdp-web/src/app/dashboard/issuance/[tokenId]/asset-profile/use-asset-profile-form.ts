@@ -10,6 +10,7 @@ import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import {
   isMaxSupplyBelowMintedSupply,
   isSupplyLockedOnChain,
+  type SignerSelectionState,
 } from "../token-management-workspace.utils";
 import { updateAssetProfileAction } from "./actions";
 import { areDraftsEquivalent, profileToDraftState } from "./asset-profile-mapping";
@@ -23,9 +24,11 @@ import { areDraftsEquivalent, profileToDraftState } from "./asset-profile-mappin
 export function useAssetProfileForm({
   token,
   assetProfile: initialAssetProfile,
+  metadataSignerSelection,
 }: {
   token: Token;
   assetProfile: AssetProfile;
+  metadataSignerSelection: SignerSelectionState;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -53,6 +56,16 @@ export function useAssetProfileForm({
 
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  const [selectedMetadataSignerWalletId, setMetadataSignerWalletId] = useState("");
+  const metadataSignerWalletId =
+    selectedMetadataSignerWalletId || metadataSignerSelection.defaultWalletId;
+  const requiresMetadataSigner = Boolean(token.mintAddress && token.status !== "pending");
+  const metadataSignerUnavailableReason = requiresMetadataSigner
+    ? (metadataSignerSelection.unavailableReason ??
+      (metadataSignerSelection.wallets.some((wallet) => wallet.id === metadataSignerWalletId)
+        ? null
+        : t("DashboardIssuance.signer.select")))
+    : null;
 
   const updateDraft = (patch: Partial<DraftState>) => {
     if (saving) {
@@ -66,6 +79,10 @@ export function useAssetProfileForm({
   const supplyLocked = isSupplyLockedOnChain(token);
 
   const errors = getAssetDetailsErrors(draft, t);
+  if (token.mintAddress) {
+    // A deployed token's historical deployment wallet is read-only here.
+    delete errors.signingWalletId;
+  }
   if (!draft.name.trim()) {
     errors.name = t("DashboardIssuance.errors.assetNameRequired");
   }
@@ -82,7 +99,7 @@ export function useAssetProfileForm({
       symbol: token.symbol,
     });
   }
-  const errorCount = Object.keys(errors).length;
+  const errorCount = Object.keys(errors).length + (metadataSignerUnavailableReason ? 1 : 0);
 
   const discard = () => {
     setDraft(baseline);
@@ -107,6 +124,7 @@ export function useAssetProfileForm({
         profileId: assetProfile.id,
         rebuiltMetadata: buildIssuanceMetadata(draft),
         tokenPatch: {
+          signingCustodyWalletId: requiresMetadataSigner ? metadataSignerWalletId : undefined,
           name: draft.name.trim(),
           description: draft.description.trim() || null,
           uri: draft.metadataUri.trim() || null,
@@ -174,6 +192,9 @@ export function useAssetProfileForm({
     discard,
     assetProfile,
     supplyLocked,
+    metadataSignerWalletId,
+    setMetadataSignerWalletId,
+    requiresMetadataSigner,
   };
 }
 

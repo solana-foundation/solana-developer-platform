@@ -76,8 +76,18 @@ export function TokenActionPrimaryForms({
   // Mirrors the non-pending half of each submit button's `disabled` condition so the
   // note adjacent to the button explains why the action is unavailable (e.g. the
   // destination is denylisted) without the user having to scan the form fields.
-  const mintDisabledReason = signerUnavailableReason || mintValidationReason;
-  const burnDisabledReason = signerUnavailableReason || burnValidationReason;
+  const mintDisabledReason =
+    signerUnavailableReason ||
+    (signerWallets.length > 1 && !mintForm.signingWalletId
+      ? t("DashboardIssuance.signer.select")
+      : null) ||
+    mintValidationReason;
+  const burnDisabledReason =
+    signerUnavailableReason ||
+    (signerWallets.length > 1 && !burnForm.signingWalletId
+      ? t("DashboardIssuance.signer.select")
+      : null) ||
+    burnValidationReason;
 
   return (
     <>

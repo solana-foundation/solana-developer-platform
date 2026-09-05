@@ -85,6 +85,7 @@
     "@solana/signers": "catalog:",
     "@solana/subscriptions": "0.5.0",
     "@solana/token-acl-gate-sdk": "0.3.0",
+    "@solana/token-acl-sdk": "catalog:",
     "@solana/transactions": "catalog:",
     "hono": "4.13.5",
     "ioredis": "6.0.0",

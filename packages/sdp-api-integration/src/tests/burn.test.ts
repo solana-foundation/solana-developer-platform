@@ -12,6 +12,7 @@ import {
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
+  let custodyWalletId = "";
   let deployedTokenId = "";
   const request = requestWithApiKey();
 
@@ -19,6 +20,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
     custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -28,6 +30,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
 
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
@@ -37,6 +40,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
       body: JSON.stringify({
         name: "Burn Test Token",
         symbol: "BURN",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 9,
         isMintable: true,
       }),
@@ -47,6 +51,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
 
     await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     await request(`/v1/issuance/tokens/${deployedTokenId}/mint`, {
@@ -55,6 +61,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         mint: {
           destination: custodyAddress,
           amount: "5",
@@ -70,6 +77,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         burn: {
           source: custodyAddress,
           amount: "1",

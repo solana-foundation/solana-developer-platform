@@ -10,6 +10,7 @@ const token = {
   id: "tok_3e04a7b4-6277-4d4d-bdab-d26ae5075167",
   projectId: "prj_x",
   organizationId: "org_x",
+  signingCustodyWalletId: null,
   signingWalletId: null,
   mintAddress: null,
   mintAuthority: null,

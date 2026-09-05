@@ -108,6 +108,15 @@ describe("buildTokenInput (supply cap)", () => {
   });
 });
 
+describe("buildTokenInput (deployment wallet)", () => {
+  it("maps the selected wallet to the exact public API field", () => {
+    expect(
+      buildTokenInput(genericDraftWith({ signingWalletId: "  cwlt_exact  " }))
+        .signingCustodyWalletId
+    ).toBe("cwlt_exact");
+  });
+});
+
 describe("buildTokenInput (freeze authority)", () => {
   // isFreezable has no draft field of its own: it is derived from the
   // "freezeAccounts" advanced setting, which is the single control for it.

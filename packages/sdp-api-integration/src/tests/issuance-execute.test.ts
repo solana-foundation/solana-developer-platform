@@ -19,12 +19,14 @@ import { createAndDeployStablecoin, mintToWallet, TEST_WALLETS } from "../helper
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute Endpoints", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
+  let custodyWalletId = "";
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
     custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -34,12 +36,18 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
   });
 
   it("pauses and unpauses a token", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Pause Execute Coverage", "PAUSE");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Pause Execute Coverage",
+      "PAUSE",
+      custodyWalletId
+    );
 
     const pauseRes = await request(`/v1/issuance/tokens/${tokenId}/pause`, {
       method: "POST",
@@ -81,8 +89,19 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
   it("freezes, lists, and unfreezes a token account", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Freeze Execute Coverage", "FREEZE");
-    const tokenAccount = await mintToWallet(request, tokenId, TEST_WALLETS.wallet1, "1");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Freeze Execute Coverage",
+      "FREEZE",
+      custodyWalletId
+    );
+    const tokenAccount = await mintToWallet(
+      request,
+      tokenId,
+      TEST_WALLETS.wallet1,
+      "1",
+      custodyWalletId
+    );
 
     const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
       method: "POST",
@@ -92,6 +111,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
       body: JSON.stringify({
         accountAddress: tokenAccount,
         reason: "Coverage freeze",
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
     expect(freezeRes.status).toBe(201);
@@ -115,6 +135,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
     expect(unfreezeRes.status).toBe(200);
@@ -126,8 +147,13 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
   it("executes a burn", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Burn Execute Coverage", "BURN");
-    await mintToWallet(request, tokenId, custodyAddress, "1");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Burn Execute Coverage",
+      "BURN",
+      custodyWalletId
+    );
+    await mintToWallet(request, tokenId, custodyAddress, "1", custodyWalletId);
 
     const burnRes = await request(`/v1/issuance/tokens/${tokenId}/burn`, {
       method: "POST",
@@ -135,6 +161,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         burn: {
           source: custodyAddress,
           amount: "1",
@@ -151,9 +178,26 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
   it("executes a seize and force-burn", {
     timeout: 240000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Seize Execute Coverage", "SEIZE");
-    const sourceTokenAccount = await mintToWallet(request, tokenId, TEST_WALLETS.wallet1, "4");
-    const destinationTokenAccount = await mintToWallet(request, tokenId, TEST_WALLETS.wallet2, "1");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Seize Execute Coverage",
+      "SEIZE",
+      custodyWalletId
+    );
+    const sourceTokenAccount = await mintToWallet(
+      request,
+      tokenId,
+      TEST_WALLETS.wallet1,
+      "4",
+      custodyWalletId
+    );
+    const destinationTokenAccount = await mintToWallet(
+      request,
+      tokenId,
+      TEST_WALLETS.wallet2,
+      "1",
+      custodyWalletId
+    );
 
     const seizeRes = await request(`/v1/issuance/tokens/${tokenId}/seize`, {
       method: "POST",
@@ -161,6 +205,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         seize: {
           source: sourceTokenAccount,
           destination: destinationTokenAccount,
@@ -180,6 +225,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         forceBurn: {
           source: destinationTokenAccount,
           amount: "1",
@@ -196,7 +242,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
   it("executes an authority update", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Authority Execute Coverage", "AUTH");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Authority Execute Coverage",
+      "AUTH",
+      custodyWalletId
+    );
 
     const authorityRes = await request(`/v1/issuance/tokens/${tokenId}/authority`, {
       method: "POST",
@@ -204,6 +255,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         authority: {
           role: "mint",
           currentAuthority: custodyAddress,
@@ -221,8 +273,13 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
   it("refreshes token supply", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Supply Refresh Coverage", "SUPPLY");
-    await mintToWallet(request, tokenId, TEST_WALLETS.wallet1, "4");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Supply Refresh Coverage",
+      "SUPPLY",
+      custodyWalletId
+    );
+    await mintToWallet(request, tokenId, TEST_WALLETS.wallet1, "4", custodyWalletId);
 
     const refreshSupplyRes = await request(`/v1/issuance/tokens/${tokenId}/supply/refresh`, {
       method: "POST",
@@ -238,9 +295,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
     const tokenId = await createAndDeployStablecoin(
       request,
       "Confirmed History Coverage",
-      "HISTORY"
+      "HISTORY",
+      custodyWalletId
     );
-    await mintToWallet(request, tokenId, TEST_WALLETS.wallet1, "1");
+    await mintToWallet(request, tokenId, TEST_WALLETS.wallet1, "1", custodyWalletId);
 
     const pauseRes = await request(`/v1/issuance/tokens/${tokenId}/pause`, {
       method: "POST",

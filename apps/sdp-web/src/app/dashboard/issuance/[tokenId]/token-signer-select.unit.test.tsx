@@ -18,12 +18,13 @@ function makeWallet(index: number): PaymentsDashboardWallet {
 
 function render(
   wallets: PaymentsDashboardWallet[],
-  signerUnavailableReason: string | null = null
+  signerUnavailableReason: string | null = null,
+  signerWalletId = ""
 ): string {
   return renderToStaticMarkup(
     <TokenSignerSelect
       signerWallets={wallets}
-      signerWalletId=""
+      signerWalletId={signerWalletId}
       signerUnavailableReason={signerUnavailableReason}
       onSignerWalletIdChange={() => {}}
       optional
@@ -42,6 +43,12 @@ describe("TokenSignerSelect", () => {
 
   it("renders a select instead of a locked card when several wallets exist", () => {
     const markup = render([makeWallet(1), makeWallet(2)]);
+    expect(markup).not.toContain('data-testid="wallet-identity-card"');
+    expect(markup).toContain("DashboardIssuance.signer.select");
+  });
+
+  it("keeps selection available when a previous choice disappeared and only one wallet remains", () => {
+    const markup = render([makeWallet(1)], null, "cw_removed");
     expect(markup).not.toContain('data-testid="wallet-identity-card"');
     expect(markup).toContain("DashboardIssuance.signer.select");
   });

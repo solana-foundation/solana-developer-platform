@@ -54,6 +54,8 @@ export interface UpdateAssetProfileActionInput {
   // the freshly fetched profile server-side before the PATCH.
   rebuiltMetadata: IssuanceMetadata;
   tokenPatch: {
+    // Per-action metadata signer, never the profile's historical deployment wallet.
+    signingCustodyWalletId?: string;
     name: string;
     description: string | null;
     uri: string | null;
@@ -150,7 +152,7 @@ function readCustomFields(customer: Record<string, unknown>): CustomFieldRow[] {
  * Hydrate the creation-flow form model from an existing profile + token.
  *
  * The token row wins for the fields it duplicates (name, symbol, decimals,
- * description, imageUrl, uri, signingWalletId): it is what deploy and the rest
+ * description, imageUrl, uri, signingCustodyWalletId): it is what deploy and the rest
  * of the dashboard read, and the profile's copies can lag behind token-only
  * updates made from the old management UI. Saving re-converges both.
  */
@@ -205,7 +207,7 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     accessControl: readAccessControl(compliance.accessControl),
     capacities: coerceCapacities(compliance.capacities),
     advancedSettings: readAdvancedSettings(metadata.settings),
-    signingWalletId: token.signingWalletId ?? "",
+    signingWalletId: token.signingCustodyWalletId ?? "",
     metadataUri: token.uri ?? "",
     customFields: readCustomFields(customer),
     publicFields,

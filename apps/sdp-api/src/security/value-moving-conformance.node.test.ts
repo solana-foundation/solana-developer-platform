@@ -98,7 +98,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/authority",',
-      before: "policyGate({ extract: extractUpdateAuthorityPolicyCandidate })",
+      before: "extract: extractUpdateAuthorityPolicyCandidate",
       after: "executeUpdateAuthority",
     },
     replay: [

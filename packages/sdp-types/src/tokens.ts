@@ -206,7 +206,9 @@ export interface Token {
   id: string; // tok_xxxxxxxxxxxx
   projectId: string;
   organizationId: string;
-  /** Preferred custody wallet ID used for token deploy/admin/write actions. */
+  /** Exact SDP wallet selected for direct deployment (null on unresolved legacy rows). */
+  signingCustodyWalletId: string | null;
+  /** Internal Provider wallet ID mirror retained for legacy deploy/rollback paths. */
   signingWalletId: string | null;
   /** Solana mint address (null until deployed) */
   mintAddress: string | null;
@@ -253,6 +255,8 @@ export interface TokenTransaction {
   id: string; // ttx_xxxxxxxxxxxx
   tokenId: string;
   organizationId: string;
+  /** Exact SDP wallet used for this operation (null on legacy history). */
+  custodyWalletId: string | null;
   type: TokenTransactionType;
   status: TokenTransactionStatus;
   /** Request idempotency key */
@@ -274,6 +278,12 @@ export interface TokenTransaction {
   updatedAt: string;
 }
 
+/** Public token projection; the Provider wallet mirror remains internal. */
+export type PublicToken = Omit<Token, "signingWalletId">;
+
+/** Public transaction projection; the exact signer pin remains internal. */
+export type PublicTokenTransaction = Omit<TokenTransaction, "custodyWalletId">;
+
 export interface TokenTransactionListItem {
   token: {
     id: string;
@@ -281,7 +291,7 @@ export interface TokenTransactionListItem {
     symbol: string;
     mintAddress: string | null;
   };
-  transaction: TokenTransaction;
+  transaction: PublicTokenTransaction;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -397,8 +407,8 @@ export interface TokenTemplateOverrides {
 export interface CreateTokenRequest {
   name: string;
   symbol: string;
-  /** Preferred custody wallet ID for token deploy/admin/write actions. */
-  signingWalletId?: string;
+  /** Exact SDP Wallet ID selected for direct deployment. */
+  signingCustodyWalletId?: string;
   decimals?: number;
   description?: string;
   /** Metadata URI passed to on-chain token metadata (points to off-chain JSON). */
@@ -462,15 +472,15 @@ export interface UnfreezeAccountRequest {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface TokenResponse {
-  token: Token;
+  token: PublicToken;
 }
 
 export interface ListTokensResponse {
-  tokens: Token[];
+  tokens: PublicToken[];
 }
 
 export interface TokenTransactionResponse {
-  transaction: TokenTransaction;
+  transaction: PublicTokenTransaction;
 }
 
 export interface TokenAllowlistResponse {

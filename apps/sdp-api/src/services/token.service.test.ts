@@ -17,6 +17,26 @@ describe("TokenService", () => {
   let db: DatabaseClient;
   let tokenService: TokenService;
 
+  async function seedExecutionWallet(): Promise<void> {
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cfg_issuance_execution', ?, ?, 'local', 'encrypted')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+         VALUES ('cwlt_issuance_execution', 'cfg_issuance_execution',
+                 'provider_issuance_execution', 'Authority111'),
+                ('cwlt_issuance_previous', 'cfg_issuance_execution',
+                 'provider_issuance_previous', 'Authority222')`
+      )
+      .run();
+  }
+
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
@@ -122,7 +142,69 @@ describe("TokenService", () => {
       .run();
   });
 
-  it("releases an unsubmitted transaction's idempotency key for approved recovery", async () => {
+  it("persists an exact draft wallet without dropping its Provider-ID mirror", async () => {
+    await seedExecutionWallet();
+
+    const token = await tokenService.createToken({
+      projectId: TEST_PROJECT.id,
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_PROJECT_API_KEY.id,
+      name: "Exact Wallet Token",
+      symbol: "EWT",
+      signingCustodyWalletId: "cwlt_issuance_execution",
+      signingWalletId: "provider_issuance_execution",
+    });
+
+    expect(token).toMatchObject({
+      signingCustodyWalletId: "cwlt_issuance_execution",
+      signingWalletId: "provider_issuance_execution",
+    });
+    expect(
+      await db
+        .prepare(
+          `SELECT signing_custody_wallet_id, signing_wallet_id
+             FROM issued_tokens
+            WHERE id = ?`
+        )
+        .bind(token.id)
+        .first()
+    ).toEqual({
+      signing_custody_wallet_id: "cwlt_issuance_execution",
+      signing_wallet_id: "provider_issuance_execution",
+    });
+  });
+
+  it("persists the exact wallet on a transaction and its idempotent replay", async () => {
+    await seedExecutionWallet();
+    const input = {
+      tokenId: "tok_freeze_refreeze",
+      organizationId: TEST_ORG.id,
+      type: "mint" as const,
+      params: { destination: "wallet_exact_execution", amount: "1" },
+      custodyWalletId: "cwlt_issuance_execution",
+      idempotencyKey: "exact-wallet-transaction",
+      idempotencyFingerprint: "exact-wallet-transaction-fingerprint",
+    };
+
+    const first = await tokenService.createTransaction(input);
+    const replay = await tokenService.createTransaction(input);
+
+    expect(first.transaction).toMatchObject({
+      custodyWalletId: "cwlt_issuance_execution",
+    });
+    expect(replay).toMatchObject({
+      replayed: true,
+      transaction: { custodyWalletId: "cwlt_issuance_execution" },
+    });
+    expect(
+      await db
+        .prepare("SELECT custody_wallet_id FROM issuance_transactions WHERE id = ?")
+        .bind(first.transaction.id)
+        .first()
+    ).toEqual({ custody_wallet_id: "cwlt_issuance_execution" });
+  });
+
+  it("releases an unsubmitted transaction's idempotency key for a safe retry", async () => {
     const input = {
       tokenId: "tok_freeze_refreeze",
       organizationId: TEST_ORG.id,
@@ -1071,6 +1153,13 @@ describe("TokenService", () => {
   });
 
   describe("deploy claim lifecycle (beginTokenDeploy / releaseTokenDeploy)", () => {
+    const deployWallet = {
+      custodyWalletId: "cwlt_issuance_execution",
+      providerWalletId: "provider_issuance_execution",
+    };
+
+    beforeEach(seedExecutionWallet);
+
     async function insertToken(
       id: string,
       overrides: { mintAddress?: string | null; projectId?: string; status?: string }
@@ -1105,19 +1194,39 @@ describe("TokenService", () => {
     it("claims a pending token, flipping it to deploying and returning the frozen snapshot", async () => {
       await insertToken("tok_claim_ok", { status: "pending", mintAddress: null });
 
-      const claimed = await tokenService.beginTokenDeploy("tok_claim_ok");
+      const claimed = await tokenService.beginTokenDeploy("tok_claim_ok", deployWallet);
 
       expect(claimed).not.toBeNull();
       expect(claimed?.symbol).toBe("CLM");
       expect(await readStatus("tok_claim_ok")).toBe("deploying");
     });
 
+    it("atomically freezes the exact deploy wallet and its Provider-ID mirror", async () => {
+      await insertToken("tok_claim_exact_wallet", { status: "pending", mintAddress: null });
+      await db
+        .prepare(
+          `UPDATE issued_tokens
+              SET signing_custody_wallet_id = 'cwlt_issuance_previous',
+                  signing_wallet_id = 'provider_issuance_previous'
+            WHERE id = 'tok_claim_exact_wallet'`
+        )
+        .run();
+
+      const claimed = await tokenService.beginTokenDeploy("tok_claim_exact_wallet", deployWallet);
+
+      expect(claimed).toMatchObject({
+        status: "deploying",
+        signingCustodyWalletId: "cwlt_issuance_execution",
+        signingWalletId: "provider_issuance_execution",
+      });
+    });
+
     it("returns null when the token is already claimed for deploy", async () => {
       await insertToken("tok_claim_twice", { status: "pending", mintAddress: null });
 
-      expect(await tokenService.beginTokenDeploy("tok_claim_twice")).not.toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_twice", deployWallet)).not.toBeNull();
       // A second, concurrent deploy must lose the claim rather than mint twice.
-      expect(await tokenService.beginTokenDeploy("tok_claim_twice")).toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_twice", deployWallet)).toBeNull();
     });
 
     it("returns null for an already-deployed token", async () => {
@@ -1126,13 +1235,13 @@ describe("TokenService", () => {
         mintAddress: "Dep1oyed11111111111111111111111111111111111",
       });
 
-      expect(await tokenService.beginTokenDeploy("tok_claim_deployed")).toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_deployed", deployWallet)).toBeNull();
       expect(await readStatus("tok_claim_deployed")).toBe("active");
     });
 
     it("blocks symbol/decimals PATCHes while the token is deploying (closes the stale-snapshot race)", async () => {
       await insertToken("tok_claim_race", { status: "pending", mintAddress: null });
-      await tokenService.beginTokenDeploy("tok_claim_race");
+      await tokenService.beginTokenDeploy("tok_claim_race", deployWallet);
 
       // This is the exact race: a PATCH landing while the mint is being created
       // from the claimed snapshot must lose, not corrupt the identity.
@@ -1150,7 +1259,7 @@ describe("TokenService", () => {
 
     it("blocks metadata updates while deployment is using the claimed snapshot", async () => {
       await insertToken("tok_claim_metadata_race", { status: "pending", mintAddress: null });
-      await tokenService.beginTokenDeploy("tok_claim_metadata_race");
+      await tokenService.beginTokenDeploy("tok_claim_metadata_race", deployWallet);
 
       await expect(
         tokenService.updateToken("tok_claim_metadata_race", {
@@ -1175,7 +1284,7 @@ describe("TokenService", () => {
       });
       expect(pendingSnapshot).not.toBeNull();
 
-      await tokenService.beginTokenDeploy("tok_completed_metadata_race");
+      await tokenService.beginTokenDeploy("tok_completed_metadata_race", deployWallet);
       await tokenService.setTokenDeployed(
         "tok_completed_metadata_race",
         "11111111111111111111111111111111",
@@ -1203,7 +1312,7 @@ describe("TokenService", () => {
 
     it("releases a deploying claim back to pending so a failed deploy stays editable", async () => {
       await insertToken("tok_claim_release", { status: "pending", mintAddress: null });
-      await tokenService.beginTokenDeploy("tok_claim_release");
+      await tokenService.beginTokenDeploy("tok_claim_release", deployWallet);
       expect(await readStatus("tok_claim_release")).toBe("deploying");
 
       await tokenService.releaseTokenDeploy("tok_claim_release");
@@ -1215,7 +1324,7 @@ describe("TokenService", () => {
 
       // And re-claimable: a retried deploy after a failed one must not be stuck
       // failing the pending-only claim.
-      expect(await tokenService.beginTokenDeploy("tok_claim_release")).not.toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_release", deployWallet)).not.toBeNull();
     });
 
     it("does not revert an already-deployed token when release is called", async () => {
@@ -1273,7 +1382,7 @@ describe("TokenService", () => {
         createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
       );
 
-      await expect(scoped.beginTokenDeploy("tok_foreign_claim")).resolves.toBeNull();
+      await expect(scoped.beginTokenDeploy("tok_foreign_claim", deployWallet)).resolves.toBeNull();
       await scoped.releaseTokenDeploy("tok_foreign_release");
       await expect(
         scoped.setTokenDeployed(

@@ -76,7 +76,7 @@ export async function createIssuanceTokenAction(
   const template = String(formData.get("template") ?? "custom").trim();
   const description = String(formData.get("description") ?? "").trim();
   const imageUrl = String(formData.get("imageUrl") ?? "").trim();
-  const signingWalletId = String(formData.get("signingWalletId") ?? "").trim();
+  const signingCustodyWalletId = String(formData.get("signingWalletId") ?? "").trim();
   const decimalsRaw = String(formData.get("decimals") ?? "").trim();
   const maxSupplyRaw = String(formData.get("maxSupply") ?? "").trim();
   const requiresAllowlist = parseBoolean(formData.get("requiresAllowlist"), false);
@@ -126,7 +126,7 @@ export async function createIssuanceTokenAction(
     template: string;
     uri?: string;
     imageUrl?: string;
-    signingWalletId?: string;
+    signingCustodyWalletId?: string;
     description?: string;
     decimals?: number;
     maxSupply?: string;
@@ -154,8 +154,8 @@ export async function createIssuanceTokenAction(
     payload.imageUrl = imageUrl;
   }
 
-  if (signingWalletId) {
-    payload.signingWalletId = signingWalletId;
+  if (signingCustodyWalletId) {
+    payload.signingCustodyWalletId = signingCustodyWalletId;
   }
 
   if (decimalsRaw) {

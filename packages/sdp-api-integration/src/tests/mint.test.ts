@@ -16,6 +16,7 @@ import {
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
+  let custodyWalletId = "";
   let deployedTokenId = "";
   const request = requestWithApiKey();
 
@@ -23,6 +24,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
     custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -32,6 +34,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
 
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
@@ -41,6 +44,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
       body: JSON.stringify({
         name: "Mint Test Token",
         symbol: "MINT",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 9,
         isMintable: true,
       }),
@@ -51,6 +55,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
 
     await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
   }, 60000);
 
@@ -61,6 +67,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         mint: {
           destination: custodyAddress,
           amount: "1",
@@ -90,6 +97,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         mint: {
           destination: custodyAddress,
           amount: "1",

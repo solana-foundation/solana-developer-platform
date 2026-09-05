@@ -144,7 +144,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
   // server-side "signing wallet is required" for the wallet that's right on screen.
   useEffect(() => {
     if (signerWallets.length === 1 && !draft.signingWalletId) {
-      updateDraft({ signingWalletId: signerWallets[0].walletId });
+      updateDraft({ signingWalletId: signerWallets[0].id });
     }
   }, [signerWallets, draft.signingWalletId, updateDraft]);
 
@@ -185,7 +185,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
     // payload carries the wallet the UI shows as selected.
     const submittedDraft =
       !signerWalletsError && signerWallets.length === 1
-        ? { ...draft, signingWalletId: signerWallets[0].walletId }
+        ? { ...draft, signingWalletId: signerWallets[0].id }
         : draft;
     try {
       const result = await createAssetDraftAction({

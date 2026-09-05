@@ -169,6 +169,7 @@ export function createInitialFreezeForm(): FreezeFormState {
   return {
     accountAddress: "",
     reason: "",
+    signingWalletId: "",
   };
 }
 
@@ -707,7 +708,9 @@ function getPendingAuthoritySignerWallet(
     return null;
   }
 
-  return findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
+  return token.signingCustodyWalletId
+    ? findWalletByCustodyWalletId(availableWallets, token.signingCustodyWalletId)
+    : availableWallets[0];
 }
 
 function pendingTokenRequiresPermanentDelegate(token: Token): boolean {
@@ -766,7 +769,9 @@ export type SignerAwareAction =
   | "force-burn"
   | "authority"
   | "freeze"
-  | "pause";
+  | "pause"
+  | "metadata"
+  | "allowlist";
 
 export interface SignerSelectionState {
   wallets: PaymentsDashboardWallet[];
@@ -780,20 +785,25 @@ export function getAvailableSignerWallets(
   return authorityWallets.filter((wallet) => wallet.publicKey.trim());
 }
 
-export function getSignerWalletOptionLabel(wallet: PaymentsDashboardWallet, t: Translate): string {
+export function getSignerWalletOptionLabel(
+  wallet: PaymentsDashboardWallet,
+  t: Translate,
+  includeCustodyWalletId = false
+): string {
   const primaryLabel = wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled");
-  return `${primaryLabel} · ${formatValue(wallet.walletId, t)} · ${formatValue(wallet.publicKey, t)}`;
+  const label = `${primaryLabel} · ${formatValue(wallet.walletId, t)} · ${formatValue(wallet.publicKey, t)}`;
+  return includeCustodyWalletId ? `${label} · ${wallet.id}` : label;
 }
 
-export function findWalletByWalletId(
+export function findWalletByCustodyWalletId(
   authorityWallets: PaymentsDashboardWallet[],
-  walletId: string | null | undefined
+  custodyWalletId: string | null | undefined
 ): PaymentsDashboardWallet | null {
-  if (!walletId) {
+  if (!custodyWalletId) {
     return null;
   }
 
-  return authorityWallets.find((wallet) => wallet.walletId === walletId) ?? null;
+  return authorityWallets.find((wallet) => wallet.id === custodyWalletId) ?? null;
 }
 
 export function findWalletByPublicKey(
@@ -829,6 +839,8 @@ export function getSignerSelectionForAction({
   token,
   authorityWallets,
   metadataAuthority,
+  metadataAuthorityError,
+  allowlistAuthority,
   permissionRow,
   t,
 }: {
@@ -836,9 +848,14 @@ export function getSignerSelectionForAction({
   token: Token;
   authorityWallets: PaymentsDashboardWallet[];
   metadataAuthority: string | null;
+  metadataAuthorityError?: string | null;
+  allowlistAuthority?: string | null;
   permissionRow?: PermissionRow | null;
   t: Translate;
 }): SignerSelectionState {
+  if (action === "metadata" && metadataAuthorityError) {
+    return { wallets: [], defaultWalletId: "", unavailableReason: metadataAuthorityError };
+  }
   const availableWallets = getAvailableSignerWallets(authorityWallets);
 
   if (availableWallets.length === 0) {
@@ -849,13 +866,33 @@ export function getSignerSelectionForAction({
     };
   }
 
-  if (action === "deploy" || action === "burn") {
-    const preferredWallet =
-      findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
+  if (action === "deploy") {
+    const preferredWallet = findWalletByCustodyWalletId(
+      availableWallets,
+      token.signingCustodyWalletId
+    );
+    if (token.signingCustodyWalletId && !preferredWallet) {
+      return {
+        wallets: availableWallets,
+        defaultWalletId: "",
+        unavailableReason: t("DashboardIssuance.management.requiredSignerNotControlled"),
+      };
+    }
 
     return {
       wallets: availableWallets,
-      defaultWalletId: preferredWallet.walletId,
+      defaultWalletId: (preferredWallet ?? availableWallets[0]).id,
+      unavailableReason: null,
+    };
+  }
+
+  if (action === "burn") {
+    const hasDuplicateAddress =
+      new Set(availableWallets.map((wallet) => wallet.publicKey)).size < availableWallets.length;
+
+    return {
+      wallets: availableWallets,
+      defaultWalletId: hasDuplicateAddress ? "" : availableWallets[0].id,
       unavailableReason: null,
     };
   }
@@ -898,6 +935,12 @@ export function getSignerSelectionForAction({
       missingReason = t("DashboardIssuance.management.noPauseAuthorityConfigured");
       uncontrolledReason = t("DashboardIssuance.management.pauseAuthorityNotControlled");
       break;
+    case "metadata":
+      requiredAuthority = metadataAuthority;
+      break;
+    case "allowlist":
+      requiredAuthority = allowlistAuthority ?? null;
+      break;
     default:
       break;
   }
@@ -910,8 +953,10 @@ export function getSignerSelectionForAction({
     };
   }
 
-  const matchedWallet = findWalletByPublicKey(availableWallets, requiredAuthority);
-  if (!matchedWallet) {
+  const matchedWallets = availableWallets.filter(
+    (wallet) => wallet.publicKey === requiredAuthority
+  );
+  if (matchedWallets.length === 0) {
     return {
       wallets: [],
       defaultWalletId: "",
@@ -920,8 +965,8 @@ export function getSignerSelectionForAction({
   }
 
   return {
-    wallets: [matchedWallet],
-    defaultWalletId: matchedWallet.walletId,
+    wallets: matchedWallets,
+    defaultWalletId: matchedWallets.length === 1 ? matchedWallets[0].id : "",
     unavailableReason: null,
   };
 }
