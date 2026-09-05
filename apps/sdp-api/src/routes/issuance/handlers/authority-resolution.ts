@@ -9,10 +9,7 @@ import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
-import {
-  assertApiKeyWalletAccess,
-  assertFreshApiKeyCustodyWalletAccess,
-} from "@/services/api-key-scope.service";
+import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -485,63 +482,6 @@ export async function createResolvedAuthoritySigner(params: {
     throw badRequest("Selected custody wallet does not control the current authority");
   }
   return loadResolvedAuthoritySigner(params);
-}
-
-/** Legacy Provider-ID resolution retained only for legacy prepare-family callers. */
-export async function resolveLegacyAuthorityWallet(params: {
-  env: Env;
-  auth: ApiKeyContext;
-  token: TokenRecord;
-  requestedWalletId?: string | null;
-  currentAuthority: string;
-}): Promise<{ walletId: string }> {
-  const { env, auth, token, requestedWalletId, currentAuthority } = params;
-  const preferredWalletId =
-    requestedWalletId ?? token?.signingWalletId ?? auth.signingWalletId ?? null;
-  const custodyStore = new CustodyConfigStore(getDb(env), env);
-
-  if (preferredWalletId) {
-    assertApiKeyWalletAccess(auth, preferredWalletId, ["tokens:admin"]);
-    const preferredWallet = await custodyStore.findActiveWalletByIdentifier(
-      auth.organizationId,
-      auth.projectId ?? undefined,
-      preferredWalletId
-    );
-    if (preferredWallet?.publicKey === currentAuthority) {
-      return { walletId: preferredWallet.walletId };
-    }
-  }
-
-  const authorityWallet = await custodyStore.findActiveWalletByPublicKey(
-    auth.organizationId,
-    auth.projectId ?? undefined,
-    currentAuthority
-  );
-
-  if (!authorityWallet) {
-    throw badRequest("Current authority is not controlled by custody");
-  }
-
-  assertApiKeyWalletAccess(auth, authorityWallet.walletId, ["tokens:admin"]);
-
-  return { walletId: authorityWallet.walletId };
-}
-
-export async function resolveLegacyAuthoritySigner(params: {
-  env: Env;
-  auth: ApiKeyContext;
-  token: TokenRecord;
-  requestedWalletId?: string | null;
-  currentAuthority: string;
-}): Promise<{ signer: TransactionSigner; walletId: string }> {
-  const resolved = await resolveLegacyAuthorityWallet(params);
-  const signer = await createLegacyResolvedAuthoritySigner({
-    env: params.env,
-    auth: params.auth,
-    walletId: resolved.walletId,
-    currentAuthority: params.currentAuthority,
-  });
-  return { signer, walletId: resolved.walletId };
 }
 
 export async function createLegacyResolvedAuthoritySigner(params: {
