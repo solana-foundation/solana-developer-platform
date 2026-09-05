@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { REDACTION_CENSOR } from "@/runtime/log-redaction";
+import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -125,9 +127,43 @@ describe("HeliusRingsEventRepository (postgres)", () => {
     });
     if (!wallet) throw new Error("wallet fixture was not created");
 
+    const credentialId = "pcred_hre_repo_test";
+    const credential = await new ProviderCredentialStore(db).insertCredential({
+      id: credentialId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      provider: "helius_rings",
+      label: "Event repository test",
+      scope: "project",
+      source: "stored",
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "opaque" },
+      displayMetadata: {},
+      version: 1,
+      rotatedFromId: null,
+      idempotencyKey: credentialId,
+      idempotencyFingerprint: credentialId,
+      createdBy: TEST_USER.id,
+    });
+    await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+      credentialId,
+    ]);
+    const connection = await new HeliusRingsConnectionStore(db).insert({
+      id: "hrconn_hre_repo_test",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      name: "Event repository test",
+      providerCredentialId: credentialId,
+      providerCredentialScopeKey: credential.scope_key,
+      allowInsecureHttp: false,
+      displayMetadata: {},
+      makeDefault: true,
+      createdBy: TEST_USER.id,
+    });
+
     operationRepo = createPostgresHeliusRingsOperationRepository(db);
     const { operation } = await operationRepo.reserveIntent({
       ...scope,
+      ringsConnectionId: connection.id,
       walletId: wallet.id,
       opType: "shield",
       intentKey: "sha256:event-test",

@@ -11,6 +11,7 @@ import {
   executeRingsOperation,
   getRingsHealth,
   getRingsOperation,
+  getRingsSetup,
   getRingsWallet,
   getRingsWalletIdentity,
   listRingsOperations,
@@ -38,6 +39,7 @@ heliusRings.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: tru
 heliusRings.use("*", projectContextMiddleware());
 
 heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
+heliusRings.get("/setup-status", requirePermissions("payments:read"), getRingsSetup);
 
 heliusRings.get("/rings", requirePermissions("payments:read"), listRingsProjectRings);
 // Recording a ring runs bring-up (signed transactions through custody), so it

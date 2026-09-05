@@ -16,6 +16,7 @@
  * Ships dormant: early-returns unless the feature flag is on.
  */
 
+import { getDb } from "@/db";
 import {
   createHeliusRingsOperationRepository,
   type HeliusRingsOperationRow,
@@ -23,6 +24,7 @@ import {
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
+import { resolveRingsBackgroundRpcUrl } from "@/services/helius-rings/connection-resolver";
 import {
   type RingsSignatureOutcome,
   readRingsBlockHeight,
@@ -94,7 +96,7 @@ export interface PollRingsIndexingDependencies {
   createService?: ServiceFor;
   now?: () => Date;
   /** Test seam for the expiry pass's view of the chain. */
-  readBlockHeight?: (input: { env: Env }) => Promise<string | null>;
+  readBlockHeight?: (input: { env: Env; rpcUrl?: string }) => Promise<string | null>;
   /** Test seam for the lookup that spares a transaction the chain confirms. */
   readSignatureStatus?: SignatureStatusReader;
 }
@@ -111,7 +113,6 @@ export async function pollRingsIndexing(
     return;
   }
 
-  const now = dependencies.now ?? (() => new Date());
   const createService: ServiceFor =
     dependencies.createService ?? ((tenant) => createHeliusRingsService(env, tenant));
   const serviceFor = (operation: HeliusRingsOperationRow) =>
@@ -123,9 +124,16 @@ export async function pollRingsIndexing(
   const repository = createHeliusRingsOperationRepository(env);
   const logger = getLogger();
 
-  const readSignatureStatus = dependencies.readSignatureStatus ?? readRingsSignatureStatus;
-
-  const blockHeight = await (dependencies.readBlockHeight ?? readRingsBlockHeight)({ env });
+  const needsRpcUrl = !dependencies.readBlockHeight || !dependencies.readSignatureStatus;
+  const rpcUrl = needsRpcUrl ? await resolveRingsBackgroundRpcUrl(env) : undefined;
+  const readSignatureStatus =
+    dependencies.readSignatureStatus ??
+    ((input: { env: Env; signature: string }) =>
+      readRingsSignatureStatus({ ...input, ...(rpcUrl ? { rpcUrl } : {}) }));
+  const blockHeight = await (dependencies.readBlockHeight ?? readRingsBlockHeight)({
+    env,
+    ...(rpcUrl ? { rpcUrl } : {}),
+  });
   if (blockHeight === null) {
     logger.warn({}, "rings expiry pass skipped: block height unavailable");
   } else {
@@ -137,7 +145,13 @@ export async function pollRingsIndexing(
   }
 
   await completeIndexedFailures(repository, serviceFor, logger);
-  await advanceInFlight(repository, serviceFor, logger, now(), { env, readSignatureStatus });
+  const sweepNow = dependencies.now?.() ?? (await readDatabaseNow(env));
+  await advanceInFlight(repository, serviceFor, logger, sweepNow, { env, readSignatureStatus });
+}
+
+async function readDatabaseNow(env: Env): Promise<Date> {
+  const row = await getDb(env).queryOne<{ now: string }>("SELECT sdp_iso_now() AS now");
+  return new Date(row?.now ?? Date.now());
 }
 
 /** What the two passes that can give up on a signature need to consult the chain. */
@@ -257,7 +271,10 @@ async function advanceInFlight(
   chain: ChainCheck
 ): Promise<void> {
   const inFlight = await repository.listInFlightOperations({
-    staleBefore: now.toISOString(),
+    // `updated_at` and the application clock both have millisecond precision.
+    // Include rows written in this exact millisecond; the destructive paths
+    // below still enforce their own grace period.
+    staleBefore: new Date(now.getTime() + 1).toISOString(),
     limit: MAX_PER_RUN,
   });
   const timeoutCutoff = now.getTime() - RINGS_INDEXING_TIMEOUT_MS;

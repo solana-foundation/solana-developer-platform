@@ -65,8 +65,10 @@ const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red" };
 
 function describeClientFailure(error: unknown, config: RingsGatewayConfig): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
-  const apiKey = readApiKey(config.solanaRpcUrl);
-  const secrets = apiKey === null ? [config.solanaRpcUrl] : [config.solanaRpcUrl, apiKey];
+  const secrets = [config.solanaRpcUrl, config.indexerUrl, config.proverUrl].flatMap((url) => [
+    url,
+    ...readQueryValues(url),
+  ]);
 
   return secrets.reduce(
     (message, secret) => (secret.length === 0 ? message : message.replaceAll(secret, "[redacted]")),
@@ -74,11 +76,11 @@ function describeClientFailure(error: unknown, config: RingsGatewayConfig): stri
   );
 }
 
-function readApiKey(rpcUrl: string): string | null {
+function readQueryValues(endpointUrl: string): string[] {
   try {
-    return new URL(rpcUrl).searchParams.get("api-key");
+    return [...new URL(endpointUrl).searchParams.values()].filter((value) => value.length > 0);
   } catch {
-    return null;
+    return [];
   }
 }
 

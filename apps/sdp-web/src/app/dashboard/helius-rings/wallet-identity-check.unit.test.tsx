@@ -184,13 +184,13 @@ describe("WalletIdentityCheck", () => {
 
   it("surfaces the server's own reason when the read fails", async () => {
     mocks.fetchRingsWalletIdentity.mockResolvedValue({
-      error: "Helius Rings is enabled but HELIUS_RINGS_RPC_URL is not configured",
+      error: "Helius Rings setup is required for this project",
     });
     renderCheck();
 
     await userEvent.setup().click(checkButton());
 
-    expect(await screen.findByText(/HELIUS_RINGS_RPC_URL is not configured/)).toBeTruthy();
+    expect(await screen.findByText(/Helius Rings setup is required/)).toBeTruthy();
     // A failure is not a verdict about the chain.
     expect(screen.queryByText("Not registered")).toBeNull();
     expect(checkButton().disabled).toBe(false);

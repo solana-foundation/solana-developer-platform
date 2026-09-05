@@ -170,14 +170,13 @@ describe("RingCard", () => {
 
   it("surfaces the server's own reason when bring-up refuses", async () => {
     mocks.createProjectRing.mockResolvedValue({
-      error:
-        "ring bring-up needs HELIUS_RINGS_RING_RPC_URL; every other rings operation runs without it",
+      error: "ring bring-up needs a Ring RPC URL in the project's Helius Rings configuration",
     });
     renderCard([]);
 
     await fillForm("treasury", RING_PROGRAM);
 
-    expect(await screen.findByText(/HELIUS_RINGS_RING_RPC_URL/)).toBeTruthy();
+    expect(await screen.findByText(/Ring RPC URL/)).toBeTruthy();
   });
 
   it("answers, and re-enables the control, when the request never returns a reply", async () => {

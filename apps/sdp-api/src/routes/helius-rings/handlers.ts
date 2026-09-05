@@ -12,6 +12,7 @@ import { success } from "@/lib/response";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
+import { getRingsSetupStatus } from "@/services/helius-rings/connection.service";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import {
@@ -42,6 +43,10 @@ function tenantOf(c: AppContext) {
     auth,
     tenant: { organizationId: auth.organizationId, projectId: requireProjectId(c) },
   };
+}
+
+export async function getRingsSetup(c: AppContext) {
+  return success(c, await getRingsSetupStatus(c));
 }
 
 function policyCustodyWalletId(wallet: HeliusRingsWalletRow): string {

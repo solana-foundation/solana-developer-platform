@@ -236,20 +236,6 @@ export interface Env {
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
 
-  // Rings upstreams, all required once Rings is enabled. Absence does not
-  // disable the gateway: it reports every component red naming what is missing.
-  HELIUS_RINGS_RPC_URL?: string;
-  HELIUS_RINGS_INDEXER_URL?: string;
-  HELIUS_RINGS_PROVER_URL?: string;
-
-  // Helius ring RPC, which mints custom-ring auditor keys. Only ring bring-up
-  // needs it; absent, submitting a ring program id fails with config_error.
-  HELIUS_RINGS_RING_RPC_URL?: string;
-
-  // Permits plain-http Rings upstreams; opt-in per environment because over
-  // plaintext an indexer response reveals which notes an identity owns.
-  HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
-
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;

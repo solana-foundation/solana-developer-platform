@@ -168,4 +168,16 @@ describe("createRingsGateway", () => {
     expect(health.detail?.rpc).not.toBe("client unavailable: unknown error");
     expect(JSON.stringify(health)).not.toContain("super-secret-key");
   });
+
+  it("redacts credentials embedded in every configured upstream", async () => {
+    const health = await createRingsGateway({
+      ...CONFIG,
+      indexerUrl: "not-a-url?token=indexer-secret",
+      proverUrl: "https://prover.example.test/?key=prover-secret",
+    }).probeHealth();
+
+    const serialized = JSON.stringify(health);
+    expect(serialized).not.toContain("indexer-secret");
+    expect(serialized).not.toContain("prover-secret");
+  });
 });
