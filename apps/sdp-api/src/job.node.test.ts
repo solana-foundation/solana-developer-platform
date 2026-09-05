@@ -347,6 +347,37 @@ describe("runCronJob", () => {
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
+  it("runs every reconciler while credential cleanup is pending and reports its failure last", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(
+      makeEnv({ PRIVATE_CHANNELS_ENABLED: "true", MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
+    );
+    const cleanup = deferred<{ cleaned: number; skipped: number; failed: number }>();
+    vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReturnValue(cleanup.promise);
+
+    const completion = expect(runCronJob()).rejects.toThrow("credential cleanup down");
+    try {
+      await vi.waitFor(() => {
+        expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+        expect(trackPendingDeposits).toHaveBeenCalledTimes(1);
+        expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
+        expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
+        expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+        expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
+        expect(retireOrphanedActionSecrets).toHaveBeenCalledTimes(1);
+        expect(runEarnMetricsRefreshTick).toHaveBeenCalledTimes(1);
+        expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
+      });
+      expect(closeDatabasePools).not.toHaveBeenCalled();
+      expect(closeAllRedisClients).not.toHaveBeenCalled();
+    } finally {
+      cleanup.reject(new Error("credential cleanup down"));
+      await completion;
+    }
+
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+    expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for in-flight cleanup when pending transfers fail", async () => {
     const cleanup = deferred<{ cleaned: number; skipped: number; failed: number }>();
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReturnValue(cleanup.promise);

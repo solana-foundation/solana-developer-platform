@@ -634,6 +634,63 @@ describe("provider credential lifecycle", () => {
     ]);
   });
 
+  it("rejects a valid credential for a different Privy account without changing the current credential", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    vi.stubGlobal("fetch", providerFetch);
+    const db = getDb(env);
+    const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+      CREDENTIAL_ID,
+    ]);
+
+    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-different-privy-account",
+      body: { fields: { appId: "different-privy-app", appSecret: "valid-other-secret" } },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    expect(body).toMatchObject({
+      data: {
+        providerCredential: { status: "failed_validation" },
+        rotation: { status: "failed", code: "provider_account_mismatch" },
+      },
+    });
+    expect(body.data.providerCredential.id).not.toBe(CREDENTIAL_ID);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(
+      await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+    ).toEqual(original);
+    expect(
+      await db.queryMany<{ id: string; provider_credential_id: string }>(
+        "SELECT id, provider_credential_id FROM custody_connections ORDER BY id"
+      )
+    ).toEqual([
+      { id: CONNECTION_A_ID, provider_credential_id: CREDENTIAL_ID },
+      { id: CONNECTION_B_ID, provider_credential_id: CREDENTIAL_ID },
+    ]);
+    expect(
+      await db.queryOne<{
+        status: string;
+        last_failure_code: string | null;
+        rotated_from_provider_credential_id: string | null;
+        encrypted_secret_payload: string | null;
+      }>(
+        `SELECT status, last_failure_code, rotated_from_provider_credential_id,
+                encrypted_secret_payload
+         FROM provider_credentials WHERE id = ?`,
+        [body.data.providerCredential.id]
+      )
+    ).toEqual({
+      status: "failed_validation",
+      last_failure_code: "provider_account_mismatch",
+      rotated_from_provider_credential_id: CREDENTIAL_ID,
+      encrypted_secret_payload: null,
+    });
+  });
+
   it("persists an uncertain candidate and resumes it without another secret submission", async () => {
     const providerFetch = vi
       .fn()
@@ -1204,20 +1261,89 @@ describe("provider credential lifecycle", () => {
   });
 
   it("blocks rollback while a retryable direct child is pending", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", providerFetch);
-    await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+    const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
-      key: "rotate-pending-before-rollback",
+      key: "rotate-before-pending-child",
       body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
+    expect(rotated.status).toBe(200);
+    const rotatedBody = (await rotated.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    expect(rotatedBody.data).toMatchObject({
+      providerCredential: { status: "active" },
+      rotation: { status: "success" },
+    });
+    const currentId = rotatedBody.data.providerCredential.id;
 
-    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rollback`, {
+    const pending = await lifecycleRequest(`/provider-credentials/${currentId}/rotate`, {
+      method: "POST",
+      key: "rotate-pending-before-rollback",
+      body: { fields: { appId: APP_ID, appSecret: "pending-secret" } },
+    });
+    expect(pending.status).toBe(200);
+    const pendingBody = (await pending.json()) as {
+      data: { providerCredential: { id: string } };
+    };
+    expect(pendingBody.data).toMatchObject({
+      providerCredential: { status: "pending" },
+      rotation: { status: "retry_unknown", code: "provider_response_unknown" },
+    });
+    const candidateId = pendingBody.data.providerCredential.id;
+
+    const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
       method: "POST",
     });
 
     expect(response.status).toBe(409);
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    expect(state.status).toBe(200);
+    expect(await state.json()).toMatchObject({
+      data: {
+        providerCredential: { id: currentId, status: "active" },
+        rotationCandidate: { id: candidateId, status: "pending" },
+        rollback: {
+          providerCredential: { id: CREDENTIAL_ID, status: "retired" },
+          expiresAt: expect.any(String),
+        },
+      },
+    });
+    expect(
+      await getDb(env).queryMany<{ provider_credential_id: string }>(
+        "SELECT provider_credential_id FROM custody_connections ORDER BY id"
+      )
+    ).toEqual([{ provider_credential_id: currentId }, { provider_credential_id: currentId }]);
+
+    const canceled = await lifecycleRequest(`/provider-credentials/${candidateId}/deactivate`, {
+      method: "POST",
+    });
+    expect(canceled.status).toBe(200);
+    expect(await canceled.json()).toMatchObject({
+      data: { providerCredential: { id: candidateId, status: "deactivated" } },
+    });
+    expect(
+      await getDb(env).queryOne<{ status: string; encrypted_secret_payload: string | null }>(
+        "SELECT status, encrypted_secret_payload FROM provider_credentials WHERE id = ?",
+        [candidateId]
+      )
+    ).toEqual({ status: "deactivated", encrypted_secret_payload: null });
+    const afterCancellation = await lifecycleRequest(
+      `/connections/${CONNECTION_A_ID}/provider-credential`
+    );
+    expect(afterCancellation.status).toBe(200);
+    expect(await afterCancellation.json()).toMatchObject({
+      data: {
+        providerCredential: { id: currentId, status: "active" },
+        rotationCandidate: null,
+      },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the active version unchanged when rollback Provider state is uncertain", async () => {

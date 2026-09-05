@@ -64,13 +64,15 @@ const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
  * collection. Provider Credential cleanup is fatal after its bounded batch has
  * tried every row, so orphan risk remains visible to the scheduler.
  *
- * The sequence:
+ * Provider Credential secret cleanup runs alongside the entire sequence below.
+ * Its latency must not delay later money ticks. Both tasks settle before fatal
+ * failures are reported and database/Redis pools are closed.
+ *
+ * The reconciliation sequence:
  *
  * 1. **Pending transfers** + approved-wallet-operation replay + sponsorship
- *    budget reconciliation, alongside **Provider Credential secret cleanup** —
- *    independent monitored siblings, so either starts even while the other is
- *    slow. The transfers legs and the cleanup rows each run settled before
- *    their tick reports failure. Fatal.
+ *    budget reconciliation. The transfer legs settle before their tick reports
+ *    failure. Fatal.
  * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
  *    deployment-provided Managed Reconciliation Cadence is its effective
@@ -161,62 +163,73 @@ export async function runCronJob(): Promise<void> {
       }
     };
 
-    const initialOutcomes = await Promise.allSettled([
-      monitored(PENDING_TRANSFERS_MONITOR, async () => {
-        const outcomes = await Promise.allSettled([
-          (async () => {
-            await trackPendingTransfers(env);
-            await recoverApprovedWalletOperations(env);
-          })(),
-          reconcileSponsorshipBudgets(env),
-        ]);
-        throwCollected(rejectionReasons(outcomes), "pending-transfers tick had multiple failures");
-      }),
+    const jobOutcomes = await Promise.allSettled([
+      (async () => {
+        await collect(
+          monitored(PENDING_TRANSFERS_MONITOR, async () => {
+            const outcomes = await Promise.allSettled([
+              (async () => {
+                await trackPendingTransfers(env);
+                await recoverApprovedWalletOperations(env);
+              })(),
+              reconcileSponsorshipBudgets(env),
+            ]);
+            throwCollected(
+              rejectionReasons(outcomes),
+              "pending-transfers tick had multiple failures"
+            );
+          })
+        );
+        await collect(
+          monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () => collectDueRecurringPayments(env))
+        );
+        if (privateChannelsEnabled) {
+          const outcomes = await Promise.allSettled([
+            monitored(PENDING_DEPOSITS_MONITOR, () => trackPendingDeposits(env)),
+            monitored(PENDING_WITHDRAWALS_MONITOR, () => trackPendingWithdrawals(env)),
+          ]);
+          failures.push(...rejectionReasons(outcomes));
+        } else {
+          await monitored(PENDING_DEPOSITS_MONITOR, async () => undefined);
+          await monitored(PENDING_WITHDRAWALS_MONITOR, async () => undefined);
+        }
+        await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
+        await collect(
+          monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env))
+        );
+        if (assetProfilesEnabled) {
+          await collect(
+            monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env))
+          );
+        } else {
+          await monitored(WORKFLOW_EXECUTIONS_MONITOR, async () => undefined);
+        }
+        await monitored(WORKFLOW_SECRET_RETIREMENTS_MONITOR, () =>
+          retireOrphanedActionSecrets(env)
+        ).catch(() => undefined);
+        if (earnEnabled) {
+          await monitored(EARN_METRICS_REFRESH_MONITOR, () =>
+            runEarnMetricsRefreshTick(env, undefined)
+          ).catch(() => undefined);
+          await collect(
+            runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
+              runEarnCatalogueSyncIfDue(env, undefined)
+            )
+          );
+        } else {
+          await monitored(EARN_METRICS_REFRESH_MONITOR, async () => undefined);
+          await collect(
+            runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
+              runEarnCatalogueSyncIfDue(env, undefined, { workEnabled: false })
+            )
+          );
+        }
+      })(),
       monitored(PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR, () =>
         cleanupRetiredProviderCredentialSecrets(env)
       ),
     ]);
-    failures.push(...rejectionReasons(initialOutcomes));
-    await collect(
-      monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () => collectDueRecurringPayments(env))
-    );
-    if (privateChannelsEnabled) {
-      const outcomes = await Promise.allSettled([
-        monitored(PENDING_DEPOSITS_MONITOR, () => trackPendingDeposits(env)),
-        monitored(PENDING_WITHDRAWALS_MONITOR, () => trackPendingWithdrawals(env)),
-      ]);
-      failures.push(...rejectionReasons(outcomes));
-    } else {
-      await monitored(PENDING_DEPOSITS_MONITOR, async () => undefined);
-      await monitored(PENDING_WITHDRAWALS_MONITOR, async () => undefined);
-    }
-    await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
-    await collect(monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env)));
-    if (assetProfilesEnabled) {
-      await collect(monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env)));
-    } else {
-      await monitored(WORKFLOW_EXECUTIONS_MONITOR, async () => undefined);
-    }
-    await monitored(WORKFLOW_SECRET_RETIREMENTS_MONITOR, () =>
-      retireOrphanedActionSecrets(env)
-    ).catch(() => undefined);
-    if (earnEnabled) {
-      await monitored(EARN_METRICS_REFRESH_MONITOR, () =>
-        runEarnMetricsRefreshTick(env, undefined)
-      ).catch(() => undefined);
-      await collect(
-        runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
-          runEarnCatalogueSyncIfDue(env, undefined)
-        )
-      );
-    } else {
-      await monitored(EARN_METRICS_REFRESH_MONITOR, async () => undefined);
-      await collect(
-        runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
-          runEarnCatalogueSyncIfDue(env, undefined, { workEnabled: false })
-        )
-      );
-    }
+    failures.push(...rejectionReasons(jobOutcomes));
     throwCollected(failures, "reconciliation job had multiple tick failures");
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);
