@@ -62,6 +62,25 @@ export async function resolveIdempotencyReplay<
   throw conflict("Idempotency key already used with different request payload");
 }
 
+/**
+ * A replayed row still `pending` this long after its last write was abandoned
+ * mid-flight: the process died between the reserving insert and the broadcast,
+ * and private channels have no reconciliation worker to recover it. Replaying
+ * such a row verbatim would pin the operation to `pending` forever, so callers
+ * fail it instead, freeing the client to retry under a new idempotency key. The
+ * window sits far above the broadcast + confirm budget (seconds) so a live
+ * request can never be failed out from under itself, and the callers' `pending`
+ * status CAS backstops that race regardless of the clock.
+ */
+const ABANDONED_RESERVATION_AFTER_MS = 10 * 60 * 1000;
+
+export function isAbandonedReservation(row: { status: string; updated_at: string }): boolean {
+  return (
+    row.status === "pending" &&
+    Date.now() - Date.parse(row.updated_at) >= ABANDONED_RESERVATION_AFTER_MS
+  );
+}
+
 export async function resolveIdentityBoundIdempotencyReplay<
   Row extends { idempotency_fingerprint: string | null },
 >(
@@ -356,6 +375,111 @@ export const buildEarnExternalWalletWithdrawalFingerprint = (
       direction: "withdrawal",
       shares: normalizeDecimalString(input.shares),
       transactionId: input.transactionId,
+    })
+  );
+
+export interface PrivateChannelDepositFingerprintInput {
+  /** The connected instance the escrow deposit lands in. */
+  instanceId: string;
+  /** The source custody wallet (`custody_wallets.wallet_id`) that signs. */
+  walletId: string;
+  /** Channel address credited by the deposit. */
+  recipient: string;
+  mint: string;
+  amount: string;
+}
+
+/**
+ * Fingerprint for a Private Channels escrow deposit.
+ *
+ * Same inclusion test as the Earn fingerprints: every field changes WHAT MOVES.
+ * `instanceId` earns its place because the same (wallet, mint, amount) sent at
+ * two connected instances is two escrows on two chains, and `recipient` because
+ * the credited address is the whole point of a cross-member deposit — reusing a
+ * key with a different recipient must 409, not silently answer with the first
+ * one. Decimal spelling is normalized without rounding, so `1` and `1.000000`
+ * are one intent to the mint.
+ */
+export const buildPrivateChannelDepositFingerprint = (
+  input: PrivateChannelDepositFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "private_channel_deposit",
+      instanceId: input.instanceId,
+      walletId: input.walletId,
+      recipient: input.recipient,
+      mint: input.mint,
+      direction: "deposit",
+      amount: normalizeDecimalString(input.amount),
+    })
+  );
+
+export interface PrivateChannelWithdrawalFingerprintInput {
+  instanceId: string;
+  /** The custody wallet whose channel balance is burned. */
+  walletId: string;
+  /** Address that receives the operator's release. */
+  destination: string;
+  mint: string;
+  amount: string;
+}
+
+/**
+ * Fingerprint for a Private Channels withdrawal (a burn plus a later release).
+ *
+ * `destination` is load-bearing here in a way it is not on a deposit: the burn
+ * is irreversible and the release is what a human later pays out, so a key
+ * reused with a different destination is a redirect attempt and must 409.
+ */
+export const buildPrivateChannelWithdrawalFingerprint = (
+  input: PrivateChannelWithdrawalFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "private_channel_withdrawal",
+      instanceId: input.instanceId,
+      walletId: input.walletId,
+      destination: input.destination,
+      mint: input.mint,
+      direction: "withdrawal",
+      amount: normalizeDecimalString(input.amount),
+    })
+  );
+
+export interface PrivateChannelTransferFingerprintInput {
+  instanceId: string;
+  /** The logical channel the transfer is made in. */
+  channelId: string;
+  /** The sending custody wallet. */
+  walletId: string;
+  /** `private_channel_verified_wallets.id` of the recipient. */
+  recipientVerifiedWalletId: string;
+  mint: string;
+  amount: string;
+}
+
+/**
+ * Fingerprint for a member-to-member channel transfer.
+ *
+ * The recipient is named by its VERIFIED-WALLET id rather than its pubkey,
+ * because that id is what the request carried and what the access seam
+ * authorized: a key reused against a different verified wallet is a different
+ * authorization decision even when the two rows happen to share a pubkey.
+ */
+export const buildPrivateChannelTransferFingerprint = (
+  input: PrivateChannelTransferFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "private_channel_transfer",
+      instanceId: input.instanceId,
+      channelId: input.channelId,
+      walletId: input.walletId,
+      recipientVerifiedWalletId: input.recipientVerifiedWalletId,
+      mint: input.mint,
+      direction: "transfer",
+      amount: normalizeDecimalString(input.amount),
     })
   );
 

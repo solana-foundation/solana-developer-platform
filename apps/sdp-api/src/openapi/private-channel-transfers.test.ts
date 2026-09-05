@@ -30,7 +30,7 @@ describe("Private Channel transfer OpenAPI", () => {
     );
   });
 
-  it("documents the opaque recipient request without an idempotency header", () => {
+  it("documents the opaque recipient request behind a REQUIRED idempotency header", () => {
     const document = createOpenApiDocument();
     const operation = document.paths?.["/v1/private-channels/channels/{channelId}/transfers"]?.post;
     const idempotencyKey = parameterNamed(
@@ -39,7 +39,11 @@ describe("Private Channel transfer OpenAPI", () => {
     );
     const serializedBody = JSON.stringify(operation?.requestBody);
 
-    expect(idempotencyKey).toBeUndefined();
+    // Marking it optional here would let a generated client omit a header the
+    // runtime 400s on — the route signs and broadcasts, so the reservation is
+    // not something a caller may skip.
+    expect(idempotencyKey).toMatchObject({ in: "header", required: true });
+    expect(operation?.responses).toHaveProperty("409");
     expect(serializedBody).toContain('"walletId"');
     expect(serializedBody).toContain('"recipientVerifiedWalletId"');
     expect(serializedBody).toContain('"amount"');

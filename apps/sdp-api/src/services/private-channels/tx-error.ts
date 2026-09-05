@@ -129,3 +129,80 @@ export function isNodeAtCapacityError(error: unknown): boolean {
   }
   return false;
 }
+
+const AMBIGUOUS_TRANSPORT_CODES = new Set([
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EPIPE",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+/**
+ * Gateway statuses that mean the send WAS forwarded upstream and the answer was
+ * lost on the way back: 502 when the proxy got no usable response from the node,
+ * 504 when it gave up waiting for one. Either way the node may have executed the
+ * transaction, so the row's fate is unknown.
+ *
+ * 503 is deliberately absent. It is the proxy refusing before it forwards
+ * anything — the same "never reached" case as a refused connection, and
+ * therefore a definitive rejection.
+ */
+const AMBIGUOUS_HTTP_STATUSES = new Set([502, 504]);
+
+function isAmbiguousHttpStatus(value: unknown): boolean {
+  return typeof value === "number" && AMBIGUOUS_HTTP_STATUSES.has(value);
+}
+
+/**
+ * Whether a submission error leaves the transaction's fate unknown: the
+ * connection died, timed out, or was answered by a gateway that had already
+ * forwarded it, so the node may have executed it. A JSON-RPC error response, a
+ * refused connection, or a DNS failure is NOT ambiguous — the node either
+ * answered or was never reached — and stays a definitive rejection. Callers
+ * that persisted the signature before the send must reconcile an ambiguous
+ * outcome against the chain instead of marking the row failed, which would
+ * invite a duplicate under a fresh idempotency key.
+ */
+export function isAmbiguousSubmissionOutcome(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
+    const record = current as {
+      name?: unknown;
+      code?: unknown;
+      message?: unknown;
+      cause?: unknown;
+      details?: unknown;
+      statusCode?: unknown;
+      status?: unknown;
+      context?: unknown;
+    };
+    if (record.name === "AbortError" || record.name === "TimeoutError") return true;
+    // A forwarded-but-unanswered gateway response. `context.statusCode` is where
+    // @solana/kit puts it on SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR; the bare
+    // fields cover plain fetch/undici wrappers.
+    if (isAmbiguousHttpStatus(record.statusCode) || isAmbiguousHttpStatus(record.status)) {
+      return true;
+    }
+    if (
+      typeof record.context === "object" &&
+      record.context !== null &&
+      isAmbiguousHttpStatus((record.context as { statusCode?: unknown }).statusCode)
+    ) {
+      return true;
+    }
+    if (
+      typeof record.details === "object" &&
+      record.details !== null &&
+      (record.details as { timedOut?: unknown }).timedOut === true
+    ) {
+      return true;
+    }
+    if (typeof record.code === "string" && AMBIGUOUS_TRANSPORT_CODES.has(record.code)) return true;
+    if (record.message === "socket hang up") return true;
+    if (record.cause === undefined || record.cause === current) break;
+    current = record.cause;
+  }
+  return false;
+}

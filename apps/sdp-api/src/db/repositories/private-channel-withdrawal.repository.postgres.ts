@@ -40,6 +40,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelWithdrawalRow {
     settlement_ref: (row.settlement_ref ?? null) as string | null,
     failure_reason: (row.failure_reason ?? null) as string | null,
     context: readContext(row.context),
+    idempotency_key: (row.idempotency_key ?? null) as string | null,
+    idempotency_fingerprint: (row.idempotency_fingerprint ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -54,8 +56,9 @@ export function createPostgresPrivateChannelWithdrawalRepository(
         .prepare(
           `INSERT INTO private_channel_withdrawals (
                id, organization_id, project_id, instance_id, wallet_id,
-               owner, destination, mint, amount, context
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+               owner, destination, mint, amount, context,
+               idempotency_key, idempotency_fingerprint
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
           RETURNING *`
         )
         .bind(
@@ -68,8 +71,21 @@ export function createPostgresPrivateChannelWithdrawalRepository(
           input.destination,
           input.mint,
           input.amount,
-          JSON.stringify(input.context ?? {})
+          JSON.stringify(input.context ?? {}),
+          input.idempotencyKey,
+          input.idempotencyFingerprint
         )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async findWithdrawalByIdempotency(scope: WithdrawalProjectScope & { idempotencyKey: string }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_withdrawals
+             WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(scope.organizationId, scope.projectId, scope.idempotencyKey)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
@@ -87,6 +103,7 @@ export function createPostgresPrivateChannelWithdrawalRepository(
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND (?::text IS NULL OR status = ?)
+              AND (?::boolean IS NOT TRUE OR signature IS NULL)
           RETURNING *`
         )
         .bind(
@@ -96,7 +113,8 @@ export function createPostgresPrivateChannelWithdrawalRepository(
           input.failureReason ?? null,
           input.id,
           input.expectedStatus ?? null,
-          input.expectedStatus ?? null
+          input.expectedStatus ?? null,
+          input.expectedSignatureAbsent ?? false
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

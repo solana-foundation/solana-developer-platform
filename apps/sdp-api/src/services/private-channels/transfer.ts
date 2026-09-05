@@ -7,7 +7,9 @@ import {
   address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getSignatureFromTransaction,
   getTransactionEncoder,
+  signature as parseSignature,
   pipe,
   type Signature,
   setTransactionMessageFeePayerSigner,
@@ -22,6 +24,7 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { getTransferCheckedInstruction as getToken2022TransferCheckedInstruction } from "@solana-program/token-2022";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   createPrivateChannelTransferRepository,
   mapPrivateChannelTransferRow,
@@ -29,6 +32,11 @@ import {
   type PrivateChannelTransferRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import {
+  buildPrivateChannelTransferFingerprint,
+  isAbandonedReservation,
+  resolveIdempotencyReplay,
+} from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -38,7 +46,7 @@ import { resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { confirmAndPersistTransfer } from "./transfer-confirm";
 import { emitTransferEvent } from "./transfer-events";
-import { describeTxError, isNodeAtCapacityError } from "./tx-error";
+import { describeTxError, isAmbiguousSubmissionOutcome, isNodeAtCapacityError } from "./tx-error";
 
 type TransferInstance = Pick<
   PrivateChannelInstance,
@@ -69,6 +77,11 @@ export interface CreateChannelTransferInput {
   amount: string;
   /** Mint to transfer; must be on the instance's allowlist. Defaults to its first entry. */
   mint?: string;
+  /**
+   * The caller's `Idempotency-Key`. Required: it is the reservation that makes a
+   * retry reuse this transfer instead of spending the balance twice.
+   */
+  idempotencyKey: string;
   gatewayAuth: SpcAuthContext;
   projectRpc: PrivateChannelProjectRpcClient;
 }
@@ -153,6 +166,14 @@ async function broadcastTransfer(
     recipient: Address;
     amountBaseUnits: bigint;
     gatewayAuth: SpcAuthContext;
+    /**
+     * Called with the transaction's signature after signing and before the
+     * send, so the outcome of a request that dies mid-send stays resolvable:
+     * a persisted signature is what lets abandoned-reservation recovery ask
+     * SPC what happened instead of guessing. A 401 retry re-signs and reports
+     * its new signature the same way before its own send.
+     */
+    onSigned: (signature: Signature) => Promise<void>;
   }
 ): Promise<Signature> {
   const signer = input.signer;
@@ -188,6 +209,7 @@ async function broadcastTransfer(
       (m) => appendTransactionMessageInstructions(instructions, m)
     );
     const signed = await signTransactionMessageWithSigners(message);
+    await input.onSigned(getSignatureFromTransaction(signed));
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
     return solanaRpc.sendTransaction(gatewayRpc, signedBytes);
   });
@@ -202,7 +224,7 @@ async function settleTransfer(
   pending: PrivateChannelTransferRow,
   outcome:
     | { status: "submitted"; signature: Signature }
-    | { status: "failed"; failureReason: string }
+    | { status: "failed"; failureReason: string; expectedSignatureAbsent?: boolean }
 ): Promise<PrivateChannelTransferRow> {
   try {
     const row = await repo.updateTransfer({
@@ -211,6 +233,8 @@ async function settleTransfer(
       signature: outcome.status === "submitted" ? outcome.signature : null,
       failureReason: outcome.status === "failed" ? outcome.failureReason : null,
       expectedStatus: "pending",
+      expectedSignatureAbsent:
+        outcome.status === "failed" ? (outcome.expectedSignatureAbsent ?? false) : false,
     });
     if (row) {
       return row;
@@ -236,6 +260,106 @@ async function settleTransfer(
     );
   }
   return pending;
+}
+
+/**
+ * Take the reservation for this transfer, or hand back the transfer that won the
+ * race for the same key. See `reserveWithdrawal` in `./withdraw` — same shape,
+ * same reason the insert is allowed to fail.
+ */
+async function reserveTransfer(
+  repo: PrivateChannelTransferRepository,
+  fingerprint: string,
+  findExisting: () => Promise<PrivateChannelTransferRow | null>,
+  input: Omit<
+    Parameters<PrivateChannelTransferRepository["createTransfer"]>[0],
+    "idempotencyFingerprint"
+  >
+): Promise<{ row: PrivateChannelTransferRow; replayed: boolean }> {
+  try {
+    const created = await repo.createTransfer({
+      ...input,
+      idempotencyFingerprint: fingerprint,
+    });
+    if (!created) {
+      throw new AppError("INTERNAL_ERROR", "Failed to persist the transfer.");
+    }
+    return { row: created, replayed: false };
+  } catch (error) {
+    if (!isPostgresUniqueViolation(error)) {
+      throw error;
+    }
+    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    if (!raced) {
+      throw error;
+    }
+    return { row: raced, replayed: true };
+  }
+}
+
+/**
+ * Resolve a replayed reservation whose original request died mid-flight (see
+ * `isAbandonedReservation`), instead of returning `pending` forever.
+ *
+ * The signature is persisted BEFORE the send, so it splits the crash window in
+ * two: a row without one provably never reached SPC and is failed, freeing the
+ * client to retry under a new idempotency key; a row with one may have executed,
+ * so it is promoted to `submitted` and confirmed against SPC — failing it would
+ * invite a duplicate of a transfer that already moved the balance. A signed
+ * transaction that never actually went out cannot confirm (its blockhash
+ * expires), so that row stays `submitted` for the operator, which is the same
+ * verdictless outcome the live confirm path settles for.
+ *
+ * The `pending` CAS in `settleTransfer` means a still-live original wins the
+ * race and these writes are no-ops.
+ */
+async function resolveAbandonedReservation(
+  env: Env,
+  repo: PrivateChannelTransferRepository,
+  row: PrivateChannelTransferRow,
+  input: { gatewayUrl: string; gatewayAuth: SpcAuthContext; sdpUserId: string }
+) {
+  if (!row.signature) {
+    const failureReason =
+      "Transfer reservation was abandoned before broadcast; retry with a new idempotency key.";
+    const failed = await settleTransfer(repo, row, {
+      status: "failed",
+      failureReason,
+      expectedSignatureAbsent: true,
+    });
+    if (failed.status === "failed") {
+      await emitTransferEvent(
+        env,
+        failed,
+        PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED,
+        PRIVATE_CHANNEL_EVENT_STATUSES.FAILED,
+        input.sdpUserId
+      );
+    }
+    return mapPrivateChannelTransferRow(failed);
+  }
+
+  const signature = parseSignature(row.signature);
+  let latest = await settleTransfer(repo, row, { status: "submitted", signature });
+  const settled = await confirmAndPersistTransfer(env, repo, {
+    transferId: row.id,
+    gatewayUrl: input.gatewayUrl,
+    signature,
+    gatewayAuth: input.gatewayAuth,
+  });
+  if (settled) {
+    latest = settled;
+    const eventType =
+      latest.status === "confirmed"
+        ? PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_CONFIRMED
+        : PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_FAILED;
+    const eventStatus =
+      latest.status === "confirmed"
+        ? PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED
+        : PRIVATE_CHANNEL_EVENT_STATUSES.FAILED;
+    await emitTransferEvent(env, latest, eventType, eventStatus, input.sdpUserId);
+  }
+  return mapPrivateChannelTransferRow(latest);
 }
 
 /**
@@ -273,6 +397,38 @@ export async function createChannelTransfer(
 
   const sender = address(input.wallet.publicKey);
   const recipientAddress = address(input.recipient.pubkey);
+
+  const repo = createPrivateChannelTransferRepository(env);
+  const findReplay = () =>
+    repo.findTransferByIdempotency({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+  const fingerprint = buildPrivateChannelTransferFingerprint({
+    instanceId: input.instance.id,
+    channelId: input.channelId,
+    walletId: input.wallet.walletId,
+    recipientVerifiedWalletId: input.recipient.verifiedWalletId,
+    mint,
+    amount: input.amount,
+  });
+
+  // The replay lookup comes FIRST, ahead of the balance read, because a retry of
+  // an already-executed transfer must return that transfer — the balance it spent
+  // is gone, so re-checking would reject the caller's own success.
+  const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
+  if (replay) {
+    if (isAbandonedReservation(replay)) {
+      return resolveAbandonedReservation(env, repo, replay, {
+        gatewayUrl: input.instance.gatewayUrl,
+        gatewayAuth: input.gatewayAuth,
+        sdpUserId: input.sdpUserId,
+      });
+    }
+    return mapPrivateChannelTransferRow(replay);
+  }
+
   const balance = await getChannelBalance(env, {
     instance: input.instance,
     owner: sender,
@@ -285,10 +441,10 @@ export async function createChannelTransfer(
   }
 
   // Persist BEFORE anything is broadcast, so a request that dies mid-flight still
-  // leaves an auditable row. A failure here means nothing was sent, which is a
-  // legitimate 500 — there is no funds movement to report.
-  const repo = createPrivateChannelTransferRepository(env);
-  const pending = await repo.createTransfer({
+  // leaves an auditable row. The insert doubles as the reservation: the unique
+  // index on (organization, project, idempotency_key) means a duplicate racing
+  // this one loses and replays instead of spending the balance a second time.
+  const reserved = await reserveTransfer(repo, fingerprint, findReplay, {
     organizationId: input.organizationId,
     projectId: input.projectId,
     instanceId: input.instance.id,
@@ -301,10 +457,19 @@ export async function createChannelTransfer(
     recipient: recipientAddress,
     mint,
     amount: input.amount,
+    idempotencyKey: input.idempotencyKey,
   });
-  if (!pending) {
-    throw new AppError("INTERNAL_ERROR", "Failed to persist the transfer.");
+  if (reserved.replayed) {
+    if (isAbandonedReservation(reserved.row)) {
+      return resolveAbandonedReservation(env, repo, reserved.row, {
+        gatewayUrl: input.instance.gatewayUrl,
+        gatewayAuth: input.gatewayAuth,
+        sdpUserId: input.sdpUserId,
+      });
+    }
+    return mapPrivateChannelTransferRow(reserved.row);
   }
+  const pending = reserved.row;
 
   const fail = async (failureReason: string) => {
     const failed = await settleTransfer(repo, pending, { status: "failed", failureReason });
@@ -319,6 +484,7 @@ export async function createChannelTransfer(
   };
 
   let signature: Signature;
+  let recordedSignature: Signature | null = null;
   try {
     signature = await broadcastTransfer(env, {
       instance: input.instance,
@@ -329,6 +495,22 @@ export async function createChannelTransfer(
       recipient: recipientAddress,
       amountBaseUnits,
       gatewayAuth: input.gatewayAuth,
+      // The reservation is still exclusively this request's (the CAS holds it),
+      // so record the signature on it before the bytes go out. If the write
+      // fails the send is aborted: better an unbroadcast failed transfer than
+      // an executed one whose signature exists nowhere.
+      onSigned: async (signedAs) => {
+        const recorded = await repo.updateTransfer({
+          id: pending.id,
+          status: "pending",
+          signature: signedAs,
+          expectedStatus: "pending",
+        });
+        if (!recorded) {
+          throw new AppError("CONFLICT", "Transfer reservation is no longer pending.");
+        }
+        recordedSignature = signedAs;
+      },
     });
   } catch (error) {
     // A capacity shed happens at ingress before the dedup insert, so nothing was
@@ -337,7 +519,14 @@ export async function createChannelTransfer(
     if (isNodeAtCapacityError(error)) {
       return fail("SPC is at capacity and did not accept the transfer. Try again shortly.");
     }
-    return fail(describeTxError(error, "Transfer submission failed."));
+    if (recordedSignature !== null && isAmbiguousSubmissionOutcome(error)) {
+      // The connection died after the signed bytes may have gone out, so SPC
+      // may have executed the transfer. Marking it failed would invite a
+      // duplicate under a fresh key; fall through and ask SPC instead.
+      signature = recordedSignature;
+    } else {
+      return fail(describeTxError(error, "Transfer submission failed."));
+    }
   }
 
   let latest = await settleTransfer(repo, pending, { status: "submitted", signature });

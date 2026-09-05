@@ -25,6 +25,10 @@ export interface PrivateChannelDepositRow {
   failure_reason: string | null;
   /** Read-only audit snapshot; the oracle never reads it. */
   context: PrivateChannelTransferContext;
+  /** The caller's `Idempotency-Key`; the tenant-scoped reservation this row claimed. */
+  idempotency_key: string | null;
+  /** Fingerprint of the request that claimed the key. Null only on pre-header history. */
+  idempotency_fingerprint: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,6 +47,13 @@ export interface CreateDepositInput extends DepositProjectScope {
   amount: string;
   /** Audit snapshot at intent time; oracle never reads it. */
   context: PrivateChannelTransferContext;
+  /**
+   * The reservation. Both fields travel together — the schema rejects one
+   * without the other — because a key with no fingerprint could only ever be
+   * replayed blind.
+   */
+  idempotencyKey: string;
+  idempotencyFingerprint: string;
 }
 
 export interface UpdateDepositInput {
@@ -59,6 +70,13 @@ export interface UpdateDepositInput {
    * still in this status. Prevents concurrent pollers from regressing state.
    */
   expectedStatus?: PrivateChannelTransferStatus;
+  /**
+   * Additionally require that no signature has been persisted yet. Guards the
+   * fail path of abandoned-reservation recovery: a decision made from a
+   * signatureless snapshot must not land on a row a live request signed in the
+   * meantime.
+   */
+  expectedSignatureAbsent?: boolean;
 }
 
 export interface PrivateChannelDepositRepositoryContext {
@@ -68,6 +86,14 @@ export interface PrivateChannelDepositRepositoryContext {
 export interface PrivateChannelDepositRepository {
   createDeposit(input: CreateDepositInput): Promise<PrivateChannelDepositRow | null>;
   updateDeposit(input: UpdateDepositInput): Promise<PrivateChannelDepositRow | null>;
+  /**
+   * The row that already claimed `idempotencyKey` in this tenant, or null.
+   * Scoped to (organization, project) to match the unique index, so one
+   * tenant's key can neither collide with nor probe for another's.
+   */
+  findDepositByIdempotency(
+    scope: DepositProjectScope & { idempotencyKey: string }
+  ): Promise<PrivateChannelDepositRow | null>;
   getDepositById(
     scope: DepositProjectScope & { id: string }
   ): Promise<PrivateChannelDepositRow | null>;

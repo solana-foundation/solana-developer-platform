@@ -12,7 +12,11 @@ vi.mock("@/lib/private-channels", () => ({
   createPrivateChannelTransfer: mocks.createPrivateChannelTransfer,
   fetchPrivateChannelTransferRecipients: mocks.fetchPrivateChannelTransferRecipients,
 }));
-vi.mock("@/lib/sdp-api", () => ({
+// `SdpApiResponseError` comes through unmocked: the action narrows on it to read
+// the HTTP status that decides whether the browser may retire the idempotency
+// key, so a stub class here would only test the stub.
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: mocks.createSdpApiClient,
   extractSdpApiErrorMessage: mocks.extractSdpApiErrorMessage,
 }));
@@ -65,6 +69,7 @@ describe("private-channel transfer actions", () => {
         walletId: "wallet_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1",
+        idempotencyKey: "idem_transfer_unit",
       },
       "DashboardPrivateChannels.transfer.selectChannel",
     ],
@@ -74,6 +79,7 @@ describe("private-channel transfer actions", () => {
         walletId: "",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1",
+        idempotencyKey: "idem_transfer_unit",
       },
       "DashboardPrivateChannels.transfer.selectSourceWallet",
     ],
@@ -83,6 +89,7 @@ describe("private-channel transfer actions", () => {
         walletId: "wallet_sender",
         recipientVerifiedWalletId: "",
         amount: "1",
+        idempotencyKey: "idem_transfer_unit",
       },
       "DashboardPrivateChannels.transfer.selectRecipient",
     ],
@@ -92,6 +99,7 @@ describe("private-channel transfer actions", () => {
         walletId: "wallet_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1.0000001",
+        idempotencyKey: "idem_transfer_unit",
       },
       "DashboardPrivateChannels.common.amountInvalid",
     ],
@@ -113,14 +121,22 @@ describe("private-channel transfer actions", () => {
         walletId: "wallet_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: " 1.25 ",
+        idempotencyKey: "idem_transfer_unit",
       })
     ).resolves.toEqual({ ok: true, transfer });
 
-    expect(mocks.createPrivateChannelTransfer).toHaveBeenCalledWith(client, "channel_alpha", {
-      walletId: "wallet_sender",
-      recipientVerifiedWalletId: "pcvw_recipient",
-      amount: "1.25",
-    });
+    // The key travels as a HEADER argument, never in the body: it is the
+    // reservation, not part of the request payload.
+    expect(mocks.createPrivateChannelTransfer).toHaveBeenCalledWith(
+      client,
+      "channel_alpha",
+      {
+        walletId: "wallet_sender",
+        recipientVerifiedWalletId: "pcvw_recipient",
+        amount: "1.25",
+      },
+      "idem_transfer_unit"
+    );
   });
 
   it("returns a recoverable server error", async () => {
@@ -132,11 +148,15 @@ describe("private-channel transfer actions", () => {
         walletId: "wallet_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1",
+        idempotencyKey: "idem_transfer_unit",
       })
     ).resolves.toEqual({
       ok: false,
       kind: "server",
       message: "Gateway unavailable",
+      // A plain Error is not an API response: nothing proves the request was
+      // never recorded, so the browser must KEEP the key and replay.
+      status: null,
     });
   });
 

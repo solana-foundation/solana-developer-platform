@@ -23,6 +23,8 @@ const DEPOSIT: PrivateChannelDepositRow = {
   settlement_ref: null,
   failure_reason: null,
   context: { actingUserId: "usr_depositor" },
+  idempotency_key: "idem_dep_event_test",
+  idempotency_fingerprint: "fp_dep_event_test",
   created_at: NOW,
   updated_at: NOW,
 };
@@ -42,6 +44,8 @@ const WITHDRAWAL: PrivateChannelWithdrawalRow = {
   settlement_ref: null,
   failure_reason: null,
   context: { actingUserId: "usr_owner" },
+  idempotency_key: "idem_wd_event_test",
+  idempotency_fingerprint: "fp_wd_event_test",
   created_at: NOW,
   updated_at: NOW,
 };

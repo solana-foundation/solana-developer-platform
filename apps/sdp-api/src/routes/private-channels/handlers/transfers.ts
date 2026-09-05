@@ -10,6 +10,7 @@ import {
   getPrivateChannelTransferRepository,
   loadPrivateChannelProjectRpcClient,
 } from "../context";
+import { requireIdempotencyKey } from "../helpers";
 import {
   type createTransferBodySchema,
   transferChannelIdParamSchema,
@@ -34,7 +35,12 @@ export async function listPrivateChannelTransferRecipients(c: AppContext) {
   return success(c, { recipients });
 }
 
-/** POST /channels/:channelId/transfers. */
+/**
+ * POST /channels/:channelId/transfers.
+ *
+ * `Idempotency-Key` is required. The reservation it takes is what makes a retry
+ * return this transfer instead of spending the sender's balance a second time.
+ */
 export async function createPrivateChannelTransfer(
   c: ValidatedBodyContext<typeof createTransferBodySchema>
 ) {
@@ -42,6 +48,7 @@ export async function createPrivateChannelTransfer(
   const body = c.req.valid("json");
 
   try {
+    const idempotencyKey = requireIdempotencyKey(c, "Private Channels transfers");
     const context = await resolveTransferCreateContext(c, {
       channelId,
       walletId: body.walletId,
@@ -65,6 +72,7 @@ export async function createPrivateChannelTransfer(
       recipient: context.recipient,
       amount: body.amount,
       mint: body.mint,
+      idempotencyKey,
       gatewayAuth,
       projectRpc,
     });

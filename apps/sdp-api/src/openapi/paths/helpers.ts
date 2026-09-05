@@ -32,6 +32,11 @@ export const projectScopeWithRequiredIdempotencyHeaders = projectScopeHeaders.ex
   "Idempotency-Key": idempotencyKeyHeaderSchema,
 });
 
+/** The session-only variant, for the Private Channels value-movement routes. */
+export const sessionProjectScopeWithRequiredIdempotencyHeaders = sessionProjectScopeHeaders.extend({
+  "Idempotency-Key": idempotencyKeyHeaderSchema,
+});
+
 export const errorResponses = (schema: z.ZodTypeAny, codes: number[]) =>
   Object.fromEntries(
     codes.map((code) => [

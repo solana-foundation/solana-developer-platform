@@ -33,6 +33,7 @@ import {
   address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getSignatureFromTransaction,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -40,12 +41,15 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   createPrivateChannelDepositRepository,
   mapPrivateChannelDepositRow,
+  type PrivateChannelDepositRepository,
   type PrivateChannelDepositRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { buildPrivateChannelDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -55,7 +59,7 @@ import { confirmAndPersistDeposit } from "./deposit-confirm";
 import { emitDepositEvent } from "./deposit-events";
 import { resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
-import { describeTxError } from "./tx-error";
+import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
 
 /** The instance fields the deposit needs. */
 type DepositInstance = Pick<
@@ -67,16 +71,26 @@ export interface CreateChannelDepositInput {
   instance: DepositInstance;
   organizationId: string;
   projectId: string;
-  /** SDP user creating the intent; recorded on the audit context. */
-  userId: string;
+  /**
+   * SDP user creating the intent; recorded on the audit context and surfaced as
+   * the event's `sdpUserId`. Null for API-key callers, which have no human
+   * behind them — the SPC identity that acts is the project's principal, not a
+   * user, so this stays a best-effort attribution rather than a gate.
+   */
+  userId: string | null;
   /** Custody wallet the deposit is signed from (the escrow `user`). */
   wallet: CustodyWallet;
   /** UI decimal amount (e.g. "1.5"). */
   amount: string;
   /** Mint to deposit; must be on the instance's allowlist. Defaults to its first entry. */
   mint?: string;
-  /** Address credited in the channel; defaults to the depositor. */
-  recipient?: string;
+  /** Address credited in the channel; already authorized by the route's access seam. */
+  recipient: string;
+  /**
+   * The caller's `Idempotency-Key`. Required: it is the reservation that makes a
+   * retry reuse this deposit instead of broadcasting a second escrow transfer.
+   */
+  idempotencyKey: string;
   /**
    * SPC auth context. Auth-enabled instances gate gateway reads; kept on the
    * signature only so this module stays symmetric with withdraw.ts, and its
@@ -103,6 +117,13 @@ async function broadcastDeposit(
     recipient: Address;
     amountBaseUnits: bigint;
     projectRpc: PrivateChannelProjectRpcClient;
+    /**
+     * Called with the transaction's signature after signing and before the
+     * send, so the outcome of a request that dies mid-send stays resolvable:
+     * a persisted signature is what lets the reconciler ask the chain what
+     * happened instead of failing the row as never-broadcast.
+     */
+    onSigned: (signature: Signature) => Promise<void>;
   }
 ): Promise<Signature> {
   const signer = await solanaServices.createOrgSigner(
@@ -143,11 +164,78 @@ async function broadcastDeposit(
 
   // The custody wallet is the only signer (payer + user); fully sign and broadcast.
   const signed = await signTransactionMessageWithSigners(message);
+  await input.onSigned(getSignatureFromTransaction(signed));
   const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
   return solanaRpc.sendTransaction(input.projectRpc.rpc, signedBytes);
 }
 
-/** Create a deposit intent: persist, broadcast to devnet, confirm on-chain. */
+/**
+ * Claim the caller's `Idempotency-Key` for this deposit, or hand back the
+ * deposit that already claimed it.
+ *
+ * The unique index IS the reservation, which is why the insert is allowed to
+ * fail: a concurrent duplicate loses it and reads the winner's row instead of
+ * broadcasting a second escrow transfer. The pre-insert lookup only saves the
+ * common (sequential retry) case a round trip through a failed insert. Both
+ * paths go through `resolveIdempotencyReplay`, so a key reused with a DIFFERENT
+ * request is a 409 rather than a quiet answer about someone else's deposit.
+ */
+async function reserveDeposit(
+  repo: PrivateChannelDepositRepository,
+  input: {
+    organizationId: string;
+    projectId: string;
+    instanceId: string;
+    walletId: string;
+    depositor: string;
+    recipient: string;
+    mint: string;
+    amount: string;
+    context: PrivateChannelDepositRow["context"];
+    idempotencyKey: string;
+  }
+): Promise<{ row: PrivateChannelDepositRow; replayed: boolean }> {
+  const fingerprint = buildPrivateChannelDepositFingerprint({
+    instanceId: input.instanceId,
+    walletId: input.walletId,
+    recipient: input.recipient,
+    mint: input.mint,
+    amount: input.amount,
+  });
+  const findExisting = () =>
+    repo.findDepositByIdempotency({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+
+  const existing = await resolveIdempotencyReplay(findExisting, fingerprint);
+  if (existing) {
+    return { row: existing, replayed: true };
+  }
+
+  try {
+    const created = await repo.createDeposit({
+      ...input,
+      idempotencyFingerprint: fingerprint,
+    });
+    if (!created) {
+      throw new AppError("INTERNAL_ERROR", "Failed to persist the deposit intent.");
+    }
+    return { row: created, replayed: false };
+  } catch (error) {
+    if (!isPostgresUniqueViolation(error)) {
+      throw error;
+    }
+    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    if (!raced) {
+      throw error;
+    }
+    return { row: raced, replayed: true };
+  }
+}
+
+/** Create a deposit intent: reserve, persist, broadcast to devnet, confirm on-chain. */
 export async function createChannelDeposit(
   env: Env,
   input: CreateChannelDepositInput
@@ -169,7 +257,7 @@ export async function createChannelDeposit(
     input.mint
   );
   const depositor = wallet.publicKey;
-  const recipient = input.recipient ?? depositor;
+  const recipient = input.recipient;
 
   const amountBaseUnits = parseDecimalAmount(input.amount, decimals);
   if (amountBaseUnits <= 0n) {
@@ -177,7 +265,10 @@ export async function createChannelDeposit(
   }
 
   const repo = createPrivateChannelDepositRepository(env);
-  const created = await repo.createDeposit({
+  // The reservation is taken BEFORE the signer is derived or anything is
+  // broadcast, so a retry — or a second request racing the first — can only ever
+  // reach the row the winner created.
+  const { row: created, replayed } = await reserveDeposit(repo, {
     organizationId,
     projectId,
     instanceId: instance.id,
@@ -191,11 +282,14 @@ export async function createChannelDeposit(
       gatewayUrl: instance.gatewayUrl,
       escrowProgramId: instance.escrowProgramId,
       escrowInstanceAddr: instance.escrowInstanceAddr,
-      actingUserId: input.userId,
+      // Omitted rather than stored as null when there is no human caller: the
+      // context is an optional-field JSONB and the events read it as `?? null`.
+      actingUserId: input.userId ?? undefined,
     },
+    idempotencyKey: input.idempotencyKey,
   });
-  if (!created) {
-    throw new AppError("INTERNAL_ERROR", "Failed to persist the deposit intent.");
+  if (replayed) {
+    return mapPrivateChannelDepositRow(created);
   }
 
   let latest: PrivateChannelDepositRow = created;
@@ -203,6 +297,7 @@ export async function createChannelDeposit(
   // Broadcast. A failure here means the transaction never reached the chain (no
   // signature), so the deposit is a terminal failure — no funds moved.
   let signature: Signature;
+  let recordedSignature: Signature | null = null;
   try {
     signature = await broadcastDeposit(env, {
       instance,
@@ -214,20 +309,44 @@ export async function createChannelDeposit(
       recipient: address(recipient),
       amountBaseUnits,
       projectRpc: input.projectRpc,
+      // The reservation is still exclusively this request's (the CAS holds it),
+      // so record the signature on it before the bytes go out. If the write
+      // fails the send is aborted: better an unbroadcast failed deposit than an
+      // executed escrow transfer whose signature exists nowhere.
+      onSigned: async (signedAs) => {
+        const recorded = await repo.updateDeposit({
+          id: created.id,
+          status: "pending",
+          signature: signedAs,
+          expectedStatus: "pending",
+        });
+        if (!recorded) {
+          throw new AppError("CONFLICT", "Deposit reservation is no longer pending.");
+        }
+        recordedSignature = signedAs;
+      },
     });
   } catch (error) {
-    const failureReason = describeTxError(error, "Deposit submission failed.");
-    getLogger().error({ depositId: created.id, error }, "createChannelDeposit: broadcast failed");
-    const failed = await repo.updateDeposit({
-      id: created.id,
-      status: "failed",
-      failureReason,
-      expectedStatus: "pending",
-    });
-    if (failed) {
-      await emitDepositEvent(env, failed, "transfer.deposit.failed", "failed", { failureReason });
+    if (recordedSignature !== null && isAmbiguousSubmissionOutcome(error)) {
+      // The connection died after the signed bytes may have gone out, so the
+      // chain may have executed the escrow transfer. Marking it failed would
+      // invite a duplicate under a fresh key; fall through and let the
+      // submitted reconciliation ask the chain instead.
+      signature = recordedSignature;
+    } else {
+      const failureReason = describeTxError(error, "Deposit submission failed.");
+      getLogger().error({ depositId: created.id, error }, "createChannelDeposit: broadcast failed");
+      const failed = await repo.updateDeposit({
+        id: created.id,
+        status: "failed",
+        failureReason,
+        expectedStatus: "pending",
+      });
+      if (failed) {
+        await emitDepositEvent(env, failed, "transfer.deposit.failed", "failed", { failureReason });
+      }
+      return mapPrivateChannelDepositRow(failed ?? created);
     }
-    return mapPrivateChannelDepositRow(failed ?? created);
   }
 
   latest =

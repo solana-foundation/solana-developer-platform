@@ -99,8 +99,10 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   // Phase 1 — pending/submitted per withdrawal.
   for (const withdrawal of pending) {
     try {
-      if (withdrawal.status === "pending") {
+      if (withdrawal.status === "pending" && !withdrawal.signature) {
         await failIfStale(env, repo, withdrawal, now, "Withdrawal burn was never broadcast.");
+      } else if (withdrawal.status === "pending") {
+        await promoteSignedPending(env, repo, withdrawal, loadInstance, now);
       } else if (withdrawal.status === "submitted") {
         const instance = await loadInstance(withdrawal.instance_id);
         if (!instance) {
@@ -189,6 +191,36 @@ function logReconcileError(withdrawalId: string, status: string, err: unknown): 
 }
 
 /** Fail a burn-signature-less withdrawal that has been stuck past the threshold. */
+/**
+ * The burn signature is persisted before the send, so a pending row carrying
+ * one belongs to a request that died mid-send: the burn may have reached the
+ * gateway. Promote it and let the submitted reconciliation ask, instead of
+ * failing a burn that may have executed.
+ */
+async function promoteSignedPending(
+  env: Env,
+  repo: PrivateChannelWithdrawalRepository,
+  withdrawal: PrivateChannelWithdrawalRow,
+  loadInstance: (id: string) => Promise<PrivateChannelInstanceRow | null>,
+  now: number
+): Promise<void> {
+  if (now - Date.parse(withdrawal.updated_at) <= STUCK_AFTER_MS) {
+    return;
+  }
+  const promoted = await repo.updateWithdrawal({
+    id: withdrawal.id,
+    status: "submitted",
+    expectedStatus: "pending",
+  });
+  if (!promoted) {
+    return;
+  }
+  const instance = await loadInstance(promoted.instance_id);
+  if (instance) {
+    await reconcileSubmitted(env, repo, promoted, instance, now);
+  }
+}
+
 async function failIfStale(
   env: Env,
   repo: PrivateChannelWithdrawalRepository,
@@ -199,7 +231,7 @@ async function failIfStale(
   if (withdrawal.signature) {
     return;
   }
-  await failStale(env, repo, withdrawal, now, reason);
+  await failStale(env, repo, withdrawal, now, reason, { expectedSignatureAbsent: true });
 }
 
 /** Signature-agnostic stale fail. Only legitimate pre-burn-confirmation. */
@@ -208,7 +240,8 @@ async function failStale(
   repo: PrivateChannelWithdrawalRepository,
   withdrawal: PrivateChannelWithdrawalRow,
   now: number,
-  reason: string
+  reason: string,
+  guard: { expectedSignatureAbsent?: boolean } = {}
 ): Promise<void> {
   if (now - Date.parse(withdrawal.updated_at) <= STUCK_AFTER_MS) {
     return;
@@ -218,6 +251,7 @@ async function failStale(
     status: "failed",
     failureReason: reason,
     expectedStatus: withdrawal.status,
+    expectedSignatureAbsent: guard.expectedSignatureAbsent ?? false,
   });
   if (failed) {
     await emitWithdrawalEvent(
@@ -247,7 +281,14 @@ async function reconcileSubmitted(
   // will need to be wired through this call the way withdraw-confirm.ts does.
   // TODO(auth): plumb resolveMemberGatewayAuth into the cron path once we need it.
   const rpc = solanaRpc.createRpc(env, { rpcUrl: instance.gateway_url });
-  const [status] = await solanaRpc.getSignatureStatuses(rpc, [withdrawal.signature as Signature]);
+  // searchTransactionHistory for the same reason as the deposit reconciler:
+  // every path into here is already past the node's short recent-status cache,
+  // and promoteSignedPending reaches it strictly AFTER STUCK_AFTER_MS. Without
+  // it an executed burn reads null and is failed, which invites the caller to
+  // burn the same balance twice.
+  const [status] = await solanaRpc.getSignatureStatuses(rpc, [withdrawal.signature as Signature], {
+    searchTransactionHistory: true,
+  });
 
   if (!status) {
     if (now - Date.parse(withdrawal.updated_at) > STUCK_AFTER_MS) {
