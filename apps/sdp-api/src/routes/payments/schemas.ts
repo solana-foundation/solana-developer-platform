@@ -490,19 +490,21 @@ export const createTransferSchema = z.strictObject({
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
   /**
-   * Retired on this route: it has no private-transfer path any more. Declared
-   * as `never` rather than omitted — matching the retired `requestId` on the
-   * earn routes — so the stray key is rejected with this message instead of
-   * being silently stripped. This object is not `.strict()`, so stripping it
-   * would let an old caller's private-transfer request fall through and execute
-   * as an ordinary PUBLIC transfer, moving funds visibly that the caller asked
-   * to move privately. Failing the request is the only safe answer.
+   * Retired, but still ACCEPTED by validation. SDP no longer has a
+   * private-transfer provider, and the request cannot be honoured — but v1
+   * published this field, so rejecting the shape here would break the contract
+   * in place. Validation therefore keeps accepting it and the route answers
+   * PROVIDER_UNAVAILABLE (503), which is what this field's callers already had
+   * to handle: every failure of the old provider path — timeout, malformed
+   * response, upstream 5xx — surfaced as exactly that.
    *
-   * The message says only that the field is not accepted. Whether SDP offers
-   * private transfers again is a product question, and a request validator is
-   * not the place to announce an answer to it.
+   * It must not be dropped either. This object is not `.strict()`, so a
+   * stripped key would let an old caller's private-transfer request fall
+   * through and execute as an ordinary PUBLIC transfer, moving funds visibly
+   * that the caller asked to move privately. Accepted here, refused at the
+   * route: see the guard in `extractTransferPolicyCandidate`.
    */
-  privateTransfer: z.never("privateTransfer is not accepted on this endpoint").optional(),
+  privateTransfer: z.unknown().optional(),
 });
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);

@@ -41,6 +41,7 @@ import {
   badRequestQuery,
   conflict,
   notFound,
+  providerUnavailable,
   solanaRpcError,
 } from "@/lib/errors";
 import {
@@ -414,6 +415,33 @@ async function updateOnchainTransferForRamp(
 }
 
 /**
+ * Refuse a retired `privateTransfer` request.
+ *
+ * v1 published this field, so validation still accepts its shape rather than
+ * breaking the contract in place; the capability behind it is simply gone. 503
+ * is what these callers already had to handle — every failure of the old
+ * provider path surfaced as PROVIDER_UNAVAILABLE — so this is a permanent
+ * instance of a documented outcome, not a new one.
+ *
+ * This runs at the very top of the gate's extraction, which is the earliest
+ * point in the flow, and that placement is load-bearing rather than tidy. The
+ * fingerprint no longer covers `privateTransfer`, so a private-transfer request
+ * reusing the Idempotency-Key of an earlier public transfer with the same
+ * source, destination, token and amount would otherwise match it in
+ * `findTransferIdempotentKeyReplay` and return that public transfer's 200 — a
+ * request to move funds privately answered with proof of a public movement.
+ * Refusing before the replay lookup is what closes that.
+ */
+function assertRetiredPrivateTransfer(body: { privateTransfer?: unknown }): void {
+  if (body.privateTransfer === undefined) {
+    return;
+  }
+  throw providerUnavailable(
+    "privateTransfer is retired: no private-transfer provider is available on this endpoint. Remove the field to send an ordinary public transfer."
+  );
+}
+
+/**
  * Parse and resolve a create-transfer request into its policy candidate for
  * the policy gate: validated body, resolved scope and outbound operation, and
  * the enforcement raw payload.
@@ -425,6 +453,7 @@ export async function extractTransferPolicyCandidate(
   c: ValidatedBodyContext<typeof createTransferSchema>
 ): Promise<PolicyGateExtraction> {
   const body = c.req.valid("json");
+  assertRetiredPrivateTransfer(body);
   assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
 
   const scope = await resolveScope(

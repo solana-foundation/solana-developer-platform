@@ -1976,11 +1976,12 @@ describe("Payments routes — transfers", () => {
   });
 
   /**
-   * This route has no private-transfer path any more, and the body schema is not
-   * `.strict()`, so an unknown key would be STRIPPED and the request would
-   * execute as an ordinary public transfer — publishing on-chain exactly what
-   * the caller asked to keep private. Failing the request is the only safe
-   * answer, and nothing may be signed, submitted, or recorded on the way out.
+   * The capability is gone, but v1 published the field, so validation still
+   * accepts its shape and the refusal is a runtime one: PROVIDER_UNAVAILABLE,
+   * the same outcome every failure of the old provider path already produced.
+   * What must never happen is the request succeeding — the body schema is not
+   * `.strict()`, so a stripped key would execute an ordinary public transfer and
+   * publish on-chain exactly what the caller asked to keep private.
    */
   it("refuses a privateTransfer request instead of downgrading it to a public transfer", async () => {
     const res = await app.request(
@@ -2002,10 +2003,10 @@ describe("Payments routes — transfers", () => {
       env
     );
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain("privateTransfer is not accepted");
+    expect(body.error.code).toBe("PROVIDER_UNAVAILABLE");
+    expect(body.error.message).toContain("privateTransfer is retired");
 
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -2013,6 +2014,94 @@ describe("Payments routes — transfers", () => {
       id: string;
     }>();
     expect(transfers.results).toHaveLength(0);
+  });
+
+  /**
+   * The fingerprint no longer covers `privateTransfer`, so a private-transfer
+   * request reusing an earlier PUBLIC transfer's Idempotency-Key matches it on
+   * every remaining field. Were the refusal to run after the replay lookup, the
+   * caller would be handed that public transfer's 200 — a request to move funds
+   * privately answered with proof of a public movement. The refusal runs first.
+   */
+  it("refuses a privateTransfer replay of a public transfer's idempotency key", async () => {
+    const idempotencyKey = "retired-private-transfer-replay";
+    const transferBody = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "1",
+    };
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Idempotency-Key": idempotencyKey,
+    };
+    const repository = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.createTransfer({
+      id: generatePaymentTransferId(),
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: SOL_MINT,
+      amount: "1",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "confirmed",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: "already-broadcast-public-signature",
+      slot: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotencyKey,
+      idempotencyFingerprint: buildPaymentTransferFingerprint({
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        token: SOL_MINT,
+        amount: "1",
+        memo: null,
+        type: "transfer",
+      }),
+    });
+
+    // Without the field the key replays, which is what makes the assertion
+    // below meaningful: the refusal is what stops it, not a fingerprint miss.
+    const publicReplay = await app.request(
+      "/v1/payments/transfers",
+      { method: "POST", headers, body: JSON.stringify(transferBody) },
+      env
+    );
+    expect(publicReplay.status).toBe(200);
+
+    const privateReplay = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...transferBody,
+          privateTransfer: { provider: "magicblock", magicBlock: {} },
+        }),
+      },
+      env
+    );
+
+    expect(privateReplay.status).toBe(503);
+    const replayBody = (await privateReplay.json()) as { error: { code: string } };
+    expect(replayBody.error.code).toBe("PROVIDER_UNAVAILABLE");
   });
 
   describe("execute transfer — happy path", () => {
