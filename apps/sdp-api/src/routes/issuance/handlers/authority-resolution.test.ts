@@ -373,44 +373,61 @@ describe("authority-resolution", () => {
     expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
   });
 
-  it("falls back to the metadata pointer authority without mutating the token record", async () => {
-    fetchMaybeMintMock.mockResolvedValue(
-      createDecodedMint({
-        extensions: [
-          {
-            __kind: "MetadataPointer",
-            authority: { __option: "Some", value: AUTHORITY },
-          },
-          {
-            __kind: "TokenMetadata",
-            updateAuthority: { __option: "None" },
-          },
-        ],
-      })
-    );
+  it.each([
+    {
+      state: "revoked",
+      metadataExtensions: [{ __kind: "TokenMetadata", updateAuthority: { __option: "None" } }],
+      expectedAuthority: null,
+    },
+    { state: "missing", metadataExtensions: [], expectedAuthority: null },
+    {
+      state: "active",
+      metadataExtensions: [
+        {
+          __kind: "TokenMetadata",
+          updateAuthority: { __option: "Some", value: OTHER_AUTHORITY },
+        },
+      ],
+      expectedAuthority: OTHER_AUTHORITY,
+    },
+  ])(
+    "resolves $state metadata authority independently of the pointer authority",
+    async ({ metadataExtensions, expectedAuthority }) => {
+      fetchMaybeMintMock.mockResolvedValue(
+        createDecodedMint({
+          extensions: [
+            {
+              __kind: "MetadataPointer",
+              authority: { __option: "Some", value: AUTHORITY },
+            },
+            ...metadataExtensions,
+          ],
+        })
+      );
 
-    const tokenService = {
-      updateTokenAuthorities: vi.fn(),
-    } as unknown as {
-      updateTokenAuthorities: ReturnType<typeof vi.fn>;
-    };
+      const tokenService = {
+        updateTokenAuthorities: vi.fn(),
+      } as unknown as {
+        updateTokenAuthorities: ReturnType<typeof vi.fn>;
+      };
 
-    const authority = await resolveMetadataAuthority(
-      {
-        SOLANA_RPC_URL: "https://rpc.example.test",
-        SOLANA_NETWORK: "devnet",
-      } as never,
-      tokenService as never,
-      createToken({
-        metadataAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
-        mintAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
-      })
-    );
+      const authority = await resolveMetadataAuthority(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        tokenService as never,
+        createToken({
+          metadataAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
+          mintAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
+        })
+      );
 
-    expect(authority).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
-    expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
-    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
-  });
+      expect(authority).toBe(expectedAuthority);
+      expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
+      expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
+    }
+  );
 
   it("uses live mint authority and treats a request value as an assertion", async () => {
     fetchMaybeMintMock.mockResolvedValue(

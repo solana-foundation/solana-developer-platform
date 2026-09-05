@@ -146,17 +146,16 @@ async function fetchMintAuthorities(
     (extension) => extension.__kind === "PermanentDelegate"
   );
   const tokenMetadata = extensions.find((extension) => extension.__kind === "TokenMetadata");
-  const metadataPointer = extensions.find((extension) => extension.__kind === "MetadataPointer");
   const metadataUpdateAuthority = tokenMetadata
     ? unwrapOption(tokenMetadata.updateAuthority)
     : null;
-  const metadataPointerAuthority = metadataPointer ? unwrapOption(metadataPointer.authority) : null;
 
   return {
     mintAuthority: unwrapOption(mint.data.mintAuthority),
     freezeAuthority: unwrapOption(mint.data.freezeAuthority),
     permanentDelegate: permanentDelegate?.delegate ?? null,
-    metadataAuthority: metadataUpdateAuthority ?? metadataPointerAuthority,
+    // MetadataPointer authority can redirect metadata, not edit its contents.
+    metadataAuthority: metadataUpdateAuthority,
   };
 }
 

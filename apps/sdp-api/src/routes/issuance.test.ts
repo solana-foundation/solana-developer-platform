@@ -23,6 +23,7 @@ import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resol
 import { buildIdempotencyMetadata } from "@/routes/issuance/handlers/idempotency";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { rootLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
 import {
   recoverApprovedWalletOperations,
@@ -3282,6 +3283,80 @@ describe("Issuance Routes", () => {
         resolveAuthorityWalletSpy.mockRestore();
         createResolvedAuthoritySignerSpy.mockRestore();
         updateMetadataSpy.mockRestore();
+      }
+    });
+
+    it("rejects revoked metadata updates before signing, audit intent, or token mutation", async () => {
+      const token = await seedIssuedToken({ name: "Immutable metadata" });
+      vi.mocked(AuthorityResolution.resolveCurrentAuthorityForRole).mockRestore();
+      // SAFETY: this partial external SDK fixture supplies every mint field read by the route.
+      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint").mockResolvedValue({
+        exists: true,
+        data: {
+          mintAuthority: { __option: "None" },
+          freezeAuthority: { __option: "None" },
+          extensions: {
+            __option: "Some",
+            value: [
+              { __kind: "TokenMetadata", updateAuthority: { __option: "None" } },
+              {
+                __kind: "MetadataPointer",
+                authority: { __option: "Some", value: TEST_SOLANA_ADDRESSES.wallet3 },
+              },
+            ],
+          },
+        },
+      } as never);
+      const updateMetadata = vi.spyOn(MosaicService.prototype, "updateMetadata").mockResolvedValue({
+        signature: "sig_should_not_be_sent",
+        slot: 123n,
+      });
+      const admission = vi.spyOn(SigningService.prototype, "admitRuntimeExecution");
+      const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+      try {
+        const audit = new AuditService(getDb(env));
+        const auditOptions = { resourceType: "audit_ledger" } as const;
+        const auditCount = await audit.countForOrganization(TEST_ORG.id, auditOptions);
+        const headers = { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` };
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: "Must not be saved",
+              signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({
+          error: {
+            code: "BAD_REQUEST",
+            message: "Metadata authority is not available for this token",
+          },
+        });
+        expect(admission).not.toHaveBeenCalled();
+        expect(signer).not.toHaveBeenCalled();
+        expect(updateMetadata).not.toHaveBeenCalled();
+        expect(await audit.countForOrganization(TEST_ORG.id, auditOptions)).toBe(auditCount);
+        const read = await app.request(
+          `/v1/issuance/tokens/${token.id}?includeMetadataAuthority=true`,
+          { headers },
+          env
+        );
+        expect(read.status).toBe(200);
+        expect(await read.json()).toMatchObject({
+          data: { token: { name: "Immutable metadata" }, metadataAuthority: null },
+        });
+      } finally {
+        mintRead.mockRestore();
+        updateMetadata.mockRestore();
+        admission.mockRestore();
       }
     });
 
