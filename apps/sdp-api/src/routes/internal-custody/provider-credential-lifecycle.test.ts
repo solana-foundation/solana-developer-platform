@@ -4,12 +4,13 @@ import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { RedisKVStore } from "@/runtime/kv-redis";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
 
@@ -234,6 +235,99 @@ describe("provider credential lifecycle", () => {
     vi.unstubAllGlobals();
     await clearKVStores(env);
   });
+
+  it.each(["actor", "organization"])(
+    "refuses rotation when the %s quota is exhausted",
+    async (scope) => {
+      vi.spyOn(Date, "now").mockReturnValue(Date.now());
+      await seedRateLimit(
+        env,
+        `metered:credential-rotation:org:${ORGANIZATION_ID}${scope === "actor" ? `:user:${USER_ID}` : ""}`,
+        scope === "actor" ? 5 : 20
+      );
+      const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+      vi.stubGlobal("fetch", providerFetch);
+
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+        method: "POST",
+        key: "rotate-quota-exhausted",
+        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      });
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get("Retry-After")).not.toBeNull();
+      expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(providerFetch).not.toHaveBeenCalled();
+      const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      expect(state.status).toBe(200);
+      expect(await state.json()).toMatchObject({
+        data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
+      });
+    }
+  );
+
+  it("refuses rotation before provider calls or secret storage when the quota store is unavailable", async () => {
+    vi.spyOn(RedisKVStore.prototype, "admitSlidingWindow").mockRejectedValue(
+      new Error("KV unavailable")
+    );
+    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    vi.stubGlobal("fetch", providerFetch);
+
+    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-quota-unavailable",
+      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+    expect(providerFetch).not.toHaveBeenCalled();
+    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    expect(state.status).toBe(200);
+    expect(await state.json()).toMatchObject({
+      data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
+    });
+  });
+
+  it.each(["complete-rotation", "rollback", "deactivate"])(
+    "refuses %s before provider calls or state changes when its quota is exhausted",
+    async (action) => {
+      vi.spyOn(Date, "now").mockReturnValue(Date.now());
+      const providerFetch = vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(
+            action === "rollback"
+              ? Response.json({ data: [] })
+              : new Response(null, { status: 503 })
+          )
+        );
+      vi.stubGlobal("fetch", providerFetch);
+      const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+        method: "POST",
+        key: "rotate-before-quota-test",
+        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      });
+      expect(rotated.status).toBe(200);
+      const { data } = await rotated.json();
+      const statePath = `/connections/${CONNECTION_A_ID}/provider-credential`;
+      const before = await (await lifecycleRequest(statePath)).json();
+      const quota = action === "complete-rotation" ? "credential-rotation" : "credential-recovery";
+      await seedRateLimit(env, `metered:${quota}:org:${ORGANIZATION_ID}`, 20);
+      providerFetch.mockClear();
+
+      const response = await lifecycleRequest(
+        `/provider-credentials/${data.providerCredential.id}/${action}`,
+        { method: "POST" }
+      );
+
+      expect(response.status).toBe(429);
+      expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(providerFetch).not.toHaveBeenCalled();
+      const after = await (await lifecycleRequest(statePath)).json();
+      expect(after.data).toEqual(before.data);
+    }
+  );
 
   it("returns the exact credential and complete authorized impact", async () => {
     const response = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
@@ -720,7 +814,8 @@ describe("provider credential lifecycle", () => {
     expect(providerFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("rolls every connection back to the retained immediate predecessor", async () => {
+  it("rolls every connection back even when the rotation quota is exhausted", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const providerFetch = vi
       .fn()
       .mockImplementation(() => Promise.resolve(Response.json({ data: [] })));
@@ -733,6 +828,13 @@ describe("provider credential lifecycle", () => {
     const rotatedBody = (await rotated.json()) as {
       data: { providerCredential: { id: string } };
     };
+
+    await seedRateLimit(
+      env,
+      `metered:credential-rotation:org:${ORGANIZATION_ID}:user:${USER_ID}`,
+      5
+    );
+    await seedRateLimit(env, `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20);
 
     const rollback = await lifecycleRequest(
       `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
@@ -817,6 +919,7 @@ describe("provider credential lifecycle", () => {
   });
 
   it("cancels an unreferenced pending candidate without a fallible post-commit read", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -827,6 +930,12 @@ describe("provider credential lifecycle", () => {
       data: { providerCredential: { id: string } };
     };
     const candidateId = rotatedBody.data.providerCredential.id;
+    await seedRateLimit(
+      env,
+      `metered:credential-rotation:org:${ORGANIZATION_ID}:user:${USER_ID}`,
+      5
+    );
+    await seedRateLimit(env, `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20);
     const findLifecycleCredential = ProviderCredentialStore.prototype.findLifecycleCredential;
     vi.spyOn(ProviderCredentialStore.prototype, "findLifecycleCredential").mockImplementation(
       async function (this: ProviderCredentialStore, organizationId, credentialId, options) {

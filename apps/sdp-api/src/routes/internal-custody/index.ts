@@ -8,6 +8,7 @@ import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
+import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
 import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
@@ -43,6 +44,9 @@ const rotationBodySchema = z
   })
   .strict();
 const privySetup = getProviderSetupDefinition("custody", "privy");
+const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
+// Rotation retries must not consume the budget for rollback or candidate cancellation.
+const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
 
 const internalCustody = new Hono<{ Bindings: Env }>();
 
@@ -194,6 +198,7 @@ internalCustody.post("/provider-credentials/:credentialId/rotate", async (c) => 
   }
   const idempotencyKey = c.req.header("Idempotency-Key");
   if (!idempotencyKey) throw badRequest("Idempotency-Key is required");
+  await enforceMeteredQuota(c, rotationQuota);
   return success(
     c,
     await rotateProviderCredential(c, params.data.credentialId, body.data.fields, idempotencyKey)
@@ -205,6 +210,7 @@ internalCustody.post("/provider-credentials/:credentialId/complete-rotation", as
   if (!params.success) {
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
   }
+  await enforceMeteredQuota(c, rotationQuota);
   return success(c, await completeRotationCandidate(c, params.data.credentialId));
 });
 
@@ -213,6 +219,7 @@ internalCustody.post("/provider-credentials/:credentialId/rollback", async (c) =
   if (!params.success) {
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
   }
+  await enforceMeteredQuota(c, recoveryQuota);
   return success(c, await rollbackProviderCredential(c, params.data.credentialId));
 });
 
@@ -221,6 +228,7 @@ internalCustody.post("/provider-credentials/:credentialId/deactivate", async (c)
   if (!params.success) {
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
   }
+  await enforceMeteredQuota(c, recoveryQuota);
   return success(c, await deactivateRotationCandidate(c, params.data.credentialId));
 });
 
