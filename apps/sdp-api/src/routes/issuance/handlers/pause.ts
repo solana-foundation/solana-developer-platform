@@ -65,6 +65,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     tokenId,
     type: "pause",
     idempotencyKey: c.req.header("Idempotency-Key"),
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
@@ -96,6 +97,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     env: c.env,
     auth,
     currentAuthority: pauseAuthorityRaw,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
   });
 
@@ -251,6 +253,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     tokenId,
     type: "unpause",
     idempotencyKey: c.req.header("Idempotency-Key"),
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
@@ -282,6 +285,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     env: c.env,
     auth,
     currentAuthority: pauseAuthorityRaw,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
   });
 

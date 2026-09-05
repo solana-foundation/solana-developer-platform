@@ -15,10 +15,16 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { type createTokenSchema, listTokensQuerySchema, type updateTokenSchema } from "../schemas";
+import {
+  type createTokenSchema,
+  getTokenQuerySchema,
+  listTokensQuerySchema,
+  type updateTokenSchema,
+} from "../schemas";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
+  resolveAllowlistAuthority,
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
   resolveIssuanceWallet,
@@ -63,6 +69,7 @@ async function resolveMetadataUpdate(params: {
   tokenService: TokenService;
   token: TokenRecord;
   patch: ReturnType<typeof getOnChainMetadataPatch>;
+  signingCustodyWalletId?: string;
 }) {
   if (
     !params.token.mintAddress ||
@@ -86,6 +93,7 @@ async function resolveMetadataUpdate(params: {
     env: params.c.env,
     auth: params.auth,
     currentAuthority,
+    requestedCustodyWalletId: params.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
   await admitIssuanceRuntimeExecution({
@@ -226,6 +234,10 @@ export const listTokenFacets = async (c: AppContext) => {
 export const getToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
+  const parsed = getTokenQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -238,6 +250,12 @@ export const getToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
+  if (parsed.data.includeAllowlistAuthority === "true") {
+    const allowlistAuthority = token.ablListAddress
+      ? await resolveAllowlistAuthority(c.env, token.ablListAddress)
+      : null;
+    return success(c, { token: toPublicToken(token), allowlistAuthority });
+  }
   return success(c, { token: toPublicToken(token) });
 };
 
@@ -245,7 +263,7 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = c.req.valid("json");
+  const { signingCustodyWalletId, ...body } = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
 
@@ -306,6 +324,7 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
       tokenService,
       token: existing,
       patch: metadataPatch,
+      signingCustodyWalletId,
     });
 
     auditIntent = await auditService.beginCritical(c, {

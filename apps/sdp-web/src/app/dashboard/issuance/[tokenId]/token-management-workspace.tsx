@@ -164,7 +164,8 @@ function canLoadAuthorityWallets(
   activeTab: TokenManagementTab,
   tokenStatus: TokenManagementWorkspaceProps["token"]["status"]
 ): boolean {
-  return activeTab !== "overview" || tokenStatus === "pending";
+  // The overview's Unpause button also needs its signer candidates.
+  return activeTab !== "overview" || tokenStatus === "pending" || tokenStatus === "paused";
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: token management intentionally centralizes action orchestration and tab coordination in one workspace.
@@ -197,6 +198,7 @@ export function TokenManagementWorkspace({
     runActionImmediately: runActionImmediatelyBase,
     dismissActionConfirmation,
     confirmAction,
+    selectConfirmationWallet,
   } = useTokenActionRunner();
   const [activeAction, setActiveAction] = useState<AdminAction | null>(null);
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
@@ -503,6 +505,31 @@ export function TokenManagementWorkspace({
       t,
     })
   );
+  const metadataSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "metadata",
+      token,
+      authorityWallets,
+      metadataAuthority,
+      t,
+    })
+  );
+  const allowlistSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "allowlist",
+      token,
+      authorityWallets,
+      metadataAuthority,
+      allowlistAuthority: authorityWalletsData?.allowlistAuthority,
+      t,
+    })
+  );
+  const allowlistDisabledReason = token.ablListAddress
+    ? (authorityWalletsData?.allowlistAuthorityError ??
+      (authorityWalletsData?.allowlistAuthority === undefined
+        ? t("DashboardIssuance.management.loadingSignerWallets")
+        : allowlistSignerSelection.unavailableReason))
+    : null;
   const permissionRows = getPermissionRows(token, metadataAuthority, t).map((row) => {
     const displayedAuthorityAddress = getDisplayedAuthorityAddress({
       token,
@@ -713,23 +740,30 @@ export function TokenManagementWorkspace({
   };
 
   const handleUpdateMetadata = () => {
+    if (token.mintAddress && metadataSignerSelection.unavailableReason) {
+      toast.error(metadataSignerSelection.unavailableReason);
+      return;
+    }
     const nextName = metadataForm.name.trim();
     if (!nextName) {
       toast.error(t("DashboardIssuance.management.tokenNameRequired"));
       return;
     }
 
-    runAction({
-      label: t("DashboardIssuance.management.updateToken"),
-      method: "PATCH",
-      path: tokenBasePath,
-      body: {
-        name: nextName,
-        description: metadataForm.description.trim() ? metadataForm.description.trim() : null,
-        uri: metadataForm.uri.trim() ? metadataForm.uri.trim() : null,
-        imageUrl: metadataForm.imageUrl.trim() ? metadataForm.imageUrl.trim() : null,
+    runAction(
+      {
+        label: t("DashboardIssuance.management.updateToken"),
+        method: "PATCH",
+        path: tokenBasePath,
+        body: {
+          name: nextName,
+          description: metadataForm.description.trim() ? metadataForm.description.trim() : null,
+          uri: metadataForm.uri.trim() ? metadataForm.uri.trim() : null,
+          imageUrl: metadataForm.imageUrl.trim() ? metadataForm.imageUrl.trim() : null,
+        },
       },
-    });
+      { signerWallets: token.mintAddress ? metadataSignerSelection.wallets : undefined }
+    );
   };
 
   const submitDeploy = (signingCustodyWalletId: string) => {
@@ -1032,6 +1066,7 @@ export function TokenManagementWorkspace({
         successToast: pause
           ? t("DashboardIssuance.management.pauseFinalized")
           : t("DashboardIssuance.management.unpauseFinalized"),
+        signerWallets: pauseSignerSelection.wallets,
       }
     );
   };
@@ -1098,6 +1133,10 @@ export function TokenManagementWorkspace({
   };
 
   const handleAddAllowlist = () => {
+    if (allowlistDisabledReason) {
+      toast.error(allowlistDisabledReason);
+      return;
+    }
     const address = allowlistForm.address.trim();
     if (!address) {
       toast.error(
@@ -1107,18 +1146,26 @@ export function TokenManagementWorkspace({
       return;
     }
 
-    runAction({
-      label: controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry"),
-      method: "POST",
-      path: `${tokenBasePath}/allowlist`,
-      body: {
-        address,
-        label: asOptionalString(allowlistForm.label),
+    runAction(
+      {
+        label:
+          controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry"),
+        method: "POST",
+        path: `${tokenBasePath}/allowlist`,
+        body: {
+          address,
+          label: asOptionalString(allowlistForm.label),
+        },
       },
-    });
+      { signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined }
+    );
   };
 
   const handleRemoveAllowlist = (entryId: string) => {
+    if (allowlistDisabledReason) {
+      toast.error(allowlistDisabledReason);
+      return;
+    }
     runAction(
       {
         label:
@@ -1128,6 +1175,7 @@ export function TokenManagementWorkspace({
         path: `${tokenBasePath}/allowlist/${entryId}`,
       },
       {
+        signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined,
         onSuccess: async () => {
           await mutateSupportingData(
             (current) => {
@@ -1326,13 +1374,13 @@ export function TokenManagementWorkspace({
           signerWallets: pauseSignerSelection.wallets,
           defaultSignerWalletId: pauseSignerSelection.defaultWalletId,
           signerUnavailableReason: pauseSignerSelection.unavailableReason,
-          // Pause authority is always single
+          // The confirmation dialog owns pause/unpause signer selection.
           onSignerWalletIdChange: (_value: string) => {},
         };
       default:
         return {
           signerWallets: [],
-          signerUnavailableReason: null,
+          signerUnavailableReason: action === "allowlist" ? allowlistDisabledReason : null,
           onSignerWalletIdChange: (_value: string) => {},
         };
     }
@@ -1690,6 +1738,7 @@ export function TokenManagementWorkspace({
         isPending={isPending}
         onCancel={dismissActionConfirmation}
         onConfirm={confirmAction}
+        onSignerWalletIdChange={selectConfirmationWallet}
       />
 
       <TokenDeployWalletDialog

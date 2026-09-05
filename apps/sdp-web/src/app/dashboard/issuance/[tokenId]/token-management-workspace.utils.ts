@@ -769,7 +769,9 @@ export type SignerAwareAction =
   | "force-burn"
   | "authority"
   | "freeze"
-  | "pause";
+  | "pause"
+  | "metadata"
+  | "allowlist";
 
 export interface SignerSelectionState {
   wallets: PaymentsDashboardWallet[];
@@ -837,6 +839,7 @@ export function getSignerSelectionForAction({
   token,
   authorityWallets,
   metadataAuthority,
+  allowlistAuthority,
   permissionRow,
   t,
 }: {
@@ -844,6 +847,7 @@ export function getSignerSelectionForAction({
   token: Token;
   authorityWallets: PaymentsDashboardWallet[];
   metadataAuthority: string | null;
+  allowlistAuthority?: string | null;
   permissionRow?: PermissionRow | null;
   t: Translate;
 }): SignerSelectionState {
@@ -926,6 +930,12 @@ export function getSignerSelectionForAction({
       missingReason = t("DashboardIssuance.management.noPauseAuthorityConfigured");
       uncontrolledReason = t("DashboardIssuance.management.pauseAuthorityNotControlled");
       break;
+    case "metadata":
+      requiredAuthority = metadataAuthority;
+      break;
+    case "allowlist":
+      requiredAuthority = allowlistAuthority ?? null;
+      break;
     default:
       break;
   }
@@ -946,25 +956,6 @@ export function getSignerSelectionForAction({
       wallets: [],
       defaultWalletId: "",
       unavailableReason: uncontrolledReason,
-    };
-  }
-
-  // Pause has no exact-wallet request field. It deliberately keeps automatic
-  // server-side authority resolution, so duplicate credentials cannot be
-  // disambiguated here. Selector-capable actions expose every exact row.
-  if (action === "pause") {
-    if (matchedWallets.length > 1) {
-      return {
-        wallets: matchedWallets,
-        defaultWalletId: "",
-        unavailableReason: t("DashboardIssuance.management.requiredSignerAmbiguous"),
-      };
-    }
-
-    return {
-      wallets: matchedWallets,
-      defaultWalletId: matchedWallets[0].id,
-      unavailableReason: null,
     };
   }
 

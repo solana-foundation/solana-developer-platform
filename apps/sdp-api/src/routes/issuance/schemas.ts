@@ -116,7 +116,13 @@ export const createTokenWithAssetProfileSchema = createTokenSchema
 
 export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAssetProfileSchema>;
 
+export const getTokenQuerySchema = z.object({
+  includeAllowlistAuthority: z.enum(["true", "false"]).optional(),
+});
+
 export const updateTokenSchema = z.object({
+  // Per-request metadata signer; does not change the deployment wallet.
+  signingCustodyWalletId: z.string().min(1).optional(),
   name: z.string().min(1).max(100).optional(),
   // Symbol and decimals define the mint; the handler rejects them after deploy.
   // Same constraints as createTokenSchema.
@@ -277,6 +283,7 @@ export const confirmDeploySchema = z.object({
 });
 
 export const pauseTokenSchema = z.object({
+  signingCustodyWalletId: z.string().min(1).optional(),
   options: z
     .object({
       priorityFee: z
@@ -303,8 +310,13 @@ export const unfreezeSchema = z
   .strict();
 
 export const addAllowlistSchema = z.object({
+  signingCustodyWalletId: z.string().min(1).optional(),
   address: z.string().min(32).max(44),
   label: z.string().max(100).optional(),
+});
+
+export const removeAllowlistQuerySchema = z.object({
+  signingCustodyWalletId: z.string().min(1).optional(),
 });
 
 export const listAllowlistQuerySchema = z.object({

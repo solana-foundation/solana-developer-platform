@@ -1,8 +1,6 @@
-import { createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types";
 import type { TransactionSigner } from "@solana/kit";
-import { getListConfig } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -19,15 +17,19 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { type addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
+import {
+  type addAllowlistSchema,
+  listAllowlistQuerySchema,
+  removeAllowlistQuerySchema,
+} from "../schemas";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
+  resolveAllowlistAuthority,
   resolveAuthorityWallet,
 } from "./authority-resolution";
 
 type AppContext = Context<{ Bindings: Env }>;
-type MosaicSdkRpc = Parameters<typeof getListConfig>[0]["rpc"];
 
 const DEFAULT_SURFPOOL_ABL_REMOVE_TIMEOUT_MS = 15_000;
 
@@ -162,16 +164,15 @@ async function resolveAllowlistAuthoritySigner(
   c: AppContext,
   auth: ApiKeyContext,
   tokenService: TokenService,
-  list: ReturnType<typeof assertValidAddress>
+  list: ReturnType<typeof assertValidAddress>,
+  signingCustodyWalletId?: string
 ) {
-  const { authority } = await getListConfig({
-    rpc: createRpcForSdk<MosaicSdkRpc>(c.env),
-    listConfig: list,
-  });
+  const authority = await resolveAllowlistAuthority(c.env, list);
   const authorityWallet = await resolveAuthorityWallet({
     env: c.env,
     auth,
     currentAuthority: authority,
+    requestedCustodyWalletId: signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
   await admitIssuanceRuntimeExecution({
@@ -265,7 +266,13 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
       ? assertValidAddress(token.ablListAddress, "ablListAddress")
       : null;
     const authorityWallet = list
-      ? await resolveAllowlistAuthoritySigner(c, auth, tokenService, list)
+      ? await resolveAllowlistAuthoritySigner(
+          c,
+          auth,
+          tokenService,
+          list,
+          body.signingCustodyWalletId
+        )
       : null;
 
     let { entry } = await tokenService.addAllowlistEntry({
@@ -340,6 +347,10 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
 export const removeAllowlistEntry = async (c: AppContext) => {
   const { tokenId, entryId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
+  const parsed = removeAllowlistQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -364,7 +375,13 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     ? assertValidAddress(token.ablListAddress, "ablListAddress")
     : null;
   const authorityWallet = list
-    ? await resolveAllowlistAuthoritySigner(c, auth, tokenService, list)
+    ? await resolveAllowlistAuthoritySigner(
+        c,
+        auth,
+        tokenService,
+        list,
+        parsed.data.signingCustodyWalletId
+      )
     : null;
   const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {

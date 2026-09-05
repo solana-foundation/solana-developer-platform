@@ -60,6 +60,31 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     expect(names).toContain("walletId");
   });
 
+  it("documents optional selectors for automatic-authority actions and the live list authority read", () => {
+    const doc = createOpenApiDocument();
+    for (const [method, path] of [
+      ["post", "/v1/issuance/tokens/{tokenId}/pause"],
+      ["post", "/v1/issuance/tokens/{tokenId}/unpause"],
+      ["post", "/v1/issuance/tokens/{tokenId}/allowlist"],
+      ["patch", "/v1/issuance/tokens/{tokenId}"],
+    ] as const) {
+      const schema = requestSchema(doc.paths?.[path]?.[method]?.requestBody);
+      expect(schema.properties).toHaveProperty("signingCustodyWalletId");
+      expect(schema.required ?? []).not.toContain("signingCustodyWalletId");
+    }
+    const removal = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"]?.delete;
+    expect(removal?.parameters).toContainEqual(
+      expect.objectContaining({ name: "signingCustodyWalletId", in: "query", required: false })
+    );
+    const get = doc.paths?.["/v1/issuance/tokens/{tokenId}"]?.get;
+    expect(get?.parameters).toContainEqual(
+      expect.objectContaining({ name: "includeAllowlistAuthority", in: "query" })
+    );
+    expect(requestSchema(get?.responses?.["200"]).properties?.data?.properties).toHaveProperty(
+      "allowlistAuthority"
+    );
+  });
+
   it("documents conflict responses for wallet-bound mutations", () => {
     const doc = createOpenApiDocument();
     const operations = [

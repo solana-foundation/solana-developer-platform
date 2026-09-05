@@ -6,6 +6,7 @@ import type {
   TokenAllowlistEntry,
   TokenTransaction,
 } from "@sdp/types";
+import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -47,7 +48,15 @@ export interface TokenManagementSupportingData {
 export interface TokenAuthorityWalletsData {
   authorityWallets: PaymentsDashboardWallet[];
   authorityWalletsError: string | null;
+  // Optional only for pre-existing persisted dashboard cache entries.
+  allowlistAuthority?: string | null;
+  allowlistAuthorityError?: string | null;
 }
+
+const allowlistAuthoritySchema = z.object({
+  allowlistAuthority: z.string().min(1).nullable(),
+  allowlistAuthorityError: z.string().nullable(),
+});
 
 function getApiError(body: SupportingDataEnvelope, fallback: string): string {
   if (typeof body.error?.message === "string" && body.error.message) {
@@ -132,6 +141,7 @@ export async function fetchTokenAuthorityWallets(
   }
 
   return {
+    ...allowlistAuthoritySchema.parse(body.data),
     authorityWallets: Array.isArray(body.data?.authorityWallets) ? body.data.authorityWallets : [],
     authorityWalletsError:
       typeof body.data?.authorityWalletsError === "string" ? body.data.authorityWalletsError : null,

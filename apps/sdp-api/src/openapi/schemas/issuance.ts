@@ -13,9 +13,11 @@ import {
   deployTokenSchema as deployTokenSchemaBase,
   forceBurnSchema as forceBurnSchemaBase,
   freezeSchema as freezeSchemaBase,
+  getTokenQuerySchema as getTokenQuerySchemaBase,
   listTokensQuerySchema as listTokensQuerySchemaBase,
   mintSchema as mintSchemaBase,
   pauseTokenSchema as pauseTokenSchemaBase,
+  removeAllowlistQuerySchema as removeAllowlistQuerySchemaBase,
   seizeSchema as seizeSchemaBase,
   unfreezeSchema as unfreezeSchemaBase,
   updateAuthoritySchema as updateAuthoritySchemaBase,
@@ -571,6 +573,10 @@ export const executeUnpauseResponseSchema = z
 export const tokenResponseSchema = z
   .object({
     token: tokenSchema.openapi({ description: "Token details." }),
+    allowlistAuthority: solanaAddressSchema.nullable().optional().openapi({
+      description:
+        "Live on-chain list authority. Returned only by GET token with includeAllowlistAuthority=true; null when no on-chain list is configured. This is not the token freeze authority or a signer authorization.",
+    }),
   })
   .openapi({ description: "Token response payload." });
 
@@ -860,8 +866,21 @@ export const tokenWithAssetProfileResponseSchema = z
   })
   .openapi({ description: "Token + asset profile response payload." });
 
+export const getTokenQueryOpenApiSchema = getTokenQuerySchemaBase.extend({
+  includeAllowlistAuthority: withOpenApi(getTokenQuerySchemaBase.shape.includeAllowlistAuthority, {
+    description:
+      "Opt in to a read-only RPC lookup of the current on-chain list authority for wallet selection. Ordinary token reads do not perform this lookup.",
+    example: "true",
+  }),
+});
+
 export const updateTokenRequestSchema = updateTokenSchemaBase
   .extend({
+    signingCustodyWalletId: withOpenApi(updateTokenSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID for this on-chain metadata update. Must control the current metadata authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Does not change the draft/deployment wallet and is unused for database-only edits.",
+      example: "cwlt_example",
+    }),
     name: withOpenApi(updateTokenSchemaBase.shape.name, {
       description:
         "Updated token name. For deployed tokens, this updates on-chain Token-2022 metadata using the current metadata authority.",
@@ -1098,6 +1117,11 @@ export const updateAuthorityRequestSchema = updateAuthoritySchemaBase
 
 export const pauseTokenRequestSchema = pauseTokenSchemaBase
   .extend({
+    signingCustodyWalletId: withOpenApi(pauseTokenSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Replay must retain the original wallet.",
+      example: "cwlt_example",
+    }),
     options: withOpenApi(pauseTokenSchemaBase.shape.options, {
       description: "Pause/unpause options.",
       example: { priorityFee: "low", simulate: true },
@@ -1141,6 +1165,11 @@ export const unfreezeAccountRequestSchema = unfreezeSchemaBase
 
 export const addTokenAllowlistRequestSchema = addTokenAllowlistSchemaBase
   .extend({
+    signingCustodyWalletId: withOpenApi(addTokenAllowlistSchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+      example: "cwlt_example",
+    }),
     address: withOpenApi(addTokenAllowlistSchemaBase.shape.address, {
       description: "Wallet address to allowlist.",
       example: "So11111111111111111111111111111111111111112",
@@ -1151,6 +1180,14 @@ export const addTokenAllowlistRequestSchema = addTokenAllowlistSchemaBase
     }),
   })
   .openapi({ description: "Add token allowlist entry request body." });
+
+export const removeTokenAllowlistQuerySchema = removeAllowlistQuerySchemaBase.extend({
+  signingCustodyWalletId: withOpenApi(removeAllowlistQuerySchemaBase.shape.signingCustodyWalletId, {
+    description:
+      "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+    example: "cwlt_example",
+  }),
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Template Schemas

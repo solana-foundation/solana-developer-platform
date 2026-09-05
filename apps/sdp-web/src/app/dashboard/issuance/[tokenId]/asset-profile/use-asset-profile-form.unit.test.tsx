@@ -78,6 +78,19 @@ const assetProfile: AssetProfile = {
   updatedAt: "2025-01-01T00:00:00.000Z",
 };
 
+const metadataSignerSelection = {
+  wallets: [
+    {
+      id: "cwlt_metadata",
+      walletId: "provider_metadata",
+      publicKey: token.metadataAuthority ?? "",
+      label: "Metadata signer",
+    },
+  ],
+  defaultWalletId: "cwlt_metadata",
+  unavailableReason: null,
+};
+
 function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -100,7 +113,10 @@ afterEach(cleanup);
 
 describe("useAssetProfileForm", () => {
   it("saves an unrelated edit to a deployed legacy permanent-delegate token", async () => {
-    const rendered = renderHook(() => useAssetProfileForm({ token, assetProfile }), { wrapper });
+    const rendered = renderHook(
+      () => useAssetProfileForm({ token, assetProfile, metadataSignerSelection }),
+      { wrapper }
+    );
 
     expect(rendered.result.current.draft.signingWalletId).toBe("");
     act(() => rendered.result.current.updateDraft({ website: "https://new.verde.example" }));
@@ -111,18 +127,90 @@ describe("useAssetProfileForm", () => {
     await act(() => rendered.result.current.save());
 
     expect(mocks.updateAssetProfile).toHaveBeenCalledOnce();
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({ signingCustodyWalletId: "cwlt_metadata" }),
+      })
+    );
+  });
+
+  it("requires an exact metadata signer choice without changing the historical deployment wallet", async () => {
+    const selection = {
+      ...metadataSignerSelection,
+      wallets: [
+        ...metadataSignerSelection.wallets,
+        { ...metadataSignerSelection.wallets[0], id: "cwlt_second", label: "Second signer" },
+      ],
+      defaultWalletId: "",
+    };
+    const rendered = renderHook(
+      () => useAssetProfileForm({ token, assetProfile, metadataSignerSelection: selection }),
+      { wrapper }
+    );
+    act(() => rendered.result.current.updateDraft({ description: "Updated metadata" }));
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
+
+    act(() => rendered.result.current.setMetadataSignerWalletId("cwlt_second"));
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({ signingCustodyWalletId: "cwlt_second" }),
+      })
+    );
+    expect(rendered.result.current.draft.signingWalletId).toBe("");
   });
 
   it("keeps the deployment-wallet requirement for an undeployed token", async () => {
     const pendingToken = { ...token, mintAddress: null, status: "pending" as const };
-    const rendered = renderHook(() => useAssetProfileForm({ token: pendingToken, assetProfile }), {
-      wrapper,
-    });
+    const rendered = renderHook(
+      () => useAssetProfileForm({ token: pendingToken, assetProfile, metadataSignerSelection }),
+      {
+        wrapper,
+      }
+    );
 
     act(() => rendered.result.current.updateDraft({ website: "https://new.verde.example" }));
 
     expect(rendered.result.current.errors.signingWalletId).toBeDefined();
     await act(() => rendered.result.current.save());
     expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
+  });
+
+  it("preserves edits and requires an explicit replacement after the chosen signer disappears", async () => {
+    const multiple = {
+      ...metadataSignerSelection,
+      defaultWalletId: "",
+      wallets: [
+        ...metadataSignerSelection.wallets,
+        { ...metadataSignerSelection.wallets[0], id: "cwlt_removed" },
+      ],
+    };
+    const rendered = renderHook(
+      ({ selection }) =>
+        useAssetProfileForm({ token, assetProfile, metadataSignerSelection: selection }),
+      {
+        wrapper,
+        initialProps: { selection: multiple },
+      }
+    );
+    act(() => {
+      rendered.result.current.updateDraft({ description: "Keep these edits" });
+      rendered.result.current.setMetadataSignerWalletId("cwlt_removed");
+    });
+    rendered.rerender({ selection: metadataSignerSelection });
+    expect(rendered.result.current.metadataSignerWalletId).toBe("cwlt_removed");
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
+    act(() => rendered.result.current.setMetadataSignerWalletId("cwlt_metadata"));
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({
+          description: "Keep these edits",
+          signingCustodyWalletId: "cwlt_metadata",
+        }),
+      })
+    );
   });
 });

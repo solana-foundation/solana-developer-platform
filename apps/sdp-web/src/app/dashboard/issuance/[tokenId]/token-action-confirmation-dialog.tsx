@@ -4,12 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import type { ActionConfirmationState } from "./token-management-workspace.types";
+import { TokenSignerSelect } from "./token-signer-select";
 
 interface TokenActionConfirmationDialogProps {
   actionConfirmation: ActionConfirmationState | null;
   isPending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  onSignerWalletIdChange: (value: string) => void;
 }
 
 export function TokenActionConfirmationDialog({
@@ -17,6 +19,7 @@ export function TokenActionConfirmationDialog({
   isPending,
   onCancel,
   onConfirm,
+  onSignerWalletIdChange,
 }: TokenActionConfirmationDialogProps) {
   const t = useTranslations();
   if (!actionConfirmation) {
@@ -39,11 +42,33 @@ export function TokenActionConfirmationDialog({
       <p className="mt-2 text-[15px] leading-[1.45] text-secondary">
         {actionConfirmation.options.confirmationDescription}
       </p>
+      {actionConfirmation.signerWallets ? (
+        <div className="mt-4">
+          <TokenSignerSelect
+            signerWallets={actionConfirmation.signerWallets}
+            signerWalletId={actionConfirmation.signingCustodyWalletId ?? ""}
+            signerUnavailableReason={null}
+            onSignerWalletIdChange={onSignerWalletIdChange}
+          />
+        </div>
+      ) : null}
       <div className="mt-5 flex items-center justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel} disabled={isPending}>
           {t("DashboardIssuance.confirmation.notNow")}
         </Button>
-        <Button type="button" onClick={onConfirm} disabled={isPending}>
+        <Button
+          type="button"
+          onClick={onConfirm}
+          disabled={
+            isPending ||
+            Boolean(
+              actionConfirmation.signerWallets &&
+                !actionConfirmation.signerWallets.some(
+                  (wallet) => wallet.id === actionConfirmation.signingCustodyWalletId
+                )
+            )
+          }
+        >
           {actionConfirmation.options.confirmButtonLabel}
         </Button>
       </div>

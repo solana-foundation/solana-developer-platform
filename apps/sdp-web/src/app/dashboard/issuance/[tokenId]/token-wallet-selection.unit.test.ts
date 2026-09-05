@@ -77,26 +77,33 @@ describe("issuance exact wallet selection", () => {
     ).toBeNull();
   });
 
-  it.each(["mint", "seize", "force-burn", "freeze", "authority"] as const)(
-    "requires an exact choice for duplicate %s authority wallets",
-    (action) => {
-      const selection = getSignerSelectionForAction({
-        action,
-        token: {
-          ...token,
-          mintAuthority: "authority",
-          freezeAuthority: "authority",
-        } as Token,
-        authorityWallets: duplicateAuthorityWallets,
-        metadataAuthority: "authority",
-        t,
-      });
+  it.each([
+    "mint",
+    "seize",
+    "force-burn",
+    "freeze",
+    "authority",
+    "pause",
+    "metadata",
+    "allowlist",
+  ] as const)("requires an exact choice for duplicate %s authority wallets", (action) => {
+    const selection = getSignerSelectionForAction({
+      action,
+      token: {
+        ...token,
+        mintAuthority: "authority",
+        freezeAuthority: "authority",
+      } as Token,
+      authorityWallets: duplicateAuthorityWallets,
+      metadataAuthority: "authority",
+      allowlistAuthority: "authority",
+      t,
+    });
 
-      expect(selection.wallets).toEqual(duplicateAuthorityWallets);
-      expect(selection.defaultWalletId).toBe("");
-      expect(selection.unavailableReason).toBeNull();
-    }
-  );
+    expect(selection.wallets).toEqual(duplicateAuthorityWallets);
+    expect(selection.defaultWalletId).toBe("");
+    expect(selection.unavailableReason).toBeNull();
+  });
 
   it("keeps the single matching authority wallet selected", () => {
     const selection = getSignerSelectionForAction({
@@ -124,20 +131,19 @@ describe("issuance exact wallet selection", () => {
     expect(selection.defaultWalletId).toBe("");
   });
 
-  it("blocks ambiguous pause because its endpoint has no exact selector", () => {
+  it("selects by the list authority rather than the token freeze authority", () => {
     const selection = getSignerSelectionForAction({
-      action: "pause",
-      token: { ...token, mintAuthority: "authority" } as Token,
-      authorityWallets: duplicateAuthorityWallets,
+      action: "allowlist",
+      token: { ...token, freezeAuthority: "address_b" } as Token,
+      authorityWallets: wallets,
       metadataAuthority: null,
+      allowlistAuthority: "address_a",
       t,
     });
 
-    expect(selection.wallets).toEqual(duplicateAuthorityWallets);
-    expect(selection.defaultWalletId).toBe("");
-    expect(selection.unavailableReason).toBe(
-      "DashboardIssuance.management.requiredSignerAmbiguous"
-    );
+    expect(selection.wallets).toEqual([wallets[0]]);
+    expect(selection.defaultWalletId).toBe("cwlt_a");
+    expect(selection.unavailableReason).toBeNull();
   });
 
   it("can distinguish duplicate signer rows by their exact IDs", () => {

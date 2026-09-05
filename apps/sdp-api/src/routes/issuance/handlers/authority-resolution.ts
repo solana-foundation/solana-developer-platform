@@ -3,6 +3,7 @@ import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
+import { getListConfig } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
@@ -25,6 +26,15 @@ export interface ResolvedIssuanceWallet {
   custodyWalletId: string;
   providerWalletId: string;
   publicKey: string;
+}
+
+/** Shared live list authority for both signer selection and execution. */
+export async function resolveAllowlistAuthority(env: Env, listAddress: string): Promise<string> {
+  const { authority } = await getListConfig({
+    rpc: createRpcForSdk<Parameters<typeof getListConfig>[0]["rpc"]>(env),
+    listConfig: assertValidAddress(listAddress, "ablListAddress"),
+  });
+  return authority;
 }
 
 /** Validate an existing direct-action replay without consulting live authority state. */

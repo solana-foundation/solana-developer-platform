@@ -54,6 +54,8 @@ export interface UpdateAssetProfileActionInput {
   // the freshly fetched profile server-side before the PATCH.
   rebuiltMetadata: IssuanceMetadata;
   tokenPatch: {
+    // Per-action metadata signer, never the profile's historical deployment wallet.
+    signingCustodyWalletId?: string;
     name: string;
     description: string | null;
     uri: string | null;

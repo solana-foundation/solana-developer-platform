@@ -448,12 +448,6 @@ export function TokenActionAdminForms({
           description={t("DashboardIssuance.forms.pauseControlsDescription")}
         >
           <div className="space-y-4">
-            <TokenSignerSelect
-              signerWallets={signerWallets}
-              signerWalletId={freezeForm.signingWalletId || defaultSignerWalletId}
-              signerUnavailableReason={signerUnavailableReason}
-              onSignerWalletIdChange={onSignerWalletIdChange}
-            />
             <div
               className={[
                 "flex flex-wrap gap-2",

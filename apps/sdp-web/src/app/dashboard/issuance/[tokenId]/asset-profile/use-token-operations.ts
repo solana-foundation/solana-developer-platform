@@ -139,6 +139,7 @@ export function useTokenOperations({
     runActionImmediately: runActionImmediatelyBase,
     dismissActionConfirmation,
     confirmAction,
+    selectConfirmationWallet,
   } = useTokenActionRunner();
 
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
@@ -346,6 +347,17 @@ export function useTokenOperations({
   const forceBurnSignerSelection = signerSelectionFor("force-burn");
   const freezeSignerSelection = signerSelectionFor("freeze");
   const pauseSignerSelection = signerSelectionFor("pause");
+  const metadataSignerSelection = signerSelectionFor("metadata");
+  const allowlistSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "allowlist",
+      token,
+      authorityWallets,
+      metadataAuthority,
+      allowlistAuthority: authorityWalletsData?.allowlistAuthority,
+      t,
+    })
+  );
 
   // Custody control is only knowable once the authority wallets have loaded
   // without error; until then a row's control status is "unknown" (no badge).
@@ -489,12 +501,13 @@ export function useTokenOperations({
     mint: effectiveMintDisabledReason ?? mintValidationReason,
     burn: effectiveBurnDisabledReason ?? burnValidationReason,
   };
-  // Allowlist mutations only touch the chain when the token has an on-chain ABL
-  // list; then the list is governed by the freeze-authority delegate (sRFC-37
-  // Token ACL), so it needs the freeze authority under SDP custody — same check
-  // as freeze. DB-only allowlists need no signer and stay ungated.
+  // A list has its own live authority; it need not be the token freeze authority.
+  // Database-only allowlists still need no signer.
   const allowlistDisabledReason = token.ablListAddress
-    ? freezeSignerSelection.unavailableReason
+    ? (authorityWalletsData?.allowlistAuthorityError ??
+      (authorityWalletsData?.allowlistAuthority === undefined
+        ? t("DashboardIssuance.management.loadingSignerWallets")
+        : allowlistSignerSelection.unavailableReason))
     : null;
 
   const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
@@ -820,6 +833,7 @@ export function useTokenOperations({
         successToast: pause
           ? t("DashboardIssuance.management.pauseFinalized")
           : t("DashboardIssuance.management.unpauseFinalized"),
+        signerWallets: pauseSignerSelection.wallets,
       }
     );
   };
@@ -899,15 +913,19 @@ export function useTokenOperations({
       return;
     }
 
-    runAction({
-      label: controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry"),
-      method: "POST",
-      path: `${tokenBasePath}/allowlist`,
-      body: {
-        address,
-        label: asOptionalString(allowlistForm.label),
+    runAction(
+      {
+        label:
+          controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry"),
+        method: "POST",
+        path: `${tokenBasePath}/allowlist`,
+        body: {
+          address,
+          label: asOptionalString(allowlistForm.label),
+        },
       },
-    });
+      { signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined }
+    );
   };
 
   const handleRemoveAllowlist = (entryId: string) => {
@@ -917,13 +935,16 @@ export function useTokenOperations({
     }
     // The list + labels/count refresh via the allowlist SWR keys in
     // revalidateAfterSuccess, so no local optimistic update is needed here.
-    runAction({
-      label:
-        controlListCopy?.removeActionLabel ??
-        t("DashboardIssuance.management.removeAllowlistEntry"),
-      method: "DELETE",
-      path: `${tokenBasePath}/allowlist/${entryId}`,
-    });
+    runAction(
+      {
+        label:
+          controlListCopy?.removeActionLabel ??
+          t("DashboardIssuance.management.removeAllowlistEntry"),
+        method: "DELETE",
+        path: `${tokenBasePath}/allowlist/${entryId}`,
+      },
+      { signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined }
+    );
   };
 
   const handleAuthorityModalOpen = (row: PermissionRow) => {
@@ -1215,14 +1236,12 @@ export function useTokenOperations({
           signerWallets: pauseSignerSelection.wallets,
           defaultSignerWalletId: pauseSignerSelection.defaultWalletId,
           signerUnavailableReason: pauseSignerSelection.unavailableReason,
-          // Pause authority is always single
+          // The confirmation dialog owns pause/unpause signer selection.
           onSignerWalletIdChange: (_value: string) => {},
         };
       case "allowlist":
         return {
           signerWallets: [] as PaymentsDashboardWallet[],
-          // On-chain allowlist mutations are signed by the freeze-authority
-          // delegate, so gate on the same custody availability.
           signerUnavailableReason: allowlistDisabledReason,
           onSignerWalletIdChange: (_value: string) => {},
         };
@@ -1241,6 +1260,8 @@ export function useTokenOperations({
     actionConfirmation,
     dismissActionConfirmation,
     confirmAction,
+    selectConfirmationWallet,
+    metadataSignerSelection,
     // token facts
     tokenBasePath,
     explorerHref,

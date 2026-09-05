@@ -13,11 +13,13 @@ import {
   errorResponseSchema,
   forceBurnRequestSchema,
   freezeAccountRequestSchema,
+  getTokenQueryOpenApiSchema,
   listTokensQueryOpenApiSchema,
   mintRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
   pauseTokenRequestSchema,
+  removeTokenAllowlistQuerySchema,
   seizeRequestSchema,
   templateIdParamSchema,
   tokenIdParamSchema,
@@ -253,13 +255,14 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      query: getTokenQueryOpenApiSchema,
     },
     responses: {
       200: {
         description: "Token",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -1008,12 +1011,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         tokenId: tokenIdParamSchema,
         entryId: allowlistEntryIdParamSchema,
       }),
+      query: removeTokenAllowlistQuerySchema,
     },
     responses: {
       204: {
         description: "Allowlist entry removed",
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

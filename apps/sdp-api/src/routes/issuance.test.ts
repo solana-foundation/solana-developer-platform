@@ -12,7 +12,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
@@ -1310,54 +1310,344 @@ describe("Issuance Routes", () => {
       }
     });
 
-    it("replays pause without inspecting live on-chain authority", async () => {
-      const token = await seedIssuedToken({
-        id: "tok_direct_pause_replay",
-        status: "revoked",
-      });
-      const idempotencyKey = "direct-pause-replay";
-      const body = {};
-      const idempotency = buildIdempotencyMetadata(idempotencyKey, {
-        tokenId: token.id,
-        operation: "pause",
-        mode: "execute",
-        params: { signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID },
-      });
-      await seedIssuanceTransaction({
-        id: "ttx_direct_pause_replay",
-        tokenId: token.id,
-        type: "pause",
-        status: "finalized",
-        custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
-        idempotencyKey,
-        idempotencyFingerprint: idempotency.idempotencyFingerprint,
-        signature: "sig_direct_pause_replay",
-        slot: 13,
-        params: { signature: null, slot: null },
-      });
-      const inspectSpy = vi
-        .spyOn(MosaicSdk, "inspectToken")
-        .mockRejectedValue(new Error("authority unavailable"));
-      const admitSpy = vi
-        .spyOn(SigningService.prototype, "admitRuntimeExecution")
-        .mockRejectedValue(new Error("runtime unavailable"));
+    it.each(["pause", "unpause"] as const)(
+      "replays %s only for the original exact wallet",
+      async (operation) => {
+        const token = await seedIssuedToken({
+          id: "tok_direct_pause_replay",
+          status: "revoked",
+        });
+        const idempotencyKey = "direct-pause-replay";
+        const body = {};
+        const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+          tokenId: token.id,
+          operation,
+          mode: "execute",
+          params: { signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID },
+        });
+        await seedIssuanceTransaction({
+          id: "ttx_direct_pause_replay",
+          tokenId: token.id,
+          type: operation,
+          status: "finalized",
+          custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+          idempotencyKey,
+          idempotencyFingerprint: idempotency.idempotencyFingerprint,
+          signature: "sig_direct_pause_replay",
+          slot: 13,
+          params: { signature: null, slot: null },
+        });
+        const inspectSpy = vi
+          .spyOn(MosaicSdk, "inspectToken")
+          .mockRejectedValue(new Error("authority unavailable"));
+        const admitSpy = vi
+          .spyOn(SigningService.prototype, "admitRuntimeExecution")
+          .mockRejectedValue(new Error("runtime unavailable"));
 
-      try {
-        const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/pause`,
-          { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
+        try {
+          const replay = await app.request(
+            `/v1/issuance/tokens/${token.id}/${operation}`,
+            { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
+            env
+          );
+          expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
+          expect(await replay.json()).toMatchObject({
+            data: { transaction: { id: "ttx_direct_pause_replay", status: "finalized" } },
+          });
+          const explicitReplay = await app.request(
+            `/v1/issuance/tokens/${token.id}/${operation}`,
+            {
+              method: "POST",
+              headers: headers(idempotencyKey),
+              body: JSON.stringify({ signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID }),
+            },
+            env
+          );
+          expect(explicitReplay.status).toBe(200);
+          const changedWallet = await app.request(
+            `/v1/issuance/tokens/${token.id}/${operation}`,
+            {
+              method: "POST",
+              headers: headers(idempotencyKey),
+              body: JSON.stringify({ signingCustodyWalletId: "cwlt_other" }),
+            },
+            env
+          );
+          expect(changedWallet.status).toBe(409);
+          expect(inspectSpy).not.toHaveBeenCalled();
+          expect(admitSpy).not.toHaveBeenCalled();
+        } finally {
+          inspectSpy.mockRestore();
+          admitSpy.mockRestore();
+        }
+      }
+    );
+  });
+
+  describe("optional authority wallet selectors", () => {
+    const operations = [
+      "pause",
+      "unpause",
+      "metadata",
+      "allowlist-add",
+      "allowlist-remove",
+    ] as const;
+    type Operation = (typeof operations)[number];
+    const selectedWalletId = "cwlt_explicit_authority";
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+    };
+
+    beforeEach(() => {
+      // SAFETY: these external SDK stubs supply only the fields consumed by the routes.
+      vi.spyOn(MosaicSdk, "inspectToken").mockResolvedValue({
+        authorities: { pausableAuthority: TEST_ACTIVE_TOKEN.mintAuthority },
+      } as Awaited<ReturnType<typeof MosaicSdk.inspectToken>>);
+      vi.spyOn(MosaicService.prototype, "pauseToken").mockResolvedValue({
+        signature: "sig_pause",
+        slot: 14n,
+      });
+      vi.spyOn(MosaicService.prototype, "unpauseToken").mockResolvedValue({
+        signature: "sig_unpause",
+        slot: 15n,
+      });
+      vi.spyOn(MosaicService.prototype, "updateMetadata").mockResolvedValue({
+        signature: "sig_metadata",
+        slot: 16n,
+      });
+      vi.spyOn(MosaicService.prototype, "addToList").mockResolvedValue({
+        signature: "sig_allowlist_add",
+        slot: 17n,
+      });
+      vi.spyOn(MosaicService.prototype, "removeFromList").mockResolvedValue({
+        signature: "sig_allowlist_remove",
+        slot: 18n,
+      });
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    async function prepareAction(operation: Operation) {
+      const token = await seedIssuedToken({
+        id: "tok_explicit_authority",
+        status: operation === "unpause" ? "paused" : "active",
+        signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      let path = `/v1/issuance/tokens/${token.id}`;
+      let method = "POST";
+      let body: Record<string, unknown> = {};
+      if (operation === "metadata") {
+        method = "PATCH";
+        body = { name: "Updated through selected wallet" };
+      } else if (operation === "allowlist-add") {
+        path += "/allowlist";
+        body = { address: TEST_SOLANA_ADDRESSES.wallet1 };
+      } else if (operation === "allowlist-remove") {
+        const service = new TokenService(getDb(env));
+        const { entry } = await service.addAllowlistEntry({
+          tokenId: token.id,
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          addedBy: TEST_PROJECT_API_KEY.id,
+        });
+        method = "DELETE";
+        path += `/allowlist/${entry.id}`;
+      } else {
+        path += `/${operation}`;
+      }
+      return (custodyWalletId?: string) =>
+        app.request(
+          method === "DELETE" && custodyWalletId
+            ? `${path}?signingCustodyWalletId=${encodeURIComponent(custodyWalletId)}`
+            : path,
+          {
+            method,
+            headers,
+            body:
+              method === "DELETE"
+                ? undefined
+                : JSON.stringify({ ...body, signingCustodyWalletId: custodyWalletId }),
+          },
           env
         );
-        expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
-        expect(await replay.json()).toMatchObject({
-          data: { transaction: { id: "ttx_direct_pause_replay", status: "finalized" } },
-        });
-        expect(inspectSpy).not.toHaveBeenCalled();
-        expect(admitSpy).not.toHaveBeenCalled();
-      } finally {
-        inspectSpy.mockRestore();
-        admitSpy.mockRestore();
+    }
+
+    it.each(operations)(
+      "%s resolves duplicate authority rows only with an explicit wallet",
+      async (operation) => {
+        const request = await prepareAction(operation);
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, purpose, status)
+         SELECT ?, custody_config_id, 'wal_explicit_authority', public_key, purpose, status
+         FROM custody_wallets WHERE id = ?`
+          )
+          .bind(selectedWalletId, DEFAULT_ISSUANCE_CUSTODY_WALLET_ID)
+          .run();
+
+        const ambiguous = await request();
+        expect(ambiguous.status).toBe(409);
+        expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.pauseToken).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.unpauseToken).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.updateMetadata).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.addToList).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.removeFromList).not.toHaveBeenCalled();
+
+        const selected = await request(selectedWalletId);
+        expect(selected.status).toBe(
+          operation === "allowlist-add" ? 201 : operation === "allowlist-remove" ? 204 : 200
+        );
+        expect(SolanaServices.createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+          env,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          selectedWalletId
+        );
+        if (operation === "pause" || operation === "unpause") {
+          expect(await selected.json()).toMatchObject({
+            data: { transaction: { status: "confirmed" } },
+          });
+        } else if (operation === "metadata") {
+          expect(await selected.json()).toMatchObject({
+            data: {
+              token: {
+                name: "Updated through selected wallet",
+                signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+              },
+            },
+          });
+        }
       }
+    );
+
+    it.each(operations)(
+      "%s keeps automatic selection for one authority wallet",
+      async (operation) => {
+        const request = await prepareAction(operation);
+        const result = await request();
+        expect(result.status).toBe(
+          operation === "allowlist-add" ? 201 : operation === "allowlist-remove" ? 204 : 200
+        );
+        expect(SolanaServices.createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+          env,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+        );
+      }
+    );
+
+    it.each(operations)(
+      "%s rejects a missing or wrong-authority selection without falling back",
+      async (operation) => {
+        const request = await prepareAction(operation);
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, purpose, status)
+         SELECT ?, custody_config_id, 'wal_wrong_authority', ?, purpose, status
+         FROM custody_wallets WHERE id = ?`
+          )
+          .bind(selectedWalletId, TEST_SOLANA_ADDRESSES.wallet1, DEFAULT_ISSUANCE_CUSTODY_WALLET_ID)
+          .run();
+        expect((await request("cwlt_missing")).status).toBe(404);
+        expect((await request(selectedWalletId)).status).toBe(400);
+        expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.pauseToken).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.unpauseToken).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.updateMetadata).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.addToList).not.toHaveBeenCalled();
+        expect(MosaicService.prototype.removeFromList).not.toHaveBeenCalled();
+        const history = await app.request(
+          "/v1/issuance/tokens/tok_explicit_authority/transactions",
+          { headers },
+          env
+        );
+        expect(await history.json()).toMatchObject({ data: [], meta: { total: 0 } });
+      }
+    );
+
+    it.each(operations)(
+      "%s rejects wallets outside the project or organization before signing",
+      async (operation) => {
+        const request = await prepareAction(operation);
+        await seedOrganization({ id: "org_other_selector", name: "Other", slug: "other-selector" });
+        for (const organizationId of [TEST_ORG.id, "org_other_selector"]) {
+          const projectId = `prj_other_${organizationId}`;
+          const configId = `cfg_other_${organizationId}`;
+          const custodyWalletId = `cwlt_other_${organizationId}`;
+          await seedProject({
+            id: projectId,
+            organizationId,
+            name: "Other project",
+            slug: "other-project",
+          });
+          await getDb(env)
+            .prepare(
+              `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+           VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
+            )
+            .bind(configId, organizationId, projectId)
+            .run();
+          await getDb(env)
+            .prepare(
+              `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, purpose, status)
+           VALUES (?, ?, ?, ?, 'transfer', 'active')`
+            )
+            .bind(custodyWalletId, configId, custodyWalletId, TEST_ACTIVE_TOKEN.mintAuthority)
+            .run();
+          expect((await request(custodyWalletId)).status).toBe(404);
+        }
+        expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+        const history = await app.request(
+          "/v1/issuance/tokens/tok_explicit_authority/transactions",
+          { headers },
+          env
+        );
+        expect(await history.json()).toMatchObject({ data: [], meta: { total: 0 } });
+      }
+    );
+
+    it.each(operations)(
+      "%s does not substitute an unavailable selected wallet",
+      async (operation) => {
+        const request = await prepareAction(operation);
+        await getDb(env)
+          .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+          .bind(DEFAULT_ISSUANCE_CUSTODY_WALLET_ID)
+          .run();
+        expect((await request(DEFAULT_ISSUANCE_CUSTODY_WALLET_ID)).status).toBe(409);
+        expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+        const history = await app.request(
+          "/v1/issuance/tokens/tok_explicit_authority/transactions",
+          { headers },
+          env
+        );
+        expect(await history.json()).toMatchObject({ data: [], meta: { total: 0 } });
+      }
+    );
+
+    it("reads the live allowlist authority only when explicitly requested", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_allowlist_authority_read",
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      vi.mocked(MosaicSdk.getListConfig).mockClear();
+      const ordinary = await app.request(`/v1/issuance/tokens/${token.id}`, { headers }, env);
+      expect(ordinary.status).toBe(200);
+      expect(MosaicSdk.getListConfig).not.toHaveBeenCalled();
+      const withAuthority = await app.request(
+        `/v1/issuance/tokens/${token.id}?includeAllowlistAuthority=true`,
+        { headers },
+        env
+      );
+      expect(withAuthority.status).toBe(200);
+      expect(await withAuthority.json()).toMatchObject({
+        data: { allowlistAuthority: TEST_ACTIVE_TOKEN.mintAuthority },
+      });
+      expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
     });
   });
 
