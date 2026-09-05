@@ -83,12 +83,10 @@ UPDATE counterparty_provider_accounts cpa
    AND c.status <> 'active'
    AND cpa.status = 'active';
 
--- BVNK (and any provider using the linked-account model) resolves a webhook's
--- tenant through counterparty_provider_accounts.provider_customer_reference.
--- The same dual-claim ambiguity applies: two active customer links claiming one
--- provider reference would make the system-scoped webhook lookup match rows in
--- two organizations. Same contract as the mural index above: stop with the
--- conflicting ids rather than silently reassigning a provider relationship.
+-- BVNK webhooks resolve their tenant by provider_customer_reference, so one
+-- reference must map to one active counterparty. Scoped to bvnk/lightspark
+-- (customers SDP creates one-per-counterparty): a MoonPay account is
+-- buyer-owned and legitimately links to many counterparties.
 DO $$
 DECLARE
   reference_conflicts TEXT;
@@ -100,6 +98,7 @@ BEGIN
     FROM counterparty_provider_accounts
     WHERE status = 'active'
       AND kind = 'customer_link'
+      AND provider IN ('bvnk', 'lightspark')
       AND provider_customer_reference IS NOT NULL
     GROUP BY provider, provider_customer_reference
     HAVING count(*) > 1
@@ -118,4 +117,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_counterparty_provider_accounts_customer_li
 ON counterparty_provider_accounts(provider, provider_customer_reference)
 WHERE status = 'active'
   AND kind = 'customer_link'
+  AND provider IN ('bvnk', 'lightspark')
   AND provider_customer_reference IS NOT NULL;
