@@ -334,9 +334,7 @@ export async function completeRotationCandidate(
     const visible = await rotationCommitIsVisible(context, loaded);
     if (visible === true) {
       if (applied) {
-        await context.audit.completeCritical(c, auditIntent, {
-          metadata: { event: "provider_credential_rotated", provider: "privy" },
-        });
+        logUnresolvedAuditIntent(context, auditIntent, loaded.candidate.id);
       } else {
         await closeRejectedIntent(context, auditIntent, "provider_credential_rotation_replayed");
         await loadAuthorizedCandidate(context, loaded.candidate.id);
@@ -457,9 +455,7 @@ export async function rollbackProviderCredential(
     const visible = await rollbackCommitIsVisible(context, current, predecessor);
     if (visible === true) {
       if (applied) {
-        await context.audit.completeCritical(c, auditIntent, {
-          metadata: { event: "provider_credential_rolled_back", provider: "privy" },
-        });
+        logUnresolvedAuditIntent(context, auditIntent, predecessor.id);
       } else {
         await closeRejectedIntent(context, auditIntent, "provider_credential_rollback_replayed");
         await loadAuthorizedCurrent(context, predecessor.id, ROLLBACK_UNAVAILABLE);
@@ -556,9 +552,7 @@ export async function deactivateRotationCandidate(
     const visible = await cancellationCommitIsVisible(context, loaded);
     if (visible === true) {
       if (applied) {
-        await context.audit.completeCritical(c, auditIntent, {
-          metadata: { event: "provider_credential_rotation_canceled", provider: "privy" },
-        });
+        logUnresolvedAuditIntent(context, auditIntent, candidateId);
       } else {
         await closeRejectedIntent(
           context,
@@ -1231,6 +1225,26 @@ async function cleanupRejectedCandidate(
 
 function mapLifecycleCredential(row: LifecycleCredentialRow): LifecycleProviderCredential {
   return { ...mapProviderCredential(row), source: row.source };
+}
+
+function logUnresolvedAuditIntent(
+  context: LifecycleContext,
+  intent: AuditIntent,
+  credentialId: string
+): void {
+  // A visible transition after a failed COMMIT may belong to another request.
+  // Keep this intent unresolved until its own transaction outcome is proven.
+  logEvent("warn", {
+    event: "sdp_api_credential_lifecycle_audit_unresolved",
+    organization_id: context.organizationId,
+    project_id: context.projectId,
+    provider: "privy",
+    provider_credential_id: credentialId,
+    audit_intent_id: intent.id,
+    request_id: context.c.get("requestId"),
+    operation: intent.entry.action,
+    reason: "commit_outcome_unknown",
+  });
 }
 
 function logLifecycleFailure(

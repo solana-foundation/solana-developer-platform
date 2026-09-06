@@ -960,6 +960,120 @@ describe("provider credential lifecycle", () => {
     ).toEqual({ count: 1 });
   });
 
+  describe.each([
+    {
+      operation: "rotation",
+      command: "complete-rotation",
+      event: "provider_credential_rotated",
+      action: "rotate",
+    },
+    {
+      operation: "rollback",
+      command: "rollback",
+      event: "provider_credential_rolled_back",
+      action: "rollback",
+    },
+    {
+      operation: "cancellation",
+      command: "deactivate",
+      event: "provider_credential_rotation_canceled",
+      action: "deactivate",
+    },
+  ])("$operation COMMIT recovery", ({ operation, command, event, action }) => {
+    it.each([false, true])(
+      "keeps the ambiguous intent unresolved (transaction committed: %s)",
+      async (committed) => {
+        const secret = "commit-recovery-secret";
+        const providerFetch = vi
+          .fn()
+          .mockResolvedValue(
+            operation === "rollback"
+              ? Response.json({ data: [] })
+              : new Response(null, { status: 503 })
+          );
+        vi.stubGlobal("fetch", providerFetch);
+        const initial = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+          method: "POST",
+          key: "rotate-before-commit-recovery",
+          body: { fields: { appId: APP_ID, appSecret: secret } },
+        });
+        expect(initial.status).toBe(200);
+        const { data } = credentialResponseSchema.parse(await initial.json());
+        const candidateId = data.providerCredential.id;
+        const targetId = operation === "rollback" ? CREDENTIAL_ID : candidateId;
+        const path = `/provider-credentials/${candidateId}/${command}`;
+        providerFetch.mockImplementation(async () => Response.json({ data: [] }));
+
+        const logger = getLogger();
+        const warning = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+        const db = getDb(env);
+        const runTransaction = db.transaction.bind(db);
+        const lostCommit = new Error(`Lost COMMIT response with sensitive detail: ${secret}`);
+        vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+          if (committed) {
+            await runTransaction(callback);
+          } else {
+            // The callback completes, but its writes roll back before another
+            // request wins. The loser then observes the winner's committed state.
+            await expect(
+              runTransaction(async (tx) => {
+                await callback(tx);
+                throw lostCommit;
+              })
+            ).rejects.toBe(lostCommit);
+            const winner = await lifecycleRequest(path, { method: "POST" });
+            expect(winner.status).toBe(200);
+          }
+          throw lostCommit;
+        });
+
+        const response = await lifecycleRequest(path, { method: "POST" });
+        expect(response.status).toBe(200);
+        expect(
+          credentialResponseSchema.parse(await response.json()).data.providerCredential.id
+        ).toBe(targetId);
+        const outcomes = await db.queryMany<{ id: string }>(
+          `SELECT id FROM audit_logs
+           WHERE organization_id = ? AND status = 'success'
+             AND metadata::jsonb ->> 'event' = ?`,
+          [ORGANIZATION_ID, event]
+        );
+        expect(outcomes).toHaveLength(committed ? 0 : 1);
+        const unresolved = await db.queryMany<{ resource_id: string }>(
+          `SELECT intent.resource_id FROM audit_logs intent
+           WHERE intent.organization_id = ?
+             AND intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+             AND intent.metadata::jsonb -> 'target' ->> 'resourceId' = ?
+             AND intent.metadata::jsonb -> 'target' ->> 'action' = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM audit_logs outcome
+               WHERE outcome.organization_id = intent.organization_id
+                 AND outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+             )`,
+          [ORGANIZATION_ID, targetId, action]
+        );
+        expect(unresolved).toHaveLength(1);
+        const intent = unresolved[0];
+        if (!intent) throw new Error("Expected the unresolved lifecycle intent");
+        expect(warning).toHaveBeenCalledExactlyOnceWith(
+          {
+            event: "sdp_api_credential_lifecycle_audit_unresolved",
+            organization_id: ORGANIZATION_ID,
+            project_id: PROJECT_A_ID,
+            provider: "privy",
+            provider_credential_id: targetId,
+            audit_intent_id: intent.resource_id,
+            request_id: "req_provider_credential_lifecycle",
+            operation: action,
+            reason: "commit_outcome_unknown",
+          },
+          "sdp_api_credential_lifecycle_audit_unresolved"
+        );
+        expect(JSON.stringify(warning.mock.calls)).not.toContain(secret);
+      }
+    );
+  });
+
   it("keeps rejected credentials pending when their audit intent cannot be persisted", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
     const db = getDb(env);
