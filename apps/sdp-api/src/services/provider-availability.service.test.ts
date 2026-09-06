@@ -605,6 +605,7 @@ describe("provider-availability.service", () => {
       perena: false,
       ground: false,
       kamino: false,
+      jupiter_lend: false,
     });
   });
 

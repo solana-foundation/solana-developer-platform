@@ -53,13 +53,13 @@ export interface IntegrationEntry<TProvider extends string = string> {
 }
 
 const RPC_DESCRIPTION_KEYS: Record<OrganizationRpcProvider, MessageKey> = {
-  alchemy: "DashboardCustody.onboardingRpcAlchemyDescription",
-  default: "DashboardCustody.onboardingRpcDefaultDescription",
-  helius: "DashboardCustody.onboardingRpcHeliusDescription",
-  nodit: "DashboardCustody.onboardingRpcNoditDescription",
-  quicknode: "DashboardCustody.onboardingRpcQuickNodeDescription",
-  triton: "DashboardCustody.onboardingRpcTritonDescription",
-  validationcloud: "DashboardCustody.onboardingRpcValidationCloudDescription",
+  alchemy: "DashboardCustody.integrationRpcAlchemyDescription",
+  default: "DashboardCustody.integrationRpcDefaultDescription",
+  helius: "DashboardCustody.integrationRpcHeliusDescription",
+  nodit: "DashboardCustody.integrationRpcNoditDescription",
+  quicknode: "DashboardCustody.integrationRpcQuickNodeDescription",
+  triton: "DashboardCustody.integrationRpcTritonDescription",
+  validationcloud: "DashboardCustody.integrationRpcValidationCloudDescription",
 };
 
 const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
@@ -124,10 +124,9 @@ export function resolveCustodyIntegrations(input: {
  * BYOK runs on the tenant's own endpoint, so deployment availability decides
  * nothing about whether their own key is live.
  *
- * `default` is listed like any other provider, including while the organization
- * is on a vendor. Hiding it left an organization that had moved to Helius with
- * no page offering SDP RPC and a 404 at its route, so the only way back was the
- * Settings dropdown this family replaced (HOO-787).
+ * `default` is the platform's round-robin routing mode, not a provider. It may
+ * still be the active organization setting, but it must never appear as an
+ * integration card or provider detail page.
  */
 export function resolveRpcIntegrations(input: {
   selectedProvider: OrganizationRpcProvider | null;
@@ -150,8 +149,10 @@ export function resolveRpcIntegrations(input: {
 }): IntegrationEntry<OrganizationRpcProvider>[] {
   const activeProvider = input.servingProvider ?? input.selectedProvider;
   const ownKeys = new Set(input.providersWithOwnKey ?? []);
+  const integrations: IntegrationEntry<OrganizationRpcProvider>[] = [];
 
-  return ORGANIZATION_RPC_PROVIDERS.map((provider) => {
+  for (const provider of ORGANIZATION_RPC_PROVIDERS) {
+    if (provider === "default") continue;
     const entry = input.entries[provider];
     // Every RPC provider is generally available; an unconfigured one lacks a
     // URL in this deployment *and* a key of the tenant's own, because either
@@ -163,13 +164,15 @@ export function resolveRpcIntegrations(input: {
         : entry?.enabled || ownKeys.has(provider)
           ? "available"
           : "not_configured";
-    return {
+    integrations.push({
       provider,
       label: RPC_PROVIDER_LABELS[provider],
       status,
       descriptionKey: RPC_DESCRIPTION_KEYS[provider],
-    };
-  });
+    });
+  }
+
+  return integrations;
 }
 
 /**

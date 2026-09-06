@@ -1,7 +1,7 @@
 import { createZolanaClient } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import { address } from "@solana/kit";
-import { withConfiguredTreeErrorBridge } from "./error-bridge.js";
+import { withConfiguredAddressErrorBridge } from "./error-bridge.js";
 
 export interface RingsClientConfig {
   /** Full Helius RPC URL, API key included. */
@@ -27,7 +27,7 @@ export function createRingsClient(config: RingsClientConfig): Promise<ZolanaClie
     solanaRpcUrl: config.solanaRpcUrl,
     indexerUrl: config.indexerUrl,
     proverUrl: config.proverUrl,
-    tree: tree === undefined ? undefined : withConfiguredTreeErrorBridge(() => address(tree)),
+    tree: tree === undefined ? undefined : withConfiguredAddressErrorBridge(() => address(tree)),
     allowInsecureHttp: config.allowInsecureHttp ?? false,
   });
 }

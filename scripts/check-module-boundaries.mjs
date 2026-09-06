@@ -27,6 +27,7 @@ const MODULE_METADATA = [
       "@sdp/helius-rings-sdk",
       "@sdp/issuance",
       "@sdp/kamino",
+      "@sdp/jupiter-lend",
       "@sdp/payments",
       "@sdp/policy",
       "@sdp/private-channels",
@@ -112,6 +113,12 @@ const MODULE_METADATA = [
     // That one-way edge is also why the Kamino program-id table lives in
     // @sdp/types, which both reach without a cycle.
     allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/jupiter-lend",
+    directory: "packages/sdp-jupiter-lend",
+    purpose: "Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK.",
+    allowedDependencies: ["@sdp/earn", "@sdp/types"],
   },
   {
     name: "@sdp/veda",

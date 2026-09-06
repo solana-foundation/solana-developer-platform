@@ -18,6 +18,7 @@ import { runWithCronRunEvent } from "@/cron/run-event";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
   isAssetProfilesEnabled,
   isEarnEnabled,
@@ -33,6 +34,7 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
@@ -154,6 +156,19 @@ export async function runCronJob(): Promise<void> {
 
   try {
     const monitored = createManagedTickRunner();
+    // The catalogue sync deliberately skips `monitored` (it owns its own
+    // failure reporting), so the system database identity has to be applied
+    // here too: an unidentified tick is DENIED by row-level security, not
+    // merely unscoped.
+    // Rest-spread rather than an optional parameter: the tick's call arity is
+    // asserted exactly, and forwarding an explicit `undefined` third argument
+    // is a different call than passing two.
+    const catalogueSync = (...options: [] | [{ workEnabled: boolean }]) =>
+      runWithSystemDatabaseIdentity(`job:${EARN_CATALOGUE_SYNC_MONITOR}`, () =>
+        runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
+          runEarnCatalogueSyncIfDue(env, undefined, ...options)
+        )
+      );
     const failures: unknown[] = [];
     const collect = async (tick: Promise<unknown>) => {
       try {
@@ -169,6 +184,8 @@ export async function runCronJob(): Promise<void> {
           monitored(PENDING_TRANSFERS_MONITOR, async () => {
             const outcomes = await Promise.allSettled([
               (async () => {
+                // Keep revocation recovery ahead of payment reconciliation.
+                await reconcileRevokedApiKeyCache(env);
                 await trackPendingTransfers(env);
                 await recoverApprovedWalletOperations(env);
               })(),
@@ -211,18 +228,10 @@ export async function runCronJob(): Promise<void> {
           await monitored(EARN_METRICS_REFRESH_MONITOR, () =>
             runEarnMetricsRefreshTick(env, undefined)
           ).catch(() => undefined);
-          await collect(
-            runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
-              runEarnCatalogueSyncIfDue(env, undefined)
-            )
-          );
+          await collect(catalogueSync());
         } else {
           await monitored(EARN_METRICS_REFRESH_MONITOR, async () => undefined);
-          await collect(
-            runWithCronRunEvent(getManagedMonitorSlug(EARN_CATALOGUE_SYNC_MONITOR), () =>
-              runEarnCatalogueSyncIfDue(env, undefined, { workEnabled: false })
-            )
-          );
+          await collect(catalogueSync({ workEnabled: false }));
         }
       })(),
       monitored(PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR, () =>
@@ -240,7 +249,14 @@ function createManagedTickRunner(): <T>(monitor: string, work: () => Promise<T>)
   return async <T>(monitor: string, work: () => Promise<T>): Promise<T> => {
     const monitorSlug = getManagedMonitorSlug(monitor);
     try {
-      return await runWithCronRunEvent(monitorSlug, work);
+      // Reconciliation is cross-tenant by nature: every tick runs under a
+      // named system database identity so row-level security (migration 0079)
+      // admits it explicitly rather than by accident. Wrapped here rather than
+      // at each call site so no future tick can forget it, and outside the run
+      // event so anything that layer ever persists is covered too.
+      return await runWithSystemDatabaseIdentity(`job:${monitor}`, () =>
+        runWithCronRunEvent(monitorSlug, work)
+      );
     } catch (error) {
       getLogger().error(
         {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
+import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { RedisKVStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -48,6 +49,7 @@ function buildApp() {
   const token = `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;
   const app = new Hono<{ Bindings: Env }>();
 
+  app.use("*", databaseIdentityBoundary());
   app.use("*", kvStoreMiddleware());
   app.use("*", async (c, next) => {
     c.set("verifiedClerkJwt", { token, payload });

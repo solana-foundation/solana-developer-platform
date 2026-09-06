@@ -2,6 +2,7 @@
 
 import { TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
 import { PERMISSION_ROW_ICONS, TokenSettingsSection } from "../../token-settings-section";
@@ -63,6 +64,8 @@ export function PermissionsTab({
  */
 function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
   const t = useTranslations();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
   const externalRows = ops.permissionRows.filter((row) => row.controlStatus === "external");
   const custodyWallet = ops.authorityWallets[0] ?? null;
 
@@ -113,9 +116,11 @@ function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
         ) : (
           <p className="text-xs text-warning">
             {t("DashboardIssuance.permissions.externalRemediationNoWallet")}{" "}
-            <Link href="/dashboard/wallets/setup" className="font-medium underline">
-              {t("DashboardIssuance.permissions.createWallet")}
-            </Link>
+            {custodyEnabled ? (
+              <Link href="/dashboard/wallets/setup" className="font-medium underline">
+                {t("DashboardIssuance.permissions.createWallet")}
+              </Link>
+            ) : null}
           </p>
         )}
         <p className="mt-2 text-xs text-warning">

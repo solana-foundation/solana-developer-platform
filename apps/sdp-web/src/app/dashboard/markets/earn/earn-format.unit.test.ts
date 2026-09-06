@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatProviderAmount, formatTokenQuantity, formatUsd } from "./earn-format";
+import {
+  earnProviderLabel,
+  formatProviderAmount,
+  formatTokenQuantity,
+  formatUsd,
+} from "./earn-format";
 
 describe("Earn display formatting", () => {
   it("renders provider decimals exactly, past the safe-integer boundary", () => {
@@ -27,5 +32,9 @@ describe("Earn display formatting", () => {
   it("normalizes leading and trailing zeroes", () => {
     expect(formatTokenQuantity("001234.500000", "en-US", "USDC")).toBe("1,234.5 USDC");
     expect(formatTokenQuantity("0.009001", "en-US", "USDC")).toBe("0.009001 USDC");
+  });
+
+  it("renders the Jupiter Lend provider name in both Markets product tables", () => {
+    expect(earnProviderLabel("jupiter_lend")).toBe("Jupiter Lend");
   });
 });
