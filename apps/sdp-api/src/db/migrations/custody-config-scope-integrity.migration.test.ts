@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { expect, it } from "vitest";
-import { env } from "@/test/helpers/env";
+import { adminDatabaseUrl } from "@/test/helpers/env";
 
 it("deduplicates org-level custody configs and repoints references", async () => {
   const migrationPath = path.join(
@@ -11,7 +11,7 @@ it("deduplicates org-level custody configs and repoints references", async () =>
     "postgres/0056_custody_config_scope_integrity.sql"
   );
   const sql = readFileSync(migrationPath, "utf8");
-  const client = new Client({ connectionString: env.DATABASE_URL });
+  const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
   const notices: string[] = [];
   client.on("notice", (notice) => {

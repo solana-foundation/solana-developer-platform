@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { env } from "@/test/helpers/env";
+import { adminDatabaseUrl } from "@/test/helpers/env";
 import {
   CHECK_VIOLATION,
   expectSqlstate as expectSqlstateOn,
@@ -75,7 +75,7 @@ async function insertOperation(
 }
 
 beforeAll(async () => {
-  client = new Client({ connectionString: env.DATABASE_URL });
+  client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
 });
 

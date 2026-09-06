@@ -26,6 +26,14 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   recurring: "/dashboard/payments/recurring",
 } as const;
 
+export const DASHBOARD_INTEGRATIONS_SUBNAV_HREFS = {
+  custody: "/dashboard/integrations?tab=custody",
+  rpc: "/dashboard/integrations?tab=rpc",
+  ramps: "/dashboard/integrations?tab=ramps",
+  compliance: "/dashboard/integrations?tab=compliance",
+  privacy: "/dashboard/integrations?tab=privacy",
+} as const;
+
 export type DashboardLoadingRoute =
   | "home"
   | "token-holdings"
@@ -170,22 +178,37 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
  * `/dashboard/custody` tree too — they are the same destination under two paths.
  */
 export function isDashboardNavItemActive(pathname: string, href: string): boolean {
+  const [pathnameOnly, pathnameSearch = ""] = pathname.split("?", 2);
+  const [hrefPathname, hrefSearch] = href.split("?", 2);
+
+  // Integration family links intentionally keep the reader on the catalog and
+  // change only its `tab` query parameter. Match that parameter exactly so
+  // just one child in the sidebar earns the active rail treatment.
+  if (hrefSearch) {
+    return pathnameOnly === hrefPathname && pathnameSearch === hrefSearch;
+  }
+
   if (href === "/dashboard") {
     // Holdings has no nav entry of its own and is only reached from the home
     // allocation card, so Home keeps the highlight rather than the sidebar going
     // blank while you are on it.
-    return pathname === "/dashboard" || pathname === "/dashboard/tokens";
+    return pathnameOnly === "/dashboard" || pathnameOnly === "/dashboard/tokens";
   }
   if (href === "/dashboard/integrations") {
     return (
-      pathname === "/dashboard/integrations" || pathname.startsWith("/dashboard/integrations/")
+      pathnameOnly === "/dashboard/integrations" ||
+      pathnameOnly.startsWith("/dashboard/integrations/")
     );
   }
   if (href === "/dashboard/wallets") {
-    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
+    return (
+      pathnameOnly.startsWith("/dashboard/wallets") || pathnameOnly.startsWith("/dashboard/custody")
+    );
   }
   if (href === "/dashboard/payments") {
-    return pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+    return (
+      pathnameOnly === "/dashboard/payments" || pathnameOnly.startsWith("/dashboard/payments/")
+    );
   }
-  return pathname === href || pathname.startsWith(`${href}/`);
+  return pathnameOnly === href || pathnameOnly.startsWith(`${href}/`);
 }

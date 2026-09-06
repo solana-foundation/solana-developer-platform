@@ -72,6 +72,21 @@ describe("integrations route", () => {
     ).toBe(true);
     expect(isDashboardNavItemActive("/dashboard/wallets", "/dashboard/integrations")).toBe(false);
   });
+
+  it("marks only the selected integration family as active", () => {
+    expect(
+      isDashboardNavItemActive(
+        "/dashboard/integrations?tab=custody",
+        "/dashboard/integrations?tab=custody"
+      )
+    ).toBe(true);
+    expect(
+      isDashboardNavItemActive(
+        "/dashboard/integrations?tab=custody",
+        "/dashboard/integrations?tab=rpc"
+      )
+    ).toBe(false);
+  });
 });
 
 describe("dashboard navigation active state", () => {
