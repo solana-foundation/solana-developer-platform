@@ -303,6 +303,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     provisioningFlag: env.PRIVY_BYOK_ENABLED,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
+    gcpProjectId: env.GCP_SECRET_MANAGER_PROJECT_ID,
+    gcpSecretPrefix: env.GCP_SECRET_MANAGER_SECRET_PREFIX,
     privyAppId: env.PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET,
   };
@@ -326,6 +328,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.PRIVY_BYOK_ENABLED = original.provisioningFlag;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
+    env.GCP_SECRET_MANAGER_PROJECT_ID = original.gcpProjectId;
+    env.GCP_SECRET_MANAGER_SECRET_PREFIX = original.gcpSecretPrefix;
     env.PRIVY_APP_ID = original.privyAppId;
     env.PRIVY_APP_SECRET = original.privyAppSecret;
     await clearKVStores(env);
@@ -602,6 +606,37 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       connections: 0,
       wallets: 0,
     });
+  });
+
+  it("accepts credential fields at the 4096-character input limit", async () => {
+    const { app, token } = buildApp();
+    const response = await submit(app, token, {
+      key: "submit-max-length-fields",
+      body: {
+        ...VALID_BODY,
+        fields: { ...VALID_BODY.fields, appId: "a".repeat(4096), appSecret: "s".repeat(4096) },
+      },
+    });
+
+    expect(response.status).toBe(201);
+  });
+
+  it.each(["appId", "appSecret"])("rejects oversized %s before secret-store I/O", async (field) => {
+    env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+    env.GCP_SECRET_MANAGER_PROJECT_ID = "sdp-submission-test";
+    env.GCP_SECRET_MANAGER_SECRET_PREFIX = "sdp-provider-credentials";
+    const providerFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 503 }));
+    const { app, token } = buildApp();
+
+    const response = await submit(app, token, {
+      key: "submit-oversized-field",
+      body: { ...VALID_BODY, fields: { ...VALID_BODY.fields, [field]: "x".repeat(4097) } },
+    });
+
+    expect(response.status).toBe(400);
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   it("replays the committed result before current gates and keeps the secret exact", async () => {

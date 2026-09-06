@@ -37,8 +37,8 @@ const rotationBodySchema = z
   .object({
     fields: z
       .object({
-        appId: z.string().trim().min(1),
-        appSecret: z.string().min(1),
+        appId: z.string().trim().min(1).max(4096),
+        appSecret: z.string().min(1).max(4096),
       })
       .strict(),
   })

@@ -1532,6 +1532,47 @@ describe("provider credential lifecycle", () => {
     expect(response.status).toBe(503);
   });
 
+  it("validates credentials at the 4096-character input limit", async () => {
+    const appId = "a".repeat(4096);
+    const appSecret = ` ${"s".repeat(4094)} `;
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", providerFetch);
+
+    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-max-length-fields",
+      body: { fields: { appId: ` ${appId} `, appSecret } },
+    });
+
+    expect(response.status).toBe(200);
+    expect(providerFetch).toHaveBeenCalledExactlyOnceWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: `Basic ${Buffer.from(`${appId}:${appSecret}`).toString("base64")}`,
+          "privy-app-id": appId,
+        }),
+      })
+    );
+  });
+
+  it.each(["appId", "appSecret"])("rejects oversized %s before secret-store I/O", async (field) => {
+    env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+    env.GCP_SECRET_MANAGER_PROJECT_ID = "sdp-lifecycle-test";
+    env.GCP_SECRET_MANAGER_SECRET_PREFIX = "sdp-provider-credentials";
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    vi.stubGlobal("fetch", providerFetch);
+
+    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-oversized-field",
+      body: { fields: { appId: APP_ID, appSecret: "new-secret", [field]: "x".repeat(4097) } },
+    });
+
+    expect(response.status).toBe(400);
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed rotation input before writing a candidate", async () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",

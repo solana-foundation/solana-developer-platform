@@ -750,6 +750,7 @@ async function assertLockedAuthorization(
   references: readonly CredentialReferenceRow[]
 ): Promise<void> {
   if (
+    references.length === 0 ||
     !(await store.lockAuthorizedProjects(
       context.organizationId,
       context.userId,
