@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { WizardFrame } from "@/components/wizard-frame";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { verifyWalletAction } from "../../wallets/actions";
 import { createPrincipalAction } from "../actions";
@@ -31,6 +32,8 @@ function walletLabel(wallet: CustodyWalletSummary): string {
 export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary[] }) {
   const router = useRouter();
   const t = useTranslations();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
   const [name, setName] = useState("");
   const [walletId, setWalletId] = useState("");
   const [createdPrincipalId, setCreatedPrincipalId] = useState<string | null>(null);
@@ -149,9 +152,11 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
         {wallets.length === 0 ? (
           <Callout variant="info">
             {t("DashboardPrivateChannels.members.noWalletsBefore")}{" "}
-            <Link className="font-medium underline underline-offset-4" href="/dashboard/wallets">
-              {t("DashboardPrivateChannels.members.noWalletsLink")}
-            </Link>
+            {custodyEnabled ? (
+              <Link className="font-medium underline underline-offset-4" href="/dashboard/wallets">
+                {t("DashboardPrivateChannels.members.noWalletsLink")}
+              </Link>
+            ) : null}
             {t("DashboardPrivateChannels.members.noWalletsAfter")}
           </Callout>
         ) : null}

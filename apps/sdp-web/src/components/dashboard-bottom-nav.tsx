@@ -26,8 +26,8 @@ const itemBase =
   "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-1 py-1.5 text-[11px] leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised motion-reduce:transition-none";
 
 /**
- * Thumb-reachable navigation for the four destinations people move between most,
- * with everything else behind "More".
+ * Thumb-reachable navigation for the primary enabled destinations, with
+ * everything else behind "More".
  *
  * Deliberately **additive**: the top bar's navigation button and the slide-over it
  * opens are untouched, and "More" gets its own accessible name so there is only
@@ -39,10 +39,14 @@ const itemBase =
  */
 export function DashboardBottomNav({
   pathname,
+  custodyEnabled,
+  issuanceEnabled,
   paymentsEnabled,
   onOpenMore,
 }: {
   pathname: string;
+  custodyEnabled: boolean;
+  issuanceEnabled: boolean;
   paymentsEnabled: boolean;
   onOpenMore: () => void;
 }) {
@@ -54,11 +58,15 @@ export function DashboardBottomNav({
       href: DASHBOARD_SIDE_NAV_HREFS.home,
       icon: LayoutDashboardIcon,
     },
-    {
-      label: t("Shared.dashboardShell.wallets"),
-      href: DASHBOARD_SIDE_NAV_HREFS.wallets,
-      icon: WalletIcon,
-    },
+    ...(custodyEnabled
+      ? [
+          {
+            label: t("Shared.dashboardShell.wallets"),
+            href: DASHBOARD_SIDE_NAV_HREFS.wallets,
+            icon: WalletIcon,
+          },
+        ]
+      : []),
     ...(paymentsEnabled
       ? [
           {
@@ -68,11 +76,15 @@ export function DashboardBottomNav({
           },
         ]
       : []),
-    {
-      label: t("Shared.dashboardShell.issuance"),
-      href: DASHBOARD_SIDE_NAV_HREFS.issuance,
-      icon: CoinsIcon,
-    },
+    ...(issuanceEnabled
+      ? [
+          {
+            label: t("Shared.dashboardShell.issuance"),
+            href: DASHBOARD_SIDE_NAV_HREFS.issuance,
+            icon: CoinsIcon,
+          },
+        ]
+      : []),
   ];
 
   return (

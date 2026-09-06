@@ -55,7 +55,10 @@ import {
   type UnsignedVaultTransaction,
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
-import { broadcastRecordedVaultMovement } from "./vault-intent-execution.service";
+import {
+  broadcastRecordedVaultMovement,
+  isSlippageSimulationFailure,
+} from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
@@ -138,10 +141,17 @@ function rethrowProviderBuildFailure(error: unknown, operation: string): never {
  */
 function throwSimulationRefusal(
   prefix: string,
-  simulation: { error: string; fault: "caller" | "sponsor" }
+  simulation: { error: string; fault: "caller" | "sponsor"; logs: readonly string[] }
 ): never {
   const message = `${prefix}: ${simulation.error}`;
   if (simulation.fault === "sponsor") throw internalError(message);
+  if (isSlippageSimulationFailure(simulation.error, simulation.logs)) {
+    throw badRequest(
+      `${prefix}: the vault would return less than the request's slippage floor allows. ` +
+        "Raise the slippage tolerance (or lower the floor) and try again.",
+      { reason: "slippage_exceeded" }
+    );
+  }
   throw badRequest(message);
 }
 

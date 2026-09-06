@@ -84,7 +84,7 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
  * keys on `Env`: the template literal below must resolve to a `keyof Env` for
  * every member of this union, so widening it silently demands a credential.
  */
-type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda">;
+type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda" | "jupiter_lend">;
 
 /**
  * Credentialed earn providers share one shape: `<PREFIX>_API_KEY` for
@@ -337,6 +337,7 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     perena: keyPairCredentialDefinition("Perena", "PERENA"),
     ground: keyPairCredentialDefinition("Ground", "GROUND"),
     kamino: publicApiDefinition("Kamino"),
+    jupiter_lend: publicApiDefinition("Jupiter Lend"),
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

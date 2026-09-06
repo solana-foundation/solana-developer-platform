@@ -115,10 +115,10 @@ balance with a live one.
     `handlers/curation.ts` so route tests can mock today's picks away — the
     same rule the surfacing mock in `earn-program.test.ts` follows).
     `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
-    not currently OFFER — Ground today, so the shipped catalogue is Kamino only;
-    `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho/Jupiter-related rows
-    ("jupiter" is the Jupiter Lend exclusion, PRO-1727 — a name term only
-    because no such row exists on any registry to key an address on). The list
+    not currently OFFER — Ground today, while Kamino and Jupiter Lend are
+    surfaced; `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho-related rows.
+    Jupiter Lend is admitted through its dedicated provider, which validates the
+    canonical USDT asset and jlUSDT receipt mints. The list
     pushes both into SQL (`providers: SURFACED_EARN_PROVIDERS` +
     `excludeRelatedTerms`) so `total` and the page window describe the rows the
     caller can see; `isHiddenStrategy` applies the same two rules to the detail
@@ -423,24 +423,25 @@ organization's own custody wallets.
     is how a whole money-moving surface stayed invisible to the sink inventory.
     The policy envelope is `program` / `earn_vault_deposit`; migration 0060
     re-opens that live family after the earlier vocabulary trim.
-  - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
-    (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
-    vault-withdraw route. The dashboard surfaces the durable position but
-    visibly disables its exit action. Entitlement cannot express this — it is
-    org-scoped, not environment-scoped. The dashboard disables the deposit
-    affordance from the same constant so the opportunity remains discoverable
-    without advertising an action the API will refuse.
-  - `minSharesOut` is **required in production** and optional in sandbox: the
-    pinned Kamino SDK picks the LEGACY deposit instruction when it is absent, so
-    there is no implicit floor at all.
+  - **Provider/environment capability after strategy resolution.**
+    `isVaultDirectDepositEnabled(environment, provider)`
+    (`@sdp/types/provider-access`) opens only the provider's real deployment:
+    Jupiter Lend on production/mainnet; Kamino and Veda on sandbox/devnet. The
+    dashboard reads the same map, so it never advertises an action the API will
+    refuse.
+  - `minSharesOut` is required for every production deposit. Slippage-capable
+    providers quote the live share rate, and their builders encode the caller's
+    exact floor in the provider instruction. Jupiter Lend uses
+    `depositWithMinAmountOut`; its withdrawal twin uses
+    `redeemWithMinAmountOut` with the caller's `minAmountOut`.
   - `Idempotency-Key` is **REQUIRED** and body `requestId` is rejected. There is
     no provider-side dedupe to fall back on: the chain will happily accept the
     same transfer twice. The header value is stored with a canonical
     `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
     position is claimed — reusing a key with a different intent is a **409**, not
     a silent replay, and writes nothing.
-  - Gate order: schema → environment capability → production floor → strategy
-    resolution → deposit-style check → surfacing → entitlement →
+  - Gate order: schema → strategy resolution → provider/environment capability
+    → provider-specific production floor → deposit-style check → surfacing → entitlement →
     **catalogue admission** → wallet. `assertStrategyDepositable`
     (`handlers/admission.ts`) is shared with the custodial path and asserts
     `status = 'active'` plus `isClusterFundableInEnvironment`; without it a
@@ -664,6 +665,38 @@ organization's own custody wallets.
   matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
+
+- `GET /vault-share-reconciliation` — chain-versus-ledger REPORT for the custody
+  claims above (PRO-1741). The positions read can only serve what SDP recorded,
+  and `self_service` custody credentials make divergence reachable (an org can
+  sign from the same wallet outside SDP). This read enumerates each scoped
+  wallet's SPL balances (`getSplTokenBalances`, both token programs), attributes
+  share mints through the STORED catalogue (`listShareMintedStrategies`: no
+  status filter and no curation — a paused or hidden vault's shares are still
+  money — but cluster-scoped, so the PRO-1742 mirror can never claim a balance
+  read from the environment's own cluster), and reports both disagreements:
+  `unrecordedHoldings` (held shares of a catalogued vault with no visible claim)
+  and `unbackedPositions` (a visible claim whose wallet holds none of its
+  shares; a claim with an unsettled movement is excluded — the ledger already
+  explains that disagreement and the sweep settles it). A duplicated share mint
+  attributes to the active-then-newest row and sets `ambiguousAttribution` when
+  the candidates disagree on the vault identity — `share_mint` carries no
+  uniqueness rule, and a re-listed vault leaves its predecessor row behind.
+  **Report-only in both directions**: it writes, adopts, and closes nothing — an org-level custody
+  config is shared by sibling projects, so adoption would guess attribution,
+  and a scan that writes money records fabricates claims the moment it has a
+  bug. Claim visibility is the positions read's EXACT predicate by construction
+  (`CUSTODY_VAULT_CLAIM_VISIBILITY_SQL` — a broader match would mark a holding
+  recorded while `/vault-positions` still hides it), and wallet-binding scope is
+  the same `listReadableEarnVaultWallets`. No provider gate (ADR 0002: money the
+  org already holds). The endpoint is genesis-proven before any balance read — a
+  wrong-cluster RPC would report every position unbacked — and a per-wallet
+  read failure degrades to a named `unreadableWallets` entry whose claims go
+  unjudged, never a zero-share finding. The whole pass runs under one
+  `VaultDeadline`, so a data-driven wallet count bounds what gets READ, never
+  how long the request runs: an over-budget wallet is unreadable, not a hung
+  request and not a silent skip. Registered in the INTERNAL OpenAPI document
+  only — partners hold no custody wallets for this read to reconcile.
 
 - `POST /vault-withdrawal-previews` — the exit QUOTE the dashboard derives its
   `minAmountOut` floor from (`supportsVaultWithdrawQuote`; 501 for a provider
@@ -897,9 +930,8 @@ produces a movement, so nothing on this surface reports it. That outcome is
 observable via `GET /v1/wallets/approval-requests/:approvalRequestId`, whose
 `status` plus nested `operation.status` distinguish rejected/canceled from
 approved-and-executed. Wiring the dashboard to it is deliberately not done
-here. `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` still fail-closes production
-DEPOSITS — the remaining blocker is PRO-1703 (vault positions on the Active
-tab), not the exit path.
+here. `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` scopes new deposits to
+each provider's supported deployment; withdrawals remain open independently.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
 `SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
@@ -934,8 +966,9 @@ kvault program id also resolves on devnet with no accounts under it.
   (Kamino is keyless; a credentialed vault provider's own client throws
   `PROVIDER_NOT_CONFIGURED` from inside its build). Capability (501) is the
   only provider-shaped refusal, and wallet policy is the org's own custody
-  control, not a provider gate. It also ignores `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`:
-  the environment fail-close guards the way IN only.
+  control, not a provider gate. It also ignores
+  `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`: the environment fail-close
+  guards the way IN only.
 - **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
   deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
   because a deposit quote exists only to open a new position. It takes the
