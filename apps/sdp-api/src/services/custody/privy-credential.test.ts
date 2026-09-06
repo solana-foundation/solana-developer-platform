@@ -24,6 +24,7 @@ describe("checkPrivyCredential", () => {
       {
         method: "GET",
         headers: {
+          // Base64 of dummy test credentials "app-123:secret"; fetch is mocked.
           Authorization: "Basic YXBwLTEyMzpzZWNyZXQ=",
           "privy-app-id": "app-123",
         },
