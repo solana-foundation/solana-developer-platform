@@ -519,6 +519,54 @@ function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) 
   );
 }
 
+/**
+ * The two legs, yours first.
+ *
+ * Ordered rather than written twice. The previous version branched on which
+ * side was SDP's and then re-tested that same flag inside every prop of both
+ * copies, where it is provably constant - the create form's LegCards hit the
+ * identical problem and the compiler said so. Holding the cards as values and
+ * ordering them keeps one copy of the markup and one decision.
+ */
+function LegCards({
+  action,
+  closed,
+  trade,
+}: {
+  action?: ReactNode;
+  closed: boolean;
+  trade: DvpTrade;
+}) {
+  const t = useTranslations();
+  const sdpLegIsA = trade.sdpSide === "a";
+
+  const cardA = (
+    <LegCard
+      action={sdpLegIsA ? action : undefined}
+      closed={closed}
+      holder={sdpLegIsA ? t("DashboardMarkets.dvp.legSdp") : t("DashboardMarkets.dvp.legCounterparty")}
+      key="a"
+      leg={trade.legs.a}
+      title={t("DashboardMarkets.dvp.legA")}
+    />
+  );
+  const cardB = (
+    <LegCard
+      action={sdpLegIsA ? undefined : action}
+      closed={closed}
+      holder={sdpLegIsA ? t("DashboardMarkets.dvp.legCounterparty") : t("DashboardMarkets.dvp.legSdp")}
+      key="b"
+      leg={trade.legs.b}
+      title={t("DashboardMarkets.dvp.legB")}
+    />
+  );
+
+  // Your leg first, whichever it is. The exchange band above already reads as
+  // what you give then what you get, so fixed A-then-B order made the band and
+  // the cards under it run opposite ways on a trade where SDP holds leg B.
+  return sdpLegIsA ? [cardA, cardB] : [cardB, cardA];
+}
+
 export function DvpTradeDetailWorkspace({
   trade,
   cluster,
@@ -586,57 +634,11 @@ export function DvpTradeDetailWorkspace({
               what you give and then what you get — so on a trade where SDP
               holds leg B, the band and the two cards under it ran opposite
               ways. Same ordering as the create form, for the same reason. */}
-          {sdpLegIsA ? (
-            <>
-              <LegCard
-                action={sdpLegIsA ? fundAction : undefined}
-                closed={tradeClosed}
-                holder={
-                  sdpLegIsA
-                    ? t("DashboardMarkets.dvp.legSdp")
-                    : t("DashboardMarkets.dvp.legCounterparty")
-                }
-                leg={trade.legs.a}
-                title={t("DashboardMarkets.dvp.legA")}
-              />
-              <LegCard
-                action={sdpLegIsA ? undefined : fundAction}
-                closed={tradeClosed}
-                holder={
-                  sdpLegIsA
-                    ? t("DashboardMarkets.dvp.legCounterparty")
-                    : t("DashboardMarkets.dvp.legSdp")
-                }
-                leg={trade.legs.b}
-                title={t("DashboardMarkets.dvp.legB")}
-              />
-            </>
-          ) : (
-            <>
-              <LegCard
-                action={sdpLegIsA ? undefined : fundAction}
-                closed={tradeClosed}
-                holder={
-                  sdpLegIsA
-                    ? t("DashboardMarkets.dvp.legCounterparty")
-                    : t("DashboardMarkets.dvp.legSdp")
-                }
-                leg={trade.legs.b}
-                title={t("DashboardMarkets.dvp.legB")}
-              />
-              <LegCard
-                action={sdpLegIsA ? fundAction : undefined}
-                closed={tradeClosed}
-                holder={
-                  sdpLegIsA
-                    ? t("DashboardMarkets.dvp.legSdp")
-                    : t("DashboardMarkets.dvp.legCounterparty")
-                }
-                leg={trade.legs.a}
-                title={t("DashboardMarkets.dvp.legA")}
-              />
-            </>
-          )}
+          <LegCards
+            action={fundAction}
+            closed={tradeClosed}
+            trade={trade}
+          />
         </div>
 
         {awaitingApproval ? (
