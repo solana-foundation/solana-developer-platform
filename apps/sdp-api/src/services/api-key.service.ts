@@ -105,6 +105,22 @@ export interface RotateApiKeyResult {
   previousKeyHash: string;
 }
 
+/**
+ * A live replacement for this key already exists, so the rotation that
+ * created it already succeeded — this attempt is a duplicate (a retry after
+ * a lost response, or a concurrent second request). Minting another key
+ * would leave one live credential whose secret nobody holds.
+ */
+export interface ApiKeyAlreadyRotatedResult {
+  alreadyRotatedTo: string;
+}
+
+export function isApiKeyAlreadyRotated(
+  result: RotateApiKeyResult | ApiKeyAlreadyRotatedResult
+): result is ApiKeyAlreadyRotatedResult {
+  return "alreadyRotatedTo" in result;
+}
+
 export interface VerifyApiKeyOwnershipInput {
   apiKey: string;
   organizationId: string;
@@ -406,7 +422,7 @@ export class ApiKeyService {
     projectId: string,
     gracePeriodHours: number,
     pepper?: string
-  ): Promise<RotateApiKeyResult | null> {
+  ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
     const existing = await this.db
       .prepare(
@@ -441,43 +457,73 @@ export class ApiKeyService {
 
     const rotationDeadline = new Date(Date.now() + gracePeriodHours * 60 * 60 * 1000).toISOString();
 
-    await this.db.transaction(async (tx) => {
-      await tx
-        .prepare(
-          `INSERT INTO api_keys (
+    // Rotation is a create, not an idempotent update: every attempt mints a
+    // live credential whose secret exists only in that attempt's response.
+    // A retry after a lost response — or two concurrent attempts — would
+    // otherwise leave a second active key nobody holds the secret for and
+    // nothing distinguishes from a real one. The advisory lock serializes
+    // attempts on this key so the replacement check below decides, and the
+    // key material is hashed before the lock so no expensive work happens
+    // inside it.
+    const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(this.db);
+    if (!lockedTransactionWithPostCommit) {
+      throw new Error("Database client cannot serialize API key rotation");
+    }
+
+    let existingReplacementId: string | null = null;
+
+    await lockedTransactionWithPostCommit(
+      `api-key-rotation:${keyId}`,
+      async (tx) => {
+        // Serialized by the lock: a competing rotation of this key has
+        // either not started or already committed its replacement.
+        const replacement = await tx.queryOne<{ id: string }>(
+          `SELECT id FROM api_keys
+           WHERE rotated_from = $1 AND status = 'active'
+           LIMIT 1`,
+          [keyId]
+        );
+        if (replacement) {
+          existingReplacementId = replacement.id;
+          return;
+        }
+
+        await tx
+          .prepare(
+            `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
             role, permissions, allowed_ips, signing_wallet_id, rotated_from, status
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
-        )
-        .bind(
-          newKeyId,
-          organizationId,
-          existing.project_id,
-          existing.created_by,
-          existing.name,
-          existing.description,
-          newPrefix,
-          newKeyHash,
-          existing.role,
-          existing.permissions,
-          existing.allowed_ips,
-          existing.signing_wallet_id,
-          keyId
-        )
-        .run();
+          )
+          .bind(
+            newKeyId,
+            organizationId,
+            existing.project_id,
+            existing.created_by,
+            existing.name,
+            existing.description,
+            newPrefix,
+            newKeyHash,
+            existing.role,
+            existing.permissions,
+            existing.allowed_ips,
+            existing.signing_wallet_id,
+            keyId
+          )
+          .run();
 
-      await tx
-        .prepare(
-          `UPDATE api_keys
+        await tx
+          .prepare(
+            `UPDATE api_keys
            SET rotation_deadline = ?
            WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(rotationDeadline, keyId, this.scope.organizationId, this.scope.projectId)
-        .run();
+          )
+          .bind(rotationDeadline, keyId, this.scope.organizationId, this.scope.projectId)
+          .run();
 
-      await tx
-        .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+        await tx
+          .prepare(
+            `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
            SELECT
              'akw_' || md5(random()::text || clock_timestamp()::text),
              ?,
@@ -485,12 +531,21 @@ export class ApiKeyService {
              permissions
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`
-        )
-        .bind(newKeyId, keyId)
-        .run();
+          )
+          .bind(newKeyId, keyId)
+          .run();
 
-      await this.cloneApiKeyPolicyFoundation(tx, keyId, newKeyId);
-    });
+        await this.cloneApiKeyPolicyFoundation(tx, keyId, newKeyId);
+      },
+      // The caller owns the post-commit cache refresh (it holds the KV
+      // handle) and must never fail the response over it, so nothing runs
+      // here. The lock is what this helper is used for.
+      async () => {}
+    );
+
+    if (existingReplacementId) {
+      return { alreadyRotatedTo: existingReplacementId };
+    }
 
     return {
       apiKey: {
@@ -509,6 +564,51 @@ export class ApiKeyService {
       },
       previousKeyHash: existing.key_hash,
     };
+  }
+
+  /**
+   * Compensating undo for a rotation whose cache invalidation could not be
+   * applied. The stale cached entry describes the PRE-rotation key — active,
+   * no deadline — so rather than leave the old key authorizing past a
+   * deadline the cache will never carry, put Postgres back into the state
+   * that entry already describes: clear the deadline and retire the
+   * replacement nobody received a secret for.
+   *
+   * The rotation becomes a no-op instead of a half-applied one, and because
+   * the replacement is no longer active the caller's retry is admitted by
+   * the duplicate guard rather than refused.
+   */
+  async undoRotation(keyId: string, replacementKeyId: string): Promise<void> {
+    assertTenantClaim(
+      this.scope,
+      { organizationId: this.scope.organizationId, projectId: this.scope.projectId },
+      "ApiKeyService.undoRotation"
+    );
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .prepare(
+          `UPDATE api_keys
+           SET rotation_deadline = NULL
+           WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(keyId, this.scope.organizationId, this.scope.projectId)
+        .run();
+
+      await tx
+        .prepare(
+          `UPDATE api_keys
+           SET status = 'revoked', revoked_at = ?
+           WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(
+          new Date().toISOString(),
+          replacementKeyId,
+          this.scope.organizationId,
+          this.scope.projectId
+        )
+        .run();
+    });
   }
 
   async revokeApiKey(

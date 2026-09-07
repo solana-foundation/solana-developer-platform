@@ -40,9 +40,16 @@ const mainnetStrategy: EarnStrategy = {
   fundable: false,
 };
 
+const secondLiveStrategy: EarnStrategy = {
+  ...liveStrategy,
+  id: "earn_strategy_growth",
+  providerReference: "KvaultGrowth111111111111111111111111111111",
+  name: "Kamino Growth Vault",
+  currentApy: "0.081",
+};
+
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
-  mainnetFundable: false,
   strategyClusters: [] as Array<SolanaCluster | undefined>,
 }));
 
@@ -56,8 +63,8 @@ vi.mock("./earn-program-data", () => ({
     return {
       strategies:
         options?.cluster === "mainnet-beta"
-          ? [{ ...mainnetStrategy, fundable: mocks.mainnetFundable }]
-          : [liveStrategy],
+          ? [mainnetStrategy]
+          : [liveStrategy, secondLiveStrategy],
       error: undefined,
       isLoading: false,
     };
@@ -83,7 +90,6 @@ function renderWithEnglish(children: ReactNode) {
 
 afterEach(() => {
   mocks.environment = "sandbox";
-  mocks.mainnetFundable = false;
   mocks.strategyClusters.length = 0;
   vi.clearAllMocks();
   cleanup();
@@ -94,21 +100,22 @@ describe("EarnIntegrationGuide", () => {
     kamino: { entitled: true, configured: true, enabled: true },
   } as const;
 
-  it("renders a compact step-by-step guide with the real B2B2C contract", async () => {
+  it("renders a compact reference guide with the real B2B2C contract", async () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide
+        apiBaseUrl="http://127.0.0.1:8787"
         earnHref="/dashboard/markets/embedded-yield"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
       />
     );
 
-    expect(screen.getByText("Integrate Embedded Yield")).toBeTruthy();
+    expect(screen.getByText("Set up the server client")).toBeTruthy();
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
 
-    // All four steps stay visible as navigation, while only the active code
-    // slice renders. This keeps the whole flow findable without a long page.
+    // All four concerns stay visible as navigation, while only the active code
+    // slice renders. This keeps the whole flow findable without a wizard.
     const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw"];
     const serverFlow = screen.getByLabelText("Server flow");
     expect(within(serverFlow).getAllByRole("button")).toHaveLength(4);
@@ -130,6 +137,8 @@ describe("EarnIntegrationGuide", () => {
     }
     const code = snippets.join("\n");
     expect(code).toContain("/v1/earn/external-wallet/deposit-transactions");
+    expect(code).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
+    expect(code).not.toContain('const SDP_API_URL = "https://api.solana.com"');
     expect(code).toContain("/v1/earn/external-wallet/deposits");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
@@ -139,6 +148,9 @@ describe("EarnIntegrationGuide", () => {
     expect(code).not.toContain("/v1/earn/vault-deposit-previews");
     expect(code).not.toContain("/v1/earn/external-wallet/withdrawal-previews");
     expect(code).toContain("signedTransaction");
+    expect(code).toContain("feePayer?: string");
+    expect(code).toContain("sourceTokenMint: EMBEDDED_YIELD_STRATEGY.directDepositMint");
+    expect(code.match(/return data\.transaction;/g)).toHaveLength(2);
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");
@@ -173,7 +185,6 @@ describe("EarnIntegrationGuide", () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide
-        configureHref="/dashboard/markets/embedded-yield/configure"
         earnHref="/dashboard/markets/embedded-yield"
         providerAccess={providerAccess}
         strategyCluster="mainnet-beta"
@@ -187,9 +198,7 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText(/Production project is required/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Client" }));
     expect(screen.getByText(/"id": "earn_strategy_mainnet"/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Change strategy" }).getAttribute("href")).toBe(
-      "/dashboard/markets/embedded-yield/configure?cluster=mainnet-beta"
-    );
+    expect(screen.getByText("earn_strategy_mainnet")).toBeTruthy();
   });
 
   it("generates quote-derived deposit and withdrawal floors for Veda", () => {
@@ -212,10 +221,8 @@ describe("EarnIntegrationGuide", () => {
   });
 
   it("does not let a mainnet deep link bypass provider access", () => {
-    mocks.mainnetFundable = true;
     renderWithEnglish(
       <EarnIntegrationGuide
-        configureHref="/dashboard/markets/embedded-yield/configure"
         earnHref="/dashboard/markets/embedded-yield"
         providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
         strategyCluster="mainnet-beta"
@@ -226,9 +233,10 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
     expect(screen.queryByText("Mainnet vault preview")).toBeNull();
+    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
   });
 
-  it("asks for a strategy when none is selected", () => {
+  it("defaults to the first available strategy without a separate selection step", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         earnHref="/dashboard/markets/embedded-yield"
@@ -236,11 +244,12 @@ describe("EarnIntegrationGuide", () => {
       />
     );
 
-    expect(screen.getByText("Choose a strategy first")).toBeTruthy();
-    expect(screen.getByText(/select a live strategy/)).toBeTruthy();
+    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
+    expect(screen.getByText("earn_strategy_live")).toBeTruthy();
+    expect(screen.getByText(/"id": "earn_strategy_live"/)).toBeTruthy();
   });
 
-  it("offers a recovery route when the strategy id no longer resolves", () => {
+  it("keeps the strategy dropdown available when a deep-linked id no longer resolves", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         earnHref="/dashboard/markets/embedded-yield"
@@ -251,9 +260,24 @@ describe("EarnIntegrationGuide", () => {
 
     expect(screen.getByText("Strategy no longer available")).toBeTruthy();
     expect(screen.getByText(/no longer in the live catalogue/)).toBeTruthy();
-    expect(
-      screen.getByRole("link", { name: "Return to Embedded Yield" }).getAttribute("href")
-    ).toBe("/dashboard/markets/embedded-yield");
+    expect(screen.getByRole("combobox", { name: "Select a strategy" })).toBeTruthy();
+  });
+
+  it("updates the strategy id and code in place when the dropdown changes", async () => {
+    const user = userEvent.setup();
+    renderWithEnglish(
+      <EarnIntegrationGuide
+        earnHref="/dashboard/markets/embedded-yield"
+        providerAccess={providerAccess}
+      />
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
+    await user.click(screen.getByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
+
+    expect(screen.getByText("earn_strategy_growth")).toBeTruthy();
+    expect(screen.getByText(/"id": "earn_strategy_growth"/)).toBeTruthy();
+    expect(screen.queryByText("earn_strategy_live")).toBeNull();
   });
 
   it("refuses a deep link when the selected environment cannot fund the strategy", () => {
@@ -268,7 +292,7 @@ describe("EarnIntegrationGuide", () => {
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/sandbox-only/)).toBeTruthy();
-    expect(screen.queryByText("1 · Set up the server client")).toBeNull();
+    expect(screen.queryByText("Set up the server client")).toBeNull();
   });
 
   it("names provider setup as the reason an otherwise live strategy cannot be integrated", () => {

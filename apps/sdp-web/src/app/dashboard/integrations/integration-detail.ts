@@ -34,7 +34,7 @@ export interface IntegrationDetail {
  * click, because nothing typed the literals against the provider unions.
  */
 const KNOWN_NON_CUSTODY_PROVIDERS: ReadonlySet<string> = new Set<string>([
-  ...ORGANIZATION_RPC_PROVIDERS,
+  ...ORGANIZATION_RPC_PROVIDERS.filter((provider) => provider !== "default"),
   ...RAMP_PROVIDERS,
   ...COMPLIANCE_PROVIDERS,
 ]);

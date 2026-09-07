@@ -43,7 +43,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import {
+  useDashboardWorkspace,
+  useOptionalDashboardWorkspace,
+} from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -78,6 +81,7 @@ import {
   type EarnProviderAccess,
   type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
@@ -398,17 +402,23 @@ function TreasuryWalletsCard({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
+  const canManageCustody = workspace?.dashboardAccess.capabilities.canManageCustody ?? true;
+  if (!custodyEnabled) return null;
   return (
     <section>
       <div className="mb-4 flex items-center justify-between gap-4">
         <h2 className="text-[19px] leading-6 font-medium text-primary">
           {t("DashboardMarkets.treasury.connectedWallets")}
         </h2>
-        <Button asChild size="sm" variant="secondary">
-          <Link href={DASHBOARD_SIDE_NAV_HREFS.wallets}>
-            {t("DashboardMarkets.treasury.viewAll")}
-          </Link>
-        </Button>
+        {wallets.length > 0 ? (
+          <Button asChild size="sm" variant="secondary">
+            <Link href={DASHBOARD_SIDE_NAV_HREFS.wallets}>
+              {t("DashboardMarkets.treasury.viewAll")}
+            </Link>
+          </Button>
+        ) : null}
       </div>
       {isLoading ? (
         <div className="grid gap-3 md:grid-cols-3">
@@ -419,11 +429,22 @@ function TreasuryWalletsCard({
       ) : error ? (
         <p className="text-sm text-secondary">{t("DashboardMarkets.treasury.walletsError")}</p>
       ) : wallets.length === 0 ? (
-        <ListEmptyState
-          description={t("DashboardMarkets.treasury.walletsEmptyDescription")}
-          icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
-          message={t("DashboardMarkets.treasury.walletsEmptyTitle")}
-        />
+        <Card className="overflow-hidden rounded-2xl py-0">
+          <ListEmptyState
+            action={
+              canManageCustody ? (
+                <Button asChild size="sm">
+                  <Link href={`${DASHBOARD_SIDE_NAV_HREFS.wallets}/setup`}>
+                    {t("DashboardCustody.createWallet")}
+                  </Link>
+                </Button>
+              ) : undefined
+            }
+            description={t("DashboardMarkets.treasury.walletsEmptyDescription")}
+            icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
+            message={t("DashboardMarkets.treasury.walletsEmptyTitle")}
+          />
+        </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-3">
           {wallets.map((wallet) => {
@@ -994,7 +1015,9 @@ function TreasuryStrategiesCard({
   unrecordedShareMints: ReadonlySet<string> | undefined;
 }) {
   const t = useTranslations();
-  const depositsEnabled = isVaultDirectDepositEnabled(environment);
+  const depositsEnabled = SURFACED_VAULT_DIRECT_EARN_PROVIDERS.some((provider) =>
+    isVaultDirectDepositEnabled(environment, provider)
+  );
 
   return (
     <section>
@@ -1124,7 +1147,7 @@ export function TreasurySolutionsWorkspace({
     wallets,
     error: walletsError,
     isLoading: walletsLoading,
-    refresh: refreshWallets,
+    refreshBalances: refreshWalletBalances,
   } = useEarnFundingWallets();
   const {
     strategies,
@@ -1371,7 +1394,7 @@ export function TreasurySolutionsWorkspace({
           }
           onDeposit={setDepositStrategy}
           onRefresh={() => {
-            refreshWallets();
+            refreshWalletBalances();
             refreshStrategies();
             // On the default shelf both strategy hooks share one SWR key, and
             // refreshing it twice would run the paged catalogue fetch twice
@@ -1406,13 +1429,13 @@ export function TreasurySolutionsWorkspace({
           onClose={() => setDepositStrategy(null)}
           projectId={selectedProjectId}
           onDeposited={(deposit) => {
-            // Two refreshes, for two different moments. This one shows the
-            // claimed position row and the debited wallet right away; the
-            // watch below is what re-reads them once the chain has actually
-            // decided, which is the only point at which the holding is real.
+            // Two refreshes, for two different moments. This starts an
+            // uncached balance read for a fast landing; the watch below reads
+            // again once the chain has actually decided, which is the only
+            // point at which the holding is real.
             addVaultDepositWatches([deposit]);
             refreshPositions();
-            refreshWallets();
+            refreshWalletBalances();
           }}
           strategy={depositStrategy}
         />
@@ -1437,7 +1460,7 @@ export function TreasurySolutionsWorkspace({
           onWithdrawn={(withdrawal) => {
             addVaultWithdrawalWatches([withdrawal]);
             refreshPositions();
-            refreshWallets();
+            refreshWalletBalances();
           }}
           position={withdrawPosition}
           projectId={selectedProjectId}
@@ -1471,7 +1494,7 @@ export function TreasurySolutionsWorkspace({
             // Only now did the exit change what the org holds: the shares are
             // burned and the proceeds sit in the custody wallet.
             refreshPositions();
-            refreshWallets();
+            refreshWalletBalances();
           }}
         />
       ))}
@@ -1493,7 +1516,7 @@ export function TreasurySolutionsWorkspace({
             // Only NOW is the position real: the shares exist on chain and the
             // wallet balance reflects what left it.
             refreshPositions();
-            refreshWallets();
+            refreshWalletBalances();
           }}
         />
       ))}

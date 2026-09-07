@@ -35,8 +35,8 @@ function matchesIdentity(output: ProofOutputUtxo, expected: ShieldedAddress): bo
 
 function isPlainOutput(output: ProofOutputUtxo): boolean {
   return (
-    output.zoneProgramId === undefined &&
-    output.zoneDataHash === undefined &&
+    output.ringProgramId === undefined &&
+    output.ringDataHash === undefined &&
     output.dataHash === undefined &&
     output.data.isEmpty()
   );

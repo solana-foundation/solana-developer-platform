@@ -100,6 +100,22 @@ describe("RedisKVStore (HOO-510)", () => {
       );
       expect(results.filter(Boolean)).toHaveLength(1);
     });
+
+    it("applies expirationTtl when provided", async () => {
+      const store = new RedisKVStore(raw, "test");
+
+      expect(await store.compareAndSet("head", null, "one", { expirationTtl: 60 })).toBe(true);
+      const ttlMs = await raw.pttl("test:head");
+      expect(ttlMs).toBeGreaterThan(0);
+      expect(ttlMs).toBeLessThanOrEqual(60_000);
+    });
+
+    it("persists indefinitely when no TTL is provided", async () => {
+      const store = new RedisKVStore(raw, "test");
+
+      expect(await store.compareAndSet("head", null, "one")).toBe(true);
+      expect(await raw.pttl("test:head")).toBe(-1);
+    });
   });
 
   describe("compareAndDelete", () => {

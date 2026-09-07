@@ -8,6 +8,7 @@ export function gatewayStub(overrides: Partial<RingsGatewayPort>): RingsGatewayP
   return {
     probeHealth: unexpected("probeHealth"),
     provisionIdentity: unexpected("provisionIdentity"),
+    provisionRing: unexpected("provisionRing"),
     readIdentity: unexpected("readIdentity"),
     syncPhoton: unexpected("syncPhoton"),
     buildOperation: unexpected("buildOperation"),

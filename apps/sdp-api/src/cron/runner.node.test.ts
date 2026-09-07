@@ -27,6 +27,10 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import {
+  REVOKED_API_KEY_CACHE_CRON,
+  runRevokedApiKeyCacheReconciliation,
+} from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { startCron } from "./runner";
 import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
@@ -100,6 +104,13 @@ vi.mock("./pending-withdrawals", () => ({
   runPendingWithdrawalsReconciliation: vi.fn(),
 }));
 
+// Pulls the KV store set (and through it the Redis client); mocked so runner.ts
+// loads without them, same as the reconcilers above.
+vi.mock("./revoked-api-key-cache", () => ({
+  REVOKED_API_KEY_CACHE_CRON: "* * * * *",
+  runRevokedApiKeyCacheReconciliation: vi.fn(),
+}));
+
 // The workflow engine reaches the same heavy Solana modules as the reconcilers above.
 vi.mock("./workflow-executions", () => ({
   WORKFLOW_EXECUTIONS_CRON: "* * * * *",
@@ -146,6 +157,7 @@ describe("startCron", () => {
     vi.mocked(runPendingTransfersReconciliation).mockReset();
     vi.mocked(runPendingWithdrawalsReconciliation).mockReset();
     vi.mocked(runRecurringPaymentsCollection).mockReset();
+    vi.mocked(runRevokedApiKeyCacheReconciliation).mockReset();
     vi.mocked(runRingsIndexingPoll).mockReset();
     vi.mocked(runWorkflowExecutions).mockReset();
     vi.mocked(runWorkflowSecretRetirements).mockReset();
@@ -161,10 +173,10 @@ describe("startCron", () => {
   // in every count below too — including the ones where asset profiles is off.
   //
   // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
-  // proof-of-life no-ops, so every configuration schedules all 11 tasks. What a
+  // proof-of-life no-ops, so every configuration schedules all 12 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 11;
+  const ALL_TASKS = 12;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -183,15 +195,36 @@ describe("startCron", () => {
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
-    expect(scheduleMock.mock.calls[2][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
-    expect(scheduleMock.mock.calls[3][0]).toBe(WORKFLOW_EXECUTIONS_CRON);
-    expect(scheduleMock.mock.calls[4][0]).toBe(PENDING_DEPOSITS_CRON);
-    expect(scheduleMock.mock.calls[5][0]).toBe(PENDING_WITHDRAWALS_CRON);
-    expect(scheduleMock.mock.calls[6][0]).toBe(RINGS_INDEXING_CRON);
-    expect(scheduleMock.mock.calls[7][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
-    expect(scheduleMock.mock.calls[8][0]).toBe(EARN_METRICS_REFRESH_CRON);
-    expect(scheduleMock.mock.calls[9][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
-    expect(scheduleMock.mock.calls[10][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+    expect(scheduleMock.mock.calls[2][0]).toBe(REVOKED_API_KEY_CACHE_CRON);
+    expect(scheduleMock.mock.calls[3][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
+    expect(scheduleMock.mock.calls[4][0]).toBe(WORKFLOW_EXECUTIONS_CRON);
+    expect(scheduleMock.mock.calls[5][0]).toBe(PENDING_DEPOSITS_CRON);
+    expect(scheduleMock.mock.calls[6][0]).toBe(PENDING_WITHDRAWALS_CRON);
+    expect(scheduleMock.mock.calls[7][0]).toBe(RINGS_INDEXING_CRON);
+    expect(scheduleMock.mock.calls[8][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
+    expect(scheduleMock.mock.calls[9][0]).toBe(EARN_METRICS_REFRESH_CRON);
+    expect(scheduleMock.mock.calls[10][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
+    expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+  });
+
+  it("always schedules revoked API key cache reconciliation", () => {
+    // This sweep is the only recovery path when a revocation's post-commit
+    // cache write fails, so every deployment running the in-process
+    // scheduler must get it — no feature flag, same as the standalone job.
+    const bg = makeBg();
+    const env = {} as Env;
+    startCron({ env, bg });
+
+    expect(scheduleMock.mock.calls.map((call) => call[0])).toContain(REVOKED_API_KEY_CACHE_CRON);
+
+    for (const call of scheduleMock.mock.calls) {
+      (call[1] as () => void)();
+    }
+    expect(runRevokedApiKeyCacheReconciliation).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
   });
 
   it("schedules workflow executions by default, and its tick runs the engine", () => {
@@ -200,7 +233,7 @@ describe("startCron", () => {
     const observability = makeObservability();
     startCron({ env, bg, observability });
 
-    (scheduleMock.mock.calls[3][1] as () => void)();
+    (scheduleMock.mock.calls[4][1] as () => void)();
     expect(runWorkflowExecutions).toHaveBeenCalledWith({
       env,
       bg,
@@ -214,7 +247,7 @@ describe("startCron", () => {
     const observability = makeObservability();
     startCron({ env, bg, observability });
 
-    (scheduleMock.mock.calls[3][1] as () => void)();
+    (scheduleMock.mock.calls[4][1] as () => void)();
     const passed = vi.mocked(runWorkflowExecutions).mock.calls[0][0].observability;
     expect(passed).toBeDefined();
     expect(passed).not.toBe(observability);
@@ -238,7 +271,7 @@ describe("startCron", () => {
     vi.mocked(observability.withMonitor).mockImplementation((_slug, fn) => fn());
     startCron({ env: {} as Env, bg, observability });
 
-    (scheduleMock.mock.calls[3][1] as () => void)();
+    (scheduleMock.mock.calls[4][1] as () => void)();
     const passed = vi.mocked(runWorkflowExecutions).mock.calls[0][0].observability;
     await passed?.withMonitor("sdp-api-run-workflow-executions", async () => undefined, {
       schedule: { type: "crontab", value: "*/5 * * * *" },
@@ -312,7 +345,7 @@ describe("startCron", () => {
     startCron({ env: {} as Env, bg: makeBg() });
 
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
-    expect(scheduleMock.mock.calls[2][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
+    expect(scheduleMock.mock.calls[3][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
   });
 
   it("schedules deposit + withdrawal reconcilers when private channels are enabled", () => {
@@ -345,7 +378,7 @@ describe("startCron", () => {
     const bg = makeBg();
     startCron({ env: {} as Env, bg });
 
-    (scheduleMock.mock.calls[4][1] as () => void)();
+    (scheduleMock.mock.calls[5][1] as () => void)();
     expect(runPendingDepositsReconciliation).not.toHaveBeenCalled();
     expect(bg.run).toHaveBeenCalledTimes(1);
     await vi.mocked(bg.run).mock.calls[0][0];
@@ -364,7 +397,7 @@ describe("startCron", () => {
     const bg = makeBg();
     startCron({ env: {} as Env, bg });
 
-    (scheduleMock.mock.calls[8][1] as () => void)();
+    (scheduleMock.mock.calls[9][1] as () => void)();
     expect(bg.run).toHaveBeenCalledTimes(1);
     await vi.mocked(bg.run).mock.calls[0][0];
 
@@ -455,7 +488,7 @@ describe("startCron", () => {
     const observability = makeObservability();
     startCron({ env, bg, observability });
     // recovery, transfers, recurring, workflow executions — recurring is third.
-    const tick = scheduleMock.mock.calls[2][1] as () => void;
+    const tick = scheduleMock.mock.calls[3][1] as () => void;
     tick();
     expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({
       env,
@@ -507,7 +540,7 @@ describe("startCron", () => {
     const env = {} as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
-    const tick = scheduleMock.mock.calls[6][1] as () => void;
+    const tick = scheduleMock.mock.calls[7][1] as () => void;
     tick();
     expect(runRingsIndexingPoll).toHaveBeenCalledWith({
       env,

@@ -42,6 +42,42 @@ describe("api key scope service", () => {
     });
   });
 
+  it("treats an explicitly empty permissions list as deny-all, never wildcard", () => {
+    // Regression (Hacktron): an admin restricting a wallet binding to zero
+    // permissions must not silently grant full wildcard access instead.
+    const auth = createApiKeyAuth({
+      walletBindings: [{ walletId: "wal_restricted", permissions: [] }],
+    });
+
+    expect(() => assertApiKeyWalletAccess(auth, "wal_restricted", ["payments:read"])).toThrowError(
+      AppError
+    );
+    expect(() => assertApiKeyWalletAccess(auth, "wal_restricted", ["custody:admin"])).toThrowError(
+      AppError
+    );
+  });
+
+  it("stores an explicitly empty permissions list instead of widening it to wildcard", () => {
+    expect(
+      resolveUpdateWalletScope({
+        walletScope: "selected",
+        walletBindings: [{ walletId: "wal_restricted", permissions: [] }],
+      })
+    ).toMatchObject({
+      bindings: [{ walletId: "wal_restricted", permissions: [] }],
+    });
+
+    // Omitting permissions entirely keeps the historical unrestricted default.
+    expect(
+      resolveUpdateWalletScope({
+        walletScope: "selected",
+        signingWalletIds: ["wal_default"],
+      })
+    ).toMatchObject({
+      bindings: [{ walletId: "wal_default", permissions: ["*"] }],
+    });
+  });
+
   it("enforces wallet-level permissions for selected-scope API keys", () => {
     const auth = createApiKeyAuth({
       walletBindings: [{ walletId: "wal_selected", permissions: ["payments:read"] }],

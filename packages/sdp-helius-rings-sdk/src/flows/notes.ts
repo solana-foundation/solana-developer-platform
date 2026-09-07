@@ -52,7 +52,14 @@ export function selectNotes(input: SelectNotesInput): NoteSelection {
  */
 function spendable(input: SelectNotesInput): readonly WalletUtxo[] {
   return byCommitment(
-    input.wallet.utxos().filter((note) => !note.spent && note.utxo.asset === input.asset)
+    input.wallet
+      .utxos()
+      // Ring-bound notes are spendable only by their ring's own transact, which
+      // these default-pool builders never emit. Selecting one would build a
+      // transaction the chain rejects; balances already report them separately.
+      .filter(
+        (note) => !note.spent && note.utxo.asset === input.asset && note.utxo.ringProgramId == null
+      )
   );
 }
 

@@ -46,6 +46,7 @@ import {
   listEarnVaultPositions,
   listEarnVaultWithdrawals,
 } from "./handlers/vault";
+import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
 import {
   earnExternalWalletDepositTransactionSchema,
   earnExternalWalletSubmitSchema,
@@ -225,6 +226,17 @@ earn.get(
   "/vault-positions",
   requirePermissions("earn:read", "wallets:read"),
   listEarnVaultPositions
+);
+// Chain-versus-ledger reconciliation for the custody vault claims above
+// (PRO-1741): a REPORT of share balances the positions read cannot see (held
+// with no recorded claim) and claims the chain no longer backs (recorded, zero
+// shares). Report-only — it writes nothing — with no provider gate (it
+// describes money the org already holds) and the positions read's exact
+// wallet-binding scope, which is why it carries the same permission pair.
+earn.get(
+  "/vault-share-reconciliation",
+  requirePermissions("earn:read", "wallets:read"),
+  getEarnVaultShareReconciliation
 );
 
 // External-wallet (caller-signed) vault flows (PRO-1722): the B2B2C money

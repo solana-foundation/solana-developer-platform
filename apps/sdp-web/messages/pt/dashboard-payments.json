@@ -266,7 +266,9 @@
       "addressSearchPlaceholder": "Buscar um endereço",
       "addressAutocompleteFailed": "Não foi possível buscar endereços. Tente novamente.",
       "addressDetailsFailed": "Não foi possível carregar esse endereço. Faça outra busca.",
-      "untrustedProviderUrl": "O provedor retornou uma URL não confiável, então ela não foi carregada. Crie uma nova cotação ou entre em contato com o suporte."
+      "untrustedProviderUrl": "O provedor retornou uma URL não confiável, então ela não foi carregada. Crie uma nova cotação ou entre em contato com o suporte.",
+      "payoutAccountsTitle": "Contas de pagamento salvas",
+      "payoutAccountsDescription": "Escolha onde este pagamento será depositado ou preencha os dados abaixo para pagar em uma nova conta."
     },
     "onchainSend": {
       "noAssets": "Esta Wallet não tem ativos disponíveis para enviar.",
@@ -323,7 +325,9 @@
       "offrampProvisioningDetail": "Provisionando uma Wallet de pagamentos de saída dedicada da BVNK para esta moeda.",
       "simulateDeposit": "Simular depósito",
       "simulating": "Simulando...",
-      "depositSimulated": "Depósito simulado"
+      "depositSimulated": "Depósito simulado",
+      "agreementPendingTitle": "Confirmando seu acordo",
+      "agreementPendingDescription": "Estamos registrando sua aceitação junto à BVNK — isso leva apenas um momento."
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifique sua identidade",
@@ -641,7 +645,20 @@
       "copyAddress": "Copiar endereço",
       "addressCopied": "Endereço copiado",
       "addAnyway": "Adicionar mesmo assim",
-      "addAnywayTitle": "Adicionar endereço sinalizado?"
+      "addAnywayTitle": "Adicionar endereço sinalizado?",
+      "providerAccounts": "Contas do provedor",
+      "loadingProviderAccounts": "Carregando contas do provedor…",
+      "noProviderAccounts": "Nenhuma conta de provedor ainda.",
+      "providerAccountsMissing": "A resposta de contas do provedor veio vazia.",
+      "providerAccountCorridor": "Corredor",
+      "providerAccountRail": "Rede",
+      "providerAccountBank": "Banco",
+      "providerAccountNumber": "Conta",
+      "providerAccountCustomer": "Cliente",
+      "providerAccountStatus": "Status",
+      "copyCustomerId": "Copiar ID do cliente",
+      "customerIdCopied": "ID do cliente copiado",
+      "noPayoutAccounts": "Nenhuma conta de pagamento ainda."
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -957,7 +974,9 @@
       "openAccount": "Abrir conta no explorer",
       "editPaymentDescription": "Atualize as Wallets, o valor e a programação do pagamento.",
       "paymentUpdated": "Pagamento recorrente atualizado.",
-      "noChangesToSave": "Nenhuma alteração para salvar."
+      "noChangesToSave": "Nenhuma alteração para salvar.",
+      "sourceWalletUnresolved": "Wallet de origem indisponível",
+      "sourceWalletUnresolvedDescription": "Este pagamento recorrente não está vinculado a uma Wallet exata da SDP, portanto suas ações estão indisponíveis."
     },
     "transactions": {
       "searchPlaceholder": "Buscar ID, assinatura, endereço, referência ou contraparte (3+ caracteres)",
