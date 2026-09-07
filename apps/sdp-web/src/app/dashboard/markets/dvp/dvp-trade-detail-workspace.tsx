@@ -30,6 +30,7 @@ import {
   type DvpTradeLeg,
   formatLegAmount,
   frozenLegs,
+  isDvpAgentTrade,
   isDvpTradeClosed,
   legFundingRatio,
   overFundedLegs,
@@ -327,6 +328,10 @@ function TradeSummary({
   trade: DvpTrade;
 }) {
   const t = useTranslations();
+  const agentTrade = isDvpAgentTrade(trade);
+  const walletLabelKey = agentTrade
+    ? ("DashboardMarkets.dvp.sdpWalletLabelAgent" as const)
+    : ("DashboardMarkets.dvp.sdpWalletLabel" as const);
 
   return (
     <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
@@ -397,21 +402,27 @@ function TradeSummary({
           wallet-shaped address on it was the settlement authority, a system
           account with signing power over the trade. It was read as the
           reader's own, which is exactly the confusion to avoid. */}
+      {/* "Funded from" is only true when this wallet delivers a leg. On an
+          agent trade it signs the create and pays the fee and the escrow rent
+          and nothing else, so the row is titled by what it actually did. This
+          one is keyed off `sdpWallet` rather than the side, which is why
+          sweeping every `sdpSide` read did not reach it. */}
       {trade.sdpWallet ? (
         <dl className="mt-3 border-border-subtle border-t pt-3">
           <div>
             <dt className="text-tertiary text-xs">
-              {t("DashboardMarkets.dvp.sdpWalletLabel")}
+              {t(walletLabelKey)}
               {trade.sdpWallet.label ? ` · ${trade.sdpWallet.label}` : ""}
             </dt>
             <dd className="mt-0.5">
-              <CopyableAddress
-                address={trade.sdpWallet.address}
-                label={t("DashboardMarkets.dvp.sdpWalletLabel")}
-              />
+              <CopyableAddress address={trade.sdpWallet.address} label={t(walletLabelKey)} />
             </dd>
             <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-              {t("DashboardMarkets.dvp.sdpWalletHint")}
+              {t(
+                agentTrade
+                  ? "DashboardMarkets.dvp.sdpWalletHintAgent"
+                  : "DashboardMarkets.dvp.sdpWalletHint"
+              )}
             </p>
           </div>
         </dl>

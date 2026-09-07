@@ -159,6 +159,23 @@ describe("DvpTradeDetailWorkspace", () => {
       expect(renderDetail(trade({ sdpSide: null }))).not.toContain("Fund this leg");
     });
 
+    // The custody wallet row is keyed off `sdpWallet`, not the side, so
+    // sweeping every `sdpSide` read did not reach it. It claimed the trade
+    // "spends from it and delivers to it", which on an agent trade it does
+    // neither of: it signs, and it pays the fee and the escrow rent.
+    it("says what the custody wallet actually did, which is not deliver", () => {
+      const html = renderDetail(
+        trade({
+          tradeKind: "agent",
+          sdpSide: null,
+          sdpWallet: { address: "4fpJcAAs1tVMgPx38XorGjBAAKqPAxwow5vHzyyETfaq", label: "mullah" },
+        })
+      );
+
+      expect(html).not.toContain("This trade spends from it and delivers to it");
+      expect(html).toContain("Signed and paid by");
+    });
+
     // Settling is the one thing an agent DOES do, so it must not be removed
     // along with the funding affordance.
     it("keeps the close actions, which are the agent's whole job", () => {
