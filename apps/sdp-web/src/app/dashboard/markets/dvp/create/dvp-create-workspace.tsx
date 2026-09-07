@@ -1,6 +1,7 @@
 "use client";
 
 import type { SolanaCluster } from "@sdp/types";
+import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -23,7 +24,7 @@ import {
 } from "./dvp-create-fields";
 import { DvpCreateSummary } from "./dvp-create-summary";
 import { PayoutChoice } from "./dvp-payout-choice";
-import { useDvpCreateForm } from "./use-dvp-create-form";
+import { type DvpCreateForm, useDvpCreateForm } from "./use-dvp-create-form";
 
 /**
  * Real devnet addresses, shown only as placeholders so the shape of what a
@@ -354,12 +355,12 @@ function RoleStep({
       <Callout title={t("DashboardMarkets.dvp.noWalletsTitle")} variant="warning">
         <span className="grid gap-3">
           <span>{t("DashboardMarkets.dvp.noWalletsBody")}</span>
-          <a
+          <Link
             className="font-medium text-primary text-sm underline underline-offset-4"
             href="/dashboard/wallets"
           >
             {t("DashboardMarkets.dvp.noWalletsAction")}
-          </a>
+          </Link>
         </span>
       </Callout>
     );
@@ -553,6 +554,69 @@ function useWizardSteps() {
  * WHAT and gives the irreversible step somewhere to be reviewed, which a trade
  * that spends rent and publishes escrow addresses deserves.
  */
+/**
+ * Whether each stage has been answered, in stage order.
+ *
+ * A function rather than inline, because every entry is a cluster of
+ * conditions and together they were most of the workspace's control flow —
+ * which put "why is Continue disabled" and "what does this screen render" in
+ * the same place to read.
+ *
+ * Each stage answers for itself, so Continue cannot carry an incomplete answer
+ * forward and the last stage is not the first place a problem shows.
+ */
+function stageAnswered(form: DvpCreateForm): boolean[] {
+  const legsResolved =
+    !form.asset.pendingLookup &&
+    !form.cash.pendingLookup &&
+    Boolean(form.asset.mint && form.cash.mint) &&
+    Boolean(form.asset.baseUnits && form.cash.baseUnits);
+
+  return [
+    Boolean(form.walletId),
+    form.partiesReady && !form.destinations.anyLooksWrong,
+    legsResolved,
+    Boolean(form.expiry),
+    form.ready,
+  ];
+}
+
+/** Back, plus either Continue or the one irreversible button. */
+function WizardFooter({
+  canContinue,
+  form,
+  onBack,
+  onContinue,
+  onLastStep,
+}: {
+  canContinue: boolean;
+  form: DvpCreateForm;
+  onBack: () => void;
+  onContinue: () => void;
+  onLastStep: boolean;
+}) {
+  const t = useTranslations();
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <Button onClick={onBack} type="button" variant="secondary">
+        {t("DashboardMarkets.dvp.wizardBack")}
+      </Button>
+      {onLastStep ? (
+        <Button disabled={form.submitting || !form.ready} onClick={form.submit} type="button">
+          {form.submitting
+            ? t("DashboardMarkets.dvp.createSubmitting")
+            : t("DashboardMarkets.dvp.createAction")}
+        </Button>
+      ) : (
+        <Button disabled={!canContinue} onClick={onContinue} type="button">
+          {t("DashboardMarkets.dvp.wizardContinue")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function DvpCreateWorkspace({
   cluster,
   context,
@@ -567,24 +631,8 @@ export function DvpCreateWorkspace({
   const wallet = context.wallets.find((entry) => entry.id === form.walletId) ?? null;
   const agent = form.tradeKind === "agent";
 
-  // Each stage answers for itself, so Continue cannot carry an incomplete
-  // answer forward and the last stage is not the first place a problem shows.
-  const stepComplete = [
-    Boolean(form.walletId),
-    form.partiesReady && !form.destinations.anyLooksWrong,
-    Boolean(
-      !form.asset.pendingLookup &&
-        !form.cash.pendingLookup &&
-        form.asset.mint &&
-        form.cash.mint &&
-        form.asset.baseUnits &&
-        form.cash.baseUnits
-    ),
-    Boolean(form.expiry),
-    form.ready,
-  ];
   const last = steps.length - 1;
-  const canContinue = stepComplete[step];
+  const canContinue = stageAnswered(form)[step];
 
   const summary = (
     <DvpCreateSummary
@@ -610,30 +658,13 @@ export function DvpCreateWorkspace({
   ][step];
 
   const footer = (
-    <div className="flex items-center justify-between gap-3">
-      <Button
-        onClick={() => setStep((current) => Math.max(0, current - 1))}
-        type="button"
-        variant="secondary"
-      >
-        {t("DashboardMarkets.dvp.wizardBack")}
-      </Button>
-      {step === last ? (
-        <Button disabled={form.submitting || !form.ready} onClick={form.submit} type="button">
-          {form.submitting
-            ? t("DashboardMarkets.dvp.createSubmitting")
-            : t("DashboardMarkets.dvp.createAction")}
-        </Button>
-      ) : (
-        <Button
-          disabled={!canContinue}
-          onClick={() => setStep((current) => Math.min(last, current + 1))}
-          type="button"
-        >
-          {t("DashboardMarkets.dvp.wizardContinue")}
-        </Button>
-      )}
-    </div>
+    <WizardFooter
+      canContinue={canContinue}
+      form={form}
+      onBack={() => setStep((current) => Math.max(0, current - 1))}
+      onContinue={() => setStep((current) => Math.min(last, current + 1))}
+      onLastStep={step === last}
+    />
   );
 
   return (
