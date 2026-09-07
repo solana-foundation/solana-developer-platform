@@ -11,8 +11,13 @@
  * It applies to tenant endpoints alone. Platform provider endpoints come from
  * deployment config and are legitimately private in local development and in
  * the Surfpool integration suites, so those keep the ordinary fetch.
+ *
+ * Private Channels probes come through here too, via
+ * `services/private-channels/egress.ts`, which pairs this transport with an
+ * exact origin allowlist because a project supplies those URLs directly.
  */
 import { lookup as dnsLookup } from "node:dns";
+import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { LookupFunction } from "node:net";
 
@@ -126,6 +131,31 @@ export interface GuardedFetchInit {
    * the guard again rather than trusted for having come from an allowed one.
    */
   maxRedirects?: number;
+  /**
+   * Stop buffering the response body past this many bytes. Callers that relay
+   * an upstream payload leave it off; a probe that only reads a status and a
+   * short reason sets it, so a hostile endpoint cannot answer a health check
+   * with a body large enough to matter.
+   */
+  maxResponseBytes?: number;
+  /**
+   * Set only for a destination that matched an exact operator-approved
+   * allowlist entry which is itself plaintext or a private literal — the public
+   * Private Channels sandbox answers on `http://`, and a developer's gateway is
+   * on loopback. It permits `http:` and dials without the address check, since
+   * the operator named that exact origin in deployment config. It must never be
+   * set from anything a request can influence: for tenant input, the allowlist
+   * is what decides, and this flag then only repeats a decision already made.
+   */
+  approvedInsecureDestination?: boolean;
+  /**
+   * The operator approved this origin on plaintext http, but its host is a
+   * NAME: the transport is relaxed while the connect-time address check stays,
+   * so the name still resolves through `guardedLookup`. Same trust rule as
+   * `approvedInsecureDestination`: never set from anything a request can
+   * influence.
+   */
+  approvedPlaintextDestination?: boolean;
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -187,10 +217,18 @@ export function nextRedirectStep(
  * Same shape as a `fetch` call the caller would otherwise make. Every hop,
  * including a redirected one, resolves through `guardedLookup`, so a redirect
  * cannot walk the request somewhere the first check refused.
+ *
+ * `approvedInsecureDestination` names the origin the caller approved, which the
+ * upstream's `Location` header is not, so it does not travel to the next hop:
+ * a redirect off an approved plaintext origin is a fresh destination and faces
+ * the full check.
  */
 export async function guardedFetch(url: string, init: GuardedFetchInit): Promise<Response> {
   const target = new URL(url);
-  if (target.protocol !== "https:") {
+  const plaintextApproved =
+    target.protocol === "http:" &&
+    (init.approvedPlaintextDestination || init.approvedInsecureDestination);
+  if (target.protocol !== "https:" && !plaintextApproved) {
     throw new EgressBlockedError(target.hostname);
   }
 
@@ -206,17 +244,37 @@ export async function guardedFetch(url: string, init: GuardedFetchInit): Promise
     method: step.method,
     body: step.body,
     maxRedirects: init.maxRedirects - 1,
+    approvedInsecureDestination: false,
+    approvedPlaintextDestination: false,
   });
 }
 
 async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Response> {
+  // An operator-approved destination is reached without the address check —
+  // that is what approving a plaintext or loopback origin means — but the
+  // request still refuses redirects and still bounds what it reads back.
+  const request = target.protocol === "http:" ? httpRequest : httpsRequest;
+  const lookup = init.approvedInsecureDestination ? undefined : guardedLookup;
+
   return new Promise<Response>((resolve, reject) => {
-    const req = httpsRequest(
+    const req = request(
       target,
-      { method: init.method, headers: init.headers, lookup: guardedLookup, signal: init.signal },
+      { method: init.method, headers: init.headers, lookup, signal: init.signal },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        let buffered = 0;
+        res.on("data", (chunk: Buffer) => {
+          // Past the cap the stream is drained rather than destroyed: an
+          // aborted read races the `end` this promise settles on, and the
+          // caller's signal already bounds how long draining can take.
+          const room =
+            init.maxResponseBytes === undefined
+              ? chunk.length
+              : Math.max(0, init.maxResponseBytes - buffered);
+          if (room === 0) return;
+          chunks.push(room < chunk.length ? chunk.subarray(0, room) : chunk);
+          buffered += Math.min(room, chunk.length);
+        });
         res.on("error", reject);
         res.on("end", () => {
           const status = res.statusCode ?? 502;
