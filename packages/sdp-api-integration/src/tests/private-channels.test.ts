@@ -19,6 +19,7 @@ import { env } from "#env-impl";
 import {
   getGatewayUrl,
   PRIVATE_CHANNEL_CONFIGURED,
+  privateChannelProbeTransport,
   RUN_INTEGRATION_TESTS,
 } from "../helpers/private-channels";
 
@@ -30,7 +31,7 @@ describe.skipIf(!PRIVATE_CHANNEL_CONFIGURED || !RUN_INTEGRATION_TESTS)(
   "Private Channels connectivity",
   () => {
     it("is healthy: the probe reports the gateway ready", async () => {
-      const result = await probeGatewayHealth(getGatewayUrl());
+      const result = await probeGatewayHealth(getGatewayUrl(), privateChannelProbeTransport);
 
       expect(result.status).toBe("ready");
     });
