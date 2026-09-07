@@ -47,7 +47,7 @@ import {
   errorResponses,
   jsonContent,
   projectScopeHeaders,
-  sessionProjectScopeHeaders,
+  projectScopeWithRequiredIdempotencyHeaders,
 } from "./helpers";
 
 const TAG = "Private Channels";
@@ -231,8 +231,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Read an owner's channel token balance",
     operationId: "getPrivateChannelBalance",
     description:
-      "Reads an owner's token balance on the channel via the gateway (per wallet+mint; shared across the wallet's channels). `owner` accepts a walletId, wallet public key, or raw address; `mint` defaults to the instance cluster's USDC mint. A never-credited owner reads as a zero balance. Requires a user session — API-key auth is not accepted at runtime.",
-    security: [{ sessionCookie: [] }],
+      "Reads an owner's token balance on the channel via the gateway (per wallet+mint; shared across the wallet's channels). `owner` accepts a walletId, wallet public key, or raw address; `mint` defaults to the instance cluster's USDC mint. A never-credited owner reads as a zero balance. Accepts a dashboard session or an API key; a wallet-scoped key may only read wallets it is bound to.",
+    security: [{ apiKeyAuth: [] }, { sessionCookie: [] }],
     request: { headers: projectScopeHeaders, query: privateChannelBalanceQuerySchema },
     responses: {
       200: {
@@ -269,18 +269,18 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a deposit into the channel escrow",
     operationId: "createPrivateChannelDeposit",
     description:
-      "Builds, server-signs, and broadcasts an escrow deposit from a custody wallet to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance. Requires a user session — API-key auth is not accepted at runtime.",
-    security: [{ sessionCookie: [] }],
+      "Builds, server-signs, and broadcasts an escrow deposit from a custody wallet to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance. Accepts a dashboard session or an API key. The source `walletId` must be a custody wallet enrolled under the project's Private Channels principal on this instance (and, for a wallet-scoped API key, one the key is bound to), and `recipient` must be an address verified on it. The `Idempotency-Key` header is REQUIRED: an identical retry returns the original deposit without a second escrow transfer, while reusing the key for a different request returns 409.",
+    security: [{ apiKeyAuth: [] }, { sessionCookie: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       body: { content: jsonContent(createPrivateChannelDepositBodySchema) },
     },
     responses: {
       200: {
-        description: "The created deposit.",
+        description: "The created deposit, or the original one when the key is replayed.",
         content: jsonContent(successResponseSchema(privateChannelDepositSchema)),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -327,18 +327,18 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a withdrawal from the channel balance",
     operationId: "createPrivateChannelWithdrawal",
     description:
-      "Server-signs a burn of the custody wallet's channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA. Requires a user session — API-key auth is not accepted at runtime.",
-    security: [{ sessionCookie: [] }],
+      "Server-signs a burn of the custody wallet's channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA. Accepts a dashboard session or an API key. The burn owner named by `walletId` must be a custody wallet enrolled under the project's Private Channels principal on this instance (and, for a wallet-scoped API key, one the key is bound to), and the balance is checked before the burn is broadcast. The `Idempotency-Key` header is REQUIRED: a burn cannot be undone, so an identical retry returns the original withdrawal, while reusing the key for a different request returns 409.",
+    security: [{ apiKeyAuth: [] }, { sessionCookie: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       body: { content: jsonContent(createPrivateChannelWithdrawalBodySchema) },
     },
     responses: {
       200: {
-        description: "The created withdrawal.",
+        description: "The created withdrawal, or the original one when the key is replayed.",
         content: jsonContent(successResponseSchema(privateChannelWithdrawalSchema)),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -385,10 +385,10 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List eligible verified-wallet transfer recipients",
     operationId: "listPrivateChannelTransferRecipients",
     description:
-      "Requires the project's default principal to have access to the active channel. Returns every verified wallet in that channel, one entry per wallet, including the project's own. A transfer to the same wallet it is sent from is rejected on create.",
-    security: [{ sessionCookie: [] }],
+      "Accepts a dashboard session or an API key. Requires the project's default principal to have access to the active channel. Returns every verified wallet in that channel, one entry per wallet, including the project's own. A transfer to the same wallet it is sent from is rejected on create.",
+    security: [{ apiKeyAuth: [] }, { sessionCookie: [] }],
     request: {
-      headers: sessionProjectScopeHeaders,
+      headers: projectScopeHeaders,
       params: privateChannelTransferChannelIdParamSchema,
     },
     responses: {
@@ -407,19 +407,20 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a verified principal-to-principal channel transfer",
     operationId: "createPrivateChannelTransfer",
     description:
-      "Server-signs with the project's default principal's verified SDP custody wallet and sends only to an opaque verified-wallet recipient returned by the channel recipient endpoint. Records the transfer as `pending` before broadcast, `submitted` once SPC accepts it, then `confirmed` once a signature-status read shows it executed. `failed` covers preparation errors, ingress rejection and execution errors, and may be retried by the caller. Returns once the confirm read resolves; a transfer still `submitted` in the response means that read returned no verdict.",
-    security: [{ sessionCookie: [] }],
+      "Accepts a dashboard session or an API key (a wallet-scoped key must be bound to the source wallet). Server-signs with the project's default principal's verified SDP custody wallet and sends only to an opaque verified-wallet recipient returned by the channel recipient endpoint. Records the transfer as `pending` before broadcast, `submitted` once SPC accepts it, then `confirmed` once a signature-status read shows it executed. `failed` covers preparation errors, ingress rejection and execution errors, and may be retried by the caller. Returns once the confirm read resolves; a transfer still `submitted` in the response means that read returned no verdict. The `Idempotency-Key` header is REQUIRED: an identical retry returns the original transfer instead of spending the balance again, while reusing the key for a different request returns 409.",
+    security: [{ apiKeyAuth: [] }, { sessionCookie: [] }],
     request: {
-      headers: sessionProjectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       params: privateChannelTransferChannelIdParamSchema,
       body: { content: jsonContent(createPrivateChannelTransferBodySchema) },
     },
     responses: {
       200: {
-        description: "The stored transfer: confirmed, failed, or still submitted.",
+        description:
+          "The stored transfer: confirmed, failed, still submitted, or the original one when the key is replayed.",
         content: jsonContent(successResponseSchema(privateChannelTransferSchema)),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 

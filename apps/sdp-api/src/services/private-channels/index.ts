@@ -4,6 +4,15 @@ export {
   getChannelDeposit,
   listChannelDeposits,
 } from "./deposit";
+export {
+  type ApprovedOrigin,
+  assertApprovedPrivateChannelDestinations,
+  buildPrivateChannelEgressAllowlist,
+  checkPrivateChannelDestination,
+  createPrivateChannelProbeTransport,
+  type PrivateChannelEgressAllowlist,
+  resolvePrivateChannelEgressAllowlist,
+} from "./egress";
 export { mapPrivateChannelError } from "./errors";
 export {
   createPrivateChannelEventService,
@@ -25,6 +34,7 @@ export {
 export {
   getInstanceOverview,
   probeInstanceHealth,
+  toProbeResultDto,
   verifyInstanceConnection,
 } from "./service";
 export {

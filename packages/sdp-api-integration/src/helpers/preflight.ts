@@ -2,6 +2,7 @@ import { apiTestSupport } from "@sdp/api/test-support";
 import { probeGatewayHealth } from "@sdp/private-channels";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+import { privateChannelProbeTransport } from "./private-channels";
 
 const { KoraClient } = apiTestSupport;
 
@@ -89,7 +90,7 @@ async function preflightSpcSuite(): Promise<void> {
 
   // Fail with "the gateway is down" rather than letting each test time out.
   const health = await withLabel("PrivateChannels.probeGatewayHealth", () =>
-    probeGatewayHealth(gatewayUrl)
+    probeGatewayHealth(gatewayUrl, privateChannelProbeTransport)
   );
   if (health.status === "unreachable") {
     throw new Error(
