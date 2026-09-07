@@ -55,10 +55,12 @@ interface DvpCreateFormFields {
  * The whole form: the fields above plus the optional settlement destinations,
  * which own their own state in `useDvpDestinations`.
  */
-export interface DvpCreateForm
-  extends DvpCreateFormFields,
-    DvpDestinations,
-    Omit<DvpParties, "ready" | "request"> {}
+export interface DvpCreateForm extends DvpCreateFormFields, Omit<DvpParties, "ready" | "request"> {
+  /** Where each side is paid, as a choice per party. */
+  destinations: DvpDestinations;
+  /** Whether the parties step is complete on its own. */
+  partiesReady: boolean;
+}
 
 /**
  * Whether the form describes a trade that can be created.
@@ -158,8 +160,8 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
       parties: parties.request,
       tokenProgramA: asset.token?.tokenProgram ?? null,
       tokenProgramB: cash.token?.tokenProgram ?? null,
-      userASettlementDestination: destinations.trimmedDestinationA,
-      userBSettlementDestination: destinations.trimmedDestinationB,
+      userASettlementDestination: destinations.a.resolved,
+      userBSettlementDestination: destinations.b.resolved,
       walletId,
     });
   }
@@ -194,7 +196,8 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     submit,
     submitting,
     walletId,
-    ...destinations,
+    destinations,
+    partiesReady: parties.ready,
     // `ready` and `request` are the parties hook's own internal verdict; the
     // form's `ready` spans the legs too and must win.
     ...(({ ready: _ready, request: _request, ...rest }) => rest)(parties),

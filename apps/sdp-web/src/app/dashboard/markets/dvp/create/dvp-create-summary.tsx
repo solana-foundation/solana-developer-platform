@@ -74,8 +74,16 @@ export function DvpCreateSummary({
     mint: cashMint,
     symbol: cashSymbol || t("DashboardMarkets.dvp.sideCash"),
   };
-  const deliver = sdpSide === "a" ? asset : cash;
-  const receive = sdpSide === "a" ? cash : asset;
+  // On an agent trade neither leg is yours, so "you deliver" names nobody. The
+  // legs keep their own A-then-B order and are labelled by party instead.
+  const deliver = agent || sdpSide === "a" ? asset : cash;
+  const receive = agent || sdpSide === "a" ? cash : asset;
+  const deliverLabel = agent
+    ? t("DashboardMarkets.dvp.summaryPartyADelivers")
+    : t("DashboardMarkets.dvp.summaryYouDeliver");
+  const receiveLabel = agent
+    ? t("DashboardMarkets.dvp.summaryPartyBDelivers")
+    : t("DashboardMarkets.dvp.summaryYouReceive");
 
   const steps = [
     t("DashboardMarkets.dvp.stepEscrows"),
@@ -97,14 +105,14 @@ export function DvpCreateSummary({
         <div className="mt-4 grid gap-3">
           <Leg
             amount={deliver.amount}
-            direction={t("DashboardMarkets.dvp.summaryYouDeliver")}
+            direction={deliverLabel}
             mint={deliver.mint}
             symbol={deliver.symbol}
           />
           <ArrowDownIcon aria-hidden className="h-4 w-4 text-tertiary" />
           <Leg
             amount={receive.amount}
-            direction={t("DashboardMarkets.dvp.summaryYouReceive")}
+            direction={receiveLabel}
             mint={receive.mint}
             symbol={receive.symbol}
           />

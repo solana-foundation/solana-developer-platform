@@ -1,13 +1,13 @@
 "use client";
 
 import type { SolanaCluster } from "@sdp/types";
-import type { ReactNode } from "react";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
+import { WizardFrame } from "@/components/wizard-frame";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,7 @@ import {
   TradeKindChoice,
 } from "./dvp-create-fields";
 import { DvpCreateSummary } from "./dvp-create-summary";
+import { PayoutChoice } from "./dvp-payout-choice";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
 /**
@@ -34,32 +35,6 @@ const PLACEHOLDER_COUNTERPARTY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 /** A second, visibly different address: two fields sharing one placeholder
  * reads as a value that has already been filled in twice. */
 const PLACEHOLDER_PARTY_B = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
-
-/**
- * A titled group of fields.
- *
- * Eight inputs in a column is a wall. Three named groups is a sequence, and the
- * names carry the reason each field is being asked for.
- */
-function Section({
-  children,
-  description,
-  title,
-}: {
-  children: ReactNode;
-  description: string;
-  title: string;
-}) {
-  return (
-    <section className="grid gap-4 rounded-2xl border border-border-default p-5">
-      <div>
-        <h2 className="font-medium text-primary text-sm">{title}</h2>
-        <p className="mt-1 text-tertiary text-xs leading-relaxed">{description}</p>
-      </div>
-      {children}
-    </section>
-  );
-}
 
 /**
  * The cluster arrives as a prop rather than from `useSolanaCluster` so this
@@ -202,74 +177,6 @@ function LegCards({
 }
 
 /**
- * Delivering somewhere other than the address that funded the leg.
- *
- * Collapsed, because the ordinary trade pays each party back at its own
- * address and two more address fields in the open would imply otherwise. An
- * execution desk routinely settles into a different account, and the program
- * has always taken both destinations — SDP was the only part dropping them.
- *
- * Kept in Terms rather than beside the legs on purpose. This is an agreement
- * about where value ends up, not a property of the token being moved, and it is
- * the same class of thing as who the counterparty is and when the trade lapses.
- */
-function SettlementDestinations({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
-  const t = useTranslations();
-  const rows = [
-    {
-      id: "dvp-destination-a",
-      label: t("DashboardMarkets.dvp.fieldDestinationA"),
-      value: form.destinationA,
-      onChange: form.setDestinationA,
-      invalid: form.destinationALooksWrong,
-    },
-    {
-      id: "dvp-destination-b",
-      label: t("DashboardMarkets.dvp.fieldDestinationB"),
-      value: form.destinationB,
-      onChange: form.setDestinationB,
-      invalid: form.destinationBLooksWrong,
-    },
-  ];
-
-  return (
-    <details className="group rounded-xl border border-border-subtle">
-      <summary className="cursor-pointer list-none px-4 py-3 text-primary text-sm marker:hidden">
-        {t("DashboardMarkets.dvp.groupDestinations")}
-        <span className="mt-0.5 block font-normal text-tertiary text-xs">
-          {t("DashboardMarkets.dvp.groupDestinationsHint")}
-        </span>
-      </summary>
-      <div className="grid gap-4 border-border-subtle border-t px-4 py-4 sm:grid-cols-2">
-        {rows.map((row) => (
-          <Field
-            hint={
-              row.invalid
-                ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
-                : t("DashboardMarkets.dvp.fieldDestinationHint")
-            }
-            htmlFor={row.id}
-            key={row.id}
-            label={row.label}
-            tone={row.invalid ? "danger" : "muted"}
-          >
-            <Input
-              aria-invalid={row.invalid}
-              className="text-xs"
-              id={row.id}
-              onChange={(event) => row.onChange(event.target.value)}
-              placeholder={PLACEHOLDER_COUNTERPARTY}
-              spellCheck={false}
-              value={row.value}
-            />
-          </Field>
-        ))}
-      </div>
-    </details>
-  );
-}
-
-/**
  * Who the trade is between.
  *
  * A principal trade has one counterparty, because the other side is the wallet
@@ -370,6 +277,258 @@ function TradeParties({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
   );
 }
 
+/**
+ * Where each side is paid, as a choice per party rather than a hidden box.
+ *
+ * Sits with the parties because that is what it is about: whose proceeds, and
+ * to which account. Naming it by leg ("asset side is paid to") said which token
+ * moved and never whose money it was, and described nothing at all on a trade
+ * between two other parties.
+ */
+function PayoutChoices({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
+  const t = useTranslations();
+  const agent = form.tradeKind === "agent";
+  const sdpIsA = !agent && form.sdpSide === "a";
+
+  // Whose side each leg is, said in the words this trade kind uses.
+  const labelA = agent
+    ? t("DashboardMarkets.dvp.fieldPartyA")
+    : sdpIsA
+      ? t("DashboardMarkets.dvp.reviewYou")
+      : t("DashboardMarkets.dvp.counterpartyLabel");
+  const labelB = agent
+    ? t("DashboardMarkets.dvp.fieldPartyB")
+    : sdpIsA
+      ? t("DashboardMarkets.dvp.counterpartyLabel")
+      : t("DashboardMarkets.dvp.reviewYou");
+
+  const addressA = agent ? form.partyA.trim() : sdpIsA ? "" : form.counterparty.trim();
+  const addressB = agent ? form.partyB.trim() : sdpIsA ? form.counterparty.trim() : "";
+
+  return (
+    <div className="grid gap-3">
+      <div>
+        <h3 className="font-medium text-primary text-sm">
+          {t("DashboardMarkets.dvp.groupPayouts")}
+        </h3>
+        <p className="mt-1 text-tertiary text-xs leading-relaxed">
+          {t("DashboardMarkets.dvp.groupPayoutsHint")}
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PayoutChoice
+          id="dvp-payout-a"
+          party={addressA}
+          partyLabel={labelA}
+          payout={form.destinations.a}
+        />
+        <PayoutChoice
+          id="dvp-payout-b"
+          party={addressB}
+          partyLabel={labelB}
+          payout={form.destinations.b}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Which wallet pays, and whether you are a party at all. */
+function RoleStep({
+  context,
+  form,
+  wallet,
+}: {
+  context: DvpCreateContext;
+  form: ReturnType<typeof useDvpCreateForm>;
+  wallet: { address: string; label: string | null } | null;
+}) {
+  const t = useTranslations();
+  const agent = form.tradeKind === "agent";
+
+  // Without one there is nothing to sign the create or pay the escrow rent, so
+  // every later stage is unreachable. An empty picker and a dead Continue said
+  // none of that.
+  if (context.wallets.length === 0) {
+    return (
+      <Callout title={t("DashboardMarkets.dvp.noWalletsTitle")} variant="warning">
+        <span className="grid gap-3">
+          <span>{t("DashboardMarkets.dvp.noWalletsBody")}</span>
+          <a
+            className="font-medium text-primary text-sm underline underline-offset-4"
+            href="/dashboard/wallets"
+          >
+            {t("DashboardMarkets.dvp.noWalletsAction")}
+          </a>
+        </span>
+      </Callout>
+    );
+  }
+
+  return (
+    <div className="grid gap-5">
+      <Field
+        hint={
+          wallet
+            ? t(
+                agent
+                  ? "DashboardMarkets.dvp.fieldWalletHintWithAddressAgent"
+                  : "DashboardMarkets.dvp.fieldWalletHintWithAddress",
+                { address: shortenAddress(wallet.address) }
+              )
+            : t(
+                agent
+                  ? "DashboardMarkets.dvp.fieldWalletHintAgent"
+                  : "DashboardMarkets.dvp.fieldWalletHint"
+              )
+        }
+        label={t("DashboardMarkets.dvp.fieldWallet")}
+      >
+        <Select
+          ariaLabel={t("DashboardMarkets.dvp.fieldWallet")}
+          onValueChange={(next) => form.setWalletId(next ?? "")}
+          value={form.walletId}
+        >
+          {context.wallets.map((entry) => (
+            <SelectItem key={entry.id} value={entry.id}>
+              {entry.label ?? shortenAddress(entry.address)}
+            </SelectItem>
+          ))}
+        </Select>
+      </Field>
+
+      <TradeKindChoice onChange={form.setTradeKind} value={form.tradeKind} />
+
+      {agent ? null : (
+        <SideChoice
+          assetSymbol={form.asset.symbol}
+          cashSymbol={form.cash.symbol}
+          onChange={form.setSdpSide}
+          value={form.sdpSide}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Who the two sides are, and where each of them is paid. */
+function PartiesStep({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
+  return (
+    <div className="grid gap-6">
+      <TradeParties form={form} />
+      <PayoutChoices form={form} />
+    </div>
+  );
+}
+
+/** How long the other side has, and your own reference for the trade. */
+function TermsStep({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
+  const t = useTranslations();
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field
+        hint={t("DashboardMarkets.dvp.fieldExpiryHint")}
+        htmlFor="dvp-expiry"
+        label={t("DashboardMarkets.dvp.fieldExpiry")}
+      >
+        {/* An expiry in the past is refused on chain, so it is not offered. */}
+        <DatePicker disablePast id="dvp-expiry" onChange={form.setExpiry} value={form.expiry} />
+      </Field>
+      <ReferenceField id="dvp-ref" onChange={form.setRefString} value={form.refString} />
+    </div>
+  );
+}
+
+/**
+ * The last look before rent is spent and two escrow addresses are published.
+ *
+ * Every other create flow in the product ends in one. This trade cannot be
+ * edited afterwards: changing anything means a new trade at a new address, so
+ * the recap is the only place a mistake is still cheap.
+ */
+function ReviewStep({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
+  const t = useTranslations();
+  const agent = form.tradeKind === "agent";
+  const sdpIsA = !agent && form.sdpSide === "a";
+
+  const parties = agent
+    ? [
+        [t("DashboardMarkets.dvp.fieldPartyA"), form.partyA.trim()],
+        [t("DashboardMarkets.dvp.fieldPartyB"), form.partyB.trim()],
+      ]
+    : [
+        [
+          t("DashboardMarkets.dvp.reviewYou"),
+          sdpIsA ? t("DashboardMarkets.dvp.legA") : t("DashboardMarkets.dvp.legB"),
+        ],
+        [t("DashboardMarkets.dvp.counterpartyLabel"), form.counterparty.trim()],
+      ];
+
+  const rows: [string, string][] = [
+    ...(parties as [string, string][]),
+    [
+      t("DashboardMarkets.dvp.legA"),
+      `${form.asset.amount || "—"} ${form.asset.symbol || ""}`.trim(),
+    ],
+    [t("DashboardMarkets.dvp.legB"), `${form.cash.amount || "—"} ${form.cash.symbol || ""}`.trim()],
+    [t("DashboardMarkets.dvp.fieldExpiry"), form.expiry],
+    ...(form.refString.trim()
+      ? ([[t("DashboardMarkets.dvp.fieldRef"), form.refString.trim()]] as [string, string][])
+      : []),
+  ];
+
+  return (
+    <div className="grid gap-4">
+      <Callout variant="warning">{t("DashboardMarkets.dvp.reviewIntro")}</Callout>
+
+      {form.destinations.anyRedirected ? (
+        <Callout variant="warning">{t("DashboardMarkets.dvp.reviewRedirected")}</Callout>
+      ) : null}
+
+      <dl className="grid gap-0 overflow-hidden rounded-xl border border-border-subtle">
+        {rows.map(([label, value]) => (
+          <div
+            className="flex items-start justify-between gap-4 border-border-subtle border-b px-4 py-3 last:border-b-0"
+            key={label}
+          >
+            <dt className="text-tertiary text-xs">{label}</dt>
+            <dd className="min-w-0 break-all text-right text-primary text-sm">{value || "—"}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/** The wizard's stages, in the order the trade is actually decided. */
+function useWizardSteps() {
+  const t = useTranslations();
+  return [
+    { label: t("DashboardMarkets.dvp.stepRole"), title: t("DashboardMarkets.dvp.stepRoleTitle") },
+    {
+      label: t("DashboardMarkets.dvp.stepParties"),
+      title: t("DashboardMarkets.dvp.stepPartiesTitle"),
+    },
+    { label: t("DashboardMarkets.dvp.stepLegs"), title: t("DashboardMarkets.dvp.stepLegsTitle") },
+    { label: t("DashboardMarkets.dvp.stepTerms"), title: t("DashboardMarkets.dvp.stepTermsTitle") },
+    {
+      label: t("DashboardMarkets.dvp.stepReview"),
+      title: t("DashboardMarkets.dvp.stepReviewTitle"),
+    },
+  ] as const;
+}
+
+/**
+ * The create flow, staged.
+ *
+ * Every other create flow in this product is a WizardFrame with a summary rail
+ * and a review stage — counterparty, ramps, private channels. This was the one
+ * long scroll, which also forced a genuine ordering problem: the leg cards name
+ * whose leg each one is, so on a trade between two other parties they were
+ * labelling parties the form had not asked for yet. Staging puts WHO before
+ * WHAT and gives the irreversible step somewhere to be reviewed, which a trade
+ * that spends rent and publishes escrow addresses deserves.
+ */
 export function DvpCreateWorkspace({
   cluster,
   context,
@@ -379,164 +538,120 @@ export function DvpCreateWorkspace({
 }) {
   const t = useTranslations();
   const form = useDvpCreateForm(cluster, context);
+  const steps = useWizardSteps();
+  const [step, setStep] = useState(0);
   const wallet = context.wallets.find((entry) => entry.id === form.walletId) ?? null;
+  const agent = form.tradeKind === "agent";
+
+  // Each stage answers for itself, so Continue cannot carry an incomplete
+  // answer forward and the last stage is not the first place a problem shows.
+  const stepComplete = [
+    Boolean(form.walletId),
+    form.partiesReady && !form.destinations.anyLooksWrong,
+    Boolean(
+      !form.asset.pendingLookup &&
+        !form.cash.pendingLookup &&
+        form.asset.mint &&
+        form.cash.mint &&
+        form.asset.baseUnits &&
+        form.cash.baseUnits
+    ),
+    Boolean(form.expiry),
+    form.ready,
+  ];
+  const last = steps.length - 1;
+  const canContinue = stepComplete[step];
+
+  const summary = (
+    <DvpCreateSummary
+      agent={agent}
+      amountA={form.asset.amount}
+      amountB={form.cash.amount}
+      assetMint={form.asset.token?.mint ?? null}
+      assetSymbol={form.asset.symbol}
+      cashMint={form.cash.token?.mint ?? null}
+      cashSymbol={form.cash.symbol}
+      counterparty={form.counterparty}
+      ready={form.ready}
+      sdpSide={form.sdpSide}
+    />
+  );
+
+  const body = [
+    <RoleStep context={context} form={form} key="role" wallet={wallet} />,
+    <PartiesStep form={form} key="parties" />,
+    <div className="grid gap-4 sm:grid-cols-2" key="legs">
+      <LegCards context={context} form={form} />
+    </div>,
+    <TermsStep form={form} key="terms" />,
+    <ReviewStep form={form} key="review" />,
+  ][step];
+
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <Button
+        onClick={() => setStep((current) => Math.max(0, current - 1))}
+        type="button"
+        variant="secondary"
+      >
+        {t("DashboardMarkets.dvp.wizardBack")}
+      </Button>
+      {step === last ? (
+        <Button disabled={form.submitting || !form.ready} onClick={form.submit} type="button">
+          {form.submitting
+            ? t("DashboardMarkets.dvp.createSubmitting")
+            : t("DashboardMarkets.dvp.createAction")}
+        </Button>
+      ) : (
+        <Button
+          disabled={!canContinue}
+          onClick={() => setStep((current) => Math.min(last, current + 1))}
+          type="button"
+        >
+          {t("DashboardMarkets.dvp.wizardContinue")}
+        </Button>
+      )}
+    </div>
+  );
 
   return (
-    <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      <form className="mx-auto w-full max-w-5xl" onSubmit={form.submit}>
-        <p className="max-w-2xl text-secondary text-sm leading-relaxed">
-          {t(
-            form.tradeKind === "agent"
-              ? "DashboardMarkets.dvp.createDescriptionAgent"
-              : "DashboardMarkets.dvp.createDescription"
-          )}
-        </p>
-
-        {context.error ? (
-          <Callout className="mt-5" variant="danger">
-            {context.error}
-          </Callout>
-        ) : null}
+    <WizardFrame
+      aside={<aside className="hidden lg:block">{summary}</aside>}
+      currentStep={step}
+      description={t(
+        agent
+          ? "DashboardMarkets.dvp.createDescriptionAgent"
+          : "DashboardMarkets.dvp.createDescription"
+      )}
+      footer={footer}
+      // The frame defaults to max-w-3xl and then puts a 440px rail inside
+      // it, which leaves the content about 330px wide and crushes the leg
+      // cards. The other wizard that uses an aside sets the same width.
+      maxWidthClassName="max-w-6xl"
+      progressLabel={t("DashboardMarkets.dvp.wizardProgress", {
+        current: String(step + 1),
+        total: String(steps.length),
+      })}
+      steps={steps}
+      summary={summary}
+    >
+      <div className="grid gap-5">
+        {context.error ? <Callout variant="danger">{context.error}</Callout> : null}
 
         {cluster === "devnet" ? null : (
-          <Callout className="mt-5" variant="warning">
+          <Callout variant="warning">
             {t("DashboardMarkets.dvp.wrongClusterWarning", { cluster })}
           </Callout>
         )}
 
-        {/* The summary rides alongside on a wide screen and falls under the
-            fields on a narrow one, so the trade being described stays in view
-            while the numbers that describe it are being typed. */}
-        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-          <div className="grid gap-5">
-            <Section
-              description={t(
-                form.tradeKind === "agent"
-                  ? "DashboardMarkets.dvp.groupYourSideHintAgent"
-                  : "DashboardMarkets.dvp.groupYourSideHint"
-              )}
-              title={t(
-                form.tradeKind === "agent"
-                  ? "DashboardMarkets.dvp.groupYourSideAgent"
-                  : "DashboardMarkets.dvp.groupYourSide"
-              )}
-            >
-              <Field
-                hint={
-                  wallet
-                    ? t(
-                        form.tradeKind === "agent"
-                          ? "DashboardMarkets.dvp.fieldWalletHintWithAddressAgent"
-                          : "DashboardMarkets.dvp.fieldWalletHintWithAddress",
-                        { address: shortenAddress(wallet.address) }
-                      )
-                    : t(
-                        form.tradeKind === "agent"
-                          ? "DashboardMarkets.dvp.fieldWalletHintAgent"
-                          : "DashboardMarkets.dvp.fieldWalletHint"
-                      )
-                }
-                label={t("DashboardMarkets.dvp.fieldWallet")}
-              >
-                <Select
-                  ariaLabel={t("DashboardMarkets.dvp.fieldWallet")}
-                  onValueChange={(next) => form.setWalletId(next ?? "")}
-                  value={form.walletId}
-                >
-                  {context.wallets.map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {entry.label ?? shortenAddress(entry.address)}
-                    </SelectItem>
-                  ))}
-                </Select>
-              </Field>
+        {body}
 
-              <TradeKindChoice onChange={form.setTradeKind} value={form.tradeKind} />
-
-              {form.tradeKind === "principal" ? (
-                <SideChoice
-                  assetSymbol={form.asset.symbol}
-                  cashSymbol={form.cash.symbol}
-                  onChange={form.setSdpSide}
-                  value={form.sdpSide}
-                />
-              ) : null}
-            </Section>
-
-            <Section
-              description={t("DashboardMarkets.dvp.groupLegsHint")}
-              title={t("DashboardMarkets.dvp.groupLegs")}
-            >
-              <div className="grid gap-4 sm:grid-cols-2">
-                <LegCards context={context} form={form} />
-              </div>
-            </Section>
-
-            <Section
-              description={t(
-                form.tradeKind === "agent"
-                  ? "DashboardMarkets.dvp.groupTermsHintAgent"
-                  : "DashboardMarkets.dvp.groupTermsHint"
-              )}
-              title={t(
-                form.tradeKind === "agent"
-                  ? "DashboardMarkets.dvp.groupTermsAgent"
-                  : "DashboardMarkets.dvp.groupTerms"
-              )}
-            >
-              <TradeParties form={form} />
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  hint={t("DashboardMarkets.dvp.fieldExpiryHint")}
-                  htmlFor="dvp-expiry"
-                  label={t("DashboardMarkets.dvp.fieldExpiry")}
-                >
-                  {/* An expiry in the past is refused on chain, so it is not
-                      offered here. */}
-                  <DatePicker
-                    disablePast
-                    id="dvp-expiry"
-                    onChange={form.setExpiry}
-                    value={form.expiry}
-                  />
-                </Field>
-
-                <ReferenceField id="dvp-ref" onChange={form.setRefString} value={form.refString} />
-              </div>
-
-              <SettlementDestinations form={form} />
-            </Section>
-          </div>
-
-          <div className="grid gap-4 lg:sticky lg:top-6">
-            <DvpCreateSummary
-              agent={form.tradeKind === "agent"}
-              amountA={form.asset.amount}
-              amountB={form.cash.amount}
-              assetMint={form.asset.token?.mint ?? null}
-              assetSymbol={form.asset.symbol}
-              cashMint={form.cash.token?.mint ?? null}
-              cashSymbol={form.cash.symbol}
-              counterparty={form.counterparty}
-              ready={form.ready}
-              sdpSide={form.sdpSide}
-            />
-
-            {form.error ? (
-              <Callout live variant="danger">
-                {form.error}
-              </Callout>
-            ) : null}
-
-            <Button className="w-full" disabled={form.submitting || !form.ready} type="submit">
-              {form.submitting
-                ? t("DashboardMarkets.dvp.createSubmitting")
-                : t("DashboardMarkets.dvp.createAction")}
-            </Button>
-          </div>
-        </div>
-      </form>
-    </DashboardWorkspaceOverviewPanel>
+        {form.error ? (
+          <Callout live variant="danger">
+            {form.error}
+          </Callout>
+        ) : null}
+      </div>
+    </WizardFrame>
   );
 }

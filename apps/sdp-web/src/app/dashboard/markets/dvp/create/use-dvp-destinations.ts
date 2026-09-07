@@ -1,19 +1,21 @@
 "use client";
 
 /**
- * Where each party's proceeds go, when that is not the party itself.
+ * Where each side's proceeds are paid.
  *
- * Its own hook for the same reason each leg has one: this is a self-contained
- * pair of optional fields with a validity rule of their own, and folding them
- * into the form hook made that hook's control flow the thing a reader had to
- * hold in their head to answer any question about it.
+ * Modelled as an explicit CHOICE per side rather than an optional text box.
  *
- * Values are kept AS TYPED and only trimmed on the way out. Empty is the
- * ordinary trade and means the party's own address, which is what the program
- * records for an omitted destination — so "left blank" and "typed the party's
- * own address" have to stay distinguishable. The idempotency key depends on
- * that distinction: it mirrors the API's fingerprint field for field, and the
- * API treats an absent destination and an explicit one as different requests.
+ * The default is that a side is paid back at the address it funded from, and a
+ * hidden empty input never said so: you opened a disclosure, found two blank
+ * fields, and had to infer what leaving them blank meant. Worse, redirecting a
+ * payout is precisely the shape a forged trade takes, so burying it was exactly
+ * the wrong emphasis. Making it two radio options states the default and makes
+ * the redirect a deliberate act.
+ *
+ * Values are kept AS TYPED and trimmed on the way out. Empty means "pay the
+ * party", which is what the program records for an omitted destination, and the
+ * idempotency key mirrors the API fingerprint — so "left on the default" and
+ * "typed the party's own address" have to stay distinguishable.
  */
 
 import { useState } from "react";
@@ -21,50 +23,60 @@ import { useState } from "react";
 /** Base58 excludes 0, O, I and l so they cannot be confused when read aloud. */
 const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-export interface DvpDestinations {
+export type PayoutMode = "party" | "elsewhere";
+
+export interface DvpPayout {
+  mode: PayoutMode;
+  setMode: (next: PayoutMode) => void;
   /** As typed, so the field renders what was entered. */
-  destinationA: string;
-  destinationB: string;
-  setDestinationA: (next: string) => void;
-  setDestinationB: (next: string) => void;
+  address: string;
+  setAddress: (next: string) => void;
   /** Something is typed and it is not a base58 address. Blank is not wrong. */
-  destinationALooksWrong: boolean;
-  destinationBLooksWrong: boolean;
-  /** Trimmed, for the request. Empty means the party's own address. */
-  trimmedDestinationA: string;
-  trimmedDestinationB: string;
-  /** Whether either named destination is unusable, so submit can be blocked. */
-  anyLooksWrong: boolean;
+  looksWrong: boolean;
+  /** Chosen "elsewhere" but not yet given a usable address. */
+  incomplete: boolean;
+  /** Trimmed and only when redirected. Empty means pay the party. */
+  resolved: string;
 }
 
-/**
- * Judges a destination only once something is typed.
- *
- * Complaining at the first character is noise: these fields are optional, and
- * blank is the default rather than a mistake.
- */
-function looksWrong(trimmed: string): boolean {
-  return trimmed.length > 0 && !BASE58_ADDRESS.test(trimmed);
+export interface DvpDestinations {
+  a: DvpPayout;
+  b: DvpPayout;
+  /** Either side is redirected but unusable, so submit must be blocked. */
+  anyLooksWrong: boolean;
+  /** Either side pays somewhere other than its own address. */
+  anyRedirected: boolean;
+}
+
+function usePayout(): DvpPayout {
+  const [mode, setMode] = useState<PayoutMode>("party");
+  const [address, setAddress] = useState("");
+
+  const trimmed = address.trim();
+  const looksWrong = mode === "elsewhere" && trimmed.length > 0 && !BASE58_ADDRESS.test(trimmed);
+  const incomplete = mode === "elsewhere" && trimmed.length === 0;
+
+  return {
+    mode,
+    setMode,
+    address,
+    setAddress,
+    looksWrong,
+    incomplete,
+    // Switching back to the default must not smuggle a typed address into the
+    // request, so this reads the mode rather than only the text.
+    resolved: mode === "elsewhere" ? trimmed : "",
+  };
 }
 
 export function useDvpDestinations(): DvpDestinations {
-  const [destinationA, setDestinationA] = useState("");
-  const [destinationB, setDestinationB] = useState("");
-
-  const trimmedDestinationA = destinationA.trim();
-  const trimmedDestinationB = destinationB.trim();
-  const destinationALooksWrong = looksWrong(trimmedDestinationA);
-  const destinationBLooksWrong = looksWrong(trimmedDestinationB);
+  const a = usePayout();
+  const b = usePayout();
 
   return {
-    destinationA,
-    destinationB,
-    setDestinationA,
-    setDestinationB,
-    destinationALooksWrong,
-    destinationBLooksWrong,
-    trimmedDestinationA,
-    trimmedDestinationB,
-    anyLooksWrong: destinationALooksWrong || destinationBLooksWrong,
+    a,
+    b,
+    anyLooksWrong: a.looksWrong || b.looksWrong || a.incomplete || b.incomplete,
+    anyRedirected: a.resolved.length > 0 || b.resolved.length > 0,
   };
 }

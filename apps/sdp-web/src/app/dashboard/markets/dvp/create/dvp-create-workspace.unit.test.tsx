@@ -49,19 +49,57 @@ function renderForm(
   );
 }
 
+/**
+ * Walks the wizard to a stage, filling only what the previous stages require.
+ *
+ * Continue is disabled until a stage is complete, so navigating IS the
+ * assertion that each stage can be satisfied on its own — which is most of
+ * what staging bought.
+ */
+const COUNTERPARTY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
+function advanceTo(stage: "parties" | "legs" | "terms" | "review") {
+  const next = () => fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+  next(); // role -> parties (the first wallet is preselected)
+  if (stage === "parties") return;
+
+  fireEvent.change(screen.getByLabelText(/counterparty address/i), {
+    target: { value: COUNTERPARTY },
+  });
+  next(); // parties -> legs
+  if (stage === "legs") return;
+
+  fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10" } });
+  fireEvent.change(screen.getByLabelText(/cash amount/i), { target: { value: "25" } });
+  next(); // legs -> terms
+  if (stage === "terms") return;
+
+  next(); // terms -> review
+}
+
 afterEach(cleanup);
 
 describe("DvpCreateWorkspace", () => {
-  it("cannot be submitted until both legs and a counterparty are set", () => {
+  // Continue gates each stage, so an empty form cannot even reach the review
+  // stage where Create lives.
+  it("cannot leave the parties stage without a counterparty", () => {
     renderForm();
+    advanceTo("parties");
 
-    expect(screen.getByRole("button", { name: /create trade/i })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
+  });
+
+  it("reaches review once every stage is answered, and only then offers Create", () => {
+    renderForm();
+    advanceTo("review");
+
+    expect(screen.getByRole("button", { name: /create trade/i })).toBeTruthy();
   });
 
   // The whole point of the conversion: the amount the chain receives is shown
   // before it is sent, so a three-orders-of-magnitude mistake is visible.
   it("discloses the base units a typed amount resolves to", () => {
     renderForm();
+    advanceTo("legs");
 
     fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10.5" } });
 
@@ -72,6 +110,7 @@ describe("DvpCreateWorkspace", () => {
   // form has to say so rather than rounding.
   it("refuses an amount finer than the mint allows, and says why", () => {
     renderForm();
+    advanceTo("legs");
 
     fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "1.9999999" } });
 
@@ -80,6 +119,7 @@ describe("DvpCreateWorkspace", () => {
 
   it("flags a counterparty that is not a Solana address", () => {
     renderForm();
+    advanceTo("parties");
 
     fireEvent.change(screen.getByLabelText(/counterparty address/i), {
       target: { value: "nope" },
@@ -138,22 +178,32 @@ describe("DvpCreateWorkspace", () => {
   describe("which leg is whose", () => {
     it("marks the asset leg as yours by default", () => {
       const { container } = renderForm();
+      advanceTo("legs");
 
       expect(container.textContent).toContain("You deliver");
       expect(container.textContent).toContain("They deliver");
     });
 
     // The leg you act on should be the one you reach first, by eye and by tab.
+    // The side is chosen two stages earlier, so this walks back to change it
+    // and forward again — which also proves Back keeps what was entered.
     it("puts your own leg first, whichever side you are on", () => {
       const { container } = renderForm();
+      advanceTo("legs");
       const order = () =>
         Array.from(container.querySelectorAll("label")).map((node) => node.textContent ?? "");
+      const back = () => fireEvent.click(screen.getByRole("button", { name: /back/i }));
+      const next = () => fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
       expect(order().findIndex((text) => /asset you are trading/i.test(text))).toBeLessThan(
         order().findIndex((text) => /paid in/i.test(text))
       );
 
+      back();
+      back();
       fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
+      next();
+      next();
 
       expect(order().findIndex((text) => /paid in/i.test(text))).toBeLessThan(
         order().findIndex((text) => /asset you are trading/i.test(text))
@@ -164,6 +214,7 @@ describe("DvpCreateWorkspace", () => {
       const { container } = renderForm();
 
       fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
+      advanceTo("legs");
 
       expect(container.textContent).toContain("What you pay with");
       expect(container.textContent).not.toContain("What the other side pays with");
