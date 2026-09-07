@@ -338,7 +338,7 @@
       "groupYourSideAgent": "Your role",
       "groupYourSideHint": "Which of your wallets holds the leg you are delivering, and which leg that is.",
       "groupYourSideHintAgent": "Which wallet pays for this trade, and whether you are a party to it.",
-      "inboundBadgeWaiting": "Fund your leg",
+      "inboundBadgeWaiting": "Awaiting your funds",
       "inboundColumnExpires": "Expires",
       "inboundColumnFund": "Fund this address",
       "inboundColumnYouDeliver": "You deliver",

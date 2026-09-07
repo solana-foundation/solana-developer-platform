@@ -76,9 +76,18 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
       }
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
+          error?: { message?: string; details?: { reason?: string } };
         };
-        setError(body.error?.message ?? `Request failed (${response.status}).`);
+        // The specific reason first. Policy answers "denied by policy" as its
+        // headline and puts WHY in the details — which rule matched and on what
+        // — and showing only the headline left an operator with a red line and
+        // nowhere to go. "Destination <escrow> is not allowed by policy" names
+        // the rule to change; "denied by policy" names nothing.
+        setError(
+          body.error?.details?.reason ??
+            body.error?.message ??
+            `Request failed (${response.status}).`
+        );
         return;
       }
       // The single biggest source of "did anything happen?": all three of these
