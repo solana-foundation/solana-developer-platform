@@ -20,14 +20,43 @@ function respond(status: number, body: unknown) {
 }
 
 describe("detail page routing", () => {
-  // THE regression. Null trade, null error, 200 status.
+  // THE regression. A 200 carrying no trade must not read as absence.
   it("a 200 with no trade in it is not an absence", async () => {
     const result = await fetchDvpTrade(respond(200, { data: {} }), "dvp_1");
 
     expect(result.trade).toBeNull();
-    expect(result.error).toBeNull();
     // Keying the branch off the message would send this to notFound().
     expect(isNotFound(result)).toBe(false);
+  });
+
+  /**
+   * Greptile's blocking finding on this PR: a 200 whose body carries a TRUTHY
+   * but partial trade passed the null check, entered the success branch, and
+   * threw when the workspace dereferenced its missing legs. A truthy object is
+   * not a renderable one.
+   */
+  it.each([
+    ["an empty object", {}],
+    ["no legs at all", { id: "dvp_1", status: "created" }],
+    ["a null legs bag", { id: "dvp_1", status: "created", legs: null }],
+    ["only one leg", { id: "dvp_1", status: "created", legs: { a: {} } }],
+    ["a null leg", { id: "dvp_1", status: "created", legs: { a: {}, b: null } }],
+    ["no id", { status: "created", legs: { a: {}, b: {} } }],
+  ])("refuses a 200 carrying %s rather than rendering it", async (_label, trade) => {
+    const result = await fetchDvpTrade(respond(200, { data: { trade } }), "dvp_1");
+
+    expect(result.trade).toBeNull();
+    // Retryable, not absent: the trade may well exist and hold both legs.
+    expect(isNotFound(result)).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+
+  it("renders a 200 that does carry both legs", async () => {
+    const trade = { id: "dvp_1", status: "created", legs: { a: {}, b: {} } };
+    const result = await fetchDvpTrade(respond(200, { data: { trade } }), "dvp_1");
+
+    expect(result.trade).toEqual(trade);
+    expect(result.error).toBeNull();
   });
 
   it("a genuine 404 is an absence", async () => {
