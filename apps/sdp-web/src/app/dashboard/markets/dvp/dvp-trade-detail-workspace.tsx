@@ -484,7 +484,6 @@ function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) 
 
   return (
     <>
-
       {frozen.length > 0 ? (
         <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">
           <span className="inline-flex items-start gap-2">
