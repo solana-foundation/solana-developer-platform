@@ -38,12 +38,15 @@ function request(overrides: Partial<DvpCreateRequest> = {}): DvpCreateRequest {
   return {
     amountA: "1000",
     amountB: "2000",
-    counterparty: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
     expiry: "2027-01-01",
     mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
     mintB: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
     refString: "",
-    sdpSide: "a",
+    parties: {
+      tradeKind: "principal",
+      sdpSide: "a",
+      counterparty: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+    } as const,
     tokenProgramA: T22,
     tokenProgramB: T22,
     // Empty is the ordinary trade: each party is paid at its own address.
@@ -91,7 +94,15 @@ describe("useDvpCreateSubmit idempotency key", () => {
     it.each([
       ["the asset mint", { mintA: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE" }],
       ["the cash mint", { mintB: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1" }],
-      ["the side SDP takes", { sdpSide: "b" as const }],
+      [
+        "the side SDP takes",
+        {
+          parties: {
+            tradeKind: "principal",
+            sdpSide: "b",
+          },
+        } as Partial<DvpCreateRequest>,
+      ],
       ["the asset token program", { tokenProgramA: LEGACY }],
       ["the cash token program", { tokenProgramB: LEGACY }],
       ["the reference", { refString: "invoice-42" }],
@@ -117,7 +128,16 @@ describe("useDvpCreateSubmit idempotency key", () => {
   describe("still distinguishes trades that differ by", () => {
     it.each([
       ["the wallet", { walletId: "cwlt_other" }],
-      ["the counterparty", { counterparty: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn" }],
+      [
+        "the counterparty",
+        {
+          parties: {
+            tradeKind: "principal",
+            sdpSide: "a",
+            counterparty: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+          },
+        } as Partial<DvpCreateRequest>,
+      ],
       ["the asset amount", { amountA: "1001" }],
       ["the cash amount", { amountB: "2001" }],
       ["the expiry", { expiry: "2027-01-02" }],

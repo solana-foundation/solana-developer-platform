@@ -312,6 +312,89 @@ export function AmountField({
  * else, and a collapsed dropdown shows the consequence of only the option you
  * already picked. Both are on screen, and each says what it means for you.
  */
+/**
+ * Whether this organization is a party to the trade, or only setting it up.
+ *
+ * Ilan: "it's actually more common for an execution agent to set up the onchain
+ * swap details then have two counter parties do the swaps." The program always
+ * allowed it — CreateDvp's only signer is the payer — so this exposes a shape
+ * that was already there rather than adding one.
+ *
+ * Same card grammar as the side chooser directly below it, because the two
+ * questions are asked one after the other and reading as one control is the
+ * point.
+ */
+export function TradeKindChoice({
+  onChange,
+  value,
+}: {
+  onChange: (next: "principal" | "agent") => void;
+  value: "principal" | "agent";
+}) {
+  const t = useTranslations();
+  const options = [
+    {
+      kind: "principal" as const,
+      title: t("DashboardMarkets.dvp.kindPrincipalTitle"),
+      detail: t("DashboardMarkets.dvp.kindPrincipalDetail"),
+    },
+    {
+      kind: "agent" as const,
+      title: t("DashboardMarkets.dvp.kindAgentTitle"),
+      detail: t("DashboardMarkets.dvp.kindAgentDetail"),
+    },
+  ];
+
+  return (
+    <fieldset className="grid gap-1.5">
+      <legend className="mb-1.5 font-medium text-primary text-sm">
+        {t("DashboardMarkets.dvp.fieldTradeKind")}
+      </legend>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {options.map((option) => {
+          const selected = value === option.kind;
+          return (
+            <label
+              className={cn(
+                "flex cursor-pointer gap-3 rounded-2xl border p-4 transition-colors",
+                "focus-within:ring-2 focus-within:ring-border-strong",
+                selected
+                  ? "border-primary bg-fill-subtle"
+                  : "border-border-default bg-surface-raised hover:bg-fill-subtle"
+              )}
+              key={option.kind}
+            >
+              <input
+                checked={selected}
+                className="sr-only"
+                name="dvp-trade-kind"
+                onChange={() => onChange(option.kind)}
+                type="radio"
+                value={option.kind}
+              />
+              <span
+                aria-hidden
+                className={cn(
+                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                  selected ? "border-primary" : "border-border-strong"
+                )}
+              >
+                {selected ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
+              </span>
+              <span className="min-w-0">
+                <span className="block font-medium text-primary text-sm">{option.title}</span>
+                <span className="mt-0.5 block text-tertiary text-xs leading-relaxed">
+                  {option.detail}
+                </span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 export function SideChoice({
   assetSymbol,
   cashSymbol,

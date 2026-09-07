@@ -413,7 +413,21 @@
       "cancelConfirmTitle": "Cancel this trade?",
       "cancelConfirmBody": "Each leg goes back to whoever deposited it and the trade closes for good. Nobody can settle it afterwards, and creating it again means new escrow addresses.",
       "cancelConfirmDismiss": "Keep the trade",
-      "cancelConfirmAccept": "Cancel trade"
+      "cancelConfirmAccept": "Cancel trade",
+      "fieldTradeKind": "Your role in this trade",
+      "kindPrincipalTitle": "You are one of the parties",
+      "kindPrincipalDetail": "One of your custody wallets delivers a leg. The other side is any address.",
+      "kindAgentTitle": "You are setting it up for two others",
+      "kindAgentDetail": "Both legs belong to other parties. Your wallet signs and pays the fees and rent, and delivers nothing.",
+      "fieldPartyA": "First party",
+      "fieldPartyB": "Second party",
+      "fieldPartyHint": "Any Solana address. They sign nothing here and need no account with us.",
+      "fieldPartiesAreSame": "Both sides are the same address. A trade needs two parties.",
+      "agentVerifyNotice": "Neither party is you, so neither was here when the terms were set. Send each of them the trade address so they can check the amounts and their own escrow before paying anything.",
+      "legPartyADelivers": "First party delivers",
+      "legPartyBDelivers": "Second party delivers",
+      "legAgentHolder": "Neither leg is yours",
+      "kindAgentBadge": "Set up for two other parties"
     }
   },
   "DashboardEarn": {

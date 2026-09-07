@@ -8,11 +8,19 @@ import { Callout } from "@/components/ui/callout";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import type { DvpCreateContext } from "./dvp-create.data";
-import { AmountField, Field, MintField, ReferenceField, SideChoice } from "./dvp-create-fields";
+import {
+  AmountField,
+  Field,
+  MintField,
+  ReferenceField,
+  SideChoice,
+  TradeKindChoice,
+} from "./dvp-create-fields";
 import { DvpCreateSummary } from "./dvp-create-summary";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
@@ -65,16 +73,25 @@ function Section({
  * either card saying which one you were filling in for yourself. The moving
  * balance was the only signal, and a balance is a hint, not a label.
  */
-function LegOwner({ mine }: { mine: boolean }) {
+function LegOwner({ owner }: { owner: "you" | "them" | "partyA" | "partyB" }) {
   const t = useTranslations();
+  const key = {
+    you: "DashboardMarkets.dvp.legYouDeliver",
+    them: "DashboardMarkets.dvp.legTheyDeliver",
+    // On an agent trade neither leg is yours, so "you deliver" has no referent
+    // and naming a side would claim a leg this organization does not hold.
+    partyA: "DashboardMarkets.dvp.legPartyADelivers",
+    partyB: "DashboardMarkets.dvp.legPartyBDelivers",
+  }[owner] as MessageKey;
+
   return (
     <p
       className={cn(
         "font-medium text-[11px] uppercase tracking-wide",
-        mine ? "text-primary" : "text-tertiary"
+        owner === "you" ? "text-primary" : "text-tertiary"
       )}
     >
-      {mine ? t("DashboardMarkets.dvp.legYouDeliver") : t("DashboardMarkets.dvp.legTheyDeliver")}
+      {t(key)}
     </p>
   );
 }
@@ -99,10 +116,11 @@ function LegCards({
   form: ReturnType<typeof useDvpCreateForm>;
 }) {
   const t = useTranslations();
+  const agent = form.tradeKind === "agent";
 
   const assetLegCard = (
     <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-      <LegOwner mine={form.sdpSide === "a"} />
+      <LegOwner owner={agent ? "partyA" : form.sdpSide === "a" ? "you" : "them"} />
       <MintField
         choice={form.asset.choice}
         custom={form.asset.custom}
@@ -137,7 +155,7 @@ function LegCards({
 
   const cashLegCard = (
     <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-      <LegOwner mine={form.sdpSide === "b"} />
+      <LegOwner owner={agent ? "partyB" : form.sdpSide === "b" ? "you" : "them"} />
       <MintField
         choice={form.cash.choice}
         custom={form.cash.custom}
@@ -169,10 +187,13 @@ function LegCards({
     </div>
   );
 
+  // Your leg first, on a trade where one of them is yours. An agent trade has
+  // no "your leg", so it keeps the trade's own A-then-B order.
+  const yoursFirst = !agent && form.sdpSide === "b";
   return (
     <>
-      {form.sdpSide === "a" ? assetLegCard : cashLegCard}
-      {form.sdpSide === "a" ? cashLegCard : assetLegCard}
+      {yoursFirst ? cashLegCard : assetLegCard}
+      {yoursFirst ? assetLegCard : cashLegCard}
     </>
   );
 }
@@ -245,6 +266,105 @@ function SettlementDestinations({ form }: { form: ReturnType<typeof useDvpCreate
   );
 }
 
+/**
+ * Who the trade is between.
+ *
+ * A principal trade has one counterparty, because the other side is the wallet
+ * chosen above. An agent trade has two, and neither of them is this
+ * organization — so the field that used to say "the other side" would be
+ * lying, and both addresses have to be asked for explicitly.
+ */
+function TradeParties({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
+  const t = useTranslations();
+
+  if (form.tradeKind === "principal") {
+    const wrong = form.counterpartyLooksWrong || form.counterpartyIsOwnLegWallet;
+    return (
+      <Field
+        hint={
+          form.counterpartyIsOwnLegWallet
+            ? t("DashboardMarkets.dvp.fieldCounterpartyIsOwnWallet")
+            : form.counterpartyLooksWrong
+              ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
+              : t("DashboardMarkets.dvp.fieldCounterpartyHint")
+        }
+        htmlFor="dvp-counterparty"
+        label={t("DashboardMarkets.dvp.fieldCounterparty")}
+        tone={wrong ? "danger" : "muted"}
+      >
+        <Input
+          aria-invalid={wrong}
+          className="text-xs"
+          id="dvp-counterparty"
+          onChange={(event) => form.setCounterparty(event.target.value)}
+          placeholder={PLACEHOLDER_COUNTERPARTY}
+          required
+          spellCheck={false}
+          value={form.counterparty}
+        />
+      </Field>
+    );
+  }
+
+  const rows = [
+    {
+      id: "dvp-party-a",
+      label: t("DashboardMarkets.dvp.fieldPartyA"),
+      value: form.partyA,
+      onChange: form.setPartyA,
+      invalid: form.partyALooksWrong,
+    },
+    {
+      id: "dvp-party-b",
+      label: t("DashboardMarkets.dvp.fieldPartyB"),
+      value: form.partyB,
+      onChange: form.setPartyB,
+      invalid: form.partyBLooksWrong,
+    },
+  ];
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        {rows.map((row) => (
+          <Field
+            hint={
+              row.invalid
+                ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
+                : t("DashboardMarkets.dvp.fieldPartyHint")
+            }
+            htmlFor={row.id}
+            key={row.id}
+            label={row.label}
+            tone={row.invalid ? "danger" : "muted"}
+          >
+            <Input
+              aria-invalid={row.invalid}
+              className="text-xs"
+              id={row.id}
+              onChange={(event) => row.onChange(event.target.value)}
+              placeholder={PLACEHOLDER_COUNTERPARTY}
+              required
+              spellCheck={false}
+              value={row.value}
+            />
+          </Field>
+        ))}
+      </div>
+
+      {form.partiesAreSame ? (
+        <Callout variant="danger">{t("DashboardMarkets.dvp.fieldPartiesAreSame")}</Callout>
+      ) : null}
+
+      {/* Neither party was in the room when this trade was created, and the
+          economic terms are not bound by the trade's address, so each of them
+          has to check the stored terms before paying anything. Saying so here
+          is cheaper than saying it after somebody funds the wrong trade. */}
+      <Callout variant="info">{t("DashboardMarkets.dvp.agentVerifyNotice")}</Callout>
+    </div>
+  );
+}
+
 export function DvpCreateWorkspace({
   cluster,
   context,
@@ -307,12 +427,16 @@ export function DvpCreateWorkspace({
                 </Select>
               </Field>
 
-              <SideChoice
-                assetSymbol={form.asset.symbol}
-                cashSymbol={form.cash.symbol}
-                onChange={form.setSdpSide}
-                value={form.sdpSide}
-              />
+              <TradeKindChoice onChange={form.setTradeKind} value={form.tradeKind} />
+
+              {form.tradeKind === "principal" ? (
+                <SideChoice
+                  assetSymbol={form.asset.symbol}
+                  cashSymbol={form.cash.symbol}
+                  onChange={form.setSdpSide}
+                  value={form.sdpSide}
+                />
+              ) : null}
             </Section>
 
             <Section
@@ -328,33 +452,7 @@ export function DvpCreateWorkspace({
               description={t("DashboardMarkets.dvp.groupTermsHint")}
               title={t("DashboardMarkets.dvp.groupTerms")}
             >
-              <Field
-                hint={
-                  form.counterpartyIsOwnLegWallet
-                    ? t("DashboardMarkets.dvp.fieldCounterpartyIsOwnWallet")
-                    : form.counterpartyLooksWrong
-                      ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
-                      : t("DashboardMarkets.dvp.fieldCounterpartyHint")
-                }
-                htmlFor="dvp-counterparty"
-                label={t("DashboardMarkets.dvp.fieldCounterparty")}
-                tone={
-                  form.counterpartyLooksWrong || form.counterpartyIsOwnLegWallet
-                    ? "danger"
-                    : "muted"
-                }
-              >
-                <Input
-                  aria-invalid={form.counterpartyLooksWrong || form.counterpartyIsOwnLegWallet}
-                  className="font-mono text-xs"
-                  id="dvp-counterparty"
-                  onChange={(event) => form.setCounterparty(event.target.value)}
-                  placeholder={PLACEHOLDER_COUNTERPARTY}
-                  required
-                  spellCheck={false}
-                  value={form.counterparty}
-                />
-              </Field>
+              <TradeParties form={form} />
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field

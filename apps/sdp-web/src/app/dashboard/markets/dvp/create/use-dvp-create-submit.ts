@@ -13,6 +13,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import type { DvpPartiesRequest } from "./use-dvp-parties";
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 
@@ -50,8 +51,12 @@ const FNV_MASK = (1n << 128n) - 1n;
 function createIdempotencyKey(request: DvpCreateRequest): string {
   const material = JSON.stringify([
     request.walletId,
-    request.sdpSide,
-    request.counterparty,
+    // The parties are described differently by kind, so the kind goes in too:
+    // without it an agent trade and a principal trade could hash the same.
+    request.parties.tradeKind,
+    ...(request.parties.tradeKind === "agent"
+      ? [request.parties.partyA, request.parties.partyB]
+      : [request.parties.sdpSide, request.parties.counterparty]),
     request.mintA,
     request.tokenProgramA ?? TOKEN_2022,
     request.mintB,
@@ -78,12 +83,12 @@ function createIdempotencyKey(request: DvpCreateRequest): string {
 export interface DvpCreateRequest {
   amountA: string;
   amountB: string;
-  counterparty: string;
   expiry: string;
   mintA: string;
   mintB: string;
   refString: string;
-  sdpSide: "a" | "b";
+  /** Who the two parties are, in whichever shape the caller chose. */
+  parties: DvpPartiesRequest;
   /** Each listed mint carries its own program; a pasted one is assumed T22. */
   tokenProgramA: string | null;
   tokenProgramB: string | null;
@@ -123,8 +128,16 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
         },
         body: JSON.stringify({
           sdpWalletId: request.walletId,
-          sdpSide: request.sdpSide,
-          counterparty: request.counterparty,
+          ...(request.parties.tradeKind === "agent"
+            ? {
+                tradeKind: "agent",
+                partyA: request.parties.partyA,
+                partyB: request.parties.partyB,
+              }
+            : {
+                sdpSide: request.parties.sdpSide,
+                counterparty: request.parties.counterparty,
+              }),
           mintA: request.mintA,
           mintB: request.mintB,
           // A PASTED address is assumed Token-2022; if it is not, create

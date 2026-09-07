@@ -21,11 +21,9 @@ import type {
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 import { type DvpDestinations, useDvpDestinations } from "./use-dvp-destinations";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
+import { type DvpParties, useDvpParties } from "./use-dvp-parties";
 
 export { CUSTOM } from "./use-dvp-leg";
-
-/** Base58 excludes 0, O, I and l so they cannot be confused when read aloud. */
-const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** A month out: long enough to fund and settle, well inside the program's cap. */
 function defaultExpiry(): string {
@@ -41,19 +39,12 @@ interface DvpCreateFormFields {
   /** The wallet's balance of the cash mint, when SDP delivers that leg. */
   cashBalance: DvpWalletBalance | null;
   cashOptions: DvpCreateOption[];
-  counterparty: string;
-  counterpartyLooksWrong: boolean;
-  /** The counterparty is the very wallet funding your leg — one party, two sides. */
-  counterpartyIsOwnLegWallet: boolean;
   error: string | null;
   expiry: string;
   ready: boolean;
   refString: string;
-  sdpSide: "a" | "b";
-  setCounterparty: (next: string) => void;
   setExpiry: (next: string) => void;
   setRefString: (next: string) => void;
-  setSdpSide: (next: "a" | "b") => void;
   setWalletId: (next: string) => void;
   submit: (event: React.FormEvent) => void;
   submitting: boolean;
@@ -64,7 +55,10 @@ interface DvpCreateFormFields {
  * The whole form: the fields above plus the optional settlement destinations,
  * which own their own state in `useDvpDestinations`.
  */
-export interface DvpCreateForm extends DvpCreateFormFields, DvpDestinations {}
+export interface DvpCreateForm
+  extends DvpCreateFormFields,
+    DvpDestinations,
+    Omit<DvpParties, "ready" | "request"> {}
 
 /**
  * Whether the form describes a trade that can be created.
@@ -76,9 +70,8 @@ function canCreateTrade(input: {
   asset: DvpLeg;
   cash: DvpLeg;
   walletId: string;
-  counterparty: string;
-  counterpartyLooksWrong: boolean;
-  counterpartyIsOwnLegWallet: boolean;
+  /** Whichever party shape was chosen, complete and usable. */
+  partiesReady: boolean;
   destinationLooksWrong: boolean;
 }): boolean {
   const { asset, cash } = input;
@@ -94,11 +87,7 @@ function canCreateTrade(input: {
   // A malformed destination is refused by the API anyway; blocking here saves
   // a round trip that costs a custody-provider call.
   const partiesUsable = Boolean(
-    input.walletId &&
-      input.counterparty &&
-      !input.counterpartyLooksWrong &&
-      !input.counterpartyIsOwnLegWallet &&
-      !input.destinationLooksWrong
+    input.walletId && input.partiesReady && !input.destinationLooksWrong
   );
 
   return legsResolved && amountsResolved && partiesUsable;
@@ -136,61 +125,37 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   const { error, submit: send, submitting } = useDvpCreateSubmit();
 
   const [walletId, setWalletId] = useState(context.wallets[0]?.id ?? "");
-  const [sdpSide, setSdpSide] = useState<"a" | "b">("a");
-  const [counterparty, setCounterparty] = useState("");
   // Passed uncalled: React only uses a lazy initializer's return on the first
   // render, so calling it here would build a Date on every keystroke.
   const [expiry, setExpiry] = useState(defaultExpiry);
   const [refString, setRefString] = useState("");
   const destinations = useDvpDestinations();
-
-  const trimmedCounterparty = counterparty.trim();
-  // Only once there is enough typed to judge. Complaining at the first
-  // character is noise, not help.
-  const counterpartyLooksWrong =
-    trimmedCounterparty.length > 0 && !BASE58_ADDRESS.test(trimmedCounterparty);
-
-  /**
-   * The counterparty is the wallet funding your own leg.
-   *
-   * A trade needs two parties; this is one party on both sides of it, and the
-   * program refuses it outright. The API refuses it too — `userA and userB must
-   * differ` — but only after resolving the custody signer, so the round trip
-   * spends a provider call to return a sentence about `userA` to somebody who
-   * has never seen that word. Naming it here, against the address the wallet
-   * picker is already showing, costs nothing and says what is wrong.
-   *
-   * Deliberately only THIS wallet. Trading between two wallets you own is a
-   * real trade with two distinct parties, and blocking it would be wrong.
-   */
-  const counterpartyIsOwnLegWallet =
-    trimmedCounterparty.length > 0 &&
-    trimmedCounterparty === context.wallets.find((candidate) => candidate.id === walletId)?.address;
+  const parties = useDvpParties(context.wallets, walletId);
 
   const ready = canCreateTrade({
     asset,
     cash,
     walletId,
-    counterparty: trimmedCounterparty,
-    counterpartyLooksWrong,
-    counterpartyIsOwnLegWallet,
+    partiesReady: parties.ready,
     destinationLooksWrong: destinations.anyLooksWrong,
   });
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!(ready && asset.baseUnits && cash.baseUnits)) {
+    // `ready` already implies the parties resolved; re-checking narrows the
+    // type without asserting, so a future change to `ready` cannot smuggle a
+    // half-filled party set into the request.
+    if (!(ready && asset.baseUnits && cash.baseUnits && parties.request)) {
       return;
     }
     void send({
       amountA: asset.baseUnits,
       amountB: cash.baseUnits,
-      counterparty: trimmedCounterparty,
       expiry,
       mintA: asset.mint,
       mintB: cash.mint,
       refString: refString.trim(),
-      sdpSide,
+      parties: parties.request,
       tokenProgramA: asset.token?.tokenProgram ?? null,
       tokenProgramB: cash.token?.tokenProgram ?? null,
       userASettlementDestination: destinations.trimmedDestinationA,
@@ -202,33 +167,36 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   // The balance belongs to the leg SDP actually delivers — that is the only one
   // spent from this wallet. Showing it on the counterparty's leg would claim we
   // hold what they owe.
-  const sdpBalance = resolveSdpBalance(
-    context.wallets.find((wallet) => wallet.id === walletId) ?? null,
-    sdpSide === "a" ? asset : cash
-  );
+  // Only a principal trade spends from this wallet. On an agent trade the
+  // wallet pays fees and rent and delivers nothing, so showing a token balance
+  // beside a leg would claim we hold what a third party owes.
+  const sdpBalance =
+    parties.tradeKind === "agent"
+      ? null
+      : resolveSdpBalance(
+          context.wallets.find((wallet) => wallet.id === walletId) ?? null,
+          parties.sdpSide === "a" ? asset : cash
+        );
 
   return {
     asset,
-    assetBalance: sdpSide === "a" ? sdpBalance : null,
+    assetBalance: parties.sdpSide === "a" ? sdpBalance : null,
     cash,
-    cashBalance: sdpSide === "b" ? sdpBalance : null,
+    cashBalance: parties.sdpSide === "b" ? sdpBalance : null,
     cashOptions,
-    counterparty,
-    counterpartyIsOwnLegWallet,
-    counterpartyLooksWrong,
     error,
     expiry,
     ready,
     refString,
-    sdpSide,
-    setCounterparty,
     setExpiry,
     setRefString,
-    setSdpSide,
     setWalletId,
     submit,
     submitting,
     walletId,
     ...destinations,
+    // `ready` and `request` are the parties hook's own internal verdict; the
+    // form's `ready` spans the legs too and must win.
+    ...(({ ready: _ready, request: _request, ...rest }) => rest)(parties),
   };
 }
