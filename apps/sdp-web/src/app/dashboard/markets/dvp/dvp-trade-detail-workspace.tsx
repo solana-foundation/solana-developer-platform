@@ -174,11 +174,22 @@ function ExchangeBand({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
   // Left is always the first party's leg then, because "you" has no referent.
   const given = agent || sdpSide === "a" ? trade.legs.a : trade.legs.b;
   const taken = agent || sdpSide === "a" ? trade.legs.b : trade.legs.a;
+  // Past tense once the trade is closed, on both shapes. The principal labels
+  // already did this and the agent ones did not, so a settled agent trade read
+  // "First party delivers" about a delivery that finished minutes ago.
   const givenLabel = agent
-    ? t("DashboardMarkets.dvp.summaryPartyADelivers")
+    ? t(
+        closed
+          ? "DashboardMarkets.dvp.summaryPartyADelivered"
+          : "DashboardMarkets.dvp.summaryPartyADelivers"
+      )
     : t(closed ? "DashboardMarkets.dvp.youDelivered" : "DashboardMarkets.dvp.youDeliver");
   const takenLabel = agent
-    ? t("DashboardMarkets.dvp.summaryPartyBDelivers")
+    ? t(
+        closed
+          ? "DashboardMarkets.dvp.summaryPartyBDelivered"
+          : "DashboardMarkets.dvp.summaryPartyBDelivers"
+      )
     : t(closed ? "DashboardMarkets.dvp.youReceived" : "DashboardMarkets.dvp.youReceive");
 
   return (

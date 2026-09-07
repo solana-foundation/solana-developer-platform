@@ -269,15 +269,22 @@ export function DvpTradesWorkspace({
                     // project is the one thing here with a deadline against it,
                     // and a number on the control says so without a banner
                     // above the table that is empty most days.
-                    items={STATUS_FILTER_ORDER.filter(
-                      (option) => option !== "waiting" || inbound.length > 0
-                    ).map((option) => ({
-                      value: option,
-                      label:
-                        option === "waiting"
-                          ? `${t(STATUS_FILTER_LABELS[option])} · ${inbound.length}`
-                          : t(STATUS_FILTER_LABELS[option]),
-                    }))}
+                    items={STATUS_FILTER_ORDER.flatMap((option) => {
+                      // The waiting segment only exists when it has something
+                      // in it; an empty one would be a permanent dead control.
+                      if (option === "waiting" && inbound.length === 0) {
+                        return [];
+                      }
+                      return [
+                        {
+                          value: option,
+                          label:
+                            option === "waiting"
+                              ? `${t(STATUS_FILTER_LABELS[option])} · ${inbound.length}`
+                              : t(STATUS_FILTER_LABELS[option]),
+                        },
+                      ];
+                    })}
                     // Re-clicking the active segment can emit an empty value
                     // from the underlying toggle group, and a status filter
                     // always has a selection.
