@@ -318,6 +318,22 @@ export interface DvpTradeRepository {
    * predicate is wrong.
    */
   listInboundForParty(scope: DvpInboundScope, limit: number): Promise<DvpTradeRow[]>;
+  /**
+   * One trade by id, with NO project or organization predicate.
+   *
+   * For a party acting on a trade another organization created, where a scoped
+   * read returns nothing by definition. The absence of a predicate here is not
+   * the absence of a boundary: `dvp_trades` forces row-level security, and a
+   * tenant reaches a row it does not own through exactly one policy —
+   * `sdp_dvp_party_read` (0089), which requires a custody wallet of theirs to
+   * match `user_a` or `user_b`. An unrelated id returns null no matter what
+   * this method does, and it returns null for a system-identity caller too,
+   * because that policy is tenant-only.
+   *
+   * Callers must still decide WHICH leg is the caller's; being able to read a
+   * trade is not permission to fund an arbitrary side of it.
+   */
+  getByIdAsParty(tradeId: string): Promise<DvpTradeRow | null>;
 }
 
 /** Who is asking, and which addresses make a trade theirs. */

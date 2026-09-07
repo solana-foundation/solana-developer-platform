@@ -18,6 +18,7 @@
 import { AlertTriangleIcon, ArrowDownLeftIcon, ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -31,6 +32,7 @@ import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loadi
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
+import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
 /** An amount and its symbol, in the direction it moves for the reader. */
 function InboundAmount({ leg, outgoing }: { leg: DvpInboundLeg; outgoing: boolean }) {
@@ -50,6 +52,41 @@ function InboundAmount({ leg, outgoing }: { leg: DvpInboundLeg; outgoing: boolea
         <div className="truncate text-tertiary text-xs">{shortenAddress(leg.mint)}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Funds the reader's own leg from the wallet whose key made it theirs.
+ *
+ * Clicked, not held: paying into a trade's escrow is a step forward rather than
+ * something to walk back, and hold-to-confirm is reserved for destroying
+ * something. The transfer is still governed by this organization's own wallet
+ * policy, so it may come back held for approval.
+ *
+ * Its own component because each row needs its own pending state; one hook in
+ * the table body would put every row into "Funding…" at once.
+ */
+function InboundFundAction({ frozen, tradeId }: { frozen: boolean; tradeId: string }) {
+  const t = useTranslations();
+  const { act, awaitingApproval, error, pending } = useDvpTradeActions(tradeId);
+
+  return (
+    <span className="relative z-10 grid gap-1">
+      <Button
+        className="w-fit"
+        // A transfer into a frozen escrow bounces, so offering to send one is
+        // offering to waste a signature and a fee.
+        disabled={frozen || pending !== null || awaitingApproval}
+        onClick={() => act("fund-as-party")}
+        size="sm"
+        type="button"
+      >
+        {pending === "fund-as-party"
+          ? t("DashboardMarkets.dvp.inboundFunding")
+          : t("DashboardMarkets.dvp.inboundFundAction")}
+      </Button>
+      {error ? <span className="text-error text-xs">{error}</span> : null}
+    </span>
   );
 }
 
@@ -121,16 +158,23 @@ export function DvpInboundPanel({ trades }: { trades: DvpInboundTrade[] }) {
                           {t("DashboardMarkets.dvp.inboundFunded")}
                         </span>
                       ) : (
-                        // Above the copy button rather than beside it: a frozen
+                        // Above the button rather than beside it: a frozen
                         // escrow bounces the transfer, so it has to be read
-                        // before the address is taken, not after.
-                        <div className="grid gap-1">
+                        // before anything is sent, not after.
+                        <div className="grid gap-1.5">
                           {yours.frozen ? (
                             <span className="text-warning text-xs">
                               {t("DashboardMarkets.dvp.inboundFrozen")}
                             </span>
                           ) : null}
-                          <span className="relative z-10 inline-flex items-center gap-1 text-sm">
+                          <InboundFundAction frozen={yours.frozen === true} tradeId={trade.id} />
+                          {/* The address stays, under the button. Funding from
+                              here needs a custody wallet holding the party key;
+                              a party who holds that key in their own wallet
+                              instead has nothing to click and still needs
+                              somewhere to send. */}
+                          <span className="relative z-10 inline-flex items-center gap-1 text-tertiary text-xs">
+                            {t("DashboardMarkets.dvp.inboundOrSendManually")}
                             <span className="sr-only">{yours.escrow}</span>
                             <span aria-hidden>{shortenAddress(yours.escrow)}</span>
                             <WalletAddressCopyButton

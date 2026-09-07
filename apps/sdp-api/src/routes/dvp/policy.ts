@@ -13,6 +13,7 @@
  * limit be evaded by labelling the trade the other way round.
  */
 
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { PolicyCandidate } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -24,6 +25,9 @@ import {
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
+import { legOfSide } from "@/services/dvp/fund";
+import { resolveFundableLeg } from "@/services/dvp/fund-authorization";
+import { readEscrowState } from "@/services/dvp/read-chain";
 import type { DvpCloseAction } from "@/services/dvp/settle";
 
 /** Every trade action that spends from a custody wallet. */
@@ -300,4 +304,109 @@ export async function extractDvpTradeActionPolicyCandidate(
 export interface DvpCloseResolved {
   trade: DvpTradeRow | null;
   settlement: SettlementWalletRef | null;
+}
+
+/**
+ * The policy-gate extractor for a party funding its own leg (PRO-1854).
+ *
+ * Three things differ from the extractor above, and each is forced:
+ *
+ * 1. The trade is loaded WITHOUT project scope. That is the point of the
+ *    feature — the trade belongs to somebody else. The read is permitted by the
+ *    `sdp_dvp_party_read` policy (0089), which admits it only when a custody
+ *    wallet of this tenant matches a party address, so an unrelated trade id
+ *    returns nothing here regardless of what this code does.
+ * 2. Policy is evaluated against the FUNDING organization's own wallet. Their
+ *    limits and approvals govern their money; the creating org's govern theirs,
+ *    and it is not the creating org's money moving.
+ * 3. One leg, theirs. The other leg describes what the counterparty owes and is
+ *    no part of this operation.
+ */
+export async function extractDvpPartyFundingPolicyCandidate(
+  c: Context<{ Bindings: Env }>
+): Promise<PolicyGateExtraction> {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const tradeId = c.req.param("tradeId") ?? "";
+
+  const absent: PolicyGateExtraction = {
+    candidate: null,
+    legs: [],
+    body: {},
+    resolved: { trade: null, settlement: null },
+    rawPayload: { tradeId },
+    idempotencyKey: null,
+  };
+
+  const trade = await createDvpTradeRepository(c.env).getByIdAsParty(tradeId);
+  if (!trade) {
+    return absent;
+  }
+
+  const fundable = await resolveFundableLeg(c.env, trade, {
+    organizationId: auth.organizationId,
+    projectId,
+    auth,
+  });
+  // Ungoverned rather than refused here: the handler produces the 403, and
+  // filing a wallet operation for a trade this caller has no leg on would put
+  // somebody else's trade in their approvals queue.
+  if (!fundable) {
+    return { ...absent, resolved: { trade, settlement: null } };
+  }
+
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, fundable.custodyWalletId, [
+    "payments:write",
+  ]);
+
+  const wallet = await getDb(c.env)
+    .prepare(
+      `SELECT w.id AS custody_wallet_id, w.public_key, w.wallet_id
+         FROM custody_wallets w
+        WHERE w.id = ? AND w.status = 'active'`
+    )
+    .bind(fundable.custodyWalletId)
+    .first<{ custody_wallet_id: string; public_key: string; wallet_id: string }>();
+  if (!wallet) {
+    return { ...absent, resolved: { trade, settlement: null } };
+  }
+
+  const leg = legOfSide(trade, fundable.side);
+  const state = await readEscrowState(solanaRpc.createRpc(c.env), leg.escrow, leg.tokenProgram);
+  const held = state?.amount ?? 0n;
+  // The shortfall, like the other extractor: funding tops a leg up, so the
+  // number an approver sees has to be the number that moves.
+  const outstanding = leg.amount > held ? leg.amount - held : 0n;
+
+  const candidate: PolicyCandidate = {
+    organizationId: auth.organizationId,
+    projectId,
+    custodyWalletId: wallet.custody_wallet_id,
+    walletId: wallet.wallet_id,
+    apiKeyId: auth.apiKeyId,
+    actor: walletOperationActorFromAuth(auth),
+    source: "api",
+    operationFamily: "program",
+    operationType: "dvp_fund",
+    providerExtensions: {},
+    asset: leg.mint,
+    amount: outstanding.toString(),
+    destination: leg.escrow,
+    context: {
+      dvpTradeId: trade.id,
+      dvpAction: "fund",
+      dvpLeg: fundable.side,
+      dvpAsParty: true,
+      swapDvp: trade.swapDvp,
+    },
+  };
+
+  return {
+    candidate,
+    legs: [candidate],
+    body: {},
+    resolved: { trade, settlement: null },
+    rawPayload: { tradeId, side: fundable.side },
+    idempotencyKey: null,
+  };
 }

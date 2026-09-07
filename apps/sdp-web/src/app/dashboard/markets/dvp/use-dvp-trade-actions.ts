@@ -14,7 +14,13 @@ import { toast } from "sonner";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 
-export type DvpTradeActionName = "settle" | "cancel" | "fund";
+/**
+ * `fund-as-party` funds a leg of a trade another organization created, and is
+ * a separate action rather than a mode of `fund` because the API separates
+ * them: one asks who owns the trade, the other who holds the key to a party
+ * address on it. The name is also the URL segment.
+ */
+export type DvpTradeActionName = "settle" | "cancel" | "fund" | "fund-as-party";
 
 export interface DvpTradeActions {
   act: (action: DvpTradeActionName) => Promise<void>;
@@ -34,12 +40,14 @@ const DONE_MESSAGE: Record<DvpTradeActionName, MessageKey> = {
   settle: "DashboardMarkets.dvp.toastSettled",
   cancel: "DashboardMarkets.dvp.toastCancelled",
   fund: "DashboardMarkets.dvp.toastFunded",
+  "fund-as-party": "DashboardMarkets.dvp.toastFundedAsParty",
 };
 
 const HELD_MESSAGE: Record<DvpTradeActionName, MessageKey> = {
   settle: "DashboardMarkets.dvp.toastSettleHeld",
   cancel: "DashboardMarkets.dvp.toastCancelHeld",
   fund: "DashboardMarkets.dvp.toastFundHeld",
+  "fund-as-party": "DashboardMarkets.dvp.toastFundHeld",
 };
 
 export function useDvpTradeActions(tradeId: string): DvpTradeActions {

@@ -411,6 +411,14 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return result.results.map((row) => mapDvpTradeRow(row));
     },
 
+    async getByIdAsParty(tradeId) {
+      const row = await db
+        .prepare(`SELECT ${SELECT_COLUMNS} FROM dvp_trades WHERE id = ?`)
+        .bind(tradeId)
+        .first<Record<string, unknown>>();
+      return row ? mapDvpTradeRow(row) : null;
+    },
+
     async listInboundForParty(scope, limit) {
       // No addresses means no wallets, which means nothing can name this
       // caller. Returning early keeps an `IN ()` out of the SQL, which is a

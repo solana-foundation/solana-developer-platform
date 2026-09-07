@@ -38,7 +38,13 @@ export interface DvpInboundTrade {
 }
 
 /**
- * The caller's own custody wallet addresses.
+ * The caller's own custody wallet addresses, mapped to the wallet that holds
+ * each one.
+ *
+ * Exported because funding (PRO-1854) must answer the same question discovery
+ * answers: which party addresses are this caller's. One function so the rule
+ * that decides what you can SEE cannot drift from the rule that decides what
+ * you can FUND.
  *
  * Scoped the same way `/v1/wallets` scopes its listing, through
  * `getAllowedApiKeyCustodyWalletIdsForPermissions`, so a key bound to a subset
@@ -46,7 +52,7 @@ export interface DvpInboundTrade {
  * narrowly bound key would learn about trades naming wallets it has no rights
  * over, which is the same disclosure the binding exists to prevent.
  */
-async function callerPartyAddresses(
+export async function callerPartyAddresses(
   env: Env,
   request: DvpInboundRequest
 ): Promise<Map<string, string>> {

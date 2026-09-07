@@ -10,13 +10,17 @@ import {
   cancelTrade,
   createTrade,
   fundTrade,
+  fundTradeAsParty,
   getTrade,
   inspectMint,
   listInboundTrades,
   listTrades,
   settleTrade,
 } from "./handlers";
-import { extractDvpTradeActionPolicyCandidate } from "./policy";
+import {
+  extractDvpPartyFundingPolicyCandidate,
+  extractDvpTradeActionPolicyCandidate,
+} from "./policy";
 import { createDvpTradeSchema } from "./schemas";
 
 const dvp = new Hono<{ Bindings: Env }>();
@@ -82,6 +86,15 @@ dvp.post(
   requirePermissions("payments:write", "wallets:read"),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "fund") }),
   fundTrade
+);
+// Funding a leg of a trade somebody else created. Its own route rather than a
+// mode of the one above, because the authorization rule is different: that one
+// asks who owns the trade, this one asks who holds the key to a party address.
+dvp.post(
+  "/trades/:tradeId/fund-as-party",
+  requirePermissions("payments:write", "wallets:read"),
+  policyGate({ extract: (c) => extractDvpPartyFundingPolicyCandidate(c) }),
+  fundTradeAsParty
 );
 dvp.post(
   "/trades/:tradeId/settle",

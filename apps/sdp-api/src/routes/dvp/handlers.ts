@@ -15,6 +15,7 @@ import {
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
+import { fundDvpTradeLegAsParty } from "@/services/dvp/fund-as-party";
 import { listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import { observeDvpTradeIfStale, observeDvpTradeNow } from "@/services/dvp/observe-now";
@@ -363,6 +364,42 @@ export const cancelTrade = closeTrade("cancel");
  * this file uses. That one speaks to the organization that created the trade
  * and carries fields belonging to it.
  */
+/**
+ * A party funding its own leg of a trade another organization created.
+ *
+ * Separate from `fundTrade` because the two answer authorization differently:
+ * that one asks whether the caller owns the trade, this one asks whether the
+ * caller holds the key to a party address on it. Folding them together would
+ * mean one endpoint with two authorization rules and a branch deciding which
+ * applies, on a route that moves money.
+ */
+export const fundTradeAsParty = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
+  if (!resolved.trade) {
+    throw notFound("DvP trade not found");
+  }
+
+  const result = await fundDvpTradeLegAsParty(c, resolved.trade, {
+    organizationId: auth.organizationId,
+    projectId,
+    auth,
+  });
+
+  // Same reason as the other funding path: the sweep runs once a minute and the
+  // page would otherwise read "Waiting on funds" straight after a transfer that
+  // worked, which is indistinguishable from one that did not.
+  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
+
+  return success(c, {
+    tradeId: resolved.trade.id,
+    leg: result.leg,
+    amount: result.amount,
+    signature: result.signature,
+  });
+};
+
 export const listInboundTrades = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
