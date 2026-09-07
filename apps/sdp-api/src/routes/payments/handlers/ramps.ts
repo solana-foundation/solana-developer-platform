@@ -1,4 +1,3 @@
-import { redactCredentialString } from "@sdp/custody";
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
@@ -36,6 +35,7 @@ import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provi
 import { buildRequirementSchema, readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { redactCredentialString } from "@sdp/redaction";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   isCountryCode,

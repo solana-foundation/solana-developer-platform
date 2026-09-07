@@ -143,6 +143,25 @@ export type PrivateChannelHealth =
   | { status: "unreachable"; latencyMs: number; error: string };
 
 /**
+ * Result of the connect-time probe (`POST /probe`, and the same check Connect
+ * re-runs) as it goes over the wire: one status per endpoint plus latency, and
+ * a short reason when something failed.
+ *
+ * The caller chose these endpoints, so nothing an endpoint returns is relayed
+ * back — no upstream body, no headers, and reason strings truncated. What the
+ * connect form needs is a badge per endpoint, and that is all this carries.
+ */
+export interface PrivateChannelProbeResult {
+  /** True only when all three endpoints answered as expected. */
+  ok: boolean;
+  gateway: PrivateChannelHealth;
+  rpc:
+    | { ok: true; latencyMs: number; version: string }
+    | { ok: false; latencyMs: number; error: string };
+  auth: { ok: true; latencyMs: number } | { ok: false; latencyMs: number; error: string };
+}
+
+/**
  * Post-connect overview. Two data sources:
  *   - `gateway.*` — SPC channel chain via the gateway's JSON-RPC passthrough
  *   - `chainRpc.*` — Solana L1 via the direct chain RPC URL (where the escrow

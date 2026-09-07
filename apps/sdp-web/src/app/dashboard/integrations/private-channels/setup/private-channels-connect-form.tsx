@@ -1,11 +1,11 @@
 "use client";
 
-import {
-  type ConnectionProbeResult,
-  privateChannelInstanceInputSchema,
-  SANDBOX_DEFAULTS,
-} from "@sdp/private-channels";
-import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
+import { privateChannelInstanceInputSchema, SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import type {
+  PrivateChannelInstance,
+  PrivateChannelInstanceInput,
+  PrivateChannelProbeResult,
+} from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
@@ -383,7 +383,7 @@ export function PrivateChannelsConnectForm({
 
 type Translate = ReturnType<typeof useTranslations>;
 
-function probeFailureMessage(t: Translate, probe: ConnectionProbeResult): string {
+function probeFailureMessage(t: Translate, probe: PrivateChannelProbeResult): string {
   return isProjectRpcProbeFailure(probe)
     ? t("DashboardPrivateChannels.instance.projectRpcTestFailed")
     : t("DashboardPrivateChannels.instance.connectionTestFailed");
