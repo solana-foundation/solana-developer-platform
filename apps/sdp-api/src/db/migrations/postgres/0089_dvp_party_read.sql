@@ -27,18 +27,23 @@
 -- Is the calling tenant a party to this trade?
 -- ---------------------------------------------------------------------------
 --
--- 🚨 The organization scoping here comes from `custody_wallets`' OWN policy,
--- not from a predicate written below. That table carries no `organization_id`;
--- 0081 scopes it by walking `custody_config_id` / `custody_connection_id` up to
--- a parent that does. A policy expression is evaluated as the calling role, so
--- the nested read is filtered by that policy and `EXISTS` can only ever match a
--- wallet the caller's organization owns.
+-- The organization is matched EXPLICITLY here, against the same parents 0081
+-- walks to scope `custody_wallets` (that table carries no `organization_id` of
+-- its own; a wallet belongs to an org through its custody config or its
+-- connection).
 --
--- That is the whole security boundary of this function. Two ways it could be
--- widened by accident, both of which the coverage tests are there to catch:
--- marking this SECURITY DEFINER, or relaxing the policy on `custody_wallets`.
--- Restated rather than duplicated on purpose — copying the parent-walk here
--- would be a second copy of a rule that must not drift from the first.
+-- An earlier version left the scoping entirely to `custody_wallets`' own policy
+-- — a policy expression runs as the calling role, so the nested read is
+-- filtered and `EXISTS` can only match a wallet the caller owns. That is true,
+-- and it was too subtle to rest a cross-organization boundary on: it reads as
+-- an unscoped `EXISTS`, it silently widens if that policy is ever relaxed, and
+-- under any role holding BYPASSRLS it matches every organization's wallets.
+-- Verified by running: as a superuser this predicate answered true for an
+-- address belonging to a different tenant entirely.
+--
+-- So the rule is written twice on purpose, and the duplication is the point:
+-- the predicate below is correct on its own, and `custody_wallets`' policy
+-- still applies underneath it. Either alone would refuse a stranger.
 --
 -- Restricted to the `tenant` identity because the privileged identities already
 -- pass through `sdp_tenant_isolation_allows` and have no need of this path.
@@ -46,10 +51,16 @@ CREATE OR REPLACE FUNCTION sdp_dvp_caller_is_party(trade_user_a TEXT, trade_user
 RETURNS BOOLEAN
 LANGUAGE sql STABLE AS $$
   SELECT sdp_tenant_isolation_identity() = 'tenant'
+     AND sdp_tenant_isolation_organization_id() IS NOT NULL
      AND EXISTS (
        SELECT 1
        FROM custody_wallets cw
+       LEFT JOIN custody_configs cfg ON cfg.id = cw.custody_config_id
+       LEFT JOIN custody_connections conn ON conn.id = cw.custody_connection_id
        WHERE cw.public_key IN (trade_user_a, trade_user_b)
+         AND cw.status = 'active'
+         AND sdp_tenant_isolation_organization_id()
+             IN (cfg.organization_id, conn.organization_id)
      )
 $$;
 
