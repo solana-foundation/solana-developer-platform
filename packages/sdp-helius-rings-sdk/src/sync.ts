@@ -4,8 +4,9 @@ import type {
   PrivateTransactionDirection,
   PrivateTransactionKind,
   SyncReport as SdkSyncReport,
+  Wallet,
 } from "@heliuslabs/zolana/transaction";
-import { getPrivateTokenBalances, getPrivateTransactions } from "@heliuslabs/zolana/wallet";
+import { getPrivateTransactions } from "@heliuslabs/zolana/wallet";
 import type {
   AssetBalance,
   KnownAsset,
@@ -84,13 +85,12 @@ export async function syncRingsWallet(
 
       const labels = assetLabels(input.knownAssets ?? []);
       const transactions = getPrivateTransactions(wallet);
+      const { balances, unspentNotes } = perRingBalances(wallet, labels);
 
       return {
-        balances: getPrivateTokenBalances(wallet).map((balance) =>
-          toAssetBalance(balance.mint, balance.amount, labels)
-        ),
+        balances,
         history: transactions.map(toHistoryEntry),
-        report: toSyncReport(wallet.utxos().filter((entry) => !entry.spent).length, report),
+        report: toSyncReport(unspentNotes, report),
         // Photon is queried by view tag and nullifier, not by outer signature,
         // so the signatures a sync observed are the ones its history rows were
         // reconstructed from.
@@ -122,10 +122,56 @@ function assetLabels(known: readonly KnownAsset[]): Map<string, KnownAsset> {
   return new Map(known.map((asset) => [asset.mint, asset]));
 }
 
+const byString = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0;
+
+/** Empty string sorts before every base58 id, keeping the default bucket first. */
+const ringKey = (ring: string | null): string => ring ?? "";
+
+/**
+ * One balance per (ring, mint) over unspent notes. One wallet's notes mix
+ * unbound and ring-bound entries; default spend paths reach only unbound notes
+ * and a ring's flows only its own, so merging them (as the SDK's own balance
+ * read does) would overstate every spendable position. Default bucket first,
+ * then rings by id, mints ascending — a deterministic order the dashboard's
+ * adjacent-run grouping relies on. Counts the unspent notes it already visits,
+ * so the report does not pay `wallet.utxos()`'s per-note deep snapshot twice.
+ */
+function perRingBalances(
+  wallet: Wallet,
+  labels: Map<string, KnownAsset>
+): { balances: AssetBalance[]; unspentNotes: number } {
+  const perRing = new Map<string | null, Map<string, bigint>>();
+  let unspentNotes = 0;
+  for (const entry of wallet.utxos()) {
+    if (entry.spent) {
+      continue;
+    }
+    unspentNotes += 1;
+    const ring = entry.utxo.ringProgramId ?? null;
+    let perMint = perRing.get(ring);
+    if (!perMint) {
+      perMint = new Map<string, bigint>();
+      perRing.set(ring, perMint);
+    }
+    perMint.set(entry.utxo.asset, (perMint.get(entry.utxo.asset) ?? 0n) + entry.utxo.amount);
+  }
+
+  const balances = [...perRing.entries()]
+    .sort(([left], [right]) => byString(ringKey(left), ringKey(right)))
+    .flatMap(([ring, perMint]) =>
+      [...perMint.entries()]
+        .sort(([left], [right]) => byString(left, right))
+        .map(([mint, amount]) => toAssetBalance(mint, amount, labels, ring))
+    );
+  return { balances, unspentNotes };
+}
+
 function toAssetBalance(
   reportedMint: string,
   amount: bigint,
-  labels: Map<string, KnownAsset>
+  labels: Map<string, KnownAsset>,
+  ringProgramId: string | null
 ): AssetBalance {
   const mint = sdpMint(reportedMint);
   const label = labels.get(mint);
@@ -135,6 +181,7 @@ function toAssetBalance(
     symbol: label?.symbol ?? "UNKNOWN",
     decimals: label?.decimals ?? 0,
     amountRaw: amount.toString(),
+    ringProgramId,
   };
 }
 

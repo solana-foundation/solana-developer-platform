@@ -1,3 +1,4 @@
+import type { CustodyConnectionCheckStatus, CustodyWalletStatus } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
@@ -42,7 +43,7 @@ export interface CustodyConnectionRow {
   request_delay_ms: number | null;
   status: CustodyConnectionStatus;
   setup_metadata: unknown;
-  last_check_status: string | null;
+  last_check_status: CustodyConnectionCheckStatus | null;
   last_check_at: string | null;
   last_check_failure_code: string | null;
   activated_at: string | null;
@@ -53,17 +54,21 @@ export interface CustodyConnectionRow {
 export interface ProjectConnectionListRow {
   id: string;
   provider: "privy";
-  status: CustodyConnectionStatus;
+  connection_status: CustodyConnectionStatus;
   setup_metadata: unknown;
-  last_check_status: string | null;
+  last_check_status: CustodyConnectionCheckStatus | null;
   last_check_at: string | null;
   last_check_failure_code: string | null;
   activated_at: string | null;
   created_at: string;
-  credential_id: string;
   credential_label: string;
   credential_status: ProviderCredentialStatus;
-  credential_display_metadata: unknown;
+  provider_account_fingerprint: string | null;
+  default_custody_wallet_id: string | null;
+  default_wallet_id: string | null;
+  default_wallet_public_key: string | null;
+  default_wallet_status: CustodyWalletStatus | null;
+  is_selected: boolean;
 }
 
 export interface ProjectConnectionState extends CustodyConnectionRow {
@@ -192,19 +197,32 @@ export class ProviderCredentialStore {
     const connections = await this.db.queryMany<ProjectConnectionListRow>(
       `SELECT c.id,
               c.provider,
-              c.status,
+              c.status AS connection_status,
               c.setup_metadata,
               c.last_check_status,
               c.last_check_at,
               c.last_check_failure_code,
               c.activated_at,
               c.created_at,
-              pc.id AS credential_id,
               pc.label AS credential_label,
               pc.status AS credential_status,
-              pc.display_metadata AS credential_display_metadata
+              c.provider_account_fingerprint,
+              c.default_custody_wallet_id,
+              default_wallet.wallet_id AS default_wallet_id,
+              default_wallet.public_key AS default_wallet_public_key,
+              default_wallet.status AS default_wallet_status,
+              EXISTS (
+                SELECT 1
+                FROM custody_scope_defaults selected
+                WHERE selected.organization_id = c.organization_id
+                  AND selected.project_id = c.project_id
+                  AND selected.default_custody_connection_id = c.id
+              ) AS is_selected
          FROM custody_connections c
          JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+         LEFT JOIN custody_wallets default_wallet
+           ON default_wallet.id = c.default_custody_wallet_id
+          AND default_wallet.custody_connection_id = c.id
         WHERE c.organization_id = ? AND c.project_id = ?
         ORDER BY c.created_at DESC, c.id DESC
         LIMIT ? OFFSET ?`,

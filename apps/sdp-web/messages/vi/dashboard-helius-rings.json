@@ -108,7 +108,9 @@
       "working": "Vẫn đang xử lý",
       "retryOf": "Thử lại của {id}",
       "retriedAs": "Đã thử lại thành {id}",
-      "state_voided": "Đã void"
+      "state_voided": "Đã void",
+      "ring": "Ring",
+      "ringDefault": "Ring mặc định"
     },
     "errors": {
       "loadFailed": "Không thể tải dữ liệu Helius Rings. Vui lòng thử lại sau.",
@@ -154,7 +156,13 @@
       "recipientPrivateWallet": "Private wallet người nhận",
       "recipientPrivateWalletPlaceholder": "Chọn một private wallet",
       "privateTransferNoRecipients": "Không có private wallet nào khác đã được cấp phát trong project này để chuyển đến.",
-      "started": "Thao tác đã bắt đầu. Theo dõi trong mục Activity bên dưới."
+      "started": "Thao tác đã bắt đầu. Theo dõi trong mục Activity bên dưới.",
+      "ring": "Ring",
+      "ringDefault": "Ring mặc định",
+      "ringShieldHint": "Ring nơi các shielded notes được ghi vào.",
+      "ringSpendHint": "Nguồn tiền: chỉ các note gắn với ring đã chọn mới có thể được chi tiêu từ ring này.",
+      "ringNoneActive": "Chưa có ring nào hoạt động; hãy hoàn tất khởi tạo trong thẻ Custom rings trước khi chọn một ring.",
+      "summaryRing": "Ring"
     },
     "zones": {
       "title": "Zones",
@@ -207,7 +215,11 @@
       "executing": "Đang thực thi…",
       "void": "Void",
       "voiding": "Đang void…",
-      "voidConfirm": "Void xác nhận giao dịch đã ký này chưa từng lên on-chain và giải phóng spend slot của Wallet. Chỉ tiếp tục nếu bạn đã đối chiếu chữ ký và xác nhận chắc chắn giao dịch không tồn tại."
+      "voidConfirm": "Void xác nhận giao dịch đã ký này chưa từng lên on-chain và giải phóng spend slot của Wallet. Chỉ tiếp tục nếu bạn đã đối chiếu chữ ký và xác nhận chắc chắn giao dịch không tồn tại.",
+      "recheck": "Kiểm tra indexer",
+      "rechecking": "Đang kiểm tra…",
+      "recheckFound": "Indexer đã bắt kịp — thao tác này hiện đã hoàn tất.",
+      "recheckStillMissing": "Indexer vẫn chưa có bản ghi về giao dịch này. Indexer có thể đang chậm hơn chuỗi; hãy kiểm tra lại trước khi void."
     },
     "workspace": {
       "selectPrompt": "Chọn một private wallet ở trên để xem chi tiết, thao tác và hoạt động của nó."
@@ -218,7 +230,33 @@
       "empty": "0",
       "notProvisioned": "Chưa được cấp phát.",
       "unpriced": "—",
-      "privateBalanceLabel": "Số dư private"
+      "privateBalanceLabel": "Số dư private",
+      "defaultRing": "Ring mặc định",
+      "customRing": "Custom ring {id}"
+    },
+    "ring": {
+      "title": "Custom ring",
+      "description": "Các custom ring có tên cho project này. Ops triển khai program của từng ring và bàn giao id của nó; ghi lại tên và id tại đây sẽ hoàn tất quá trình khởi tạo (auditor key, ring config, quyền đọc, lookup table) thông qua custody. Khi hoạt động, mọi thao tác đều có thể nhắm đến ring theo tên — các thao tác của ring mặc định không bao giờ bị chặn bởi ring này.",
+      "none": "Chưa có custom ring nào được ghi lại. Mọi thao tác đều dùng ring mặc định.",
+      "openList": "Xem custom ring",
+      "dialogDescription": "Chọn một ring để xem program, auditor key và lookup table của nó.",
+      "nameLabel": "Tên ring",
+      "namePlaceholder": "treasury",
+      "programIdLabel": "Program id của ring",
+      "programIdPlaceholder": "Program id Base58 từ bản deployment của ops",
+      "programId": "Program của ring",
+      "auditorKey": "Auditor public key",
+      "lookupTable": "Lookup table",
+      "submit": "Ghi lại và khởi tạo",
+      "submitting": "Đang khởi tạo…",
+      "retry": "Thử khởi tạo lại",
+      "repointHint": "Gửi lại một tên đã ghi sẽ tiếp tục quá trình khởi tạo của ring. Nhập id khác dưới tên đó sẽ thay thế program của ring — chỉ khả thi khi ring chưa từng hoạt động.",
+      "submitFailed": "Khởi tạo ring thất bại.",
+      "status_pending": "Đang chờ",
+      "status_active": "Hoạt động",
+      "status_failed": "Thất bại",
+      "explain_pending": "Quá trình khởi tạo chưa hoàn tất. Các thao tác chưa thể nhắm đến ring này; các thao tác của ring mặc định không bị ảnh hưởng.",
+      "explain_failed": "Khởi tạo thất bại; các thao tác không thể nhắm đến ring này cho đến khi thử lại thành công. Các thao tác của ring mặc định không bị ảnh hưởng."
     }
   }
 }

@@ -9,7 +9,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { badRequest, internalError } from "@/lib/errors";
+import { internalError } from "@/lib/errors";
 import { buildEarnVaultWithdrawalFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
@@ -21,7 +21,7 @@ import {
 import { createVaultDeadline } from "./vault-deadline";
 import { appendVaultRequestMemo } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
-import { refusedBuildMessage } from "./vault-refusals";
+import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
 
 /**
@@ -224,9 +224,7 @@ export async function withdrawFromVault(
     plan = appendVaultRequestMemo(built, "vault-withdrawal", input.requestId);
   } catch (error) {
     getLogger().error({ error }, "vault withdrawal: build failed before signing");
-    const refusal = refusedBuildMessage(error);
-    if (refusal) throw badRequest(refusal);
-    throw error;
+    rethrowVaultProviderFailure(error);
   }
 
   if (plan.cluster !== cluster) {

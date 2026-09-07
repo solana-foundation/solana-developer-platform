@@ -1,4 +1,5 @@
 import { Hono, type Next } from "hono";
+import { runWithSystemDatabaseIdentity } from "@/db";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
@@ -74,7 +75,11 @@ const issuance = new Hono<{ Bindings: Env }>();
 // below so wallets and explorers can fetch it without credentials (Hono applies
 // `use(...)` only to routes registered after it). App-wide KV/rate-limit bypass
 // for this path is wired via KV_FREE_PATHS in app.ts.
-issuance.get("/tokens/:tokenId/metadata.json", serveTokenMetadata);
+// Public lookups resolve a token by id with no tenant in scope, so the
+// handler runs under an explicit system database identity.
+issuance.get("/tokens/:tokenId/metadata.json", (c) =>
+  runWithSystemDatabaseIdentity("http:token-metadata", () => serveTokenMetadata(c))
+);
 
 issuance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 issuance.use("*", projectContextMiddleware());

@@ -62,6 +62,7 @@ export async function seedCachedApiKey(
     JSON.stringify({
       ...data,
       rotationDeadline: data.rotationDeadline ?? null,
+      organizationStatus: data.organizationStatus ?? "active",
       walletScope:
         data.walletScope ??
         ((data.walletBindings?.length ?? 0) > 0 || data.signingWalletId ? "selected" : "all"),

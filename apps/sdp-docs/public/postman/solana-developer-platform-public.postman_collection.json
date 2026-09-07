@@ -2170,6 +2170,30 @@
           }
         },
         {
+          "name": "Preview a direct vault deposit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-deposit-previews",
+            "description": "Quotes how many shares a direct vault deposit would mint from the provider's live accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no idempotency key, and 501 when the provider cannot quote deposits.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"amount\": \"25\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Get external-wallet position totals",
           "request": {
             "method": "GET",

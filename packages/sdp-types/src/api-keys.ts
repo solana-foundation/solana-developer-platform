@@ -90,6 +90,23 @@ export interface CachedApiKey {
    * entries written before rotation-deadline enforcement was deployed.
    */
   rotationDeadline?: string | null;
+  /**
+   * Status of the owning organization. Authentication rejects any key whose
+   * organization is not active, independently of the key's own status — a key
+   * created or rotated after an organization deletion enumerated its keys is
+   * never covered by that deletion's revocation or cache refresh. Undefined is
+   * reserved for legacy cache entries written before this check was deployed.
+   */
+  organizationStatus?: string;
+  /**
+   * Set on a cache entry a miss-path fill has installed but not yet verified
+   * against Postgres. Readers must treat such entries as cache misses: the
+   * install's snapshot predates its CAS win, and cache eviction can have
+   * erased a newer revocation's terminal entry in between. The fill replaces
+   * the marker with a trusted entry only after its post-install Postgres read
+   * comes back clean.
+   */
+  pendingVerification?: true;
 }
 
 // API Request/Response types
