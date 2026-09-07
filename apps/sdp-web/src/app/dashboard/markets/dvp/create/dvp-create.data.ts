@@ -4,10 +4,9 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 /**
  * What the create form needs to offer real choices instead of blank fields.
  *
- * The asset leg comes from the organization's own issued tokens — Zach:
- * "definitely tied to assets from issuance" — so the common case is picking a
- * token you already made rather than pasting a mint address you have to go and
- * look up.
+ * The asset leg is tied to the organization's own issued tokens, so the common
+ * case is picking a token you already made rather than pasting a mint address
+ * you have to go and look up.
  */
 
 export interface DvpCreateOption {
