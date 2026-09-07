@@ -296,4 +296,35 @@ export interface DvpTradeRepository {
     signature: string
   ): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
+  /**
+   * Open trades naming one of these addresses, created by somebody else.
+   *
+   * The addresses are the caller's own custody wallet public keys, resolved
+   * server-side. They are never taken from a request: a party address is the
+   * only input, so accepting one would make this an oracle for enumerating any
+   * address's trades.
+   *
+   * Excludes the caller's own project, because a trade you created already
+   * appears in your list and arriving in both places would read as two trades.
+   * Scoped by project rather than organization so an org that is genuinely both
+   * the agent and a party — one project sets terms, another holds the wallet —
+   * still discovers it.
+   *
+   * Reaching rows another organization owns is the point, and it is allowed by
+   * exactly one thing: the `sdp_dvp_party_read` policy added in 0089, which
+   * admits a SELECT when a custody wallet of the calling tenant matches
+   * `user_a` or `user_b`. The address filter below is not the security boundary;
+   * it is the query. The boundary is in the database and holds even if this
+   * predicate is wrong.
+   */
+  listInboundForParty(scope: DvpInboundScope, limit: number): Promise<DvpTradeRow[]>;
+}
+
+/** Who is asking, and which addresses make a trade theirs. */
+export interface DvpInboundScope {
+  organizationId: string;
+  /** Excluded from the results: trades this project created are already listed. */
+  projectId: string;
+  /** Public keys of the caller's custody wallets. Empty means no results. */
+  partyAddresses: string[];
 }

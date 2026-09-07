@@ -410,5 +410,33 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },
+
+    async listInboundForParty(scope, limit) {
+      // No addresses means no wallets, which means nothing can name this
+      // caller. Returning early keeps an `IN ()` out of the SQL, which is a
+      // syntax error in Postgres rather than an empty result.
+      if (scope.partyAddresses.length === 0) {
+        return [];
+      }
+
+      // Only statuses where the party can still do something. A settled or
+      // cancelled trade naming you is history, and putting it in a list called
+      // "waiting on you" would be false. `expired` is left out for the same
+      // reason: nothing a party funds can settle after it.
+      const placeholders = scope.partyAddresses.map(() => "?").join(", ");
+      const result = await db
+        .prepare(
+          `SELECT ${SELECT_COLUMNS}
+             FROM dvp_trades
+            WHERE status IN ('created', 'partially_funded', 'funded')
+              AND project_id <> ?
+              AND (user_a IN (${placeholders}) OR user_b IN (${placeholders}))
+            ORDER BY created_at DESC
+            LIMIT ?`
+        )
+        .bind(scope.projectId, ...scope.partyAddresses, ...scope.partyAddresses, limit)
+        .all<Record<string, unknown>>();
+      return result.results.map((row) => mapDvpTradeRow(row));
+    },
   };
 }

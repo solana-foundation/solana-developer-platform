@@ -72,6 +72,80 @@ export async function fetchDvpTrades(request: SdpApiClient["request"]): Promise<
   }
 }
 
+/**
+ * A trade somebody else created that names one of this project's wallets.
+ *
+ * A deliberately smaller shape than `DvpTrade`. The endpoint withholds
+ * everything belonging to the creating organization, so a type carrying those
+ * fields as optional would invite a surface to reach for one and render a blank
+ * where a reader expects a value.
+ */
+export interface DvpInboundTrade {
+  id: string;
+  status: string;
+  swapDvp: string;
+  /** Which leg is this caller's. */
+  yourSide: "a" | "b";
+  legs: {
+    a: DvpInboundLeg;
+    b: DvpInboundLeg;
+  };
+  expiryTimestamp: string;
+  createdAt: string;
+}
+
+export interface DvpInboundLeg {
+  party: string;
+  mint: string;
+  amount: string;
+  decimals: number | null;
+  symbol: string | null;
+  escrow: string;
+  observedAmount: string | null;
+  frozen: boolean;
+}
+
+/** Only the fields the panel reads, so a new optional field upstream is not a crash. */
+function isRenderableInbound(value: unknown): value is DvpInboundTrade {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const trade = value as Partial<DvpInboundTrade>;
+  return (
+    typeof trade.id === "string" &&
+    (trade.yourSide === "a" || trade.yourSide === "b") &&
+    typeof trade.legs === "object" &&
+    trade.legs !== null &&
+    typeof trade.legs.a === "object" &&
+    typeof trade.legs.b === "object"
+  );
+}
+
+/**
+ * Trades waiting on this caller.
+ *
+ * Never throws and never surfaces its own error: this panel sits above the main
+ * list, and a failure to read it must not replace the page a reader came for.
+ * An unreadable inbound list renders as no panel, which is what an empty one
+ * renders as too — the distinction matters to us and not to them.
+ */
+export async function fetchDvpInboundTrades(
+  request: SdpApiClient["request"]
+): Promise<DvpInboundTrade[]> {
+  try {
+    const response = await request("/v1/dvp/trades/inbound");
+    if (!response.ok) {
+      return [];
+    }
+    const body = (await response.json().catch(() => ({}))) as {
+      data?: { trades?: unknown[] };
+    };
+    return (body.data?.trades ?? []).filter(isRenderableInbound);
+  } catch {
+    return [];
+  }
+}
+
 export interface DvpTradeResult {
   trade: DvpTrade | null;
   error: string | null;

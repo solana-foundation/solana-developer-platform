@@ -56,7 +56,7 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
 function renderList(trades: DvpTrade[], error: string | null = null): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <DvpTradesWorkspace error={error} trades={trades} />
+      <DvpTradesWorkspace inbound={[]} error={error} trades={trades} />
     </I18nProvider>
   );
 }

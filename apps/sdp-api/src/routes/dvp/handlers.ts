@@ -15,6 +15,7 @@ import {
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
+import { listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import { observeDvpTradeIfStale, observeDvpTradeNow } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
@@ -24,6 +25,7 @@ import {
 } from "@/services/dvp/settle-preflight";
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import type { Env } from "@/types/env";
+import { toDvpInboundResponse } from "./inbound-response";
 import type { DvpCloseResolved } from "./policy";
 import { type createDvpTradeSchema, listDvpTradesQuerySchema } from "./schemas";
 
@@ -348,6 +350,31 @@ export const fundTrade = async (c: AppContext) => {
 
 export const settleTrade = closeTrade("settle");
 export const cancelTrade = closeTrade("cancel");
+
+/**
+ * Trades somebody else created that are waiting on this caller.
+ *
+ * No parameters at all, deliberately. The filter is the caller's own custody
+ * wallet addresses, resolved server-side: a party address is the only input
+ * this would otherwise take, and accepting one would make the endpoint an
+ * oracle for enumerating the trades of any address on Solana.
+ *
+ * Its own serializer, `toDvpInboundResponse`, rather than the one the rest of
+ * this file uses. That one speaks to the organization that created the trade
+ * and carries fields belonging to it.
+ */
+export const listInboundTrades = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const inbound = await listInboundDvpTrades(c.env, {
+    organizationId: auth.organizationId,
+    projectId,
+    auth,
+  });
+
+  return success(c, { trades: inbound.map(toDvpInboundResponse) });
+};
 
 export const listTrades = async (c: AppContext) => {
   const auth = getAuth(c);

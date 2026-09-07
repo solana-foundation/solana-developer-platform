@@ -12,6 +12,7 @@ import {
   fundTrade,
   getTrade,
   inspectMint,
+  listInboundTrades,
   listTrades,
   settleTrade,
 } from "./handlers";
@@ -59,6 +60,11 @@ dvp.post(
 // `payments:read` so it does not become an unauthenticated RPC proxy.
 dvp.get("/mints/:mint", requirePermissions("wallets:read", "payments:read"), inspectMint);
 dvp.get("/trades", requirePermissions("wallets:read", "payments:read"), listTrades);
+// BEFORE `/trades/:tradeId`, or the parameter route swallows it and "inbound"
+// is looked up as a trade id. Trades another organization created that name one
+// of this caller's wallets; takes no parameters, because the only one it could
+// take is a party address and that would make it an enumeration oracle.
+dvp.get("/trades/inbound", requirePermissions("wallets:read", "payments:read"), listInboundTrades);
 dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"), getTrade);
 
 // Settle and cancel are the only two actions the settlement authority can take,

@@ -31,6 +31,7 @@ import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
+import { DvpInboundPanel } from "./dvp-inbound-panel";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpTrade,
@@ -43,7 +44,7 @@ import {
   matchesAddressQuery,
   overFundedLegs,
 } from "./dvp-trade";
-import { DVP_TRADES_PAGE_SIZE } from "./dvp-trades.data";
+import { DVP_TRADES_PAGE_SIZE, type DvpInboundTrade } from "./dvp-trades.data";
 
 /**
  * A leg as one cell: what it is worth, and whether the escrow has it.
@@ -144,9 +145,12 @@ const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
 
 export function DvpTradesWorkspace({
   trades,
+  inbound,
   error,
 }: {
   trades: DvpTrade[];
+  /** Trades another organization created that name one of this project's wallets. */
+  inbound: DvpInboundTrade[];
   error: string | null;
 }) {
   const t = useTranslations();
@@ -206,6 +210,11 @@ export function DvpTradesWorkspace({
             </Button>
           )}
         </div>
+
+        {/* Before the list, and before the error: a trade waiting on this
+            project is the only item on the page with an expiry running against
+            it, and it is not affected by the list having failed to load. */}
+        <DvpInboundPanel trades={inbound} />
 
         {/* An error and a table of nothing say different things, and showing
             both says the list is empty when the truth is that it could not be
