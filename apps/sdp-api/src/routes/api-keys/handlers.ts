@@ -13,12 +13,18 @@ import {
   createPolicyRepository,
   type UpsertApiKeyWalletPolicyBindingInput,
 } from "@/db/repositories";
+import {
+  dropApiKeyCacheEntry,
+  isApiKeyCacheWritable,
+  refreshApiKeyCache,
+} from "@/lib/api-key-cache";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { ApiKeyService } from "@/services/api-key.service";
+import { getLogger } from "@/runtime/logger";
+import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
@@ -45,6 +51,114 @@ import type {
 } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+/**
+ * A mutation must not report success while the cache may still serve the
+ * pre-mutation authorization. refreshApiKeyCache returns false when CAS
+ * contention left a possibly-stale trusted entry in the slot; retry with
+ * backoff, and if it never converges surface a retriable failure — the DB
+ * mutation is already committed, so the caller re-issues the request rather
+ * than trusting a success that silently kept the old cached authorization.
+ */
+async function ensureApiKeyCacheRefreshed(
+  db: DatabaseClient,
+  kv: Parameters<typeof refreshApiKeyCache>[1],
+  keyHash: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    if (await refreshApiKeyCache(db, kv, keyHash)) {
+      return;
+    }
+  }
+  throw new AppError(
+    "INTERNAL_ERROR",
+    "The change was saved but the key's cached authorization could not be refreshed yet; retry the request"
+  );
+}
+
+/**
+ * Best-effort variant for rotation, the one mutation that must NOT fail the
+ * request over this write: the replacement key's one-time secret is already
+ * committed and exists only in the pending response, so a 500 here pushes
+ * the caller into rotating again — minting a second live credential while
+ * the first one's secret is lost.
+ *
+ * Retries absorb transient failures. When they are exhausted the slot may
+ * still hold the pre-rotation entry, whose `rotationDeadline: null` would let
+ * the old secret reach protected endpoints past the deadline Postgres now
+ * carries — and with `gracePeriodHours: 0` that deadline is immediate. So the
+ * entry is dropped instead of left standing: the next request misses and
+ * re-reads the real deadline, rather than waiting on the reconciliation
+ * sweep. Only when that also fails is the sweep the remaining path.
+ */
+async function tryRefreshApiKeyCache(
+  db: DatabaseClient,
+  kv: Parameters<typeof refreshApiKeyCache>[1],
+  keyHash: string
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    try {
+      if (await refreshApiKeyCache(db, kv, keyHash)) {
+        return true;
+      }
+    } catch {
+      // Thrown store errors retry like lost CAS rounds; the drop below and
+      // then the sweep are the remaining paths if the store stays down.
+    }
+  }
+
+  try {
+    await dropApiKeyCacheEntry(kv, keyHash);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Undo a committed rotation whose cache invalidation failed, putting Postgres
+ * back into the state the stale cached entry already describes.
+ *
+ * This is the last repair that does not need the cache, so it retries rather
+ * than settling for the one outcome nothing can fix: Postgres carrying a
+ * rotation deadline the cache does not know about, which lets the old secret
+ * authenticate past it. A single attempt would concede that on a dropped
+ * connection or a lock timeout — far likelier than an outage lasting the whole
+ * window. The undo is idempotent (clear the deadline, revoke the replacement),
+ * so a retry after a partial-looking failure is safe.
+ *
+ * Failing every attempt means neither store accepts writes. Nothing can then
+ * record the deadline anywhere the reader looks — not this handler, and not
+ * the reconciliation sweep, which writes to the same cache — so the caller is
+ * told which key to revoke by hand.
+ */
+async function tryUndoRotation(
+  apiKeyService: ApiKeyService,
+  keyId: string,
+  replacementKeyId: string
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    try {
+      await apiKeyService.undoRotation(keyId, replacementKeyId);
+      return true;
+    } catch (error) {
+      getLogger().error(
+        { error, keyId, replacementKeyId, attempt },
+        "Rotation rollback attempt failed"
+      );
+    }
+  }
+  return false;
+}
 
 function resolveActor(c: AppContext): {
   organizationId: string;
@@ -401,9 +515,17 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
     }
   });
 
-  // Invalidate cache if auth-relevant fields changed
-  if (body.allowedIps !== undefined || body.permissions !== undefined || walletSelection.touched) {
-    await c.var.kv.apiKeys.delete(`key:${existing.key_hash}`);
+  // Refresh cache if auth-relevant fields changed. expiresAt matters too:
+  // the middleware enforces expiration from the cached entry, so a stale one
+  // would honor the old deadline for the full cache TTL. Refresh, never
+  // delete: an emptied slot invites an in-flight stale fill to repopulate it.
+  if (
+    body.allowedIps !== undefined ||
+    body.permissions !== undefined ||
+    body.expiresAt !== undefined ||
+    walletSelection.touched
+  ) {
+    await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
   }
 
   // Audit log
@@ -580,6 +702,20 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
   const body = c.req.valid("json");
   const gracePeriodHours = body.gracePeriodHours ?? 24;
 
+  // Checked BEFORE anything commits. Once the rotation lands, the old key's
+  // cached entry must be invalidated or it keeps authorizing past its new
+  // deadline — and every recovery path (the refresh, the fallback drop, the
+  // reconciliation sweep) writes to this same store, so none of them can
+  // help if it is refusing writes. Rotation cannot be rolled back, cannot
+  // fail its response, and cannot be retried, so the only safe answer to an
+  // unwritable cache is to not start.
+  if (!(await isApiKeyCacheWritable(c.var.kv.apiKeys))) {
+    throw new AppError(
+      "SERVICE_UNAVAILABLE",
+      "Rotation is unavailable right now because cached credentials cannot be invalidated; nothing was changed, so retry shortly"
+    );
+  }
+
   const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const rotation = await apiKeyService.rotateApiKey(
     keyId,
@@ -593,17 +729,71 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     throw notFound("API key");
   }
 
-  // Invalidate old key cache
-  await c.var.kv.apiKeys.delete(`key:${rotation.previousKeyHash}`);
+  if (isApiKeyAlreadyRotated(rotation)) {
+    // A live replacement already exists, so an earlier attempt committed
+    // one. Its secret was delivered only in that attempt's response, so
+    // minting a second key here would leave a live credential nobody holds
+    // — name the replacement instead and let the caller decide.
+    throw new AppError(
+      "CONFLICT",
+      `This API key was already rotated; its replacement is ${rotation.alreadyRotatedTo}. Revoke that key and rotate again if its secret was never received.`
+    );
+  }
 
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "update",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: { action: "rotate", newKeyId: rotation.apiKey.id, gracePeriodHours },
-  });
+  // Post-commit: the replacement exists and its secret lives only in the
+  // response below, so this must not simply throw — a 500 here would lose
+  // that secret. The pre-commit probe rules out a store that is already
+  // down, but it cannot stop one from failing in the window that follows.
+  const oldKeyCacheRefreshed = await tryRefreshApiKeyCache(
+    getDb(c.env),
+    c.var.kv.apiKeys,
+    rotation.previousKeyHash
+  );
+
+  if (!oldKeyCacheRefreshed) {
+    // The cache kept the pre-rotation entry: active, no deadline. Returning
+    // the secret now would leave the old key usable past the deadline
+    // Postgres carries, with every repair path blocked on the same store.
+    // Undo instead — put Postgres back into the state that stale entry
+    // already describes, so nothing is left inconsistent with it.
+    if (await tryUndoRotation(apiKeyService, keyId, rotation.apiKey.id)) {
+      getLogger().error(
+        { keyId, newKeyId: rotation.apiKey.id },
+        "Rotated key cache entry could not be refreshed or dropped; rotation rolled back"
+      );
+      throw new AppError(
+        "SERVICE_UNAVAILABLE",
+        "Rotation was rolled back because cached credentials could not be invalidated; nothing was changed, so retry shortly"
+      );
+    }
+
+    // Neither store accepted writes, so the rotation stands with a cached
+    // entry that still reports no deadline. Nothing here can repair that —
+    // the sweep writes to the same cache — so name the key an operator has
+    // to revoke by hand rather than imply an automatic recovery.
+    getLogger().error(
+      { keyId, newKeyId: rotation.apiKey.id },
+      "Rotated key cache entry could not be invalidated and every rollback attempt failed; the old secret authenticates until the cache accepts writes or its entry expires"
+    );
+    throw new AppError(
+      "INTERNAL_ERROR",
+      `Rotation committed but cached credentials could not be invalidated and the rollback failed. The replacement key is ${rotation.apiKey.id}; revoke it and retry, as its secret was not delivered.`
+    );
+  }
+
+  try {
+    await new AuditService(getDb(c.env)).log(c, {
+      action: "update",
+      resourceType: "api_key",
+      resourceId: keyId,
+      metadata: { action: "rotate", newKeyId: rotation.apiKey.id, gracePeriodHours },
+    });
+  } catch (error) {
+    getLogger().error(
+      { error, keyId, newKeyId: rotation.apiKey.id },
+      "Failed to audit an API key rotation that already committed"
+    );
+  }
 
   const response: RotateApiKeyResponse = {
     apiKey: rotation.apiKey,
@@ -627,16 +817,26 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
 
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      "SELECT id, name, key_hash, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
     .bind(keyId, actor.organizationId, projectId)
-    .first<{ id: string; name: string; status: string; revoked_at: string | null }>();
+    .first<{
+      id: string;
+      name: string;
+      key_hash: string;
+      status: string;
+      revoked_at: string | null;
+    }>();
 
   if (!existing) {
     throw notFound("API key");
   }
 
   if (existing.status === "deactivated" || existing.status === "revoked") {
+    // Already revoked in Postgres, but the cache may still say otherwise
+    // (e.g. the earlier revocation crashed between the DB write and the
+    // cache write). Re-assert before reporting success.
+    await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
     return success(c, {
       success: true,
       revokedAt: existing.revoked_at ?? new Date().toISOString(),
@@ -658,8 +858,10 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     throw notFound("API key");
   }
 
-  // Invalidate KV cache
-  await c.var.kv.apiKeys.delete(`key:${revokedKey.keyHash}`);
+  // Overwrite the cache with the revoked state before reporting success.
+  // A plain delete would leave a window where an in-flight fill from a
+  // pre-revocation DB read repopulates the entry for the full cache TTL.
+  await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, revokedKey.keyHash);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

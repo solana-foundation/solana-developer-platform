@@ -1,25 +1,25 @@
-*    @solana-foundation/sdp-maintainers
+*                                                       @solana-foundation/foundation-product-team
 
 # Custody and signing
-/packages/sdp-custody/                                  @multipletwigs @pashpashkin
-/apps/sdp-api/src/services/adapters/signing/            @multipletwigs @pashpashkin
-/apps/sdp-api/src/services/domain/signing/              @multipletwigs @pashpashkin
+/packages/sdp-custody/                                  @solana-foundation/foundation-product-team
+/apps/sdp-api/src/services/adapters/signing/            @solana-foundation/foundation-product-team
+/apps/sdp-api/src/services/domain/signing/              @solana-foundation/foundation-product-team
 
 # Payments and ramps
-/packages/sdp-payments/                                 @multipletwigs @pashpashkin
-/apps/sdp-api/src/routes/payments/                      @multipletwigs @pashpashkin
+/packages/sdp-payments/                                 @solana-foundation/foundation-product-team
+/apps/sdp-api/src/routes/payments/                      @solana-foundation/foundation-product-team
 
 # Issuance
-/packages/sdp-issuance/                                 @arseniy-nikitochkin @multipletwigs
-/apps/sdp-api/src/routes/issuance/                      @arseniy-nikitochkin @multipletwigs
+/packages/sdp-issuance/                                 @solana-foundation/foundation-product-team
+/apps/sdp-api/src/routes/issuance/                      @solana-foundation/foundation-product-team
 
 # Authentication and authorization
-/apps/sdp-api/src/middleware/                           @multipletwigs @pashpashkin
-/apps/sdp-api/src/lib/auth.ts                           @multipletwigs @pashpashkin
+/apps/sdp-api/src/middleware/                           @solana-foundation/foundation-product-team
+/apps/sdp-api/src/lib/auth.ts                           @solana-foundation/foundation-product-team
 
 # Database migrations
-/apps/sdp-api/src/db/migrations/                        @pashpashkin @multipletwigs
+/apps/sdp-api/src/db/migrations/                        @solana-foundation/foundation-product-team
 
 # CI/CD, release, and deploy machinery
-/.github/                                               @G1de0n @niks3089
-/scripts/                                               @G1de0n @niks3089
+/.github/                                               @solana-foundation/foundation-product-team
+/scripts/                                               @solana-foundation/foundation-product-team

@@ -13,6 +13,8 @@ export const paymentsQueryKeys = {
     ["offramp-transfer-status", transferId] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
+  isCounterpartyRequirementsKey: (key: unknown) =>
+    Array.isArray(key) && key[0] === "counterparty-requirements",
   counterpartyRequirements: ({
     counterpartyId,
     provider,
@@ -20,7 +22,6 @@ export const paymentsQueryKeys = {
     cryptoToken,
     fiatCurrency,
     destinationWallet,
-    destinationCountry,
   }: {
     counterpartyId: string;
     provider: RampProviderId;
@@ -28,7 +29,6 @@ export const paymentsQueryKeys = {
     cryptoToken: string;
     fiatCurrency: RampFiatCurrency;
     destinationWallet: string;
-    destinationCountry: string;
   }) =>
     [
       "counterparty-requirements",
@@ -38,7 +38,6 @@ export const paymentsQueryKeys = {
       cryptoToken,
       fiatCurrency,
       destinationWallet,
-      destinationCountry,
     ] as const,
   rampEstimate: ({
     direction,

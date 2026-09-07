@@ -19,6 +19,7 @@ describe("PrivateOperation serialization", () => {
       outerTxSignature: null,
       photonIndexedAt: null,
       failure: null,
+      ringProgramId: null,
       input: {
         walletId: "hw_1",
         opType: "shield",

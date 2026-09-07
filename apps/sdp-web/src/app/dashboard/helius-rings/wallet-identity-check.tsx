@@ -163,7 +163,8 @@ function Outcome({ identity }: { identity: RingsWalletIdentity }) {
   );
 }
 
-function Address({ label, value }: { label: string; value: string }) {
+/** Label over a break-all monospace value, for keys and addresses inside a `<dl>`. */
+export function Address({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5">
       <dt className="text-xs text-secondary">{label}</dt>

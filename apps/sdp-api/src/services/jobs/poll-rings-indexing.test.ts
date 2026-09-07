@@ -80,6 +80,13 @@ function ringsGateway(
  */
 const NO_HEIGHT = async () => null;
 
+/**
+ * The chain has no record of the signature. Every escalation below is about
+ * bytes that are genuinely lost, not merely unindexed, so the passes that can
+ * give up are told so explicitly rather than left to reach a real RPC.
+ */
+const CHAIN_HAS_NOTHING = async () => "absent" as const;
+
 let walletId: string;
 let jobEnv: typeof env;
 
@@ -213,6 +220,7 @@ describe("pollRingsIndexing", () => {
       createService: () => serviceWith(gateway),
       now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
       readBlockHeight: NO_HEIGHT,
+      readSignatureStatus: CHAIN_HAS_NOTHING,
     });
 
     const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -225,6 +233,36 @@ describe("pollRingsIndexing", () => {
     expect(row?.state).toBe("failed");
     expect(row?.failure_code).toBe("manual_reconciliation_required");
     expect(row?.retryable).toBe(false);
+  });
+
+  it("keeps an operation past the budget while the chain vouches for it", async () => {
+    const gateway = ringsGateway({ indexingDelayMs: 60 * 60 * 1000 });
+    const operation = await serviceWith(gateway).prepareOperation(
+      {
+        walletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        clientNonce: "job-timeout-landed",
+      },
+      { apiKeyId: null, actor: null, custodyWalletId: null }
+    );
+    expect(operation.state).toBe("indexing");
+
+    await pollRingsIndexing(jobEnv, {
+      createService: () => serviceWith(gateway),
+      now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
+      readBlockHeight: NO_HEIGHT,
+      readSignatureStatus: async () => "landed",
+    });
+
+    const row = await createHeliusRingsOperationRepository(env).getOperationById({
+      ...tenant,
+      id: operation.id,
+    });
+    // The budget measures the indexer's patience, not the payment's fate. An
+    // outage must not turn a settled transaction into operator work.
+    expect(row?.state).toBe("indexing");
+    expect(row?.failure_code).toBeNull();
   });
 
   it("sweeps a broadcast stranded in submitted into reconciliation", async () => {
@@ -299,6 +337,7 @@ describe("pollRingsIndexing", () => {
       await pollRingsIndexing(jobEnv, {
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
+        readSignatureStatus: CHAIN_HAS_NOTHING,
       });
 
       const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -317,6 +356,7 @@ describe("pollRingsIndexing", () => {
       await pollRingsIndexing(jobEnv, {
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
+        readSignatureStatus: CHAIN_HAS_NOTHING,
       });
 
       const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -327,6 +367,48 @@ describe("pollRingsIndexing", () => {
       // owner who asked to shield one amount would have moved two.
       expect(row?.failure_code).toBe("manual_reconciliation_required");
       expect(row?.retryable).toBe(false);
+    });
+
+    /**
+     * A devnet Photon stuck thousands of slots behind the chain declared
+     * finalized shields lost: the pass read the indexer's silence as absence
+     * and wrote a non-retryable failure over a payment that had settled. A
+     * shield reaches it early regardless, because its recorded height is only
+     * a floor.
+     */
+    it("spares a shield the chain confirms, however far behind Photon is", async () => {
+      const id = await strand("shield", "job-strand-landed");
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+        readSignatureStatus: async () => "landed",
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      expect(row?.state).toBe("indexing");
+      expect(row?.failure_code).toBeNull();
+    });
+
+    it("waits rather than escalating when the chain cannot be asked", async () => {
+      const id = await strand("withdraw", "job-strand-unaskable");
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+        readSignatureStatus: async () => null,
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      // An RPC that could not answer is not an RPC reporting absence.
+      expect(row?.state).toBe("indexing");
+      expect(row?.failure_code).toBeNull();
     });
 
     it("completes a signed failure once Photon holds it", async () => {

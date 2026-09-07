@@ -1,10 +1,30 @@
-import { type PrivateOperationInput, ZONE_KINDS } from "@sdp/helius-rings";
+import {
+  DEFAULT_RING_NAME,
+  type PrivateOperationInput,
+  RING_NAME_PATTERN,
+  ZONE_KINDS,
+} from "@sdp/helius-rings";
 import { z } from "zod";
+import { solanaAddressSchema } from "@/routes/payments/schemas";
 
 export const createRingsWalletSchema = z.object({
   /** SDP custody wallet id (`walletId` from GET /v1/wallets). */
   walletId: z.string().min(1),
   name: z.string().min(1).max(120),
+});
+
+export const createProjectRingSchema = z.object({
+  /**
+   * Operator-chosen handle operations select the ring by. A slug because it
+   * appears in request bodies and logs; "default" names the default ring and
+   * can never name a ring.
+   */
+  name: z
+    .string()
+    .regex(RING_NAME_PATTERN, "name must be a 1-32 character lowercase slug")
+    .refine((value) => value !== DEFAULT_RING_NAME, '"default" names the default ring'),
+  /** Base58 program id of the pre-deployed custom ring program. */
+  ringProgramId: solanaAddressSchema("ringProgramId"),
 });
 
 /**
@@ -59,6 +79,16 @@ const operationFields = {
 const mint = z.string().min(1);
 const assetAmount = z.strictObject({ mint, amountRaw });
 
+/**
+ * Ring NAME the operation targets; the server resolves and pins the program id
+ * at prepare time. Omitted or "default" = the default ring. For spends
+ * the named ring is the SOURCE of funds. Existence and bring-up state are the
+ * service's checks, not the schema's.
+ */
+const ring = z
+  .union([z.literal(DEFAULT_RING_NAME), z.string().regex(RING_NAME_PATTERN)])
+  .optional();
+
 export const prepareRingsOperationSchema = z
   .discriminatedUnion(
     "opType",
@@ -67,6 +97,7 @@ export const prepareRingsOperationSchema = z
         ...operationFields,
         opType: z.literal("shield"),
         asset: assetAmount,
+        ring,
       }),
       z.strictObject({
         ...operationFields,
@@ -78,6 +109,7 @@ export const prepareRingsOperationSchema = z
           amountRaw,
         }),
         to: z.string().min(1),
+        ring,
       }),
       z.strictObject({
         ...operationFields,
@@ -92,6 +124,7 @@ export const prepareRingsOperationSchema = z
         }),
         /** Recipient's canonical shielded address; the service resolves it to a same-tenant wallet. */
         to: z.string().min(1),
+        ring,
       }),
     ],
     {

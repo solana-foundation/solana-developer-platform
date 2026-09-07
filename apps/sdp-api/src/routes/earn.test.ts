@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
+import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -763,25 +764,35 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     expect(body.data.total).toBe(1);
   });
 
-  /**
-   * The Jupiter Lend exclusion is a name TERM, so it must hold even in the
-   * worst case: a row squatting a curated address. Terms can exclusively
-   * REMOVE rows, which is what makes stacking them on the allowlist safe.
-   */
-  it("hides a Jupiter Lend row even when it carries a curated address", async () => {
+  it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();
-    const shelf = (await shippedCuratedVaults()).devnet?.kamino ?? [];
-
     const jupiter = await seedStrategy({
-      providerReference: shelf[0],
-      name: "Jupiter Lend USDC",
+      provider: "jupiter_lend",
+      providerReference: JUPITER_LEND_USDT.assetMint,
+      name: "Jupiter Lend USDT",
+      underlyingSource: "Jupiter Lend",
+      depositMints: [JUPITER_LEND_USDT.assetMint],
+      shareMint: JUPITER_LEND_USDT.shareMint,
+      hostCluster: "mainnet-beta",
     });
 
-    const list = await getEarn("/v1/earn/strategies");
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
     expect(list.status).toBe(200);
-    const body = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
-    expect(body.data.strategies).toEqual([]);
-    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(404);
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
+    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([jupiter.id]);
+    expect(body.data.strategies[0]).toMatchObject({
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
+    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(200);
   });
 });

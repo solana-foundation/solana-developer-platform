@@ -47,7 +47,7 @@ describe("earn provider credential key drift", () => {
    * purpose.
    */
   it("declares credential keys for every earn provider except the known keyless ones", () => {
-    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda"]);
+    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda", "jupiter_lend"]);
     const undeclared = EARN_PROVIDERS.filter(
       (provider) =>
         !KEYLESS_EARN_PROVIDERS.has(provider) &&

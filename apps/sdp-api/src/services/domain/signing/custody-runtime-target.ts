@@ -1,6 +1,12 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider, normalizePrivyWalletId } from "@sdp/custody";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
-import type { CustodyWalletPurpose } from "@sdp/types";
+import type {
+  CustodyConnectionCheckStatus,
+  CustodyConnectionLifecycle,
+  CustodyWalletPurpose,
+  CustodyWalletStatus,
+  ProviderCredentialStatus,
+} from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { DatabaseClient, DatabaseExecutor } from "@/db";
 import {
@@ -147,19 +153,22 @@ interface ConfigWalletRow extends ConfigRow {
   wallet_status: string;
 }
 
-interface ConnectionTargetRow {
-  connection_id: string;
-  organization_id: string;
-  project_id: string;
-  provider: string;
-  connection_status: string;
-  last_check_status: string | null;
-  credential_status: string;
+export interface CustodyConnectionRuntimeAvailabilityFacts {
+  connection_status: CustodyConnectionLifecycle;
+  last_check_status: CustodyConnectionCheckStatus | null;
+  credential_status: ProviderCredentialStatus;
   provider_account_fingerprint: string | null;
   default_custody_wallet_id: string | null;
   default_wallet_id: string | null;
   default_wallet_public_key: string | null;
-  default_wallet_status: string | null;
+  default_wallet_status: CustodyWalletStatus | null;
+}
+
+interface ConnectionTargetRow extends CustodyConnectionRuntimeAvailabilityFacts {
+  connection_id: string;
+  organization_id: string;
+  project_id: string;
+  provider: string;
   wallet_id: string | null;
   wallet_public_key: string | null;
   wallet_status: string | null;
@@ -248,6 +257,34 @@ export interface CustodyConnectionSelectionResult {
   provider: CustodyProvider;
   walletId: string;
   publicKey: string;
+}
+
+export function isCustodyConnectionRuntimeAvailable(
+  env: Pick<Env, "PRIVY_BYOK_ENABLED">,
+  provider: CustodyProvider,
+  row: CustodyConnectionRuntimeAvailabilityFacts
+): boolean {
+  return (
+    isCustodyConnectionOwnerRuntimeAvailable(env, provider, row) &&
+    row.default_custody_wallet_id !== null &&
+    row.default_wallet_id !== null &&
+    row.default_wallet_public_key !== null &&
+    row.default_wallet_status === "active"
+  );
+}
+
+function isCustodyConnectionOwnerRuntimeAvailable(
+  env: Pick<Env, "PRIVY_BYOK_ENABLED">,
+  provider: CustodyProvider,
+  row: CustodyConnectionRuntimeAvailabilityFacts
+): boolean {
+  return (
+    isCustodyConnectionRuntimeEnabled(env, provider) &&
+    row.connection_status === "active" &&
+    row.last_check_status === "success" &&
+    row.credential_status === "active" &&
+    row.provider_account_fingerprint !== null
+  );
 }
 
 const RUNTIME_EXECUTION_PAUSED_REASON = "runtime_execution_paused";
@@ -1271,22 +1308,16 @@ export class CustodyRuntimeTargets {
 
   private isConnectionRuntimeAvailable(row: ConnectionTargetRow): boolean {
     return (
-      this.isConnectionOwnerRuntimeAvailable(row) &&
-      row.wallet_status === "active" &&
-      row.default_custody_wallet_id !== null &&
-      row.default_wallet_id !== null &&
-      row.default_wallet_public_key !== null &&
-      row.default_wallet_status === "active"
+      isCustodyConnectionRuntimeAvailable(this.env, this.parseProvider(row.provider), row) &&
+      row.wallet_status === "active"
     );
   }
 
   private isConnectionOwnerRuntimeAvailable(row: ConnectionTargetRow): boolean {
-    return (
-      isCustodyConnectionRuntimeEnabled(this.env, this.parseProvider(row.provider)) &&
-      row.connection_status === "active" &&
-      row.last_check_status === "success" &&
-      row.credential_status === "active" &&
-      row.provider_account_fingerprint !== null
+    return isCustodyConnectionOwnerRuntimeAvailable(
+      this.env,
+      this.parseProvider(row.provider),
+      row
     );
   }
 
