@@ -124,5 +124,4 @@ describe("detail page routing", () => {
     expect(result.trade).toEqual(trade);
     expect(result.error).toBeNull();
   });
-
 });
